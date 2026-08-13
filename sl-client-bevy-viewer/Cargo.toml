@@ -199,6 +199,9 @@ tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-lo
 tracing-tracy = { version = "0.11.4", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { version = "2.5.8" }
+# The raw wgpu value types Bevy does not re-export (the GPU pick pass's
+# sequence-carrying clear color) — the same pin `sl-client-bevy` uses.
+wgpu-types = { version = "29" }
 
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }

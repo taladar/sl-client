@@ -8904,6 +8904,7 @@ dependencies = [
  "tracing-tracy",
  "unic-langid",
  "url",
+ "wgpu-types",
 ]
 
 [[package]]

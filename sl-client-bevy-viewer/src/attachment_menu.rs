@@ -291,7 +291,7 @@ pub(crate) static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Profile",
                 action: "profile",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -613,7 +613,7 @@ pub(crate) static ATTACHMENT_OTHER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Profile",
                 action: "profile",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -1082,6 +1082,14 @@ mod tests {
         let im = slot_at(&stranger, Compass::SouthEast)?;
         assert_eq!(im.outcome, SlotOutcome::Action("im"));
         assert!(im.enabled, "IM must always be live on another's attachment");
+        // Profile is wired (it routes to the *wearer* through the shared avatar
+        // dispatch), so clicking an avatar's worn mesh body still offers it.
+        let profile = slot_at(&stranger, Compass::East)?;
+        assert_eq!(profile.outcome, SlotOutcome::Action("profile"));
+        assert!(
+            profile.enabled,
+            "Profile must be live on another's attachment (routes to the wearer)"
+        );
         let add = resolve_slots(
             &super::OTHER_ADD_PIE,
             &PieConditions::new([TARGET_NOT_FRIEND]),
@@ -1097,7 +1105,6 @@ mod tests {
         );
         // The placeholders: present, disabled — until the sentinel is held.
         for (point, name) in [
-            (Compass::East, "Profile"),
             (Compass::North, "Go To"),
             (Compass::NorthWest, "Report"),
             (Compass::SouthWest, "Pay"),
@@ -1109,7 +1116,7 @@ mod tests {
         }
         let held = resolve_slots(&ATTACHMENT_OTHER_PIE, &PieConditions::new([UNIMPLEMENTED]));
         assert!(
-            slot_at(&held, Compass::East)?.enabled,
+            slot_at(&held, Compass::North)?.enabled,
             "holding the sentinel proves it is the only thing gating the placeholder"
         );
         Ok(())

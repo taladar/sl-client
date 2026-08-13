@@ -64,12 +64,13 @@
 //! right-click to an agent two ways, mirroring the reference's "name tag or the
 //! avatar itself": the on-screen tag rect test
 //! ([`crate::name_tag_billboard::NameTagHitTest`] — tags are world-space
-//! billboard meshes no picking backend covers) or the
-//! mesh-accurate world pick ([`crate::avatar_pick::AvatarPicker`]) against the
-//! avatar's **posed** geometry. That same picker — and the same tag hit-test —
-//! is what a future **inventory drag-and-drop onto an avatar** will reuse to
-//! find its drop target, which is
-//! why the identity lives on the entities rather than in a menu-only lookup.
+//! billboard meshes no picking backend covers) or the **GPU ID-buffer pick**
+//! ([`crate::gpu_pick`]) against exactly what is drawn — the avatar's
+//! GPU-posed pixels, an object face, or bare terrain — resolved a frame later
+//! by [`resolve_right_click_pick`]. The same tag identity is what the
+//! inventory drag-and-drop onto an avatar reuses to find its drop target,
+//! which is why the identity lives on the entities rather than in a menu-only
+//! lookup.
 //!
 //! Reference (Firestorm, read-only): `menu_pie_avatar_self.xml`,
 //! `menu_pie_avatar_other.xml` (the compass positions), and
@@ -86,20 +87,18 @@ use sl_client_bevy::{
 };
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
-use crate::avatar_pick::{AvatarPicker, PickAccuracy};
 use crate::avatar_profile::OpenAvatarProfile;
-use crate::avatars::{AvatarPickTarget, AvatarState, RefetchAvatarTextures};
-use crate::camera::ViewerCamera;
+use crate::avatars::{AvatarState, RefetchAvatarTextures};
 use crate::conversations::{ConversationKey, OpenConversation};
+use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
-use crate::land_menu::{OpenLandMenu, pick_land};
+use crate::land_menu::OpenLandMenu;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
-use crate::terrain::TerrainSurface;
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 
@@ -710,6 +709,7 @@ impl Plugin for AvatarMenuPlugin {
                 Update,
                 (
                     request_avatar_menu_on_right_click,
+                    resolve_right_click_pick,
                     open_avatar_menu,
                     handle_avatar_menu_actions,
                     clear_ground_sit_on_move,
@@ -757,32 +757,32 @@ fn setup_pick_inspector(mut commands: Commands) {
     ));
 }
 
-/// Rewrite the pick inspector each frame with what a pick at the cursor would hit:
-/// the name-tag hit, the UI-occlusion verdict, the HUD-occlusion verdict, the
-/// nearest world-ray hit, and the resolved mesh-accurate avatar pick, so the
-/// failing stage is visible without a click.
+/// Rewrite the pick inspector each frame with what a pick at the cursor would
+/// hit: the name-tag hit, the UI-occlusion verdict, the HUD-occlusion
+/// verdict, and the latest resolved GPU ID-buffer pick (requested at
+/// ~[`crate::gpu_pick::PICK_HZ`] Hz while the inspector runs), so the failing
+/// stage is visible without a click.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a debug system reading everything a pick reads: the window, the world and HUD \
-              cameras, render layers, the hover map / pickables / node sizes for UI occlusion, \
-              the name-tag hit test, the \
-              name / parent / avatar-target queries to describe a hit, the ray caster, the avatar \
-              picker, and the overlay node it writes"
+    reason = "a debug system reading everything a pick reads: the window, the HUD camera, \
+              render layers, the hover map / pickables / node sizes for UI occlusion, the \
+              name-tag hit test, the ray caster for the HUD test, the GPU pick queue + its \
+              resolved channel, and the overlay node it writes"
 )]
 fn update_pick_inspector(
+    time: Res<Time>,
     windows: Query<&Window>,
-    camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
     layers: Query<(Entity, &RenderLayers)>,
     hover_map: Res<HoverMap>,
     pickables: Query<&Pickable>,
     tag_hit: NameTagHitTest,
     node_sizes: Query<&ComputedNode>,
-    names: Query<&Name>,
-    parents: Query<&ChildOf>,
-    pick_targets: Query<&AvatarPickTarget>,
-    picker: AvatarPicker,
     mut ray_cast: MeshRayCast,
+    mut picker: ResMut<GpuPicker>,
+    mut picks: MessageReader<GpuPickResolved>,
+    mut last_pick: Local<Option<GpuPickResolved>>,
+    mut since_pick: Local<f32>,
     mut inspector: Query<(&mut Node, &mut Text), With<PickInspector>>,
 ) {
     let Ok(window) = windows.single() else {
@@ -797,19 +797,17 @@ fn update_pick_inspector(
     node.left = Val::Px(cursor.x + 16.0);
     node.top = Val::Px(cursor.y + 16.0);
 
-    // The nearest named ancestor of an entity, to describe a hit readably.
-    let named = |mut entity: Entity| -> String {
-        for _step in 0..12 {
-            if let Ok(name) = names.get(entity) {
-                return name.as_str().to_owned();
-            }
-            match parents.get(entity) {
-                Ok(parent) => entity = parent.parent(),
-                Err(_e) => break,
-            }
+    // Keep a rolling GPU pick alive and remember the newest answer.
+    *since_pick += time.delta_secs();
+    if *since_pick >= 1.0 / crate::gpu_pick::PICK_HZ {
+        picker.request(cursor, PickPurpose::Inspector);
+        *since_pick = 0.0;
+    }
+    for pick in picks.read() {
+        if pick.purpose == PickPurpose::Inspector {
+            *last_pick = Some(pick.clone());
         }
-        format!("{entity:?}")
-    };
+    }
 
     let ui_blocked = pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
     let hud = pointer_over_hud(cursor, &hud_camera, &layers, &mut ray_cast);
@@ -821,35 +819,29 @@ fn update_pick_inspector(
             None => "tag (2d)→ (none)".to_owned(),
         },
     ];
-    if let Ok((camera, camera_transform)) = camera.single()
-        && let Ok(ray) = camera.viewport_to_world(camera_transform, cursor)
-    {
-        let any_settings = MeshRayCastSettings::default()
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any);
-        match ray_cast.cast_ray(ray, &any_settings).first() {
-            Some((entity, hit)) => lines.push(format!(
-                "world→ {} @ {:.1}m avatar={}",
-                named(*entity),
-                hit.distance,
-                pick_targets.contains(*entity)
-            )),
-            None => lines.push("world→ (nothing)".to_owned()),
-        }
-        // The real avatar resolution: the mesh-accurate pick against the posed
-        // geometry (with its box fallback), exactly what a right-click uses.
-        match picker.pick(ray) {
+    match last_pick.as_ref() {
+        Some(pick) => match pick.hit.as_ref() {
             Some(hit) => {
-                let accuracy = match hit.accuracy {
-                    PickAccuracy::Mesh => "mesh",
-                    PickAccuracy::BoxFallback => "box",
+                let what = match hit.resolution {
+                    PickResolution::Avatar { agent, worn: None } => format!("avatar {agent:?}"),
+                    PickResolution::Avatar {
+                        agent,
+                        worn: Some(worn),
+                    } => format!("avatar {agent:?} worn {worn:?}"),
+                    PickResolution::ObjectFace { scoped, face, .. } => {
+                        format!("object {scoped:?} face {}", face.get())
+                    }
+                    PickResolution::Terrain => "terrain".to_owned(),
+                    PickResolution::Water => "water".to_owned(),
                 };
                 lines.push(format!(
-                    "avatar→ {:?} @ {:.1}m ({accuracy})",
-                    hit.agent, hit.distance
+                    "gpu→ {what} @ {:.1}m ({:.1},{:.1},{:.1})",
+                    hit.distance, hit.world_point.x, hit.world_point.y, hit.world_point.z,
                 ));
             }
-            None => lines.push("avatar→ (none)".to_owned()),
-        }
+            None => lines.push("gpu→ (nothing)".to_owned()),
+        },
+        None => lines.push("gpu→ (no pick yet)".to_owned()),
     }
     *text = Text::new(lines.join("\n"));
 }
@@ -869,23 +861,25 @@ fn update_pick_inspector(
 /// 2. **The body / sphere** — no mesh-picking backend is installed (the viewer
 ///    raycasts on demand, like [`crate::hud_pick`]), so this casts a ray from the
 ///    world camera through the cursor and resolves it **mesh-accurately** via
-///    [`AvatarPicker`]: the avatar's posed, CPU-skinned triangles decide (the
-///    fitted box only stands in for an avatar with no visible decoded geometry
-///    yet), so a click just *off* an avatar's silhouette picks nothing, matching
-///    the reference. A hit whose nearest triangle belongs to a **worn rigged
-///    submesh** resolves past the avatar to the worn object, which gets the
-///    attachment pie (self vs other by the wearer), as the reference dispatches
-///    (`lltoolpie.cpp` `isAttachment()`).
+///    the **GPU ID-buffer pick** ([`crate::gpu_pick`]): the avatar's drawn,
+///    GPU-posed pixels decide, so a click just *off* an avatar's silhouette
+///    picks nothing, matching the reference — and a click on an animated
+///    avatar is pixel-accurate, morphs and physics included. A hit whose
+///    pixel belongs to a **worn rigged submesh** resolves past the avatar to
+///    the worn object, which gets the attachment pie (self vs other by the
+///    wearer), as the reference dispatches (`lltoolpie.cpp` `isAttachment()`).
 ///
-/// The same world ray is also resolved to an in-world object
-/// ([`ObjectPicker`]); when both an avatar and an object are hit, the **nearer**
-/// wins, so an object standing in front of an avatar gets the object pie and
-/// vice versa — and an object hit that is itself a worn (rigid) attachment gets
-/// the attachment pie rather than the object one. When the ray's first hit is
-/// **bare terrain** ([`pick_land`]) nearer than any avatar, the land pie opens
-/// instead ([`crate::land_menu`]) — the reference's `PICK_LAND` outcome. A
-/// **HUD** attachment under the cursor occludes the world and resolves through
-/// its own orthographic ray to the attachment-self pie.
+/// The same pick names an object face or bare terrain — the ID buffer's depth
+/// test already arbitrated nearest-wins between them, so an object standing
+/// in front of an avatar gets the object pie and vice versa; an object hit
+/// that is itself a worn (rigid) attachment gets the attachment pie rather
+/// than the object one; bare terrain opens the land pie
+/// ([`crate::land_menu`]) — the reference's `PICK_LAND` outcome. The world
+/// resolution is **asynchronous** (the readback arrives 1–2 frames after the
+/// release): this system requests the pick, and [`resolve_right_click_pick`]
+/// routes the answer. A **HUD** attachment under the cursor occludes the
+/// world and resolves synchronously through its own orthographic ray to the
+/// attachment-self pie.
 ///
 /// It opens on the right-button **release** of a click, not the press: a right-
 /// *drag* is camera free-look here, so the menu must not appear the moment a look
@@ -899,9 +893,9 @@ fn update_pick_inspector(
     reason = "a Bevy system's parameters are its injected resources / queries: the mouse button \
               and motion plus the click/drag tracker, the hover map / pickables / node sizes for \
               the UI occlusion, the name-tag hit test, the window for the \
-              cursor, the world and HUD cameras plus render layers and the ray caster for the HUD \
-              pick, the mesh-accurate avatar picker, the object picker and the terrain-marker \
-              query for the world pick, and the four open-request channels"
+              cursor, the HUD camera plus render layers and the ray caster for the HUD \
+              pick, the object picker for the HUD resolve, the GPU pick queue for the world \
+              resolve, and the avatar / attachment open channels"
 )]
 fn request_avatar_menu_on_right_click(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -912,23 +906,14 @@ fn request_avatar_menu_on_right_click(
     tag_hit: NameTagHitTest,
     node_sizes: Query<&ComputedNode>,
     windows: Query<&Window>,
-    camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
     layers: Query<(Entity, &RenderLayers)>,
-    picker: AvatarPicker,
     object_picker: ObjectPicker,
-    terrain: Query<(), With<TerrainSurface>>,
+    mut picker: ResMut<GpuPicker>,
     mut ray_cast: MeshRayCast,
-    // The four open-request channels, tupled into one system param to stay
-    // within Bevy's per-system parameter limit.
-    requests: (
-        MessageWriter<OpenAvatarMenu>,
-        MessageWriter<OpenObjectMenu>,
-        MessageWriter<OpenAttachmentMenu>,
-        MessageWriter<OpenLandMenu>,
-    ),
+    mut requests: MessageWriter<OpenAvatarMenu>,
+    mut attachment_requests: MessageWriter<OpenAttachmentMenu>,
 ) {
-    let (mut requests, mut object_requests, mut attachment_requests, mut land_requests) = requests;
     // Track the gesture: a press starts it, motion accumulates, a release decides.
     if buttons.just_pressed(MouseButton::Right) {
         gesture.down = true;
@@ -994,36 +979,78 @@ fn request_avatar_menu_on_right_click(
         }
         return;
     } else {
-        // 3. The world: resolve the ray at the cursor against both candidate
-        // targets — the avatars' **posed** geometry (mesh-accurate, with the
-        // fitted box only as the no-geometry fallback — see `crate::avatar_pick`)
-        // and the in-world objects (`crate::object_menu`) — and let the nearer
-        // hit win.
-        let Ok((camera, camera_transform)) = camera.single() else {
-            return;
+        // 3. The world: request the GPU ID-buffer pick at the cursor. The
+        // depth test arbitrates avatar / object / terrain nearest-wins in the
+        // pick view itself; `resolve_right_click_pick` routes the readback to
+        // the right pie 1–2 frames later.
+        picker.request(cursor, PickPurpose::RightClick);
+        None
+    };
+
+    if let Some(agent) = agent {
+        requests.write(OpenAvatarMenu { agent, at: cursor });
+    }
+}
+
+/// Route a resolved right-click GPU pick to its pie: an avatar's own pixels to
+/// the avatar pies, a worn rigged submesh past the avatar to the attachment
+/// pies, an object face (surface-refined) to the object or attachment pies,
+/// and bare terrain to the land pie — the same dispatch the synchronous
+/// resolver used to run on ray casts.
+pub(crate) fn resolve_right_click_pick(
+    mut picks: MessageReader<GpuPickResolved>,
+    object_picker: ObjectPicker,
+    mut ray_cast: MeshRayCast,
+    mut requests: MessageWriter<OpenAvatarMenu>,
+    mut object_requests: MessageWriter<OpenObjectMenu>,
+    mut attachment_requests: MessageWriter<OpenAttachmentMenu>,
+    mut land_requests: MessageWriter<OpenLandMenu>,
+) {
+    for pick in picks.read() {
+        if pick.purpose != PickPurpose::RightClick {
+            continue;
+        }
+        let cursor = pick.cursor;
+        let Some(hit) = pick.hit.as_ref() else {
+            continue;
         };
-        let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
-            return;
-        };
-        let avatar_hit = picker.pick(ray);
-        // The object ray must not strike HUD geometry: a HUD is screen-space
-        // (and has already had its chance to occlude above).
-        let hud_entities: HashSet<Entity> = layers
-            .iter()
-            .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
-            .map(|(entity, _layers)| entity)
-            .collect();
-        let object_hit = object_picker.pick(ray, &mut ray_cast, &hud_entities);
-        // Bare terrain as the ray's first hit: mutually exclusive with an
-        // object first-hit (same ray, same filter), so it competes only with
-        // the (occlusion-blind) avatar pick, by distance.
-        let land_hit = pick_land(ray, &mut ray_cast, &terrain, &hud_entities);
-        match (avatar_hit, object_hit) {
-            (avatar, Some(object))
-                if avatar
-                    .as_ref()
-                    .is_none_or(|avatar| object.distance < avatar.distance) =>
-            {
+        match hit.resolution {
+            PickResolution::Avatar { agent, worn: None } => {
+                requests.write(OpenAvatarMenu { agent, at: cursor });
+            }
+            PickResolution::Avatar {
+                agent,
+                worn: Some(worn),
+            } => {
+                // A worn rigged submesh resolves past the avatar to the worn
+                // object (submesh → worn object → wearer) and opens the
+                // attachment pie. The skinned pick carries no face / UV
+                // surface, so Touch on this path goes without one. An
+                // unresolvable worn object (already gone from the tracked
+                // set) falls back to the wearer's avatar pie.
+                match object_picker.summary_of(worn) {
+                    Some(summary) => {
+                        attachment_requests.write(OpenAttachmentMenu {
+                            summary,
+                            surface: None,
+                            wearer: Some(agent),
+                            hud: false,
+                            at: cursor,
+                        });
+                    }
+                    None => {
+                        requests.write(OpenAvatarMenu { agent, at: cursor });
+                    }
+                }
+            }
+            PickResolution::ObjectFace { entity, .. } => {
+                // Refine the pick against the one face the ID buffer named
+                // (a single-entity ray test, not a scene walk) for the exact
+                // struck surface — face index, ST/UV, position, normal.
+                let Some(object) = object_picker.pick_entity(pick.ray, &mut ray_cast, entity)
+                else {
+                    continue;
+                };
                 if object.summary.attachment {
                     // A worn (rigid) attachment: the attachment pies, self vs
                     // other decided at open time by its wearer.
@@ -1040,54 +1067,15 @@ fn request_avatar_menu_on_right_click(
                         at: cursor,
                     });
                 }
-                None
             }
-            (Some(avatar), _object)
-                if land_hit.is_none_or(|land| avatar.distance <= land.distance) =>
-            {
-                match avatar.worn {
-                    // The nearest posed triangle belongs to a worn rigged
-                    // submesh: resolve past the avatar to the worn object
-                    // (submesh → worn object → wearer) and open the attachment
-                    // pie. The CPU-skinned pick carries no face / UV surface,
-                    // so Touch on this path goes without one. An unresolvable
-                    // worn object (already gone from the tracked set) falls
-                    // back to the wearer's avatar pie.
-                    Some(worn) => match object_picker.summary_of(worn) {
-                        Some(summary) => {
-                            attachment_requests.write(OpenAttachmentMenu {
-                                summary,
-                                surface: None,
-                                wearer: Some(avatar.agent),
-                                hud: false,
-                                at: cursor,
-                            });
-                            None
-                        }
-                        None => Some(avatar.agent),
-                    },
-                    None => Some(avatar.agent),
-                }
+            PickResolution::Terrain => {
+                land_requests.write(OpenLandMenu {
+                    at: cursor,
+                    point: hit.world_point,
+                });
             }
-            // No avatar or object won — bare terrain as the ray's first hit
-            // opens the land pie. (`(None, Some(_))` cannot reach here — with
-            // no avatar hit the guard on the first arm always admits the
-            // object — so this arm is an avatar out-distanced by terrain, or
-            // nothing but possibly terrain.)
-            _no_avatar_or_object => {
-                if let Some(land) = land_hit {
-                    land_requests.write(OpenLandMenu {
-                        at: cursor,
-                        point: land.point,
-                    });
-                }
-                None
-            }
+            PickResolution::Water => {}
         }
-    };
-
-    if let Some(agent) = agent {
-        requests.write(OpenAvatarMenu { agent, at: cursor });
     }
 }
 

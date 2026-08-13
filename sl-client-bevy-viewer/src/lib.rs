@@ -39,7 +39,6 @@ mod audio;
 mod avatar_assets;
 mod avatar_dump;
 mod avatar_menu;
-mod avatar_pick;
 mod avatar_picker;
 mod avatar_profile;
 mod avatar_replay;
@@ -91,6 +90,7 @@ mod gizmos;
 mod glow;
 mod gpu_avatar_spike;
 mod gpu_avatars;
+mod gpu_pick;
 mod ground;
 mod group_notice;
 mod group_profile;
@@ -289,7 +289,7 @@ use crate::avatars::{
     VolumeMorphGain, apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
     apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
     apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
-    fit_avatar_pick_colliders, focus_camera_on_volume_shape, handle_refetch_avatar_textures,
+    fit_avatar_tag_heights, focus_camera_on_volume_shape, handle_refetch_avatar_textures,
     ingest_avatar_bakes, log_avatar_interest_census, recenter_avatars, setup_avatar_body,
     toggle_volume_morphs, update_avatar_objects, update_coarse_avatars,
 };
@@ -1489,6 +1489,10 @@ fn run_session(
     // legacy CPU pose path, `ghost` the Phase 1a side-by-side comparison
     // harness (CPU in place + GPU-FK ghost 2 m aside). Env read once here.
     .add_plugins(crate::gpu_avatars::GpuAvatarsPlugin::from_env())
+    // GPU ID-buffer picking (Phase 3): the cursor pick is a render, not a
+    // ray cast — pixel-perfect against exactly what is drawn, GPU-posed
+    // avatars included.
+    .add_plugins(crate::gpu_pick::GpuPickPlugin)
     // The client-side physics foundation (P31.1): an avian3d physics world with
     // Second Life gravity, a fixed timestep at the sim's target rate, and
     // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34
@@ -1904,9 +1908,10 @@ fn run_session(
                             .after(crate::groups::ingest_group_events),
                     )
                         .chain(),
-                    // Fit each avatar's pick-collider box to its posed skeleton, after
-                    // the bodies (and their skeleton instances) exist.
-                    fit_avatar_pick_colliders.after(update_avatar_objects),
+                    // Float each avatar's name tag above its skeleton's head
+                    // top, after the bodies (and their skeleton instances)
+                    // exist.
+                    fit_avatar_tag_heights.after(update_avatar_objects),
                 ),
                 // Parent each worn attachment to its avatar's skeleton joint (P16.1),
                 // after the avatars (and their skeleton instances) have been spawned.
@@ -2035,6 +2040,9 @@ fn run_session(
                 // active the left click belongs to selection (viewer-object-
                 // selection-core), so the touch pick stands down.
                 pick_and_touch.run_if(crate::edit_tool::edit_tool_inactive),
+                // The world half of the touch resolves on the GPU pick's
+                // readback, 1–2 frames after the press.
+                crate::hud_pick::resolve_touch_pick.run_if(crate::edit_tool::edit_tool_inactive),
                 // On-screen render priority (P20.2): re-rank the queued texture / mesh
                 // fetches by the pixel area each object covers, so what the camera
                 // looks at loads first. Throttled internally. It also picks each plain

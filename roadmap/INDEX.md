@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 60 |
+| ideas | 61 |
 | ready | 248 |
 | blocked | 80 |
 | in-progress | 15 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 779 |
 | deferred | 23 |
 | wont-do | 10 |
-| **total** | **1239** |
+| **total** | **1240** |
 
-## ideas (60)
+## ideas (61)
 
 ### viewer
 
@@ -86,6 +86,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Main-world per-material specialization checks cost ~8.4 ms/frame
 - [`viewer-perf-name-tag-per-frame-churn`](ideas/viewer-perf-name-tag-per-frame-churn.md)
   — Name-tag systems recompose / re-solve every frame (ungated)
+- [`viewer-perf-pipeline-prewarm-during-login`](ideas/viewer-perf-pipeline-prewarm-during-login.md)
+  — Pre-warm render pipelines during the login/connect window
 - [`viewer-perf-probe-irradiance-split`](ideas/viewer-perf-probe-irradiance-split.md)
   — Separate low-res irradiance path for probes (reference-style 16 px)
 - [`viewer-perf-probe-occlusion-skip`](ideas/viewer-perf-probe-occlusion-skip.md)

@@ -41,6 +41,7 @@ use std::sync::Arc;
 
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
+use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
@@ -280,10 +281,11 @@ pub(crate) struct WorldRootObject;
 /// A rigged submesh hangs off the wearer's body root (not its own object
 /// entity, see [`apply_rigged_attachments`]), so a hit on it cannot be walked
 /// up the entity hierarchy to a [`SceneObject`]; this component carries the
-/// identity instead. The mesh-accurate avatar pick ([`crate::avatar_pick`])
-/// reads it so a right-click on a worn mesh resolves to the **attachment**
-/// pies ([`crate::attachment_menu`], submesh → worn object → wearer) rather
-/// than the wearer's plain avatar pie — the wearer itself rides the sibling
+/// identity instead. The GPU pick-tag assignment
+/// ([`crate::gpu_pick::assign_avatar_pick_tags`]) reads it so a right-click
+/// on a worn mesh resolves to the **attachment** pies
+/// ([`crate::attachment_menu`], submesh → worn object → wearer) rather than
+/// the wearer's plain avatar pie — the wearer itself rides the sibling
 /// [`AvatarPickTarget`]. An animesh submesh (no wearer) is never tagged.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct WornPickTarget {
@@ -2143,16 +2145,22 @@ pub(crate) fn pick_object(
 /// companion to [`pick_object`]: a worn attachment (mesh hair, clothing) renders
 /// skinned to the skeleton, so the prim-face [`MeshRayCast`] in [`pick_object`]
 /// (which tests the static bind-pose geometry, positioned nowhere near where the
-/// vertices actually skin to) cannot reliably hit it. The mesh-accurate skinned
-/// [`AvatarPicker`](crate::avatar_pick::AvatarPicker) can, and resolves the hit to
-/// the worn object; this reports that object's identity and every face's texture /
-/// tint — the ground truth for a wrongly rendered attachment (e.g. a dark hair
-/// piece) that `pick_object` cannot reach. A separate system (not extra parameters
-/// on `pick_object`) to stay within Bevy's system-parameter tuple limit.
+/// vertices actually skin to) cannot reliably hit it. This diagnostic instead
+/// CPU-skins every worn rigged submesh from its joint-entity palette and ray
+/// tests the posed triangles ([`all_worn_hits`]) — the whole **stack** along
+/// the ray, nearest first, because a mesh hair's overlapping layers (an
+/// invisible tint-0 variant in front of the drawn one) mean the nearest hit is
+/// often not the layer being looked at. (The interactive cursor pick is the
+/// GPU ID buffer, [`crate::gpu_pick`], which only ever reports the nearest —
+/// exactly what this stack dump exists to see past. In the GPU-avatar
+/// in-place path the joint entities are frozen, so the stack is tested at
+/// rest pose — fine for layer identification, which is pose-independent.)
+/// A separate system (not extra parameters on `pick_object`) to stay within
+/// Bevy's system-parameter tuple limit.
 pub(crate) fn pick_worn_attachment(
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
-    avatar_picker: crate::avatar_pick::AvatarPicker,
+    parts: WornPickParts,
     state: Res<ObjectState>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyP) {
@@ -2162,10 +2170,8 @@ pub(crate) fn pick_worn_attachment(
         return;
     };
     let ray = Ray3d::new(camera.translation(), camera.forward());
-    // Every worn attachment the ray passes through, nearest first — a mesh hair's
-    // overlapping layers (an invisible tint-0 variant in front of the drawn one)
-    // mean the nearest hit is often not the layer being looked at.
-    let hits = avatar_picker.all_worn_hits(ray);
+    // Every worn attachment the ray passes through, nearest first.
+    let hits = all_worn_hits(&parts, ray);
     if hits.is_empty() {
         return;
     }
@@ -2205,6 +2211,202 @@ pub(crate) fn pick_worn_attachment(
             );
         }
     }
+}
+
+/// Everything the worn-stack diagnostic ray test reads, bundled as one
+/// [`bevy::ecs::system::SystemParam`]: the worn rigged submeshes, the joint
+/// globals their palettes rebuild from, and the mesh / bindpose assets.
+#[derive(bevy::ecs::system::SystemParam)]
+pub(crate) struct WornPickParts<'w, 's> {
+    /// Every worn rigged submesh (tagged with its worn object's identity).
+    parts: Query<
+        'w,
+        's,
+        (
+            &'static Mesh3d,
+            &'static InheritedVisibility,
+            Option<&'static SkinnedMesh>,
+            &'static GlobalTransform,
+            &'static WornPickTarget,
+        ),
+    >,
+    /// Joint-entity globals, to rebuild each skin's matrix palette.
+    globals: Query<'w, 's, &'static GlobalTransform>,
+    /// Mesh assets (rest positions / joints / weights / indices).
+    meshes: Res<'w, Assets<Mesh>>,
+    /// Inverse-bindpose assets, the other half of each palette.
+    bindposes: Res<'w, Assets<SkinnedMeshInverseBindposes>>,
+}
+
+/// Every worn-attachment object `ray` passes through, nearest first,
+/// deduplicated by worn object (keeping its nearest submesh hit). CPU-skins
+/// each visible worn rigged submesh from its joint-entity palette (`world =
+/// Σ wᵢ · (joint_world · inverse_bind) · rest`, weights used raw exactly as
+/// the GPU consumes them) and ray tests the posed triangles — a rigid worn
+/// piece is placed by its `GlobalTransform` instead.
+fn all_worn_hits(parts: &WornPickParts, ray: Ray3d) -> Vec<(f32, ScopedObjectId)> {
+    let mut nearest: HashMap<ScopedObjectId, f32> = HashMap::new();
+    for (mesh3d, visibility, skinned, global, worn) in &parts.parts {
+        if !visibility.get() {
+            continue;
+        }
+        let Some(mesh) = parts.meshes.get(&mesh3d.0) else {
+            continue;
+        };
+        let Some(VertexAttributeValues::Float32x3(positions)) =
+            mesh.attribute(Mesh::ATTRIBUTE_POSITION)
+        else {
+            continue;
+        };
+        let world_positions: Vec<Vec3> = match skinned {
+            Some(skin) => {
+                let Some(palette) = worn_skin_palette(parts, skin) else {
+                    continue;
+                };
+                let (
+                    Some(VertexAttributeValues::Uint16x4(joint_indices)),
+                    Some(VertexAttributeValues::Float32x4(joint_weights)),
+                ) = (
+                    mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX),
+                    mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT),
+                )
+                else {
+                    continue;
+                };
+                skinned_world_positions(positions, joint_indices, joint_weights, &palette)
+            }
+            None => positions
+                .iter()
+                .map(|position| global.transform_point(Vec3::from_array(*position)))
+                .collect(),
+        };
+        if let Some(distance) = nearest_triangle_entry(&world_positions, mesh.indices(), ray) {
+            nearest
+                .entry(worn.scoped)
+                .and_modify(|best| *best = best.min(distance))
+                .or_insert(distance);
+        }
+    }
+    let mut hits: Vec<(f32, ScopedObjectId)> = nearest
+        .into_iter()
+        .map(|(scoped, distance)| (distance, scoped))
+        .collect();
+    hits.sort_by(|a, b| a.0.total_cmp(&b.0));
+    hits
+}
+
+/// Rebuild a skinned piece's world-space matrix palette — per slot,
+/// `joint_world · inverse_bind`, exactly what the GPU palette holds — or
+/// `None` when the bindposes asset or a joint entity is gone.
+fn worn_skin_palette(parts: &WornPickParts, skin: &SkinnedMesh) -> Option<Vec<Mat4>> {
+    let inverse_bindposes = parts.bindposes.get(&skin.inverse_bindposes)?;
+    let mut palette = Vec::with_capacity(inverse_bindposes.len());
+    for (joint, inverse_bind) in skin.joints.iter().zip(inverse_bindposes.iter()) {
+        let global = parts.globals.get(*joint).ok()?;
+        palette.push(Mat4::from(global.affine()).mul_mat4(inverse_bind));
+    }
+    Some(palette)
+}
+
+/// CPU-reproduce the GPU matrix-palette skinning for every vertex: `world =
+/// Σ wᵢ · palette[jᵢ] · rest`, weights used **raw** (the mesh builders
+/// already stored what the GPU consumes).
+fn skinned_world_positions(
+    positions: &[[f32; 3]],
+    joint_indices: &[[u16; 4]],
+    joint_weights: &[[f32; 4]],
+    palette: &[Mat4],
+) -> Vec<Vec3> {
+    positions
+        .iter()
+        .zip(joint_indices.iter().zip(joint_weights.iter()))
+        .map(|(position, (joints, weights))| {
+            let rest = Vec3::from_array(*position);
+            let mut skinned = Vec3::ZERO;
+            for (joint, weight) in joints.iter().zip(weights.iter()) {
+                if *weight <= 0.0 {
+                    continue;
+                }
+                let Some(matrix) = palette.get(usize::from(*joint)) else {
+                    continue;
+                };
+                skinned = matrix
+                    .transform_point3(rest)
+                    .mul_add(Vec3::splat(*weight), skinned);
+            }
+            skinned
+        })
+        .collect()
+}
+
+/// The nearest forward intersection of `ray` with the triangle list described
+/// by `indices` over `positions` (non-indexed consecutive triples when the
+/// mesh has no index buffer), or `None` if the ray misses every triangle.
+fn nearest_triangle_entry(
+    positions: &[Vec3],
+    indices: Option<&Indices>,
+    ray: Ray3d,
+) -> Option<f32> {
+    let mut nearest: Option<f32> = None;
+    let mut consider_triangle = |a: Vec3, b: Vec3, c: Vec3| {
+        if let Some(distance) = ray_triangle_entry(ray, a, b, c) {
+            nearest = Some(nearest.map_or(distance, |current| current.min(distance)));
+        }
+    };
+    match indices {
+        Some(indices) => {
+            let mut iter = indices.iter();
+            while let (Some(a), Some(b), Some(c)) = (iter.next(), iter.next(), iter.next()) {
+                let (Some(a), Some(b), Some(c)) =
+                    (positions.get(a), positions.get(b), positions.get(c))
+                else {
+                    continue;
+                };
+                consider_triangle(*a, *b, *c);
+            }
+        }
+        None => {
+            for triangle in positions.chunks_exact(3) {
+                if let [a, b, c] = triangle {
+                    consider_triangle(*a, *b, *c);
+                }
+            }
+        }
+    }
+    nearest
+}
+
+/// Möller–Trumbore ray/triangle intersection, **double-sided** (worn layers
+/// are routinely seen from their back faces), returning the forward distance
+/// along the ray or `None`.
+fn ray_triangle_entry(ray: Ray3d, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+    /// `a - b`, per component (the workspace `arithmetic_side_effects` lint
+    /// covers the glam operators).
+    const fn diff(a: Vec3, b: Vec3) -> Vec3 {
+        Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
+    }
+    let edge_ab = diff(b, a);
+    let edge_ac = diff(c, a);
+    let direction = ray.direction.as_vec3();
+    let p = direction.cross(edge_ac);
+    let determinant = edge_ab.dot(p);
+    // Parallel (or degenerate) triangle.
+    if determinant.abs() < f32::EPSILON {
+        return None;
+    }
+    let inverse_determinant = 1.0 / determinant;
+    let origin_offset = diff(ray.origin, a);
+    let u = origin_offset.dot(p) * inverse_determinant;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = origin_offset.cross(edge_ab);
+    let v = direction.dot(q) * inverse_determinant;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    let distance = edge_ac.dot(q) * inverse_determinant;
+    (distance > 0.0).then_some(distance)
 }
 
 /// The mesh asset key of a mesh object, or `None` if the object is not a mesh.
@@ -5153,10 +5355,10 @@ fn build_rigged_submeshes(
         }
         // A worn rigged submesh is part of its wearer's drawn silhouette — on a
         // modern mesh-body avatar the *base* body is hidden, so without this tag
-        // the wearer's mesh-accurate pick (`crate::avatar_pick`) would find no
-        // geometry and fall back to the box. An animesh (no wearer, `agent`
-        // `None`) is not an avatar and stays untagged, matching the reference
-        // viewer's control-avatar exclusion from avatar picking.
+        // the wearer would have no pickable geometry in the GPU pick view
+        // (`crate::gpu_pick`). An animesh (no wearer, `agent` `None`) is not an
+        // avatar and stays untagged, matching the reference viewer's
+        // control-avatar exclusion from avatar picking.
         if let Some(agent) = agent {
             spawned.insert(AvatarPickTarget::new(agent));
         }

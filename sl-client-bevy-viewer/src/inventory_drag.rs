@@ -48,10 +48,10 @@ use sl_client_bevy::{
     Uuid, Vector,
 };
 
-use crate::avatar_pick::AvatarPicker;
 use crate::avatars::AvatarPickTarget;
 use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
+use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::inventory::{
     InventoryModel, InventorySelection, InventoryUi, InventoryUiAction, InventoryView, RowKey,
@@ -597,8 +597,7 @@ pub(crate) fn on_row_drag_end(
     ),
     world: (
         Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
-        AvatarPicker,
-        MeshRayCast,
+        Res<DragWorldPick>,
     ),
     resolve: (
         Res<ButtonInput<KeyCode>>,
@@ -617,7 +616,7 @@ pub(crate) fn on_row_drag_end(
     let (viewports, lists, mut rows) = geometry;
     let (hover_map, pickables, node_sizes, child_of) = occlusion;
     let (agent_targets, pick_targets, contents_targets, notecard_targets) = targets;
-    let (camera, picker, mut ray_cast) = world;
+    let (camera, world_pick) = world;
     let (keyboard, scene, objects) = resolve;
     let (mut actions, mut commands, mut contents_mutations, mut commands_bevy, mut add_embedded) =
         outputs;
@@ -743,33 +742,37 @@ pub(crate) fn on_row_drag_end(
     }
 
     // 4. The world: an avatar body first, then a rez point for an object item.
-    let Ok((camera, camera_transform)) = camera.single() else {
+    // The world resolution is the latest GPU ID-buffer pick kept fresh during
+    // the drag by `drive_drag_world_picks` (a drop happens with the cursor at
+    // rest, so the ≤ ~70 ms staleness is invisible).
+    let Ok((_camera, camera_transform)) = camera.single() else {
         return;
     };
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+    let Some(world_hit) = world_pick.hit else {
         return;
     };
-    if let Some(hit) = picker.pick(ray) {
-        drop_onto_agent(
-            &active,
-            hit.agent,
-            &identity,
-            &model,
-            &mut worn,
-            &mut commands,
-        );
+    if let DragPickHit::Avatar(agent) = world_hit {
+        drop_onto_agent(&active, agent, &identity, &model, &mut worn, &mut commands);
         return;
     }
-    let settings = MeshRayCastSettings::default();
-    if let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() {
+    let (face_entity, world_point) = match world_hit {
+        DragPickHit::Avatar(_agent) => return,
+        DragPickHit::Object {
+            entity,
+            world_point,
+        } => (Some(entity), world_point),
+        DragPickHit::Ground { world_point } => (None, world_point),
+    };
+    {
         let start = bevy_to_sl_vec(camera_transform.translation());
-        let end = bevy_to_sl_vec(hit.point);
-        // The in-world object the ray struck, resolved to its task-inventory
+        let end = bevy_to_sl_vec(world_point);
+        // The in-world object the pick struck, resolved to its task-inventory
         // target when the agent may add to it (modify, or "allow anyone to add
         // inventory") — the reference's drop-into-contents (`dad3dUpdateInventory`).
         let ctrl =
             keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);
-        let contents_target = hit_scene_object(entity, &scene, &child_of)
+        let contents_target = face_entity
+            .and_then(|entity| hit_scene_object(entity, &scene, &child_of))
             .filter(|scoped| {
                 objects.agent_can_modify(scoped) || objects.agent_allows_inventory_drop(scoped)
             })
@@ -1050,7 +1053,103 @@ impl Plugin for InventoryDragPlugin {
     /// Register the drag state and the per-frame drive systems.
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryDragState>()
-            .add_systems(Update, (drive_inventory_drag, drive_drag_object_hover));
+            .init_resource::<DragWorldPick>()
+            .add_systems(
+                Update,
+                (
+                    drive_inventory_drag,
+                    drive_drag_world_picks,
+                    ingest_drag_world_picks,
+                    drive_drag_object_hover,
+                )
+                    .chain(),
+            );
+    }
+}
+
+/// What the latest GPU pick found under the cursor during an active drag —
+/// the world half of the drop resolution ([`on_row_drag_end`] reads it at
+/// `DragEnd`, the hover outline reads it every frame).
+#[derive(Resource, Debug, Default)]
+pub(crate) struct DragWorldPick {
+    /// The latest resolved world hit, `None` when the pick missed (sky) or no
+    /// drag is active.
+    hit: Option<DragPickHit>,
+}
+
+/// One resolved drag-time world hit.
+#[derive(Debug, Clone, Copy)]
+enum DragPickHit {
+    /// An avatar's drawn pixels (a worn rigged submesh drops onto its wearer
+    /// too, matching the old body pick).
+    Avatar(AgentKey),
+    /// An object face: the face's mesh entity (for the linkset walk) and the
+    /// struck world point (the rez ray's end).
+    Object {
+        /// The face's mesh entity.
+        entity: Entity,
+        /// The struck world point.
+        world_point: Vec3,
+    },
+    /// Bare terrain — or water, which the old first-hit ray also treated as a
+    /// rez surface.
+    Ground {
+        /// The struck world point.
+        world_point: Vec3,
+    },
+}
+
+/// While a drag is active, keep a ~[`PICK_HZ`] Hz GPU pick alive at the
+/// cursor so [`DragWorldPick`] stays fresh for the hover outline and the
+/// eventual drop; clear the stashed hit when no drag is running.
+fn drive_drag_world_picks(
+    state: Res<InventoryDragState>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    time: Res<Time>,
+    mut since_pick: Local<f32>,
+    mut picker: ResMut<GpuPicker>,
+    mut world_pick: ResMut<DragWorldPick>,
+) {
+    if state.active.is_none() {
+        if world_pick.hit.is_some() {
+            world_pick.hit = None;
+        }
+        *since_pick = f32::MAX;
+        return;
+    }
+    let Some(cursor) = windows
+        .single()
+        .ok()
+        .and_then(|window| window.cursor_position())
+    else {
+        return;
+    };
+    *since_pick += time.delta_secs();
+    if *since_pick >= 1.0 / PICK_HZ {
+        picker.request(cursor, PickPurpose::Drag);
+        *since_pick = 0.0;
+    }
+}
+
+/// Fold every resolved drag pick into [`DragWorldPick`].
+fn ingest_drag_world_picks(
+    mut picks: MessageReader<GpuPickResolved>,
+    mut world_pick: ResMut<DragWorldPick>,
+) {
+    for pick in picks.read() {
+        if pick.purpose != PickPurpose::Drag {
+            continue;
+        }
+        world_pick.hit = pick.hit.as_ref().map(|hit| match hit.resolution {
+            PickResolution::Avatar { agent, worn: _ } => DragPickHit::Avatar(agent),
+            PickResolution::ObjectFace { entity, .. } => DragPickHit::Object {
+                entity,
+                world_point: hit.world_point,
+            },
+            PickResolution::Terrain | PickResolution::Water => DragPickHit::Ground {
+                world_point: hit.world_point,
+            },
+        });
     }
 }
 
@@ -1063,15 +1162,13 @@ impl Plugin for InventoryDragPlugin {
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the drag state, \
-              the window + camera + ray-cast to find the hovered object, the scene / hierarchy / \
-              object-state to resolve + permission-check it, the keyboard for the Ctrl modifier, \
-              the UI-occlusion guard, and the hover output"
+              the latest GPU world pick, the scene / hierarchy / object-state to resolve + \
+              permission-check it, the keyboard for the Ctrl modifier, the UI-occlusion guard, \
+              and the hover output"
 )]
 fn drive_drag_object_hover(
     state: Res<InventoryDragState>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
-    mut ray_cast: MeshRayCast,
+    world_pick: Res<DragWorldPick>,
     scene: Query<&crate::objects::SceneObject>,
     child_of: Query<&ChildOf>,
     objects: Res<crate::objects::ObjectState>,
@@ -1106,28 +1203,15 @@ fn drive_drag_object_hover(
         clear(&mut hover_out);
         return;
     }
-    let Some(cursor) = windows
-        .single()
-        .ok()
-        .and_then(|window| window.cursor_position())
-    else {
-        clear(&mut hover_out);
-        return;
+    // The latest resolved GPU pick under the cursor (kept fresh at ~PICK_HZ
+    // by `drive_drag_world_picks`); only an object face can be an outline
+    // target.
+    let target = match world_pick.hit {
+        Some(DragPickHit::Object { entity, .. }) => {
+            resolve_hover_entity(entity, &scene, &child_of, &objects)
+        }
+        _not_an_object => None,
     };
-    let Ok((camera, camera_transform)) = camera.single() else {
-        clear(&mut hover_out);
-        return;
-    };
-    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
-        clear(&mut hover_out);
-        return;
-    };
-    let settings = MeshRayCastSettings::default();
-    let target = ray_cast
-        .cast_ray(ray, &settings)
-        .first()
-        .cloned()
-        .and_then(|(entity, _hit)| resolve_hover_entity(entity, &scene, &child_of, &objects));
     let want = target.map(|(root, scoped)| crate::edit_selection::DragHover {
         root,
         // Foreign (red) when you cannot modify it — you may only drop via its

@@ -69,8 +69,7 @@ use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureDecoded, TextureManager, tint_color};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
-/// UV-sphere, roughly avatar-sized). Read by [`crate::avatar_pick`] to
-/// intersect the sphere analytically.
+/// UV-sphere, roughly avatar-sized).
 pub(crate) const AVATAR_SPHERE_RADIUS: f32 = 1.0;
 
 /// The number of longitudinal segments (sectors) of the placeholder UV-sphere.
@@ -92,33 +91,11 @@ const NAME_TAG_GAP: f32 = 0.3;
 /// object position sits near the pelvis).
 const BODY_TAG_HEIGHT: f32 = 1.9;
 
-/// The pick box's **width** (left-to-right), in metres — the reference's fixed
-/// `DEFAULT_AGENT_WIDTH`. Only the *height* is taken from the skeleton; width and
-/// depth are constants, so the box hugs the torso instead of ballooning out to
-/// the arm span (the skeleton's horizontal joint spread includes the arms).
-const PICK_COLLIDER_WIDTH: f32 = 0.6;
-
-/// The pick box's **depth** (front-to-back), in metres — the reference's fixed
-/// `DEFAULT_AGENT_DEPTH`.
-const PICK_COLLIDER_DEPTH: f32 = 0.45;
-
-/// Extra height, in metres, added **above** the highest joint so the box reaches
-/// the top of the head (the head joint sits inside the skull, not at its crown) —
-/// mirroring the reference's `√2` skull correction in spirit.
-const PICK_COLLIDER_HEAD_MARGIN: f32 = 0.18;
-
-/// Extra height, in metres, added **below** the lowest joint so the box reaches
-/// the soles (the ankle / foot joints sit above the sole).
-const PICK_COLLIDER_FOOT_MARGIN: f32 = 0.1;
-
-/// A floor, in metres, on the fitted box height, so a degenerate or not-yet-posed
-/// skeleton still leaves a clickable volume.
-const PICK_COLLIDER_MIN_HEIGHT: f32 = 0.3;
-
-/// A hard ceiling, in metres, on the fitted box height, so a stray raised or
-/// extended joint (an arm overhead, a Bento wing) cannot inflate the pick volume
-/// without bound.
-const PICK_COLLIDER_MAX_HEIGHT: f32 = 3.2;
+/// Extra height, in metres, added **above** the highest joint when deriving
+/// the head top for the name tag's float height (the head joint sits inside
+/// the skull, not at its crown) — mirroring the reference's `√2` skull
+/// correction in spirit.
+const HEAD_TOP_MARGIN: f32 = 0.18;
 
 /// A skin-toned base colour for the un-textured Phase-13.2 body, before the
 /// baked-texture phases (P14) drape real textures over it.
@@ -165,10 +142,9 @@ pub(crate) struct AvatarAnchor;
 /// same agent through one component, so a caller never has to know *which* piece
 /// it hit. Kept separate from [`AvatarBodyPart`] (which also holds an agent) so
 /// non-mesh pieces (the sphere, the name tag) can carry the identity too, and
-/// so a future consumer — inventory **drag-and-drop onto an avatar** is the
-/// planned one — reads a single, purpose-named component rather than three
-/// different markers. The mesh-accurate pick over these pieces lives in
-/// [`crate::avatar_pick`].
+/// so consumers — the GPU pick-tag assignment
+/// ([`crate::gpu_pick::assign_avatar_pick_tags`]) is the main one — read a
+/// single, purpose-named component rather than three different markers.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AvatarPickTarget {
     /// The avatar this entity is part of.
@@ -183,32 +159,6 @@ impl AvatarPickTarget {
     }
 
     /// The avatar this entity belongs to.
-    pub(crate) const fn agent(&self) -> AgentKey {
-        self.agent
-    }
-}
-
-/// A marker on an avatar's invisible **pick box**, carrying its avatar so
-/// [`fit_avatar_pick_colliders`] can size and place it from that avatar's
-/// posed skeleton each frame. Since the mesh-accurate pick
-/// ([`crate::avatar_pick`]) the box is no longer the primary pick target: it
-/// is the pick's **broad phase** (which avatars are worth CPU-skinning) and
-/// its **fallback** for an avatar with no visible decoded geometry yet.
-#[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct AvatarPickCollider {
-    /// The avatar this collider stands in for.
-    agent: AgentKey,
-}
-
-impl AvatarPickCollider {
-    /// Tag the pick box of `agent` (test scaffolding in
-    /// [`crate::avatar_pick`] builds one directly).
-    #[cfg(test)]
-    pub(crate) const fn new(agent: AgentKey) -> Self {
-        Self { agent }
-    }
-
-    /// The avatar this box stands in for.
     pub(crate) const fn agent(&self) -> AgentKey {
         self.agent
     }
@@ -560,19 +510,6 @@ struct AvatarAssets {
     mesh: Handle<Mesh>,
     /// The shared soft-blue material handle.
     material: Handle<FaceMaterial>,
-    /// The shared invisible box mesh used as a rigged body's **pick
-    /// collider**. A body's real geometry is skinned, and a [`MeshRayCast`] tests
-    /// a skinned mesh against its *bind* pose (not the posed vertices), so it
-    /// cannot reliably hit the avatar where it is drawn; a rigid box at the
-    /// body root gives a dependable stand-in volume at the visible location.
-    /// The mesh-accurate pick ([`crate::avatar_pick`]) uses it as its broad
-    /// phase and its no-geometry fallback. See [`AvatarPickTarget`] and
-    /// [`pick_collider_mesh`].
-    collider: Handle<Mesh>,
-    /// A translucent material used to **draw** the pick collider when debugging
-    /// (`SL_VIEWER_DEBUG_PICK_BOX`); the collider is otherwise material-less and never
-    /// rendered.
-    collider_material: Handle<FaceMaterial>,
 }
 
 /// One nearby avatar as the map surfaces (minimap, radar) consume it — see
@@ -1479,66 +1416,26 @@ fn placeholder_sphere_mesh() -> Mesh {
         .uv(SPHERE_SECTORS, SPHERE_STACKS)
 }
 
-/// The **pick-collider** mesh — a **unit cube** standing in where a rigged
-/// (skinned) body cannot be ray tested (the broad phase / fallback volume of
-/// [`crate::avatar_pick`]). [`fit_avatar_pick_colliders`] scales and places it
-/// to the avatar's posed skeleton each frame, so a unit cube here is only the
-/// base shape. Normally never rendered (its entity is [`Visibility::Hidden`]);
-/// it is drawn translucently under `SL_VIEWER_DEBUG_PICK_BOX`.
-fn pick_collider_mesh() -> Mesh {
-    Cuboid::from_length(1.0).mesh().build()
-}
-
-/// The translucent material the pick collider is drawn with when
-/// `SL_VIEWER_DEBUG_PICK_BOX` is set — a see-through green box so its fit to the
-/// avatar can be eyeballed.
-fn pick_collider_debug_material() -> FaceMaterial {
-    inert_face_material(StandardMaterial {
-        base_color: Color::srgba(0.2, 1.0, 0.4, 0.22),
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        double_sided: true,
-        cull_mode: None,
-        ..default()
-    })
-}
-
-/// Whether the pick collider should be **drawn** (the `SL_VIEWER_DEBUG_PICK_BOX`
-/// debug toggle) rather than left invisible. Deliberately a *separate* env var
-/// from the `SL_VIEWER_DEBUG_PICK` cursor pick inspector: inspecting what a
-/// pick would resolve to is useful without painting a translucent green box
-/// over every avatar, so the box draw must be opted into on its own.
-fn pick_collider_debug_visible() -> bool {
-    std::env::var_os("SL_VIEWER_DEBUG_PICK_BOX").is_some()
-}
-
-/// Size and place each avatar's pick-collider box to fit its **posed** skeleton,
-/// every frame.
+/// Float each rigged avatar's name tag just above its skeleton's head top,
+/// every frame (the spawn-time `BODY_TAG_HEIGHT` guess sits *in* the head of
+/// a tall mesh body — the reference anchors the tag above the actual head).
 ///
-/// Only the **height** is read from the live joints, which is what makes the box
-/// track the avatar's **shape** (a short avatar gets a short box, a tall one a
-/// tall box — the reference's shape-driven `mBodySize` height) and its **pose** (a
-/// seated or crouched skeleton is shorter, and the box follows). Width and depth
-/// are the reference's fixed `DEFAULT_AGENT_WIDTH` / `DEFAULT_AGENT_DEPTH`, so the
-/// box hugs the torso rather than ballooning to the arm span.
+/// **Frame:** the body root carries the whole Second Life → Bevy basis change
+/// ([`crate::coords::sl_to_bevy_object_rotation`], a `-90°` turn about `X`),
+/// so its child subtree — the skeleton — is in **Second Life space**: `+Z`
+/// up. The head top is the joints' `z` span top, grown past the head joint to
+/// the crown ([`HEAD_TOP_MARGIN`]) and quantised to a 1 cm grid so idle
+/// breathe/sway cannot churn the tag target every frame.
 ///
-/// **Frame:** the box is a child of the body root, and that root carries the whole
-/// Second Life → Bevy basis change ([`crate::coords::sl_to_bevy_object_rotation`],
-/// a `-90°` turn about `X`), so its child subtree — the skeleton — is in **Second
-/// Life space**: `+Z` up, `+X` forward, `+Y` left. So *height* is the joints' `z`
-/// span, *depth* (front-back) is the box's local `x`, and *width* (left-right) is
-/// its local `y`. Working in this frame keeps the box centred on the body axis and
-/// aligned to the avatar's facing as it turns; the height is grown a little past
-/// the joints (the crown of the head above the head joint, the soles below the
-/// ankle).
-pub(crate) fn fit_avatar_pick_colliders(
+/// (Until the Phase 4 joint-entity removal, the joints this reads are the
+/// CPU-written — in the GPU in-place path, frozen rest-pose — globals; the
+/// tag height only needs the avatar's standing extent, which those carry.)
+pub(crate) fn fit_avatar_tag_heights(
     avatars: Res<AvatarState>,
     globals: Query<&GlobalTransform>,
-    mut colliders: Query<(&AvatarPickCollider, &mut Transform)>,
     mut tags: Query<&mut NameTag>,
 ) {
-    for (collider, mut transform) in &mut colliders {
-        let agent = collider.agent;
+    for (agent, _anchor, _tag) in avatars.labelled_avatars() {
         let (Some(root), Some(joints)) = (
             avatars.body_root_of(agent),
             avatars.joint_entities_of(agent),
@@ -1551,46 +1448,19 @@ pub(crate) fn fit_avatar_pick_colliders(
         // Joint heights in the root's own (Second Life, Z-up) frame, via its
         // inverse — the `z` component is the vertical one here.
         let to_local = root_global.affine().inverse();
-        let mut min_z = f32::INFINITY;
         let mut max_z = f32::NEG_INFINITY;
         for joint in joints {
             let Ok(joint_global) = globals.get(*joint) else {
                 continue;
             };
             let z = to_local.transform_point3(joint_global.translation()).z;
-            min_z = min_z.min(z);
             max_z = max_z.max(z);
         }
-        if !min_z.is_finite() || !max_z.is_finite() {
+        if !max_z.is_finite() {
             continue;
         }
-        // Height from the joint `z` span, grown to the crown and the soles; depth
-        // (local x) and width (local y) fixed; centred on the body axis (x = y = 0).
-        // Quantised to a 1 cm grid: the box is a broad-phase volume with ±10 cm
-        // margins, but it is fitted from the *posed* joints, so the idle
-        // breathe/sway would otherwise move it a hair every evaluated frame —
-        // dirtying the avatar's transform tree, which makes Bevy propagation
-        // revert the driver-written joint globals and re-wakes the pose gate (a
-        // self-sustaining feedback loop). On the grid it only moves when the
-        // body's extent genuinely changes.
         let quantise = |value: f32| (value * 100.0).round() / 100.0;
-        let bottom = quantise(min_z - PICK_COLLIDER_FOOT_MARGIN);
-        let top = quantise(max_z + PICK_COLLIDER_HEAD_MARGIN);
-        let height = (top - bottom).clamp(PICK_COLLIDER_MIN_HEIGHT, PICK_COLLIDER_MAX_HEIGHT);
-        // The mesh is a unit cube (full extent 1), so `scale = size` gives it the
-        // wanted extents: local x = depth, local y = width, local z = height.
-        let size = Vec3::new(PICK_COLLIDER_DEPTH, PICK_COLLIDER_WIDTH, height);
-        let centre = Vec3::new(0.0, 0.0, f32::midpoint(bottom, top));
-        if transform.translation != centre {
-            transform.translation = centre;
-        }
-        if transform.scale != size {
-            transform.scale = size;
-        }
-        // The same posed head top drives the name tag's float height (the
-        // spawn-time `BODY_TAG_HEIGHT` guess sits *in* the head of a tall
-        // mesh body — the reference anchors the tag above the actual head).
-        // A small threshold keeps head-bob from churning the tag target.
+        let top = quantise(max_z + HEAD_TOP_MARGIN);
         if let Some(label) = avatars.label_of(agent)
             && let Ok(mut tag) = tags.get_mut(label)
         {
@@ -1653,27 +1523,8 @@ impl AvatarState {
         let built = assets.get_or_insert_with(|| AvatarAssets {
             mesh: meshes.add(placeholder_sphere_mesh()),
             material: materials.add(placeholder_material()),
-            collider: meshes.add(pick_collider_mesh()),
-            collider_material: materials.add(pick_collider_debug_material()),
         });
         (built.mesh.clone(), built.material.clone())
-    }
-
-    /// The shared pick-collider mesh and its debug material, building the shared
-    /// assets on first use. See [`AvatarAssets::collider`] for why a rigged body
-    /// needs a rigid box to be pickable.
-    fn collider_handles(
-        assets: &mut Option<AvatarAssets>,
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<FaceMaterial>,
-    ) -> (Handle<Mesh>, Handle<FaceMaterial>) {
-        let built = assets.get_or_insert_with(|| AvatarAssets {
-            mesh: meshes.add(placeholder_sphere_mesh()),
-            material: materials.add(placeholder_material()),
-            collider: meshes.add(pick_collider_mesh()),
-            collider_material: materials.add(pick_collider_debug_material()),
-        });
-        (built.collider.clone(), built.collider_material.clone())
     }
 
     /// The tag text for an agent: its display name when resolved, else its
@@ -1859,20 +1710,12 @@ impl AvatarState {
     /// order), and the attachment-point node entities (keyed by raw point id),
     /// which the caller records so a worn attachment can be parented to the right
     /// joint at its stored offset (P16.1/P16.2).
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "spawning an avatar body needs the agent, its object + region \
-                  offset (for the neighbour-region placement), the shared body \
-                  asset, the collider mesh/material, and the Commands sink"
-    )]
     fn spawn_body(
         &self,
         agent: AgentKey,
         object: &Object,
         body: &AvatarBody,
         region_offset: Vec3,
-        collider: Handle<Mesh>,
-        collider_material: Handle<FaceMaterial>,
         commands: &mut Commands,
     ) -> (AvatarEntities, Vec<Entity>, HashMap<u8, Entity>) {
         let root_drop = self
@@ -1938,37 +1781,9 @@ impl AvatarState {
                 Some((point_id, node))
             })
             .collect();
-        // The pick box: a rigid stand-in volume at the body root where the
-        // skinned body cannot be ray tested (see [`AvatarAssets::collider`]).
-        // [`fit_avatar_pick_colliders`] sizes and places it each frame from the
-        // posed skeleton; the initial transform below is a one-frame placeholder.
-        // The mesh-accurate pick ([`crate::avatar_pick`]) reads its
-        // `GlobalTransform` directly (broad phase + no-geometry fallback) — no
-        // `MeshRayCast` is aimed at it any more. Normally invisible (never
-        // drawn); drawn translucently under `SL_VIEWER_DEBUG_PICK_BOX`.
-        let debug_visible = pick_collider_debug_visible();
-        let mut collider_entity = commands.spawn((
-            Mesh3d(collider),
-            // A one-frame placeholder in the root's Second Life frame (z up),
-            // replaced by [`fit_avatar_pick_colliders`] from the posed skeleton.
-            Transform {
-                translation: Vec3::new(0.0, 0.0, 1.0),
-                scale: Vec3::new(PICK_COLLIDER_DEPTH, PICK_COLLIDER_WIDTH, 2.0),
-                ..default()
-            },
-            if debug_visible {
-                Visibility::Visible
-            } else {
-                Visibility::Hidden
-            },
-            ChildOf(root),
-            AvatarPickTarget { agent },
-            AvatarPickCollider { agent },
-            Name::new("avatar-pick-collider"),
-        ));
-        if debug_visible {
-            collider_entity.insert(MeshMaterial3d(collider_material));
-        }
+        // (The old invisible pick-collider box is gone: the GPU ID-buffer
+        // pick — `crate::gpu_pick` — picks the drawn, GPU-posed pixels
+        // directly, so no rigid stand-in volume is needed.)
         // A rigged body is roughly half a metre across at head height — the
         // camera pull that keeps the avatar's own head from occluding its tag.
         let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, 0.5, commands);
@@ -2184,17 +1999,8 @@ impl AvatarState {
         self.request_name(agent);
         let entities = match body {
             Some(body) => {
-                let (collider, collider_material) =
-                    Self::collider_handles(&mut self.assets, meshes, materials);
-                let (entities, joints, attachment_nodes) = self.spawn_body(
-                    agent,
-                    object,
-                    body,
-                    region_offset,
-                    collider,
-                    collider_material,
-                    commands,
-                );
+                let (entities, joints, attachment_nodes) =
+                    self.spawn_body(agent, object, body, region_offset, commands);
                 // Record the joint entities and per-point attachment nodes so a
                 // worn attachment can be parented at the right joint offset once it
                 // arrives (P16.1/P16.2).

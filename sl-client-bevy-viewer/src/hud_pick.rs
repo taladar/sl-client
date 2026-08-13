@@ -41,7 +41,6 @@ use sl_client_bevy::{
     Command, PrimFaceId, SlCommand, SurfaceInfo, TextureFace, Vector, texture_face_uv_transform,
 };
 
-use crate::camera::ViewerCamera;
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::media_prim::MediaWorldClick;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
@@ -85,23 +84,24 @@ const TOUCH_BUTTON: MouseButton = MouseButton::Left;
 type FaceQuery<'world, 'state> =
     Query<'world, 'state, (&'static PrimFaceEntity, &'static FaceTextureDebug)>;
 
-/// On a left click, touch the HUD face under the cursor — or, if none, the world
-/// object under it (the reference's HUD-first pick order).
+/// On a left click, touch the HUD face under the cursor — or, if none,
+/// request the **GPU ID-buffer pick** ([`crate::gpu_pick`]) of the world
+/// under it (the reference's HUD-first pick order); [`resolve_touch_pick`]
+/// dispatches the touch when the readback lands 1–2 frames later.
 ///
 /// The cursor is free in every camera mode except mouselook, so the click has a
 /// pointer position to use directly; in mouselook (a centred, captured cursor) the
 /// pick falls back to the screen centre (the crosshair). The HUD ray is
 /// orthographic (through the HUD camera) and restricted to the HUD render layer;
-/// the world ray is the ordinary perspective ray from the world camera through the
-/// pick point, restricted to everything *not* on the HUD layer, so the two passes
-/// never poach each other's geometry.
+/// the world pick view excludes HUD-layer geometry, so the two passes never
+/// poach each other's geometry.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the \
               mouse button, the Alt modifier, the hover map that says the click landed on UI, the \
-              window for the cursor, the two cameras to cast from, the ray caster, the \
-              render-layer / face / object components a hit is resolved through, and the command \
-              channel the touch is sent on"
+              window for the cursor, the HUD camera to cast from, the ray caster, the \
+              render-layer / face / object components a HUD hit is resolved through, the GPU \
+              pick queue for the world fall-through, and the command channel the touch is sent on"
 )]
 pub(crate) fn pick_and_touch(
     buttons: Res<ButtonInput<MouseButton>>,
@@ -111,13 +111,13 @@ pub(crate) fn pick_and_touch(
     node_sizes: Query<&ComputedNode>,
     windows: Query<&Window>,
     hud_camera: Query<(&Camera, &GlobalTransform), With<HudCamera>>,
-    fly_camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
     layers: Query<(Entity, &RenderLayers)>,
     mut ray_cast: MeshRayCast,
     faces: FaceQuery,
     scene: Query<&SceneObject>,
     globals: Query<&GlobalTransform>,
     parents: Query<&ChildOf>,
+    mut picker: ResMut<crate::gpu_pick::GpuPicker>,
     mut writer: MessageWriter<SlCommand>,
     mut media_clicks: MessageWriter<MediaWorldClick>,
 ) {
@@ -188,26 +188,63 @@ pub(crate) fn pick_and_touch(
         }
     }
 
-    // 2. Fall through to the world: a perspective ray from the fly camera through
-    //    the cursor, limited to everything *not* on the HUD layer.
-    if let Ok((camera, camera_transform)) = fly_camera.single()
-        && let Ok(ray) = camera.viewport_to_world(camera_transform, cursor)
-    {
-        let world_filter = |entity: Entity| !hud_entities.contains(&entity);
-        let settings = MeshRayCastSettings::default().with_filter(&world_filter);
-        if let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() {
-            touch_hit(
-                entity,
-                &hit,
-                &faces,
-                &scene,
-                &globals,
-                &parents,
-                &mut writer,
-                &mut media_clicks,
-                "world",
-            );
+    // 2. Fall through to the world: the GPU ID-buffer pick at the cursor
+    //    (HUD-layer geometry is excluded from the pick view by construction);
+    //    `resolve_touch_pick` dispatches the touch on the readback.
+    picker.request(cursor, crate::gpu_pick::PickPurpose::Touch);
+}
+
+/// Dispatch a resolved world touch pick: an object-face hit is surface-refined
+/// against the one face the ID buffer named (recovering the face index /
+/// ST / UV / position / normal the sim's surface block wants) and touched;
+/// avatar / terrain / water hits touch nothing, exactly like the old ray
+/// walk resolving to no object.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the resolved \
+              pick channel, the ray caster for the surface refinement, the face / object \
+              components a hit is resolved through, and the command channels"
+)]
+pub(crate) fn resolve_touch_pick(
+    mut picks: MessageReader<crate::gpu_pick::GpuPickResolved>,
+    mut ray_cast: MeshRayCast,
+    faces: FaceQuery,
+    scene: Query<&SceneObject>,
+    globals: Query<&GlobalTransform>,
+    parents: Query<&ChildOf>,
+    mut writer: MessageWriter<SlCommand>,
+    mut media_clicks: MessageWriter<MediaWorldClick>,
+) {
+    for pick in picks.read() {
+        if pick.purpose != crate::gpu_pick::PickPurpose::Touch {
+            continue;
         }
+        let Some(hit) = pick.hit.as_ref() else {
+            continue;
+        };
+        let crate::gpu_pick::PickResolution::ObjectFace { entity, .. } = hit.resolution else {
+            continue;
+        };
+        // Refine against the one named face for the exact struck surface.
+        let only = |candidate: Entity| candidate == entity;
+        let settings = MeshRayCastSettings::default()
+            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
+            .with_filter(&only);
+        let Some((entity, ray_hit)) = ray_cast.cast_ray(pick.ray, &settings).first().cloned()
+        else {
+            continue;
+        };
+        touch_hit(
+            entity,
+            &ray_hit,
+            &faces,
+            &scene,
+            &globals,
+            &parents,
+            &mut writer,
+            &mut media_clicks,
+            "world",
+        );
     }
 }
 

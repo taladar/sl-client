@@ -37,21 +37,18 @@ use bevy::ecs::system::SystemParam;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use sl_settings::{Scope, SettingValue};
-use std::collections::HashSet;
 
 use sl_client_bevy::{RegionCoordinates, RegionHandle, SlCommand, SlIdentity, Vector};
 
-use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::edit_tool_inactive;
-use crate::hud::{HudCamera, on_hud_layer};
+use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
+use crate::hud::HudCamera;
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_context::InputContext;
 use crate::minimap::{narrow, region_handle_at};
-use crate::objects::SceneObject;
 use crate::settings::ViewerSettings;
 use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
-use crate::terrain::TerrainSurface;
 
 /// The persisted setting section — shared with other input-behaviour settings.
 const INPUT_SECTION: &[&str] = &["input"];
@@ -127,6 +124,7 @@ impl Plugin for DoubleClickTeleportPlugin {
             (
                 toggle_double_click_teleport,
                 world_double_click_teleport.run_if(edit_tool_inactive),
+                resolve_double_click_teleport,
             ),
         );
     }
@@ -176,24 +174,17 @@ fn toggle_double_click_teleport(
     );
 }
 
-/// The world ray-cast + hit-classification queries, grouped so the double-click
-/// system stays within Bevy's system-parameter budget.
+/// The HUD-occlusion queries, grouped so the double-click system stays within
+/// Bevy's system-parameter budget (the world resolution itself is the GPU
+/// ID-buffer pick).
 #[derive(SystemParam)]
 struct WorldRay<'w, 's> {
-    /// The perspective world camera the pick ray is cast from.
-    cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// The orthographic HUD camera, for HUD-attachment occlusion.
     hud_cameras: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<HudCamera>>,
-    /// The ray caster.
+    /// The HUD-occlusion ray caster.
     ray_cast: MeshRayCast<'w, 's>,
-    /// Every render-layered entity, to split the HUD subtree from the world.
+    /// Every render-layered entity, to gather the HUD subtree.
     layers: Query<'w, 's, (Entity, &'static RenderLayers)>,
-    /// Terrain surfaces, so a hit can be confirmed as land.
-    terrain: Query<'w, 's, (), With<TerrainSurface>>,
-    /// Scene objects, so a hit resolving to one is treated as an object, not land.
-    scene: Query<'w, 's, &'static SceneObject>,
-    /// Parent links, walked up from a hit to its object / terrain root.
-    parents: Query<'w, 's, &'static ChildOf>,
 }
 
 /// The UI-occlusion queries, grouped for the same reason.
@@ -207,12 +198,13 @@ struct UiOcclusion<'w, 's> {
     sizes: Query<'w, 's, &'static ComputedNode>,
 }
 
-/// Detect a double-click on bare ground and teleport there, when the
-/// double-click action is `Teleport`.
+/// Detect a double-click and request the GPU ID-buffer pick under it (when
+/// the double-click action is `Teleport`); [`resolve_double_click_teleport`]
+/// issues the teleport if the readback names bare ground.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the input state, cursor window, identity, the grouped ray / occlusion \
-              params, the click-timing local, and the two command channels"
+    reason = "the input state, cursor window, the grouped occlusion params, the \
+              click-timing local, and the GPU pick queue"
 )]
 fn world_double_click_teleport(
     time: Res<Time>,
@@ -221,12 +213,10 @@ fn world_double_click_teleport(
     context: Res<InputContext>,
     settings: Res<ViewerSettings>,
     windows: Query<&Window>,
-    identity: Res<SlIdentity>,
     occlusion: UiOcclusion,
     mut ray: WorldRay,
+    mut picker: ResMut<GpuPicker>,
     mut last_click: Local<Option<(f64, Vec2)>>,
-    mut commands: MessageWriter<SlCommand>,
-    mut begin: MessageWriter<BeginTeleportFlow>,
 ) {
     // A mouse gesture is independent of keyboard focus (a click on the world
     // still teleports while a floater holds the keyboard) — occlusion is handled
@@ -276,86 +266,59 @@ fn world_double_click_teleport(
         return;
     }
 
-    // Cast the world ray (everything not on the HUD layer).
-    let Ok((camera, camera_transform)) = ray.cameras.single() else {
-        return;
-    };
-    let Ok(world_ray) = camera.viewport_to_world(camera_transform, cursor) else {
-        return;
-    };
-    let hud_entities: HashSet<Entity> = ray
-        .layers
-        .iter()
-        .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
-        .map(|(entity, _layers)| entity)
-        .collect();
-    let world_filter = |entity: Entity| !hud_entities.contains(&entity);
-    let cast_settings = MeshRayCastSettings::default().with_filter(&world_filter);
-    let Some((entity, hit)) = ray
-        .ray_cast
-        .cast_ray(world_ray, &cast_settings)
-        .first()
-        .cloned()
-    else {
-        return;
-    };
-
-    // Only bare ground teleports; an object / avatar / sky hit is left alone.
-    if !is_terrain_hit(entity, &ray.terrain, &ray.scene, &ray.parents) {
-        debug!("double-click teleport: hit {entity} is not terrain; ignored");
-        return;
-    }
-
-    let Some(handle) = identity.region_handle else {
-        debug!("double-click teleport: no region handle yet; ignored");
-        return;
-    };
-    let point = bevy_to_sl_vec(hit.point);
-    let forward = bevy_to_sl_vec(Vec3::from(world_ray.direction));
-    let Some((destination, position, look_at)) = teleport_destination(handle, &point, &forward)
-    else {
-        return;
-    };
-    let label = format!(
-        "{:.0}, {:.0}, {:.0}",
-        position.x(),
-        position.y(),
-        position.z()
-    );
-    info!("double-click teleport → {destination:?} at {label}");
-    issue_teleport(
-        &mut commands,
-        &mut begin,
-        TeleportTarget {
-            region_handle: destination,
-            position,
-            look_at,
-        },
-        Some(label),
-    );
+    // Request the GPU ID-buffer pick; the resolve system fires the teleport
+    // if the readback names bare ground.
+    picker.request(cursor, PickPurpose::DoubleClick);
 }
 
-/// Whether a ray hit resolves to **terrain** (bare ground) rather than a scene
-/// object, avatar, or the sky. Walks up the parent chain: a [`SceneObject`]
-/// ancestor means an object (not terrain); a [`TerrainSurface`] means land.
-fn is_terrain_hit(
-    entity: Entity,
-    terrain: &Query<(), With<TerrainSurface>>,
-    scene: &Query<&SceneObject>,
-    parents: &Query<&ChildOf>,
-) -> bool {
-    let mut current = entity;
-    loop {
-        if scene.get(current).is_ok() {
-            return false;
+/// Issue the teleport when a double-click's GPU pick resolves to **terrain**
+/// (bare ground) — an object / avatar / water / sky hit is left alone, the
+/// conservative reading of the reference's "non-interactive surface only"
+/// rule the ray-cast version also applied.
+fn resolve_double_click_teleport(
+    mut picks: MessageReader<GpuPickResolved>,
+    identity: Res<SlIdentity>,
+    mut commands: MessageWriter<SlCommand>,
+    mut begin: MessageWriter<BeginTeleportFlow>,
+) {
+    for pick in picks.read() {
+        if pick.purpose != PickPurpose::DoubleClick {
+            continue;
         }
-        if terrain.get(current).is_ok() {
-            return true;
+        let Some(hit) = pick.hit.as_ref() else {
+            continue;
+        };
+        if hit.resolution != PickResolution::Terrain {
+            debug!("double-click teleport: pick is not terrain; ignored");
+            continue;
         }
-        match parents.get(current) {
-            Ok(child_of) => current = child_of.parent(),
-            Err(_) => return false,
-        }
+        let Some(handle) = identity.region_handle else {
+            debug!("double-click teleport: no region handle yet; ignored");
+            continue;
+        };
+        let point = bevy_to_sl_vec(hit.world_point);
+        let forward = bevy_to_sl_vec(Vec3::from(pick.ray.direction));
+        let Some((destination, position, look_at)) = teleport_destination(handle, &point, &forward)
+        else {
+            continue;
+        };
+        let label = format!(
+            "{:.0}, {:.0}, {:.0}",
+            position.x(),
+            position.y(),
+            position.z()
+        );
+        info!("double-click teleport → {destination:?} at {label}");
+        issue_teleport(
+            &mut commands,
+            &mut begin,
+            TeleportTarget {
+                region_handle: destination,
+                position,
+                look_at,
+            },
+            Some(label),
+        );
     }
 }
 

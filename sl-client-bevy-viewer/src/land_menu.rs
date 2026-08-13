@@ -41,18 +41,15 @@
 //! # How a pick reaches here
 //!
 //! [`crate::avatar_menu`]'s right-click resolver owns the gesture and the
-//! occlusion order (UI, then HUD, then world). In the world it resolves the ray
-//! against avatars, objects, **and** the terrain ([`pick_land`]): terrain is
-//! deliberately last in priority at equal distance, but a hill *in front of*
-//! an avatar or object wins by distance, exactly like the reference's unified
-//! first-hit pick. The terrain patches are the [`TerrainSurface`] meshes the
-//! avatar ground probe ([`crate::ground`]) already raycasts.
+//! occlusion order (UI, then HUD, then world). The world resolution is the
+//! GPU ID-buffer pick ([`crate::gpu_pick`]): the terrain patches carry the
+//! class-3 pick tag, the depth test arbitrates against avatars and objects
+//! (a hill *in front of* either wins, exactly like the reference's unified
+//! first-hit pick), and the clicked ground point is the depth unprojection.
 //!
 //! Reference (Firestorm, read-only): `menu_pie_land.xml` (the compass
 //! positions), `lltoolpie.cpp` (the land pick), `llviewermenu.cpp`
 //! (`LLLandSit` and friends).
-
-use std::collections::HashSet;
 
 use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
@@ -60,7 +57,6 @@ use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 use crate::about_land::{AboutLandSubject, OpenAboutLand};
 use crate::avatar_menu::{SelfGroundSit, UNIMPLEMENTED};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
-use crate::terrain::TerrainSurface;
 use crate::ui_element::UiAction;
 
 /// The `element` the land pie attributes its [`UiAction`]s to.
@@ -140,44 +136,6 @@ pub(crate) static LAND_PIE: PieMenuDef = PieMenuDef {
         },
     ],
 };
-
-// ---------------------------------------------------------------------------
-// The pick: resolving the world ray to bare terrain, for the shared resolver.
-// ---------------------------------------------------------------------------
-
-/// A world ray resolved to the terrain: what the right-click resolver compares
-/// against the avatar pick (an object first-hit and a terrain first-hit are
-/// mutually exclusive — same ray, same filter).
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct LandRayHit {
-    /// The hit distance along the ray, in metres — compared against the avatar
-    /// pick so the nearer target wins.
-    pub(crate) distance: f32,
-    /// The world-space point the ray struck the terrain, used to resolve which
-    /// parcel a right-click landed on (the About Land slice).
-    pub(crate) point: Vec3,
-}
-
-/// Resolve `ray` to the terrain, first-hit-only: `Some` exactly when the
-/// nearest thing the ray strikes is a land patch ([`TerrainSurface`]), so
-/// terrain behind an object or avatar body is never picked through it.
-///
-/// `exclude` is the HUD entity set, the same exclusion the object pick applies
-/// (a HUD is screen-space and never a world pick).
-pub(crate) fn pick_land(
-    ray: Ray3d,
-    ray_cast: &mut MeshRayCast,
-    terrain: &Query<(), With<TerrainSurface>>,
-    exclude: &HashSet<Entity>,
-) -> Option<LandRayHit> {
-    let world_filter = |entity: Entity| !exclude.contains(&entity);
-    let settings = MeshRayCastSettings::default().with_filter(&world_filter);
-    let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
-    terrain.contains(entity).then_some(LandRayHit {
-        distance: hit.distance,
-        point: hit.point,
-    })
-}
 
 // ---------------------------------------------------------------------------
 // The widget-facing wiring: open request → open pie → dispatch.

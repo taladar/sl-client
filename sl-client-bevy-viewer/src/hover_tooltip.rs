@@ -13,12 +13,17 @@
 //!   behind [`SETTING_SHOW_LAND_TIPS`] (the reference's "Show land tooltips",
 //!   off by default), from the held [`sl_client_bevy::SlAgentParcel`].
 //!
-//! The pick reuses the same cursor-ray + occlusion arbitration the right-click
+//! The pick reuses the same cursor + occlusion arbitration the right-click
 //! world menu does ([`crate::avatar_menu`]): the name-tag rect test wins first,
-//! then UI / HUD occlusion suppress, then the nearest of the mesh-accurate
-//! avatar pick, the object ray cast, and the land ray. It runs on a dwell timer
-//! that resets on cursor motion, so the tip only appears once the pointer has
-//! settled — and never while a mouse button is held (a drag / click gesture).
+//! then UI / HUD occlusion suppress, then the **GPU ID-buffer pick**
+//! ([`crate::gpu_pick`]) resolves what is drawn under the cursor — avatar,
+//! object face or bare land — with the depth test doing the nearest-wins
+//! arbitration the old `MeshRayCast` distance comparisons did on the CPU. It
+//! runs on a dwell timer that resets on cursor motion, so the tip only appears
+//! once the pointer has settled — and never while a mouse button is held (a
+//! drag / click gesture). While dwelt, the pick view refreshes at
+//! ~[`crate::gpu_pick::PICK_HZ`] Hz; the 1–2 frame readback latency is
+//! invisible under the 0.5 s dwell.
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
@@ -33,17 +38,14 @@ use sl_client_bevy::{
     SlAgentParcel, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
-use crate::avatar_pick::AvatarPicker;
 use crate::avatars::AvatarState;
-use crate::camera::ViewerCamera;
+use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::groups::GroupsModel;
-use crate::hud::{HudCamera, on_hud_layer};
+use crate::hud::HudCamera;
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::i18n::Translator;
 use crate::name_tag_billboard::NameTagHitTest;
-use crate::object_menu::ObjectPicker;
 use crate::objects::{ObjectSlMotion, ObjectState};
-use crate::terrain::TerrainSurface;
 
 /// Master toggle: show in-world hover tooltips (object + avatar). Default on.
 pub(crate) const SETTING_SHOW_HOVER_TIPS: &str = "ShowHoverTips";
@@ -97,6 +99,12 @@ pub(crate) struct HoverTooltip;
 pub(crate) struct HoverTooltipState {
     /// Seconds the pointer has rested since the last motion.
     idle_secs: f32,
+    /// Seconds since the last GPU pick request (drives the ~15 Hz refresh
+    /// while dwelt).
+    since_pick: f32,
+    /// What the latest resolved GPU pick found under the cursor (`None` =
+    /// nothing / not yet resolved), written by [`ingest_hover_picks`].
+    target: Option<HoverTarget>,
     /// What the box should show this frame (`None` = hidden). The resolve
     /// system ([`update_hover_tooltip`]) writes it; the apply system
     /// ([`apply_hover_tooltip`]) renders it — split so the pick machinery's
@@ -164,7 +172,9 @@ pub(crate) fn ingest_object_properties_family(
     }
 }
 
-/// What the cursor is resting on, resolved by [`HoverPick::resolve`].
+/// What the cursor is resting on, resolved from the GPU ID-buffer pick by
+/// [`ingest_hover_picks`] (or the synchronous name-tag rect test).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum HoverTarget {
     /// An avatar (its name-tag rect, or its posed body / a worn attachment's
     /// wearer).
@@ -199,22 +209,18 @@ const TOOLTIP_FLAGS: &[(u32, &str)] = &[
     (1 << 29, "hovertip-flag-temporary"),      // FLAGS_TEMPORARY_ON_REZ
 ];
 
-/// The whole cursor-pick machinery bundled as one system param — the world /
-/// HUD cameras, render layers, the terrain marker, the mesh-accurate avatar
-/// picker, the object picker, the ray caster, the name-tag rect test, and the
-/// UI-occlusion inputs — so [`update_hover_tooltip`] stays within Bevy's
-/// per-system parameter limit (the [`crate::avatar_menu`] right-click resolver
-/// is at that limit already).
+/// The cursor-occlusion machinery bundled as one system param — the HUD
+/// camera, render layers, the name-tag rect test, and the UI-occlusion
+/// inputs — so [`update_hover_tooltip`] stays within Bevy's per-system
+/// parameter limit. The world resolution itself is the asynchronous GPU
+/// ID-buffer pick ([`crate::gpu_pick`]); only the HUD-occlusion ray (the
+/// orthographic HUD test [`crate::hud_pick`] owns) still casts.
 #[derive(SystemParam)]
 pub(crate) struct HoverPick<'w, 's> {
-    /// The world camera the cursor ray is cast through.
-    camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// The HUD camera, for the HUD-occlusion test.
     hud_camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<HudCamera>>,
-    /// Every entity's render layers, to gather the HUD subtree to exclude.
+    /// Every entity's render layers, to gather the HUD subtree.
     layers: Query<'w, 's, (Entity, &'static RenderLayers)>,
-    /// The terrain marker, so a bare-ground first hit is recognised.
-    terrain: Query<'w, 's, (), With<TerrainSurface>>,
     /// The pointer hover map, for the UI-occlusion test.
     hover_map: Res<'w, HoverMap>,
     /// Pickable flags, for the UI-occlusion test.
@@ -222,13 +228,10 @@ pub(crate) struct HoverPick<'w, 's> {
     /// Computed node sizes, for the UI-occlusion test.
     node_sizes: Query<'w, 's, &'static ComputedNode>,
     /// The name-tag rect test (tags are custom billboard meshes no picking
-    /// backend covers).
+    /// backend covers; the 2D rect test is exact and cheap, so it stays CPU).
     tag_hit: NameTagHitTest<'w, 's>,
-    /// The mesh-accurate avatar pick.
-    avatar_picker: AvatarPicker<'w, 's>,
-    /// The in-world object pick.
-    object_picker: ObjectPicker<'w, 's>,
-    /// The on-demand ray caster the picks share (from the bevy prelude).
+    /// The HUD-occlusion ray caster (HUD picking stays on the orthographic
+    /// CPU test by design).
     ray_cast: MeshRayCast<'w, 's>,
 }
 
@@ -239,50 +242,37 @@ impl HoverPick<'_, '_> {
         pointer_over_blocking_ui(&self.hover_map, &self.pickables, &self.node_sizes)
             || pointer_over_hud(cursor, &self.hud_camera, &self.layers, &mut self.ray_cast)
     }
+}
 
-    /// Resolve what the cursor rests on: the name tag first, then the nearest of
-    /// the avatar body, the object ray, and the land ray (the reference's tag →
-    /// world order). `None` when the ray escapes to the sky.
-    fn resolve(&mut self, cursor: Vec2) -> Option<HoverTarget> {
-        if let Some(agent) = self.tag_hit.agent_at(cursor) {
-            return Some(HoverTarget::Avatar(agent));
+/// Fold every resolved hover pick into [`HoverTooltipState::target`]: the GPU
+/// ID buffer names an avatar (its posed pixels, worn rigged submeshes
+/// included), an object face (resolved to its linkset summary), bare terrain,
+/// or nothing — the depth test already arbitrated nearest-wins.
+pub(crate) fn ingest_hover_picks(
+    mut picks: MessageReader<GpuPickResolved>,
+    objects: Res<ObjectState>,
+    mut state: ResMut<HoverTooltipState>,
+) {
+    for pick in picks.read() {
+        if pick.purpose != PickPurpose::Hover {
+            continue;
         }
-        let (camera, camera_transform) = self.camera.single().ok()?;
-        let ray = camera.viewport_to_world(camera_transform, cursor).ok()?;
-        let avatar_hit = self.avatar_picker.pick(ray);
-        let hud_entities: StdHashSet<Entity> = self
-            .layers
-            .iter()
-            .filter(|(_entity, layers)| on_hud_layer(Some(layers)))
-            .map(|(entity, _layers)| entity)
-            .collect();
-        let object_hit = self
-            .object_picker
-            .pick(ray, &mut self.ray_cast, &hud_entities);
-        let land_hit =
-            crate::land_menu::pick_land(ray, &mut self.ray_cast, &self.terrain, &hud_entities);
-
-        // Nearest wins: object beats a farther (or absent) avatar; otherwise the
-        // avatar beats farther land; otherwise bare terrain.
-        match (avatar_hit, object_hit) {
-            (avatar, Some(object))
-                if avatar
-                    .as_ref()
-                    .is_none_or(|avatar| object.distance < avatar.distance) =>
-            {
-                Some(HoverTarget::Object {
-                    root: object.summary.root_full,
-                    root_scoped: object.summary.root_scoped,
-                    flags: object.summary.flags,
-                })
+        state.target = pick.hit.as_ref().and_then(|hit| match hit.resolution {
+            // A worn rigged submesh hovers as its wearer, exactly as the old
+            // CPU avatar pick reported it.
+            PickResolution::Avatar { agent, worn: _ } => Some(HoverTarget::Avatar(agent)),
+            PickResolution::ObjectFace { scoped, .. } => {
+                objects
+                    .pick_summary(scoped)
+                    .map(|summary| HoverTarget::Object {
+                        root: summary.root_full,
+                        root_scoped: summary.root_scoped,
+                        flags: summary.flags,
+                    })
             }
-            (Some(avatar), _object)
-                if land_hit.is_none_or(|land| avatar.distance <= land.distance) =>
-            {
-                Some(HoverTarget::Avatar(avatar.agent))
-            }
-            _no_avatar_or_object => land_hit.map(|_land| HoverTarget::Land),
-        }
+            PickResolution::Terrain => Some(HoverTarget::Land),
+            PickResolution::Water => None,
+        });
     }
 }
 
@@ -440,15 +430,16 @@ fn tip_toggles(settings: Option<&crate::settings::ViewerSettings>) -> (bool, boo
 }
 
 /// Resolve the hover tooltip: accumulate dwell while the pointer rests, then
-/// resolve what is under the cursor and stash the box's desired content in
-/// [`HoverTooltipState::render`] (or clear it when the pointer moves, a button
-/// is held, or nothing is under it). Deliberately holds **no** overlay query —
-/// [`apply_hover_tooltip`] does the box write, so the pick machinery's
-/// `Visibility` reads never conflict with the box's `Visibility` write.
+/// keep a ~[`PICK_HZ`] Hz GPU pick refreshed at the cursor and stash the box's
+/// desired content in [`HoverTooltipState::render`] (or clear it when the
+/// pointer moves, a button is held, or nothing is under it). Deliberately
+/// holds **no** overlay query — [`apply_hover_tooltip`] does the box write, so
+/// the pick machinery's `Visibility` reads never conflict with the box's
+/// `Visibility` write.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the resolve fuses the cursor / dwell inputs, the bundled pick machinery, \
-              the name resolvers, the held parcel and the settings"
+    reason = "the resolve fuses the cursor / dwell inputs, the occlusion machinery, the \
+              GPU pick queue, the name resolvers, the held parcel and the settings"
 )]
 pub(crate) fn update_hover_tooltip(
     windows: Query<&Window>,
@@ -456,6 +447,7 @@ pub(crate) fn update_hover_tooltip(
     buttons: Res<ButtonInput<MouseButton>>,
     time: Res<Time>,
     mut pick: HoverPick,
+    mut picker: ResMut<GpuPicker>,
     names: HoverNames,
     object_data: HoverObjectData,
     mut costs: ResMut<crate::object_cost::ObjectCostModel>,
@@ -476,6 +468,8 @@ pub(crate) fn update_hover_tooltip(
         || motion.delta.length() > MOTION_RESET_PX;
     if dismiss {
         state.idle_secs = 0.0;
+        state.since_pick = f32::MAX;
+        state.target = None;
         state.render = None;
         return;
     }
@@ -495,7 +489,24 @@ pub(crate) fn update_hover_tooltip(
         return;
     }
 
-    let lines = match pick.resolve(cursor) {
+    // Keep the GPU pick fresh at ~PICK_HZ while dwelt on world content; the
+    // resolved answer arrives 1–2 frames later via `ingest_hover_picks`.
+    // (`f32::MAX + dt` stays `f32::MAX`, so the post-dismiss sentinel simply
+    // requests immediately on the first dwelt frame.)
+    state.since_pick += time.delta_secs();
+    if state.since_pick >= 1.0 / PICK_HZ {
+        picker.request(cursor, PickPurpose::Hover);
+        state.since_pick = 0.0;
+    }
+
+    // The name-tag rect test wins over the world pick (the reference's tag →
+    // world order); it is synchronous and exact, so it stays CPU.
+    let target = match pick.tag_hit.agent_at(cursor) {
+        Some(agent) => Some(HoverTarget::Avatar(agent)),
+        None => state.target,
+    };
+
+    let lines = match target {
         Some(HoverTarget::Avatar(agent)) => Some(vec![names.avatars.label_text(agent)]),
         Some(HoverTarget::Object {
             root,
@@ -688,6 +699,7 @@ impl Plugin for HoverTooltipPlugin {
                 Update,
                 (
                     ingest_object_properties_family,
+                    ingest_hover_picks,
                     update_hover_tooltip,
                     apply_hover_tooltip,
                 )

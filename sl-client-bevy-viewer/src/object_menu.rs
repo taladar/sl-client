@@ -79,14 +79,14 @@
 //!
 //! [`crate::avatar_menu`]'s right-click resolver owns the gesture (click vs
 //! camera free-look drag) and the occlusion order (UI, then HUD, then world).
-//! In the world it resolves **both** candidates — the mesh-accurate avatar pick
-//! and this module's object pick ([`ObjectPicker`]) — and the nearer hit wins,
-//! so an object standing in front of an avatar gets the object pie and vice
-//! versa. The object pick is the same first-hit ray walk the left-click touch
-//! uses ([`crate::hud_pick`]): nearest non-HUD mesh hit, walked up to its
-//! [`SceneObject`], resolved through [`ObjectState::pick_summary`] to the
-//! picked prim + linkset root, and discarded when it lands on an avatar
-//! (category) or a worn attachment.
+//! The world resolution is the GPU ID-buffer pick ([`crate::gpu_pick`]):
+//! its depth test arbitrates avatar vs object nearest-wins in the pick view
+//! itself, so an object standing in front of an avatar gets the object pie
+//! and vice versa. An object-face hit is then **surface-refined** here
+//! ([`ObjectPicker::pick_entity`], a single-entity ray test against exactly
+//! the face the ID buffer named), walked up to its [`SceneObject`], and
+//! resolved through [`ObjectState::pick_summary`] to the picked prim +
+//! linkset root.
 //!
 //! Reference (Firestorm, read-only): `menu_pie_object.xml` (the compass
 //! positions), `lltoolpie.cpp` (the pick), `llviewermenu.cpp` (the handlers).
@@ -762,15 +762,10 @@ pub(crate) struct ObjectRayHit {
     /// The surface the ray struck, in the picked object's own frame — carried
     /// into Touch (`llDetectedTouch*`) and Sit Here (the seat offset).
     pub(crate) surface: SurfaceInfo,
-    /// The hit distance along the ray, in metres — compared against the avatar
-    /// pick so the nearer target wins.
-    pub(crate) distance: f32,
 }
 
 /// Everything an object pick reads, bundled as one [`SystemParam`] so the
-/// right-click resolver adds a single parameter (the [`AvatarPicker`] pattern).
-///
-/// [`AvatarPicker`]: crate::avatar_pick::AvatarPicker
+/// right-click resolver adds a single parameter.
 #[derive(SystemParam)]
 pub(crate) struct ObjectPicker<'w, 's> {
     /// The tracked-object store, for the linkset walk.
@@ -788,10 +783,13 @@ pub(crate) struct ObjectPicker<'w, 's> {
 impl ObjectPicker<'_, '_> {
     /// Resolve `ray` to the nearest object it hits — an in-world object, or a
     /// worn (rigid) attachment ([`ObjectPickSummary::attachment`] tells the two
-    /// apart, and the resolver routes an attachment to the attachment pies) —
-    /// or `None` when the first thing struck is neither (terrain, an avatar's
-    /// own body). Deliberately first-hit-only, so an occluded object is not
-    /// picked through whatever hides it.
+    /// apart) — or `None` when the first thing struck is neither (terrain, an
+    /// avatar's own body). Deliberately first-hit-only, so an occluded object
+    /// is not picked through whatever hides it.
+    ///
+    /// Only the **edit tool**'s click-select still resolves through this ray
+    /// walk ([`crate::edit_selection`]); the cursor picks (touch, menus,
+    /// hover) moved to the GPU ID buffer ([`crate::gpu_pick`]).
     ///
     /// `exclude` is the HUD entity set: a HUD is screen-space and never a world
     /// pick (see [`pick_hud`](Self::pick_hud) for its own ray).
@@ -803,6 +801,28 @@ impl ObjectPicker<'_, '_> {
     ) -> Option<ObjectRayHit> {
         let world_filter = |entity: Entity| !exclude.contains(&entity);
         let settings = MeshRayCastSettings::default().with_filter(&world_filter);
+        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
+        self.resolve(entity, &hit)
+    }
+
+    /// Refine a GPU ID-buffer pick against the **one face entity** the ID
+    /// buffer named: a single-entity ray test (the filter admits only
+    /// `entity`, so this is not a scene walk) that recovers the exact struck
+    /// surface — face index, ST/UV, position, normal — the touch / sit /
+    /// menu paths carry. `None` when the ray unexpectedly misses the face
+    /// (an alpha-cutout edge pixel the v1 pick treats as opaque).
+    pub(crate) fn pick_entity(
+        &self,
+        ray: Ray3d,
+        ray_cast: &mut MeshRayCast,
+        entity: Entity,
+    ) -> Option<ObjectRayHit> {
+        let only = |candidate: Entity| candidate == entity;
+        let settings = MeshRayCastSettings::default()
+            // The GPU pick already established visibility (it drew the
+            // pixel); the refinement must not second-guess a per-view flag.
+            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
+            .with_filter(&only);
         let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
         self.resolve(entity, &hit)
     }
@@ -853,7 +873,7 @@ impl ObjectPicker<'_, '_> {
             }
             current = self.parents.get(current).ok()?.parent();
         };
-        // An avatar is picked mesh-accurately by `AvatarPicker`, not here.
+        // An avatar is picked by its class-1 GPU pick tag, not here.
         if scene.category == ObjectCategory::Avatar {
             return None;
         }
@@ -866,11 +886,7 @@ impl ObjectPicker<'_, '_> {
             face.map(|(_marker, FaceTextureDebug(tf))| tf),
             object_global,
         );
-        Some(ObjectRayHit {
-            summary,
-            surface,
-            distance: hit.distance,
-        })
+        Some(ObjectRayHit { summary, surface })
     }
 }
 
