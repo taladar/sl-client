@@ -855,6 +855,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SetVelocityInterpolation { .. } => "set_velocity_interpolation",
         Command::RequestUserInfo => "request_user_info",
         Command::UpdateUserInfo { .. } => "update_user_info",
+        Command::SetChatLogConfig(_) => "set_chat_log_config",
         Command::TriggerSound { .. } => "trigger_sound",
         Command::RequestGodlikePowers { .. } => "request_godlike_powers",
         Command::EjectUser { .. } => "eject_user",

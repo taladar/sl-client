@@ -197,6 +197,29 @@ impl ChatLog {
         self.base_dir.is_some() && self.config.any_enabled()
     }
 
+    /// Swaps in a new configuration on the live logger (the `SetChatLogConfig`
+    /// command): later lines are written under the new type set and format
+    /// knobs. Turning the `conversation.log` index on loads (and
+    /// retention-purges) the on-disk index exactly as construction does;
+    /// turning it off drops the in-memory index (the file itself is left in
+    /// place). The name / transcript-path caches are kept — they describe the
+    /// session, not the configuration. A driver pushing a settings-derived
+    /// configuration shortly after login may see the construction-time
+    /// configuration govern the first few lines; that window is benign and
+    /// inherent to the hand-off.
+    pub(crate) fn set_config(&mut self, config: ChatLogConfig) {
+        let index_was_on = self.config.conversation_log;
+        self.config = config;
+        match (&self.base_dir, index_was_on, self.config.conversation_log) {
+            (Some(dir), false, true) => {
+                self.conversations =
+                    load_conversation_index(dir, self.config.conversation_log_retention_days);
+            }
+            (_, true, false) => self.conversations = BTreeMap::new(),
+            _unchanged => {}
+        }
+    }
+
     /// The current local wall-clock as a [`LogLineTime`].
     fn now(&self) -> LogLineTime {
         broken_down(OffsetDateTime::now_utc().to_offset(self.offset))
@@ -866,6 +889,56 @@ mod tests {
         log.log_inbound_im(peer, "Alice Resident", "hi", None);
         let contents = fs_err::read_to_string(dir.join("conversation.log")).unwrap_or_default();
         assert_eq!(contents.contains("Old Friend"), false);
+        assert_eq!(contents.contains("Alice Resident.txt|"), true);
+    }
+
+    #[test]
+    fn set_config_switches_types_and_loads_the_index() {
+        let dir = temp_dir("set-config");
+        let _ignored = fs_err::create_dir_all(&dir);
+        // A fresh (current-time) pre-existing index entry, to be picked up when
+        // the conversation-log index is enabled live.
+        let peer = AgentKey::from(Uuid::from_u128(2));
+        let existing = sl_proto::conversation_log_line(
+            super::current_unix(),
+            sl_proto::ConversationKind::Direct,
+            false,
+            "Old Friend",
+            peer,
+            Uuid::from_u128(3),
+            "Old Friend.txt",
+        );
+        let _written = fs_err::write(dir.join("conversation.log"), format!("{existing}\n"));
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let mut log = ChatLog::new(
+            im_config(),
+            Some(dir.clone()),
+            "Me Resident".to_owned(),
+            Some(own),
+        );
+        log.log_inbound_im(peer, "Alice Resident", "one", None);
+        // Disable IM logging live: the next line must not be written.
+        log.set_config(ChatLogConfig {
+            enabled: BTreeSet::new(),
+            ..ChatLogConfig::default()
+        });
+        log.log_inbound_im(peer, "Alice Resident", "two", None);
+        let transcript = fs_err::read_to_string(dir.join("Alice Resident.txt")).unwrap_or_default();
+        assert_eq!(transcript.contains("one"), true);
+        assert_eq!(transcript.contains("two"), false);
+        // Re-enable with the conversation-log index on: the on-disk index is
+        // loaded (the pre-existing fresh entry survives) and new activity is
+        // indexed alongside it.
+        log.set_config(ChatLogConfig {
+            enabled: [LoggedChatType::InstantMessage].into_iter().collect(),
+            conversation_log: true,
+            ..ChatLogConfig::default()
+        });
+        log.log_inbound_im(peer, "Alice Resident", "three", None);
+        let transcript = fs_err::read_to_string(dir.join("Alice Resident.txt")).unwrap_or_default();
+        assert_eq!(transcript.contains("three"), true);
+        let contents = fs_err::read_to_string(dir.join("conversation.log")).unwrap_or_default();
+        assert_eq!(contents.contains("Old Friend.txt|"), true);
         assert_eq!(contents.contains("Alice Resident.txt|"), true);
     }
 

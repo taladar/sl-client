@@ -431,6 +431,16 @@ pub const CAP_LSL_SYNTAX: &str = "LSLSyntax";
 /// [`Session::handle_caps_event`] into [`Event::AgentPreferences`].
 pub const CAP_AGENT_PREFERENCES: &str = "AgentPreferences";
 
+/// The HTTP capability for the agent's **account contact / directory
+/// preferences** (`UserInfo`): a GET returning the stored settings (directory
+/// visibility, IM-to-email forwarding, the account e-mail) and a POST of
+/// `{ dir_visibility, im_via_email }` updating them. The modern equivalent of
+/// the legacy `UserInfoRequest` / `UpdateUserInfo` UDP messages; the reply is
+/// decoded by [`Session::handle_caps_event`] into [`Event::UserInfo`]. Second
+/// Life serves it (Firestorm's `llagent.cpp` `updateAgentUserInfoCoro`);
+/// OpenSim implements only the UDP path.
+pub const CAP_USER_INFO: &str = "UserInfo";
+
 /// The HTTP capability for an object's **land-impact / physics costs**
 /// (`GetObjectCost`): a POST of `{ object_ids }` returning the per-object resource
 /// and physics costs. Driven by the runtimes' `RequestObjectCost` command; the
@@ -567,6 +577,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_SIMULATOR_FEATURES,
     CAP_LSL_SYNTAX,
     CAP_AGENT_PREFERENCES,
+    CAP_USER_INFO,
     CAP_GET_OBJECT_COST,
     CAP_RESOURCE_COST_SELECTED,
     CAP_GET_OBJECT_PHYSICS_DATA,

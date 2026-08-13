@@ -36,10 +36,10 @@ use super::{
     CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView, ChatSession,
-    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE,
-    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory,
-    InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO, ChatLifecycleView,
+    ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit,
+    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
+    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
     MessageCursor, PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant,
     ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
     TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo,
@@ -103,7 +103,8 @@ use sl_wire::{
     parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
     parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
     parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
-    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features, zero_decode,
+    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features,
+    parse_user_info_reply, zero_decode,
 };
 use sl_wire::{Direction, GlobalCoordinates, combine_uuids};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -659,6 +660,31 @@ impl Session {
                 Ok(preferences) => self
                     .events
                     .push_back(Event::AgentPreferences(Box::new(preferences))),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The reply to a `UserInfo` GET or POST: a GET carries the
+            // account's stored contact preferences (surfaced as
+            // [`Event::UserInfo`], the same event the legacy `UserInfoReply`
+            // UDP message feeds); a POST acknowledges with only
+            // `success`/`message`, so it surfaces nothing — a failure is
+            // logged.
+            CAP_USER_INFO => match parse_user_info_reply(body) {
+                Ok(reply) => {
+                    if !reply.success {
+                        tracing::warn!(
+                            message = reply.message.as_deref().unwrap_or_default(),
+                            "UserInfo capability request failed"
+                        );
+                    } else if let Some(directory_visibility) = reply.directory_visibility {
+                        self.events.push_back(Event::UserInfo(UserInfo {
+                            im_via_email: reply.im_via_email.unwrap_or(false),
+                            directory_visibility: DirectoryVisibility::from_wire(
+                                &directory_visibility,
+                            ),
+                            email: reply.email.unwrap_or_default(),
+                        }));
+                    }
+                }
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `GetObjectCost` POST: the per-object land-impact and

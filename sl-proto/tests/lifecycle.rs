@@ -17019,6 +17019,47 @@ mod test {
         Ok(())
     }
 
+    /// A `UserInfo` GET reply surfaces the account's stored contact
+    /// preferences as [`Event::UserInfo`] — the same event the legacy
+    /// `UserInfoReply` UDP message feeds — while a bare POST acknowledgement
+    /// (`success` only) surfaces nothing.
+    #[test]
+    fn user_info_cap_surfaces_stored_set_and_ack_is_silent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let xml = sl_proto::build_user_info_reply(true, "hidden", "someone@example.com");
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_USER_INFO, &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::UserInfo(_)))
+            .ok_or("expected a UserInfo event")?;
+        let Event::UserInfo(info) = event else {
+            return Err("expected UserInfo".into());
+        };
+        assert!(info.im_via_email);
+        assert_eq!(
+            info.directory_visibility,
+            sl_proto::DirectoryVisibility::Hidden
+        );
+        assert_eq!(info.email, "someone@example.com");
+
+        // The POST acknowledgement carries no contact fields: no event.
+        let ack = sl_proto::build_user_info_ack(true, None);
+        let body = sl_proto::parse_llsd_xml(&ack)?;
+        session.handle_caps_event(sl_proto::CAP_USER_INFO, &body, now)?;
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::UserInfo(_)))
+        );
+        Ok(())
+    }
+
     /// A `GetObjectCost` reply surfaces the per-object land-impact / physics
     /// costs, keyed and sorted by object id.
     #[test]

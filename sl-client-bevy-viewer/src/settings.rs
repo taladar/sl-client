@@ -257,6 +257,7 @@ impl ViewerSettings {
         crate::avatars::register_settings(&mut settings);
         crate::hover_text::register_settings(&mut settings);
         crate::hover_tooltip::register_settings(&mut settings);
+        crate::preferences_chat::register_settings(&mut settings);
         crate::preferences_general::register_settings(&mut settings);
         crate::preferences_graphics::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);

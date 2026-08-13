@@ -3093,10 +3093,11 @@ preferences-cancel = Cancel
 preferences-tab-general = General
 preferences-tab-graphics = Graphics
 preferences-tab-audio = Sound & media
+preferences-tab-chat = Chat & privacy
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
 # The general tab (viewer-preferences-general-tab): language, maturity, start
-# location, UI scale, name-tag basics, away timeout, busy responses.
+# location, UI scale, name-tag basics, away timeout.
 preferences-section-language = Language
 preferences-row-language = Interface language
 preferences-locale-default = System default
@@ -3138,10 +3139,32 @@ preferences-afk-5-min = 5 minutes
 preferences-afk-10-min = 10 minutes
 preferences-afk-30-min = 30 minutes
 preferences-afk-60-min = 60 minutes
+# The chat / IM + privacy tab (viewer-preferences-chat-privacy-tab): display,
+# disk logging, automatic replies (moved from the general tab), privacy.
+preferences-section-chat-display = Chat display
+preferences-row-chat-font-size = Chat text size
+preferences-chat-font-small = Small
+preferences-chat-font-medium = Medium
+preferences-chat-font-large = Large
+preferences-row-nearby-toast-lifetime = Nearby chat stays on screen for (s)
+preferences-row-chat-max-lines = Most nearby chat lines shown at once
+preferences-section-chat-logging = Chat & IM logging
+preferences-row-log-nearby-chat = Save nearby chat on my computer
+preferences-row-log-instant-messages = Save IMs and group chat on my computer
+preferences-row-log-timestamp = Add a timestamp to each log line
+preferences-row-log-timestamp-date = Include the date in log timestamps
+preferences-row-log-timestamp-seconds = Include seconds in log timestamps
+preferences-row-log-filename-date = Add a date to transcript file names
+preferences-row-log-legacy-names = Use legacy transcript file names
+preferences-row-conversation-log = Keep a log of past conversations
+preferences-row-conversation-log-retention = Forget inactive conversations after (days)
 preferences-section-busy-response = Automatic replies
 preferences-row-busy-response = Do Not Disturb reply
 preferences-row-autorespond-response = Autorespond reply
 preferences-row-autorespond-non-friends-response = Autorespond reply to non-friends
+preferences-section-privacy = Privacy
+preferences-row-online-status-hidden = Only friends and groups know I'm online
+preferences-row-im-via-email = Email me IMs that arrive while I'm offline
 # The UI & world display tab's section headings and rows.
 preferences-section-world = In-world display
 preferences-section-maps = Mini-map & world map

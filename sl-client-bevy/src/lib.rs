@@ -25,13 +25,13 @@ use sl_proto::{
     CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
     CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    ChatSessionKind, Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse,
-    MessageCursor, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, build_agent_preferences_request,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body,
+    CAP_USER_INFO, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, SessionMessage, UserInfoUpdate, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_get_object_cost_request,
     build_get_object_physics_data_request, build_modify_material_params_request,
     build_object_media_navigate_request, build_object_media_update_request,
@@ -42,10 +42,10 @@ use sl_proto::{
     build_update_experience_request, build_update_item_asset_request,
     build_update_script_agent_request, build_update_script_task_request,
     build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_voice_signaling_request, chat_session_request_body, copy_inventory_from_notecard_body,
-    display_names_query, experience_id_query, experience_info_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body,
-    parse_login_response,
+    build_user_info_update, build_voice_signaling_request, chat_session_request_body,
+    copy_inventory_from_notecard_body, display_names_query, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    group_invite_response_body, parse_login_response,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -61,10 +61,10 @@ pub use sl_proto::{
     ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
     ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
     Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DisconnectReason, DisplayName, DisplayNameUpdate,
-    Distance, EconomyData, EnvironmentAsset, EnvironmentSettings, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
-    EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
+    DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset, EnvironmentSettings,
+    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
+    EventId, EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
     ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
     FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
     GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
@@ -104,12 +104,13 @@ pub use sl_proto::{
     StartLocation, StartLocationParseError, SurfaceInfo, TaskInventoryItem, TaskInventoryKey,
     TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
     TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, Transmit, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector,
-    ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest,
-    WaterSettings, Wearable, WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
-    particle_pattern, pcode, sim_access, texture_anim_mode,
+    TransactionId, TransferId, Transmit, UpdatableAssetType, UpdateGroupInfoParams, UserInfo, Uuid,
+    Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
+    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, avatar_texture,
+    azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
+    decode_texture_entry, encode_texture_entry, environment_asset_from_bytes, grid_to_handle,
+    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
+    texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -3865,15 +3866,49 @@ fn advance_running(
                 session.set_velocity_interpolation(*enabled, now).ok();
             }
             Command::RequestUserInfo => {
-                session.request_user_info(now).ok();
+                // Cap-preferred (the modern `UserInfo` GET), falling back to
+                // the legacy `UserInfoRequest` UDP message where the region
+                // does not serve the capability (OpenSim).
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_USER_INFO, &events_tx);
+                    });
+                } else {
+                    session.request_user_info(now).ok();
+                }
             }
             Command::UpdateUserInfo {
                 im_via_email,
                 directory_visibility,
             } => {
-                session
-                    .update_user_info(*im_via_email, *directory_visibility, now)
-                    .ok();
+                // Cap-preferred (the modern `UserInfo` POST), falling back to
+                // the legacy `UpdateUserInfo` UDP message where the region
+                // does not serve the capability (OpenSim). `im_via_email` is
+                // always included: OpenSim needs it and Second Life ignores
+                // unknown keys (it manages the forwarding preference on the
+                // account website).
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
+                {
+                    let body = build_user_info_update(&UserInfoUpdate {
+                        im_via_email: Some(*im_via_email),
+                        dir_visibility: directory_visibility.to_wire().to_owned(),
+                    });
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_USER_INFO, &events_tx);
+                    });
+                } else {
+                    session
+                        .update_user_info(*im_via_email, *directory_visibility, now)
+                        .ok();
+                }
+            }
+            Command::SetChatLogConfig(config) => {
+                chat_log.set_config((**config).clone());
             }
             Command::TriggerSound {
                 sound,

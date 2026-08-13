@@ -107,8 +107,33 @@ const MIN_SIZE: Vec2 = Vec2::new(360.0, 210.0);
 /// The chrome / label font size, in logical pixels.
 const CHROME_FONT_SIZE: f32 = 13.0;
 
-/// The transcript font size, in logical pixels.
+/// The transcript font size, in logical pixels, at the medium
+/// [`crate::preferences_chat::SETTING_CHAT_FONT_SIZE`] step (and when no
+/// settings are available).
 const TRANSCRIPT_FONT_SIZE: f32 = 13.0;
+
+/// The transcript font size for the stored font-size step: `0` small, `1`
+/// medium, `2` large (an unknown step reads as medium). Two points below the
+/// overlay's sizes, as the medium pair always was.
+const fn transcript_font_size_for_step(step: u32) -> f32 {
+    match step {
+        0 => 11.0,
+        2 => 15.0,
+        _medium => TRANSCRIPT_FONT_SIZE,
+    }
+}
+
+/// The stored font-size step (medium when no settings are available).
+fn transcript_font_step(settings: Option<&crate::settings::ViewerSettings>) -> u32 {
+    settings
+        .and_then(|settings| {
+            settings
+                .store()
+                .get_u32(crate::preferences_chat::SETTING_CHAT_FONT_SIZE)
+                .ok()
+        })
+        .unwrap_or(1)
+}
 
 /// One wheel notch's scroll distance, in logical pixels — matched to the gallery
 /// and the virtual list so every scroll surface feels the same.
@@ -859,6 +884,33 @@ struct NearbyRecallState {
     requested: bool,
 }
 
+/// Force every transcript to rebuild on the next refresh when the stored
+/// font-size step changes (the preferences combo applies live through the
+/// store), by resetting each view's rendered revision to the always-rebuild
+/// sentinel. Guarded on the *step* changing — the settings resource dirties
+/// on every unrelated write too — and inert on its first observation, when
+/// nothing was rendered under a different step yet.
+fn restyle_transcripts_on_font_change(
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    mut ui: Option<ResMut<ConversationsUi>>,
+    mut last_step: Local<Option<u32>>,
+) {
+    let step = transcript_font_step(settings.as_deref());
+    if *last_step == Some(step) {
+        return;
+    }
+    let first_observation = last_step.is_none();
+    *last_step = Some(step);
+    if first_observation {
+        return;
+    }
+    if let Some(ui) = ui.as_deref_mut() {
+        for view in ui.views.values_mut() {
+            view.rendered_revision = u64::MAX;
+        }
+    }
+}
+
 /// The plugin: the model + UI resources, the floater spawn, and the systems that
 /// ingest events, spawn / close tabs, refresh the view and route input.
 #[derive(Debug, Clone, Copy, Default)]
@@ -886,6 +938,7 @@ impl Plugin for ConversationsPlugin {
                     respond_to_invites,
                     close_conversations,
                     spawn_conversation_tabs,
+                    restyle_transcripts_on_font_change,
                     refresh_conversations
                         .run_if(crate::floater::floater_shown(CONVERSATIONS_FLOATER_ID)),
                 )
@@ -1706,6 +1759,7 @@ fn refresh_conversations(
     mut borders: Query<&mut BorderColor>,
     mut nodes: Query<&mut Node>,
     mut scrolls: Query<&mut ScrollPosition>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
 ) {
     let Some(ui) = ui.as_deref_mut() else {
         return;
@@ -1774,7 +1828,9 @@ fn refresh_conversations(
                 .entity(view.transcript_column)
                 .despawn_related::<Children>();
             for line in entry.recall.iter().chain(entry.lines.iter()) {
-                let mut style = LinkTextStyle::at(TRANSCRIPT_FONT_SIZE);
+                let mut style = LinkTextStyle::at(transcript_font_size_for_step(
+                    transcript_font_step(settings.as_deref()),
+                ));
                 style.plain_color = TRANSCRIPT_COLOR;
                 spawn_linkified_text(
                     &mut commands,

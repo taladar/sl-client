@@ -158,6 +158,7 @@ mod pie_menu;
 mod preferences;
 mod preferences_alerts;
 mod preferences_audio;
+mod preferences_chat;
 mod preferences_general;
 mod preferences_graphics;
 mod probe_layers;
@@ -304,7 +305,8 @@ use crate::camera::{
     dump_camera_pose, position_camera,
 };
 use crate::chat::{
-    ChatOverlay, position_chat_overlay, setup_chat_overlay, tick_chat_overlay, update_chat_overlay,
+    ChatOverlay, position_chat_overlay, restyle_chat_overlay, setup_chat_overlay,
+    tick_chat_overlay, update_chat_overlay,
 };
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
@@ -962,7 +964,10 @@ fn run_session(
     .add_plugins(SlClientPlugin {
         params: params.clone(),
         diagnostics: true,
-        // Log every text-chat type to the per-avatar chat directory.
+        // Log every text-chat type to the per-avatar chat directory — the
+        // pre-login default; once the account settings load,
+        // `preferences_chat` pushes the avatar's stored logging preferences
+        // over this via `Command::SetChatLogConfig`.
         chat_log_config: ChatLogConfig {
             enabled: BTreeSet::from([
                 LoggedChatType::Nearby,
@@ -1413,6 +1418,11 @@ fn run_session(
     // (viewer-preferences-audio-tab); the tab content itself plugs into the
     // shell's registry.
     .add_plugins(crate::preferences_audio::PreferencesAudioPlugin)
+    // The chat / IM + privacy tab's runtime side
+    // (viewer-preferences-chat-privacy-tab): the login-time chat-log
+    // configuration push, the `UserInfo` request / seed pair, and the per-OK
+    // apply hook; the tab content itself plugs into the shell's registry.
+    .add_plugins(crate::preferences_chat::PreferencesChatPlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1970,6 +1980,7 @@ fn run_session(
                 (
                     update_chat_overlay,
                     tick_chat_overlay,
+                    restyle_chat_overlay,
                     position_chat_overlay,
                 ),
                 // Quit handling: request a clean logout on the quit key, then force the
