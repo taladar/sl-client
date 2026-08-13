@@ -158,6 +158,7 @@ mod pie_menu;
 mod preferences;
 mod preferences_alerts;
 mod preferences_audio;
+mod preferences_camera_move;
 mod preferences_chat;
 mod preferences_general;
 mod preferences_graphics;
@@ -1423,6 +1424,11 @@ fn run_session(
     // configuration push, the `UserInfo` request / seed pair, and the per-OK
     // apply hook; the tab content itself plugs into the shell's registry.
     .add_plugins(crate::preferences_chat::PreferencesChatPlugin)
+    // The camera & movement tab's runtime side
+    // (viewer-preferences-camera-move-tab): the per-frame CameraTuning /
+    // MovementTuning refreshes and the field-of-view / mouselook-avatar
+    // appliers; the tab content itself plugs into the shell's registry.
+    .add_plugins(crate::preferences_camera_move::PreferencesCameraMovePlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1631,6 +1637,7 @@ fn run_session(
         .init_resource::<locomotion_ik::LocomotionAdjust>()
         .init_resource::<ground::AvatarGround>()
         .init_resource::<AvatarControls>()
+        .init_resource::<movement::MovementTuning>()
         .init_resource::<TypingState>()
         .init_resource::<ControlAvatarState>()
         .init_resource::<ChatOverlay>()

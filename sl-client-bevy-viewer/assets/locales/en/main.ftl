@@ -3094,6 +3094,7 @@ preferences-tab-general = General
 preferences-tab-graphics = Graphics
 preferences-tab-audio = Sound & media
 preferences-tab-chat = Chat & privacy
+preferences-tab-camera-move = Camera & movement
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
 # The general tab (viewer-preferences-general-tab): language, maturity, start
@@ -3280,6 +3281,26 @@ preferences-row-auto-accept-inventory = Automatically accept incoming inventory 
 preferences-section-alert-popups = Viewer alerts that can be shown or hidden
 preferences-alerts-col-show = Show
 preferences-alerts-col-label = Alert
+# The camera & movement tab (viewer-preferences-camera-move-tab): third-person
+# camera geometry / feel, mouselook feel, and the movement options.
+preferences-section-camera-view = Camera
+preferences-row-camera-angle = Field of view (radians)
+preferences-row-camera-offset-scale = Camera distance scale
+preferences-row-camera-smoothing = Camera smoothing (seconds)
+preferences-row-camera-max-distance = Maximum camera distance (m)
+preferences-row-camera-no-wheel-zoom = Don't let the mouse wheel zoom the camera
+preferences-section-mouselook = Mouselook
+preferences-row-mouse-sensitivity = Mouselook mouse sensitivity
+preferences-row-invert-mouse = Invert the vertical mouse look
+preferences-row-first-person-avatar = Show my avatar in mouselook
+preferences-section-movement = Movement
+preferences-row-tap-tap-hold-run = Double-tap and hold a walk key to run
+preferences-row-automatic-fly = Fly by holding the jump key
+preferences-row-avatar-turn-rate = Turn speed (radians per second)
+preferences-row-double-click-action = Double-click on the ground
+preferences-double-click-none = No action
+preferences-double-click-teleport = Teleport to the clicked point
+preferences-reset-default = Reset
 
 ## The Quick Preferences panel (viewer-quick-preferences): the small
 ## bottom-right floater of the settings reached-for hourly.

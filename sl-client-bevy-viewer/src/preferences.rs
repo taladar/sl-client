@@ -179,6 +179,11 @@ pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
         build: crate::preferences_chat::build_chat_tab,
     },
     PreferencesTabDef {
+        id: crate::preferences_camera_move::TAB_ID,
+        label_key: "preferences-tab-camera-move",
+        build: crate::preferences_camera_move::build_camera_move_tab,
+    },
+    PreferencesTabDef {
         id: "world-ui",
         label_key: "preferences-tab-world-ui",
         build: build_world_ui_tab,

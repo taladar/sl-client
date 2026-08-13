@@ -75,6 +75,86 @@ const TAKE_OFF_HOLD_SECS: f32 = 0.5;
 /// rate.
 const ROTATION_SEND_INTERVAL_SECS: f32 = 0.05;
 
+/// The window (seconds) within which a second tap of the same walk key counts as
+/// a double-tap for tap-tap-hold-to-run. Deliberately its own constant — the
+/// *mouse* double-click interval has its own consolidation task
+/// (`viewer-consolidate-double-click-interval`) and this is a keyboard gesture.
+const DOUBLE_TAP_RUN_WINDOW_SECS: f32 = 0.3;
+
+/// The user-tunable movement parameters, refreshed every frame from the typed
+/// settings store by the camera & movement preferences tab
+/// (`crate::preferences_camera_move`). The defaults reproduce the module
+/// constants / established behaviour, so a run without a settings store (the
+/// gallery, headless tests) behaves as before — except
+/// [`allow_tap_tap_hold_run`](Self::allow_tap_tap_hold_run), a new gesture that
+/// ships enabled to match the reference default.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub(crate) struct MovementTuning {
+    /// How fast the ← / → keys turn the avatar's heading, radians per second —
+    /// replaces the fixed [`TURN_RATE_RAD_PER_SEC`].
+    pub(crate) turn_rate_rad_per_sec: f32,
+    /// Whether double-tapping and holding a walk key runs — the reference's
+    /// `AllowTapTapHoldRun`.
+    pub(crate) allow_tap_tap_hold_run: bool,
+    /// Whether holding the ascend key while standing auto-engages flight
+    /// (P31.16) — the reference's `AutomaticFly`. Off, only the explicit fly
+    /// toggle starts flying; auto-land (P31.11) stays on either way, as the
+    /// reference does.
+    pub(crate) automatic_fly: bool,
+}
+
+impl Default for MovementTuning {
+    /// Today's constants / behaviour (tap-tap-hold-run enabled, the reference
+    /// default).
+    fn default() -> Self {
+        Self {
+            turn_rate_rad_per_sec: TURN_RATE_RAD_PER_SEC,
+            allow_tap_tap_hold_run: true,
+            automatic_fly: true,
+        }
+    }
+}
+
+/// The per-key state of the tap-tap-hold-to-run detector: how recently the key
+/// was last tapped and whether a double-tap's run is currently latched (held).
+#[derive(Debug, Clone)]
+struct DoubleTapRun {
+    /// Seconds since the key was last freshly pressed; starts beyond the window
+    /// so the first tap of a session can never pair with "before the session".
+    since_last_tap: f32,
+    /// Whether the second tap of a double-tap is still held, running the avatar.
+    latched: bool,
+}
+
+impl Default for DoubleTapRun {
+    fn default() -> Self {
+        Self {
+            since_last_tap: f32::INFINITY,
+            latched: false,
+        }
+    }
+}
+
+/// Advance one walk key's tap-tap-hold-to-run state by a frame and return
+/// whether it is running: a fresh press within
+/// [`DOUBLE_TAP_RUN_WINDOW_SECS`] of the previous one latches the run, and the
+/// latch holds until the key is released. Pure, so the gesture is
+/// unit-testable frame by frame.
+fn double_tap_run(state: &mut DoubleTapRun, just_pressed: bool, held: bool, dt: f32) -> bool {
+    if !held {
+        state.latched = false;
+    }
+    if just_pressed {
+        if state.since_last_tap <= DOUBLE_TAP_RUN_WINDOW_SECS {
+            state.latched = true;
+        }
+        state.since_last_tap = 0.0;
+    } else {
+        state.since_last_tap += dt;
+    }
+    state.latched && held
+}
+
 /// The persistent state of the avatar movement controls: the client-tracked walk
 /// heading, whether flying is toggled on, and the bookkeeping that keeps the viewer
 /// from re-sending an unchanged intent every frame.
@@ -99,6 +179,10 @@ pub(crate) struct AvatarControls {
     /// Seconds the ascend key has been held while standing and not flying, for the
     /// P31.16 hold-to-take-off; reset whenever that precondition lapses.
     ascend_hold_secs: f32,
+    /// The tap-tap-hold-to-run detector for the walk-forward key.
+    tap_run_forward: DoubleTapRun,
+    /// The tap-tap-hold-to-run detector for the walk-backward key.
+    tap_run_backward: DoubleTapRun,
 }
 
 impl AvatarControls {
@@ -125,6 +209,8 @@ impl Default for AvatarControls {
             last_controls: ControlFlags::empty(),
             rotation_send_accum: ROTATION_SEND_INTERVAL_SECS,
             ascend_hold_secs: 0.0,
+            tap_run_forward: DoubleTapRun::default(),
+            tap_run_backward: DoubleTapRun::default(),
         }
     }
 }
@@ -174,14 +260,16 @@ fn rotation_from_yaw(yaw: f32) -> Rotation {
 /// camera instead, via [`crate::camera::drive_flycam`]).
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system reading time, the actions, the camera mode / aim, identity, avatars, \
-              terrain, the fly permission + seat, the SpaceNavigator input + settings + smoothing, \
-              and the avatar motions plus the controls state and command writer"
+    reason = "a Bevy system reading time, the actions, the camera mode / aim, the user movement \
+              tuning, identity, avatars, terrain, the fly permission + seat, the SpaceNavigator \
+              input + settings + smoothing, and the avatar motions plus the controls state and \
+              command writer"
 )]
 pub(crate) fn drive_avatar_controls(
     actions: Res<ButtonInput<Action>>,
     mode: Res<CameraMode>,
     camera_aim: Res<CameraAim>,
+    tuning: Res<MovementTuning>,
     time: Res<Time>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
@@ -266,6 +354,7 @@ pub(crate) fn drive_avatar_controls(
         let grounded = own_motion
             .is_none_or(|motion| motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M));
         if should_take_off(
+            tuning.automatic_fly,
             controls.flying,
             grounded,
             controls.ascend_hold_secs,
@@ -311,8 +400,25 @@ pub(crate) fn drive_avatar_controls(
     if backward {
         flags = flags.union(ControlFlags::AT_NEG);
     }
-    // Run from Shift or a forward push past the SpaceNavigator run threshold.
-    if (actions.pressed(Action::Run) || nav.run) && (forward || backward) {
+    // Tap-tap-hold-to-run: double-tapping and holding a walk key latches a run
+    // for as long as it stays held. The detectors advance every frame (keeping
+    // their state fresh) and the preference gates only whether the latch counts.
+    let tap_forward = double_tap_run(
+        &mut controls.tap_run_forward,
+        actions.just_pressed(Action::MoveForward),
+        actions.pressed(Action::MoveForward),
+        dt,
+    );
+    let tap_backward = double_tap_run(
+        &mut controls.tap_run_backward,
+        actions.just_pressed(Action::MoveBackward),
+        actions.pressed(Action::MoveBackward),
+        dt,
+    );
+    let tap_run = tuning.allow_tap_tap_hold_run && (tap_forward || tap_backward);
+    // Run from Shift, a forward push past the SpaceNavigator run threshold, or a
+    // latched double-tap.
+    if (actions.pressed(Action::Run) || nav.run || tap_run) && (forward || backward) {
         flags = flags.union(ControlFlags::FAST_AT);
     }
     if ascend {
@@ -353,11 +459,11 @@ pub(crate) fn drive_avatar_controls(
         turning = true;
     } else {
         if left {
-            controls.yaw += TURN_RATE_RAD_PER_SEC * dt;
+            controls.yaw += tuning.turn_rate_rad_per_sec * dt;
             turning = true;
         }
         if right {
-            controls.yaw -= TURN_RATE_RAD_PER_SEC * dt;
+            controls.yaw -= tuning.turn_rate_rad_per_sec * dt;
             turning = true;
         }
         // The SpaceNavigator's twist turns the body too (feathered per frame); it
@@ -427,16 +533,29 @@ fn should_auto_stop_flying(
     flying && !ascend_key && descending && at_ground_floor
 }
 
-/// Whether the auto-take-off rule (P31.16) fires this frame: the avatar is not
-/// already `flying`, is `grounded` (standing on the ground), flying is permitted
-/// here (`can_fly` — the region + parcel decision from the session), and the
-/// ascend key has been held for at least [`TAKE_OFF_HOLD_SECS`]. The hold
-/// requirement is what makes a quick tap a jump but a sustained press a take-off,
-/// and debounces it from the P31.11 auto-land. Pure so the decision is
-/// unit-testable without a live terrain / avatar.
+/// Whether the auto-take-off rule (P31.16) fires this frame: the feature is on
+/// (`automatic_fly`, the user preference), the avatar is not already `flying`,
+/// is `grounded` (standing on the ground), flying is permitted here (`can_fly`
+/// — the region + parcel decision from the session), and the ascend key has
+/// been held for at least [`TAKE_OFF_HOLD_SECS`]. The hold requirement is what
+/// makes a quick tap a jump but a sustained press a take-off, and debounces it
+/// from the P31.11 auto-land. Pure so the decision is unit-testable without a
+/// live terrain / avatar.
 #[must_use]
-fn should_take_off(flying: bool, grounded: bool, ascend_held_secs: f32, can_fly: bool) -> bool {
-    !flying && grounded && can_fly && ascend_held_secs >= TAKE_OFF_HOLD_SECS
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "the take-off decision is a conjunction of independent binary conditions — the \
+              preference, flying, grounded, and fly permission — that read clearest as the flags \
+              they are"
+)]
+fn should_take_off(
+    automatic_fly: bool,
+    flying: bool,
+    grounded: bool,
+    ascend_held_secs: f32,
+    can_fly: bool,
+) -> bool {
+    automatic_fly && !flying && grounded && can_fly && ascend_held_secs >= TAKE_OFF_HOLD_SECS
 }
 
 /// Wrap an angle (radians) into `(-π, π]`, keeping the tracked heading bounded over
@@ -461,27 +580,107 @@ mod tests {
     use sl_client_bevy::Rotation;
 
     /// Holding the ascend key past the threshold while standing with fly permission
-    /// takes off; a short hold, being airborne, no permission, or already flying
-    /// does not.
+    /// takes off; a short hold, being airborne, no permission, already flying, or
+    /// the preference switched off does not.
     #[test]
     fn auto_take_off_needs_a_sustained_grounded_permitted_ascend() {
-        // Not flying, grounded, permitted, held past the threshold → take off.
-        assert!(should_take_off(false, true, TAKE_OFF_HOLD_SECS, true));
-        assert!(should_take_off(false, true, TAKE_OFF_HOLD_SECS + 1.0, true));
+        // Enabled, not flying, grounded, permitted, held past the threshold → take
+        // off.
+        assert!(should_take_off(true, false, true, TAKE_OFF_HOLD_SECS, true));
+        assert!(should_take_off(
+            true,
+            false,
+            true,
+            TAKE_OFF_HOLD_SECS + 1.0,
+            true
+        ));
 
         // Held, but not long enough yet → keep standing (a tap is a jump).
         assert!(!should_take_off(
+            true,
             false,
             true,
             TAKE_OFF_HOLD_SECS - 0.01,
             true
         ));
         // Flying disallowed here (region / parcel) → no take-off.
-        assert!(!should_take_off(false, true, TAKE_OFF_HOLD_SECS, false));
+        assert!(!should_take_off(
+            true,
+            false,
+            true,
+            TAKE_OFF_HOLD_SECS,
+            false
+        ));
         // Already flying → nothing to start.
-        assert!(!should_take_off(true, true, TAKE_OFF_HOLD_SECS, true));
+        assert!(!should_take_off(true, true, true, TAKE_OFF_HOLD_SECS, true));
         // Airborne (not standing) → the hold-to-fly is a standing gesture.
-        assert!(!should_take_off(false, false, TAKE_OFF_HOLD_SECS, true));
+        assert!(!should_take_off(
+            true,
+            false,
+            false,
+            TAKE_OFF_HOLD_SECS,
+            true
+        ));
+        // The `AutomaticFly` preference off → an arbitrarily long hold never takes
+        // off (only the explicit fly toggle starts flight).
+        assert!(!should_take_off(
+            false,
+            false,
+            true,
+            TAKE_OFF_HOLD_SECS + 60.0,
+            true
+        ));
+    }
+
+    /// The tap-tap-hold-to-run gesture: a second tap within the window latches a
+    /// run for as long as the key stays held; a slow second tap is just walking,
+    /// and releasing the key drops the latch.
+    #[test]
+    fn double_tap_run_latches_within_the_window_only() {
+        use super::{DOUBLE_TAP_RUN_WINDOW_SECS, DoubleTapRun, double_tap_run};
+
+        let dt = 1.0 / 60.0;
+
+        // Tap, release briefly, tap again inside the window and hold → running,
+        // and it stays latched while held.
+        let mut state = DoubleTapRun::default();
+        assert!(
+            !double_tap_run(&mut state, true, true, dt),
+            "first tap walks"
+        );
+        assert!(!double_tap_run(&mut state, false, false, dt), "released");
+        assert!(
+            double_tap_run(&mut state, true, true, dt),
+            "second tap within the window runs"
+        );
+        assert!(
+            double_tap_run(&mut state, false, true, dt),
+            "held: still running"
+        );
+        // Releasing drops the latch; holding again (no fresh double-tap) walks.
+        assert!(
+            !double_tap_run(&mut state, false, false, dt),
+            "released: latch drops"
+        );
+
+        // A second tap *after* the window is just another first tap.
+        let mut slow = DoubleTapRun::default();
+        assert!(!double_tap_run(&mut slow, true, true, dt));
+        assert!(!double_tap_run(&mut slow, false, false, dt));
+        // Let more than the window elapse.
+        let mut elapsed = 0.0;
+        while elapsed <= DOUBLE_TAP_RUN_WINDOW_SECS {
+            assert!(!double_tap_run(&mut slow, false, false, dt));
+            elapsed += dt;
+        }
+        assert!(
+            !double_tap_run(&mut slow, true, true, dt),
+            "a slow second tap walks"
+        );
+
+        // The very first tap of a session can never pair with "before the session".
+        let mut fresh = DoubleTapRun::default();
+        assert!(!double_tap_run(&mut fresh, true, true, dt));
     }
 
     /// Descending onto the ground with no ascend key held stops flight; the same
