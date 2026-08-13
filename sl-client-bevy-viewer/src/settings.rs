@@ -261,6 +261,7 @@ impl ViewerSettings {
         crate::preferences_chat::register_settings(&mut settings);
         crate::preferences_general::register_settings(&mut settings);
         crate::preferences_graphics::register_settings(&mut settings);
+        crate::preferences_network_cache::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);
         crate::render_priority::register_settings(&mut settings);
         crate::particles::register_settings(&mut settings);

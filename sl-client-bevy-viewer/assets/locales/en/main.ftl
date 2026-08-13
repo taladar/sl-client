@@ -2062,7 +2062,7 @@ notification-maturity-change-error = We were unable to change your preferences t
 notification-confirm-restore-toybox = This action will restore your default buttons and toolbars. You cannot undo this action.
 notification-confirm-clear-all-toybox = This action will return all buttons to the toolbox and your toolbars will be empty. You cannot undo this action.
 notification-confirm-clear-browser-cache = Are you sure you want to delete your travel, web, and search history?
-notification-confirm-clear-cache = Are you sure you want to clear your viewer cache?
+notification-confirm-clear-cache = Are you sure you want to clear your viewer cache? It will be emptied the next time you start the viewer.
 notification-confirm-clear-inventory-cache = Are you sure you want to clear your inventory cache?
 notification-confirm-clear-web-browser-cache = Are you sure you want to clear your web browser cache (Requires Restart)?
 notification-confirm-clear-cookies = Are you sure you want to clear your cookies?
@@ -3095,6 +3095,7 @@ preferences-tab-graphics = Graphics
 preferences-tab-audio = Sound & media
 preferences-tab-chat = Chat & privacy
 preferences-tab-camera-move = Camera & movement
+preferences-tab-network-cache = Network & cache
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
 # The general tab (viewer-preferences-general-tab): language, maturity, start
@@ -3301,6 +3302,23 @@ preferences-row-double-click-action = Double-click on the ground
 preferences-double-click-none = No action
 preferences-double-click-teleport = Teleport to the clicked point
 preferences-reset-default = Reset
+
+# The network & cache tab (viewer-preferences-network-cache-tab): bandwidth
+# throttle, HTTP proxy, cache sizes / locations and the clear-cache actions.
+preferences-section-network = Network
+preferences-row-max-bandwidth = Maximum bandwidth (kbps)
+preferences-section-proxy = HTTP proxy
+preferences-row-http-proxy-enabled = Route HTTP traffic through a proxy (restart required)
+preferences-row-http-proxy = HTTP proxy (host:port, restart required)
+preferences-section-cache = Cache
+preferences-row-texture-cache-size = Texture cache size (MB, restart required)
+preferences-row-asset-cache-size = Asset cache size per cache (MB, restart required)
+preferences-row-cache-location = Cache location (empty = default, restart required)
+preferences-row-chat-log-location = Chat log location (empty = default, restart required)
+preferences-row-clear-cache = Empty the texture, mesh and asset caches
+preferences-clear-cache = Clear cache
+preferences-row-clear-inventory-cache = Delete the saved inventory snapshots
+preferences-clear-inventory-cache = Clear inventory cache
 
 ## The Quick Preferences panel (viewer-quick-preferences): the small
 ## bottom-right floater of the settings reached-for hourly.

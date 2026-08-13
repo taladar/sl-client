@@ -162,6 +162,7 @@ mod preferences_camera_move;
 mod preferences_chat;
 mod preferences_general;
 mod preferences_graphics;
+mod preferences_network_cache;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -1429,6 +1430,7 @@ fn run_session(
     // MovementTuning refreshes and the field-of-view / mouselook-avatar
     // appliers; the tab content itself plugs into the shell's registry.
     .add_plugins(crate::preferences_camera_move::PreferencesCameraMovePlugin)
+    .add_plugins(crate::preferences_network_cache::PreferencesNetworkCachePlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -2412,6 +2414,11 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     // `ViewerSettings` resource — does not exist yet at login-request time.
     let start = {
         let settings = crate::settings::ViewerSettings::load();
+        // The network & cache tab's restart-scoped knobs (cache root and
+        // size ceilings, chat-log root, HTTP proxy, a pending clear-cache
+        // request) are consumed from this same pre-app load, before any
+        // store or HTTP client exists.
+        crate::preferences_network_cache::apply_startup_settings(&settings);
         let stored = settings
             .store()
             .get_str(crate::preferences_general::SETTING_LOGIN_START_LOCATION)

@@ -184,6 +184,11 @@ pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
         build: crate::preferences_camera_move::build_camera_move_tab,
     },
     PreferencesTabDef {
+        id: crate::preferences_network_cache::TAB_ID,
+        label_key: "preferences-tab-network-cache",
+        build: crate::preferences_network_cache::build_network_cache_tab,
+    },
+    PreferencesTabDef {
         id: "world-ui",
         label_key: "preferences-tab-world-ui",
         build: build_world_ui_tab,
@@ -520,6 +525,28 @@ pub(crate) fn spawn_pref_text(
     commands.entity(field).insert(binding);
     commands.entity(row).insert(PrefSearchRow { label });
     row
+}
+
+/// Spawn a searchable **action** row: a translated label plus a button the
+/// caller attaches behaviour to (`.observe(On<Activate>)`). Returns the
+/// button entity; the row is the button's parent.
+pub(crate) fn spawn_pref_action(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    button_key: &'static str,
+) -> Entity {
+    let row = commands
+        .spawn((
+            pref_row_node(),
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    let label = spawn_row_label(commands, row, label_key);
+    let button = spawn_footer_button(commands, row, button_key, 0);
+    commands.entity(row).insert(PrefSearchRow { label });
+    button
 }
 
 /// Spawn a (non-searchable) section heading over a group of rows.

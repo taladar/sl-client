@@ -271,7 +271,14 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn BlobFetcher> = concrete;
     if let Some(dir) = disk_dir {
-        match AssetStore::new(Arc::clone(&fetcher), Some(dir), AssetCacheLimits::default()) {
+        match AssetStore::new(
+            Arc::clone(&fetcher),
+            Some(dir),
+            AssetCacheLimits {
+                max_bytes: crate::paths::asset_cache_max_bytes(),
+                ..AssetCacheLimits::default()
+            },
+        ) {
             Ok(store) => return store,
             Err(error) => warn!("animation disk cache unavailable ({error}); in-memory only"),
         }
@@ -279,7 +286,14 @@ fn build_asset_store(fetcher: &Arc<BevyAssetFetcher>, disk_dir: Option<PathBuf>)
     // The disk-less store cannot fail to open; the loop extracts it without an
     // `unwrap`/`expect` and runs exactly once.
     loop {
-        match AssetStore::new(Arc::clone(&fetcher), None, AssetCacheLimits::default()) {
+        match AssetStore::new(
+            Arc::clone(&fetcher),
+            None,
+            AssetCacheLimits {
+                max_bytes: crate::paths::asset_cache_max_bytes(),
+                ..AssetCacheLimits::default()
+            },
+        ) {
             Ok(store) => return store,
             Err(error) => warn!("in-memory animation store failed to open ({error}); retrying"),
         }

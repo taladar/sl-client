@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, unbounded};
 
 use bevy::prelude::*;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 
 use std::collections::{BTreeSet, HashMap};
 
@@ -299,6 +298,7 @@ mod experiences;
 mod fetch;
 pub mod grass;
 mod http;
+pub mod http_proxy;
 mod inventory;
 mod inventory_cache;
 mod lsl_syntax_cache;
@@ -761,7 +761,9 @@ fn run_network_thread(
 
 /// Performs the blocking XML-RPC login POST, returning the response body.
 fn perform_login(url: &str, user_agent: &str, body: String) -> Result<String, String> {
-    ReqwestBlockingClient::new()
+    crate::http_proxy::blocking_client_builder()
+        .build()
+        .map_err(|error| error.to_string())?
         .post(url)
         .header("Content-Type", "text/xml")
         .header("User-Agent", user_agent)

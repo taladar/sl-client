@@ -275,7 +275,7 @@ pub(crate) fn run_texture_fetch(bundle_dir: &Path, plan: &[(Uuid, String)], now_
     ) else {
         return 0;
     };
-    let Ok(client) = reqwest::blocking::Client::builder()
+    let Ok(client) = sl_client_bevy::http_proxy::blocking_client_builder()
         .timeout(Duration::from_secs(30))
         .build()
     else {

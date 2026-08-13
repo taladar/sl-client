@@ -160,6 +160,7 @@ mod chat_log;
 mod experiences;
 mod fetch;
 mod http;
+pub mod http_proxy;
 mod inventory;
 mod inventory_cache;
 mod lsl_syntax_cache;
@@ -346,7 +347,7 @@ impl Client {
         let mut session = Session::new(params);
         let request = session.login_http_request().ok_or(Error::NoLoginRequest)?;
 
-        let http = ReqwestClient::new();
+        let http = crate::http_proxy::client_builder().build()?;
         let body = http
             .post(request.url)
             .header("Content-Type", "text/xml")
@@ -514,7 +515,7 @@ impl Client {
         // here: the event-queue long-poll runs off `EventQueueGet`, and inventory
         // fetches POST to `FetchInventoryDescendents2`. Both deliver their decoded
         // payloads back over `caps_rx` to `handle_caps_event`.
-        let http = ReqwestClient::builder()
+        let http = crate::http_proxy::client_builder()
             .timeout(Duration::from_secs(60))
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);

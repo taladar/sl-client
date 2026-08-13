@@ -314,8 +314,9 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
 /// Add a reset-to-default button into a slider `row` — the reference View
 /// tab's per-slider "D" buttons. Resetting clears the global override; the
 /// two-way binding then moves the slider back to the registered default, and
-/// the shell's snapshot keeps Cancel semantics intact.
-fn spawn_reset_button(commands: &mut Commands, row: Entity, setting: &'static str) {
+/// the shell's snapshot keeps Cancel semantics intact. Shared with the other
+/// tabs that want per-row resets (the network & cache tab).
+pub(crate) fn spawn_reset_button(commands: &mut Commands, row: Entity, setting: &'static str) {
     let button = spawn_footer_button(commands, row, "preferences-reset-default", 0);
     commands.entity(button).observe(
         move |_activate: On<Activate>, settings: Option<ResMut<ViewerSettings>>| {

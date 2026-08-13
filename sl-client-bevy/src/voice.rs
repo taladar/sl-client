@@ -4,7 +4,6 @@ use crate::EVENT_QUEUE_TIMEOUT;
 use crate::caps::report_caps_failure;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{Llsd, parse_llsd_xml};
 
 /// POSTs a voice-signalling capability (`ProvisionVoiceAccountRequest` or
@@ -19,7 +18,7 @@ pub(crate) fn run_voice_cap(
     cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -50,7 +49,7 @@ pub(crate) fn run_voice_cap(
 /// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the
 /// simulator returns only an HTTP status, so there is no event to surface.
 pub(crate) fn run_voice_signaling(cap_url: &str, body: String) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {

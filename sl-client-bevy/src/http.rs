@@ -5,7 +5,6 @@ use crate::caps::report_caps_failure;
 use crate::lsl_syntax_cache::LslSyntaxCache;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
     CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, LAND_RESOURCE_DETAIL_TAG,
     LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid,
@@ -16,7 +15,7 @@ use std::collections::HashMap;
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
 /// transport/parse failure. Shared by the experience capability fetches.
 pub(crate) fn blocking_get_llsd(url: &str) -> Option<Llsd> {
-    let http = ReqwestBlockingClient::builder()
+    let http = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
         .ok()?;
@@ -33,7 +32,7 @@ pub(crate) fn blocking_get_llsd(url: &str) -> Option<Llsd> {
 /// fire-and-forget capability call where the simulator returns only an HTTP
 /// status (e.g. the `SendUserReport` abuse-report cap). There is no event.
 pub(crate) fn run_caps_oneway(cap_url: &str, body: String) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -60,7 +59,7 @@ pub(crate) fn run_chat_session_request(
     from_group: bool,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -120,7 +119,7 @@ pub(crate) fn run_fetch_lsl_syntax(
     cache: &LslSyntaxCache,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -167,7 +166,7 @@ pub(crate) fn run_land_resources(
     parcel_id: ParcelKey,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -214,7 +213,7 @@ pub(crate) fn run_put_caps_llsd(
     cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -250,7 +249,7 @@ pub(crate) fn run_patch_caps_llsd(
     cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -285,7 +284,7 @@ pub(crate) fn run_delete_caps_llsd(
     cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -316,7 +315,7 @@ pub(crate) fn run_delete_caps_llsd(
 /// or `None` on any network/HTTP failure. When `max_bytes` is `Some`, requests
 /// only the first `max_bytes` via a `Range: bytes=0-(max_bytes-1)` header.
 pub(crate) fn blocking_get_bytes(url: &str, max_bytes: Option<usize>) -> Option<Vec<u8>> {
-    let http = ReqwestBlockingClient::builder()
+    let http = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
         .ok()?;
@@ -334,7 +333,7 @@ pub(crate) fn blocking_get_bytes(url: &str, max_bytes: Option<usize>) -> Option<
 /// Performs a blocking HTTP `GET` for an inclusive `(start, end)` byte range via
 /// a `Range: bytes=start-end` header, returning the body on a 2xx response.
 pub(crate) fn blocking_get_range(url: &str, start: u32, end: u32) -> Option<Vec<u8>> {
-    let http = ReqwestBlockingClient::builder()
+    let http = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
         .ok()?;
