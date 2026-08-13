@@ -16,33 +16,33 @@ mod test {
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayName, DisplayNameUpdate,
         EjectAction, EstateCovenant, Event, EventId, EventInfo, FeatureDisabled, FollowCamProperty,
-        FollowCamPropertyValue, FreezeAction, FriendKey, GenericMessage, GenericStreamingMessage,
-        GestureActivation, GlobalCoordinates, GodRegionUpdate, GridCoordinates, GridRectangle,
-        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
-        GroupName, GroupRequestId, GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog,
-        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
-        InventoryKey, InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize,
-        LandEdit, LandSearchType, LandStatItem, LandStatReportType, LightData, LindenAmount,
-        LindenBalance, LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo,
-        MapRequestFlags, Maturity, MeanCollision, MeanCollisionType, MovementMode,
-        NavMeshBuildStatus, NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem,
-        ObjectExtraParams, ObjectKey, ObjectPlayingAnimation, ObjectPropertiesFamily,
-        OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey, ParcelObjectOwner,
-        ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult, PointAtType, Postcard,
-        PrimShapeParams, ProductType, QueryId, RegionCoordinates, RegionHandle, RegionIdentity,
-        RegionLocalObjectId, RegionLocalParcelId, RegionStats, RegionTerrainComposition,
-        RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-        SaleType, ScopedObjectId, ScopedParcelId, ScriptControl, ScriptControlAction,
-        ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions, ServerError,
-        ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags,
-        SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-        TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, TextureFace, TextureKey,
-        Throttle, TransactionId, TransferRequestSource, TransferStatus, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        FollowCamPropertyValue, FreezeAction, FriendKey, FriendRights, GenericMessage,
+        GenericStreamingMessage, GestureActivation, GlobalCoordinates, GodRegionUpdate,
+        GridCoordinates, GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry,
+        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+        GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId, GroupRoleKey, GroupVote,
+        GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolderKey, InventoryItem,
+        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryType, InvoiceId, Kick,
+        LandArea, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
+        LandStatReportType, LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES,
+        MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
+        MeanCollisionType, MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult,
+        PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+        RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
+        RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
+        ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions,
+        ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId,
+        SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem,
+        TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource, TransferStatus,
+        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
-    use sl_proto::{AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE};
+    use sl_proto::{AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, UserRightsEntry};
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
@@ -145,17 +145,25 @@ mod test {
         Ok(AnyMessage::decode(id, &mut reader)?)
     }
 
-    /// Delivers all queued datagrams between the client and simulator (in both
-    /// directions) until neither has anything more to send.
-    fn pump(client: &mut Session, sim: &mut SimSession, now: Instant) -> Result<(), TestError> {
+    /// Delivers all queued datagrams between a client and simulator (in both
+    /// directions) at explicit endpoint addresses until neither has anything
+    /// more to send — the address-parameterized core of [`pump`], shared with
+    /// the two-avatar [`PairEnd`] topology.
+    fn pump_at(
+        client: &mut Session,
+        sim: &mut SimSession,
+        client_addr: SocketAddr,
+        sim_addr: SocketAddr,
+        now: Instant,
+    ) -> Result<(), TestError> {
         loop {
             let mut moved = false;
             while let Some(transmit) = client.poll_transmit() {
-                sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+                sim.handle_datagram(client_addr, &transmit.payload, now)?;
                 moved = true;
             }
             while let Some(transmit) = sim.poll_transmit() {
-                client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+                client.handle_datagram(sim_addr, &transmit.payload, now)?;
                 moved = true;
             }
             if !moved {
@@ -163,6 +171,12 @@ mod test {
             }
         }
         Ok(())
+    }
+
+    /// Delivers all queued datagrams between the client and simulator (in both
+    /// directions) until neither has anything more to send.
+    fn pump(client: &mut Session, sim: &mut SimSession, now: Instant) -> Result<(), TestError> {
+        pump_at(client, sim, client_addr(), sim_addr(), now)
     }
 
     /// Drains all queued server events.
@@ -246,6 +260,131 @@ mod test {
         let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         pump(&mut client, &mut sim, now)?;
         Ok((client, sim))
+    }
+
+    /// The login-fixture identity for one end of a two-avatar pair.
+    struct EndParams {
+        /// The avatar's first name (the last name is always "User").
+        first_name: &'static str,
+        /// The agent id (as a `u128`).
+        agent: u128,
+        /// The session id (as a `u128`).
+        session: u128,
+        /// The secure session id (as a `u128`).
+        secure: u128,
+        /// The circuit code.
+        circuit: u32,
+        /// The simulator's UDP port on 127.0.0.1.
+        sim_port: u16,
+        /// The client's UDP port on 127.0.0.1, as the simulator sees it.
+        client_port: u16,
+    }
+
+    /// One avatar's client `Session` wired to its **own** [`SimSession`] — the
+    /// two-avatar relay topology (one simulator session per client; the test
+    /// body plays the driver, relaying `ServerEvent`s off one end's sim into
+    /// `send_*` calls on the other's).
+    struct PairEnd {
+        /// The avatar's client session.
+        client: Session,
+        /// The simulator session serving this client.
+        sim: SimSession,
+        /// The client's UDP address, as the simulator sees it.
+        client_addr: SocketAddr,
+        /// The simulator's UDP address.
+        sim_addr: SocketAddr,
+    }
+
+    /// [`pump`] for one [`PairEnd`]: delivers this end's queued datagrams in
+    /// both directions until quiet.
+    fn pump_end(end: &mut PairEnd, now: Instant) -> Result<(), TestError> {
+        pump_at(
+            &mut end.client,
+            &mut end.sim,
+            end.client_addr,
+            end.sim_addr,
+            now,
+        )
+    }
+
+    /// Logs one avatar in against its own fresh [`SimSession`] (the
+    /// [`setup`] dance, parameterized by [`EndParams`]) and returns the
+    /// active [`PairEnd`].
+    fn setup_end(params: &EndParams, now: Instant) -> Result<PairEnd, TestError> {
+        let mut client = Session::new(LoginParams {
+            login_uri: format!("http://127.0.0.1:{}/", params.sim_port).parse()?,
+            request: LoginRequest::new(
+                params.first_name,
+                "User",
+                "secret",
+                StartLocation::Last,
+                "MyViewer",
+                "1.2.3",
+            ),
+        });
+        client.handle_login_response(
+            LoginResponse::Success(Box::new(LoginSuccess::minimal(
+                AgentKey::from(uuid::Uuid::from_u128(params.agent)),
+                uuid::Uuid::from_u128(params.session),
+                uuid::Uuid::from_u128(params.secure),
+                CircuitCode(params.circuit),
+                Ipv4Addr::new(127, 0, 0, 1),
+                params.sim_port,
+                format!("http://127.0.0.1:{}/seed", params.sim_port).parse()?,
+            ))),
+            now,
+        )?;
+        client.notify_capabilities_ready(now)?;
+        let sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
+        let mut end = PairEnd {
+            client,
+            sim,
+            client_addr: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                params.client_port,
+            ),
+            sim_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), params.sim_port),
+        };
+        pump_end(&mut end, now)?;
+        Ok(end)
+    }
+
+    /// The agent id of pair end A ("Test User" — the [`success`] fixture
+    /// identity).
+    const PAIR_A_AGENT: u128 = 1;
+
+    /// The agent id of pair end B ("Peer User").
+    const PAIR_B_AGENT: u128 = 0xB1;
+
+    /// Sets up the two-avatar relay topology: end A is the [`success`]
+    /// fixture identity on the usual ports, end B a second avatar on its own
+    /// simulator and ports.
+    fn setup_pair(now: Instant) -> Result<(PairEnd, PairEnd), TestError> {
+        let a = setup_end(
+            &EndParams {
+                first_name: "Test",
+                agent: PAIR_A_AGENT,
+                session: 2,
+                secure: 3,
+                circuit: 0x0011_2233,
+                sim_port: 9000,
+                client_port: 40000,
+            },
+            now,
+        )?;
+        let b = setup_end(
+            &EndParams {
+                first_name: "Peer",
+                agent: PAIR_B_AGENT,
+                session: 0xB2,
+                secure: 0xB3,
+                circuit: 0x0011_2234,
+                sim_port: 9001,
+                client_port: 40001,
+            },
+            now,
+        )?;
+        Ok((a, b))
     }
 
     #[test]
@@ -5609,6 +5748,320 @@ mod test {
         Ok(())
     }
 
+    /// Drives A's friendship offer through to an accepted friendship on both
+    /// [`setup_pair`] ends, playing the relaying driver: the offer IM off A's
+    /// sim is delivered via B's sim, B accepts, and the acceptance is relayed
+    /// back to A as a [`ImDialog::FriendshipAccepted`] IM. Returns the offer
+    /// transaction id.
+    fn befriend(a: &mut PairEnd, b: &mut PairEnd, now: Instant) -> Result<uuid::Uuid, TestError> {
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+
+        a.client
+            .send_friendship_offer(b_agent, "be my friend", now)?;
+        pump_end(a, now)?;
+        let offer = drain_server(&mut a.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::InstantMessage(im) if im.dialog == ImDialog::FriendshipOffered => {
+                    Some(*im)
+                }
+                _ => None,
+            })
+            .ok_or("expected the friendship-offer IM on A's sim")?;
+        assert_eq!(offer.to_agent_id, b_agent);
+
+        // Relay the offer to B unchanged; B sees it and accepts, echoing the
+        // offer IM's id as the transaction.
+        b.sim.send_instant_message(&offer, now)?;
+        pump_end(b, now)?;
+        let received = drain_client(&mut b.client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::InstantMessageReceived(im) if im.dialog == ImDialog::FriendshipOffered => {
+                    Some(*im)
+                }
+                _ => None,
+            })
+            .ok_or("expected the relayed friendship offer on B's client")?;
+        assert_eq!(received.from_agent_id, a_agent);
+
+        b.client.accept_friendship(
+            TransactionId::from(received.id),
+            FriendKey::from(a_agent.uuid()),
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xCA11)),
+            now,
+        )?;
+        pump_end(b, now)?;
+        let transaction = drain_server(&mut b.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::FriendshipAccepted { transaction, .. } => Some(transaction),
+                _ => None,
+            })
+            .ok_or("expected FriendshipAccepted on B's sim")?;
+        assert_eq!(transaction.get(), received.id);
+
+        // Relay the acceptance back to the offerer as a FriendshipAccepted IM
+        // (the simulators notify only the original offerer).
+        let accepted = InstantMessage {
+            from_agent_id: b_agent,
+            from_agent_name: "Peer User".to_owned(),
+            to_agent_id: a_agent,
+            dialog: ImDialog::FriendshipAccepted,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: received.id,
+            parent_estate_id: 0,
+            message: "Peer User accepted your friendship offer.".to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        a.sim.send_instant_message(&accepted, now)?;
+        pump_end(a, now)?;
+        drain_client(&mut a.client);
+        Ok(received.id)
+    }
+
+    /// The friendship offer/accept handshake relays end-to-end between two
+    /// avatars (one `SimSession` per client, the test as the relaying
+    /// driver), leaving both buddy caches with the default rights; presence
+    /// pushes then mark each end's new friend online.
+    #[test]
+    fn friendship_offer_accept_relays_between_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+        befriend(&mut a, &mut b, now)?;
+
+        let default_rights = FriendRights(FriendRights::CAN_SEE_ONLINE);
+        let a_friend = a
+            .client
+            .friend(FriendKey::from(b_agent.uuid()))
+            .ok_or("expected B in A's buddy cache")?;
+        assert_eq!(a_friend.rights_granted, default_rights);
+        assert_eq!(a_friend.rights_received, default_rights);
+        let b_friend = b
+            .client
+            .friend(FriendKey::from(a_agent.uuid()))
+            .ok_or("expected A in B's buddy cache")?;
+        assert_eq!(b_friend.rights_granted, default_rights);
+        assert_eq!(b_friend.rights_received, default_rights);
+
+        // The grid-level presence service (the driver) pushes each end's new
+        // friend online.
+        a.sim
+            .send_online_notification(&[FriendKey::from(b_agent.uuid())], now)?;
+        b.sim
+            .send_online_notification(&[FriendKey::from(a_agent.uuid())], now)?;
+        pump_end(&mut a, now)?;
+        pump_end(&mut b, now)?;
+        assert!(a.client.is_online(FriendKey::from(b_agent.uuid())));
+        assert!(b.client.is_online(FriendKey::from(a_agent.uuid())));
+        Ok(())
+    }
+
+    /// A rights change and a termination relay between two avatars: the
+    /// `GrantUserRights` surfaces on the granter's sim, the driver's
+    /// `send_change_user_rights` echo + push update both buddy caches, and a
+    /// `TerminateFriendship` request confirms on both ends.
+    #[test]
+    fn friendship_rights_and_termination_relay() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+        befriend(&mut a, &mut b, now)?;
+
+        // B grants A object-modify rights on top of the default.
+        let new_rights =
+            FriendRights(FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_MODIFY_OBJECTS);
+        b.client
+            .grant_user_rights(FriendKey::from(a_agent.uuid()), new_rights, now)?;
+        pump_end(&mut b, now)?;
+        let granted = drain_server(&mut b.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::UserRightsGranted { rights } => Some(rights),
+                _ => None,
+            })
+            .ok_or("expected UserRightsGranted on B's sim")?;
+        assert_eq!(
+            granted,
+            vec![UserRightsEntry {
+                agent: FriendKey::from(a_agent.uuid()),
+                rights: new_rights,
+            }]
+        );
+
+        // Driver: echo the change to the granter (changer = B's own agent,
+        // entry names the friend)…
+        b.sim.send_change_user_rights(
+            b_agent,
+            &[UserRightsEntry {
+                agent: FriendKey::from(a_agent.uuid()),
+                rights: new_rights,
+            }],
+            now,
+        )?;
+        pump_end(&mut b, now)?;
+        let events = drain_client(&mut b.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::FriendRightsChanged {
+                    friend_id,
+                    rights,
+                    granted_to_us: false,
+                } if *friend_id == FriendKey::from(a_agent.uuid()) && *rights == new_rights
+            )),
+            "expected the echo FriendRightsChanged on B, got {events:?}"
+        );
+        assert_eq!(
+            b.client
+                .friend(FriendKey::from(a_agent.uuid()))
+                .map(|f| f.rights_granted),
+            Some(new_rights)
+        );
+
+        // …and push it to the affected friend (changer = the friend B, the
+        // entry names the receiving agent, as the reference simulators send).
+        a.sim.send_change_user_rights(
+            b_agent,
+            &[UserRightsEntry {
+                agent: FriendKey::from(a_agent.uuid()),
+                rights: new_rights,
+            }],
+            now,
+        )?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::FriendRightsChanged {
+                    friend_id,
+                    rights,
+                    granted_to_us: true,
+                } if *friend_id == FriendKey::from(b_agent.uuid()) && *rights == new_rights
+            )),
+            "expected the push FriendRightsChanged on A, got {events:?}"
+        );
+        assert_eq!(
+            a.client
+                .friend(FriendKey::from(b_agent.uuid()))
+                .map(|f| f.rights_received),
+            Some(new_rights)
+        );
+
+        // B removes the friendship; the driver confirms on both ends.
+        b.client
+            .terminate_friendship(FriendKey::from(a_agent.uuid()), now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::FriendshipTerminationRequested { other }
+                    if *other == FriendKey::from(a_agent.uuid())
+            )),
+            "expected FriendshipTerminationRequested, got {server_events:?}"
+        );
+        b.sim
+            .send_terminate_friendship(FriendKey::from(a_agent.uuid()), now)?;
+        a.sim
+            .send_terminate_friendship(FriendKey::from(b_agent.uuid()), now)?;
+        pump_end(&mut a, now)?;
+        pump_end(&mut b, now)?;
+        assert!(
+            drain_client(&mut a.client)
+                .iter()
+                .any(|e| matches!(e, Event::FriendshipTerminated { .. })),
+            "expected FriendshipTerminated on A"
+        );
+        assert!(
+            drain_client(&mut b.client)
+                .iter()
+                .any(|e| matches!(e, Event::FriendshipTerminated { .. })),
+            "expected FriendshipTerminated on B"
+        );
+        assert_eq!(a.client.friend(FriendKey::from(b_agent.uuid())), None);
+        assert_eq!(b.client.friend(FriendKey::from(a_agent.uuid())), None);
+        Ok(())
+    }
+
+    /// A declined friendship offer relays back to the offerer as an
+    /// [`ImDialog::FriendshipDeclined`] IM (dialog 40 — the byte both
+    /// OpenSim and the reference viewer use for the decline notification).
+    #[test]
+    fn friendship_decline_relays_between_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+
+        a.client.send_friendship_offer(b_agent, "friends?", now)?;
+        pump_end(&mut a, now)?;
+        let offer = drain_server(&mut a.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::InstantMessage(im) if im.dialog == ImDialog::FriendshipOffered => {
+                    Some(*im)
+                }
+                _ => None,
+            })
+            .ok_or("expected the friendship-offer IM on A's sim")?;
+        b.sim.send_instant_message(&offer, now)?;
+        pump_end(&mut b, now)?;
+        drain_client(&mut b.client);
+
+        b.client
+            .decline_friendship(TransactionId::from(offer.id), now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::FriendshipDeclined { transaction }
+                    if transaction.get() == offer.id
+            )),
+            "expected FriendshipDeclined, got {server_events:?}"
+        );
+
+        let declined = InstantMessage {
+            from_agent_id: b_agent,
+            from_agent_name: "Peer User".to_owned(),
+            to_agent_id: a_agent,
+            dialog: ImDialog::FriendshipDeclined,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: offer.id,
+            parent_estate_id: 0,
+            message: "Peer User declined your friendship offer.".to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        a.sim.send_instant_message(&declined, now)?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::InstantMessageReceived(im)
+                    if im.dialog == ImDialog::FriendshipDeclined
+                        && im.from_agent_id == b_agent
+            )),
+            "expected the relayed decline IM on A, got {events:?}"
+        );
+        assert_eq!(a.client.friend(FriendKey::from(b_agent.uuid())), None);
+        Ok(())
+    }
+
     /// **The `Session` ↔ `SimSession` flow-mirroring coverage table, pinned.**
     /// One row per flow-level (multi-message) state machine the client
     /// `Session` implements — the committed audit the `protocol-sim-udp-flows`
@@ -5641,7 +6094,7 @@ mod test {
                 "chat-session lifecycle + server history",
                 FlowMirrorStatus::Pending,
             ),
-            ("friendship / presence", FlowMirrorStatus::Pending),
+            ("friendship / presence", FlowMirrorStatus::Mirrored),
             (
                 "script permission / control mirror",
                 FlowMirrorStatus::Mirrored,

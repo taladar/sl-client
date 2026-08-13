@@ -154,20 +154,21 @@ use crate::types::{
     ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult,
     DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DirectoryVisibility, DisplayNameUpdate, EjectAction, EstateCovenant, EventInfo,
-    FeatureDisabled, FollowCamPropertyValue, FreezeAction, GenericMessage, GenericStreamingMessage,
-    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
-    InstantMessage, InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize,
-    LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
-    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
+    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+    GroupVoteHistoryItem, InstantMessage, InventoryItemMove, InventoryType, Kick, LandBrushAction,
+    LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem,
+    MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
+    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
+    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
+    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, StartLocationSlot,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 use sl_wire::combine_uuids;
@@ -179,6 +180,13 @@ use sl_wire::messages::{
 use sl_wire::messages::{
     AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
     ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
+};
+use sl_wire::messages::{
+    ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
+    ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+    OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+    OnlineNotificationAgentBlockBlock,
 };
 use sl_wire::messages::{
     DisableSimulator, TeleportFailed, TeleportFailedInfoBlock, TeleportLocal,
@@ -442,7 +450,7 @@ pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
         "chat-session lifecycle + server history",
         FlowMirrorStatus::Pending,
     ),
-    ("friendship / presence", FlowMirrorStatus::Pending),
+    ("friendship / presence", FlowMirrorStatus::Mirrored),
     (
         "script permission / control mirror",
         FlowMirrorStatus::Mirrored,
@@ -528,6 +536,21 @@ pub struct SitTransform {
     pub force_mouselook: bool,
 }
 
+/// One friend-rights change entry, shared by the client's `GrantUserRights`
+/// decode ([`ServerEvent::UserRightsGranted`]) and the server's
+/// [`SimSession::send_change_user_rights`] push (a `RightsBlock` on either
+/// wire message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRightsEntry {
+    /// The related agent (`AgentRelated` on the wire): the friend whose
+    /// rights are being set, or — on a [`SimSession::send_change_user_rights`]
+    /// push where the *friend* changed what they grant — the receiving agent.
+    pub agent: FriendKey,
+    /// The complete rights bitfield now in force (`RelatedRights`), not a
+    /// delta.
+    pub rights: FriendRights,
+}
+
 /// The server-side sit state machine — the mirror of the client's private
 /// `SitState` (`AwaitingResponse` on the client corresponds to nothing here:
 /// the request is surfaced as [`ServerEvent::SitRequested`] and the machine
@@ -597,6 +620,52 @@ pub enum ServerEvent {
     },
     /// The client sent an instant message (`ImprovedInstantMessage`).
     InstantMessage(Box<InstantMessage>),
+    /// The client accepted a friendship offer (`AcceptFriendship`) — the
+    /// inverse of the client's
+    /// [`Session::accept_friendship`](crate::Session::accept_friendship). The
+    /// `transaction` echoes the offer IM's id. The driver relays the outcome
+    /// to the offerer's [`SimSession`] as an
+    /// [`ImDialog::FriendshipAccepted`](crate::ImDialog::FriendshipAccepted)
+    /// IM ([`SimSession::send_instant_message`]) — the grid-level buddy store
+    /// itself stays the driver's job.
+    FriendshipAccepted {
+        /// The offer transaction being accepted (the offer IM's id).
+        transaction: TransactionId,
+        /// The accepter's inventory folder(s) for the new friend's calling
+        /// card (the accepter's own inventory — a relaying driver normally
+        /// drops this).
+        calling_card_folders: Vec<InventoryFolderKey>,
+    },
+    /// The client declined a friendship offer (`DeclineFriendship`) — the
+    /// inverse of the client's
+    /// [`Session::decline_friendship`](crate::Session::decline_friendship).
+    /// The driver relays the outcome to the offerer's [`SimSession`] as an
+    /// [`ImDialog::FriendshipDeclined`](crate::ImDialog::FriendshipDeclined)
+    /// IM.
+    FriendshipDeclined {
+        /// The offer transaction being declined (the offer IM's id).
+        transaction: TransactionId,
+    },
+    /// The client asked to end a friendship (`TerminateFriendship`) — the
+    /// inverse of the client's
+    /// [`Session::terminate_friendship`](crate::Session::terminate_friendship).
+    /// The driver confirms with
+    /// [`SimSession::send_terminate_friendship`] on this session and relays
+    /// the removal to the former friend's [`SimSession`].
+    FriendshipTerminationRequested {
+        /// The former friend being removed.
+        other: FriendKey,
+    },
+    /// The client set the rights it grants some friends (`GrantUserRights`) —
+    /// the inverse of the client's
+    /// [`Session::grant_user_rights`](crate::Session::grant_user_rights). The
+    /// driver echoes each entry back with
+    /// [`SimSession::send_change_user_rights`] (changer = this agent) and
+    /// pushes the change to each affected friend's [`SimSession`].
+    UserRightsGranted {
+        /// The rights entries, one per friend whose grant changed.
+        rights: Vec<UserRightsEntry>,
+    },
     /// The client asked the simulator to resolve agent ids to legacy names
     /// (`UUIDNameRequest`). The server answers with
     /// [`SimSession::send_avatar_names`].
@@ -3874,6 +3943,155 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a fully-specified `ImprovedInstantMessage` to the client — the
+    /// simulator-side IM delivery, the inverse of the client's
+    /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)
+    /// (or the typed session/friendship events its dialog folds into). This
+    /// is the relay primitive for agent-to-agent traffic: a driver takes a
+    /// [`ServerEvent::InstantMessage`] off the sender's [`SimSession`] and
+    /// passes it — unchanged or with the dialog swapped (e.g. a
+    /// [`ImDialog::FriendshipDeclined`](crate::ImDialog::FriendshipDeclined)
+    /// relay of a decline) — to the recipient's session. Every
+    /// dialog-dependent field ([`InstantMessage::id`](crate::InstantMessage::id),
+    /// `from_group`, the binary bucket) is the caller's. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_instant_message(&mut self, im: &InstantMessage, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: im.from_agent_id.uuid(),
+                // A simulator-sent IM carries no viewer session id.
+                session_id: Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: im.from_group,
+                to_agent_id: im.to_agent_id.uuid(),
+                parent_estate_id: im.parent_estate_id,
+                region_id: crate::types::optional_uuid_to_wire(im.region_id),
+                position: Vector {
+                    x: im.position.x(),
+                    y: im.position.y(),
+                    z: im.position.z(),
+                },
+                offline: u8::from(im.offline),
+                dialog: im.dialog.to_u8(),
+                id: im.id,
+                timestamp: crate::types::optional_u32_to_wire(im.timestamp),
+                from_agent_name: with_nul(&im.from_agent_name),
+                message: with_nul(&im.message),
+                binary_bucket: im.binary_bucket.clone(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `OnlineNotification` — tells the client the listed friends
+    /// are online (the inverse of the client's
+    /// [`Event::FriendsOnline`](crate::Event::FriendsOnline)). Presence is a
+    /// grid-level service — the driver decides who to notify when; this
+    /// session only delivers. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_online_notification(
+        &mut self,
+        friends: &[FriendKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: friends
+                .iter()
+                .map(|friend| OnlineNotificationAgentBlockBlock {
+                    agent_id: friend.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `OfflineNotification` — tells the client the listed friends
+    /// went offline (the inverse of the client's
+    /// [`Event::FriendsOffline`](crate::Event::FriendsOffline)). Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_offline_notification(
+        &mut self,
+        friends: &[FriendKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: friends
+                .iter()
+                .map(|friend| OfflineNotificationAgentBlockBlock {
+                    agent_id: friend.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ChangeUserRights` — tells the client a friendship's rights
+    /// changed (the inverse of the client's
+    /// [`Event::FriendRightsChanged`](crate::Event::FriendRightsChanged)).
+    /// The client decodes the direction from `changer`: this circuit's own
+    /// agent id means each entry echoes a grant *this* agent made
+    /// ([`UserRightsEntry::agent`] is the friend); any other id means that
+    /// friend changed what they grant this agent ([`UserRightsEntry::agent`]
+    /// is then this circuit's agent id, as the reference simulators send it).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_change_user_rights(
+        &mut self,
+        changer: AgentKey,
+        rights: &[UserRightsEntry],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock {
+                agent_id: changer.uuid(),
+            },
+            rights: rights
+                .iter()
+                .map(|entry| ChangeUserRightsRightsBlock {
+                    agent_related: entry.agent.uuid(),
+                    related_rights: entry.rights.0,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends an `OfferCallingCard` — another agent offers this agent their
     /// calling card (the inverse of the client's
     /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered)), a
@@ -5134,6 +5352,39 @@ impl SimSession {
                         &im.agent_data,
                         &im.message_block,
                     ))));
+            }
+            AnyMessage::AcceptFriendship(accept) => {
+                self.events.push_back(ServerEvent::FriendshipAccepted {
+                    transaction: TransactionId::from(accept.transaction_block.transaction_id),
+                    calling_card_folders: accept
+                        .folder_data
+                        .iter()
+                        .map(|folder| InventoryFolderKey::from(folder.folder_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::DeclineFriendship(decline) => {
+                self.events.push_back(ServerEvent::FriendshipDeclined {
+                    transaction: TransactionId::from(decline.transaction_block.transaction_id),
+                });
+            }
+            AnyMessage::TerminateFriendship(terminate) => {
+                self.events
+                    .push_back(ServerEvent::FriendshipTerminationRequested {
+                        other: FriendKey::from(terminate.ex_block.other_id),
+                    });
+            }
+            AnyMessage::GrantUserRights(grant) => {
+                self.events.push_back(ServerEvent::UserRightsGranted {
+                    rights: grant
+                        .rights
+                        .iter()
+                        .map(|block| UserRightsEntry {
+                            agent: FriendKey::from(block.agent_related),
+                            rights: FriendRights(block.related_rights),
+                        })
+                        .collect(),
+                });
             }
             AnyMessage::UUIDNameRequest(request) => {
                 let ids = request

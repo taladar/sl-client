@@ -97,7 +97,7 @@ pub use sim_caps::{
 };
 pub use sim_session::{
     AgentPresence, AgentUpdateInfo, FlowMirrorStatus, SESSION_FLOW_COVERAGE, ServerEvent,
-    SimSession, SitTransform, TransferRequestSource,
+    SimSession, SitTransform, TransferRequestSource, UserRightsEntry,
 };
 pub use terrain::encode_layer;
 pub use types::{
