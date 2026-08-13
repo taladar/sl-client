@@ -135,7 +135,7 @@ use uuid::Uuid;
 
 use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
-use crate::bookkeeping_ids::{PingId, QueryId, TransactionId, XferId};
+use crate::bookkeeping_ids::{PingId, QueryId, TransactionId, TransferId, XferId};
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
@@ -164,8 +164,8 @@ use crate::types::{
     RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
     ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
     SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
-    TelehubInfo, TerraformArea, TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    TelehubInfo, TerraformArea, TextureEntry, Throttle, TransferStatus, Transmit,
+    UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use sl_wire::AbuseReport;
 use sl_wire::combine_uuids;
@@ -173,6 +173,13 @@ use sl_wire::messages::{
     AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
     ConfirmXferPacket, ConfirmXferPacketXferIDBlock, RequestXfer, RequestXferXferIDBlock,
     SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+};
+use sl_wire::messages::{
+    TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+};
+use sl_wire::{
+    TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM,
+    TransferSourceParamsEstate, TransferSourceParamsInvItem,
 };
 
 /// Decodes a [`RestoreItem`] from one of the field-identical inventory-item
@@ -362,6 +369,26 @@ struct SimXferReceive {
     transaction_id: TransactionId,
     /// The file bytes accumulated so far (the seq-0 length prefix stripped).
     buffer: Vec<u8>,
+}
+
+/// The maximum number of asset bytes carried in a single outbound
+/// `TransferPacket`. The reference viewer accepts up to 2048
+/// (`MAX_PACKET_DATA_SIZE`); like OpenSim's `SendAsset`, packets are kept
+/// safely under a datagram's worth.
+const TRANSFER_CHUNK_SIZE: usize = 1000;
+
+/// The decoded source of a client `TransferRequest`, surfaced on
+/// [`ServerEvent::TransferRequested`]. Only the two source types that remain
+/// UDP-only on both grids are decoded; a plain asset-by-id request
+/// (superseded by the `ViewerAsset` HTTP capability) is auto-refused and not
+/// surfaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TransferRequestSource {
+    /// A task-inventory item's asset (source `SimInvItem`) — a script or
+    /// notecard body in a prim's contents.
+    TaskInventoryItem(TransferSourceParamsInvItem),
+    /// An estate asset (source `SimEstate`) — the covenant notecard.
+    Estate(TransferSourceParamsEstate),
 }
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
@@ -1187,6 +1214,28 @@ pub enum ServerEvent {
         /// The complete asset bytes.
         data: Vec<u8>,
     },
+    /// The client asked to download an asset over the legacy UDP Transfer
+    /// path (`TransferRequest`) from a source that is still UDP-only on both
+    /// grids (task-inventory item asset, estate covenant). The driver answers
+    /// with [`SimSession::send_transfer_asset`] or
+    /// [`SimSession::send_transfer_fail`]. The inverse of the client's
+    /// [`Session::fetch_task_item_asset`](crate::Session::fetch_task_item_asset)
+    /// / [`Session::fetch_estate_covenant_asset`](crate::Session::fetch_estate_covenant_asset).
+    TransferRequested {
+        /// The client-minted transfer id, to pass back to the answer.
+        transfer_id: TransferId,
+        /// The transfer priority the client asked for.
+        priority: f32,
+        /// The decoded request source.
+        source: TransferRequestSource,
+    },
+    /// The client cancelled an in-flight asset Transfer (`TransferAbort`).
+    /// The inverse of the client's
+    /// [`Session::abort_transfer`](crate::Session::abort_transfer).
+    TransferAborted {
+        /// The transfer id that was cancelled.
+        transfer_id: TransferId,
+    },
     /// The client applied a terraform brush stroke (`ModifyLand`). The inverse
     /// of the client's
     /// [`Session::modify_land`](crate::Session::modify_land).
@@ -1516,6 +1565,10 @@ pub struct SimSession {
     /// id. `None` until [`SimSession::set_secure_session_id`]; an upload
     /// arriving while unset is refused with a failed `AssetUploadComplete`.
     secure_session_id: Option<Uuid>,
+    /// Asset Transfer requests awaiting the driver's answer, keyed by the
+    /// client-minted [`TransferId`] and holding the raw request params to echo
+    /// back in the `TransferInfo` (as the reference serving side does).
+    transfer_serves: BTreeMap<TransferId, Vec<u8>>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -1550,6 +1603,7 @@ impl SimSession {
             xfer_receives: BTreeMap::new(),
             next_xfer_id: XferId(1),
             secure_session_id: None,
+            transfer_serves: BTreeMap::new(),
             events: VecDeque::new(),
         }
     }
@@ -3928,6 +3982,111 @@ impl SimSession {
         Ok(())
     }
 
+    /// Answers a [`ServerEvent::TransferRequested`] with the asset bytes: a
+    /// `TransferInfo` header (status `Ok`, the declared size, the request
+    /// params echoed back) followed by the `TransferPacket` stream — status
+    /// `Ok` per packet and `Done` on the last, exactly as the reference
+    /// serving side sends them. Packets need no per-packet acknowledgement
+    /// (all ride the reliable channel).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open,
+    /// [`Error::UnknownTransfer`] if `transfer_id` is not awaiting an answer
+    /// (never requested, already answered, or cancelled), or a wire error if a
+    /// message fails to encode.
+    pub fn send_transfer_asset(
+        &mut self,
+        transfer_id: TransferId,
+        data: &[u8],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let Some(params) = self.transfer_serves.remove(&transfer_id) else {
+            return Err(Error::UnknownTransfer);
+        };
+        let info = AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id: transfer_id.get(),
+                channel_type: TRANSFER_CHANNEL_ASSET,
+                target_type: 0,
+                status: TransferStatus::Ok.to_code(),
+                size: i32::try_from(data.len()).unwrap_or(i32::MAX),
+                params,
+            },
+        });
+        self.send(&info, Reliability::Reliable, now)?;
+        // Stream the packets; an empty asset is one empty `Done` packet.
+        let mut index: i32 = 0;
+        let mut offset = 0_usize;
+        loop {
+            let end = offset.saturating_add(TRANSFER_CHUNK_SIZE).min(data.len());
+            let chunk = data.get(offset..end).unwrap_or(&[]);
+            let is_last = end >= data.len();
+            let status = if is_last {
+                TransferStatus::Done
+            } else {
+                TransferStatus::Ok
+            };
+            let packet = AnyMessage::TransferPacket(TransferPacket {
+                transfer_data: TransferPacketTransferDataBlock {
+                    transfer_id: transfer_id.get(),
+                    channel_type: TRANSFER_CHANNEL_ASSET,
+                    packet: index,
+                    status: status.to_code(),
+                    data: chunk.to_vec(),
+                },
+            });
+            self.send(&packet, Reliability::Reliable, now)?;
+            if is_last {
+                break;
+            }
+            offset = end;
+            index = index.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    /// Answers a [`ServerEvent::TransferRequested`] with a refusal: a
+    /// `TransferInfo` carrying the non-`Ok` `status` (asset missing ⇒
+    /// [`TransferStatus::UnknownSource`], no permission ⇒
+    /// [`TransferStatus::InsufficientPermissions`]) and size 0, which the
+    /// requesting client surfaces as
+    /// [`Event::TransferFailed`](crate::Event::TransferFailed).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open,
+    /// [`Error::UnknownTransfer`] if `transfer_id` is not awaiting an answer,
+    /// or a wire error if the message fails to encode.
+    pub fn send_transfer_fail(
+        &mut self,
+        transfer_id: TransferId,
+        status: TransferStatus,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let Some(params) = self.transfer_serves.remove(&transfer_id) else {
+            return Err(Error::UnknownTransfer);
+        };
+        let message = AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id: transfer_id.get(),
+                channel_type: TRANSFER_CHANNEL_ASSET,
+                target_type: 0,
+                status: status.to_code(),
+                size: 0,
+                params,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Replies to a finished (or refused) legacy asset upload with an
     /// `AssetUploadComplete`, the message the uploading client surfaces as
     /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
@@ -5248,6 +5407,55 @@ impl SimSession {
                         xfer_id,
                         result: abort.xfer_id.result,
                     });
+                }
+            }
+            AnyMessage::TransferRequest(request) => {
+                // A legacy UDP asset Transfer download. Only the two source
+                // types with no HTTP alternative on either grid are served
+                // (task-inventory item asset, estate asset); anything else —
+                // including the ViewerAsset-superseded plain asset source — is
+                // auto-refused as unknown, per the legacy-skip rule.
+                let block = &request.transfer_info;
+                let transfer_id = TransferId::new(block.transfer_id);
+                let source = if block.source_type == TRANSFER_SOURCE_SIM_INV_ITEM {
+                    TransferSourceParamsInvItem::decode(&block.params)
+                        .ok()
+                        .map(TransferRequestSource::TaskInventoryItem)
+                } else if block.source_type == TRANSFER_SOURCE_SIM_ESTATE {
+                    TransferSourceParamsEstate::decode(&block.params)
+                        .ok()
+                        .map(TransferRequestSource::Estate)
+                } else {
+                    None
+                };
+                if let Some(source) = source {
+                    let _prev = self
+                        .transfer_serves
+                        .insert(transfer_id, block.params.clone());
+                    self.events.push_back(ServerEvent::TransferRequested {
+                        transfer_id,
+                        priority: block.priority,
+                        source,
+                    });
+                } else {
+                    let refuse = AnyMessage::TransferInfo(TransferInfo {
+                        transfer_info: TransferInfoTransferInfoBlock {
+                            transfer_id: block.transfer_id,
+                            channel_type: TRANSFER_CHANNEL_ASSET,
+                            target_type: 0,
+                            status: TransferStatus::UnknownSource.to_code(),
+                            size: 0,
+                            params: block.params.clone(),
+                        },
+                    });
+                    self.send(&refuse, Reliability::Reliable, now)?;
+                }
+            }
+            AnyMessage::TransferAbort(abort) => {
+                let transfer_id = TransferId::new(abort.transfer_info.transfer_id);
+                if self.transfer_serves.remove(&transfer_id).is_some() {
+                    self.events
+                        .push_back(ServerEvent::TransferAborted { transfer_id });
                 }
             }
             AnyMessage::ModifyLand(modify) => {

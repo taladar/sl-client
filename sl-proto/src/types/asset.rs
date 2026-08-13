@@ -678,6 +678,23 @@ impl TransferStatus {
         }
     }
 
+    /// The `LLTSCode` status integer for this status (the inverse of
+    /// [`from_code`](Self::from_code)), as a serving simulator writes it into
+    /// a `TransferInfo`/`TransferPacket`.
+    #[must_use]
+    pub const fn to_code(self) -> i32 {
+        match self {
+            Self::Ok => 0,
+            Self::Done => 1,
+            Self::Skip => 2,
+            Self::Abort => 3,
+            Self::Error => -1,
+            Self::UnknownSource => -2,
+            Self::InsufficientPermissions => -3,
+            Self::Other(code) => code,
+        }
+    }
+
     /// Whether this status indicates the transfer succeeded (`LLTS_DONE`).
     #[must_use]
     pub const fn is_success(self) -> bool {

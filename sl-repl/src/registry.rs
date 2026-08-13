@@ -4352,6 +4352,23 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_task_item_asset",
+            usage: "<task_id> <item_id> <asset_id> <asset_type>",
+            build: |args, ctx| {
+                Ok(Command::FetchTaskItemAsset {
+                    task: ObjectKey::from(args.req_uuid(ctx, "task_id", 0)?),
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
+                    asset_id: AssetKey::from(args.req_uuid(ctx, "asset_id", 2)?),
+                    asset_type: enum_arg(args, ctx, "asset_type", 3, parse_asset_type)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "fetch_estate_covenant_asset",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::FetchEstateCovenantAsset),
+        },
+        CommandSpec {
             name: "request_xfer",
             usage: "<filename>",
             build: |args, ctx| {

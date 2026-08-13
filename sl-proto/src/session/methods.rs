@@ -44,14 +44,14 @@ use super::{
     PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
     ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
     TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
-    VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE, XferDownload, XferPurpose, XferUpload, deadline,
-    merge_deadline,
+    TransferDownload, TransferPurpose, VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE, XferDownload,
+    XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
 use crate::bookkeeping_ids::{
     GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
-    TransactionId, XferId,
+    TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -84,8 +84,8 @@ use crate::types::{
     ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
     SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply,
     TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -221,6 +221,8 @@ impl Session {
             pending_task_inventory: BTreeSet::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
+            transfer_downloads: BTreeMap::new(),
+            next_transfer_id: 1,
             objects: BTreeMap::new(),
             requested_parents: BTreeSet::new(),
             terrain: BTreeMap::new(),
@@ -3584,6 +3586,72 @@ impl Session {
                         xfer_id,
                         result: abort.xfer_id.result,
                     });
+                }
+            }
+            AnyMessage::TransferInfo(info) => {
+                // The header of a legacy UDP asset Transfer we requested: a
+                // non-`Ok` status is the refusal (asset missing, no
+                // permission); `Ok` records the declared size and the packets
+                // follow (or already arrived — packet buffering handles either
+                // order).
+                let transfer_id = TransferId::new(info.transfer_info.transfer_id);
+                if self.transfer_downloads.contains_key(&transfer_id) {
+                    let status = TransferStatus::from_code(info.transfer_info.status);
+                    if matches!(status, TransferStatus::Ok) {
+                        if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
+                            download.expected_size = usize::try_from(info.transfer_info.size).ok();
+                        }
+                    } else {
+                        let _download = self.transfer_downloads.remove(&transfer_id);
+                        self.events.push_back(Event::TransferFailed {
+                            transfer_id,
+                            status,
+                        });
+                    }
+                }
+            }
+            AnyMessage::TransferPacket(packet) => {
+                // One chunk of a legacy UDP asset Transfer. Packets are
+                // buffered by index (out-of-order arrival is legal); the
+                // `Done`-status packet marks the last index, and the assembled
+                // bytes are routed once the stream is contiguous.
+                let transfer_id = TransferId::new(packet.transfer_data.transfer_id);
+                if self.transfer_downloads.contains_key(&transfer_id) {
+                    let index = u32::try_from(packet.transfer_data.packet).unwrap_or(0);
+                    let status = TransferStatus::from_code(packet.transfer_data.status);
+                    let completed =
+                        if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
+                            download
+                                .chunks
+                                .insert(index, packet.transfer_data.data.clone());
+                            if matches!(status, TransferStatus::Done) {
+                                download.last_packet = Some(index);
+                            }
+                            download.is_complete()
+                        } else {
+                            false
+                        };
+                    if completed && let Some(download) = self.transfer_downloads.remove(&transfer_id)
+                    {
+                        let data = download.assemble();
+                        match download.purpose {
+                            TransferPurpose::TaskInventoryItem { task, item } => {
+                                self.events.push_back(Event::TaskItemAssetReceived {
+                                    transfer_id,
+                                    task,
+                                    item,
+                                    asset_type: download.asset_type,
+                                    data,
+                                });
+                            }
+                            TransferPurpose::EstateCovenant => {
+                                self.events.push_back(Event::EstateCovenantAssetReceived {
+                                    transfer_id,
+                                    data,
+                                });
+                            }
+                        }
+                    }
                 }
             }
             AnyMessage::ImageData(image) => {
@@ -7726,6 +7794,139 @@ impl Session {
             return Err(Error::NoCircuit);
         }
         self.start_xfer_download(XferPurpose::Generic, filename, now)
+    }
+
+    /// Mints the next [`TransferId`] for a legacy UDP asset Transfer (never
+    /// nil).
+    fn alloc_transfer_id(&mut self) -> TransferId {
+        let id = TransferId::new(Uuid::from_u128(self.next_transfer_id));
+        self.next_transfer_id = self.next_transfer_id.checked_add(1).unwrap_or(1);
+        id
+    }
+
+    /// Starts a legacy UDP asset Transfer (`TransferRequest`) with the given
+    /// routing `purpose`, `source_type` and packed `params`, registering the
+    /// reassembly state under a fresh [`TransferId`].
+    fn start_transfer_download(
+        &mut self,
+        purpose: TransferPurpose,
+        asset_type: AssetType,
+        source_type: i32,
+        params: Vec<u8>,
+        now: Instant,
+    ) -> Result<TransferId, Error> {
+        let transfer_id = self.alloc_transfer_id();
+        self.transfer_downloads.insert(
+            transfer_id,
+            TransferDownload {
+                purpose,
+                asset_type,
+                expected_size: None,
+                chunks: BTreeMap::new(),
+                last_packet: None,
+            },
+        );
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_transfer_request(transfer_id, source_type, params, now)?;
+        }
+        Ok(transfer_id)
+    }
+
+    /// Fetches a task-inventory item's asset — a script or notecard body out
+    /// of a prim's contents — over the legacy UDP Transfer path
+    /// (`TransferRequest`, source `SimInvItem`), the only path for this asset
+    /// source on both grids (the `ViewerAsset` HTTP capability does not cover
+    /// task-inventory items). Pass the ids a
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
+    /// listing reported for the item (a nil/absent `asset_id` there means the
+    /// simulator redacted it and the fetch will be refused). The assembled
+    /// bytes surface as [`Event::TaskItemAssetReceived`]; a refusal surfaces
+    /// as [`Event::TransferFailed`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn fetch_task_item_asset(
+        &mut self,
+        task: ObjectKey,
+        item_id: InventoryKey,
+        asset_id: AssetKey,
+        asset_type: AssetType,
+        now: Instant,
+    ) -> Result<TransferId, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id().map_or_else(Uuid::nil, |a| a.uuid());
+        let params = sl_wire::TransferSourceParamsInvItem {
+            agent_id,
+            session_id: self.session_id().unwrap_or_else(Uuid::nil),
+            // The reference viewer passes the item's owner; the simulator
+            // authorizes by agent/session, so the requesting agent is used.
+            owner_id: agent_id,
+            task_id: task.uuid(),
+            item_id: item_id.uuid(),
+            asset_id: asset_id.uuid(),
+            asset_type: asset_type.to_code(),
+        }
+        .encode();
+        self.start_transfer_download(
+            TransferPurpose::TaskInventoryItem {
+                task,
+                item: item_id,
+            },
+            asset_type,
+            sl_wire::TRANSFER_SOURCE_SIM_INV_ITEM,
+            params,
+            now,
+        )
+    }
+
+    /// Fetches the estate covenant notecard's asset over the legacy UDP
+    /// Transfer path (`TransferRequest`, source `SimEstate`), the only path
+    /// for estate assets on both grids. Request the covenant metadata first
+    /// via [`request_estate_covenant`](Self::request_estate_covenant) — the
+    /// [`Event::EstateCovenant`](crate::Event::EstateCovenant) reply carries
+    /// the covenant's asset id (nil when the estate has none); this call then
+    /// fetches the notecard body itself, surfacing it as
+    /// [`Event::EstateCovenantAssetReceived`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn fetch_estate_covenant_asset(&mut self, now: Instant) -> Result<TransferId, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let params = sl_wire::TransferSourceParamsEstate {
+            agent_id: self.agent_id().map_or_else(Uuid::nil, |a| a.uuid()),
+            session_id: self.session_id().unwrap_or_else(Uuid::nil),
+            estate_asset_type: sl_wire::ESTATE_ASSET_COVENANT,
+        }
+        .encode();
+        self.start_transfer_download(
+            TransferPurpose::EstateCovenant,
+            AssetType::Notecard,
+            sl_wire::TRANSFER_SOURCE_SIM_ESTATE,
+            params,
+            now,
+        )
+    }
+
+    /// Aborts an in-flight legacy UDP asset Transfer (`TransferAbort`),
+    /// dropping its reassembly state. No completion or failure event follows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the abort fails to encode.
+    pub fn abort_transfer(&mut self, transfer_id: TransferId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_transfer_abort(transfer_id, now)?;
+        let _download = self.transfer_downloads.remove(&transfer_id);
+        Ok(())
     }
 
     /// Requests the agent's mute (block) list (`MuteListRequest` with a zero

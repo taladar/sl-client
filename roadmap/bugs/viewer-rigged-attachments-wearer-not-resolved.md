@@ -72,10 +72,11 @@ for the untracked terminus root (owner in the update is nil).
 
 ## ROOT CAUSE (2026-08-11): untracked parent objects — no request for the parent
 
-The wearer-walk terminus probe on a clean run: **170 attachments stuck on
-`wearer unresolved after 1 hop; terminus UNTRACKED — its parent/root object never
-arrived`**. So the attachment's own update arrived, but its
-**parent (linkset root) object is not tracked** — the chain breaks one hop up.
+The wearer-walk terminus probe on a clean run: **170 attachments stuck
+on `wearer unresolved after 1 hop; terminus UNTRACKED — its parent/root
+object never arrived`**. So the attachment's own update arrived, but its
+**parent (linkset root) object is not tracked** — the chain breaks one
+hop up.
 
 `ObjectUpdateCached` cache-misses *are* requested (`try_dispatch_object` →
 `request_object_ids` → `send_request_multiple_objects`, on root **and** child

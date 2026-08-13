@@ -1664,6 +1664,31 @@ pub enum Command {
         /// The `Xfer` filename to download.
         filename: String,
     },
+    /// Fetch a task-inventory item's asset — a script or notecard body out of
+    /// a prim's contents — over the legacy UDP Transfer path
+    /// (`TransferRequest`, the only path for this source on both grids). Pass
+    /// the ids an
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
+    /// listing reported. The bytes arrive as
+    /// [`Event::TaskItemAssetReceived`](crate::Event::TaskItemAssetReceived);
+    /// a refusal as
+    /// [`Event::TransferFailed`](crate::Event::TransferFailed).
+    FetchTaskItemAsset {
+        /// The prim whose task inventory holds the item.
+        task: ObjectKey,
+        /// The task-inventory item whose asset is fetched.
+        item_id: InventoryKey,
+        /// The item's asset id, from the task-inventory listing.
+        asset_id: AssetKey,
+        /// The item's asset type, from the task-inventory listing.
+        asset_type: AssetType,
+    },
+    /// Fetch the estate covenant notecard's asset over the legacy UDP
+    /// Transfer path (`TransferRequest`, the only path for estate assets on
+    /// both grids). Request the covenant metadata first via
+    /// [`Command::RequestEstateCovenant`]; the bytes arrive as
+    /// [`Event::EstateCovenantAssetReceived`](crate::Event::EstateCovenantAssetReceived).
+    FetchEstateCovenantAsset,
     /// Write (add or replace) an item in an in-world object's task inventory
     /// (`UpdateTaskInventory`).
     UpdateTaskInventory {

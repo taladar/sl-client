@@ -37,9 +37,9 @@ mod test {
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
         SimStatId, SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem,
         TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, Transmit, UpdateGroupInfoParams,
-        UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource, TransferStatus,
+        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
@@ -50,7 +50,8 @@ mod test {
         ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
         ImprovedInstantMessageMessageBlockBlock, OfflineNotification,
         OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
-        StartPingCheck, StartPingCheckPingIDBlock,
+        StartPingCheck, StartPingCheckPingIDBlock, TransferRequest,
+        TransferRequestTransferInfoBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
@@ -5089,6 +5090,197 @@ mod test {
                 ServerEvent::XferAborted { xfer_id: got, result: -7 } if *got == second
             )),
             "expected the client abort on the sim, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A task-inventory item's asset round-trips over the legacy UDP Transfer
+    /// path: the client's `fetch_task_item_asset` sends a `TransferRequest`
+    /// whose params the simulator decodes field-for-field, the driver answers
+    /// with `send_transfer_asset`, and the multi-packet stream reassembles
+    /// byte-identically on the client (a single-packet body works too).
+    #[test]
+    fn task_item_asset_transfer_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xAAAA));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xBBBB));
+        let asset = AssetKey::from(uuid::Uuid::from_u128(0xCCCC));
+        let transfer_id =
+            client.fetch_task_item_asset(task, item, asset, AssetType::ScriptText, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let params = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::TransferRequested {
+                    transfer_id: got,
+                    source: TransferRequestSource::TaskInventoryItem(params),
+                    ..
+                } if *got == transfer_id => Some(*params),
+                _ => None,
+            })
+            .ok_or("expected a task-item TransferRequested")?;
+        assert_eq!(params.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(params.session_id, uuid::Uuid::from_u128(2));
+        assert_eq!(params.task_id, task.uuid());
+        assert_eq!(params.item_id, item.uuid());
+        assert_eq!(params.asset_id, asset.uuid());
+        assert_eq!(params.asset_type, AssetType::ScriptText.to_code());
+
+        // Multi-packet body (chunk size is 1000 bytes).
+        let body: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 241).unwrap_or(0))
+            .collect();
+        sim.send_transfer_asset(transfer_id, &body, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskItemAssetReceived {
+                    transfer_id: got,
+                    task: got_task,
+                    item: got_item,
+                    asset_type: AssetType::ScriptText,
+                    data,
+                } if *got == transfer_id && *got_task == task && *got_item == item && *data == body
+            )),
+            "expected the assembled task-item asset, got {client_events:?}"
+        );
+
+        // A body that fits one packet round-trips too.
+        let second = client.fetch_task_item_asset(task, item, asset, AssetType::Notecard, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_transfer_asset(second, b"tiny", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskItemAssetReceived { transfer_id: got, data, .. }
+                    if *got == second && data == b"tiny"
+            )),
+            "expected the single-packet asset, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The estate covenant notecard round-trips over the legacy UDP Transfer
+    /// path: `fetch_estate_covenant_asset` sends the `SimEstate` request
+    /// (estate asset type `covenant`), and the served bytes surface as
+    /// [`Event::EstateCovenantAssetReceived`].
+    #[test]
+    fn estate_covenant_transfer_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let transfer_id = client.fetch_estate_covenant_asset(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        let params = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::TransferRequested {
+                    transfer_id: got,
+                    source: TransferRequestSource::Estate(params),
+                    ..
+                } if *got == transfer_id => Some(*params),
+                _ => None,
+            })
+            .ok_or("expected an estate TransferRequested")?;
+        assert_eq!(params.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(params.estate_asset_type, sl_wire::ESTATE_ASSET_COVENANT);
+
+        sim.send_transfer_asset(transfer_id, b"Covenant text.", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::EstateCovenantAssetReceived { transfer_id: got, data }
+                    if *got == transfer_id && data == b"Covenant text."
+            )),
+            "expected the covenant asset, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// Transfer failure and abort paths: a `send_transfer_fail` refusal
+    /// surfaces as [`Event::TransferFailed`]; a client `abort_transfer`
+    /// surfaces as [`ServerEvent::TransferAborted`] and invalidates the
+    /// pending answer; and a legacy plain-asset (source 2) request is
+    /// auto-refused without surfacing a server event.
+    #[test]
+    fn transfer_fail_and_abort_paths() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xAAAA));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xBBBB));
+        let asset = AssetKey::from(uuid::Uuid::from_u128(0xCCCC));
+
+        // Refusal: the client learns the asset is missing.
+        let refused =
+            client.fetch_task_item_asset(task, item, asset, AssetType::ScriptText, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_transfer_fail(refused, TransferStatus::UnknownSource, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TransferFailed {
+                    transfer_id: got,
+                    status: TransferStatus::UnknownSource,
+                } if *got == refused
+            )),
+            "expected TransferFailed, got {client_events:?}"
+        );
+
+        // Client-side abort: the sim surfaces it and the pending answer dies.
+        let aborted =
+            client.fetch_task_item_asset(task, item, asset, AssetType::ScriptText, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        client.abort_transfer(aborted, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::TransferAborted { transfer_id: got } if *got == aborted
+            )),
+            "expected TransferAborted, got {server_events:?}"
+        );
+        assert!(matches!(
+            sim.send_transfer_asset(aborted, b"late", now),
+            Err(sl_proto::Error::UnknownTransfer)
+        ));
+
+        // Legacy plain-asset source: auto-refused, no server event surfaced.
+        let legacy = AnyMessage::TransferRequest(TransferRequest {
+            transfer_info: TransferRequestTransferInfoBlock {
+                transfer_id: uuid::Uuid::from_u128(0xDEAD),
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                source_type: sl_wire::TRANSFER_SOURCE_ASSET,
+                priority: 100.0,
+                params: asset.uuid().as_bytes().to_vec(),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&legacy, 9100, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            !server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::TransferRequested { .. })),
+            "a legacy plain-asset request must not surface, got {server_events:?}"
         );
         Ok(())
     }

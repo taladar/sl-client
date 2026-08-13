@@ -3046,6 +3046,19 @@ fn advance_running(
             Command::FetchTaskInventory { target } => {
                 session.fetch_task_inventory(*target, now).ok();
             }
+            Command::FetchTaskItemAsset {
+                task,
+                item_id,
+                asset_id,
+                asset_type,
+            } => {
+                session
+                    .fetch_task_item_asset(*task, *item_id, *asset_id, *asset_type, now)
+                    .ok();
+            }
+            Command::FetchEstateCovenantAsset => {
+                session.fetch_estate_covenant_asset(now).ok();
+            }
             Command::RequestXfer { filename } => {
                 session.request_xfer(filename, now).ok();
             }

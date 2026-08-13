@@ -708,6 +708,9 @@ impl Survey {
             | Event::ServerFileDownloaded { .. }
             | Event::XferUploaded { .. }
             | Event::XferAborted { .. }
+            | Event::TaskItemAssetReceived { .. }
+            | Event::EstateCovenantAssetReceived { .. }
+            | Event::TransferFailed { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }

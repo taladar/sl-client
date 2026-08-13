@@ -1,11 +1,11 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{PingId, XferId};
+use crate::bookkeeping_ids::{PingId, TransferId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{
-    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object, ParcelInfo,
-    TerrainPatch, Throttle,
+    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
+    ParcelInfo, TerrainPatch, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -731,6 +731,70 @@ impl TextureDownload {
     }
 }
 
+/// What a completed legacy UDP asset Transfer download is for — the routing
+/// tag stored alongside each in-flight transfer in
+/// [`Session::transfer_downloads`](Session::transfer_downloads), so the single
+/// `TransferPacket` handler can route the assembled asset bytes to the right
+/// typed event.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum TransferPurpose {
+    /// A task-inventory item's asset (a script/notecard body in a prim's
+    /// contents): surface as
+    /// [`Event::TaskItemAssetReceived`](crate::Event::TaskItemAssetReceived).
+    TaskInventoryItem {
+        /// The prim whose task inventory holds the item.
+        task: ObjectKey,
+        /// The task-inventory item whose asset was requested.
+        item: InventoryKey,
+    },
+    /// The estate covenant notecard: surface as
+    /// [`Event::EstateCovenantAssetReceived`](crate::Event::EstateCovenantAssetReceived).
+    EstateCovenant,
+}
+
+/// An in-flight legacy UDP asset Transfer download: the buffered packets and
+/// what to do with them once the final (`Done`-status) packet arrives and the
+/// stream is contiguous. Packets are buffered by index so an out-of-order
+/// arrival still reassembles correctly (mirroring the reference viewer's
+/// `LLTransferTarget` delayed-packet buffer).
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TransferDownload {
+    /// What the assembled asset bytes should be routed to on completion.
+    purpose: TransferPurpose,
+    /// The asset type the request named, echoed on the completion event.
+    asset_type: AssetType,
+    /// The declared total size from the `TransferInfo` header, once received
+    /// (currently informational; completion is driven by the `Done` packet).
+    expected_size: Option<usize>,
+    /// The received packet payloads, keyed by packet index (from 0).
+    chunks: BTreeMap<u32, Vec<u8>>,
+    /// The index of the final packet (the one carrying the `Done` status),
+    /// once seen.
+    last_packet: Option<u32>,
+}
+
+impl TransferDownload {
+    /// Whether every packet `0..=last` has been received.
+    fn is_complete(&self) -> bool {
+        self.last_packet.is_some_and(|last| {
+            usize::try_from(last)
+                .ok()
+                .and_then(|count| count.checked_add(1))
+                .is_some_and(|expected| self.chunks.len() == expected)
+        })
+    }
+
+    /// Concatenates the buffered packets in index order into the full asset
+    /// bytes.
+    fn assemble(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        for chunk in self.chunks.values() {
+            data.extend_from_slice(chunk);
+        }
+        data
+    }
+}
+
 /// What a completed inbound `Xfer` file download should become — the routing
 /// tag stored alongside each in-flight download in
 /// [`Session::xfer_downloads`](Session::xfer_downloads). Every consumer of the
@@ -1260,6 +1324,16 @@ pub struct Session {
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
     texture_downloads: BTreeMap<Uuid, TextureDownload>,
+    /// In-flight legacy UDP asset Transfers (`TransferRequest` →
+    /// `TransferInfo` + `TransferPacket` stream), keyed by the client-minted
+    /// [`TransferId`]. Started by [`Session::fetch_task_item_asset`] /
+    /// [`Session::fetch_estate_covenant_asset`] — the two source types that
+    /// remain UDP-only on both grids (no `ViewerAsset` coverage).
+    transfer_downloads: BTreeMap<TransferId, TransferDownload>,
+    /// A monotonic counter for minting [`TransferId`]s (never nil). The
+    /// reference viewer mints random transfer ids; a sans-I/O session has no
+    /// randomness, and the id only correlates replies on this circuit.
+    next_transfer_id: u128,
     /// The scene-graph object cache, keyed by the circuit instance the objects
     /// belong to (the root region *and* every child/neighbour circuit), then by
     /// region-local id. Region-local ids are only unique within a circuit, so

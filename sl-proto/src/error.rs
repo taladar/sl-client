@@ -46,4 +46,9 @@ pub enum Error {
     /// The held model is left unchanged.
     #[error("invalid inventory operation: {0}")]
     InvalidInventoryOperation(&'static str),
+    /// A [`SimSession`](crate::SimSession) transfer answer named a transfer id
+    /// that is not awaiting one — never requested, already answered, or
+    /// cancelled by the client. Nothing was sent.
+    #[error("no transfer with that id is awaiting an answer")]
+    UnknownTransfer,
 }

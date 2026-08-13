@@ -56,7 +56,7 @@ use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
 
-use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, XferId};
+use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
     ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, NearbyHistoryLine,
@@ -734,6 +734,46 @@ pub enum Event {
         /// The simulator's abort reason code (an `LLTErrorCode`; negative on
         /// error, per the reference viewer).
         result: i32,
+    },
+    /// A task-inventory item's asset arrived over the legacy UDP Transfer path
+    /// (`TransferInfo` + `TransferPacket` stream), in reply to a
+    /// [`Session::fetch_task_item_asset`](crate::Session::fetch_task_item_asset)
+    /// — how a script or notecard body is read out of a prim's contents (this
+    /// source type has no HTTP capability on either grid).
+    TaskItemAssetReceived {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The prim whose task inventory holds the item.
+        task: ObjectKey,
+        /// The task-inventory item whose asset this is.
+        item: InventoryKey,
+        /// The asset type the request named.
+        asset_type: AssetType,
+        /// The complete asset bytes.
+        data: Vec<u8>,
+    },
+    /// The estate covenant notecard's asset arrived over the legacy UDP
+    /// Transfer path, in reply to a
+    /// [`Session::fetch_estate_covenant_asset`](crate::Session::fetch_estate_covenant_asset)
+    /// (estate assets have no HTTP capability on either grid).
+    EstateCovenantAssetReceived {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The complete notecard asset bytes.
+        data: Vec<u8>,
+    },
+    /// A legacy UDP asset Transfer failed: the `TransferInfo` reported a
+    /// non-`Ok` status (e.g. [`UnknownSource`](TransferStatus::UnknownSource)
+    /// for a missing asset, or
+    /// [`InsufficientPermissions`](TransferStatus::InsufficientPermissions)),
+    /// so no asset bytes will arrive. Distinct from
+    /// [`Event::AssetTransferFailed`](Event::AssetTransferFailed), which
+    /// reports the modern HTTP fetch path.
+    TransferFailed {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The failure status the simulator reported.
+        status: TransferStatus,
     },
     /// The agent's own account contact preferences (`UserInfoReply`), in reply
     /// to a `UserInfoRequest`.

@@ -1799,6 +1799,23 @@ impl Client {
                         Some(Command::FetchTaskInventory { target }) => {
                             self.session.fetch_task_inventory(target, Instant::now())?;
                         }
+                        Some(Command::FetchTaskItemAsset {
+                            task,
+                            item_id,
+                            asset_id,
+                            asset_type,
+                        }) => {
+                            self.session.fetch_task_item_asset(
+                                task,
+                                item_id,
+                                asset_id,
+                                asset_type,
+                                Instant::now(),
+                            )?;
+                        }
+                        Some(Command::FetchEstateCovenantAsset) => {
+                            self.session.fetch_estate_covenant_asset(Instant::now())?;
+                        }
                         Some(Command::RequestXfer { filename }) => {
                             self.session.request_xfer(&filename, Instant::now())?;
                         }

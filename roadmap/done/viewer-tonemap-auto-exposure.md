@@ -30,7 +30,7 @@ Worth doing once there is content — a scripted interior, a night region — wh
 the static exposure visibly gives up. Not a prerequisite for anything.
 
 **Progress (2026-08-04) — most of this landed via the sun-disc work**
-([viewer-sun-disc-grey-aditi-hdr-scale](../bugs/viewer-sun-disc-grey-aditi-hdr-scale.md)):
+([viewer-sun-disc-grey-aditi-hdr-scale](viewer-sun-disc-grey-aditi-hdr-scale.md)):
 `exposure.rs` + `exposure.wgsl` port the reference's dynamic exposure — a
 fullscreen pass reduces the composited scene's average luminance (grid-sample
 over the reference central crop, standing in for the mip chain) and evaluates

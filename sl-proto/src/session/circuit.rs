@@ -9,7 +9,7 @@ use super::{
 };
 use crate::AssetKey;
 use crate::GroupRoleKey;
-use crate::bookkeeping_ids::{InventoryCallbackId, PingId, XferId};
+use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::encode_texture_entry;
 use crate::extra_params::extra_param_message_blocks;
 use crate::scoped_id::CircuitId;
@@ -200,10 +200,11 @@ use sl_wire::messages::{
     StartPingCheckPingIDBlock, TeleportLocationRequest, TeleportLocationRequestAgentDataBlock,
     TeleportLocationRequestInfoBlock, TeleportLureRequest, TeleportLureRequestInfoBlock,
     TerminateFriendship, TerminateFriendshipAgentDataBlock, TerminateFriendshipExBlockBlock,
-    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, UUIDGroupNameRequest,
-    UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest, UUIDNameRequestUUIDNameBlockBlock,
-    UpdateGroupInfo, UpdateGroupInfoAgentDataBlock, UpdateGroupInfoGroupDataBlock,
-    UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
+    TrackAgent, TrackAgentAgentDataBlock, TrackAgentTargetDataBlock, TransferAbort,
+    TransferAbortTransferInfoBlock, TransferRequest, TransferRequestTransferInfoBlock,
+    UUIDGroupNameRequest, UUIDGroupNameRequestUUIDNameBlockBlock, UUIDNameRequest,
+    UUIDNameRequestUUIDNameBlockBlock, UpdateGroupInfo, UpdateGroupInfoAgentDataBlock,
+    UpdateGroupInfoGroupDataBlock, UpdateInventoryFolder, UpdateInventoryFolderAgentDataBlock,
     UpdateInventoryFolderFolderDataBlock, UpdateInventoryItem, UpdateInventoryItemAgentDataBlock,
     UpdateInventoryItemInventoryDataBlock, UpdateMuteListEntry, UpdateMuteListEntryAgentDataBlock,
     UpdateMuteListEntryMuteDataBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock, UserReport,
@@ -2110,6 +2111,47 @@ impl Circuit {
                 use_big_packets: false,
                 v_file_id: Uuid::nil(),
                 v_file_type: 0,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TransferRequest` reliably — the legacy UDP asset Transfer
+    /// download start. `source_type` names the source family
+    /// ([`sl_wire::TRANSFER_SOURCE_SIM_INV_ITEM`] /
+    /// [`sl_wire::TRANSFER_SOURCE_SIM_ESTATE`]) and `params` its packed
+    /// source-specific blob; the channel is always the asset channel, and the
+    /// priority the reference viewer's default (100.0).
+    pub(crate) fn send_transfer_request(
+        &mut self,
+        transfer_id: TransferId,
+        source_type: i32,
+        params: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::TransferRequest(TransferRequest {
+            transfer_info: TransferRequestTransferInfoBlock {
+                transfer_id: transfer_id.get(),
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                source_type,
+                priority: 100.0,
+                params,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues a `TransferAbort` reliably, cancelling the in-flight asset
+    /// Transfer `transfer_id`.
+    pub(crate) fn send_transfer_abort(
+        &mut self,
+        transfer_id: TransferId,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::TransferAbort(TransferAbort {
+            transfer_info: TransferAbortTransferInfoBlock {
+                transfer_id: transfer_id.get(),
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
             },
         });
         self.send(&message, Reliability::Reliable, now)

@@ -23,5 +23,5 @@ system folders, and the shared read-only library.
 - The permission-system interactions (next-owner masks applying on
   transfer, no-copy moves) are the part worth designing carefully —
   the client-side permission topic
-  ([context/permission.md](permission.md)) documents the semantics
+  ([context/permission.md](../context/permission.md)) documents the semantics
   already.
