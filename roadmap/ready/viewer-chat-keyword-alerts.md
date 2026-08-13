@@ -19,9 +19,13 @@ same alert path.
 
 Scope: the keyword list + match options (case sensitivity, whole-word, local
 chat vs IM vs group scopes), the line-highlight in the chat displays, the
-alert colour token in the skin system, the optional sound hook (lands with
-[[viewer-ui-sound-effects]]; until then the visual alert stands alone), and
-settings persistence.
+optional sound hook (lands with [[viewer-ui-sound-effects]]; until then the
+visual alert stands alone), and settings persistence.
+
+The alert **colour** already exists: the skin token (`--keyword-alert`), the
+`KeywordAlertColor` setting and its preferences swatch row shipped with
+[[viewer-preferences-colors-skins-tab]] — this task wires the highlight that
+consumes it (`crate::skin_colors::SETTING_KEYWORD_ALERT`).
 
 Reference (Firestorm, read-only): the FS chat preferences keyword section
 (`panel_preferences_chat`, `FSKeyword*` settings), `fskeywords`.

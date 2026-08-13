@@ -58,6 +58,7 @@ use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
@@ -182,6 +183,11 @@ pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
         id: crate::preferences_camera_move::TAB_ID,
         label_key: "preferences-tab-camera-move",
         build: crate::preferences_camera_move::build_camera_move_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_colors_skins::TAB_ID,
+        label_key: "preferences-tab-colors-skins",
+        build: crate::preferences_colors_skins::build_colors_skins_tab,
     },
     PreferencesTabDef {
         id: crate::preferences_network_cache::TAB_ID,
@@ -523,6 +529,34 @@ pub(crate) fn spawn_pref_text(
         },
     );
     commands.entity(field).insert(binding);
+    commands.entity(row).insert(PrefSearchRow { label });
+    row
+}
+
+/// Spawn a searchable row holding a translated label and a settings-bound
+/// **colour swatch** (a [`SettingValue::Color3`] setting): clicking the swatch
+/// opens the shared colour picker, every pick writes through the binding, and
+/// the swatch follows the store (see the colour-swatch binding in
+/// [`crate::settings_binding`]). Returns the row node (see
+/// [`spawn_pref_checkbox`]).
+pub(crate) fn spawn_pref_color(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+) -> Entity {
+    let row = commands
+        .spawn((
+            pref_row_node(),
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    // Seeded black; the swatch sync pass paints the stored colour on the next
+    // frame (the slider idiom — the initial value is a placeholder).
+    let swatch = spawn_color_swatch(commands, row, label_key, 0, Color::BLACK);
+    commands.entity(swatch).insert(binding);
+    let label = spawn_row_label(commands, row, label_key);
     commands.entity(row).insert(PrefSearchRow { label });
     row
 }

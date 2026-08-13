@@ -113,11 +113,10 @@ impl TagContent {
 // Colours (values from the reference's colors.xml).
 // ---------------------------------------------------------------------------
 
-/// Base tag colour with display names off (`NameTagLegacy`, White).
+/// Base tag colour: display names off (`NameTagLegacy`) and a *default*
+/// display name (`NameTagMatch`) — both White in the reference, one
+/// [`TagColors::default`] slot here.
 const NAME_TAG_LEGACY: Color = Color::WHITE;
-
-/// Base tag colour for a *default* display name (`NameTagMatch`, White).
-const NAME_TAG_MATCH: Color = Color::WHITE;
 
 /// Base tag colour for a *custom* display name (`NameTagMismatch`, LtGray).
 const NAME_TAG_MISMATCH: Color = Color::srgb(0.9, 0.9, 0.9);
@@ -304,17 +303,85 @@ impl TagToggles {
     }
 }
 
+/// The name-tag colour palette, resolved once per composer run from the
+/// settings store — the active skin's tokens under any per-account overrides
+/// (the [`crate::skin_colors`] bridge, edited on the preferences colors &
+/// skins tab). [`Default`] is the built-in palette (the reference
+/// `colors.xml` values), used by tests and settings-less apps.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct TagColors {
+    /// The base tag colour: legacy names and matching display names
+    /// (`NameTagLegacy` / `NameTagMatch`).
+    pub(crate) default: Color,
+    /// The own tag's colour (`NameTagSelf`).
+    pub(crate) self_: Color,
+    /// A friend's tag colour (`NameTagFriend`), gated on
+    /// [`TagToggles::show_friend_color`].
+    pub(crate) friend: Color,
+    /// A muted avatar's tag colour (`NameTagMuted`).
+    pub(crate) muted: Color,
+    /// A Linden (grid staff) tag colour (`NameTagLinden`).
+    pub(crate) linden: Color,
+    /// A custom display name's tag colour (`NameTagMismatch`).
+    pub(crate) mismatch: Color,
+    /// Distance-band colour inside whisper range.
+    pub(crate) distance_whisper: Color,
+    /// Distance-band colour inside normal chat range.
+    pub(crate) distance_chat: Color,
+    /// Distance-band colour inside shout range.
+    pub(crate) distance_shout: Color,
+    /// Distance-band colour beyond shout range.
+    pub(crate) distance_beyond: Color,
+}
+
+impl Default for TagColors {
+    fn default() -> Self {
+        Self {
+            default: NAME_TAG_LEGACY,
+            self_: NAME_TAG_SELF,
+            friend: NAME_TAG_FRIEND,
+            muted: NAME_TAG_MUTED,
+            linden: NAME_TAG_LINDEN,
+            mismatch: NAME_TAG_MISMATCH,
+            distance_whisper: DISTANCE_WHISPER_COLOR,
+            distance_chat: DISTANCE_CHAT_COLOR,
+            distance_shout: DISTANCE_SHOUT_COLOR,
+            distance_beyond: DISTANCE_BEYOND_COLOR,
+        }
+    }
+}
+
+impl TagColors {
+    /// Resolve the palette from the settings store; without one the built-in
+    /// [`Default`] palette stands.
+    fn from_settings(settings: Option<&crate::settings::ViewerSettings>) -> Self {
+        let color = |name: &str| crate::skin_colors::setting_color(settings, name);
+        Self {
+            default: color(crate::skin_colors::SETTING_NAME_TAG_DEFAULT),
+            self_: color(crate::skin_colors::SETTING_NAME_TAG_SELF),
+            friend: color(crate::skin_colors::SETTING_NAME_TAG_FRIEND),
+            muted: color(crate::skin_colors::SETTING_NAME_TAG_MUTED),
+            linden: color(crate::skin_colors::SETTING_NAME_TAG_LINDEN),
+            mismatch: color(crate::skin_colors::SETTING_NAME_TAG_MISMATCH),
+            distance_whisper: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_WHISPER),
+            distance_chat: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_CHAT),
+            distance_shout: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_SHOUT),
+            distance_beyond: color(crate::skin_colors::SETTING_NAME_TAG_DISTANCE_BEYOND),
+        }
+    }
+}
+
 /// The chat-range band colour for a distance (the reference's
-/// whisper / say / shout / beyond bands).
-fn distance_band_color(distance_m: f32) -> Color {
+/// whisper / say / shout / beyond bands), from the resolved palette.
+fn distance_band_color(distance_m: f32, colors: &TagColors) -> Color {
     if distance_m <= WHISPER_RANGE_METRES {
-        DISTANCE_WHISPER_COLOR
+        colors.distance_whisper
     } else if distance_m <= CHAT_RANGE_METRES {
-        DISTANCE_CHAT_COLOR
+        colors.distance_chat
     } else if distance_m <= SHOUT_RANGE_METRES {
-        DISTANCE_SHOUT_COLOR
+        colors.distance_shout
     } else {
-        DISTANCE_BEYOND_COLOR
+        colors.distance_beyond
     }
 }
 
@@ -340,7 +407,11 @@ fn is_linden(record: Option<&crate::avatars::NameRecord>) -> bool {
 /// `idleUpdateNameTagText` line order and `getNameTagColor` precedence, pure
 /// and unit-testable. Line order, top to bottom: status (comma-joined
 /// `Away` / `Blocked` / `Typing`), group title, name, username, distance.
-pub(crate) fn compose_tag(inputs: &TagInputs<'_>, toggles: &TagToggles) -> TagContent {
+pub(crate) fn compose_tag(
+    inputs: &TagInputs<'_>,
+    toggles: &TagToggles,
+    colors: &TagColors,
+) -> TagContent {
     // --- The whole-tag colour (the reference's precedence chain). ---
     let has_custom_display_name = toggles.show_display_names
         && inputs
@@ -351,24 +422,28 @@ pub(crate) fn compose_tag(inputs: &TagInputs<'_>, toggles: &TagToggles) -> TagCo
             .record
             .is_none_or(|record| record.display_name.is_none())
     {
-        NAME_TAG_LEGACY
+        // A legacy name and a matching display name share the base colour
+        // (the reference's NameTagLegacy / NameTagMatch, both White).
+        colors.default
     } else if has_custom_display_name {
-        NAME_TAG_MISMATCH
+        colors.mismatch
     } else {
-        NAME_TAG_MATCH
+        colors.default
     };
     let base_color = if inputs.is_self {
-        NAME_TAG_SELF
+        colors.self_
     } else if inputs.is_friend && toggles.show_friend_color {
-        NAME_TAG_FRIEND
+        colors.friend
     } else if inputs.is_muted {
-        NAME_TAG_MUTED
+        colors.muted
     } else if is_linden(inputs.record) {
-        NAME_TAG_LINDEN
+        colors.linden
     } else if toggles.color_by_distance {
         // The whole-tag distance tint applies only when no identity colour
         // (self / friend) claimed the tag.
-        inputs.distance_m.map_or(display_base, distance_band_color)
+        inputs.distance_m.map_or(display_base, |distance| {
+            distance_band_color(distance, colors)
+        })
     } else {
         display_base
     };
@@ -448,7 +523,7 @@ pub(crate) fn compose_tag(inputs: &TagInputs<'_>, toggles: &TagToggles) -> TagCo
         lines.push(TagLine {
             text: format!("{distance:.2} m"),
             size: TagLineSize::Small,
-            color: distance_band_color(distance),
+            color: distance_band_color(distance, colors),
         });
     }
 
@@ -505,6 +580,7 @@ pub(crate) fn compose_name_tags(
     mut contents: Query<&mut TagContent, With<crate::avatars::NameTag>>,
 ) {
     let toggles = TagToggles::from_settings(settings.as_deref());
+    let colors = TagColors::from_settings(settings.as_deref());
     let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
     // The distance line measures from the OWN AVATAR (the reference's
     // behaviour) — the camera-based distances only govern fade/cut-off.
@@ -571,7 +647,7 @@ pub(crate) fn compose_name_tags(
                 distance_cache.get(&agent).copied()
             },
         };
-        let composed = compose_tag(&inputs, &toggles);
+        let composed = compose_tag(&inputs, &toggles, &colors);
         if *content != composed {
             *content = composed;
         }
@@ -582,7 +658,7 @@ pub(crate) fn compose_name_tags(
 mod tests {
     use super::{
         DISTANCE_BEYOND_COLOR, DISTANCE_CHAT_COLOR, DISTANCE_SHOUT_COLOR, DISTANCE_WHISPER_COLOR,
-        NAME_TAG_FRIEND, NAME_TAG_LINDEN, NAME_TAG_MISMATCH, NAME_TAG_MUTED, TagInputs,
+        NAME_TAG_FRIEND, NAME_TAG_LINDEN, NAME_TAG_MISMATCH, NAME_TAG_MUTED, TagColors, TagInputs,
         TagLineSize, TagToggles, compose_tag, distance_band_color,
     };
     use crate::avatars::NameRecord;
@@ -621,7 +697,7 @@ mod tests {
             distance_m: Some(12.34),
             ..TagInputs::default()
         };
-        let content = compose_tag(&inputs, &TagToggles::default());
+        let content = compose_tag(&inputs, &TagToggles::default(), &TagColors::default());
         assert_eq!(
             texts(&content),
             vec![
@@ -658,7 +734,7 @@ mod tests {
             record: Some(&record),
             ..TagInputs::default()
         };
-        let content = compose_tag(&inputs, &TagToggles::default());
+        let content = compose_tag(&inputs, &TagToggles::default(), &TagColors::default());
         assert_eq!(texts(&content), vec!["Avatar Tester"]);
 
         let record = custom_record();
@@ -670,7 +746,7 @@ mod tests {
             show_display_names: false,
             ..TagToggles::default()
         };
-        let content = compose_tag(&inputs, &toggles);
+        let content = compose_tag(&inputs, &toggles, &TagColors::default());
         assert_eq!(texts(&content), vec!["Avatar Tester"]);
     }
 
@@ -681,7 +757,7 @@ mod tests {
             provisional: "cafebabe".to_owned(),
             ..TagInputs::default()
         };
-        let content = compose_tag(&inputs, &TagToggles::default());
+        let content = compose_tag(&inputs, &TagToggles::default(), &TagColors::default());
         assert_eq!(texts(&content), vec!["cafebabe"]);
     }
 
@@ -697,7 +773,7 @@ mod tests {
             ..TagInputs::default()
         };
         assert_eq!(
-            compose_tag(&base, &TagToggles::default()).base_color,
+            compose_tag(&base, &TagToggles::default(), &TagColors::default()).base_color,
             NAME_TAG_FRIEND
         );
         let toggles_no_friend = TagToggles {
@@ -705,7 +781,7 @@ mod tests {
             ..TagToggles::default()
         };
         assert_eq!(
-            compose_tag(&base, &toggles_no_friend).base_color,
+            compose_tag(&base, &toggles_no_friend, &TagColors::default()).base_color,
             NAME_TAG_MUTED
         );
 
@@ -718,7 +794,7 @@ mod tests {
             ..TagInputs::default()
         };
         assert_eq!(
-            compose_tag(&linden, &TagToggles::default()).base_color,
+            compose_tag(&linden, &TagToggles::default(), &TagColors::default()).base_color,
             NAME_TAG_LINDEN
         );
 
@@ -731,7 +807,7 @@ mod tests {
             distance_m: None,
             ..TagInputs::default()
         };
-        let content = compose_tag(&own, &TagToggles::default());
+        let content = compose_tag(&own, &TagToggles::default(), &TagColors::default());
         assert_eq!(texts(&content), vec!["Shiny Name", "avatar.tester"],);
     }
 
@@ -747,7 +823,7 @@ mod tests {
             is_editing_appearance: true,
             ..TagInputs::default()
         };
-        let content = compose_tag(&inputs, &TagToggles::default());
+        let content = compose_tag(&inputs, &TagToggles::default(), &TagColors::default());
         assert_eq!(
             content.lines.first().map(|line| line.text.as_str()),
             Some("Away, (Editing Appearance)"),
@@ -757,10 +833,11 @@ mod tests {
     /// The distance bands at their boundaries, and the two-decimal format.
     #[test]
     fn distance_bands_and_format() {
-        assert_eq!(distance_band_color(9.99), DISTANCE_WHISPER_COLOR);
-        assert_eq!(distance_band_color(10.01), DISTANCE_CHAT_COLOR);
-        assert_eq!(distance_band_color(20.01), DISTANCE_SHOUT_COLOR);
-        assert_eq!(distance_band_color(100.01), DISTANCE_BEYOND_COLOR);
+        let colors = TagColors::default();
+        assert_eq!(distance_band_color(9.99, &colors), DISTANCE_WHISPER_COLOR);
+        assert_eq!(distance_band_color(10.01, &colors), DISTANCE_CHAT_COLOR);
+        assert_eq!(distance_band_color(20.01, &colors), DISTANCE_SHOUT_COLOR);
+        assert_eq!(distance_band_color(100.01, &colors), DISTANCE_BEYOND_COLOR);
 
         let record = custom_record();
         let inputs = TagInputs {
@@ -768,7 +845,7 @@ mod tests {
             distance_m: Some(150.0),
             ..TagInputs::default()
         };
-        let content = compose_tag(&inputs, &TagToggles::default());
+        let content = compose_tag(&inputs, &TagToggles::default(), &TagColors::default());
         let distance_line = content.lines.last().cloned();
         assert_eq!(
             distance_line.as_ref().map(|line| line.text.as_str()),
@@ -778,6 +855,24 @@ mod tests {
             distance_line.map(|line| line.color),
             Some(DISTANCE_BEYOND_COLOR)
         );
+    }
+
+    /// An overridden palette colour lands on the tag: a friend's tag takes
+    /// the palette's friend slot, not the built-in constant.
+    #[test]
+    fn overridden_palette_reaches_the_tag() {
+        let record = custom_record();
+        let inputs = TagInputs {
+            record: Some(&record),
+            is_friend: true,
+            ..TagInputs::default()
+        };
+        let colors = TagColors {
+            friend: Color::srgb(0.1, 0.2, 0.9),
+            ..TagColors::default()
+        };
+        let content = compose_tag(&inputs, &TagToggles::default(), &colors);
+        assert_eq!(content.base_color, Color::srgb(0.1, 0.2, 0.9));
     }
 
     /// The change-detection contract: identical inputs compose an equal
@@ -792,8 +887,8 @@ mod tests {
             ..TagInputs::default()
         };
         assert_eq!(
-            compose_tag(&inputs, &TagToggles::default()),
-            compose_tag(&inputs, &TagToggles::default()),
+            compose_tag(&inputs, &TagToggles::default(), &TagColors::default()),
+            compose_tag(&inputs, &TagToggles::default(), &TagColors::default()),
         );
     }
 }

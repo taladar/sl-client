@@ -160,6 +160,7 @@ mod preferences_alerts;
 mod preferences_audio;
 mod preferences_camera_move;
 mod preferences_chat;
+mod preferences_colors_skins;
 mod preferences_general;
 mod preferences_graphics;
 mod preferences_network_cache;
@@ -188,6 +189,7 @@ mod shadow_visibility;
 mod sit_camera;
 mod sit_offset;
 mod skin;
+mod skin_colors;
 mod sky;
 mod sky_presets;
 mod slurl_dispatch;
@@ -554,11 +556,14 @@ struct Options {
     camera_spin_axis: SpinAxis,
     /// The UI skin to wear — a directory under `assets/skins/` (`graphite`,
     /// `azure`). Skins are colour / texture / font tokens only, never layout.
+    /// Overrides the persisted preferences choice (the colors & skins tab) for
+    /// this run, without rewriting it.
     #[clap(long)]
     skin: Option<String>,
     /// A theme overlay for the skin — a file under
     /// `assets/skins/<skin>/themes/` (e.g. `dark`), which redefines a subset of
-    /// the skin's tokens. Omit for the skin's own base.
+    /// the skin's tokens. Omit for the skin's own base. Overrides the persisted
+    /// preferences choice for this run, without rewriting it.
     #[clap(long)]
     theme: Option<String>,
     /// Watch the skin `.css` files and re-apply them live as they are edited —
@@ -1001,6 +1006,7 @@ fn run_session(
     // `UiRoot` in the selected skin's hot-reloadable `.css` tokens. After
     // `ViewerUiPlugin` so the `UiRoot` it styles already exists.
     .add_plugins(crate::skin::ViewerSkinPlugin)
+    .add_plugins(crate::skin_colors::SkinColorsPlugin)
     // The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
     // bundles behind Bevy assets with runtime locale switching, the `Translator`
     // string-lookup API (typed named arguments → per-locale plural / gender), and
@@ -1430,6 +1436,7 @@ fn run_session(
     // MovementTuning refreshes and the field-of-view / mouselook-avatar
     // appliers; the tab content itself plugs into the shell's registry.
     .add_plugins(crate::preferences_camera_move::PreferencesCameraMovePlugin)
+    .add_plugins(crate::preferences_colors_skins::PreferencesColorsSkinsPlugin)
     .add_plugins(crate::preferences_network_cache::PreferencesNetworkCachePlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
@@ -2412,7 +2419,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     // The persisted start-location preference (the preferences General tab) is
     // read from a throwaway store load: the Bevy app — and with it the
     // `ViewerSettings` resource — does not exist yet at login-request time.
-    let start = {
+    let (start, stored_skin, stored_theme) = {
         let settings = crate::settings::ViewerSettings::load();
         // The network & cache tab's restart-scoped knobs (cache root and
         // size ceilings, chat-log root, HTTP proxy, a pending clear-cache
@@ -2424,7 +2431,15 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             .get_str(crate::preferences_general::SETTING_LOGIN_START_LOCATION)
             .ok()
             .map(str::to_owned);
-        crate::preferences_general::resolve_start_location(options.start.clone(), stored.as_deref())
+        let start = crate::preferences_general::resolve_start_location(
+            options.start.clone(),
+            stored.as_deref(),
+        );
+        // The persisted skin choice (the colors & skins tab) seeds the initial
+        // dress; the CLI / env values override it inside `resolve`.
+        let (stored_skin, stored_theme) =
+            crate::preferences_colors_skins::stored_skin_choice(&settings);
+        (start, stored_skin, stored_theme)
     };
     let mut request = LoginRequest::new(
         avatar.first().to_owned(),
@@ -2475,6 +2490,8 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 selection: crate::skin::SkinSelection::resolve(
                     options.skin.clone(),
                     options.theme.clone(),
+                    stored_skin.clone(),
+                    stored_theme.clone(),
                 ),
                 watch: options.watch_skins,
             },
@@ -2591,10 +2608,19 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             spin: camera_spin,
         },
         SkinRuntime {
-            selection: crate::skin::SkinSelection::resolve(
-                options.skin.clone(),
-                options.theme.clone(),
-            ),
+            selection: {
+                // The persisted skin choice dresses the replay UI too; the
+                // throwaway pre-app load is the `run_viewer` idiom.
+                let settings = crate::settings::ViewerSettings::load();
+                let (stored_skin, stored_theme) =
+                    crate::preferences_colors_skins::stored_skin_choice(&settings);
+                crate::skin::SkinSelection::resolve(
+                    options.skin.clone(),
+                    options.theme.clone(),
+                    stored_skin,
+                    stored_theme,
+                )
+            },
             watch: options.watch_skins,
         },
         // No network surfaces offline: keep the media engines and web auth off.

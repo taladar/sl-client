@@ -42,4 +42,36 @@
   /* Meaning-bearing (culture / colour-blind overlays remap these). */
   --gain: #3fa34d;
   --loss: #c0392b;
+
+  /* User-tunable palette (the preferences Colors & Skins tab). These are not
+   * consumed by common.css: the viewer reads them off the styled root's
+   * resolved vars and feeds them into the settings store as the skin-supplied
+   * defaults, under any per-account overrides. Hex values only — the reader
+   * parses nothing else. */
+
+  /* Chat text by source (reference: UserChatColor / AgentChatColor /
+   * ObjectChatColor / AgentIMColor / SystemChatColor). */
+  --chat-self: #ffffff;
+  --chat-others: #ffffff;
+  --chat-objects: #bfbfbf;
+  --chat-im: #a8c8ea;
+  --chat-system: #ffffff;
+
+  /* Keyword-alert highlight (consumed by the chat keyword-alerts feature). */
+  --keyword-alert: #ffc740;
+
+  /* Name-tag colours (reference: NameTagSelf/Friend/Muted/Linden/Mismatch;
+   * default covers the legacy and matching-display-name cases). */
+  --name-tag-default: #ffffff;
+  --name-tag-self: #ffffff;
+  --name-tag-friend: #bfeb7d;
+  --name-tag-muted: #666666;
+  --name-tag-linden: #0080ff;
+  --name-tag-mismatch: #e5e5e5;
+
+  /* Name-tag distance bands (ColorByDistance). */
+  --name-tag-distance-whisper: #00ff00;
+  --name-tag-distance-chat: #00ff00;
+  --name-tag-distance-shout: #ffff00;
+  --name-tag-distance-beyond: #ff0000;
 }

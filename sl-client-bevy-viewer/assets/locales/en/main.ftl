@@ -3095,6 +3095,7 @@ preferences-tab-graphics = Graphics
 preferences-tab-audio = Sound & media
 preferences-tab-chat = Chat & privacy
 preferences-tab-camera-move = Camera & movement
+preferences-tab-colors-skins = Colors & skins
 preferences-tab-network-cache = Network & cache
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
@@ -3319,6 +3320,35 @@ preferences-row-clear-cache = Empty the texture, mesh and asset caches
 preferences-clear-cache = Clear cache
 preferences-row-clear-inventory-cache = Delete the saved inventory snapshots
 preferences-clear-inventory-cache = Clear inventory cache
+
+# The colors & skins tab (viewer-preferences-colors-skins-tab): the UI skin /
+# theme choice and the user-tunable colour palette (chat, name tags).
+preferences-section-skin = Skin & theme
+preferences-row-skin = UI skin
+preferences-row-theme = Color scheme
+preferences-skin-graphite = Graphite
+preferences-skin-azure = Azure
+preferences-theme-base = Skin default
+preferences-theme-dark = Dark
+preferences-section-chat-colors = Chat colors
+preferences-row-chat-color-self = My chat
+preferences-row-chat-color-others = Other avatars
+preferences-row-chat-color-objects = Objects
+preferences-row-chat-color-im = Instant messages
+preferences-row-chat-color-system = System messages
+preferences-row-keyword-alert-color = Keyword alerts
+preferences-section-name-tag-colors = Name tag colors
+preferences-row-name-tag-color-default = Default
+preferences-row-name-tag-color-self = My tag
+preferences-row-name-tag-color-friend = Friends
+preferences-row-name-tag-color-muted = Blocked
+preferences-row-name-tag-color-linden = Grid staff (Lindens)
+preferences-row-name-tag-color-mismatch = Custom display names
+preferences-section-name-tag-distance-colors = Name tag distance colors
+preferences-row-name-tag-distance-whisper = Whisper range
+preferences-row-name-tag-distance-chat = Chat range
+preferences-row-name-tag-distance-shout = Shout range
+preferences-row-name-tag-distance-beyond = Beyond shout range
 
 ## The Quick Preferences panel (viewer-quick-preferences): the small
 ## bottom-right floater of the settings reached-for hourly.

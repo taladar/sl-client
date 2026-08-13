@@ -271,6 +271,37 @@ impl SettingsStore {
         Ok(())
     }
 
+    /// Replace a registered setting's declared default.
+    ///
+    /// The override layers are untouched, so only settings currently resolving
+    /// to their default change their effective value, and persistence is
+    /// unaffected (defaults are never written to disk). This is how a dynamic
+    /// default source — the viewer's active UI skin supplying its colour
+    /// palette — feeds the store; the reference viewer's analogue is the
+    /// per-skin `colors.xml` layer under the user's `colors.xml` overrides.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingError::UnknownSetting`] if the setting is not registered, or
+    /// [`SettingError::TypeMismatch`] if `value` does not have the declared
+    /// type (a default swap must never retype a setting).
+    pub fn set_default(&mut self, name: &str, value: SettingValue) -> Result<(), SettingError> {
+        let Some(decl) = self.decls.get_mut(name) else {
+            return Err(SettingError::UnknownSetting(name.to_owned()));
+        };
+        let expected = decl.kind();
+        let found = value.kind();
+        if expected != found {
+            return Err(SettingError::TypeMismatch {
+                name: name.to_owned(),
+                expected,
+                found,
+            });
+        }
+        decl.default = value;
+        Ok(())
+    }
+
     /// Remove a setting's override in one scope, reverting it to the next layer
     /// down. Returns whether an override was actually present.
     pub fn reset(&mut self, scope: Scope, name: &str) -> bool {

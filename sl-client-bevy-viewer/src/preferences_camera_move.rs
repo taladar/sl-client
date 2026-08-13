@@ -218,7 +218,7 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(FOV_MIN, FOV_MAX),
         SliderStep(0.01),
     );
-    spawn_reset_button(commands, fov_row, SETTING_CAMERA_ANGLE);
+    spawn_reset_button(commands, fov_row, Scope::Global, SETTING_CAMERA_ANGLE);
     let offset_row = spawn_pref_slider(
         commands,
         panel,
@@ -227,7 +227,12 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(0.5, 3.0),
         SliderStep(0.05),
     );
-    spawn_reset_button(commands, offset_row, SETTING_CAMERA_OFFSET_SCALE);
+    spawn_reset_button(
+        commands,
+        offset_row,
+        Scope::Global,
+        SETTING_CAMERA_OFFSET_SCALE,
+    );
     let smoothing_row = spawn_pref_slider(
         commands,
         panel,
@@ -236,7 +241,12 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(0.0, 1.0),
         SliderStep(0.05),
     );
-    spawn_reset_button(commands, smoothing_row, SETTING_CAMERA_SMOOTHING);
+    spawn_reset_button(
+        commands,
+        smoothing_row,
+        Scope::Global,
+        SETTING_CAMERA_SMOOTHING,
+    );
     let distance_row = spawn_pref_slider(
         commands,
         panel,
@@ -245,7 +255,12 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(5.0, 256.0),
         SliderStep(1.0),
     );
-    spawn_reset_button(commands, distance_row, SETTING_CAMERA_MAX_DISTANCE);
+    spawn_reset_button(
+        commands,
+        distance_row,
+        Scope::Global,
+        SETTING_CAMERA_MAX_DISTANCE,
+    );
     spawn_pref_checkbox(
         commands,
         panel,
@@ -262,7 +277,12 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(0.1, 15.0),
         SliderStep(0.1),
     );
-    spawn_reset_button(commands, sensitivity_row, SETTING_MOUSE_SENSITIVITY);
+    spawn_reset_button(
+        commands,
+        sensitivity_row,
+        Scope::Global,
+        SETTING_MOUSE_SENSITIVITY,
+    );
     spawn_pref_checkbox(
         commands,
         panel,
@@ -297,7 +317,7 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(0.5, 8.0),
         SliderStep(0.1),
     );
-    spawn_reset_button(commands, turn_row, SETTING_AVATAR_TURN_RATE);
+    spawn_reset_button(commands, turn_row, Scope::Global, SETTING_AVATAR_TURN_RATE);
     spawn_pref_combo(
         commands,
         panel,
@@ -311,17 +331,23 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
     );
 }
 
-/// Add a reset-to-default button into a slider `row` — the reference View
-/// tab's per-slider "D" buttons. Resetting clears the global override; the
-/// two-way binding then moves the slider back to the registered default, and
-/// the shell's snapshot keeps Cancel semantics intact. Shared with the other
-/// tabs that want per-row resets (the network & cache tab).
-pub(crate) fn spawn_reset_button(commands: &mut Commands, row: Entity, setting: &'static str) {
+/// Add a reset-to-default button into a control `row` — the reference View
+/// tab's per-slider "D" buttons. Resetting clears the `scope`'s override (the
+/// scope the row's binding writes); the two-way binding then moves the control
+/// back to the declared default, and the shell's snapshot keeps Cancel
+/// semantics intact. Shared with the other tabs that want per-row resets (the
+/// network & cache and colors & skins tabs).
+pub(crate) fn spawn_reset_button(
+    commands: &mut Commands,
+    row: Entity,
+    scope: Scope,
+    setting: &'static str,
+) {
     let button = spawn_footer_button(commands, row, "preferences-reset-default", 0);
     commands.entity(button).observe(
         move |_activate: On<Activate>, settings: Option<ResMut<ViewerSettings>>| {
             if let Some(mut settings) = settings {
-                settings.reset(Scope::Global, setting);
+                settings.reset(scope, setting);
             }
         },
     );

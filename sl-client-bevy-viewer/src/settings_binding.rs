@@ -46,6 +46,14 @@
 //!   write live (matching the checkbox/slider live-edit model the preferences
 //!   snapshot relies on), and the sync pass seeds / follows external changes,
 //!   skipping the focused or IME-composing field so it never clobbers typing.
+//! - A [colour swatch](crate::ui_color_picker) carrying a [`SettingBinding`]
+//!   beside its [`ColorSwatchValue`], bound to a [`SettingValue::Color3`]:
+//!   every [`ColorPicked`] reply — the picker's live drag, OK, and the
+//!   original-colour re-emit on its Cancel — writes through, so the preview is
+//!   live and a picker cancel self-reverts. A pick equal to the declared
+//!   default is written as a **reset** instead of an override, so a colour the
+//!   user left at the skin's value keeps following the skin
+//!   (the reference's save-only-if-different `colors.xml` behaviour).
 //!
 //! Reference (Firestorm, read-only): `llui` `control_name` handling, `lluictrl`
 //! `setControlName`, `llviewercontrol` connections.
@@ -67,6 +75,7 @@ use crate::settings::ViewerSettings;
 use crate::ui::{
     LogicalInset, LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
 };
+use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use crate::ui_combo::{ComboChanged, ComboSelection};
 use crate::ui_font::UiFont;
 
@@ -159,9 +168,11 @@ pub(crate) struct SettingsBindingPlugin;
 
 impl Plugin for SettingsBindingPlugin {
     fn build(&self, app: &mut App) {
-        // `ComboWidgetPlugin` also registers this message; doing it here too
-        // (idempotent) keeps the binding layer safe to add standalone (tests).
+        // `ComboWidgetPlugin` / `ColorPickerPlugin` also register these
+        // messages; doing it here too (idempotent) keeps the binding layer safe
+        // to add standalone (tests).
         app.add_message::<ComboChanged>()
+            .add_message::<ColorPicked>()
             .insert_resource(SettingsBindingDemoVisible::from_env())
             .add_observer(on_bound_checkbox_change)
             .add_observer(on_bound_slider_change)
@@ -183,6 +194,8 @@ impl Plugin for SettingsBindingPlugin {
                     sync_bound_combos.after(write_bound_combo_changes),
                     write_bound_text_edits,
                     sync_bound_text_inputs.after(write_bound_text_edits),
+                    write_bound_swatch_picks,
+                    sync_bound_color_swatches.after(write_bound_swatch_picks),
                     drive_demo_checkbox_visual.after(sync_bound_checkboxes),
                     drive_demo_slider_visual.after(sync_bound_sliders),
                     update_settings_binding_demo_labels,
@@ -332,6 +345,42 @@ fn write_bound_text_edits(
     }
 }
 
+/// Every [`ColorPicked`] reply to a bound colour swatch writes the colour to
+/// the binding's scope — the live drag, OK, and the original-colour re-emit of
+/// the picker's Cancel alike, the same live-edit model as the slider (the
+/// preferences snapshot covers a preferences-level Cancel).
+///
+/// A pick that lands on the setting's **declared default** is written as a
+/// [`ViewerSettings::reset`] instead of an override: the declared default is
+/// the active skin's value ([`crate::skin_colors`]), and pinning it as an
+/// override would freeze the colour across a later skin switch.
+fn write_bound_swatch_picks(
+    mut picks: MessageReader<ColorPicked>,
+    swatches: Query<&SettingBinding, With<ColorSwatchValue>>,
+    mut settings: Option<ResMut<ViewerSettings>>,
+) {
+    for pick in picks.read() {
+        let Ok(binding) = swatches.get(pick.requester) else {
+            continue;
+        };
+        let Some(settings) = settings.as_mut() else {
+            continue;
+        };
+        let srgba = pick.color.to_srgba();
+        let rgb = [srgba.red, srgba.green, srgba.blue];
+        let is_declared_default = settings
+            .store()
+            .declaration(binding.name())
+            .and_then(|decl| decl.default().as_color3())
+            .is_some_and(|default| color3_agrees(rgb, default));
+        if is_declared_default {
+            settings.reset(binding.scope(), binding.name());
+        } else {
+            settings.set(binding.scope(), binding.name(), SettingValue::Color3(rgb));
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Read / react side: the store flows store → widget, idempotently.
 // ---------------------------------------------------------------------------
@@ -452,6 +501,45 @@ fn sync_bound_text_inputs(
         }
     }
 }
+
+/// Keep every bound colour swatch's [`ColorSwatchValue`] equal to its
+/// setting's effective value — the seed on spawn, and the follow on any
+/// external change (a per-row reset, the account scope loading at login, a
+/// skin switch moving the declared default). Idempotent within
+/// [`COLOR_SYNC_EPSILON`], so the swatch fill repaint only runs on a real
+/// change.
+fn sync_bound_color_swatches(
+    settings: Option<Res<ViewerSettings>>,
+    mut swatches: Query<(&SettingBinding, &mut ColorSwatchValue)>,
+) {
+    let Some(settings) = settings else {
+        return;
+    };
+    for (binding, mut value) in &mut swatches {
+        let Ok(want) = settings.store().get_color3(binding.name()) else {
+            continue;
+        };
+        let current = value.0.to_srgba();
+        if !color3_agrees([current.red, current.green, current.blue], want) {
+            let [red, green, blue] = want;
+            value.0 = Color::srgb(red, green, blue);
+        }
+    }
+}
+
+/// Whether two stored sRGB triples agree within [`COLOR_SYNC_EPSILON`],
+/// channel-wise.
+fn color3_agrees(a: [f32; 3], b: [f32; 3]) -> bool {
+    a.iter()
+        .zip(b.iter())
+        .all(|(x, y)| (x - y).abs() <= COLOR_SYNC_EPSILON)
+}
+
+/// The largest per-channel disagreement the colour sync treats as "already in
+/// sync": half the picker's 8-bit quantisation step, so a value that
+/// round-trips through the picker's byte channels still counts as equal to a
+/// float default it visually matches.
+const COLOR_SYNC_EPSILON: f32 = 0.5 / 255.0;
 
 /// Add or remove the [`Checked`] marker on `entity` to match `checked`.
 fn reconcile_checked(commands: &mut Commands, entity: Entity, checked: bool) {
@@ -940,10 +1028,12 @@ mod tests {
     use super::{
         ComboBindingValues, SettingBinding, bound_checkbox, bound_slider, f32_to_i32, f32_to_u32,
         on_bound_checkbox_change, on_bound_slider_change, setting_as_slider_value,
-        slider_value_as_setting, sync_bound_checkboxes, sync_bound_combos, sync_bound_sliders,
-        sync_bound_text_inputs, write_bound_combo_changes, write_bound_text_edits,
+        slider_value_as_setting, sync_bound_checkboxes, sync_bound_color_swatches,
+        sync_bound_combos, sync_bound_sliders, sync_bound_text_inputs, write_bound_combo_changes,
+        write_bound_swatch_picks, write_bound_text_edits,
     };
     use crate::settings::ViewerSettings;
+    use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
     use crate::ui_combo::{ComboChanged, ComboSelection};
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -962,6 +1052,7 @@ mod tests {
         // schedule runner and the store.
         app.add_plugins(MinimalPlugins)
             .add_message::<ComboChanged>()
+            .add_message::<ColorPicked>()
             .init_resource::<InputFocus>()
             .insert_resource(ViewerSettings::from_store_for_test(store))
             .add_observer(on_bound_checkbox_change)
@@ -975,6 +1066,8 @@ mod tests {
                     sync_bound_combos.after(write_bound_combo_changes),
                     write_bound_text_edits,
                     sync_bound_text_inputs.after(write_bound_text_edits),
+                    write_bound_swatch_picks,
+                    sync_bound_color_swatches.after(write_bound_swatch_picks),
                 ),
             );
         app
@@ -1327,6 +1420,150 @@ mod tests {
             .get::<EditableText>()
             .map(|editable| editable.value().to_string());
         assert_eq!(after_blur.as_deref(), Some("external"));
+        Ok(())
+    }
+
+    /// Assert two `f32` slices are element-wise equal within the colour sync
+    /// epsilon.
+    fn approx_rgb(actual: [f32; 3], expected: [f32; 3]) {
+        for (got, want) in actual.iter().zip(expected.iter()) {
+            assert!(
+                (got - want).abs() <= super::COLOR_SYNC_EPSILON,
+                "{actual:?} != {expected:?}"
+            );
+        }
+    }
+
+    /// The stored sRGB triple of a swatch's current colour.
+    fn swatch_rgb(app: &App, swatch: Entity) -> [f32; 3] {
+        let srgba = app
+            .world()
+            .entity(swatch)
+            .get::<ColorSwatchValue>()
+            .map_or(Color::NONE, |value| value.0)
+            .to_srgba();
+        [srgba.red, srgba.green, srgba.blue]
+    }
+
+    /// Register the colour setting the swatch tests bind.
+    fn register_tint(store: &mut SettingsStore) {
+        store
+            .register("Tint", SettingValue::Color3([0.2, 0.4, 0.6]), "a colour")
+            .ok();
+    }
+
+    /// A bound swatch is seeded from the store's effective colour on the first
+    /// sync pass.
+    #[test]
+    fn swatch_reads_setting_on_build() -> Result<(), TestError> {
+        let mut app = app(register_tint);
+        let swatch = app
+            .world_mut()
+            .spawn((
+                ColorSwatchValue(Color::WHITE),
+                SettingBinding::account("Tint"),
+            ))
+            .id();
+        app.update();
+        approx_rgb(swatch_rgb(&app, swatch), [0.2, 0.4, 0.6]);
+        Ok(())
+    }
+
+    /// Every pick — the live drag and the final OK alike — writes the colour to
+    /// the binding's scope.
+    #[test]
+    fn swatch_pick_writes_setting_live_and_final() -> Result<(), TestError> {
+        let mut app = app(register_tint);
+        let swatch = app
+            .world_mut()
+            .spawn((
+                ColorSwatchValue(Color::WHITE),
+                SettingBinding::account("Tint"),
+            ))
+            .id();
+        app.update();
+
+        // A live-preview (non-final) pick already lands in the store.
+        app.world_mut().write_message(ColorPicked {
+            requester: swatch,
+            color: Color::srgb(1.0, 0.0, 0.0),
+            final_pick: false,
+        });
+        app.update();
+        approx_rgb(store(&app).get_color3("Tint")?, [1.0, 0.0, 0.0]);
+        assert!(store(&app).is_overridden("Tint"));
+
+        app.world_mut().write_message(ColorPicked {
+            requester: swatch,
+            color: Color::srgb(0.0, 1.0, 0.0),
+            final_pick: true,
+        });
+        app.update();
+        approx_rgb(store(&app).get_color3("Tint")?, [0.0, 1.0, 0.0]);
+        // The swatch fill followed through the store.
+        approx_rgb(swatch_rgb(&app, swatch), [0.0, 1.0, 0.0]);
+        Ok(())
+    }
+
+    /// A pick equal to the declared default clears the override instead of
+    /// pinning it, so the colour keeps following the (skin-supplied) default.
+    #[test]
+    fn swatch_pick_of_default_resets_override() -> Result<(), TestError> {
+        let mut app = app(register_tint);
+        let swatch = app
+            .world_mut()
+            .spawn((
+                ColorSwatchValue(Color::WHITE),
+                SettingBinding::account("Tint"),
+            ))
+            .id();
+        app.update();
+        app.world_mut().write_message(ColorPicked {
+            requester: swatch,
+            color: Color::srgb(1.0, 0.0, 0.0),
+            final_pick: true,
+        });
+        app.update();
+        assert!(store(&app).is_overridden("Tint"));
+
+        app.world_mut().write_message(ColorPicked {
+            requester: swatch,
+            color: Color::srgb(0.2, 0.4, 0.6),
+            final_pick: true,
+        });
+        app.update();
+        assert!(
+            !store(&app).is_overridden("Tint"),
+            "a pick of the default must reset, not override"
+        );
+        Ok(())
+    }
+
+    /// An external reset moves the swatch back to the declared default.
+    #[test]
+    fn swatch_follows_external_reset() -> Result<(), TestError> {
+        let mut app = app(register_tint);
+        let swatch = app
+            .world_mut()
+            .spawn((
+                ColorSwatchValue(Color::WHITE),
+                SettingBinding::account("Tint"),
+            ))
+            .id();
+        app.update();
+        app.world_mut().resource_mut::<ViewerSettings>().set(
+            Scope::Account,
+            "Tint",
+            SettingValue::Color3([0.9, 0.1, 0.1]),
+        );
+        app.update();
+        approx_rgb(swatch_rgb(&app, swatch), [0.9, 0.1, 0.1]);
+
+        app.world_mut()
+            .resource_mut::<ViewerSettings>()
+            .reset(Scope::Account, "Tint");
+        app.update();
+        approx_rgb(swatch_rgb(&app, swatch), [0.2, 0.4, 0.6]);
         Ok(())
     }
 

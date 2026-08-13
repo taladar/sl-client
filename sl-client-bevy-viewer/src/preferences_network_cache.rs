@@ -45,7 +45,7 @@ use bevy::prelude::*;
 use bevy::tasks::IoTaskPool;
 use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use sl_client_bevy::{Command, Kilobits, SlCommand, SlEvent, SlSessionEvent, Throttle};
-use sl_settings::SettingValue;
+use sl_settings::{Scope, SettingValue};
 
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::preferences::{
@@ -233,7 +233,12 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(BANDWIDTH_MIN_KBPS, BANDWIDTH_MAX_KBPS),
         SliderStep(BANDWIDTH_STEP_KBPS),
     );
-    spawn_reset_button(commands, bandwidth_row, SETTING_MAX_BANDWIDTH);
+    spawn_reset_button(
+        commands,
+        bandwidth_row,
+        Scope::Global,
+        SETTING_MAX_BANDWIDTH,
+    );
 
     spawn_pref_section(commands, panel, "preferences-section-proxy");
     spawn_pref_checkbox(
@@ -260,7 +265,12 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(CACHE_SIZE_MIN_MB, CACHE_SIZE_MAX_MB),
         SliderStep(CACHE_SIZE_STEP_MB),
     );
-    spawn_reset_button(commands, texture_row, SETTING_TEXTURE_CACHE_SIZE_MB);
+    spawn_reset_button(
+        commands,
+        texture_row,
+        Scope::Global,
+        SETTING_TEXTURE_CACHE_SIZE_MB,
+    );
     let asset_row = spawn_pref_slider(
         commands,
         panel,
@@ -269,7 +279,12 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
         SliderRange::new(CACHE_SIZE_MIN_MB, CACHE_SIZE_MAX_MB),
         SliderStep(CACHE_SIZE_STEP_MB),
     );
-    spawn_reset_button(commands, asset_row, SETTING_ASSET_CACHE_SIZE_MB);
+    spawn_reset_button(
+        commands,
+        asset_row,
+        Scope::Global,
+        SETTING_ASSET_CACHE_SIZE_MB,
+    );
     let location_row = spawn_pref_text(
         commands,
         panel,
@@ -278,7 +293,12 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
         TextInputKind::Line,
         1.0,
     );
-    spawn_reset_button(commands, location_row, SETTING_CACHE_LOCATION);
+    spawn_reset_button(
+        commands,
+        location_row,
+        Scope::Global,
+        SETTING_CACHE_LOCATION,
+    );
     let chat_log_row = spawn_pref_text(
         commands,
         panel,
@@ -287,7 +307,12 @@ pub(crate) fn build_network_cache_tab(commands: &mut Commands, panel: Entity) {
         TextInputKind::Line,
         1.0,
     );
-    spawn_reset_button(commands, chat_log_row, SETTING_CHAT_LOG_LOCATION);
+    spawn_reset_button(
+        commands,
+        chat_log_row,
+        Scope::Global,
+        SETTING_CHAT_LOG_LOCATION,
+    );
     let clear_cache = spawn_pref_action(
         commands,
         panel,

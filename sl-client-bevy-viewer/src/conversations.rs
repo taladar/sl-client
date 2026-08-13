@@ -182,8 +182,27 @@ const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
 /// the scrollback reads as a sunken well.
 const TRANSCRIPT_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
-/// A transcript line's colour.
-const TRANSCRIPT_COLOR: Color = Color::srgb(0.88, 0.90, 0.95);
+/// A transcript line's palette colour — the user-tunable chat colours of the
+/// preferences colors & skins tab ([`crate::skin_colors`]): on the Nearby tab
+/// by speaker (own / other avatar / object / system), on the IM tabs (direct,
+/// group, conference) our own lines keep the self colour and everything else
+/// takes the IM colour.
+fn transcript_line_color(
+    key: ConversationKey,
+    link: SpeakerLink,
+    settings: Option<&crate::settings::ViewerSettings>,
+) -> Color {
+    let name = match (key, link) {
+        (_, SpeakerLink::Own) => crate::skin_colors::SETTING_CHAT_SELF,
+        (ConversationKey::Nearby, SpeakerLink::Agent(_)) => crate::skin_colors::SETTING_CHAT_OTHERS,
+        (ConversationKey::Nearby, SpeakerLink::Object(_)) => {
+            crate::skin_colors::SETTING_CHAT_OBJECTS
+        }
+        (ConversationKey::Nearby, SpeakerLink::None) => crate::skin_colors::SETTING_CHAT_SYSTEM,
+        _im_tab => crate::skin_colors::SETTING_CHAT_IM,
+    };
+    crate::skin_colors::setting_color(settings, name)
+}
 
 /// The "X is typing…" line's colour — dim, so it reads as ephemeral status.
 const TYPING_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
@@ -1760,10 +1779,49 @@ fn refresh_conversations(
     mut nodes: Query<&mut Node>,
     mut scrolls: Query<&mut ScrollPosition>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
+    mut last_palette: Local<Option<[Color; 5]>>,
 ) {
     let Some(ui) = ui.as_deref_mut() else {
         return;
     };
+    // Force every transcript to rebuild when the chat palette changes (a live
+    // colour-picker drag, a skin switch), so a recolour does not wait for the
+    // next arriving line. `u64::MAX` is the established force-rebuild marker.
+    let palette = [
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::Own,
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::Agent(AgentKey::from(sl_client_bevy::Uuid::nil())),
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::Object(ObjectKey::from(sl_client_bevy::Uuid::nil())),
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::None,
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Conference(ImSessionId::from(sl_client_bevy::Uuid::nil())),
+            SpeakerLink::None,
+            settings.as_deref(),
+        ),
+    ];
+    if *last_palette != Some(palette) {
+        if last_palette.is_some() {
+            for view in ui.views.values_mut() {
+                view.rendered_revision = u64::MAX;
+            }
+        }
+        *last_palette = Some(palette);
+    }
     let active_key = model.active_key();
     let you = translator.get(YOU_LABEL_KEY);
     let nearby_title = translator.get(NEARBY_TITLE_KEY);
@@ -1831,7 +1889,8 @@ fn refresh_conversations(
                 let mut style = LinkTextStyle::at(transcript_font_size_for_step(
                     transcript_font_step(settings.as_deref()),
                 ));
-                style.plain_color = TRANSCRIPT_COLOR;
+                style.plain_color =
+                    transcript_line_color(entry.key, line.speaker_link, settings.as_deref());
                 spawn_linkified_text(
                     &mut commands,
                     view.transcript_column,
@@ -2024,10 +2083,56 @@ fn position_conversations_dock_host(
 mod tests {
     use super::{
         Command, ConversationKey, ConversationModel, ConversationTitle, SpeakerLink,
-        TranscriptLine, command_for, invite_command, line_text, tab_label,
+        TranscriptLine, command_for, invite_command, line_text, tab_label, transcript_line_color,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, ChatSource, GroupKey, ImSessionId, ObjectKey, Uuid};
+
+    /// The transcript colour chooser: the Nearby tab colours by speaker, every
+    /// IM-flavoured tab colours own lines self and everything else IM.
+    #[test]
+    fn transcript_colors_choose_by_tab_and_speaker() {
+        let palette = |name: &str| crate::skin_colors::setting_color(None, name);
+        let agent = SpeakerLink::Agent(AgentKey::from(Uuid::from_u128(1)));
+        let object = SpeakerLink::Object(ObjectKey::from(Uuid::from_u128(2)));
+        let nearby = ConversationKey::Nearby;
+        assert_eq!(
+            transcript_line_color(nearby, SpeakerLink::Own, None),
+            palette(crate::skin_colors::SETTING_CHAT_SELF)
+        );
+        assert_eq!(
+            transcript_line_color(nearby, agent, None),
+            palette(crate::skin_colors::SETTING_CHAT_OTHERS)
+        );
+        assert_eq!(
+            transcript_line_color(nearby, object, None),
+            palette(crate::skin_colors::SETTING_CHAT_OBJECTS)
+        );
+        assert_eq!(
+            transcript_line_color(nearby, SpeakerLink::None, None),
+            palette(crate::skin_colors::SETTING_CHAT_SYSTEM)
+        );
+
+        let direct = ConversationKey::Direct(AgentKey::from(Uuid::from_u128(3)));
+        assert_eq!(
+            transcript_line_color(direct, SpeakerLink::Own, None),
+            palette(crate::skin_colors::SETTING_CHAT_SELF)
+        );
+        assert_eq!(
+            transcript_line_color(direct, agent, None),
+            palette(crate::skin_colors::SETTING_CHAT_IM)
+        );
+        let group = ConversationKey::Group(GroupKey::from(Uuid::from_u128(4)));
+        assert_eq!(
+            transcript_line_color(group, agent, None),
+            palette(crate::skin_colors::SETTING_CHAT_IM)
+        );
+        let conference = ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(5)));
+        assert_eq!(
+            transcript_line_color(conference, SpeakerLink::None, None),
+            palette(crate::skin_colors::SETTING_CHAT_IM)
+        );
+    }
 
     /// A shared reference to `key`'s conversation in `model`, if it exists — the
     /// test-side lookup (the model has no non-test accessor for it).

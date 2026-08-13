@@ -261,7 +261,7 @@ pub fn run() {
         .add_message::<crate::emoji_picker::OpenEmojiPicker>()
         // The skin / design-token system, so the gallery is dressed in a real
         // skin and the switcher below can flip skins and theme overlays live.
-        .insert_resource(crate::skin::SkinSelection::resolve(None, None))
+        .insert_resource(crate::skin::SkinSelection::resolve(None, None, None, None))
         .add_plugins(crate::skin::ViewerSkinPlugin)
         // The web-media engine + browser widget, so the browser-view specimen
         // renders a real (offline, data-URL) page in the gallery — the fastest

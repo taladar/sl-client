@@ -26,7 +26,9 @@
 //! in [`ChatMessage::from_name`](sl_client_bevy::ChatMessage).
 
 use bevy::prelude::*;
-use sl_client_bevy::{ChatMessage, ChatType, SlEvent, SlSessionEvent};
+use sl_client_bevy::{
+    AgentKey, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
+};
 
 use crate::bottom_toolbar::BottomArea;
 use crate::preferences_chat::{
@@ -132,6 +134,22 @@ impl LocalChatNotice {
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct ChatOverlayContainer;
 
+/// Which palette colour an overlay line renders in, classified once at
+/// arrival — the user-tunable chat colours of the preferences colors & skins
+/// tab ([`crate::skin_colors`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChatLineSource {
+    /// The own avatar spoke ([`crate::skin_colors::SETTING_CHAT_SELF`]).
+    Own,
+    /// Another avatar spoke ([`crate::skin_colors::SETTING_CHAT_OTHERS`]).
+    Others,
+    /// An in-world object spoke ([`crate::skin_colors::SETTING_CHAT_OBJECTS`]).
+    Objects,
+    /// The system / region, an unknown source, or a viewer-generated notice
+    /// ([`crate::skin_colors::SETTING_CHAT_SYSTEM`]).
+    System,
+}
+
 /// One transient chat line in the overlay: a text node under the
 /// [`ChatOverlayContainer`] that ages, fades, and despawns on its own.
 #[derive(Component, Debug, Clone, Copy)]
@@ -144,6 +162,9 @@ pub(crate) struct ChatOverlayLine {
     /// [`CHAT_MAX_LINES`] evicts the oldest line deterministically even when
     /// several lines share the same age.
     seq: u64,
+    /// The line's colour classification, fixed at arrival; the per-frame tick
+    /// re-resolves the palette so a live picker drag recolours floating lines.
+    source: ChatLineSource,
 }
 
 /// The overlay's only mutable state: the next arrival sequence number to stamp on
@@ -164,6 +185,30 @@ fn format_chat_line(message: &ChatMessage) -> String {
         ChatType::Shout => format!("[shout] {body}"),
         _other => body,
     }
+}
+
+/// Classify a received message's speaker for the line colour: the own avatar,
+/// another avatar, an object, or the system (unknown sources read as system,
+/// the defensive default).
+fn classify_source(message: &ChatMessage, own_agent: Option<AgentKey>) -> ChatLineSource {
+    match &message.source {
+        ChatSource::Agent(agent) if Some(*agent) == own_agent => ChatLineSource::Own,
+        ChatSource::Agent(_) => ChatLineSource::Others,
+        ChatSource::Object(_) => ChatLineSource::Objects,
+        ChatSource::System | ChatSource::Unknown { .. } => ChatLineSource::System,
+    }
+}
+
+/// A line's palette colour (opaque; the fade owns the alpha), re-resolved from
+/// the store so an edit on the colors & skins tab applies live.
+fn line_color(source: ChatLineSource, settings: Option<&ViewerSettings>) -> Color {
+    let name = match source {
+        ChatLineSource::Own => crate::skin_colors::SETTING_CHAT_SELF,
+        ChatLineSource::Others => crate::skin_colors::SETTING_CHAT_OTHERS,
+        ChatLineSource::Objects => crate::skin_colors::SETTING_CHAT_OBJECTS,
+        ChatLineSource::System => crate::skin_colors::SETTING_CHAT_SYSTEM,
+    };
+    crate::skin_colors::setting_color(settings, name)
 }
 
 /// A line's alpha from its age: fully opaque through `hold` seconds, then a
@@ -268,23 +313,32 @@ pub(crate) fn update_chat_overlay(
     mut overlay: ResMut<ChatOverlay>,
     container: Query<Entity, With<ChatOverlayContainer>>,
     settings: Option<Res<ViewerSettings>>,
+    identity: Option<Res<SlIdentity>>,
 ) {
     let Ok(container) = container.single() else {
         return;
     };
     let font_size = overlay_font_size(font_step(settings.as_deref()));
-    let spawn_line = |line: String, overlay: &mut ChatOverlay, commands: &mut Commands| {
+    let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
+    let spawn_line = |line: String,
+                      source: ChatLineSource,
+                      overlay: &mut ChatOverlay,
+                      commands: &mut Commands| {
         debug!("chat overlay: {line}");
         let seq = overlay.next_seq;
         overlay.next_seq = overlay.next_seq.wrapping_add(1);
         commands.spawn((
             Text::new(line),
             UiFont::Sans.at(font_size),
-            TextColor(Color::WHITE),
+            TextColor(line_color(source, settings.as_deref())),
             // Transparent to picks, like its container: a fading chat line must
             // not block a world click that happens to land on it.
             Pickable::IGNORE,
-            ChatOverlayLine { age: 0.0, seq },
+            ChatOverlayLine {
+                age: 0.0,
+                seq,
+                source,
+            },
             ChildOf(container),
         ));
     };
@@ -292,21 +346,33 @@ pub(crate) fn update_chat_overlay(
         if let SlSessionEvent::ChatReceived(message) = &event.0
             && is_displayable(message)
         {
-            spawn_line(format_chat_line(message), &mut overlay, &mut commands);
+            spawn_line(
+                format_chat_line(message),
+                classify_source(message, own_agent),
+                &mut overlay,
+                &mut commands,
+            );
         }
     }
     // Client-generated notices (build-tool alerts, etc.) render as overlay lines
     // too, so viewer feedback shares the on-screen local-chat surface.
     for notice in notices.read() {
-        spawn_line(notice.text.clone(), &mut overlay, &mut commands);
+        spawn_line(
+            notice.text.clone(),
+            ChatLineSource::System,
+            &mut overlay,
+            &mut commands,
+        );
     }
 }
 
-/// Advance every line's age by this frame's delta, drive each line's alpha from
-/// its own age, despawn lines that have fully faded, and evict the oldest lines
-/// beyond the stored line cap so a burst cannot grow the column without bound.
-/// The hold time and cap re-resolve from the settings every frame, so a
-/// preference change governs the already-floating lines too.
+/// Advance every line's age by this frame's delta, drive each line's colour
+/// (its palette colour at the age's alpha) from its own age, despawn lines
+/// that have fully faded, and evict the oldest lines beyond the stored line
+/// cap so a burst cannot grow the column without bound. The hold time, cap
+/// and palette re-resolve from the settings every frame, so a preference
+/// change — including a live colour-picker drag — governs the
+/// already-floating lines too.
 pub(crate) fn tick_chat_overlay(
     mut commands: Commands,
     time: Res<Time>,
@@ -325,7 +391,11 @@ pub(crate) fn tick_chat_overlay(
             commands.entity(entity).despawn();
             continue;
         }
-        color.0 = color.0.with_alpha(line_alpha(line.age, hold));
+        let wanted =
+            line_color(line.source, settings.as_deref()).with_alpha(line_alpha(line.age, hold));
+        if color.0 != wanted {
+            color.0 = wanted;
+        }
         survivors.push((entity, line.seq));
     }
     if survivors.len() > cap {
@@ -401,6 +471,35 @@ mod tests {
             format_chat_line(&message("Avatar Tester", ChatType::Shout, "HEY")),
             "[shout] Avatar Tester: HEY"
         );
+    }
+
+    /// Speaker classification: the own agent is `Own`, another agent
+    /// `Others`, an object `Objects`, and system / unknown sources `System` —
+    /// with no identity every agent reads as `Others`.
+    #[test]
+    fn source_classification_by_speaker() {
+        use sl_client_bevy::{AgentKey, ObjectKey, Uuid};
+
+        use super::{ChatLineSource, classify_source};
+
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let other = AgentKey::from(Uuid::from_u128(2));
+        let mut chat = message("A", ChatType::Normal, "hi");
+
+        chat.source = ChatSource::Agent(own);
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::Own);
+        assert_eq!(classify_source(&chat, None), ChatLineSource::Others);
+        chat.source = ChatSource::Agent(other);
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::Others);
+        chat.source = ChatSource::Object(ObjectKey::from(Uuid::from_u128(3)));
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::Objects);
+        chat.source = ChatSource::System;
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::System);
+        chat.source = ChatSource::Unknown {
+            source_type: 9,
+            source_id: Uuid::from_u128(4),
+        };
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::System);
     }
 
     /// Typing triggers and empty-text messages are not displayed.

@@ -96,6 +96,17 @@ impl ViewerSettings {
         }
     }
 
+    /// Replace a registered setting's declared default (see
+    /// [`SettingsStore::set_default`](sl_settings::SettingsStore::set_default)),
+    /// logging and swallowing a (wrong-type or unregistered) error so a bad
+    /// dynamic default can never abort a frame. The skin-colour bridge
+    /// ([`crate::skin_colors`]) feeds the active skin's palette in here.
+    pub(crate) fn set_default(&mut self, name: &str, value: SettingValue) {
+        if let Err(error) = self.store.set_default(name, value) {
+            warn!("settings: could not set default for {name}: {error}");
+        }
+    }
+
     /// Write a value to the per-avatar [`Account`](Scope::Account) scope,
     /// logging and swallowing a (wrong-type or unregistered) error so a bad write
     /// can never abort a frame. The floater-geometry persistence
@@ -259,9 +270,11 @@ impl ViewerSettings {
         crate::hover_tooltip::register_settings(&mut settings);
         crate::preferences_camera_move::register_settings(&mut settings);
         crate::preferences_chat::register_settings(&mut settings);
+        crate::preferences_colors_skins::register_settings(&mut settings);
         crate::preferences_general::register_settings(&mut settings);
         crate::preferences_graphics::register_settings(&mut settings);
         crate::preferences_network_cache::register_settings(&mut settings);
+        crate::skin_colors::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);
         crate::render_priority::register_settings(&mut settings);
         crate::particles::register_settings(&mut settings);

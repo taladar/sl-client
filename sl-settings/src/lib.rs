@@ -192,6 +192,58 @@ mod tests {
         Ok(())
     }
 
+    /// `set_default` swaps the declared default in place: an un-overridden
+    /// setting resolves to the new default, while an existing override is
+    /// untouched and still wins.
+    #[test]
+    fn set_default_updates_resolution_not_overrides() -> Result<(), TestError> {
+        let mut store = populated()?;
+        store.set_default("Tint", SettingValue::Color3([0.7, 0.8, 0.9]))?;
+        approx_slice(&store.get_color3("Tint")?, &[0.7, 0.8, 0.9]);
+        assert!(!store.is_overridden("Tint"), "a default is not an override");
+
+        store.set(
+            Scope::Account,
+            "Tint",
+            SettingValue::Color3([0.5, 0.5, 0.5]),
+        )?;
+        store.set_default("Tint", SettingValue::Color3([0.1, 0.1, 0.1]))?;
+        approx_slice(&store.get_color3("Tint")?, &[0.5, 0.5, 0.5]);
+
+        // Resetting the override falls back to the latest default.
+        assert!(store.reset(Scope::Account, "Tint"));
+        approx_slice(&store.get_color3("Tint")?, &[0.1, 0.1, 0.1]);
+        Ok(())
+    }
+
+    /// `set_default` rejects an unknown name and a value of the wrong type, and
+    /// never persists: a saved scope contains overrides only, however the
+    /// defaults were swapped.
+    #[test]
+    fn set_default_rejects_bad_input_and_never_persists() -> Result<(), TestError> {
+        let mut store = populated()?;
+        assert!(matches!(
+            store.set_default("Nope", SettingValue::Bool(true)),
+            Err(SettingError::UnknownSetting(name)) if name == "Nope"
+        ));
+        assert!(matches!(
+            store.set_default("Tint", SettingValue::Bool(true)),
+            Err(SettingError::TypeMismatch {
+                expected: SettingKind::Color3,
+                found: SettingKind::Bool,
+                ..
+            })
+        ));
+
+        store.set_default("Tint", SettingValue::Color3([0.7, 0.8, 0.9]))?;
+        assert_eq!(
+            store.serialize_scope(Scope::Global),
+            "",
+            "a swapped default must not serialize as an override"
+        );
+        Ok(())
+    }
+
     /// Clearing the account scope drops every account override at once.
     #[test]
     fn clearing_account_scope_drops_all_overrides() -> Result<(), TestError> {
