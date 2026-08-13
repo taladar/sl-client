@@ -1070,6 +1070,10 @@ struct TakenControls {
 pub struct Session {
     /// The login parameters.
     login: LoginParams,
+    /// The XML-RPC method name for the login call when a redirect
+    /// (`login = "indeterminate"`) re-armed it with a `next_method` other
+    /// than the standard `login_to_simulator`. `None` until then.
+    login_method: Option<String>,
     /// The current lifecycle state.
     state: SessionState,
     /// The active (root) circuit, once login has succeeded.

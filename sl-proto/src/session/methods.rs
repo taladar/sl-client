@@ -182,6 +182,7 @@ impl Session {
     pub const fn new(login: LoginParams) -> Self {
         Self {
             login,
+            login_method: None,
             state: SessionState::New,
             circuit: None,
             children: BTreeMap::new(),
@@ -1470,13 +1471,21 @@ impl Session {
     }
 
     /// The XML-RPC login request the driver must perform, or `None` once login
-    /// has already been answered.
+    /// has already been answered. After a login redirect re-armed the session
+    /// (see [`handle_login_response`](Self::handle_login_response)), this is
+    /// the follow-up request aimed at the redirect's `next_url`/`next_method`.
     #[must_use]
     pub fn login_http_request(&self) -> Option<LoginHttpRequest> {
         if matches!(self.state, SessionState::New) {
+            let body = match &self.login_method {
+                Some(method) => {
+                    sl_wire::build_login_request_with_method(&self.login.request, method)
+                }
+                None => build_login_request(&self.login.request),
+            };
             Some(LoginHttpRequest {
                 url: self.login.login_uri.clone(),
-                body: build_login_request(&self.login.request),
+                body,
                 user_agent: self.login.request.user_agent(),
             })
         } else {
@@ -1487,13 +1496,20 @@ impl Session {
     /// Feeds back the parsed login response, bootstrapping the circuit on
     /// success or closing the session on failure.
     ///
+    /// A [`sl_wire::LoginResponse::Redirect`] (`login = "indeterminate"`)
+    /// keeps the session in its fresh state and re-arms
+    /// [`login_http_request`](Self::login_http_request) with the redirect's
+    /// `next_url`/`next_method`, so the driver simply performs the login HTTP
+    /// request again (bounding the number of hops is the driver's job).
+    ///
     /// # Errors
     ///
     /// Returns [`Error::SessionClosed`] if the session has already reached its
     /// terminal closed/disconnected state, or [`Error::AlreadyLoggedIn`] if it
-    /// is already logged in — login is valid only once, from the freshly
-    /// constructed state, so a relogin must use a fresh [`Session`]. Returns
-    /// [`Error::Wire`] if a bootstrap packet fails to encode.
+    /// is already logged in — login is answered only once, from the freshly
+    /// constructed state (redirects re-arm rather than answer it), so a
+    /// relogin must use a fresh [`Session`]. Returns [`Error::Wire`] if a
+    /// bootstrap packet fails to encode.
     pub fn handle_login_response(
         &mut self,
         response: sl_wire::LoginResponse,
@@ -1528,6 +1544,12 @@ impl Session {
                     reason: "mfa_challenge".to_owned(),
                     message: challenge.message,
                 });
+            }
+            // A login redirect: stay in the fresh state and aim the pending
+            // login request at the new endpoint; the driver re-POSTs it.
+            sl_wire::LoginResponse::Redirect(redirect) => {
+                self.login.login_uri = redirect.next_url;
+                self.login_method = Some(redirect.next_method);
             }
             sl_wire::LoginResponse::Success(success) => {
                 let sim_addr = SocketAddr::new(IpAddr::V4(success.sim_ip), success.sim_port);

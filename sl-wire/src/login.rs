@@ -4,13 +4,14 @@
 //! body and parses an XML-RPC response string into a [`LoginResponse`]. The
 //! actual HTTP(S) transport is performed by the I/O driver crates.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
 use crate::geometry::Direction;
+use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
-use sl_types::key::{AgentKey, InventoryFolderKey};
+use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, TextureKey};
 use sl_types::map::RegionCoordinates;
 use thiserror::Error;
 use uuid::Uuid;
@@ -141,16 +142,43 @@ pub struct LoginRequest {
     pub version: String,
     /// The platform string (e.g. `"lin"`, `"win"`, `"mac"`).
     pub platform: String,
+    /// The OS version string (`platform_string`, e.g. `"Linux 6.1"`; may be
+    /// empty).
+    pub platform_string: String,
+    /// The OS/platform version number (`platform_version`; may be empty).
+    pub platform_version: String,
+    /// The process address size in bits (`address_size`, 32 or 64).
+    pub address_size: i32,
+    /// A stable host identifier (`host_id`; may be empty — the reference
+    /// viewer sends its `HostID` setting).
+    pub host_id: String,
     /// A hashed MAC address (any stable token; OpenSim is lenient).
     pub mac: String,
     /// A machine/installation id (may be empty).
     pub id0: String,
+    /// How the previous session ended (`last_exec_event`, the viewer's
+    /// crash-state code), if reported.
+    pub last_exec_event: Option<i32>,
+    /// The previous session's duration (`last_exec_duration`), if reported.
+    pub last_exec_duration: Option<i32>,
+    /// The previous session's agent session id (`last_exec_session_id`), if
+    /// reported.
+    pub last_exec_session_id: Option<Uuid>,
     /// The multi-factor authentication token (the one-time code), or empty on
     /// the first attempt before any [`LoginResponse::MfaChallenge`].
     pub token: String,
     /// A remembered multi-factor `mfa_hash` to echo back, or empty. Populated
     /// from a prior [`LoginSuccess::mfa_hash`] or an [`MfaChallenge::mfa_hash`].
     pub mfa_hash: String,
+    /// Whether this request accepts the grid's terms of service
+    /// (`agree_to_tos`). Kept `true` by default; a server that gates on a
+    /// fresh ToS acceptance rejects with reason `"tos"` until the viewer
+    /// re-sends with this set (see [`LoginRejectKind::Tos`]).
+    pub agree_to_tos: bool,
+    /// Whether this request acknowledges the grid's critical message
+    /// (`read_critical`). Kept `true` by default; the `"critical"` gate
+    /// mirrors the ToS gate (see [`LoginRejectKind::CriticalMessage`]).
+    pub read_critical: bool,
     /// The requested response option flags (e.g. `inventory-root`).
     pub options: Vec<String>,
 }
@@ -180,10 +208,19 @@ impl LoginRequest {
             channel: channel.into(),
             version: version.into(),
             platform: "lin".to_owned(),
+            platform_string: String::new(),
+            platform_version: String::new(),
+            address_size: 64,
+            host_id: String::new(),
             mac: "00000000000000000000000000000000".to_owned(),
             id0: String::new(),
+            last_exec_event: None,
+            last_exec_duration: None,
+            last_exec_session_id: None,
             token: String::new(),
             mfa_hash: String::new(),
+            agree_to_tos: true,
+            read_critical: true,
             // Request the inventory root and folder skeleton so the login
             // response carries the agent's full folder tree, the matching
             // Library ("OpenSim Library" / "Library") roots and skeleton so it
@@ -234,10 +271,18 @@ pub fn password_hash(password: &str) -> String {
 /// Builds the XML-RPC request body for a `login_to_simulator` call.
 #[must_use]
 pub fn build_login_request(request: &LoginRequest) -> String {
+    build_login_request_with_method(request, "login_to_simulator")
+}
+
+/// Builds the XML-RPC request body for a login call with an explicit method
+/// name — the same struct as [`build_login_request`], but named per a
+/// [`LoginRedirect::next_method`] when following a login redirect.
+#[must_use]
+pub fn build_login_request_with_method(request: &LoginRequest, method_name: &str) -> String {
     let mut out = String::new();
-    out.push_str(
-        "<?xml version=\"1.0\"?>\n<methodCall>\n<methodName>login_to_simulator</methodName>\n<params><param><value><struct>\n",
-    );
+    out.push_str("<?xml version=\"1.0\"?>\n<methodCall>\n<methodName>");
+    push_escaped(&mut out, method_name);
+    out.push_str("</methodName>\n<params><param><value><struct>\n");
     push_string_member(&mut out, "first", &request.first_name);
     push_string_member(&mut out, "last", &request.last_name);
     push_string_member(&mut out, "passwd", &password_hash(&request.password));
@@ -245,15 +290,28 @@ pub fn build_login_request(request: &LoginRequest) -> String {
     push_string_member(&mut out, "channel", &request.channel);
     push_string_member(&mut out, "version", &request.version);
     push_string_member(&mut out, "platform", &request.platform);
+    push_string_member(&mut out, "platform_string", &request.platform_string);
+    push_string_member(&mut out, "platform_version", &request.platform_version);
+    push_int_member(&mut out, "address_size", i64::from(request.address_size));
+    push_string_member(&mut out, "host_id", &request.host_id);
     push_string_member(&mut out, "mac", &request.mac);
     push_string_member(&mut out, "id0", &request.id0);
+    if let Some(event) = request.last_exec_event {
+        push_int_member(&mut out, "last_exec_event", i64::from(event));
+    }
+    if let Some(duration) = request.last_exec_duration {
+        push_int_member(&mut out, "last_exec_duration", i64::from(duration));
+    }
+    if let Some(session_id) = request.last_exec_session_id {
+        push_string_member(&mut out, "last_exec_session_id", &session_id.to_string());
+    }
     push_string_member(&mut out, "token", &request.token);
     push_string_member(&mut out, "mfa_hash", &request.mfa_hash);
-    push_bool_member(&mut out, "agree_to_tos", true);
-    push_bool_member(&mut out, "read_critical", true);
+    push_bool_member(&mut out, "agree_to_tos", request.agree_to_tos);
+    push_bool_member(&mut out, "read_critical", request.read_critical);
     // Request structured error reasons (e.g. `mfa_challenge`).
     push_bool_member(&mut out, "extended_errors", true);
-    push_options_member(&mut out, &request.options);
+    push_string_array_member(&mut out, "options", &request.options);
     out.push_str("</struct></value></param></params>\n</methodCall>\n");
     out
 }
@@ -276,12 +334,15 @@ fn push_bool_member(out: &mut String, name: &str, value: bool) {
     out.push_str("</boolean></value></member>\n");
 }
 
-/// Appends the `options` array member.
-fn push_options_member(out: &mut String, options: &[String]) {
-    out.push_str("<member><name>options</name><value><array><data>\n");
-    for option in options {
+/// Appends an array-of-strings member (the request `options` list, a
+/// redirect's `next_options`), the form [`array_strings`] reads.
+fn push_string_array_member(out: &mut String, name: &str, values: &[String]) {
+    out.push_str("<member><name>");
+    out.push_str(name);
+    out.push_str("</name><value><array><data>\n");
+    for value in values {
         out.push_str("<value><string>");
-        push_escaped(out, option);
+        push_escaped(out, value);
         out.push_str("</string></value>\n");
     }
     out.push_str("</data></array></value></member>\n");
@@ -301,7 +362,8 @@ fn push_escaped(out: &mut String, value: &str) {
     }
 }
 
-/// A parsed login response: success, a multi-factor challenge, or a failure.
+/// A parsed login response: success, a multi-factor challenge, a redirect to
+/// another login endpoint, or a failure.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum LoginResponse {
@@ -311,8 +373,33 @@ pub enum LoginResponse {
     /// [`LoginRequest::with_mfa`], passing the code and this challenge's
     /// [`MfaChallenge::mfa_hash`].
     MfaChallenge(MfaChallenge),
+    /// The grid redirected the login (`login == "indeterminate"`): re-POST
+    /// the same request to [`LoginRedirect::next_url`].
+    Redirect(LoginRedirect),
     /// The login was rejected by the grid.
     Failure(LoginFailure),
+}
+
+/// A login redirect (`login == "indeterminate"`): the grid wants the same
+/// login re-POSTed to another endpoint — Second Life uses this to hand a
+/// login off between servers. The reference viewer re-sends the identical
+/// parameter struct to [`next_url`](Self::next_url) as an XML-RPC call named
+/// [`next_method`](Self::next_method), looping until a terminal
+/// success/failure arrives (our drivers bound the loop).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LoginRedirect {
+    /// The login endpoint to re-POST to (`next_url`).
+    pub next_url: url::Url,
+    /// The XML-RPC method name for the re-POST (`next_method`, normally
+    /// `"login_to_simulator"`).
+    pub next_method: String,
+    /// A human-readable progress message (`message`), if any — the viewer
+    /// shows it on the login progress bar.
+    pub message: Option<String>,
+    /// The `next_options` list, carried for wire fidelity — the reference
+    /// viewer does not consume it.
+    pub next_options: Vec<String>,
 }
 
 /// A multi-factor authentication challenge returned by the grid.
@@ -427,6 +514,253 @@ pub struct LoginSuccess {
     /// the `openid_token` response field. `None` on grids that do not
     /// central-authenticate their websites (OpenSim).
     pub openid_token: Option<String>,
+    /// The avatar's first name as the grid returned it (`first_name`), kept
+    /// verbatim (Second Life has historically quoted it).
+    pub first_name: Option<String>,
+    /// The avatar's last name (`last_name`).
+    pub last_name: Option<String>,
+    /// The avatar's display name (`display_name`).
+    pub display_name: Option<String>,
+    /// The real/owning agent id behind this login (`real_id`), used by grids
+    /// that support aliased logins. Nil/absent on most grids.
+    pub real_id: Option<AgentKey>,
+    /// The maturity rating of the *region* the avatar starts in
+    /// (`agent_region_access`), in the same `"PG"`/`"M"`/`"A"` short-code form
+    /// as [`agent_access`](Self::agent_access).
+    pub agent_region_access: Option<String>,
+    /// The start location the grid actually granted (`start_location`):
+    /// `"last"`, `"home"`, or `"url"` — the *granted* category, not the
+    /// request's `uri:` grammar.
+    pub start_location: Option<String>,
+    /// The server's current UNIX time (`seconds_since_epoch`), used by the
+    /// viewer to compute its offset from grid time.
+    pub seconds_since_epoch: Option<i64>,
+    /// LLUDP message names the client must not send (`udp_blacklist`,
+    /// comma-separated on the wire). Empty when the grid sent none.
+    pub udp_blacklist: Vec<String>,
+    /// The simulator's HTTP port (`http_port`). OpenSim sends it in the
+    /// XML-RPC response only; `None` elsewhere.
+    pub http_port: Option<u16>,
+    /// The start region's X extent in metres (`region_size_x`), sent by
+    /// OpenSim for variable-size regions (256 when absent).
+    pub region_size_x: Option<u32>,
+    /// The start region's Y extent in metres (`region_size_y`). See
+    /// [`region_size_x`](Self::region_size_x).
+    pub region_size_y: Option<u32>,
+    /// The `login-flags` section (first-login flag, daylight savings, …), if
+    /// provided.
+    pub login_flags: Option<LoginFlags>,
+    /// The `global-textures` section (grid default sun/cloud/moon texture
+    /// ids), if provided.
+    pub global_textures: Option<GlobalTextures>,
+    /// The `ui-config` section, if provided.
+    pub ui_config: Option<UiConfig>,
+    /// The `initial-outfit` section (first-login library outfit), if
+    /// provided.
+    pub initial_outfit: Option<InitialOutfit>,
+    /// The `newuser-config` section (default new-user avatars), if provided.
+    pub newuser_config: Option<NewUserConfig>,
+    /// The `voice-config` section (the grid's voice backend), if provided.
+    pub voice_config: Option<VoiceConfig>,
+    /// The avatar's active gestures (`gestures`). Empty if not
+    /// requested/provided.
+    pub gestures: Vec<GestureEntry>,
+    /// The grid's event directory categories (`event_categories`). Empty if
+    /// not requested/provided.
+    pub event_categories: Vec<LoginCategory>,
+    /// The grid's classified-ad categories (`classified_categories`). Empty
+    /// if not requested/provided.
+    pub classified_categories: Vec<LoginCategory>,
+    /// The `event_notifications` entries, kept as opaque [`Llsd`] values —
+    /// OpenSim always sends an empty list and Second Life's shape is not
+    /// pinned by the reference viewer's parser, so nothing is discarded.
+    pub event_notifications: Vec<Llsd>,
+    /// The `tutorial_setting` entries (tutorial web page URLs). Empty if not
+    /// requested/provided.
+    pub tutorial_settings: Vec<TutorialSetting>,
+    /// The grid's help-page URL *template* (`help_url_format`, with
+    /// substitution placeholders — deliberately not parsed as a URL).
+    pub help_url_format: Option<String>,
+    /// The web-profile base URL (`web_profile_url`).
+    pub web_profile_url: Option<url::Url>,
+    /// The profile server base URL (`profile-server-url`, OpenSim).
+    pub profile_server_url: Option<url::Url>,
+    /// The search server URL (`search`, OpenSim).
+    pub search_url: Option<url::Url>,
+    /// The destination-guide URL (`destination_guide_url`).
+    pub destination_guide_url: Option<url::Url>,
+    /// The avatar-picker URL (`avatar_picker_url`).
+    pub avatar_picker_url: Option<url::Url>,
+    /// The grid's currency symbol (`currency`, e.g. `"L$"`; OpenSim helper).
+    pub currency: Option<String>,
+    /// The fee for placing a classified ad (`classified_fee`).
+    pub classified_fee: Option<i32>,
+    /// The fee for a directory listing (`directory_fee`).
+    pub directory_fee: Option<i32>,
+    /// The account's subscription level name (`account_type`, e.g. `"Base"`
+    /// or `"Premium"`; Second Life).
+    pub account_type: Option<String>,
+    /// The account's benefit limits (`account_level_benefits`), kept as an
+    /// opaque [`Llsd`] map — the set of keys is grid-defined and grows
+    /// without notice (Second Life; absent on OpenSim).
+    pub account_level_benefits: Option<Llsd>,
+    /// The grid's subscription packages (`premium_packages`), kept as an
+    /// opaque [`Llsd`] map. The reference viewer requires the `Base` and
+    /// `Premium` keys to exist on grids that send this at all — a fidelity
+    /// obligation on the *caller* filling this in, not on the codec.
+    pub premium_packages: Option<Llsd>,
+}
+
+impl LoginSuccess {
+    /// A success carrying only the fields required to bring up the UDP
+    /// circuit — the seven the reference viewer refuses to proceed without —
+    /// with every optional field empty. The starting point for tests and for
+    /// servers that fill in optional sections one by one.
+    #[must_use]
+    pub const fn minimal(
+        agent_id: AgentKey,
+        session_id: Uuid,
+        secure_session_id: Uuid,
+        circuit_code: CircuitCode,
+        sim_ip: Ipv4Addr,
+        sim_port: u16,
+        seed_capability: url::Url,
+    ) -> Self {
+        Self {
+            agent_id,
+            session_id,
+            secure_session_id,
+            circuit_code,
+            sim_ip,
+            sim_port,
+            seed_capability,
+            message: None,
+            mfa_hash: None,
+            inventory_root: None,
+            inventory_skeleton: Vec::new(),
+            buddy_list: Vec::new(),
+            home: None,
+            look_at: None,
+            region_x: None,
+            region_y: None,
+            agent_access: None,
+            agent_access_max: None,
+            max_agent_groups: None,
+            library_root: None,
+            library_owner: None,
+            library_skeleton: Vec::new(),
+            agent_appearance_service: None,
+            map_server_url: None,
+            openid_url: None,
+            openid_token: None,
+            first_name: None,
+            last_name: None,
+            display_name: None,
+            real_id: None,
+            agent_region_access: None,
+            start_location: None,
+            seconds_since_epoch: None,
+            udp_blacklist: Vec::new(),
+            http_port: None,
+            region_size_x: None,
+            region_size_y: None,
+            login_flags: None,
+            global_textures: None,
+            ui_config: None,
+            initial_outfit: None,
+            newuser_config: None,
+            voice_config: None,
+            gestures: Vec::new(),
+            event_categories: Vec::new(),
+            classified_categories: Vec::new(),
+            event_notifications: Vec::new(),
+            tutorial_settings: Vec::new(),
+            help_url_format: None,
+            web_profile_url: None,
+            profile_server_url: None,
+            search_url: None,
+            destination_guide_url: None,
+            avatar_picker_url: None,
+            currency: None,
+            classified_fee: None,
+            directory_fee: None,
+            account_type: None,
+            account_level_benefits: None,
+            premium_packages: None,
+        }
+    }
+
+    /// Clears every response section whose *request option* name is not in
+    /// `options`, leaving the always-sent fields untouched — the behaviour of
+    /// a grid that honours the request's `options` list (Second Life does;
+    /// OpenSim ignores the list and sends everything).
+    ///
+    /// [`LoginServer::respond`] deliberately does **not** call this: whether
+    /// to honour the options is the serving grid's policy, so a fake grid
+    /// picks by calling (or not calling) this on the success it hands in.
+    pub fn filter_options(&mut self, options: &[String]) {
+        /// Whether `options` contains `name`.
+        fn wants(options: &[String], name: &str) -> bool {
+            options.iter().any(|option| option == name)
+        }
+        if !wants(options, "inventory-root") {
+            self.inventory_root = None;
+        }
+        if !wants(options, "inventory-skeleton") {
+            self.inventory_skeleton.clear();
+        }
+        if !wants(options, "inventory-lib-root") {
+            self.library_root = None;
+        }
+        if !wants(options, "inventory-lib-owner") {
+            self.library_owner = None;
+        }
+        if !wants(options, "inventory-skel-lib") {
+            self.library_skeleton.clear();
+        }
+        if !wants(options, "buddy-list") {
+            self.buddy_list.clear();
+        }
+        if !wants(options, "gestures") {
+            self.gestures.clear();
+        }
+        if !wants(options, "login-flags") {
+            self.login_flags = None;
+        }
+        if !wants(options, "global-textures") {
+            self.global_textures = None;
+        }
+        if !wants(options, "ui-config") {
+            self.ui_config = None;
+        }
+        if !wants(options, "event_categories") {
+            self.event_categories.clear();
+        }
+        if !wants(options, "event_notifications") {
+            self.event_notifications.clear();
+        }
+        if !wants(options, "classified_categories") {
+            self.classified_categories.clear();
+        }
+        if !wants(options, "initial-outfit") {
+            self.initial_outfit = None;
+        }
+        if !wants(options, "newuser-config") {
+            self.newuser_config = None;
+        }
+        if !wants(options, "tutorial_setting") {
+            self.tutorial_settings.clear();
+        }
+        if !wants(options, "voice-config") {
+            self.voice_config = None;
+        }
+        if !wants(options, "map-server-url") {
+            self.map_server_url = None;
+        }
+        if !wants(options, "max-agent-groups") {
+            self.max_agent_groups = None;
+        }
+    }
 }
 
 /// An agent's home location, parsed from the `home` login response field (a
@@ -476,6 +810,111 @@ pub struct BuddyListEntry {
     pub rights_has: i32,
 }
 
+/// One active gesture carried in a login response (`gestures`): the gesture
+/// inventory item and the gesture asset it plays.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GestureEntry {
+    /// The gesture's inventory item id (`item_id`).
+    pub item_id: InventoryKey,
+    /// The gesture's asset id (`asset_id`).
+    pub asset_id: Uuid,
+}
+
+/// The `login-flags` section of a login response: account-state flags the
+/// viewer reads at startup. On the wire this is an array holding one struct of
+/// `"Y"`/`"N"` strings; the three yes/no flags are surfaced as `bool`s and
+/// re-emitted as `"Y"`/`"N"`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LoginFlags {
+    /// Whether the account has logged in before (`ever_logged_in`). The viewer
+    /// treats `false` as a first login (welcome flows, initial outfit).
+    pub ever_logged_in: bool,
+    /// Whether grid time (US Pacific) is currently on daylight savings
+    /// (`daylight_savings`), used by the viewer's clock display.
+    pub daylight_savings: bool,
+    /// Whether the account's avatar has a gender set (`gendered`).
+    pub gendered: bool,
+    /// The `stipend_since_login` value, kept verbatim (OpenSim sends `"N"`;
+    /// the field predates modelling and has no consumer in modern viewers).
+    pub stipend_since_login: String,
+}
+
+/// The `global-textures` section of a login response: the grid-wide default
+/// environment texture ids. Array-of-one-struct on the wire.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct GlobalTextures {
+    /// The sun texture id (`sun_texture_id`).
+    pub sun_texture_id: TextureKey,
+    /// The cloud texture id (`cloud_texture_id`).
+    pub cloud_texture_id: TextureKey,
+    /// The moon texture id (`moon_texture_id`).
+    pub moon_texture_id: TextureKey,
+}
+
+/// The `ui-config` section of a login response. Array-of-one-struct on the
+/// wire, with `"Y"`/`"N"` string values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UiConfig {
+    /// Whether the viewer may show "first life" profile UI
+    /// (`allow_first_life`).
+    pub allow_first_life: bool,
+}
+
+/// The `initial-outfit` section of a login response: the library outfit a
+/// first-time avatar is dressed in. Array-of-one-struct on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct InitialOutfit {
+    /// The library clothing folder name (`folder_name`).
+    pub folder_name: String,
+    /// The outfit's gender (`gender`, e.g. `"female"`).
+    pub gender: String,
+}
+
+/// The `newuser-config` section of a login response: the default avatars a
+/// brand-new account may be offered. Array-of-one-struct on the wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NewUserConfig {
+    /// The default female avatar name (`DefaultFemaleAvatar`), if provided.
+    pub default_female_avatar: Option<String>,
+    /// The default male avatar name (`DefaultMaleAvatar`), if provided.
+    pub default_male_avatar: Option<String>,
+}
+
+/// The `voice-config` section of a login response. Array-of-one-struct on the
+/// wire.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct VoiceConfig {
+    /// The voice backend the grid uses (`VoiceServerType`, e.g. `"webrtc"`).
+    pub voice_server_type: String,
+}
+
+/// One category entry of the `event_categories` / `classified_categories`
+/// login response arrays (both share this wire shape).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LoginCategory {
+    /// The category id (`category_id`).
+    pub category_id: i32,
+    /// The human-readable category name (`category_name`).
+    pub category_name: String,
+}
+
+/// One entry of the `tutorial_setting` login response array.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TutorialSetting {
+    /// The tutorial web page URL (`tutorial_url`), kept verbatim (grids have
+    /// sent both full URLs and URL fragments here).
+    pub tutorial_url: String,
+}
+
 /// The reason a login was rejected.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -484,6 +923,15 @@ pub struct LoginFailure {
     pub reason: String,
     /// The human-readable failure message.
     pub message: String,
+    /// A localization key for the message (`message_id`, e.g.
+    /// `"LoginFailedAccountSuspended"`), sent when the request asked for
+    /// `extended_errors`. The viewer looks it up in its string table and
+    /// substitutes [`message_args`](Self::message_args).
+    pub message_id: Option<String>,
+    /// Substitution arguments for [`message_id`](Self::message_id)
+    /// (`message_args`, e.g. `TIME` for a suspension end, `VERSION` for a
+    /// required update). Empty when the grid sent none.
+    pub message_args: BTreeMap<String, String>,
 }
 
 /// A coarse classification of a [`LoginFailure`], so callers can react to the
@@ -514,6 +962,19 @@ pub enum LoginRejectKind {
     /// Authentication failed: an unknown account or a wrong password (`"key"`).
     /// Retrying with the same credentials cannot succeed.
     BadCredentials,
+    /// The grid requires the terms of service to be accepted (`"tos"`). The
+    /// reference viewer shows the ToS text from the failure message and, on
+    /// acceptance, re-sends the same login with `agree_to_tos` set — retryable
+    /// once the user agrees.
+    Tos,
+    /// The grid requires a critical message to be acknowledged (`"critical"`).
+    /// The reference viewer shows the message and re-sends the same login
+    /// with `read_critical` set — retryable once acknowledged.
+    CriticalMessage,
+    /// The grid requires a viewer update (`"update"` or `"optional"`). The
+    /// required version, when provided, is in
+    /// [`message_args`](LoginFailure::message_args) under `VERSION`.
+    UpdateRequired,
     /// Any other rejection — including the non-retryable `"presence"` variants
     /// (logins administratively restricted, unverified account) and reasons this
     /// classifier does not model. Inspect the raw
@@ -522,9 +983,24 @@ pub enum LoginRejectKind {
 }
 
 impl LoginFailure {
+    /// A failure with the given reason code and message and no extended
+    /// error fields.
+    #[must_use]
+    pub fn new(reason: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            message: message.into(),
+            message_id: None,
+            message_args: BTreeMap::new(),
+        }
+    }
+
     /// Classify this rejection into a [`LoginRejectKind`].
     ///
-    /// `"key"` maps to [`LoginRejectKind::BadCredentials`]. The `"presence"`
+    /// `"key"` maps to [`LoginRejectKind::BadCredentials`], `"tos"` to
+    /// [`LoginRejectKind::Tos`], `"critical"` to
+    /// [`LoginRejectKind::CriticalMessage`], and `"update"`/`"optional"` to
+    /// [`LoginRejectKind::UpdateRequired`]. The `"presence"`
     /// reason maps to [`LoginRejectKind::AlreadyLoggedIn`] *only* when the
     /// message identifies the already-logged-in case (it contains "already
     /// logged in"); the other `"presence"` uses (restricted logins, unverified
@@ -534,6 +1010,9 @@ impl LoginFailure {
     pub fn kind(&self) -> LoginRejectKind {
         match self.reason.as_str() {
             "key" => LoginRejectKind::BadCredentials,
+            "tos" => LoginRejectKind::Tos,
+            "critical" => LoginRejectKind::CriticalMessage,
+            "update" | "optional" => LoginRejectKind::UpdateRequired,
             "presence"
                 if self
                     .message
@@ -608,7 +1087,34 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         .ok_or(LoginParseError::NoStruct)?;
     let members = collect_members(response_struct);
 
-    if members.get("login").map(String::as_str) != Some("true") {
+    let login = members.get("login").map(String::as_str);
+    if login == Some("indeterminate") {
+        // A login redirect: re-POST the same request to `next_url`. A
+        // redirect without a usable `next_url` cannot be followed, so it
+        // degrades to a failure rather than losing the response.
+        let message = members.get("message").cloned();
+        if let Some(next_url) = members
+            .get("next_url")
+            .and_then(|u| url::Url::parse(u.trim()).ok())
+        {
+            return Ok(LoginResponse::Redirect(LoginRedirect {
+                next_url,
+                next_method: members
+                    .get("next_method")
+                    .cloned()
+                    .unwrap_or_else(|| "login_to_simulator".to_owned()),
+                message,
+                next_options: member_value_node(response_struct, "next_options")
+                    .map(array_strings)
+                    .unwrap_or_default(),
+            }));
+        }
+        return Ok(LoginResponse::Failure(LoginFailure::new(
+            "indeterminate",
+            message.unwrap_or_default(),
+        )));
+    }
+    if login != Some("true") {
         let reason = members.get("reason").cloned().unwrap_or_default();
         let message = members.get("message").cloned().unwrap_or_default();
         if reason == "mfa_challenge" {
@@ -617,7 +1123,12 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
                 message,
             }));
         }
-        return Ok(LoginResponse::Failure(LoginFailure { reason, message }));
+        return Ok(LoginResponse::Failure(LoginFailure {
+            reason,
+            message,
+            message_id: members.get("message_id").cloned(),
+            message_args: parse_message_args(response_struct),
+        }));
     }
 
     Ok(LoginResponse::Success(Box::new(LoginSuccess {
@@ -640,8 +1151,11 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
         region_y: members.get("region_y").and_then(|y| y.trim().parse().ok()),
         agent_access: members.get("agent_access").cloned(),
         agent_access_max: members.get("agent_access_max").cloned(),
+        // OpenSim also answers the viewer's OpenSim-specific `max_groups`
+        // option under that key; prefer the canonical name when both exist.
         max_agent_groups: members
             .get("max-agent-groups")
+            .or_else(|| members.get("max_groups"))
             .and_then(|g| g.trim().parse().ok()),
         library_root: parse_array_struct_uuid(response_struct, "inventory-lib-root", "folder_id")
             .map(InventoryFolderKey::from),
@@ -656,6 +1170,74 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
             .get("openid_url")
             .and_then(|s| url::Url::parse(s.trim()).ok()),
         openid_token: members.get("openid_token").cloned(),
+        first_name: members.get("first_name").cloned(),
+        last_name: members.get("last_name").cloned(),
+        display_name: members.get("display_name").cloned(),
+        real_id: members
+            .get("real_id")
+            .and_then(|id| Uuid::parse_str(id.trim()).ok())
+            .map(AgentKey::from),
+        agent_region_access: members.get("agent_region_access").cloned(),
+        start_location: members.get("start_location").cloned(),
+        seconds_since_epoch: members
+            .get("seconds_since_epoch")
+            .and_then(|s| s.trim().parse().ok()),
+        udp_blacklist: members
+            .get("udp_blacklist")
+            .map(|list| {
+                list.split(',')
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        http_port: members.get("http_port").and_then(|p| p.trim().parse().ok()),
+        region_size_x: members
+            .get("region_size_x")
+            .and_then(|s| s.trim().parse().ok()),
+        region_size_y: members
+            .get("region_size_y")
+            .and_then(|s| s.trim().parse().ok()),
+        login_flags: parse_login_flags(response_struct),
+        global_textures: parse_global_textures(response_struct),
+        ui_config: parse_ui_config(response_struct),
+        initial_outfit: parse_initial_outfit(response_struct),
+        newuser_config: parse_newuser_config(response_struct),
+        voice_config: parse_voice_config(response_struct),
+        gestures: parse_gestures(response_struct),
+        event_categories: parse_categories(response_struct, "event_categories"),
+        classified_categories: parse_categories(response_struct, "classified_categories"),
+        event_notifications: parse_event_notifications(response_struct),
+        tutorial_settings: parse_tutorial_settings(response_struct),
+        help_url_format: members.get("help_url_format").cloned(),
+        web_profile_url: members
+            .get("web_profile_url")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        profile_server_url: members
+            .get("profile-server-url")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        search_url: members
+            .get("search")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        destination_guide_url: members
+            .get("destination_guide_url")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        avatar_picker_url: members
+            .get("avatar_picker_url")
+            .and_then(|s| url::Url::parse(s.trim()).ok()),
+        currency: members.get("currency").cloned(),
+        classified_fee: members
+            .get("classified_fee")
+            .and_then(|f| f.trim().parse().ok()),
+        directory_fee: members
+            .get("directory_fee")
+            .and_then(|f| f.trim().parse().ok()),
+        account_type: members.get("account_type").cloned(),
+        account_level_benefits: member_value_node(response_struct, "account_level_benefits")
+            .map(xmlrpc_value_to_llsd),
+        premium_packages: member_value_node(response_struct, "premium_packages")
+            .map(xmlrpc_value_to_llsd),
     })))
 }
 
@@ -677,7 +1259,7 @@ fn parse_array_struct_uuid(
 /// 'position':[rX,rY,rZ], 'look_at':[rX,rY,rZ]}`. The numbers are prefixed with
 /// `r` (the LLSD-over-XML-RPC real-number marker). Returns `None` if any of the
 /// three sections is missing or malformed.
-fn parse_home(value: &str) -> Option<HomeLocation> {
+pub(crate) fn parse_home(value: &str) -> Option<HomeLocation> {
     let handle = r_numbers(section(value, "region_handle")?);
     let position = parse_region_coords(section(value, "position")?)?;
     let look_at = parse_direction(section(value, "look_at")?)?;
@@ -708,7 +1290,7 @@ fn parse_region_coords(value: &str) -> Option<RegionCoordinates> {
 }
 
 /// Parses a quasi-LLSD `r`-prefixed list as a facing direction.
-fn parse_direction(value: &str) -> Option<Direction> {
+pub(crate) fn parse_direction(value: &str) -> Option<Direction> {
     let [x, y, z] = parse_vector3(value)?;
     Some(Direction::new(x, y, z))
 }
@@ -821,6 +1403,286 @@ fn parse_buddy_list(response_struct: roxmltree::Node<'_, '_>) -> Vec<BuddyListEn
         .collect()
 }
 
+/// Extracts the `message_args` substitution map of a failure response (an
+/// XML-RPC struct of scalar values, e.g. `TIME`/`VERSION`). Empty if absent.
+fn parse_message_args(response_struct: roxmltree::Node<'_, '_>) -> BTreeMap<String, String> {
+    member_value_node(response_struct, "message_args")
+        .and_then(|value| value.children().find(|n| n.has_tag_name("struct")))
+        .map(|args_struct| collect_members(args_struct).into_iter().collect())
+        .unwrap_or_default()
+}
+
+/// Returns the member map of the *first* struct inside the named array member
+/// — the "array holding one struct" shape the login response uses for its
+/// config-like sections (`login-flags`, `global-textures`, `ui-config`, …).
+fn first_array_struct_members(
+    response_struct: roxmltree::Node<'_, '_>,
+    member: &str,
+) -> Option<HashMap<String, String>> {
+    let value = member_value_node(response_struct, member)?;
+    Some(collect_members(array_structs(value).next()?))
+}
+
+/// Parses a grid yes/no flag value: `"Y"`, `"true"`, or `"1"` (ASCII
+/// case-insensitive) read as yes; anything else as no.
+pub(crate) fn yn_wire_flag(value: &str) -> bool {
+    matches!(
+        value.trim().to_ascii_lowercase().as_str(),
+        "y" | "true" | "1"
+    )
+}
+
+/// Reads a yes/no flag member: absent reads as no.
+fn yn_flag(members: &HashMap<String, String>, key: &str) -> bool {
+    members.get(key).is_some_and(|value| yn_wire_flag(value))
+}
+
+/// Renders a yes/no flag in the canonical `"Y"`/`"N"` grid form (the form
+/// [`yn_wire_flag`] parses back, so flags round-trip).
+pub(crate) const fn yn_str(value: bool) -> &'static str {
+    if value { "Y" } else { "N" }
+}
+
+/// Extracts the `login-flags` section, if present.
+fn parse_login_flags(response_struct: roxmltree::Node<'_, '_>) -> Option<LoginFlags> {
+    let members = first_array_struct_members(response_struct, "login-flags")?;
+    Some(LoginFlags {
+        ever_logged_in: yn_flag(&members, "ever_logged_in"),
+        daylight_savings: yn_flag(&members, "daylight_savings"),
+        gendered: yn_flag(&members, "gendered"),
+        stipend_since_login: members
+            .get("stipend_since_login")
+            .cloned()
+            .unwrap_or_default(),
+    })
+}
+
+/// Extracts the `global-textures` section, if present with all three ids.
+fn parse_global_textures(response_struct: roxmltree::Node<'_, '_>) -> Option<GlobalTextures> {
+    /// Parses one of the section's texture-id members.
+    fn texture(members: &HashMap<String, String>, key: &str) -> Option<TextureKey> {
+        Uuid::parse_str(members.get(key)?.trim())
+            .ok()
+            .map(TextureKey::from)
+    }
+    let members = first_array_struct_members(response_struct, "global-textures")?;
+    Some(GlobalTextures {
+        sun_texture_id: texture(&members, "sun_texture_id")?,
+        cloud_texture_id: texture(&members, "cloud_texture_id")?,
+        moon_texture_id: texture(&members, "moon_texture_id")?,
+    })
+}
+
+/// Extracts the `ui-config` section, if present.
+fn parse_ui_config(response_struct: roxmltree::Node<'_, '_>) -> Option<UiConfig> {
+    let members = first_array_struct_members(response_struct, "ui-config")?;
+    Some(UiConfig {
+        allow_first_life: yn_flag(&members, "allow_first_life"),
+    })
+}
+
+/// Extracts the `initial-outfit` section, if present.
+fn parse_initial_outfit(response_struct: roxmltree::Node<'_, '_>) -> Option<InitialOutfit> {
+    let members = first_array_struct_members(response_struct, "initial-outfit")?;
+    Some(InitialOutfit {
+        folder_name: members.get("folder_name").cloned().unwrap_or_default(),
+        gender: members.get("gender").cloned().unwrap_or_default(),
+    })
+}
+
+/// Extracts the `newuser-config` section, if present.
+fn parse_newuser_config(response_struct: roxmltree::Node<'_, '_>) -> Option<NewUserConfig> {
+    let members = first_array_struct_members(response_struct, "newuser-config")?;
+    Some(NewUserConfig {
+        default_female_avatar: members.get("DefaultFemaleAvatar").cloned(),
+        default_male_avatar: members.get("DefaultMaleAvatar").cloned(),
+    })
+}
+
+/// Extracts the `voice-config` section, if present with its server type.
+fn parse_voice_config(response_struct: roxmltree::Node<'_, '_>) -> Option<VoiceConfig> {
+    let members = first_array_struct_members(response_struct, "voice-config")?;
+    Some(VoiceConfig {
+        voice_server_type: members.get("VoiceServerType")?.clone(),
+    })
+}
+
+/// Extracts the active-gesture list from the `gestures` member, skipping
+/// entries without a parseable item and asset id.
+fn parse_gestures(response_struct: roxmltree::Node<'_, '_>) -> Vec<GestureEntry> {
+    let Some(value) = member_value_node(response_struct, "gestures") else {
+        return Vec::new();
+    };
+    array_structs(value)
+        .filter_map(|gesture_struct| {
+            let members = collect_members(gesture_struct);
+            Some(GestureEntry {
+                item_id: InventoryKey::from(Uuid::parse_str(members.get("item_id")?.trim()).ok()?),
+                asset_id: Uuid::parse_str(members.get("asset_id")?.trim()).ok()?,
+            })
+        })
+        .collect()
+}
+
+/// Extracts an event/classified category list (both share the
+/// `category_id` + `category_name` wire shape), skipping malformed entries.
+fn parse_categories(response_struct: roxmltree::Node<'_, '_>, member: &str) -> Vec<LoginCategory> {
+    let Some(value) = member_value_node(response_struct, member) else {
+        return Vec::new();
+    };
+    array_structs(value)
+        .filter_map(|category_struct| {
+            let members = collect_members(category_struct);
+            Some(LoginCategory {
+                category_id: members.get("category_id")?.trim().parse().ok()?,
+                category_name: members.get("category_name")?.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Extracts the `event_notifications` entries as opaque [`Llsd`] values.
+fn parse_event_notifications(response_struct: roxmltree::Node<'_, '_>) -> Vec<Llsd> {
+    let Some(value) = member_value_node(response_struct, "event_notifications") else {
+        return Vec::new();
+    };
+    array_value_nodes(value).map(xmlrpc_value_to_llsd).collect()
+}
+
+/// Extracts the `tutorial_setting` entries, skipping ones without a URL.
+fn parse_tutorial_settings(response_struct: roxmltree::Node<'_, '_>) -> Vec<TutorialSetting> {
+    let Some(value) = member_value_node(response_struct, "tutorial_setting") else {
+        return Vec::new();
+    };
+    array_structs(value)
+        .filter_map(|setting_struct| {
+            let members = collect_members(setting_struct);
+            Some(TutorialSetting {
+                tutorial_url: members.get("tutorial_url")?.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Converts a free-form XML-RPC `<value>` tree into an [`Llsd`] value, for the
+/// login response fields whose shape is grid-defined (`account_level_benefits`,
+/// `premium_packages`, `event_notifications`). Structs become maps, arrays
+/// become arrays, `i4`/`int` integers, `boolean` booleans, `double` reals,
+/// `base64` binary; everything else (including `dateTime.iso8601`) is kept as
+/// its string text, so no value is ever dropped.
+fn xmlrpc_value_to_llsd(value_node: roxmltree::Node<'_, '_>) -> Llsd {
+    let Some(element) = value_node.children().find(roxmltree::Node::is_element) else {
+        return Llsd::String(value_node.text().unwrap_or_default().to_owned());
+    };
+    let text = || element.text().unwrap_or_default().to_owned();
+    match element.tag_name().name() {
+        "struct" => Llsd::Map(
+            element
+                .children()
+                .filter(|n| n.has_tag_name("member"))
+                .filter_map(|member| {
+                    let name = member
+                        .children()
+                        .find(|n| n.has_tag_name("name"))
+                        .and_then(|n| n.text())?;
+                    let value = member.children().find(|n| n.has_tag_name("value"))?;
+                    Some((name.to_owned(), xmlrpc_value_to_llsd(value)))
+                })
+                .collect(),
+        ),
+        "array" => Llsd::Array(
+            array_value_nodes(value_node)
+                .map(xmlrpc_value_to_llsd)
+                .collect(),
+        ),
+        "i4" | "int" => element
+            .text()
+            .and_then(|t| t.trim().parse().ok())
+            .map_or_else(|| Llsd::String(text()), Llsd::Integer),
+        "boolean" => Llsd::Boolean(matches!(element.text().map(str::trim), Some("1" | "true"))),
+        "double" => element
+            .text()
+            .and_then(|t| t.trim().parse().ok())
+            .map_or_else(|| Llsd::String(text()), Llsd::Real),
+        "base64" => {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD
+                .decode(text().trim())
+                .map_or_else(|_error| Llsd::String(text()), Llsd::Binary)
+        }
+        _other => Llsd::String(text()),
+    }
+}
+
+/// Appends an XML-RPC `<member>` holding a free-form [`Llsd`] value, the
+/// emitting inverse of [`xmlrpc_value_to_llsd`].
+fn push_llsd_member(out: &mut String, name: &str, value: &Llsd) {
+    out.push_str("<member><name>");
+    out.push_str(name);
+    out.push_str("</name>");
+    push_llsd_value(out, value);
+    out.push_str("</member>\n");
+}
+
+/// Appends a free-form [`Llsd`] value as an XML-RPC `<value>` tree. Maps
+/// become structs, arrays arrays, integers `<i4>`, booleans `<boolean>`,
+/// reals `<double>`, binary `<base64>`; strings, UUIDs, dates, URIs, and the
+/// undefined value are written as `<string>` (the string-degrading subset
+/// [`xmlrpc_value_to_llsd`] parses back, so values round-trip).
+fn push_llsd_value(out: &mut String, value: &Llsd) {
+    out.push_str("<value>");
+    match value {
+        Llsd::Map(map) => {
+            out.push_str("<struct>");
+            for (key, entry) in map {
+                push_llsd_member(out, key, entry);
+            }
+            out.push_str("</struct>");
+        }
+        Llsd::Array(items) => {
+            out.push_str("<array><data>\n");
+            for item in items {
+                push_llsd_value(out, item);
+                out.push('\n');
+            }
+            out.push_str("</data></array>");
+        }
+        Llsd::Integer(value) => {
+            out.push_str("<i4>");
+            out.push_str(&value.to_string());
+            out.push_str("</i4>");
+        }
+        Llsd::Boolean(value) => {
+            out.push_str("<boolean>");
+            out.push_str(if *value { "1" } else { "0" });
+            out.push_str("</boolean>");
+        }
+        Llsd::Real(value) => {
+            out.push_str("<double>");
+            out.push_str(&value.to_string());
+            out.push_str("</double>");
+        }
+        Llsd::Binary(bytes) => {
+            use base64::Engine as _;
+            out.push_str("<base64>");
+            out.push_str(&base64::engine::general_purpose::STANDARD.encode(bytes));
+            out.push_str("</base64>");
+        }
+        Llsd::String(value) | Llsd::Date(value) | Llsd::Uri(value) => {
+            out.push_str("<string>");
+            push_escaped(out, value);
+            out.push_str("</string>");
+        }
+        Llsd::Uuid(value) => {
+            out.push_str("<string>");
+            out.push_str(&value.to_string());
+            out.push_str("</string>");
+        }
+        Llsd::Undef => out.push_str("<string></string>"),
+    }
+    out.push_str("</value>");
+}
+
 /// Finds the `<value>` node of the named `<member>` directly under a `<struct>`.
 fn member_value_node<'a>(
     struct_node: roxmltree::Node<'a, '_>,
@@ -839,9 +1701,9 @@ fn member_value_node<'a>(
         .and_then(|member| member.children().find(|n| n.has_tag_name("value")))
 }
 
-/// Iterates the `<struct>` nodes inside an array `<value>` (`value → array →
-/// data → value → struct`).
-fn array_structs<'a>(
+/// Iterates the element `<value>` nodes inside an array `<value>` (`value →
+/// array → data → value`).
+fn array_value_nodes<'a>(
     value_node: roxmltree::Node<'a, 'a>,
 ) -> impl Iterator<Item = roxmltree::Node<'a, 'a>> {
     value_node
@@ -850,6 +1712,14 @@ fn array_structs<'a>(
         .and_then(|array| array.children().find(|n| n.has_tag_name("data")))
         .into_iter()
         .flat_map(|data| data.children().filter(|n| n.has_tag_name("value")))
+}
+
+/// Iterates the `<struct>` nodes inside an array `<value>` (`value → array →
+/// data → value → struct`).
+fn array_structs<'a>(
+    value_node: roxmltree::Node<'a, 'a>,
+) -> impl Iterator<Item = roxmltree::Node<'a, 'a>> {
+    array_value_nodes(value_node)
         .filter_map(|value| value.children().find(|n| n.has_tag_name("struct")))
 }
 
@@ -1000,10 +1870,33 @@ pub struct ParsedLoginRequest {
     pub version: String,
     /// The platform string (`platform`).
     pub platform: String,
+    /// The OS version string (`platform_string`), empty when not sent.
+    pub platform_string: String,
+    /// The OS/platform version number (`platform_version`), empty when not
+    /// sent.
+    pub platform_version: String,
+    /// The client's process address size in bits (`address_size`), if sent.
+    pub address_size: Option<i32>,
+    /// The client's stable host identifier (`host_id`), empty when not sent.
+    pub host_id: String,
     /// The hashed MAC address (`mac`).
     pub mac: String,
     /// The machine/installation id (`id0`).
     pub id0: String,
+    /// How the client's previous session ended (`last_exec_event`), if sent.
+    pub last_exec_event: Option<i32>,
+    /// The client's previous session duration (`last_exec_duration`), if sent.
+    pub last_exec_duration: Option<i32>,
+    /// The client's previous agent session id (`last_exec_session_id`), if
+    /// sent and well-formed.
+    pub last_exec_session_id: Option<Uuid>,
+    /// The grid scope id (`scope_id`), if sent — OpenSim's LLSD login carries
+    /// it; the XML-RPC form normally does not.
+    pub scope_id: Option<Uuid>,
+    /// A one-time web login key (`web_login_key`), if sent — OpenSim's
+    /// alternative to `passwd` for web-initiated logins. Parse-only: checking
+    /// it is the account service's job, not [`Credential`]'s.
+    pub web_login_key: Option<Uuid>,
     /// The multi-factor one-time code (`token`), empty when not answering a
     /// challenge.
     pub token: String,
@@ -1048,8 +1941,17 @@ pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseEr
         channel: member_string(&members, "channel"),
         version: member_string(&members, "version"),
         platform: member_string(&members, "platform"),
+        platform_string: member_string(&members, "platform_string"),
+        platform_version: member_string(&members, "platform_version"),
+        address_size: member_int(&members, "address_size"),
+        host_id: member_string(&members, "host_id"),
         mac: member_string(&members, "mac"),
         id0: member_string(&members, "id0"),
+        last_exec_event: member_int(&members, "last_exec_event"),
+        last_exec_duration: member_int(&members, "last_exec_duration"),
+        last_exec_session_id: member_uuid(&members, "last_exec_session_id"),
+        scope_id: member_uuid(&members, "scope_id"),
+        web_login_key: member_uuid(&members, "web_login_key"),
         token: member_string(&members, "token"),
         mfa_hash: member_string(&members, "mfa_hash"),
         agree_to_tos: parse_bool_member(&members, "agree_to_tos"),
@@ -1057,6 +1959,22 @@ pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseEr
         extended_errors: parse_bool_member(&members, "extended_errors"),
         options,
     })
+}
+
+/// Returns the named member parsed as an integer, or `None` when absent or
+/// malformed (untrusted client input).
+fn member_int(members: &HashMap<String, String>, name: &str) -> Option<i32> {
+    members
+        .get(name)
+        .and_then(|value| value.trim().parse().ok())
+}
+
+/// Returns the named member parsed as a UUID, or `None` when absent or
+/// malformed (untrusted client input).
+fn member_uuid(members: &HashMap<String, String>, name: &str) -> Option<Uuid> {
+    members
+        .get(name)
+        .and_then(|value| Uuid::parse_str(value.trim()).ok())
 }
 
 /// Returns the named scalar member, or the empty string if absent.
@@ -1067,7 +1985,7 @@ fn member_string(members: &HashMap<String, String>, name: &str) -> String {
 /// Parses the request's raw `start` member into a typed [`StartLocation`],
 /// preserving the original string (`Err`) when it does not match the grammar —
 /// the client could send anything, and nothing is discarded.
-fn parse_start_member(raw: String) -> Result<StartLocation, String> {
+pub(crate) fn parse_start_member(raw: String) -> Result<StartLocation, String> {
     raw.parse::<StartLocation>().map_err(|_ignored| raw)
 }
 
@@ -1095,7 +2013,8 @@ fn array_strings(value_node: roxmltree::Node<'_, '_>) -> Vec<String> {
 /// The inverse of [`parse_login_response`]: it emits the `<methodResponse>`
 /// struct a grid returns — `login` plus the success payload (ids, sim placement,
 /// seed cap, and any inventory/buddy/home/access/library fields that are
-/// present), or the `reason`/`message` of a failure, or an `mfa_challenge`.
+/// present), or the `reason`/`message` (plus any extended-error fields) of a
+/// failure, or an `mfa_challenge`, or an `indeterminate` redirect.
 /// Optional fields are emitted only when set, so the result re-parses to an
 /// equal [`LoginResponse`].
 #[must_use]
@@ -1112,10 +2031,27 @@ pub fn build_login_response(response: &LoginResponse) -> String {
                 push_string_member(&mut out, "mfa_hash", mfa_hash);
             }
         }
+        LoginResponse::Redirect(redirect) => {
+            push_string_member(&mut out, "login", "indeterminate");
+            push_string_member(&mut out, "next_url", redirect.next_url.as_str());
+            push_string_member(&mut out, "next_method", &redirect.next_method);
+            push_opt_string_member(&mut out, "message", redirect.message.as_deref());
+            if !redirect.next_options.is_empty() {
+                push_string_array_member(&mut out, "next_options", &redirect.next_options);
+            }
+        }
         LoginResponse::Failure(failure) => {
             push_string_member(&mut out, "login", "false");
             push_string_member(&mut out, "reason", &failure.reason);
             push_string_member(&mut out, "message", &failure.message);
+            push_opt_string_member(&mut out, "message_id", failure.message_id.as_deref());
+            if !failure.message_args.is_empty() {
+                out.push_str("<member><name>message_args</name><value><struct>");
+                for (key, value) in &failure.message_args {
+                    push_string_member(&mut out, key, value);
+                }
+                out.push_str("</struct></value></member>\n");
+            }
         }
     }
     out.push_str("</struct></value></param></params>\n</methodResponse>\n");
@@ -1183,6 +2119,203 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         success.openid_url.as_ref().map(url::Url::as_str),
     );
     push_opt_string_member(out, "openid_token", success.openid_token.as_deref());
+    push_opt_string_member(out, "first_name", success.first_name.as_deref());
+    push_opt_string_member(out, "last_name", success.last_name.as_deref());
+    push_opt_string_member(out, "display_name", success.display_name.as_deref());
+    if let Some(real_id) = success.real_id {
+        push_string_member(out, "real_id", &real_id.to_string());
+    }
+    push_opt_string_member(
+        out,
+        "agent_region_access",
+        success.agent_region_access.as_deref(),
+    );
+    push_opt_string_member(out, "start_location", success.start_location.as_deref());
+    if let Some(seconds) = success.seconds_since_epoch {
+        push_int_member(out, "seconds_since_epoch", seconds);
+    }
+    if !success.udp_blacklist.is_empty() {
+        push_string_member(out, "udp_blacklist", &success.udp_blacklist.join(","));
+    }
+    if let Some(port) = success.http_port {
+        push_int_member(out, "http_port", i64::from(port));
+    }
+    if let Some(size) = success.region_size_x {
+        push_int_member(out, "region_size_x", i64::from(size));
+    }
+    if let Some(size) = success.region_size_y {
+        push_int_member(out, "region_size_y", i64::from(size));
+    }
+    if let Some(flags) = &success.login_flags {
+        push_single_struct_member(out, "login-flags", |body| {
+            push_string_member(body, "ever_logged_in", yn_str(flags.ever_logged_in));
+            push_string_member(body, "daylight_savings", yn_str(flags.daylight_savings));
+            push_string_member(body, "gendered", yn_str(flags.gendered));
+            push_string_member(body, "stipend_since_login", &flags.stipend_since_login);
+        });
+    }
+    if let Some(textures) = &success.global_textures {
+        push_single_struct_member(out, "global-textures", |body| {
+            push_string_member(body, "sun_texture_id", &textures.sun_texture_id.to_string());
+            push_string_member(
+                body,
+                "cloud_texture_id",
+                &textures.cloud_texture_id.to_string(),
+            );
+            push_string_member(
+                body,
+                "moon_texture_id",
+                &textures.moon_texture_id.to_string(),
+            );
+        });
+    }
+    if let Some(ui_config) = &success.ui_config {
+        push_single_struct_member(out, "ui-config", |body| {
+            push_string_member(body, "allow_first_life", yn_str(ui_config.allow_first_life));
+        });
+    }
+    if let Some(outfit) = &success.initial_outfit {
+        push_single_struct_member(out, "initial-outfit", |body| {
+            push_string_member(body, "folder_name", &outfit.folder_name);
+            push_string_member(body, "gender", &outfit.gender);
+        });
+    }
+    if let Some(config) = &success.newuser_config {
+        push_single_struct_member(out, "newuser-config", |body| {
+            push_opt_string_member(
+                body,
+                "DefaultFemaleAvatar",
+                config.default_female_avatar.as_deref(),
+            );
+            push_opt_string_member(
+                body,
+                "DefaultMaleAvatar",
+                config.default_male_avatar.as_deref(),
+            );
+        });
+    }
+    if let Some(voice) = &success.voice_config {
+        push_single_struct_member(out, "voice-config", |body| {
+            push_string_member(body, "VoiceServerType", &voice.voice_server_type);
+        });
+    }
+    push_struct_array_member(out, "gestures", &success.gestures, |body, gesture| {
+        push_string_member(body, "item_id", &gesture.item_id.to_string());
+        push_string_member(body, "asset_id", &gesture.asset_id.to_string());
+    });
+    push_struct_array_member(
+        out,
+        "event_categories",
+        &success.event_categories,
+        push_category_members,
+    );
+    push_struct_array_member(
+        out,
+        "classified_categories",
+        &success.classified_categories,
+        push_category_members,
+    );
+    if !success.event_notifications.is_empty() {
+        out.push_str("<member><name>event_notifications</name><value><array><data>\n");
+        for entry in &success.event_notifications {
+            push_llsd_value(out, entry);
+            out.push('\n');
+        }
+        out.push_str("</data></array></value></member>\n");
+    }
+    push_struct_array_member(
+        out,
+        "tutorial_setting",
+        &success.tutorial_settings,
+        |body, setting| {
+            push_string_member(body, "tutorial_url", &setting.tutorial_url);
+        },
+    );
+    push_opt_string_member(out, "help_url_format", success.help_url_format.as_deref());
+    push_opt_string_member(
+        out,
+        "web_profile_url",
+        success.web_profile_url.as_ref().map(url::Url::as_str),
+    );
+    push_opt_string_member(
+        out,
+        "profile-server-url",
+        success.profile_server_url.as_ref().map(url::Url::as_str),
+    );
+    push_opt_string_member(
+        out,
+        "search",
+        success.search_url.as_ref().map(url::Url::as_str),
+    );
+    push_opt_string_member(
+        out,
+        "destination_guide_url",
+        success.destination_guide_url.as_ref().map(url::Url::as_str),
+    );
+    push_opt_string_member(
+        out,
+        "avatar_picker_url",
+        success.avatar_picker_url.as_ref().map(url::Url::as_str),
+    );
+    push_opt_string_member(out, "currency", success.currency.as_deref());
+    if let Some(fee) = success.classified_fee {
+        push_int_member(out, "classified_fee", i64::from(fee));
+    }
+    if let Some(fee) = success.directory_fee {
+        push_int_member(out, "directory_fee", i64::from(fee));
+    }
+    push_opt_string_member(out, "account_type", success.account_type.as_deref());
+    if let Some(benefits) = &success.account_level_benefits {
+        push_llsd_member(out, "account_level_benefits", benefits);
+    }
+    if let Some(packages) = &success.premium_packages {
+        push_llsd_member(out, "premium_packages", packages);
+    }
+}
+
+/// Appends the two members of a [`LoginCategory`] struct (shared by the
+/// `event_categories` and `classified_categories` arrays).
+fn push_category_members(out: &mut String, category: &LoginCategory) {
+    push_string_member(out, "category_name", &category.category_name);
+    push_int_member(out, "category_id", i64::from(category.category_id));
+}
+
+/// Appends an array member holding a single struct whose members `emit_fields`
+/// writes — the "array of one struct" shape of the config-like login response
+/// sections, the form [`first_array_struct_members`] reads.
+fn push_single_struct_member(
+    out: &mut String,
+    member: &str,
+    emit_fields: impl FnOnce(&mut String),
+) {
+    out.push_str("<member><name>");
+    out.push_str(member);
+    out.push_str("</name><value><array><data>\n<value><struct>");
+    emit_fields(out);
+    out.push_str("</struct></value>\n</data></array></value></member>\n");
+}
+
+/// Appends an array member with one struct per entry, each written by
+/// `emit_entry` — the shape [`array_structs`] reads. Nothing is emitted for an
+/// empty list, so it re-parses as "not provided".
+fn push_struct_array_member<T>(
+    out: &mut String,
+    member: &str,
+    entries: &[T],
+    mut emit_entry: impl FnMut(&mut String, &T),
+) {
+    if entries.is_empty() {
+        return;
+    }
+    out.push_str("<member><name>");
+    out.push_str(member);
+    out.push_str("</name><value><array><data>\n");
+    for entry in entries {
+        out.push_str("<value><struct>");
+        emit_entry(out, entry);
+        out.push_str("</struct></value>\n");
+    }
+    out.push_str("</data></array></value></member>\n");
 }
 
 /// Appends an `<i4>` struct member.
@@ -1254,7 +2387,7 @@ fn push_buddy_list_member(out: &mut String, buddies: &[BuddyListEntry]) {
 /// Formats a [`HomeLocation`] as the quasi-LLSD `home` string [`parse_home`]
 /// reads: `{'region_handle':[rX,rY], 'position':[rX,rY,rZ], 'look_at':[rX,rY,rZ]}`
 /// with the `r` real-number markers.
-fn home_to_string(home: &HomeLocation) -> String {
+pub(crate) fn home_to_string(home: &HomeLocation) -> String {
     let (rx, ry) = home.region_handle.global_coordinates();
     let (px, py, pz) = (home.position.x(), home.position.y(), home.position.z());
     let (lx, ly, lz) = (home.look_at.x(), home.look_at.y(), home.look_at.z());
@@ -1265,7 +2398,7 @@ fn home_to_string(home: &HomeLocation) -> String {
 
 /// Formats a three-component vector as the quasi-LLSD `[rX,rY,rZ]` string
 /// [`parse_vector3`] reads (used for the top-level `look_at` field).
-fn vector3_to_string(vector: [f32; 3]) -> String {
+pub(crate) fn vector3_to_string(vector: [f32; 3]) -> String {
     let [x, y, z] = vector;
     format!("[r{x},r{y},r{z}]")
 }
@@ -1313,16 +2446,42 @@ impl Credential {
     }
 }
 
+/// The per-request policy gates a [`LoginServer`] enforces before letting a
+/// correctly-authenticated login through — everything a grid can put between
+/// a valid password and a session. All off by default, so
+/// `&LoginGates::default()` is the plain password(+MFA)-only server.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct LoginGates {
+    /// Redirect the login to another endpoint (`login = "indeterminate"`),
+    /// served before any other check — the authoritative endpoint performs
+    /// them after the client re-POSTs there.
+    pub redirect: Option<LoginRedirect>,
+    /// The terms-of-service text to require acceptance of: rejected with
+    /// reason [`LoginServer::TOS_REASON`] until the request carries
+    /// `agree_to_tos` (the viewer shows this message and re-sends).
+    pub tos_message: Option<String>,
+    /// The critical message to require acknowledgement of: rejected with
+    /// reason [`LoginServer::CRITICAL_REASON`] until the request carries
+    /// `read_critical`.
+    pub critical_message: Option<String>,
+    /// Whether the account already has a live presence on the grid: rejected
+    /// with reason [`LoginServer::PRESENCE_REASON`] and the
+    /// already-logged-in message (the retryable `"presence"` case).
+    pub already_logged_in: bool,
+}
+
 /// The server side of the XML-RPC `login_to_simulator` endpoint: the inverse of
 /// the viewer's [`build_login_request`]/[`parse_login_response`] pair.
 ///
 /// [`LoginServer::respond`] maps a parsed [`ParsedLoginRequest`] plus the
 /// supplied account/simulator facts to the [`LoginResponse`] to return — a
-/// success, a multi-factor challenge, or a failure. Sans-I/O: the caller looks
-/// the account up, mints the session (the [`LoginSuccess`] it hands in), and
-/// performs the HTTP transport; [`LoginServer`] enforces the password/MFA checks
-/// and selects the response variant, which [`build_login_response`] then
-/// serializes.
+/// success, a multi-factor challenge, a redirect, or a failure. Sans-I/O: the
+/// caller looks the account up, mints the session (the [`LoginSuccess`] it
+/// hands in, pre-filtered with [`LoginSuccess::filter_options`] if the grid
+/// honours the request's `options`), and performs the HTTP transport;
+/// [`LoginServer`] enforces the password/gate/MFA checks and selects the
+/// response variant, which [`build_login_response`] then serializes.
 #[derive(Debug, Clone, Copy)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct LoginServer;
@@ -1331,25 +2490,68 @@ impl LoginServer {
     /// The failure reason code returned for a bad name/password, matching
     /// OpenSim/Second Life's `"key"`.
     pub const BAD_CREDENTIALS_REASON: &'static str = "key";
+    /// The failure reason code for the terms-of-service gate (`"tos"`).
+    pub const TOS_REASON: &'static str = "tos";
+    /// The failure reason code for the critical-message gate (`"critical"`).
+    pub const CRITICAL_REASON: &'static str = "critical";
+    /// The failure reason code for presence conflicts (`"presence"`).
+    pub const PRESENCE_REASON: &'static str = "presence";
+    /// The message accompanying an already-logged-in `"presence"` rejection,
+    /// phrased (as on the real grids) so [`LoginFailure::kind`] classifies it
+    /// as the retryable [`LoginRejectKind::AlreadyLoggedIn`].
+    pub const ALREADY_LOGGED_IN_MESSAGE: &'static str = "You appear to be already logged in. If this is not the case, please wait a minute and \
+         try again.";
 
-    /// Authenticates `request` against `credential` and selects the response to
-    /// send: [`LoginResponse::Success`] wrapping the supplied `success` facts
-    /// when the password matches and any MFA policy is satisfied;
-    /// [`LoginResponse::MfaChallenge`] (with the policy's remembered hash and
-    /// message) when MFA is required but unmet; or [`LoginResponse::Failure`]
-    /// (reason [`LoginServer::BAD_CREDENTIALS_REASON`]) on a password mismatch.
+    /// Authenticates `request` against `credential`, enforces `gates`, and
+    /// selects the response to send. The checks run in the order the real
+    /// grids exhibit — **redirect → password → ToS → critical message → MFA →
+    /// presence → success** — so, for example, a redirect is served without
+    /// leaking whether the password was right, and a wrong password is
+    /// reported before any ToS/critical gate:
+    ///
+    /// - [`LoginResponse::Redirect`] when [`LoginGates::redirect`] is set;
+    /// - [`LoginResponse::Failure`] (reason
+    ///   [`LoginServer::BAD_CREDENTIALS_REASON`]) on a password mismatch;
+    /// - [`LoginResponse::Failure`] (reason [`LoginServer::TOS_REASON`],
+    ///   message = the ToS text) when [`LoginGates::tos_message`] is set and
+    ///   the request does not carry `agree_to_tos`;
+    /// - [`LoginResponse::Failure`] (reason [`LoginServer::CRITICAL_REASON`])
+    ///   likewise for [`LoginGates::critical_message`] vs `read_critical`;
+    /// - [`LoginResponse::MfaChallenge`] (with the policy's remembered hash
+    ///   and message) when MFA is required but unmet;
+    /// - [`LoginResponse::Failure`] (reason [`LoginServer::PRESENCE_REASON`],
+    ///   the retryable already-logged-in message) when
+    ///   [`LoginGates::already_logged_in`] is set;
+    /// - otherwise [`LoginResponse::Success`] wrapping the supplied `success`
+    ///   facts.
     #[must_use]
     pub fn respond(
         request: &ParsedLoginRequest,
         credential: &Credential,
+        gates: &LoginGates,
         success: Box<LoginSuccess>,
     ) -> LoginResponse {
+        if let Some(redirect) = &gates.redirect {
+            return LoginResponse::Redirect(redirect.clone());
+        }
         if !credential.password_matches(request) {
-            return LoginResponse::Failure(LoginFailure {
-                reason: Self::BAD_CREDENTIALS_REASON.to_owned(),
-                message: "Could not authenticate your avatar. Check your user name and password."
-                    .to_owned(),
-            });
+            return LoginResponse::Failure(LoginFailure::new(
+                Self::BAD_CREDENTIALS_REASON,
+                "Could not authenticate your avatar. Check your user name and password.",
+            ));
+        }
+        if let Some(tos_message) = &gates.tos_message
+            && !request.agree_to_tos
+        {
+            return LoginResponse::Failure(LoginFailure::new(Self::TOS_REASON, tos_message));
+        }
+        if let Some(critical_message) = &gates.critical_message
+            && !request.read_critical
+        {
+            return LoginResponse::Failure(LoginFailure::new(
+                Self::CRITICAL_REASON,
+                critical_message,
+            ));
         }
         if let Some(mfa) = &credential.mfa
             && !mfa.is_satisfied_by(request)
@@ -1358,6 +2560,12 @@ impl LoginServer {
                 mfa_hash: Some(mfa.mfa_hash.clone()),
                 message: mfa.challenge_message.clone(),
             });
+        }
+        if gates.already_logged_in {
+            return LoginResponse::Failure(LoginFailure::new(
+                Self::PRESENCE_REASON,
+                Self::ALREADY_LOGGED_IN_MESSAGE,
+            ));
         }
         LoginResponse::Success(success)
     }
@@ -1370,10 +2578,7 @@ mod kind_tests {
 
     /// Builds a failure with the given reason and message.
     fn failure(reason: &str, message: &str) -> LoginFailure {
-        LoginFailure {
-            reason: reason.to_owned(),
-            message: message.to_owned(),
-        }
+        LoginFailure::new(reason, message)
     }
 
     /// `"key"` is bad credentials.
@@ -1421,11 +2626,32 @@ mod kind_tests {
         );
     }
 
+    /// The gate reasons map to their retry-guiding kinds.
+    #[test]
+    fn gate_reasons_map_to_their_kinds() {
+        assert_eq!(
+            failure("tos", "You must accept the ToS.").kind(),
+            LoginRejectKind::Tos
+        );
+        assert_eq!(
+            failure("critical", "Grid maintenance tonight.").kind(),
+            LoginRejectKind::CriticalMessage
+        );
+        assert_eq!(
+            failure("update", "Please update your viewer.").kind(),
+            LoginRejectKind::UpdateRequired
+        );
+        assert_eq!(
+            failure("optional", "A newer viewer is available.").kind(),
+            LoginRejectKind::UpdateRequired
+        );
+    }
+
     /// An unmodelled reason code falls through to `Other`.
     #[test]
     fn unknown_reason_is_other() {
         assert_eq!(
-            failure("tos", "You must accept the ToS.").kind(),
+            failure("connect", "Could not connect.").kind(),
             LoginRejectKind::Other
         );
     }

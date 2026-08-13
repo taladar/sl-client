@@ -100,34 +100,15 @@ mod test {
 
     /// A successful login response pointing at the test simulator.
     fn success() -> Result<LoginResponse, TestError> {
-        Ok(LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: None,
-            inventory_skeleton: Vec::new(),
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: None,
-            library_owner: None,
-            library_skeleton: Vec::new(),
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        })))
+        Ok(LoginResponse::Success(Box::new(LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        ))))
     }
 
     /// Builds an inbound datagram carrying a fully encoded client message.

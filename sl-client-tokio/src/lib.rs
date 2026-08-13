@@ -200,6 +200,11 @@ use crate::voice::{post_voice_cap, post_voice_signaling};
 /// How long to sleep when the session has no scheduled timeout.
 const IDLE_SLEEP: Duration = Duration::from_secs(3600);
 
+/// The maximum number of login redirects (`login = "indeterminate"`) a
+/// [`Client::connect`] follows before giving up, protecting against a grid
+/// that redirects in a loop.
+const MAX_LOGIN_REDIRECTS: u32 = 5;
+
 /// The HTTP verb for an AIS3 inventory request ([`route_ais3`]).
 enum Ais3Verb {
     /// `POST` — create (a folder, a link).
@@ -296,6 +301,13 @@ pub enum Error {
     /// The session unexpectedly had no login request to perform.
     #[error("the session produced no login request")]
     NoLoginRequest,
+    /// The grid kept redirecting the login (`login = "indeterminate"`) past
+    /// the `MAX_LOGIN_REDIRECTS` hop bound.
+    #[error("login redirected more than {MAX_LOGIN_REDIRECTS} times (next: {next_url})")]
+    TooManyLoginRedirects {
+        /// Where the last response wanted the login re-POSTed.
+        next_url: url::Url,
+    },
     /// The region's capabilities could not be fetched from the seed URL, so login is
     /// aborted rather than proceeding into a capless session (the seed-caps request
     /// also advertises animesh support, and every cap-backed feature — asset fetch,
@@ -349,27 +361,49 @@ impl Client {
     /// socket bind, or the circuit bootstrap fails.
     pub async fn connect(params: LoginParams) -> Result<Self, Error> {
         let mut session = Session::new(params);
-        let request = session.login_http_request().ok_or(Error::NoLoginRequest)?;
-
         let http = ReqwestClient::new();
-        let body = http
-            .post(request.url)
-            .header("Content-Type", "text/xml")
-            .header("User-Agent", &request.user_agent)
-            .body(request.body)
-            .send()
-            .await?
-            .text()
-            .await?;
-        let success = match parse_login_response(&body)? {
-            LoginResponse::Success(success) => *success,
-            LoginResponse::MfaChallenge(challenge) => return Err(Error::MfaChallenge(challenge)),
-            LoginResponse::Failure(failure) => {
-                return Err(Error::LoginRejected {
-                    kind: failure.kind(),
-                    reason: failure.reason,
-                    message: failure.message,
-                });
+        let mut redirects: u32 = 0;
+        // A redirect response (`login = "indeterminate"`) re-arms the
+        // session's pending login request at its `next_url`, so the loop
+        // simply performs the request again — bounded, as the grid controls
+        // how many hops it asks for.
+        let success = loop {
+            let request = session.login_http_request().ok_or(Error::NoLoginRequest)?;
+            let body = http
+                .post(request.url)
+                .header("Content-Type", "text/xml")
+                .header("User-Agent", &request.user_agent)
+                .body(request.body)
+                .send()
+                .await?
+                .text()
+                .await?;
+            match parse_login_response(&body)? {
+                LoginResponse::Success(success) => break *success,
+                LoginResponse::Redirect(redirect) => {
+                    if redirects >= MAX_LOGIN_REDIRECTS {
+                        return Err(Error::TooManyLoginRedirects {
+                            next_url: redirect.next_url,
+                        });
+                    }
+                    redirects = redirects.saturating_add(1);
+                    tracing::info!(
+                        "login redirected to {} (hop {redirects})",
+                        redirect.next_url
+                    );
+                    session
+                        .handle_login_response(LoginResponse::Redirect(redirect), Instant::now())?;
+                }
+                LoginResponse::MfaChallenge(challenge) => {
+                    return Err(Error::MfaChallenge(challenge));
+                }
+                LoginResponse::Failure(failure) => {
+                    return Err(Error::LoginRejected {
+                        kind: failure.kind(),
+                        reason: failure.reason,
+                        message: failure.message,
+                    });
+                }
             }
         };
 

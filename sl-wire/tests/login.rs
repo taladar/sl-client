@@ -553,8 +553,47 @@ mod test {
     }
 
     /// A full success with every optional payload, to exercise `build_login_response`.
+    /// Deliberately a full struct literal (not `LoginSuccess::minimal` plus
+    /// overrides) so adding a `LoginSuccess` field breaks this helper and
+    /// forces the round-trip test to cover it.
     fn full_success() -> Result<sl_wire::LoginSuccess, Box<dyn std::error::Error>> {
-        use sl_wire::{BuddyListEntry, HomeLocation, SkeletonFolder};
+        use sl_types::key::{InventoryKey, TextureKey};
+        use sl_wire::{
+            BuddyListEntry, GestureEntry, GlobalTextures, HomeLocation, InitialOutfit, Llsd,
+            LoginCategory, LoginFlags, NewUserConfig, SkeletonFolder, TutorialSetting, UiConfig,
+            VoiceConfig,
+        };
+
+        let benefits = Llsd::Map(
+            [
+                ("animated_object_limit".to_owned(), Llsd::Integer(2)),
+                ("attachment_limit".to_owned(), Llsd::Integer(38)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let premium_packages = Llsd::Map(
+            [
+                (
+                    "Base".to_owned(),
+                    Llsd::Map(
+                        [("benefits".to_owned(), benefits.clone())]
+                            .into_iter()
+                            .collect(),
+                    ),
+                ),
+                (
+                    "Premium".to_owned(),
+                    Llsd::Map(
+                        [("benefits".to_owned(), benefits.clone())]
+                            .into_iter()
+                            .collect(),
+                    ),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
 
         let folder = |id: &str,
                       parent: &str,
@@ -634,6 +673,93 @@ mod test {
             map_server_url: Some(url::Url::parse("http://127.0.0.1:9000/")?),
             openid_url: Some(url::Url::parse("https://id.secondlife.com/openid/webkit")?),
             openid_token: Some("open-id-token-blob".to_owned()),
+            first_name: Some("Test".to_owned()),
+            last_name: Some("User".to_owned()),
+            display_name: Some("Test User".to_owned()),
+            real_id: Some(AgentKey::from(
+                "44444444-4444-4444-4444-444444444444".parse::<uuid::Uuid>()?,
+            )),
+            agent_region_access: Some("PG".to_owned()),
+            start_location: Some("last".to_owned()),
+            seconds_since_epoch: Some(1_755_000_000),
+            udp_blacklist: vec!["EnableSimulator".to_owned(), "TeleportFinish".to_owned()],
+            http_port: Some(9001),
+            region_size_x: Some(256),
+            region_size_y: Some(512),
+            login_flags: Some(LoginFlags {
+                ever_logged_in: true,
+                daylight_savings: false,
+                gendered: true,
+                stipend_since_login: "N".to_owned(),
+            }),
+            global_textures: Some(GlobalTextures {
+                sun_texture_id: TextureKey::from(
+                    "cce0f112-878f-4586-a2e2-a8f104bba271".parse::<uuid::Uuid>()?,
+                ),
+                cloud_texture_id: TextureKey::from(
+                    "dc4b9f0b-d008-45c6-96a4-01dd947ac621".parse::<uuid::Uuid>()?,
+                ),
+                moon_texture_id: TextureKey::from(
+                    "ec4b9f0b-d008-45c6-96a4-01dd947ac621".parse::<uuid::Uuid>()?,
+                ),
+            }),
+            ui_config: Some(UiConfig {
+                allow_first_life: true,
+            }),
+            initial_outfit: Some(InitialOutfit {
+                folder_name: "Nightclub Female".to_owned(),
+                gender: "female".to_owned(),
+            }),
+            newuser_config: Some(NewUserConfig {
+                default_female_avatar: Some("Ruth".to_owned()),
+                default_male_avatar: Some("Roth".to_owned()),
+            }),
+            voice_config: Some(VoiceConfig {
+                voice_server_type: "webrtc".to_owned(),
+            }),
+            gestures: vec![GestureEntry {
+                item_id: InventoryKey::from(
+                    "dddddddd-0000-0000-0000-000000000000".parse::<uuid::Uuid>()?,
+                ),
+                asset_id: "eeeeeeee-0000-0000-0000-000000000000".parse()?,
+            }],
+            event_categories: vec![LoginCategory {
+                category_id: 18,
+                category_name: "Discussion".to_owned(),
+            }],
+            classified_categories: vec![
+                LoginCategory {
+                    category_id: 1,
+                    category_name: "Shopping".to_owned(),
+                },
+                LoginCategory {
+                    category_id: 9,
+                    category_name: "Personal".to_owned(),
+                },
+            ],
+            event_notifications: vec![Llsd::Map(
+                [
+                    ("event_id".to_owned(), Llsd::Integer(7)),
+                    ("event_name".to_owned(), Llsd::String("Dance".to_owned())),
+                ]
+                .into_iter()
+                .collect(),
+            )],
+            tutorial_settings: vec![TutorialSetting {
+                tutorial_url: "http://example.com/tutorial/".to_owned(),
+            }],
+            help_url_format: Some("https://help.example.com/[TOPIC]?lang=[LANGUAGE]".to_owned()),
+            web_profile_url: Some(url::Url::parse("https://my.example.com/")?),
+            profile_server_url: Some(url::Url::parse("http://127.0.0.1:9000/profiles")?),
+            search_url: Some(url::Url::parse("http://127.0.0.1:9000/search")?),
+            destination_guide_url: Some(url::Url::parse("https://guide.example.com/")?),
+            avatar_picker_url: Some(url::Url::parse("https://picker.example.com/")?),
+            currency: Some("L$".to_owned()),
+            classified_fee: Some(50),
+            directory_fee: Some(30),
+            account_type: Some("Premium".to_owned()),
+            account_level_benefits: Some(benefits),
+            premium_packages: Some(premium_packages),
         })
     }
 
@@ -679,6 +805,43 @@ mod test {
         assert_eq!(parsed.map_server_url, success.map_server_url);
         assert_eq!(parsed.openid_url, success.openid_url);
         assert_eq!(parsed.openid_token, success.openid_token);
+        assert_eq!(parsed.first_name, success.first_name);
+        assert_eq!(parsed.last_name, success.last_name);
+        assert_eq!(parsed.display_name, success.display_name);
+        assert_eq!(parsed.real_id, success.real_id);
+        assert_eq!(parsed.agent_region_access, success.agent_region_access);
+        assert_eq!(parsed.start_location, success.start_location);
+        assert_eq!(parsed.seconds_since_epoch, success.seconds_since_epoch);
+        assert_eq!(parsed.udp_blacklist, success.udp_blacklist);
+        assert_eq!(parsed.http_port, success.http_port);
+        assert_eq!(parsed.region_size_x, success.region_size_x);
+        assert_eq!(parsed.region_size_y, success.region_size_y);
+        assert_eq!(parsed.login_flags, success.login_flags);
+        assert_eq!(parsed.global_textures, success.global_textures);
+        assert_eq!(parsed.ui_config, success.ui_config);
+        assert_eq!(parsed.initial_outfit, success.initial_outfit);
+        assert_eq!(parsed.newuser_config, success.newuser_config);
+        assert_eq!(parsed.voice_config, success.voice_config);
+        assert_eq!(parsed.gestures, success.gestures);
+        assert_eq!(parsed.event_categories, success.event_categories);
+        assert_eq!(parsed.classified_categories, success.classified_categories);
+        assert_eq!(parsed.event_notifications, success.event_notifications);
+        assert_eq!(parsed.tutorial_settings, success.tutorial_settings);
+        assert_eq!(parsed.help_url_format, success.help_url_format);
+        assert_eq!(parsed.web_profile_url, success.web_profile_url);
+        assert_eq!(parsed.profile_server_url, success.profile_server_url);
+        assert_eq!(parsed.search_url, success.search_url);
+        assert_eq!(parsed.destination_guide_url, success.destination_guide_url);
+        assert_eq!(parsed.avatar_picker_url, success.avatar_picker_url);
+        assert_eq!(parsed.currency, success.currency);
+        assert_eq!(parsed.classified_fee, success.classified_fee);
+        assert_eq!(parsed.directory_fee, success.directory_fee);
+        assert_eq!(parsed.account_type, success.account_type);
+        assert_eq!(
+            parsed.account_level_benefits,
+            success.account_level_benefits
+        );
+        assert_eq!(parsed.premium_packages, success.premium_packages);
         Ok(())
     }
 
@@ -686,15 +849,70 @@ mod test {
     fn build_login_response_round_trips_a_failure() -> Result<(), Box<dyn std::error::Error>> {
         use sl_wire::{LoginFailure, build_login_response, parse_login_response};
 
-        let failure = LoginFailure {
-            reason: "key".to_owned(),
-            message: "Could not authenticate your avatar.".to_owned(),
-        };
+        let failure = LoginFailure::new("key", "Could not authenticate your avatar.");
         let xml = build_login_response(&LoginResponse::Failure(failure.clone()));
         let LoginResponse::Failure(parsed) = parse_login_response(&xml)? else {
             return Err("expected a failure".into());
         };
         assert_eq!(parsed, failure);
+        Ok(())
+    }
+
+    #[test]
+    fn build_login_response_round_trips_extended_error_fields()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{LoginFailure, build_login_response, parse_login_response};
+
+        // The `extended_errors` fields: a localization key plus its
+        // substitution arguments (here the suspension-end time).
+        let mut failure = LoginFailure::new(
+            "key",
+            "Your account has been suspended until December 12, 2026.",
+        );
+        failure.message_id = Some("LoginFailedAccountSuspended".to_owned());
+        failure.message_args = [("TIME".to_owned(), "December 12, 2026".to_owned())]
+            .into_iter()
+            .collect();
+        let xml = build_login_response(&LoginResponse::Failure(failure.clone()));
+        let LoginResponse::Failure(parsed) = parse_login_response(&xml)? else {
+            return Err("expected a failure".into());
+        };
+        assert_eq!(parsed, failure);
+        Ok(())
+    }
+
+    #[test]
+    fn build_login_response_round_trips_a_redirect() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{LoginRedirect, build_login_response, parse_login_response};
+
+        let redirect = LoginRedirect {
+            next_url: "https://login.example.com/second".parse()?,
+            next_method: "login_to_simulator".to_owned(),
+            message: Some("Redirecting…".to_owned()),
+            next_options: vec!["inventory-root".to_owned(), "gestures".to_owned()],
+        };
+        let xml = build_login_response(&LoginResponse::Redirect(redirect.clone()));
+        let LoginResponse::Redirect(parsed) = parse_login_response(&xml)? else {
+            return Err("expected a redirect".into());
+        };
+        assert_eq!(parsed, redirect);
+        Ok(())
+    }
+
+    #[test]
+    fn indeterminate_without_next_url_degrades_to_a_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        // A redirect the client cannot follow must still surface, as a
+        // failure carrying the reason and message.
+        let xml = response(
+            "<member><name>login</name><value><string>indeterminate</string></value></member>\
+             <member><name>message</name><value><string>try again</string></value></member>",
+        );
+        let LoginResponse::Failure(failure) = parse_login_response(&xml)? else {
+            return Err("expected a failure".into());
+        };
+        assert_eq!(failure.reason, "indeterminate");
+        assert_eq!(failure.message, "try again");
         Ok(())
     }
 
@@ -717,7 +935,9 @@ mod test {
 
     #[test]
     fn login_server_authenticates_and_challenges() -> Result<(), Box<dyn std::error::Error>> {
-        use sl_wire::{Credential, LoginServer, MfaPolicy, parse_login_request, password_hash};
+        use sl_wire::{
+            Credential, LoginGates, LoginServer, MfaPolicy, parse_login_request, password_hash,
+        };
 
         let make_request = |password: &str, token: &str, mfa_hash: Option<String>| {
             let request = LoginRequest::new(
@@ -740,15 +960,23 @@ mod test {
         // Correct password, no MFA → success.
         let ok = make_request("secret", "", None)?;
         assert!(matches!(
-            LoginServer::respond(&ok, &no_mfa, Box::new(full_success()?)),
+            LoginServer::respond(
+                &ok,
+                &no_mfa,
+                &LoginGates::default(),
+                Box::new(full_success()?)
+            ),
             LoginResponse::Success(_)
         ));
 
         // Wrong password → failure with the "key" reason.
         let bad = make_request("wrong", "", None)?;
-        let LoginResponse::Failure(failure) =
-            LoginServer::respond(&bad, &no_mfa, Box::new(full_success()?))
-        else {
+        let LoginResponse::Failure(failure) = LoginServer::respond(
+            &bad,
+            &no_mfa,
+            &LoginGates::default(),
+            Box::new(full_success()?),
+        ) else {
             return Err("expected a failure".into());
         };
         assert_eq!(failure.reason, LoginServer::BAD_CREDENTIALS_REASON);
@@ -763,9 +991,12 @@ mod test {
             }),
         };
         let first = make_request("secret", "", None)?;
-        let LoginResponse::MfaChallenge(challenge) =
-            LoginServer::respond(&first, &mfa, Box::new(full_success()?))
-        else {
+        let LoginResponse::MfaChallenge(challenge) = LoginServer::respond(
+            &first,
+            &mfa,
+            &LoginGates::default(),
+            Box::new(full_success()?),
+        ) else {
             return Err("expected an MFA challenge".into());
         };
         assert_eq!(challenge.mfa_hash.as_deref(), Some("remember-this-device"));
@@ -773,16 +1004,267 @@ mod test {
         // MFA satisfied by the one-time token → success.
         let with_token = make_request("secret", "999999", None)?;
         assert!(matches!(
-            LoginServer::respond(&with_token, &mfa, Box::new(full_success()?)),
+            LoginServer::respond(
+                &with_token,
+                &mfa,
+                &LoginGates::default(),
+                Box::new(full_success()?)
+            ),
             LoginResponse::Success(_)
         ));
 
         // MFA satisfied by echoing the remembered hash → success.
         let with_hash = make_request("secret", "", Some("remember-this-device".to_owned()))?;
         assert!(matches!(
-            LoginServer::respond(&with_hash, &mfa, Box::new(full_success()?)),
+            LoginServer::respond(
+                &with_hash,
+                &mfa,
+                &LoginGates::default(),
+                Box::new(full_success()?)
+            ),
             LoginResponse::Success(_)
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn login_server_enforces_the_gates_in_order() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{
+            Credential, LoginGates, LoginRedirect, LoginRejectKind, LoginServer,
+            parse_login_request, password_hash,
+        };
+
+        let make_request = |password: &str, agree_to_tos: bool, read_critical: bool| {
+            let mut request = LoginRequest::new(
+                "Test",
+                "User",
+                password,
+                StartLocation::Last,
+                "MyViewer",
+                "1.2.3",
+            );
+            request.agree_to_tos = agree_to_tos;
+            request.read_critical = read_critical;
+            parse_login_request(&build_login_request(&request))
+        };
+        let credential = Credential {
+            password_hash: password_hash("secret"),
+            mfa: None,
+        };
+        let all_gates = LoginGates {
+            redirect: Some(LoginRedirect {
+                next_url: "https://login.example.com/real".parse()?,
+                next_method: "login_to_simulator".to_owned(),
+                message: None,
+                next_options: Vec::new(),
+            }),
+            tos_message: Some("Please accept the updated terms.".to_owned()),
+            critical_message: Some("Grid maintenance tonight.".to_owned()),
+            already_logged_in: true,
+        };
+
+        // A redirect is served before everything else — even a bad password.
+        assert!(matches!(
+            LoginServer::respond(
+                &make_request("wrong", false, false)?,
+                &credential,
+                &all_gates,
+                Box::new(full_success()?),
+            ),
+            LoginResponse::Redirect(_)
+        ));
+
+        // Without the redirect, a wrong password is reported before the
+        // ToS/critical gates.
+        let mut gates = all_gates.clone();
+        gates.redirect = None;
+        let LoginResponse::Failure(failure) = LoginServer::respond(
+            &make_request("wrong", false, false)?,
+            &credential,
+            &gates,
+            Box::new(full_success()?),
+        ) else {
+            return Err("expected a bad-password failure".into());
+        };
+        assert_eq!(failure.reason, LoginServer::BAD_CREDENTIALS_REASON);
+
+        // Correct password, ToS not yet agreed → the "tos" gate, carrying the
+        // ToS text as its message.
+        let LoginResponse::Failure(failure) = LoginServer::respond(
+            &make_request("secret", false, false)?,
+            &credential,
+            &gates,
+            Box::new(full_success()?),
+        ) else {
+            return Err("expected a tos failure".into());
+        };
+        assert_eq!(failure.reason, LoginServer::TOS_REASON);
+        assert_eq!(failure.message, "Please accept the updated terms.");
+        assert_eq!(failure.kind(), LoginRejectKind::Tos);
+
+        // ToS agreed (the viewer's retry) → the critical-message gate next.
+        let LoginResponse::Failure(failure) = LoginServer::respond(
+            &make_request("secret", true, false)?,
+            &credential,
+            &gates,
+            Box::new(full_success()?),
+        ) else {
+            return Err("expected a critical failure".into());
+        };
+        assert_eq!(failure.reason, LoginServer::CRITICAL_REASON);
+        assert_eq!(failure.message, "Grid maintenance tonight.");
+        assert_eq!(failure.kind(), LoginRejectKind::CriticalMessage);
+
+        // Both acknowledged → the presence gate, whose message classifies as
+        // the retryable already-logged-in rejection.
+        let LoginResponse::Failure(failure) = LoginServer::respond(
+            &make_request("secret", true, true)?,
+            &credential,
+            &gates,
+            Box::new(full_success()?),
+        ) else {
+            return Err("expected a presence failure".into());
+        };
+        assert_eq!(failure.reason, LoginServer::PRESENCE_REASON);
+        assert_eq!(failure.kind(), LoginRejectKind::AlreadyLoggedIn);
+
+        // Every gate cleared → success.
+        gates.already_logged_in = false;
+        assert!(matches!(
+            LoginServer::respond(
+                &make_request("secret", true, true)?,
+                &credential,
+                &gates,
+                Box::new(full_success()?),
+            ),
+            LoginResponse::Success(_)
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn filter_options_clears_unrequested_sections() -> Result<(), Box<dyn std::error::Error>> {
+        let mut success = full_success()?;
+        success.filter_options(&["inventory-root".to_owned(), "gestures".to_owned()]);
+
+        // Requested sections survive.
+        assert!(success.inventory_root.is_some());
+        assert!(!success.gestures.is_empty());
+        // Unrequested optioned sections are cleared…
+        assert!(success.inventory_skeleton.is_empty());
+        assert!(success.buddy_list.is_empty());
+        assert!(success.login_flags.is_none());
+        assert!(success.global_textures.is_none());
+        assert!(success.ui_config.is_none());
+        assert!(success.initial_outfit.is_none());
+        assert!(success.newuser_config.is_none());
+        assert!(success.voice_config.is_none());
+        assert!(success.event_categories.is_empty());
+        assert!(success.event_notifications.is_empty());
+        assert!(success.classified_categories.is_empty());
+        assert!(success.tutorial_settings.is_empty());
+        assert!(success.library_root.is_none());
+        assert!(success.library_owner.is_none());
+        assert!(success.library_skeleton.is_empty());
+        assert!(success.map_server_url.is_none());
+        assert!(success.max_agent_groups.is_none());
+        // …while non-optioned fields stay untouched.
+        assert!(success.home.is_some());
+        assert!(success.seed_capability.as_str().contains("CAPS"));
+        assert!(success.account_type.is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn parses_an_opensim_shaped_response() -> Result<(), Box<dyn std::error::Error>> {
+        // Quirks a real OpenSim response exhibits: the `max_groups` alias,
+        // `classified_fee` as a string, Y/N section flags, and an *empty*
+        // `event_categories` array (parsed as "none provided").
+        let xml = response(
+            "<member><name>login</name><value><string>true</string></value></member>\
+             <member><name>agent_id</name><value><string>11111111-1111-1111-1111-111111111111</string></value></member>\
+             <member><name>session_id</name><value><string>22222222-2222-2222-2222-222222222222</string></value></member>\
+             <member><name>secure_session_id</name><value><string>33333333-3333-3333-3333-333333333333</string></value></member>\
+             <member><name>circuit_code</name><value><i4>123456</i4></value></member>\
+             <member><name>sim_ip</name><value><string>127.0.0.1</string></value></member>\
+             <member><name>sim_port</name><value><i4>9000</i4></value></member>\
+             <member><name>seed_capability</name><value><string>http://127.0.0.1:9000/CAPS/seed</string></value></member>\
+             <member><name>max_groups</name><value><i4>42</i4></value></member>\
+             <member><name>classified_fee</name><value><string>0</string></value></member>\
+             <member><name>login-flags</name><value><array><data>\
+             <value><struct>\
+             <member><name>daylight_savings</name><value><string>N</string></value></member>\
+             <member><name>stipend_since_login</name><value><string>N</string></value></member>\
+             <member><name>gendered</name><value><string>Y</string></value></member>\
+             <member><name>ever_logged_in</name><value><string>Y</string></value></member>\
+             </struct></value>\
+             </data></array></value></member>\
+             <member><name>event_categories</name><value><array><data></data></array></value></member>\
+             <member><name>seconds_since_epoch</name><value><i4>1755000000</i4></value></member>",
+        );
+        let LoginResponse::Success(success) = parse_login_response(&xml)? else {
+            return Err("expected a successful login".into());
+        };
+        assert_eq!(success.max_agent_groups, Some(42));
+        assert_eq!(success.classified_fee, Some(0));
+        let flags = success.login_flags.ok_or("login-flags")?;
+        assert!(flags.ever_logged_in);
+        assert!(flags.gendered);
+        assert!(!flags.daylight_savings);
+        assert_eq!(flags.stipend_since_login, "N");
+        assert!(success.event_categories.is_empty());
+        assert_eq!(success.seconds_since_epoch, Some(1_755_000_000));
+        Ok(())
+    }
+
+    #[test]
+    fn request_round_trips_the_viewer_identification_fields()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{build_login_request_with_method, parse_login_request};
+
+        let mut request = LoginRequest::new(
+            "Test",
+            "User",
+            "secret",
+            StartLocation::Last,
+            "MyViewer",
+            "1.2.3",
+        );
+        request.platform_string = "Linux 6.1".to_owned();
+        request.platform_version = "6.1.0".to_owned();
+        request.address_size = 32;
+        request.host_id = "host-42".to_owned();
+        request.last_exec_event = Some(3);
+        request.last_exec_duration = Some(1200);
+        request.last_exec_session_id =
+            Some("55555555-5555-5555-5555-555555555555".parse::<uuid::Uuid>()?);
+        request.agree_to_tos = false;
+        request.read_critical = false;
+
+        let parsed = parse_login_request(&build_login_request(&request))?;
+        assert_eq!(parsed.platform_string, "Linux 6.1");
+        assert_eq!(parsed.platform_version, "6.1.0");
+        assert_eq!(parsed.address_size, Some(32));
+        assert_eq!(parsed.host_id, "host-42");
+        assert_eq!(parsed.last_exec_event, Some(3));
+        assert_eq!(parsed.last_exec_duration, Some(1200));
+        assert_eq!(
+            parsed.last_exec_session_id,
+            Some("55555555-5555-5555-5555-555555555555".parse::<uuid::Uuid>()?)
+        );
+        assert!(!parsed.agree_to_tos);
+        assert!(!parsed.read_critical);
+        // Fields only other clients send parse to their empty defaults.
+        assert_eq!(parsed.scope_id, None);
+        assert_eq!(parsed.web_login_key, None);
+
+        // A redirect's `next_method` renames the XML-RPC call, nothing else.
+        let renamed = build_login_request_with_method(&request, "login_to_simulator_elsewhere");
+        assert!(renamed.contains("<methodName>login_to_simulator_elsewhere</methodName>"));
+        assert_eq!(
+            parse_login_request(&renamed)?,
+            parse_login_request(&build_login_request(&request))?
+        );
         Ok(())
     }
 

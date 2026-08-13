@@ -14,6 +14,7 @@ mod header;
 mod inventory;
 mod llsd;
 mod login;
+mod login_llsd;
 mod lsl_syntax;
 mod material;
 mod message;
@@ -94,11 +95,17 @@ pub use llsd::{
     parse_llsd_binary_prefix, parse_llsd_notation, parse_llsd_xml, parse_seed_response,
 };
 pub use login::{
-    BuddyListEntry, Credential, HomeLocation, LoginFailure, LoginParseError, LoginRejectKind,
-    LoginRequest, LoginResponse, LoginServer, LoginSuccess, MfaChallenge, MfaPolicy,
-    ParsedLoginRequest, SkeletonFolder, StartLocation, StartLocationParseError,
-    build_login_request, build_login_response, parse_login_request, parse_login_response,
-    password_hash,
+    BuddyListEntry, Credential, GestureEntry, GlobalTextures, HomeLocation, InitialOutfit,
+    LoginCategory, LoginFailure, LoginFlags, LoginGates, LoginParseError, LoginRedirect,
+    LoginRejectKind, LoginRequest, LoginResponse, LoginServer, LoginSuccess, MfaChallenge,
+    MfaPolicy, NewUserConfig, ParsedLoginRequest, SkeletonFolder, StartLocation,
+    StartLocationParseError, TutorialSetting, UiConfig, VoiceConfig, build_login_request,
+    build_login_request_with_method, build_login_response, parse_login_request,
+    parse_login_response, password_hash,
+};
+pub use login_llsd::{
+    build_login_request_llsd, build_login_response_llsd, parse_login_request_llsd,
+    parse_login_response_llsd,
 };
 pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
 pub use material::{

@@ -764,11 +764,7 @@ fn run_network_thread(
     commands: &Receiver<Command>,
     outbound: &Sender<NetOutbound>,
 ) {
-    let Some(request) = session.login_http_request() else {
-        return;
-    };
-    let body = perform_login(request.url.as_str(), &request.user_agent, request.body);
-    let Some(mut running) = login_phase(session, body, config, Instant::now(), outbound) else {
+    let Some(mut running) = login_phase(session, config, outbound) else {
         return;
     };
     // Sleep *inside* `recv_from`: a datagram wakes the tick immediately, and
@@ -885,21 +881,65 @@ fn send_disconnect(outbound: &Sender<NetOutbound>, reason: DisconnectReason) {
         .ok();
 }
 
-/// Handles the login response (on the network thread), building the
+/// The maximum number of login redirects (`login = "indeterminate"`) the
+/// login phase follows before giving up, protecting against a grid that
+/// redirects in a loop.
+const MAX_LOGIN_REDIRECTS: u32 = 5;
+
+/// Performs the blocking XML-RPC login — following bounded redirects — and
+/// handles the response (on the network thread), building the
 /// [`RunningSession`] on success; `None` ends the thread (a failure, an MFA
 /// challenge, or a retryable rejection — each surfaced over `outbound`).
 fn login_phase(
     mut session: Box<Session>,
-    body: Result<String, String>,
     config: &NetThreadConfig,
-    now: Instant,
     outbound: &Sender<NetOutbound>,
 ) -> Option<RunningSession> {
-    let Ok(body) = body else {
-        send_disconnect(outbound, DisconnectReason::ProtocolError);
-        return None;
+    let mut redirects: u32 = 0;
+    // A redirect response re-arms the session's pending login request at its
+    // `next_url` (see `Session::handle_login_response`), so the loop simply
+    // performs the request again until a terminal response arrives.
+    let response = loop {
+        let request = session.login_http_request()?;
+        let body = perform_login(request.url.as_str(), &request.user_agent, request.body);
+        let Ok(body) = body else {
+            send_disconnect(outbound, DisconnectReason::ProtocolError);
+            return None;
+        };
+        match parse_login_response(&body) {
+            Ok(LoginResponse::Redirect(redirect)) => {
+                if redirects >= MAX_LOGIN_REDIRECTS {
+                    send_disconnect(
+                        outbound,
+                        DisconnectReason::LoginFailed {
+                            reason: "indeterminate".to_owned(),
+                            message: format!(
+                                "login redirected more than {MAX_LOGIN_REDIRECTS} times \
+                                 (next: {})",
+                                redirect.next_url
+                            ),
+                        },
+                    );
+                    return None;
+                }
+                redirects = redirects.saturating_add(1);
+                tracing::info!(
+                    "login redirected to {} (hop {redirects})",
+                    redirect.next_url
+                );
+                if session
+                    .handle_login_response(LoginResponse::Redirect(redirect), Instant::now())
+                    .is_err()
+                {
+                    send_disconnect(outbound, DisconnectReason::ProtocolError);
+                    return None;
+                }
+            }
+            other => break other,
+        }
     };
-    match parse_login_response(&body) {
+    let now = Instant::now();
+    match response {
         Ok(LoginResponse::Success(success)) => {
             if session
                 .handle_login_response(LoginResponse::Success(success), now)
@@ -985,6 +1025,12 @@ fn login_phase(
                     },
                 );
             }
+            None
+        }
+        // The redirect loop above consumes every redirect before breaking, so
+        // one cannot reach this match; handle it defensively all the same.
+        Ok(LoginResponse::Redirect(_redirect)) => {
+            send_disconnect(outbound, DisconnectReason::ProtocolError);
             None
         }
         Err(_parse) => {

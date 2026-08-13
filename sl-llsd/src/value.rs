@@ -9,6 +9,7 @@ use crate::error::LlsdError;
 
 /// A parsed LLSD value.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum Llsd {
     /// The undefined / null value.
     Undef,

@@ -26,9 +26,9 @@ mod test {
         InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
         InventoryKey, InventoryOwner, InventoryType, InviteChannel, ItemInfo, LandArea,
         LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandingType, LightData, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LookAtType, LureId, MapItemType, Material,
-        Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode, MuteFlags,
-        MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
+        LindenBalance, LoginAccount, LoginParams, LoginRedirect, LookAtType, LureId, MapItemType,
+        Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode,
+        MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
         NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
         ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
         ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
@@ -213,34 +213,15 @@ mod test {
 
     /// A successful login response pointing at the test simulator.
     fn success() -> Result<LoginResponse, TestError> {
-        Ok(LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: None,
-            inventory_skeleton: Vec::new(),
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: None,
-            library_owner: None,
-            library_skeleton: Vec::new(),
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        })))
+        Ok(LoginResponse::Success(Box::new(LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        ))))
     }
 
     /// Decodes the message carried by a transmitted datagram.
@@ -411,10 +392,7 @@ mod test {
     #[test]
     fn login_failure_disconnects() -> Result<(), TestError> {
         let mut session = new_session()?;
-        let failure = LoginResponse::Failure(LoginFailure {
-            reason: "key".to_owned(),
-            message: "bad password".to_owned(),
-        });
+        let failure = LoginResponse::Failure(LoginFailure::new("key", "bad password"));
         session.handle_login_response(failure, Instant::now())?;
         assert!(session.is_closed());
         assert!(matches!(
@@ -425,14 +403,55 @@ mod test {
     }
 
     #[test]
+    fn login_redirect_rearms_the_login_request() -> Result<(), TestError> {
+        let mut session = new_session()?;
+        let first_request = session
+            .login_http_request()
+            .ok_or("expected a pending login request")?;
+        assert!(first_request.body.contains("login_to_simulator"));
+
+        // A redirect keeps the session in its fresh state and re-aims the
+        // pending login request at the redirect's endpoint and method name.
+        let redirect = LoginResponse::Redirect(LoginRedirect {
+            next_url: "http://redirect.example.com:8002/".parse()?,
+            next_method: "login_to_simulator_redirected".to_owned(),
+            message: Some("one moment".to_owned()),
+            next_options: Vec::new(),
+        });
+        session.handle_login_response(redirect, Instant::now())?;
+        assert!(!session.is_closed());
+        let second_request = session
+            .login_http_request()
+            .ok_or("expected the re-armed login request")?;
+        assert_eq!(
+            second_request.url.as_str(),
+            "http://redirect.example.com:8002/"
+        );
+        assert!(
+            second_request
+                .body
+                .contains("login_to_simulator_redirected")
+        );
+
+        // The re-armed request still accepts the eventual success normally.
+        session.handle_login_response(success()?, Instant::now())?;
+        assert!(session.login_http_request().is_none());
+        let events = drain_events(&mut session);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::CircuitEstablished { .. })),
+            "expected a CircuitEstablished after the redirected login, got {events:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn closed_session_rejects_relogin() -> Result<(), TestError> {
         // Drive a fresh session to its terminal closed state via a login
         // failure.
         let mut session = new_session()?;
-        let failure = LoginResponse::Failure(LoginFailure {
-            reason: "key".to_owned(),
-            message: "bad password".to_owned(),
-        });
+        let failure = LoginResponse::Failure(LoginFailure::new("key", "bad password"));
         session.handle_login_response(failure, Instant::now())?;
         assert!(session.is_closed());
         let _disconnect_events = drain_events(&mut session);
@@ -8863,49 +8882,33 @@ mod test {
         let now = Instant::now();
         let mut session = new_session()?;
         let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
-        let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: Some(root),
-            inventory_skeleton: vec![
-                SkeletonFolder {
-                    folder_id: root,
-                    parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
-                    name: "My Inventory".to_owned(),
-                    type_default: 8,
-                    version: 5,
-                },
-                SkeletonFolder {
-                    folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF1)),
-                    parent_id: root,
-                    name: "Objects".to_owned(),
-                    type_default: 6,
-                    version: 2,
-                },
-            ],
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: None,
-            library_owner: None,
-            library_skeleton: Vec::new(),
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        }));
+        let mut success = LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        success.inventory_root = Some(root);
+        success.inventory_skeleton = vec![
+            SkeletonFolder {
+                folder_id: root,
+                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+                name: "My Inventory".to_owned(),
+                type_default: 8,
+                version: 5,
+            },
+            SkeletonFolder {
+                folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0xF1)),
+                parent_id: root,
+                name: "Objects".to_owned(),
+                type_default: 6,
+                version: 2,
+            },
+        ];
+        let login = LoginResponse::Success(Box::new(success));
         session.handle_login_response(login, now)?;
 
         assert_eq!(session.inventory_root(), Some(root));
@@ -8948,44 +8951,36 @@ mod test {
         let mut session = new_session()?;
         let lib_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0112));
         let lib_owner = AgentKey::from(uuid::Uuid::from_u128(0xAB));
-        let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: None,
-            inventory_skeleton: Vec::new(),
-            buddy_list: Vec::new(),
-            home: Some(HomeLocation {
-                region_handle: RegionHandle::from_global(256_000, 256_256),
-                position: RegionCoordinates::new(128.0, 127.0, 25.0),
-                look_at: Direction::new(1.0, 0.0, 0.0),
-            }),
-            look_at: Some(Direction::new(0.5, 0.5, 0.0)),
-            region_x: Some(256_000),
-            region_y: Some(256_256),
-            agent_access: Some("M".to_owned()),
-            agent_access_max: Some("A".to_owned()),
-            max_agent_groups: Some(42),
-            library_root: Some(lib_root),
-            library_owner: Some(lib_owner),
-            library_skeleton: vec![SkeletonFolder {
-                folder_id: lib_root,
-                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
-                name: "Library".to_owned(),
-                type_default: 8,
-                version: 1,
-            }],
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        }));
+        let mut success = LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        success.home = Some(HomeLocation {
+            region_handle: RegionHandle::from_global(256_000, 256_256),
+            position: RegionCoordinates::new(128.0, 127.0, 25.0),
+            look_at: Direction::new(1.0, 0.0, 0.0),
+        });
+        success.look_at = Some(Direction::new(0.5, 0.5, 0.0));
+        success.region_x = Some(256_000);
+        success.region_y = Some(256_256);
+        success.agent_access = Some("M".to_owned());
+        success.agent_access_max = Some("A".to_owned());
+        success.max_agent_groups = Some(42);
+        success.library_root = Some(lib_root);
+        success.library_owner = Some(lib_owner);
+        success.library_skeleton = vec![SkeletonFolder {
+            folder_id: lib_root,
+            parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+            name: "Library".to_owned(),
+            type_default: 8,
+            version: 1,
+        }];
+        let login = LoginResponse::Success(Box::new(success));
         session.handle_login_response(login, now)?;
 
         // The account facts are stored on the session...
@@ -9048,46 +9043,33 @@ mod test {
         let agent_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0A00));
         let lib_root = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0B00));
         let lib_owner = AgentKey::from(uuid::Uuid::from_u128(0xAB));
-        let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: Some(agent_root),
-            inventory_skeleton: vec![SkeletonFolder {
-                folder_id: agent_root,
-                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
-                name: "My Inventory".to_owned(),
-                type_default: 8,
-                version: 1,
-            }],
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: Some(lib_root),
-            library_owner: Some(lib_owner),
-            library_skeleton: vec![SkeletonFolder {
-                folder_id: lib_root,
-                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
-                name: "Library".to_owned(),
-                type_default: 8,
-                version: 3,
-            }],
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        }));
+        let mut success = LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        success.inventory_root = Some(agent_root);
+        success.inventory_skeleton = vec![SkeletonFolder {
+            folder_id: agent_root,
+            parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+            name: "My Inventory".to_owned(),
+            type_default: 8,
+            version: 1,
+        }];
+        success.library_root = Some(lib_root);
+        success.library_owner = Some(lib_owner);
+        success.library_skeleton = vec![SkeletonFolder {
+            folder_id: lib_root,
+            parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+            name: "Library".to_owned(),
+            type_default: 8,
+            version: 3,
+        }];
+        let login = LoginResponse::Success(Box::new(success));
         session.handle_login_response(login, now)?;
         drain(&mut session)?;
         drain_events(&mut session);
@@ -9367,49 +9349,33 @@ mod test {
         // (parent nil) at versions 5 and 7, so the cached tree carries no phantom
         // parent to confuse the merge. They seed `Unknown` (metadata only).
         let nil = InventoryFolderKey::from(uuid::Uuid::nil());
-        let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: Some(unchanged_key),
-            inventory_skeleton: vec![
-                SkeletonFolder {
-                    folder_id: unchanged_key,
-                    parent_id: nil,
-                    name: "Kept".to_owned(),
-                    type_default: 8,
-                    version: 5,
-                },
-                SkeletonFolder {
-                    folder_id: bumped_key,
-                    parent_id: nil,
-                    name: "Bumped".to_owned(),
-                    type_default: 8,
-                    version: 7,
-                },
-            ],
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: None,
-            library_owner: None,
-            library_skeleton: Vec::new(),
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        }));
+        let mut success = LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        success.inventory_root = Some(unchanged_key);
+        success.inventory_skeleton = vec![
+            SkeletonFolder {
+                folder_id: unchanged_key,
+                parent_id: nil,
+                name: "Kept".to_owned(),
+                type_default: 8,
+                version: 5,
+            },
+            SkeletonFolder {
+                folder_id: bumped_key,
+                parent_id: nil,
+                name: "Bumped".to_owned(),
+                type_default: 8,
+                version: 7,
+            },
+        ];
+        let login = LoginResponse::Success(Box::new(success));
         session.handle_login_response(login, now)?;
         drain(&mut session)?;
         drain_events(&mut session);
@@ -9497,49 +9463,33 @@ mod test {
         let mut session = new_session()?;
         let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
         let sub = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF1));
-        let login = LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: Some(root),
-            inventory_skeleton: vec![
-                SkeletonFolder {
-                    folder_id: root,
-                    parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
-                    name: "My Inventory".to_owned(),
-                    type_default: 8,
-                    version: 5,
-                },
-                SkeletonFolder {
-                    folder_id: sub,
-                    parent_id: root,
-                    name: "Objects".to_owned(),
-                    type_default: 6,
-                    version: 2,
-                },
-            ],
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: None,
-            library_owner: None,
-            library_skeleton: Vec::new(),
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        }));
+        let mut success = LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        success.inventory_root = Some(root);
+        success.inventory_skeleton = vec![
+            SkeletonFolder {
+                folder_id: root,
+                parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+                name: "My Inventory".to_owned(),
+                type_default: 8,
+                version: 5,
+            },
+            SkeletonFolder {
+                folder_id: sub,
+                parent_id: root,
+                name: "Objects".to_owned(),
+                type_default: 6,
+                version: 2,
+            },
+        ];
+        let login = LoginResponse::Success(Box::new(success));
         session.handle_login_response(login, now)?;
         drain(&mut session)?;
         drain_events(&mut session);

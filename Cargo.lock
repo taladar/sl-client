@@ -9011,6 +9011,7 @@ dependencies = [
  "base64",
  "pretty_assertions",
  "roxmltree 0.20.0",
+ "serde",
  "thiserror 2.0.19",
  "time",
  "uuid",
