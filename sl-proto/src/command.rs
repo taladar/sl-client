@@ -2524,6 +2524,22 @@ pub enum Command {
         /// The maximum number of lines in the page.
         limit: usize,
     },
+    /// Fetch a group / conference session's **server-side recent-message
+    /// backlog** explicitly, POSTing the `ChatSessionRequest` capability's
+    /// `fetch history` method (see
+    /// [`CHAT_SESSION_FETCH_HISTORY`](crate::CHAT_SESSION_FETCH_HISTORY)). The
+    /// reply is decoded by [`Session::handle_caps_event`](crate::Session::handle_caps_event)
+    /// into [`Event::SessionServerHistory`](crate::Event::SessionServerHistory).
+    /// Bypasses the [`Session::set_fetch_server_chat_history`](crate::Session::set_fetch_server_chat_history)
+    /// auto-fetch gate. Second Life serves the method; on a grid without the
+    /// capability (stock OpenSim) the command is silently dropped — the cap is
+    /// absent, so there is nothing to POST to.
+    FetchSessionHistory {
+        /// Which chat session's backlog to fetch. Only `Group` / `Conference`
+        /// sessions have a server backlog; a `Direct` kind is silently ignored
+        /// (the reference never fetches for 1:1 IM).
+        kind: ChatSessionKind,
+    },
     /// Query the buddy cache with each friend's online flag. The runtime replies
     /// with [`Event::FriendsSnapshot`](crate::Event::FriendsSnapshot) built from
     /// [`Session::friends_presence`](crate::Session::friends_presence); no wire

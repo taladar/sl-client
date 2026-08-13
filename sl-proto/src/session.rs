@@ -363,6 +363,24 @@ pub const CHAT_SESSION_DECLINE: &str = "decline invitation";
 /// [`CHAT_SESSION_DECLINE`] (Firestorm `llimview.cpp` voice-call teardown).
 pub const CHAT_SESSION_DECLINE_P2P_VOICE: &str = "decline p2p voice";
 
+/// The `ChatSessionRequest` method that fetches the **server-side recent-message
+/// backlog** of a group / conference session (Firestorm `chatterBoxHistoryCoro`,
+/// `llimview.cpp:784`). The reply body is a bare LLSD *array* (oldest→newest,
+/// bounded by the server) of `{ from, from_id, message, num, time }` maps.
+/// Second Life serves it; OpenSim has no `ChatSessionRequest` handler at all, so
+/// on the local grid the fetch is simply never issued (the cap is absent).
+pub const CHAT_SESSION_FETCH_HISTORY: &str = "fetch history";
+
+/// The tag the runtimes attach when forwarding a
+/// [`CHAT_SESSION_FETCH_HISTORY`] reply to [`Session::handle_caps_event`].
+/// A synthetic routing key (never a real capability name): the reply is a bare
+/// LLSD array with no session identity of its own, so the runtime wraps it as
+/// `{ "history": <array>, "session-id": <uuid>, "from_group": <bool> }` under
+/// this tag — the fetch-history analogue of the roster-reply stamping the plain
+/// [`CAP_CHAT_SESSION_REQUEST`] tag carries (and of the transient
+/// [`LAND_RESOURCE_SUMMARY_TAG`] convention).
+pub const CHAT_SESSION_FETCH_HISTORY_TAG: &str = "ChatSessionRequest/fetch history";
+
 /// Inventory mutation (#30): the modern Second Life **AIS3** REST inventory
 /// capability (`InventoryAPIv3`). Folder/item create/update/move/remove are HTTP
 /// verbs against path suffixes under this base URL (see `sl_wire::inventory`).
@@ -1314,6 +1332,17 @@ pub struct Session {
     /// [`Session::set_background_inventory_fetch`] and consulted by
     /// [`Session::next_inventory_fetch_batch`].
     background_inventory_fetch: bool,
+    /// Whether a joined group / conference session's server-side chat backlog
+    /// is fetched automatically (`ChatSessionRequest` `fetch history`).
+    /// [`Enabled`](ServerHistoryFetch::Enabled) by default, matching the
+    /// reference viewer's `FetchGroupChatHistory` setting — unlike the opt-in
+    /// inventory crawl, seeing what was said before you were listening is the
+    /// expected chat experience. Toggled by
+    /// [`Session::set_fetch_server_chat_history`] and consulted by
+    /// [`Session::next_server_history_fetches`]; the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// works regardless.
+    fetch_server_chat_history: ServerHistoryFetch,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
     /// Whether protocol diagnostics are collected. Off by default so the
@@ -1332,12 +1361,12 @@ mod inventory;
 mod inventory_cache;
 mod methods;
 
-use self::chat_session::{ChatSession, TYPING_TIMEOUT};
+use self::chat_session::{ChatSession, ServerHistoryFetch, ServerHistoryState, TYPING_TIMEOUT};
 use self::inventory::Inventory;
 pub use chat_session::{
     ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
-    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, SessionMessage,
-    VoiceChannelInfo, VoiceChannelState,
+    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, ServerHistoryMessage,
+    SessionMessage, VoiceChannelInfo, VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;

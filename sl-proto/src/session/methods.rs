@@ -22,8 +22,8 @@ use super::conversions::{
     parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
     region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
     script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
-    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
-    teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
+    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
+    skeleton_folder, teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
     windlight_refresh_from_llsd,
 };
 use super::{
@@ -36,14 +36,16 @@ use super::{
     CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, ChatLifecycleView, ChatSession,
-    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE,
-    FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory,
-    InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MessageCursor, PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo,
-    XFER_UPLOAD_CHUNK_SIZE, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CHAT_SESSION_FETCH_HISTORY_TAG,
+    ChatLifecycleView, ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle,
+    Circuit, DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind,
+    IDENTITY_ROTATION, Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MessageCursor, PING_INTERVAL, PendingHandover,
+    PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder, ServerHistoryFetch,
+    ServerHistoryMessage, ServerHistoryState, Session, SessionMessage, SessionState, SitState,
+    TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
+    VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -228,6 +230,7 @@ impl Session {
             own_avatar: BTreeMap::new(),
             inventory: Inventory::new(),
             background_inventory_fetch: false,
+            fetch_server_chat_history: ServerHistoryFetch::Enabled,
             events: VecDeque::new(),
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
@@ -898,6 +901,46 @@ impl Session {
                         session.voice.has_voice = true;
                         session.voice.channel = Some(voice_channel_info_from_llsd(voice));
                     }
+                }
+            }
+            // The reply to a `ChatSessionRequest` "fetch history" POST: the
+            // session's server-side recent-message backlog. The wire reply is a
+            // bare LLSD array with no session identity, so the runtime wraps it
+            // as `{ history, session-id, from_group }` under this synthetic tag
+            // (see `CHAT_SESSION_FETCH_HISTORY_TAG`); the kind is rebuilt from
+            // the stamp exactly as the accept-roster arm above does — always
+            // group or conference, the only kinds a fetch is issued for. The
+            // backlog is de-duplicated against the live ring on store (the
+            // message that triggered a lazy-open fetch arrives both ways) and
+            // surfaced as `Event::SessionServerHistory` when non-empty; it is
+            // never written to the on-disk transcript.
+            CHAT_SESSION_FETCH_HISTORY_TAG => {
+                let session_uuid = body
+                    .get("session-id")
+                    .and_then(Llsd::as_uuid)
+                    .unwrap_or_default();
+                let from_group = body
+                    .get("from_group")
+                    .and_then(Llsd::as_bool)
+                    .unwrap_or(false);
+                let kind = if from_group {
+                    ChatSessionKind::Group {
+                        group_id: GroupKey::from(session_uuid),
+                    }
+                } else {
+                    ChatSessionKind::Conference {
+                        id: ImSessionId::from(session_uuid),
+                    }
+                };
+                let messages = session_history_from_llsd(body);
+                let session = self.chat_session_mut(kind, now);
+                session.store_server_history(messages);
+                let stored = session.server_history.clone();
+                if !stored.is_empty() {
+                    self.events.push_back(Event::SessionServerHistory {
+                        kind,
+                        messages: stored,
+                    });
                 }
             }
             // A `ChatterBoxSessionAgentListUpdates` push (#28): the modern voice
@@ -5777,6 +5820,19 @@ impl Session {
             .flat_map(|chat_session| chat_session.history.iter())
     }
 
+    /// The server-side chat backlog of `session`, oldest-first, as stored by the
+    /// last `fetch history` reply — already de-duplicated against the live ring
+    /// and separate from [`Self::history`]. Yields nothing for a session that is
+    /// not open, was never fetched, or on a grid without the capability.
+    pub fn server_history(
+        &self,
+        session: ChatSessionKind,
+    ) -> impl Iterator<Item = &ServerHistoryMessage> {
+        self.chat_session(session)
+            .into_iter()
+            .flat_map(|chat_session| chat_session.server_history.iter())
+    }
+
     /// The number of unread inbound messages in `session` (zero if the session is
     /// not open). Reset by our own outbound send and by [`Self::mark_session_read`].
     #[must_use]
@@ -8888,6 +8944,71 @@ impl Session {
     #[must_use]
     pub const fn background_inventory_fetch(&self) -> bool {
         self.background_inventory_fetch
+    }
+
+    /// The group / conference sessions whose server-side chat backlog should be
+    /// fetched now — every `Joined` group / conference session not yet swept,
+    /// each flipped to `Requested` so it is returned exactly once per login.
+    /// Returns an **empty** batch while the auto-fetch is disabled
+    /// ([`Session::set_fetch_server_chat_history`], default **enabled**).
+    ///
+    /// The runtime shell calls this once per loop iteration **only while the
+    /// `ChatSessionRequest` capability is known** (the defer-until-cap
+    /// convention, exactly like the inventory crawl) and POSTs a
+    /// [`CHAT_SESSION_FETCH_HISTORY`](crate::CHAT_SESSION_FETCH_HISTORY) for
+    /// each returned kind; the reply folds in via [`Session::handle_caps_event`]
+    /// and surfaces as [`Event::SessionServerHistory`]. On a grid without the
+    /// capability (stock OpenSim) the runtime never calls this, so nothing is
+    /// ever marked `Requested` there. `Direct` sessions never schedule (the
+    /// reference fetches no 1:1 backlog), nor do still-`Invited` sessions.
+    pub fn next_server_history_fetches(&mut self) -> Vec<ChatSessionKind> {
+        if !self.fetch_server_chat_history.is_enabled() {
+            return Vec::new();
+        }
+        self.chat_sessions
+            .iter_mut()
+            .filter(|(kind, chat_session)| {
+                !matches!(kind, ChatSessionKind::Direct { .. })
+                    && matches!(chat_session.lifecycle, ChatSessionLifecycle::Joined)
+                    && matches!(
+                        chat_session.server_history_state,
+                        ServerHistoryState::Unfetched
+                    )
+            })
+            .map(|(kind, chat_session)| {
+                chat_session.server_history_state = ServerHistoryState::Requested;
+                *kind
+            })
+            .collect()
+    }
+
+    /// Marks `session`'s server-history fetch cycle `Requested` without waiting
+    /// for the scheduler — the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// path calls this when it POSTs, so a manual fetch also suppresses a later
+    /// duplicate auto-fetch of the same session. A no-op for an unopened
+    /// session.
+    pub fn note_server_history_requested(&mut self, session: ChatSessionKind) {
+        if let Some(chat_session) = self.chat_session_get_mut(session) {
+            chat_session.server_history_state = ServerHistoryState::Requested;
+        }
+    }
+
+    /// Enables or disables the automatic server-side chat-backlog fetch for
+    /// newly joined group / conference sessions (default **enabled**, matching
+    /// the reference viewer's `FetchGroupChatHistory`). While disabled,
+    /// [`Session::next_server_history_fetches`] returns empty; the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// works regardless.
+    pub const fn set_fetch_server_chat_history(&mut self, enabled: bool) {
+        self.fetch_server_chat_history = ServerHistoryFetch::from_enabled(enabled);
+    }
+
+    /// Whether the automatic server-side chat-backlog fetch is enabled (see
+    /// [`Session::set_fetch_server_chat_history`]).
+    #[must_use]
+    pub const fn fetch_server_chat_history(&self) -> bool {
+        self.fetch_server_chat_history.is_enabled()
     }
 
     /// Whether the `owner` inventory tree is fully fetched — no folder under it is

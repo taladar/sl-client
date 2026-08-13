@@ -173,6 +173,20 @@
   unfocused-selection-color: var(--selection-unfocused);
 }
 
+/* The Conversations floater's transcript band colours — the reference's
+ * three-way message-class distinction in IM / group windows (grey recalled
+ * local transcript, muted-green server-fetched session history, white live
+ * lines; `ChatHistoryMessageFromLog` / `ChatHistoryMessageFromServerLog` /
+ * `AgentChatColor` in colors.xml, mapped in fschathistory.cpp). Transcript
+ * lines are spawned dynamically with code-driven per-line colours, so these
+ * land on the floater root as a SkinChatBands shim (src/skin.rs), the same
+ * mechanism as the caret rule above, and the transcript rebuild reads them. */
+.sk-conversations {
+  chat-recall-color: var(--chat-recall);
+  chat-server-history-color: var(--chat-server-history);
+  chat-live-color: var(--chat-live);
+}
+
 /* A focused text field shows the focus ring however focus arrived — mouse or
  * keyboard — where every other widget rings only on :focus-visible (Tab). The
  * reference lights a focused editor's keyboard-focus border highlight

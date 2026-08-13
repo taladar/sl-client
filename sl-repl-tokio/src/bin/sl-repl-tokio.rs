@@ -137,6 +137,12 @@ pub struct RunArgs {
     /// The optional local chat-log toggles (all off by default).
     #[clap(flatten)]
     chat_log: sl_repl::ChatLogArgs,
+    /// Disable the automatic server-side group / conference chat-backlog fetch
+    /// (`ChatSessionRequest` "fetch history"; on by default, Second-Life only —
+    /// grids without the capability never fetch either way). The explicit
+    /// `fetch_session_history` command works regardless.
+    #[clap(long)]
+    no_group_chat_history: bool,
 }
 
 /// The packaging sub-commands (the absence of a sub-command runs a session).
@@ -633,6 +639,7 @@ async fn run_repl(args: RunArgs) -> Result<(), Error> {
     });
     // The REPL exercises the full client, so crawl inventory in the background.
     client.set_background_inventory_fetch(true);
+    client.set_fetch_server_chat_history(!args.no_group_chat_history);
     let (caps_tx, mut caps_rx) = mpsc::channel::<HashMap<String, String>>(8);
     client.set_caps_reporter(caps_tx);
 

@@ -27,9 +27,9 @@ use sl_proto::{
     CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request,
+    CHAT_SESSION_FETCH_HISTORY, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, ais_category_children_fetch_url, ais_category_children_url,
+    ais_category_url, ais_create_category_url, ais_item_url, associate_inventory_request,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_get_object_cost_request,
@@ -186,7 +186,7 @@ use crate::experiences::{
 use crate::fetch::{fetch_asset_http, fetch_mesh_http, fetch_texture_http};
 use crate::http::{
     delete_caps_llsd, fetch_land_resources, fetch_lsl_syntax, get_caps_llsd, patch_caps_llsd,
-    post_caps_oneway, post_chat_session_request, put_caps_llsd,
+    post_caps_oneway, post_chat_session_fetch_history, post_chat_session_request, put_caps_llsd,
 };
 use crate::inventory::{fetch_folder_contents, fetch_group_members, fetch_inventory};
 use crate::inventory_cache::InventoryCache;
@@ -502,6 +502,19 @@ impl Client {
         self.session.set_background_inventory_fetch(enabled);
     }
 
+    /// Enables or disables the automatic server-side chat-backlog fetch (**on**
+    /// by default, matching the reference viewer's `FetchGroupChatHistory`).
+    /// While enabled, [`Client::run`] POSTs a `ChatSessionRequest`
+    /// `fetch history` once for each group / conference session that reaches
+    /// joined (when the grid serves the capability — stock OpenSim does not, so
+    /// nothing is ever sent there), surfacing the backlog as
+    /// [`Event::SessionServerHistory`]. The explicit
+    /// [`Command::FetchSessionHistory`] works regardless of this flag. Call
+    /// before [`Client::run`].
+    pub const fn set_fetch_server_chat_history(&mut self, enabled: bool) {
+        self.session.set_fetch_server_chat_history(enabled);
+    }
+
     /// Runs the session until it is disconnected or logged out, forwarding
     /// events to `events`, diagnostics to `diagnostics` (only when enabled via
     /// [`Client::set_diagnostics`]), and applying commands from `commands`.
@@ -735,6 +748,30 @@ impl Client {
                             }
                         }
                     }
+                }
+            }
+
+            // Server-side chat backlog: when a group / conference session has
+            // reached `Joined` and the `ChatSessionRequest` capability is known,
+            // POST one `fetch history` per newly joined session. Self-gating and
+            // once-per-session — `next_server_history_fetches` flips each
+            // returned session to `Requested` and returns empty while the
+            // auto-fetch is disabled. On a grid without the capability (stock
+            // OpenSim) the gate never opens, so the fetch silently never fires.
+            if let (Some(url), Some(own_agent)) = (
+                caps.get(CAP_CHAT_SESSION_REQUEST).cloned(),
+                self.session.agent_id(),
+            ) {
+                for kind in self.session.next_server_history_fetches() {
+                    let session_id = kind.canonical_session_id(own_agent);
+                    tokio::spawn(post_chat_session_fetch_history(
+                        url.clone(),
+                        chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_id),
+                        session_id,
+                        matches!(kind, ChatSessionKind::Group { .. }),
+                        http.clone(),
+                        caps_tx.clone(),
+                    ));
                 }
             }
 
@@ -2146,6 +2183,33 @@ impl Client {
                                     let body = chat_session_request_body(method, session_uuid);
                                     tokio::spawn(post_chat_session_request(url, body, session_uuid, from_group, http.clone(), caps_tx.clone()));
                                 }
+                            }
+                        }
+                        Some(Command::FetchSessionHistory { kind }) => {
+                            // Explicit server-backlog fetch, bypassing the
+                            // auto-fetch gate. Only group / conference sessions
+                            // have a server backlog; on a grid without the cap
+                            // (stock OpenSim) there is nothing to POST to, so the
+                            // command silently degrades.
+                            if !matches!(kind, ChatSessionKind::Direct { .. })
+                                && let (Some(url), Some(own)) = (
+                                    caps.get(CAP_CHAT_SESSION_REQUEST).cloned(),
+                                    self.session.agent_id(),
+                                )
+                            {
+                                // Suppress a later duplicate auto-fetch of the
+                                // same session.
+                                self.session.note_server_history_requested(kind);
+                                let session_uuid = kind.canonical_session_id(own);
+                                let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
+                                tokio::spawn(post_chat_session_fetch_history(
+                                    url,
+                                    body,
+                                    session_uuid,
+                                    matches!(kind, ChatSessionKind::Group { .. }),
+                                    http.clone(),
+                                    caps_tx.clone(),
+                                ));
                             }
                         }
                         Some(Command::QueryChatSessions) => {

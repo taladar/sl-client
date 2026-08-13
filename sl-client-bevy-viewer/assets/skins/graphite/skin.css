@@ -27,6 +27,13 @@
   --selection: #4d7fbf73;
   --selection-unfocused: #73849959;
 
+  /* Conversation transcript bands — the reference values (grey local recall,
+   * muted-green server history, white live), shared by both skins: the class
+   * distinction is by hue, so it stays put when the skin changes. */
+  --chat-recall: #808080;
+  --chat-server-history: #5e8261;
+  --chat-live: #ffffff;
+
   /* Controls */
   --control-bg: #2a2f3a;
   --control-bg-hover: #353c4a;

@@ -19656,6 +19656,218 @@ mod test {
         Ok(())
     }
 
+    /// The server-history scheduler returns each newly `Joined` group /
+    /// conference session exactly once (the `Requested` flip), never a 1:1
+    /// `Direct` session, and returns nothing while the auto-fetch is disabled.
+    #[test]
+    fn server_history_scheduler_fires_once_per_group_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // A group send lazy-opens the group session; a 1:1 IM opens a Direct
+        // session — only the group is ever scheduled.
+        let group = uuid::Uuid::from_u128(0x7A01);
+        let send = inbound_group_im(17, uuid::Uuid::from_u128(0x7A02), group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        let im = inbound_im(0, b"Friendly Bot\0", b"hi\0");
+        session.handle_datagram(sim_addr(), &server_message(&im, 10, false)?, now)?;
+
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        assert_eq!(session.next_server_history_fetches(), vec![kind]);
+        // The flip to `Requested` makes the second sweep empty.
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+        Ok(())
+    }
+
+    /// A still-`Invited` session is not scheduled; accepting promotes it to
+    /// `Joined` and the next sweep picks it up — unless the auto-fetch is
+    /// disabled, in which case the sweep stays empty until re-enabled. An
+    /// explicit `note_server_history_requested` also suppresses the sweep.
+    #[test]
+    fn server_history_scheduler_skips_invited_and_disabled() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let group = uuid::Uuid::from_u128(0x7B01);
+        let inviter = uuid::Uuid::from_u128(0x7B02);
+        let invite_xml = format!(
+            "<llsd><map>\
+               <key>session_name</key><string>My Group</string>\
+               <key>instantmessage</key><map><key>message_params</key><map>\
+                 <key>id</key><uuid>{group}</uuid>\
+                 <key>from_id</key><uuid>{inviter}</uuid>\
+                 <key>from_name</key><string>Inviter</string>\
+                 <key>type</key><integer>15</integer>\
+                 <key>from_group</key><boolean>1</boolean>\
+               </map></map></map></llsd>"
+        );
+        session.handle_caps_event("ChatterBoxInvitation", &parse_llsd_xml(&invite_xml)?, now)?;
+        // Invited, not joined: nothing to fetch yet.
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+
+        session.set_fetch_server_chat_history(false);
+        session.accept_chat_invite(ImSessionId::from(group), true, now);
+        // Joined now, but the auto-fetch is disabled.
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+
+        session.set_fetch_server_chat_history(true);
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        assert_eq!(session.next_server_history_fetches(), vec![kind]);
+
+        // A second joined session marked requested by the explicit-command path
+        // is likewise never swept.
+        let conf = uuid::Uuid::from_u128(0x7B03);
+        let conf_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        session.accept_chat_invite(ImSessionId::from(conf), false, now);
+        session.note_server_history_requested(conf_kind);
+        assert_eq!(session.next_server_history_fetches(), Vec::new());
+        Ok(())
+    }
+
+    /// A `fetch history` reply (the runtime's wrapped array under the synthetic
+    /// routing tag) folds into the right session by the stamped `session-id` +
+    /// `from_group`, drops the entry duplicating the live trigger message
+    /// (which arrived both live and inside the fetch), stores the rest
+    /// oldest-first, and surfaces them as `Event::SessionServerHistory`.
+    #[test]
+    fn fetch_history_reply_stores_deduped_backlog() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        // The trigger: a live group send (ring entry, timestamp `None`).
+        let group = uuid::Uuid::from_u128(0x7C01);
+        let sender = uuid::Uuid::from_u128(0x7C02);
+        let send = inbound_group_im(17, sender, group);
+        session.handle_datagram(sim_addr(), &server_message(&send, 9, true)?, now)?;
+        drain_events(&mut session);
+
+        let reply_xml = format!(
+            "<llsd><map>\
+               <key>history</key><array>\
+                 <map>\
+                   <key>from</key><string>Backlog Speaker</string>\
+                   <key>from_id</key><uuid>{sender}</uuid>\
+                   <key>message</key><string>before you joined</string>\
+                   <key>num</key><integer>0</integer>\
+                   <key>time</key><real>1665010000.0</real>\
+                 </map>\
+                 <map>\
+                   <key>from</key><string>Backlog Speaker</string>\
+                   <key>from_id</key><uuid>{sender}</uuid>\
+                   <key>message</key><string>hello group</string>\
+                   <key>num</key><integer>1</integer>\
+                   <key>time</key><integer>1665010060</integer>\
+                 </map>\
+               </array>\
+               <key>session-id</key><uuid>{group}</uuid>\
+               <key>from_group</key><boolean>1</boolean>\
+             </map></llsd>"
+        );
+        session.handle_caps_event(
+            sl_proto::CHAT_SESSION_FETCH_HISTORY_TAG,
+            &parse_llsd_xml(&reply_xml)?,
+            now,
+        )?;
+
+        let kind = ChatSessionKind::Group {
+            group_id: GroupKey::from(group),
+        };
+        // The stored backlog dropped the live-trigger duplicate ("hello group",
+        // the `inbound_group_im` text) and kept the genuinely older line.
+        let stored: Vec<&sl_proto::ServerHistoryMessage> = session.server_history(kind).collect();
+        assert_eq!(stored.len(), 1);
+        let entry = stored.first().ok_or("expected a stored backlog entry")?;
+        assert_eq!(entry.sender, AgentKey::from(sender));
+        assert_eq!(entry.sender_name, "Backlog Speaker");
+        assert_eq!(entry.text, "before you joined");
+        assert_eq!(entry.timestamp, Some(1_665_010_000));
+        // The live ring is untouched by the fold.
+        assert_eq!(history(&session, kind).len(), 1);
+
+        let events = drain_events(&mut session);
+        match events.as_slice() {
+            [
+                Event::SessionServerHistory {
+                    kind: got,
+                    messages,
+                },
+            ] => {
+                assert_eq!(*got, kind);
+                assert_eq!(messages.len(), 1);
+                let message = messages.first().ok_or("expected an event message")?;
+                assert_eq!(message.text, "before you joined");
+            }
+            other => return Err(format!("expected SessionServerHistory, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// A `from_group`-clear reply routes to the conference kind, and an empty
+    /// backlog (OpenSim never answers, but a hypothetical empty array reply)
+    /// stores nothing and emits no event.
+    #[test]
+    fn fetch_history_reply_routes_conference_and_skips_empty() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let conf = uuid::Uuid::from_u128(0x7D01);
+        let speaker = uuid::Uuid::from_u128(0x7D02);
+        let reply_xml = format!(
+            "<llsd><map>\
+               <key>history</key><array>\
+                 <map>\
+                   <key>from</key><string>Conference Speaker</string>\
+                   <key>from_id</key><uuid>{speaker}</uuid>\
+                   <key>message</key><string>conference backlog</string>\
+                   <key>time</key><integer>1665010000</integer>\
+                 </map>\
+               </array>\
+               <key>session-id</key><uuid>{conf}</uuid>\
+               <key>from_group</key><boolean>0</boolean>\
+             </map></llsd>"
+        );
+        session.handle_caps_event(
+            sl_proto::CHAT_SESSION_FETCH_HISTORY_TAG,
+            &parse_llsd_xml(&reply_xml)?,
+            now,
+        )?;
+        let kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(conf),
+        };
+        assert_eq!(session.server_history(kind).count(), 1);
+        assert!(matches!(
+            drain_events(&mut session).as_slice(),
+            [Event::SessionServerHistory { .. }]
+        ));
+
+        // An empty backlog reply: stored empty, no event.
+        let empty_xml = format!(
+            "<llsd><map>\
+               <key>history</key><array></array>\
+               <key>session-id</key><uuid>{conf}</uuid>\
+               <key>from_group</key><boolean>0</boolean>\
+             </map></llsd>"
+        );
+        session.handle_caps_event(
+            sl_proto::CHAT_SESSION_FETCH_HISTORY_TAG,
+            &parse_llsd_xml(&empty_xml)?,
+            now,
+        )?;
+        assert_eq!(session.server_history(kind).count(), 0);
+        assert!(drain_events(&mut session).is_empty());
+        Ok(())
+    }
+
     /// Like [`established`] but seeds the login buddy list, so the friend cache is
     /// populated for the presence read tests.
     fn established_with_friends(

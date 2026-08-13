@@ -50,13 +50,13 @@
 //! the reference also hangs off this floater are separate, already-existing tasks
 //! and are deliberately not built here.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, ObjectKey, SlCommand,
-    SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    AgentKey, ChatSessionKind, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId,
+    MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
 use crate::bottom_toolbar::{BOTTOM_BAR_Z, BottomArea};
@@ -67,6 +67,7 @@ use crate::floater::{
 use crate::i18n::{TransArgs, Translator};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
+use crate::skin::SkinChatBands;
 use crate::ui::{
     LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column, row,
 };
@@ -157,8 +158,11 @@ const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
 /// the scrollback reads as a sunken well.
 const TRANSCRIPT_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
-/// A transcript line's colour.
-const TRANSCRIPT_COLOR: Color = Color::srgb(0.88, 0.90, 0.95);
+/// The floater root's skin class — the `common.css` `.sk-conversations` rule
+/// lands the transcript **band** colours here as a [`SkinChatBands`] shim
+/// (grey local recall, muted-green server history, white live lines), which
+/// [`refresh_conversations`] reads when it rebuilds a transcript pane.
+const CONVERSATIONS_CLASS: &str = "sk-conversations";
 
 /// The "X is typing…" line's colour — dim, so it reads as ephemeral status.
 const TYPING_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
@@ -251,6 +255,27 @@ impl ConversationKey {
     const fn is_nearby(self) -> bool {
         matches!(self, Self::Nearby)
     }
+
+    /// The runtime chat-session kind behind a keyed tab, or `None` for Nearby
+    /// (local chat is not a [`ChatSessionKind`] session).
+    const fn session_kind(self) -> Option<ChatSessionKind> {
+        match self {
+            Self::Nearby => None,
+            Self::Direct(peer) => Some(ChatSessionKind::Direct { peer }),
+            Self::Group(group_id) => Some(ChatSessionKind::Group { group_id }),
+            Self::Conference(id) => Some(ChatSessionKind::Conference { id }),
+        }
+    }
+
+    /// The tab key for a runtime chat-session kind (the inverse of
+    /// [`Self::session_kind`]).
+    const fn from_session_kind(kind: ChatSessionKind) -> Self {
+        match kind {
+            ChatSessionKind::Direct { peer } => Self::Direct(peer),
+            ChatSessionKind::Group { group_id } => Self::Group(group_id),
+            ChatSessionKind::Conference { id } => Self::Conference(id),
+        }
+    }
 }
 
 /// The clickable identity of a transcript line's speaker — what the sender-name
@@ -302,10 +327,21 @@ struct Conversation {
     /// Persisted **recall** lines rendered *above* the live [`lines`](Self::lines),
     /// loaded once from the on-disk chat-log transcript so the panel opens on
     /// previous-session history (the reference viewer's "load previous
-    /// conversation"). Only the Nearby tab populates this today (via
-    /// [`ConversationModel::set_nearby_recall`]); every other tab leaves it empty.
-    /// Not subject to the live [`HISTORY_CAP`] and never counted as unread.
+    /// conversation"). The Nearby tab loads it via
+    /// [`ConversationModel::set_nearby_recall`]; a keyed tab via
+    /// [`ConversationModel::set_recall`] when its one-shot
+    /// [`request_keyed_recall`] query answers. Rendered in the recall band
+    /// colour (grey). Not subject to the live [`HISTORY_CAP`] and never counted
+    /// as unread.
     recall: Vec<TranscriptLine>,
+    /// The **server-fetched session backlog** (`Event::SessionServerHistory`,
+    /// group / conference tabs only): what was said in the session before this
+    /// client was listening, rendered *between* the local
+    /// [`recall`](Self::recall) and the live [`lines`](Self::lines) in the
+    /// server-history band colour (muted green), de-duplicated against the
+    /// recall band at render time ([`filter_server_band`]). Never counted as
+    /// unread.
+    server_history: Vec<TranscriptLine>,
     /// Bumped on each appended line; the view's last-rendered value is compared
     /// against it to avoid rebuilding an unchanged transcript node.
     revision: u64,
@@ -321,6 +357,7 @@ impl Conversation {
             typing: BTreeMap::new(),
             pending_invite: false,
             recall: Vec::new(),
+            server_history: Vec::new(),
             revision: 0,
         }
     }
@@ -497,16 +534,44 @@ impl ConversationModel {
             .map_or(0, |entry| entry.lines.len())
     }
 
-    /// Replace the Nearby tab's **recall** lines (the persisted history rendered
-    /// above the live transcript) and bump its revision so the view re-renders.
-    /// A no-op if the Nearby tab is somehow absent.
-    fn set_nearby_recall(&mut self, lines: Vec<TranscriptLine>) {
-        if let Some(index) = self.index_of(ConversationKey::Nearby)
+    /// Replace `key`'s **recall** lines (the persisted history rendered above
+    /// the live transcript) and bump its revision so the view re-renders. A
+    /// no-op for a conversation that does not exist — recall never opens a tab.
+    fn set_recall(&mut self, key: ConversationKey, lines: Vec<TranscriptLine>) {
+        if let Some(index) = self.index_of(key)
             && let Some(entry) = self.entries.get_mut(index)
         {
             entry.recall = lines;
             entry.revision = entry.revision.wrapping_add(1);
         }
+    }
+
+    /// Replace the Nearby tab's **recall** lines (see [`Self::set_recall`]).
+    fn set_nearby_recall(&mut self, lines: Vec<TranscriptLine>) {
+        self.set_recall(ConversationKey::Nearby, lines);
+    }
+
+    /// Replace `key`'s **server-history** lines (the server-fetched session
+    /// backlog rendered between recall and the live lines) and bump its
+    /// revision. A no-op for a conversation that does not exist — the backlog
+    /// never opens a tab (its session opened the tab already; a tab the user
+    /// closed stays closed).
+    fn set_server_history(&mut self, key: ConversationKey, lines: Vec<TranscriptLine>) {
+        if let Some(index) = self.index_of(key)
+            && let Some(entry) = self.entries.get_mut(index)
+        {
+            entry.server_history = lines;
+            entry.revision = entry.revision.wrapping_add(1);
+        }
+    }
+
+    /// A peer's display name from the name cache, with the same short-id
+    /// fallback the tab titles use (until an event carries the real name).
+    fn agent_name_or_short_id(&self, id: AgentKey) -> String {
+        self.agent_names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| short_id(id.uuid()))
     }
 
     /// Sets or clears a typist for `key`. A typing notification for an existing
@@ -736,6 +801,10 @@ fn tab_label(title: &str, unread: u32, active: bool) -> String {
 /// [`ConversationModel`].
 #[derive(Resource, Debug)]
 pub(crate) struct ConversationsUi {
+    /// The floater root — carries the [`CONVERSATIONS_CLASS`] skin class, so
+    /// [`refresh_conversations`] reads the transcript band colours
+    /// ([`SkinChatBands`]) off it.
+    floater_root: Entity,
     /// The vertical tab strip the tab buttons flow into.
     strip: Entity,
     /// The panel area the per-conversation panes stack in (only the active one
@@ -859,6 +928,16 @@ struct NearbyRecallState {
     requested: bool,
 }
 
+/// Per-tab one-shot latches for the **keyed-session history recall**
+/// ([`request_keyed_recall`]): a tab's key is added when its recall query is
+/// issued, so each IM / group / conference tab is queried exactly once as it
+/// first appears. Like [`NearbyRecallState`], never reset within a session.
+#[derive(Resource, Debug, Default)]
+struct KeyedRecallState {
+    /// The tabs whose recall query has already been sent.
+    requested: BTreeSet<ConversationKey>,
+}
+
 /// The plugin: the model + UI resources, the floater spawn, and the systems that
 /// ingest events, spawn / close tabs, refresh the view and route input.
 #[derive(Debug, Clone, Copy, Default)]
@@ -869,6 +948,7 @@ impl Plugin for ConversationsPlugin {
         app.init_resource::<ConversationModel>()
             .init_resource::<StripFocus>()
             .init_resource::<NearbyRecallState>()
+            .init_resource::<KeyedRecallState>()
             .add_message::<SelectConversation>()
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
@@ -895,6 +975,7 @@ impl Plugin for ConversationsPlugin {
                 Update,
                 (
                     request_nearby_recall,
+                    request_keyed_recall,
                     route_conversation_input,
                     scroll_active_transcript,
                     position_conversations_dock_host,
@@ -971,6 +1052,11 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
     commands
         .entity(handle.title_text)
         .insert(crate::i18n::Translated::new("conversations-title"));
+    // The skin class the `.sk-conversations` CSS rule matches — it lands the
+    // transcript band colours on this root as a `SkinChatBands` component.
+    commands.entity(handle.root).insert(
+        bevy_flair::style::components::ClassList::new_with_classes([CONVERSATIONS_CLASS]),
+    );
     let builder = commands.register_system(build_conversations_content);
     commands
         .entity(handle.root)
@@ -1046,6 +1132,7 @@ fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Comm
     views.insert(ConversationKey::Nearby, view);
 
     commands.insert_resource(ConversationsUi {
+        floater_root: handle.root,
         strip,
         panel_area,
         nearby_field,
@@ -1556,8 +1643,89 @@ fn ingest_conversation_events(
                     .collect();
                 model.set_nearby_recall(recalled);
             }
+            // Persisted keyed-session recall (reply to a per-tab one-shot
+            // `QueryChatHistoryPage` from `request_keyed_recall`): newest-first,
+            // so reverse to oldest-first and set as the tab's grey recall band.
+            // Unlike Nearby, these lines carry a typed sender key, so recalled
+            // names are clickable. `prev` (older pages) is ignored for the
+            // single recall window today.
+            SlSessionEvent::ChatHistoryPage {
+                session,
+                messages,
+                prev: _prev,
+            } => {
+                let key = ConversationKey::from_session_kind(*session);
+                let recalled: Vec<TranscriptLine> = messages
+                    .iter()
+                    .rev()
+                    .map(|message| {
+                        transcript_line_for(&model, &identity, message.sender, &message.text)
+                    })
+                    .collect();
+                model.set_recall(key, recalled);
+            }
+            // The server-side session backlog (`ChatSessionRequest` "fetch
+            // history", auto-issued when a group / conference session is
+            // joined): already oldest-first and de-duplicated against the live
+            // ring by the session layer; set as the tab's muted-green
+            // server-history band. The record carries the sender's display name
+            // as the server rendered it — harvest it into the name cache too.
+            SlSessionEvent::SessionServerHistory { kind, messages } => {
+                let key = ConversationKey::from_session_kind(*kind);
+                let lines: Vec<TranscriptLine> = messages
+                    .iter()
+                    .map(|message| {
+                        model.note_agent_name(message.sender, &message.sender_name);
+                        let own = identity.agent_id == Some(message.sender);
+                        TranscriptLine {
+                            own,
+                            speaker: if own {
+                                String::new()
+                            } else if message.sender_name.is_empty() {
+                                model.agent_name_or_short_id(message.sender)
+                            } else {
+                                message.sender_name.clone()
+                            },
+                            speaker_link: if own {
+                                SpeakerLink::Own
+                            } else {
+                                SpeakerLink::Agent(message.sender)
+                            },
+                            body: message.text.clone(),
+                        }
+                    })
+                    .collect();
+                model.set_server_history(key, lines);
+            }
             _other => {}
         }
+    }
+}
+
+/// Build a recalled transcript line for a keyed-session history message: our
+/// own lines render as the localized "You" (no stored name), a remote sender's
+/// name resolves through the model's name cache (short-id fallback) and links
+/// to their profile.
+fn transcript_line_for(
+    model: &ConversationModel,
+    identity: &SlIdentity,
+    sender: AgentKey,
+    text: &str,
+) -> TranscriptLine {
+    let own = identity.agent_id == Some(sender);
+    TranscriptLine {
+        own,
+        speaker: if own {
+            String::new()
+        } else {
+            model.agent_name_or_short_id(sender)
+        },
+        speaker_link: if own {
+            SpeakerLink::Own
+        } else {
+            SpeakerLink::Agent(sender)
+        },
+        body: text.to_owned(),
     }
 }
 
@@ -1582,6 +1750,40 @@ fn request_nearby_recall(
         limit: RECALL_LIMIT,
     }));
     state.requested = true;
+}
+
+/// Fire the one-shot **keyed-session history recall** for each IM / group /
+/// conference tab as it first exists: ask the runtime for a page of that
+/// session's persisted history (the in-memory-ring→on-disk-transcript view
+/// behind [`Command::QueryChatHistoryPage`]), which
+/// [`ingest_conversation_events`] renders as the tab's grey recall band — the
+/// keyed analogue of [`request_nearby_recall`]. The `before` cursor skips the
+/// newest lines the tab already shows live (the ring holds this session's live
+/// messages too, which would otherwise recall as duplicates), exactly like
+/// Nearby's `already_shown`.
+fn request_keyed_recall(
+    identity: Res<SlIdentity>,
+    model: Res<ConversationModel>,
+    mut state: ResMut<KeyedRecallState>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    if identity.agent_id.is_none() {
+        return;
+    }
+    for entry in &model.entries {
+        let Some(session) = entry.key.session_kind() else {
+            continue;
+        };
+        if state.requested.contains(&entry.key) {
+            continue;
+        }
+        commands.write(SlCommand(Command::QueryChatHistoryPage {
+            session,
+            before: Some(MessageCursor::from_consumed(entry.lines.len())),
+            limit: RECALL_LIMIT,
+        }));
+        state.requested.insert(entry.key);
+    }
 }
 
 /// Whether a nearby chat line should appear: it carries text and is not a
@@ -1706,10 +1908,18 @@ fn refresh_conversations(
     mut borders: Query<&mut BorderColor>,
     mut nodes: Query<&mut Node>,
     mut scrolls: Query<&mut ScrollPosition>,
+    band_colors: Query<&SkinChatBands>,
 ) {
     let Some(ui) = ui.as_deref_mut() else {
         return;
     };
+    // The skin's transcript band colours, landed on the floater root by the
+    // `.sk-conversations` CSS rule; the reference values are the fallback for a
+    // skin that does not style them.
+    let bands = band_colors
+        .get(ui.floater_root)
+        .copied()
+        .unwrap_or_default();
     let active_key = model.active_key();
     let you = translator.get(YOU_LABEL_KEY);
     let nearby_title = translator.get(NEARBY_TITLE_KEY);
@@ -1764,18 +1974,33 @@ fn refresh_conversations(
         }
 
         // Transcript, only when a new line landed: rebuild the line column — one
-        // linkified row per line (persisted recall lines first, then the live
-        // lines) — so speaker names and body URLs / SLURLs render clickable. Rebuilt
-        // (not appended) on the revision change, matching the previous whole-string
-        // cadence; the transcript is bounded by `HISTORY_CAP`.
+        // linkified row per line, in the reference's three bands (grey persisted
+        // recall, muted-green server-fetched history, then the live lines in
+        // white) — so speaker names and body URLs / SLURLs render clickable.
+        // The server band is de-duplicated against the recall band by speaker +
+        // text at render time, so it stays correct whichever of the two replies
+        // (local recall vs the HTTP fetch) lands first. Rebuilt (not appended)
+        // on the revision change, matching the previous whole-string cadence;
+        // the live transcript is bounded by `HISTORY_CAP`.
         if view.rendered_revision != entry.revision {
             view.rendered_revision = entry.revision;
             commands
                 .entity(view.transcript_column)
                 .despawn_related::<Children>();
-            for line in entry.recall.iter().chain(entry.lines.iter()) {
+            let server_band = filter_server_band(&entry.recall, &entry.server_history);
+            let banded_lines = entry
+                .recall
+                .iter()
+                .map(|line| (line, bands.recall))
+                .chain(
+                    server_band
+                        .into_iter()
+                        .map(|line| (line, bands.server_history)),
+                )
+                .chain(entry.lines.iter().map(|line| (line, bands.live)));
+            for (line, color) in banded_lines {
                 let mut style = LinkTextStyle::at(TRANSCRIPT_FONT_SIZE);
-                style.plain_color = TRANSCRIPT_COLOR;
+                style.plain_color = color;
                 spawn_linkified_text(
                     &mut commands,
                     view.transcript_column,
@@ -1789,6 +2014,25 @@ fn refresh_conversations(
             }
         }
     }
+}
+
+/// The server-history lines to render: `server` minus any line whose
+/// `(speaker, body)` pair already appears in the grey `recall` band — the same
+/// conversation recalled from the local transcript and fetched from the server
+/// would otherwise show twice. Order-independent (pure filtering), so it is
+/// correct whichever of the two replies landed first.
+fn filter_server_band<'history>(
+    recall: &[TranscriptLine],
+    server: &'history [TranscriptLine],
+) -> Vec<&'history TranscriptLine> {
+    server
+        .iter()
+        .filter(|line| {
+            !recall
+                .iter()
+                .any(|recalled| recalled.speaker == line.speaker && recalled.body == line.body)
+        })
+        .collect()
 }
 
 /// The "X is typing…" / "several are typing…" status for a typing set, or `None`
@@ -2285,5 +2529,96 @@ mod tests {
         assert_eq!(tab_label("Group", 3, false), "Group (3)");
         assert_eq!(tab_label("Group", 3, true), "Group");
         assert_eq!(tab_label("Group", 0, false), "Group");
+    }
+
+    /// A plain transcript line from `speaker` saying `body`.
+    fn plain_line(speaker: &str, body: &str) -> TranscriptLine {
+        TranscriptLine {
+            own: false,
+            speaker: speaker.to_owned(),
+            speaker_link: SpeakerLink::None,
+            body: body.to_owned(),
+        }
+    }
+
+    /// A keyed tab renders its three bands in the reference order — grey local
+    /// recall, then the muted-green server backlog, then the live lines — with a
+    /// server line that duplicates a recall line (same speaker + text) dropped,
+    /// exactly as [`super::refresh_conversations`] assembles the pane.
+    #[test]
+    fn keyed_tab_renders_three_bands_deduped() {
+        let mut model = ConversationModel::default();
+        let group = GroupKey::from(Uuid::from_u128(0x91));
+        let key = ConversationKey::Group(group);
+        let speaker = AgentKey::from(Uuid::from_u128(0x92));
+        model.push_remote(key, speaker, "Avatar Live", "live line");
+        model.set_recall(key, vec![plain_line("Avatar Past", "recalled line")]);
+        model.set_server_history(
+            key,
+            vec![
+                // Duplicates the recall line — the transcript already recalled
+                // this locally, so the server copy is filtered at render.
+                plain_line("Avatar Past", "recalled line"),
+                plain_line("Avatar Past", "server-only line"),
+            ],
+        );
+        let bodies = get(&model, key).map(|entry| {
+            let server_band = super::filter_server_band(&entry.recall, &entry.server_history);
+            entry
+                .recall
+                .iter()
+                .chain(server_band)
+                .chain(entry.lines.iter())
+                .map(|line| line.body.clone())
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(
+            bodies,
+            Some(vec![
+                "recalled line".to_owned(),
+                "server-only line".to_owned(),
+                "live line".to_owned()
+            ])
+        );
+    }
+
+    /// The recall↔server de-dup is pure filtering on `(speaker, body)`, so it
+    /// gives the same band whichever of the two replies (the local recall page
+    /// vs the HTTP fetch) landed first — and keeps a same-text line from a
+    /// *different* speaker.
+    #[test]
+    fn filter_server_band_is_order_independent() {
+        let recall = vec![plain_line("Avatar Past", "shared line")];
+        let server = vec![
+            plain_line("Avatar Past", "shared line"),
+            plain_line("Avatar Other", "shared line"),
+            plain_line("Avatar Past", "unique line"),
+        ];
+        let filtered: Vec<&str> = super::filter_server_band(&recall, &server)
+            .into_iter()
+            .map(|line| line.body.as_str())
+            .collect();
+        assert_eq!(filtered, vec!["shared line", "unique line"]);
+        // Against an empty recall (the fetch answered first), nothing filters.
+        assert_eq!(super::filter_server_band(&[], &server).len(), 3);
+    }
+
+    /// The tab-key ↔ session-kind mapping round-trips for every keyed tab, and
+    /// Nearby maps to no session (it is not a `ChatSessionKind`), so the keyed
+    /// recall request never queries it.
+    #[test]
+    fn conversation_key_session_kind_round_trips() {
+        let keys = [
+            ConversationKey::Direct(AgentKey::from(Uuid::from_u128(0xA1))),
+            ConversationKey::Group(GroupKey::from(Uuid::from_u128(0xA2))),
+            ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xA3))),
+        ];
+        for key in keys {
+            assert_eq!(
+                key.session_kind().map(ConversationKey::from_session_kind),
+                Some(key)
+            );
+        }
+        assert_eq!(ConversationKey::Nearby.session_kind(), None);
     }
 }

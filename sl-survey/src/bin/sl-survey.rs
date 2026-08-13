@@ -657,6 +657,7 @@ impl Survey {
             | Event::ChatSessions(_)
             | Event::ChatHistoryPage { .. }
             | Event::NearbyChatHistoryPage { .. }
+            | Event::SessionServerHistory { .. }
             | Event::FriendsSnapshot(_)
             | Event::InventoryFolderPage { .. }
             | Event::InventoryRoots { .. }

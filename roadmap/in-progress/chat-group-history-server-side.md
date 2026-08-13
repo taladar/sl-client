@@ -2,7 +2,7 @@
 id: chat-group-history-server-side
 title: Server-side group / session chat history ("fetch history")
 topic: chat
-status: ready
+status: in-progress
 origin: user request (2026-07-21); follow-up to viewer-chat-history-panel
 points: 5
 refs: [chat-a8, chat-b4, viewer-chat-history-panel, viewer-social-im-conversations]
@@ -110,3 +110,75 @@ hue, and we adopt the hues only (skip the global fade).
    verification aditi-only — generate group traffic with the second account,
    relog the first, open the group tab, expect the green backlog. Confirm
    OpenSim (cap absent) shows nothing and logs no errors.
+
+## Implemented (2026-08-13) — live verification pending
+
+All four work items are coded and unit-tested; what remains is the
+aditi live verification (and the OpenSim silent no-op check), so the
+task sits in `in-progress`.
+
+- **sl-proto**: `CHAT_SESSION_FETCH_HISTORY` + the synthetic routing tag
+  `CHAT_SESSION_FETCH_HISTORY_TAG` (`"ChatSessionRequest/fetch history"`
+  — the reply is a bare array, so the runtimes wrap it as
+  `{ history, session-id, from_group }` under that tag, the
+  `LAND_RESOURCE_*_TAG` precedent). Decoder `session_history_from_llsd`
+  (lenient; `time` decodes int **or real** via a new `epoch_member` —
+  `u32_member`/`llsd_u32` return 0 for `Llsd::Real`). New public
+  `ServerHistoryMessage { sender, sender_name, text, timestamp }`;
+  backlog stored on `ChatSession.server_history` (separate from the live
+  ring; cap 256 keep-newest; replace-wholesale), de-duplicated against
+  the ring by sender + text + 60 s timestamp slack where either side
+  `None` matches (live lines log `timestamp: None`, which is how the
+  lazy-open trigger de-dups). `Command::FetchSessionHistory { kind }`,
+  `Event::SessionServerHistory { kind, messages }` (emitted only
+  non-empty), accessor `Session::server_history(kind)`.
+- **Scheduler** (the Joined trigger): scan-and-flip
+  `Session::next_server_history_fetches()` on the inventory-crawl
+  pattern — per-session `Unfetched → Requested → Fetched` state, only
+  `Joined` group/conference sessions, gated on the sans-IO
+  `fetch_server_chat_history` flag (default **on**, the reference
+  `FetchGroupChatHistory`); a failed POST deliberately stays `Requested`
+  (no retry storm). Runtimes sweep it once per loop iteration only while
+  `ChatSessionRequest` is in the caps map (defer-until-cap; on OpenSim
+  the cap is absent so nothing ever fires).
+- **Runtimes at parity**: tokio `post_chat_session_fetch_history` +
+  bevy blocking mirror `run_chat_session_fetch_history`; both run-loop
+  sweeps; both `FetchSessionHistory` command arms (bypass the flag,
+  ignore `Direct`, mark requested); `Client::set_fetch_server_chat_history`
+  / plugin field `fetch_server_chat_history`;
+  `--no-group-chat-history` on both repl binaries and the viewer.
+  No transcript writes anywhere (first-cut rule). REPL command
+  `fetch_session_history <group|conference> <id>` + the
+  `session_server_history` event name.
+- **Viewer** (`conversations.rs`): three bands per keyed tab — grey
+  local recall, muted-green server history (de-duped against recall by
+  speaker + text at render assembly, order-independent), white live —
+  via `SkinChatBands` (the `SkinTextCaret` shim pattern) driven by new
+  CSS tokens `--chat-recall #808080` / `--chat-server-history #5e8261`
+  / `--chat-live #ffffff` (`.sk-conversations` rule in `common.css`,
+  values in both skins; reference values are also the code fallback).
+  The previously-unused `QueryChatHistoryPage`/`ChatHistoryPage` now
+  gives every keyed tab (Direct too) a one-shot local-recall page
+  (`MessageCursor::from_consumed(live_len)` skips the ring lines the tab
+  already shows live); keyed recall lines carry typed sender keys, so
+  they are clickable, unlike Nearby recall.
+- **Tests**: decoder (int/real/zero time, wrapper, non-array, non-map
+  records); store de-dup (trigger `None`-timestamp case, 60 s slack
+  boundary, sender distinction, keep-newest cap, ring/unread untouched,
+  replace-wholesale); scheduler (once-per-session, never `Direct`,
+  `Invited` skipped, disabled flag, explicit-fetch suppression); caps
+  arm (group vs conference routing, stored-buffer event, empty → no
+  event); viewer bands (three-band order + de-dup, order-independent
+  filter, key↔kind round-trip).
+
+Still to do (aditi, needs the interactive TOTP login):
+
+1. repl: second account `send_group_message`, first account
+   `fetch_session_history group <id>` → `session_server_history`; then a
+   live line → lazy-open auto-fetch, the trigger line appearing once.
+2. Viewer relog: group tab shows grey recall / green backlog / white
+   live; `--no-group-chat-history` drops the green band only.
+3. Record whether ad-hoc conferences also return history (open question
+   above).
+4. OpenSim: group traffic → no fetch issued, no warnings, recall+live
+   only.

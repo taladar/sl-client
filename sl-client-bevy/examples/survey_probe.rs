@@ -70,6 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
             background_inventory_fetch: false,
+            fetch_server_chat_history: true,
             offline: false,
         })
         .insert_resource(ProbeState {
@@ -184,6 +185,7 @@ fn on_events(
             | SlSessionEvent::ChatSessions(_)
             | SlSessionEvent::ChatHistoryPage { .. }
             | SlSessionEvent::NearbyChatHistoryPage { .. }
+            | SlSessionEvent::SessionServerHistory { .. }
             | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::InventoryFolderPage { .. }
             | SlSessionEvent::InventoryRoots { .. }

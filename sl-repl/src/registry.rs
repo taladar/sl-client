@@ -5487,6 +5487,19 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_session_history",
+            usage: "<group|conference> <id>",
+            // Explicit server-backlog fetch (`ChatSessionRequest` "fetch
+            // history"); Second-Life only — on a grid without the cap the
+            // command silently degrades. A `direct` kind parses but is ignored
+            // by the runtimes (1:1 IM has no server backlog).
+            build: |args, ctx| {
+                Ok(Command::FetchSessionHistory {
+                    kind: build_chat_session_kind(args, ctx, 0)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "query_nearby_chat_history_page",
             usage: "[already_shown] [limit]",
             // Recall older nearby (local) chat from the on-disk transcript. The

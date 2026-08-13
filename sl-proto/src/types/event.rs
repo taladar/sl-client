@@ -60,7 +60,7 @@ use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
     ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, NearbyHistoryLine,
-    SessionMessage,
+    ServerHistoryMessage, SessionMessage,
 };
 
 /// A high-level event surfaced to the driver/application.
@@ -1071,6 +1071,25 @@ pub enum Event {
         /// A cursor for the next (older) page, or `None` at the oldest line on
         /// disk.
         prev: Option<MessageCursor>,
+    },
+    /// A group / conference session's **server-side recent-message backlog**,
+    /// decoded from a `ChatSessionRequest` `fetch history` reply (auto-issued
+    /// when the session is joined, or requested explicitly via
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)).
+    /// `messages` is oldest-first and already de-duplicated against the live
+    /// ring (the message that triggered a lazy-open fetch arrives both live and
+    /// in the backlog) — exactly the buffer
+    /// [`Session::server_history`](crate::Session::server_history) then holds.
+    /// Emitted only when the de-duplicated backlog is non-empty. Server history
+    /// is what was said *before* this client was listening; it is **never
+    /// written to the on-disk transcript** (transcript = what this client heard
+    /// live). Second-Life only — stock OpenSim has no `ChatSessionRequest`
+    /// capability, so this event never fires there.
+    SessionServerHistory {
+        /// Which chat session the backlog belongs to.
+        kind: ChatSessionKind,
+        /// The backlog, oldest-first, de-duplicated against the live ring.
+        messages: Vec<ServerHistoryMessage>,
     },
     /// The buddy cache with each friend's online flag, surfaced in reply to a
     /// [`Command::QueryFriends`](crate::Command::QueryFriends) and **synthesized

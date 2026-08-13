@@ -628,6 +628,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ChatSessions(_)
             | Event::ChatHistoryPage { .. }
             | Event::NearbyChatHistoryPage { .. }
+            | Event::SessionServerHistory { .. }
             | Event::FriendsSnapshot(_)
             | Event::InventoryFolderPage { .. }
             | Event::InventoryRoots { .. }

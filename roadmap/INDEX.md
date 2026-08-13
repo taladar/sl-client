@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 223 |
+| ready | 222 |
 | blocked | 77 |
-| in-progress | 15 |
+| in-progress | 16 |
 | bugs | 22 |
 | done | 800 |
 | deferred | 22 |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (223)
+## ready (222)
 
 ### protocol
 
@@ -671,11 +671,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out
 
-### chat
-
-- [`chat-group-history-server-side`](ready/chat-group-history-server-side.md) —
-  Server-side group / session chat history ("fetch history")
-
 ### test
 
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
@@ -912,7 +907,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (15)
+## in-progress (16)
 
 ### viewer
 
@@ -950,6 +945,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream issue — font selection cannot see glyph-format renderability
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
+
+### chat
+
+- [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
+  — Server-side group / session chat history ("fetch history")
 
 ## bugs (22)
 

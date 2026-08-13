@@ -26,27 +26,28 @@ use sl_proto::{
     CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
     CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind,
-    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor,
-    RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    associate_inventory_request, build_agent_preferences_request, build_ais_create_category_body,
-    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_create_inventory_category_request,
-    build_get_object_cost_request, build_get_object_physics_data_request,
-    build_modify_material_params_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_render_materials_put_request,
-    build_resource_cost_selected_request, build_send_user_report,
-    build_set_experience_permission_request, build_update_experience_request,
-    build_update_item_asset_request, build_update_script_agent_request,
-    build_update_script_task_request, build_update_task_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
-    copy_inventory_from_notecard_body, create_listing_request, delete_listing_request,
-    display_names_query, experience_id_query, experience_info_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
-    listings_request, merchant_status_request, parse_login_response, update_listing_request,
+    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd,
+    LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request,
+    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    build_create_inventory_category_request, build_get_object_cost_request,
+    build_get_object_physics_data_request, build_modify_material_params_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_render_materials_put_request, build_resource_cost_selected_request,
+    build_send_user_report, build_set_experience_permission_request,
+    build_update_experience_request, build_update_item_asset_request,
+    build_update_script_agent_request, build_update_script_task_request,
+    build_update_task_item_asset_request, build_upload_baked_texture_request,
+    build_voice_signaling_request, chat_session_request_body, copy_inventory_from_notecard_body,
+    create_listing_request, delete_listing_request, display_names_query, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    group_invite_response_body, listing_request, listings_request, merchant_status_request,
+    parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -57,13 +58,13 @@ pub use sl_proto::{
     AnyMessage, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
     AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
     AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig,
-    ChatMessage, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode,
-    CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
-    ConversationKind, CreateGroupParams, CreateListing, DayCycle, DayCycleFrame, DeRezDestination,
-    DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
-    DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset, EnvironmentSettings,
+    ChatMessage, ChatSessionKind, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child,
+    CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate,
+    ClickAction, ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command,
+    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DayCycle, DayCycleFrame,
+    DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DisconnectReason,
+    DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset, EnvironmentSettings,
     EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
     EventId, EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
     ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
@@ -82,10 +83,10 @@ pub use sl_proto::{
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MerchantStatus, MeshKey, MfaChallenge, MoneyBalance, MoneyTransaction,
-    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine,
-    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
+    MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
+    NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
+    Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
     ObjectPermMasks, ObjectPhysicsData, ObjectPlayingAnimation, ObjectProperties,
     ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
     ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
@@ -103,17 +104,17 @@ pub use sl_proto::{
     SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
     ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
     ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, StartLocationSlot, SurfaceInfo, TaskInventoryItem,
-    TaskInventoryKey, TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation,
-    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
-    TimestampFormat, TransactionId, TransferId, Transmit, UpdatableAssetType,
-    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, ViewerEffectData,
-    ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings, Wearable,
-    WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation, decode_particle_system,
-    decode_texture_anim, decode_texture_entry, encode_texture_entry, environment_asset_from_bytes,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode,
-    sim_access, texture_anim_mode,
+    SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
+    SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType,
+    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
+    Wearable, WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
+    environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -362,8 +363,9 @@ use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    run_caps_oneway, run_chat_session_request, run_delete_caps_llsd, run_fetch_lsl_syntax,
-    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
+    run_caps_oneway, run_chat_session_fetch_history, run_chat_session_request,
+    run_delete_caps_llsd, run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources,
+    run_patch_caps_llsd, run_put_caps_llsd,
 };
 use crate::inventory::{
     fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
@@ -422,6 +424,13 @@ pub struct AccountDirsConfig {
 }
 
 /// The Bevy plugin that drives a sans-I/O [`Session`] from ECS systems.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "these are independent, orthogonal feature toggles — diagnostics, the inventory \
+              crawl, the server chat-backlog fetch, offline mode — that a consumer sets in any \
+              combination; each mirrors a bool-shaped Session/Client switch, so an enum per flag \
+              would only obscure plainly-named yes/no options"
+)]
 #[derive(Debug, Clone)]
 pub struct SlClientPlugin {
     /// The login parameters used to start the session.
@@ -459,6 +468,15 @@ pub struct SlClientPlugin {
     /// (`RequestFolderContents` / `FetchInventoryFolders`), so a consumer that
     /// ignores inventory pays nothing.
     pub background_inventory_fetch: bool,
+    /// Whether to auto-fetch a joined group / conference session's server-side
+    /// chat backlog (`ChatSessionRequest` `fetch history`; **on** matches the
+    /// reference viewer's `FetchGroupChatHistory` default). While enabled, the
+    /// driver POSTs one fetch per session that reaches joined — when the grid
+    /// serves the capability; stock OpenSim does not, so nothing is ever sent
+    /// there — and the backlog surfaces as
+    /// [`Event::SessionServerHistory`](sl_proto::Event::SessionServerHistory).
+    /// The explicit [`Command::FetchSessionHistory`] works regardless.
+    pub fetch_server_chat_history: bool,
     /// Run the plugin **offline**: register the same event/resource substrate
     /// ([`SlEvent`], [`SlCommand`], [`SlIdentity`], …) but never perform the
     /// XML-RPC login or open a circuit, so nothing touches the network. The
@@ -484,6 +502,7 @@ impl Plugin for SlClientPlugin {
                 account_dirs: self.account_dirs.clone(),
                 inventory_cache_config: self.inventory_cache_config,
                 background_inventory_fetch: self.background_inventory_fetch,
+                fetch_server_chat_history: self.fetch_server_chat_history,
                 offline: self.offline,
             })
             .init_resource::<SlIdentity>()
@@ -539,6 +558,11 @@ pub struct SlLoginRejected(pub LoginFailure);
 pub struct SlCommand(pub Command);
 
 /// The plugin configuration resource.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the resource mirror of `SlClientPlugin`'s independent feature toggles (see its \
+              matching expect)"
+)]
 #[derive(Resource, Debug)]
 struct SlConfig {
     /// The login parameters.
@@ -555,6 +579,9 @@ struct SlConfig {
     inventory_cache_config: InventoryCacheConfig,
     /// Whether the automatic background inventory crawl is enabled (default off).
     background_inventory_fetch: bool,
+    /// Whether the automatic server-side chat-backlog fetch is enabled (the
+    /// convention is on — see [`SlClientPlugin::fetch_server_chat_history`]).
+    fetch_server_chat_history: bool,
     /// Whether to run offline (skip login; feed the session synthetic events).
     offline: bool,
 }
@@ -701,6 +728,7 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
     let mut session = Session::new(config.params.clone());
     session.set_diagnostics(config.diagnostics);
     session.set_background_inventory_fetch(config.background_inventory_fetch);
+    session.set_fetch_server_chat_history(config.fetch_server_chat_history);
     let (command_tx, command_rx) = unbounded();
     let (outbound_tx, outbound_rx) = unbounded();
     let net_config = NetThreadConfig {
@@ -1231,6 +1259,32 @@ fn advance_running(
                         }
                     }
                 }
+            }
+        }
+
+        // Server-side chat backlog: when a group / conference session has
+        // reached joined and the `ChatSessionRequest` capability is known, POST
+        // one `fetch history` per newly joined session. Self-gating and
+        // once-per-session — `next_server_history_fetches` flips each returned
+        // session to requested and returns empty while the auto-fetch is
+        // disabled. On a grid without the capability (stock OpenSim) the gate
+        // never opens, so the fetch silently never fires. Mirrors the tokio run
+        // loop's sweep.
+        if let (Some(url), Some(own_agent)) = (
+            caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned(),
+            session.agent_id(),
+        ) {
+            for kind in session.next_server_history_fetches() {
+                let session_id = kind.canonical_session_id(own_agent);
+                let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_id);
+                let from_group = matches!(kind, ChatSessionKind::Group { .. });
+                let events_tx = caps.events_tx.clone();
+                let fetch_url = url.clone();
+                std::thread::spawn(move || {
+                    run_chat_session_fetch_history(
+                        &fetch_url, body, session_id, from_group, &events_tx,
+                    );
+                });
             }
         }
     }
@@ -3714,6 +3768,32 @@ fn advance_running(
                             );
                         });
                     }
+                }
+            }
+            Command::FetchSessionHistory { kind } => {
+                // Explicit server-backlog fetch, bypassing the auto-fetch gate.
+                // Only group / conference sessions have a server backlog; on a
+                // grid without the cap (stock OpenSim) there is nothing to POST
+                // to, so the command silently degrades. Mirrors the tokio arm.
+                if !matches!(kind, ChatSessionKind::Direct { .. })
+                    && let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref())
+                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+                {
+                    // Suppress a later duplicate auto-fetch of the same session.
+                    session.note_server_history_requested(*kind);
+                    let session_uuid = kind.canonical_session_id(own);
+                    let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
+                    let from_group = matches!(kind, ChatSessionKind::Group { .. });
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_chat_session_fetch_history(
+                            &url,
+                            body,
+                            session_uuid,
+                            from_group,
+                            &events_tx,
+                        );
+                    });
                 }
             }
             Command::QueryChatSessions => {

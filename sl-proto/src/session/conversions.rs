@@ -1,7 +1,7 @@
 //! Wire/LLSD <-> value-type converters shared by the session impls, plus the
 //! server-side CAPS serializers and their round-trip tests.
 
-use super::chat_session::{InviteChannel, VoiceChannelInfo};
+use super::chat_session::{InviteChannel, ServerHistoryMessage, VoiceChannelInfo};
 use crate::GroupRoleKey;
 use crate::appearance;
 use crate::types::{
@@ -3247,6 +3247,74 @@ pub(crate) fn chat_session_roster_from_llsd(body: &Llsd) -> Vec<AgentKey> {
     Vec::new()
 }
 
+/// Decodes a `ChatSessionRequest` `"fetch history"` reply into the session's
+/// server-side backlog, oldest-first as the server sends it. Accepts either the
+/// bare LLSD array the wire carries or the runtime's routing wrapper (the array
+/// under a `history` member — see
+/// [`CHAT_SESSION_FETCH_HISTORY_TAG`](crate::CHAT_SESSION_FETCH_HISTORY_TAG)).
+/// Each record is a map `{ from, from_id, message, num, time }` (Firestorm
+/// `chatterBoxHistoryCoro`, `llimview.cpp:835`); the `num` index is ignored
+/// (order is positional) and `time` may arrive as an integer **or a real** —
+/// both decode ([`epoch_member`]). Non-map records are skipped; a non-array
+/// body decodes to an empty backlog.
+pub(crate) fn session_history_from_llsd(body: &Llsd) -> Vec<ServerHistoryMessage> {
+    let records = body
+        .as_array()
+        .or_else(|| body.get("history").and_then(Llsd::as_array))
+        .unwrap_or_default();
+    records
+        .iter()
+        .filter_map(session_history_message_from_record)
+        .collect()
+}
+
+/// Decodes one `fetch history` record map into a [`ServerHistoryMessage`];
+/// returns `None` for a non-map element.
+fn session_history_message_from_record(record: &Llsd) -> Option<ServerHistoryMessage> {
+    if !matches!(record, Llsd::Map(_)) {
+        return None;
+    }
+    Some(ServerHistoryMessage {
+        sender: AgentKey::from(uuid_member_lenient(record, "from_id")),
+        sender_name: string_member(record, "from"),
+        text: string_member(record, "message"),
+        timestamp: epoch_member(record, "time"),
+    })
+}
+
+/// Reads a Unix-epoch map member that Second Life sends as an LLSD integer
+/// **or real** (the `fetch history` `time` field arrives as `r1.66501e+09`;
+/// the reference reads it with `.asInteger()`, `llimview.cpp:836`). Absent,
+/// zero, negative, or non-finite values decode to `None`.
+fn epoch_member(map: &Llsd, key: &str) -> Option<u32> {
+    let value = map.get(key)?;
+    let seconds = match value.as_i32() {
+        Some(int) => u32::try_from(int).ok()?,
+        None => {
+            let real = value.as_f64()?;
+            if !real.is_finite() || real < 0.0 || real > f64::from(u32::MAX) {
+                return None;
+            }
+            epoch_f64_to_u32(real)
+        }
+    };
+    crate::types::optional_u32_from_wire(seconds)
+}
+
+/// Narrows a finite, range-checked (`0.0..=u32::MAX`) epoch real to the `u32`
+/// seconds value it encodes. The caller ([`epoch_member`]) has already done the
+/// range guard, so the truncation is exact for any epoch the grid can send.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a fetch-history epoch is a whole-second u32 value widened to an LLSD real; \
+              the caller range-checks before narrowing"
+)]
+const fn epoch_f64_to_u32(seconds: f64) -> u32 {
+    seconds as u32
+}
+
 /// Reads a non-empty string from an LLSD map member, or `None` when the member is
 /// absent, the wrong kind, or the empty string (the grid's "unset" sentinel).
 fn optional_string_member(map: &Llsd, key: &str) -> Option<String> {
@@ -5121,6 +5189,99 @@ mod caps_serializer_tests {
             super::parse_u32_field("f", "-1"),
             Err(sl_wire::WireError::InvalidScalar { .. })
         ));
+    }
+
+    /// The `fetch history` reply decoder: a bare oldest-first array of record
+    /// maps decodes in order, and the `time` epoch decodes whether the grid
+    /// sends it as an LLSD integer or — as Second Life actually does
+    /// (`llimview.cpp:835`) — as a real. Non-map entries are skipped, a
+    /// zero / negative time is the "absent" sentinel, and field order is
+    /// preserved (oldest-first, matching the ring's orientation).
+    #[test]
+    fn session_history_decodes_int_and_real_time() {
+        let body = Llsd::Array(vec![
+            super::llsd_map(vec![
+                ("from", Llsd::String("First Speaker".to_owned())),
+                ("from_id", Llsd::Uuid(Uuid::from_u128(0xA1))),
+                ("message", Llsd::String("hello".to_owned())),
+                ("num", Llsd::Integer(1)),
+                ("time", Llsd::Integer(1_700_000_500)),
+            ]),
+            super::llsd_map(vec![
+                ("from", Llsd::String("Second Speaker".to_owned())),
+                ("from_id", Llsd::Uuid(Uuid::from_u128(0xA2))),
+                ("message", Llsd::String("world".to_owned())),
+                ("num", Llsd::Integer(2)),
+                ("time", Llsd::Real(1_700_000_600.0)),
+            ]),
+            // A non-map element is skipped, not an error.
+            Llsd::Integer(7),
+            super::llsd_map(vec![
+                ("from", Llsd::String("Third Speaker".to_owned())),
+                ("from_id", Llsd::Uuid(Uuid::from_u128(0xA3))),
+                ("message", Llsd::String("no time".to_owned())),
+                ("time", Llsd::Integer(0)),
+            ]),
+        ]);
+        assert_eq!(
+            super::session_history_from_llsd(&body),
+            vec![
+                super::ServerHistoryMessage {
+                    sender: AgentKey::from(Uuid::from_u128(0xA1)),
+                    sender_name: "First Speaker".to_owned(),
+                    text: "hello".to_owned(),
+                    timestamp: Some(1_700_000_500),
+                },
+                super::ServerHistoryMessage {
+                    sender: AgentKey::from(Uuid::from_u128(0xA2)),
+                    sender_name: "Second Speaker".to_owned(),
+                    text: "world".to_owned(),
+                    timestamp: Some(1_700_000_600),
+                },
+                super::ServerHistoryMessage {
+                    sender: AgentKey::from(Uuid::from_u128(0xA3)),
+                    sender_name: "Third Speaker".to_owned(),
+                    text: "no time".to_owned(),
+                    timestamp: None,
+                },
+            ]
+        );
+    }
+
+    /// A non-array `fetch history` body decodes to an empty backlog (lenient,
+    /// like the other CAPS decoders), and the runtime's routing wrapper — the
+    /// array under a `history` member beside the stamped session identity — is
+    /// accepted transparently.
+    #[test]
+    fn session_history_accepts_wrapper_and_rejects_non_array() {
+        assert_eq!(
+            super::session_history_from_llsd(&Llsd::Boolean(true)),
+            Vec::new()
+        );
+        let wrapped = super::llsd_map(vec![
+            (
+                "history",
+                Llsd::Array(vec![super::llsd_map(vec![
+                    ("from", Llsd::String("Speaker".to_owned())),
+                    ("from_id", Llsd::Uuid(Uuid::from_u128(0xB1))),
+                    ("message", Llsd::String("wrapped".to_owned())),
+                    ("time", Llsd::Real(1.665_01e9)),
+                ])]),
+            ),
+            ("session-id", Llsd::Uuid(Uuid::from_u128(0xB2))),
+            ("from_group", Llsd::Boolean(true)),
+        ]);
+        // `r1.66501e+09` truncates to whole seconds, as the reference's
+        // `.asInteger()` read does.
+        assert_eq!(
+            super::session_history_from_llsd(&wrapped),
+            vec![super::ServerHistoryMessage {
+                sender: AgentKey::from(Uuid::from_u128(0xB1)),
+                sender_name: "Speaker".to_owned(),
+                text: "wrapped".to_owned(),
+                timestamp: Some(1_665_010_000),
+            }]
+        );
     }
 
     /// A mute-list line with an unparsable UUID or flags is a hard error rather
