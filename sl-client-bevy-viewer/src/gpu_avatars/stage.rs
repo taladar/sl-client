@@ -3,6 +3,14 @@
 //! lifecycle, and [`stage_gpu_avatars`] — the system that assembles one
 //! [`GpuAvatarStaging`] snapshot per frame for the render world to upload.
 //!
+//! **Real placement (Phase 1b, the default):** no ghosts — every skinned
+//! submesh of a rigged avatar stages **its own** palette slot as a pass-D
+//! target (offset identity), so the rendered avatar is GPU-FK-posed in place.
+//! The pose driver freezes the skinning joints and CPU-writes only the socket
+//! subset (see `crate::animations::write_socket_globals`); the readback's
+//! CPU-expected palette comes from [`reference_fk`] over the same uploaded
+//! pose, since the joint globals no longer carry the pose.
+//!
 //! **The ghost scheme (Phase 1a verification):** the real avatar's skin slots
 //! are left untouched — it keeps rendering the normal CPU pose in place. For
 //! every rigged skinned submesh a **GPU ghost** is spawned: a duplicate entity
@@ -41,6 +49,7 @@ use sl_client_bevy::{AgentKey, AnimationPose, VolumeDeformations};
 use super::GpuAvatarsMode;
 use super::types::{
     GpuAvatarFrame, GpuLocalPose, GpuRestJoint, MAX_GPU_JOINTS, compose_rest_joints, pose_rows,
+    reference_fk,
 };
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarState};
@@ -138,6 +147,21 @@ pub(crate) struct GpuAvatarRigidGhost {
     pub(crate) source: Entity,
 }
 
+/// One **real** (in-place) submesh's resolved-skin cache in the
+/// [`GpuAvatarRegistry`] — the Phase 1b counterpart of [`GhostRecord`]: in
+/// real placement pass D writes the submesh's own palette slot, so no ghost
+/// entity exists and only the pool resolution needs remembering.
+struct RealSkinRecord {
+    /// The wearer.
+    agent: AgentKey,
+    /// A cheap invalidation fingerprint of the source's `SkinnedMesh`: the
+    /// inverse-bindpose asset and the joint-list length (a swap re-resolves).
+    fingerprint: (AssetId<SkinnedMeshInverseBindposes>, usize),
+    /// The resolved skin `(joint_count, joint_map_offset, ibp_offset)`, or
+    /// `None` while the inverse-bindpose asset is still loading.
+    skin: Option<(u32, u32, u32)>,
+}
+
 /// One rigid ghost's bookkeeping in the [`GpuAvatarRegistry`].
 struct RigidGhostRecord {
     /// The spawned ghost entity.
@@ -208,10 +232,13 @@ pub(crate) struct GpuAvatarRegistry {
     pool_generation: u64,
     /// Deduplicated resolved skins: pool key → `(count, map_off, ibp_off)`.
     skin_dedup: HashMap<SkinPoolKey, (u32, u32, u32)>,
-    /// Original submesh entity → its ghost bookkeeping.
+    /// Original submesh entity → its ghost bookkeeping (ghost placement).
     ghosts: HashMap<Entity, GhostRecord>,
-    /// Original rigid-part entity → its rigid ghost bookkeeping.
+    /// Original rigid-part entity → its rigid ghost bookkeeping (ghost
+    /// placement).
     rigid_ghosts: HashMap<Entity, RigidGhostRecord>,
+    /// Real submesh entity → its resolved-skin cache (real placement).
+    real_skins: HashMap<Entity, RealSkinRecord>,
     /// Agent → its floating "GPU" label billboard over the ghost.
     labels: HashMap<AgentKey, Entity>,
     /// Whether the too-many-joints warning already fired (once per run).
@@ -225,13 +252,80 @@ impl GpuAvatarRegistry {
     /// Allocate a dense avatar slot (reusing a freed one when available).
     /// `None` only on `u32` overflow, which a real scene never reaches.
     fn alloc_slot(&mut self) -> Option<u32> {
-        if let Some(slot) = self.free.pop() {
+        if self.free.is_empty() {
+            let slot = self.slot_capacity;
+            self.slot_capacity = self.slot_capacity.checked_add(1)?;
+            self.rest_dirty = true;
             return Some(slot);
         }
-        let slot = self.slot_capacity;
-        self.slot_capacity = self.slot_capacity.checked_add(1)?;
-        self.rest_dirty = true;
-        Some(slot)
+        self.free.pop()
+    }
+
+    /// Resolve one submesh's skin into the shared joint-map / inverse-bindpose
+    /// pools (deduplicated across wearers of the same shared mesh asset):
+    /// `(joint_count, joint_map_offset, ibp_offset)`, or `None` while the
+    /// inverse-bindpose asset has not loaded (normal during rez — retried).
+    /// Never all-or-nothing: an unresolvable joint takes the `root_fallback`
+    /// canonical index and is logged at WARN once per `source` (the
+    /// missing-eyes class of bug), instead of silently dropping the submesh
+    /// from the pass-D table.
+    fn resolve_skin_into_pools(
+        &mut self,
+        source: Entity,
+        agent: AgentKey,
+        skin: &SkinnedMesh,
+        joint_lookup: &HashMap<Entity, (AgentKey, u32)>,
+        root_fallback: u32,
+        bindposes: &Assets<SkinnedMeshInverseBindposes>,
+    ) -> Option<(u32, u32, u32)> {
+        let ibp = bindposes.get(&skin.inverse_bindposes)?;
+        let (mapped, unresolved) =
+            resolve_joint_map(&skin.joints, agent, joint_lookup, root_fallback);
+        if !unresolved.is_empty() && self.warned_unresolved.insert(source) {
+            let details: Vec<String> = unresolved
+                .iter()
+                .take(4)
+                .map(|entry| match entry.owner {
+                    Some(owner) => format!(
+                        "#{} {} (belongs to agent {owner}, not the wearer)",
+                        entry.position, entry.joint
+                    ),
+                    None => format!(
+                        "#{} {} (not an avatar skeleton joint)",
+                        entry.position, entry.joint
+                    ),
+                })
+                .collect();
+            warn!(
+                "GPU avatars: skin for source {source} (agent {agent}, {} skin joints) \
+                 has {} unresolvable joint(s), mapped to the skeleton-root fallback \
+                 (canonical {root_fallback}): {}",
+                skin.joints.len(),
+                unresolved.len(),
+                details.join(", "),
+            );
+        }
+        // Bevy zips joints with bindposes, so the palette length is the
+        // shorter of the two.
+        let count = mapped.len().min(ibp.len());
+        let map: Vec<u32> = mapped.into_iter().take(count).collect();
+        let count_u32 = u32::try_from(count).ok()?;
+        let key: SkinPoolKey = (skin.inverse_bindposes.id(), map.clone());
+        if let Some(resolved) = self.skin_dedup.get(&key).copied() {
+            return Some(resolved);
+        }
+        let (Ok(map_offset), Ok(ibp_offset)) = (
+            u32::try_from(self.pool_joint_map.len()),
+            u32::try_from(self.pool_ibps.len()),
+        ) else {
+            return None;
+        };
+        Arc::make_mut(&mut self.pool_joint_map).extend_from_slice(&map);
+        Arc::make_mut(&mut self.pool_ibps).extend(ibp.iter().take(count).copied());
+        self.pool_generation = self.pool_generation.wrapping_add(1);
+        let resolved = (count_u32, map_offset, ibp_offset);
+        let _prev = self.skin_dedup.insert(key, resolved);
+        Some(resolved)
     }
 }
 
@@ -282,12 +376,14 @@ pub(crate) fn resolve_joint_map(
     (map, unresolved)
 }
 
-/// One staged ghost skin instance: everything pass D needs except the palette
+/// One staged skin instance: everything pass D needs except the palette
 /// offset, which the render side re-resolves from `SkinUniforms` every frame.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct StagedSkinInstance {
-    /// The ghost mesh entity whose `SkinUniforms` slot pass D overwrites.
-    pub(crate) ghost: Entity,
+    /// The mesh entity whose `SkinUniforms` slot pass D overwrites — the
+    /// spawned ghost in ghost placement, the real submesh itself in real
+    /// placement.
+    pub(crate) target: Entity,
     /// The wearer's avatar slot.
     pub(crate) avatar_slot: u32,
     /// The instance's palette entry count.
@@ -299,18 +395,20 @@ pub(crate) struct StagedSkinInstance {
 }
 
 /// The staged debug-readback request (`SL_VIEWER_GPU_AVATARS_READBACK=1`):
-/// which ghost instance to copy back, and the CPU-expected palette computed
-/// this frame from the **original's** posed joint `GlobalTransform`s (the true
-/// CPU-path palette) composed with the ghost offset.
+/// which instance to copy back, and the CPU-expected palette computed this
+/// frame — in ghost placement from the original's posed joint
+/// `GlobalTransform`s (the true CPU path) composed with the ghost offset, in
+/// real placement from [`reference_fk`] over the same uploaded local pose
+/// (the golden-tested CPU reference; the joint globals are frozen there).
 #[derive(Clone)]
 pub(crate) struct StagedReadback {
-    /// The ghost whose palette range the readback pass copies.
-    pub(crate) ghost: Entity,
+    /// The instance whose palette range the readback pass copies.
+    pub(crate) target: Entity,
     /// A human-readable name for the verdict log line.
     pub(crate) label: String,
     /// The instance's palette entry count.
     pub(crate) joint_count: u32,
-    /// The CPU-path palette (`ghost_offset * joint_global * ibp` per entry).
+    /// The CPU-expected palette, one entry per skin joint.
     pub(crate) expected: Vec<Mat4>,
 }
 
@@ -447,6 +545,12 @@ pub(crate) fn stage_gpu_avatars(
     queries: GhostQueries<'_, '_>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
 ) {
+    // The startup capability check demoted this device to the CPU path:
+    // stage nothing, so the render half never dispatches.
+    if !mode.active {
+        *staging = GpuAvatarStaging::default();
+        return;
+    }
     let Some(library) = library else {
         *staging = GpuAvatarStaging::default();
         return;
@@ -557,9 +661,16 @@ pub(crate) fn stage_gpu_avatars(
         registry.rest_dirty = false;
     }
 
-    // The per-frame uploads: one frame row per avatar (root affine offset to
-    // the ghost's display position) and the dense local-pose block.
-    let offset_mat = Mat4::from_translation(Vec3::new(mode.ghost_offset, 0.0, 0.0));
+    // The per-frame uploads: one frame row per avatar and the dense
+    // local-pose block. In ghost placement the root affine carries the
+    // side-by-side display offset; in real placement the palettes land in
+    // place, so the offset is identity.
+    let ghost_mode = mode.placement == super::GpuAvatarPlacement::Ghost;
+    let offset_mat = if ghost_mode {
+        Mat4::from_translation(Vec3::new(mode.ghost_offset, 0.0, 0.0))
+    } else {
+        Mat4::IDENTITY
+    };
     let mut frames: Vec<GpuAvatarFrame> = Vec::with_capacity(active.len());
     let mut local_pose = vec![GpuLocalPose::default(); rows_len];
     for (agent, slot) in &active {
@@ -600,6 +711,181 @@ pub(crate) fn stage_gpu_avatars(
     }
     let slot_of: HashMap<AgentKey, u32> = active.iter().copied().collect();
 
+    if ghost_mode {
+        maintain_ghosts(
+            &mut commands,
+            &mut registry,
+            &queries,
+            body.as_deref(),
+            &joint_lookup,
+            &slot_of,
+        );
+    }
+
+    // The canonical index an unresolvable skin joint falls back to: the
+    // synthetic root (identity local transform), pinning the affected
+    // vertices to the avatar root instead of dropping the whole submesh.
+    let root_fallback = skeleton
+        .find("mRoot")
+        .and_then(|index| u32::try_from(index).ok())
+        .unwrap_or(0);
+
+    // Stage the pass-D instance table: in ghost placement over the ghost
+    // entities' palette slots, in real placement over the sources' own.
+    let mut instances: Vec<StagedSkinInstance> = Vec::new();
+    if ghost_mode {
+        // Resolve pending ghost skins through the shared pool resolver
+        // (collected first so the resolver can borrow the registry whole).
+        let pending: Vec<(Entity, AgentKey)> = registry
+            .ghosts
+            .iter()
+            .filter(|(_source, record)| record.skin.is_none())
+            .map(|(source, record)| (*source, record.agent))
+            .collect();
+        for (source, agent) in pending {
+            let Ok((_entity, src_skin, _mesh, _material)) = queries.sources.get(source) else {
+                continue;
+            };
+            let resolved = registry.resolve_skin_into_pools(
+                source,
+                agent,
+                src_skin,
+                &joint_lookup,
+                root_fallback,
+                &bindposes,
+            );
+            if resolved.is_some()
+                && let Some(record) = registry.ghosts.get_mut(&source)
+            {
+                record.skin = resolved;
+            }
+        }
+        for record in registry.ghosts.values() {
+            let Some(slot) = slot_of.get(&record.agent).copied() else {
+                continue;
+            };
+            if let Some((count, map_offset, ibp_offset)) = record.skin {
+                instances.push(StagedSkinInstance {
+                    target: record.ghost,
+                    avatar_slot: slot,
+                    joint_count: count,
+                    joint_map_offset: map_offset,
+                    ibp_offset,
+                });
+            }
+        }
+    } else {
+        // Real placement: every skinned source whose joints belong to a
+        // slotted avatar stages in place. Prune records of despawned sources,
+        // then resolve through the same pool resolver (cached per source, a
+        // cheap fingerprint invalidating on a SkinnedMesh swap).
+        {
+            let sources = &queries.sources;
+            registry
+                .real_skins
+                .retain(|source, _record| sources.get(*source).is_ok());
+        }
+        for (source, skin, _mesh, _material) in &queries.sources {
+            let Some(&(agent, _index)) = skin
+                .joints
+                .first()
+                .and_then(|joint| joint_lookup.get(joint))
+            else {
+                // Not an avatar skeleton skin (an animesh control skeleton) —
+                // stays on the CPU path, out of Phase 1 scope.
+                continue;
+            };
+            let Some(slot) = slot_of.get(&agent).copied() else {
+                continue;
+            };
+            let fingerprint = (skin.inverse_bindposes.id(), skin.joints.len());
+            let cached = registry
+                .real_skins
+                .get(&source)
+                .filter(|record| record.fingerprint == fingerprint && record.agent == agent)
+                .and_then(|record| record.skin);
+            let resolved = match cached {
+                Some(resolved) => Some(resolved),
+                None => {
+                    let resolved = registry.resolve_skin_into_pools(
+                        source,
+                        agent,
+                        skin,
+                        &joint_lookup,
+                        root_fallback,
+                        &bindposes,
+                    );
+                    let _prev = registry.real_skins.insert(
+                        source,
+                        RealSkinRecord {
+                            agent,
+                            fingerprint,
+                            skin: resolved,
+                        },
+                    );
+                    resolved
+                }
+            };
+            if let Some((count, map_offset, ibp_offset)) = resolved {
+                instances.push(StagedSkinInstance {
+                    target: source,
+                    avatar_slot: slot,
+                    joint_count: count,
+                    joint_map_offset: map_offset,
+                    ibp_offset,
+                });
+            }
+        }
+    }
+    instances.sort_by_key(|instance| instance.target);
+
+    // The debug readback: pick the most-jointed staged instance (the spike's
+    // convergence idiom — the mesh body, not an early system part) and stage
+    // its CPU-expected palette alongside.
+    let registry = &*registry;
+    let readback = if mode.readback {
+        instances
+            .iter()
+            .max_by_key(|instance| instance.joint_count)
+            .and_then(|instance| {
+                if ghost_mode {
+                    ghost_readback_expected(instance, registry, &queries, &bindposes, offset_mat)
+                } else {
+                    real_readback_expected(instance, registry, &feed)
+                }
+            })
+    } else {
+        None
+    };
+
+    *staging = GpuAvatarStaging {
+        joint_count: joint_count_u32,
+        slot_capacity: registry.slot_capacity,
+        frames,
+        local_pose,
+        rest: Arc::clone(&registry.assembled_rest),
+        rest_generation: registry.rest_generation,
+        joint_map: Arc::clone(&registry.pool_joint_map),
+        ibps: Arc::clone(&registry.pool_ibps),
+        pool_generation: registry.pool_generation,
+        instances,
+        readback,
+    };
+}
+
+/// The ghost placement's entity maintenance (Phase 1a harness): sync each
+/// live ghost's shared handles to its source, retire ghosts whose source lost
+/// its components, spawn ghosts for new sources, and mirror the rigid base
+/// parts (the eyeballs). No-op in real placement, which writes the sources'
+/// own palette slots and needs no duplicates.
+fn maintain_ghosts(
+    commands: &mut Commands,
+    registry: &mut GpuAvatarRegistry,
+    queries: &GhostQueries<'_, '_>,
+    body: Option<&AvatarBody>,
+    joint_lookup: &HashMap<Entity, (AgentKey, u32)>,
+    slot_of: &HashMap<AgentKey, u32>,
+) {
     // Ghost housekeeping. Sync the shared handles each live ghost mirrors —
     // the source swaps them on a LOD change or a bake-material replace — by
     // walking the ghosts and following their [`GpuAvatarGhost::source`] link.
@@ -726,7 +1012,7 @@ pub(crate) fn stage_gpu_avatars(
             .rigid_ghosts
             .retain(|_source, record| rigid_query.get(record.ghost).is_ok() || record.fresh);
     }
-    if let Some(body) = body.as_deref() {
+    if let Some(body) = body {
         for (source, part, mesh, material) in &queries.rigid_sources {
             if registry.rigid_ghosts.contains_key(&source) {
                 continue;
@@ -762,160 +1048,96 @@ pub(crate) fn stage_gpu_avatars(
                 .insert(source, RigidGhostRecord { ghost, fresh: true });
         }
     }
+}
 
-    // The canonical index an unresolvable skin joint falls back to: the
-    // synthetic root (identity local transform), pinning the affected
-    // vertices to the avatar root instead of dropping the whole submesh.
-    let root_fallback = skeleton
-        .find("mRoot")
-        .and_then(|index| u32::try_from(index).ok())
-        .unwrap_or(0);
+/// The ghost placement's readback expectation: the CPU-path palette computed
+/// from the ORIGINAL's posed joint `GlobalTransform`s — the exact matrices
+/// `extract_skins` uploads (`joint_global * ibp`) — composed with the ghost
+/// display offset. The strongest cross-check: it compares the GPU pipeline
+/// end-to-end against the live CPU pose path.
+fn ghost_readback_expected(
+    instance: &StagedSkinInstance,
+    registry: &GpuAvatarRegistry,
+    queries: &GhostQueries<'_, '_>,
+    bindposes: &Assets<SkinnedMeshInverseBindposes>,
+    offset_mat: Mat4,
+) -> Option<StagedReadback> {
+    let (source, record) = registry
+        .ghosts
+        .iter()
+        .find(|(_source, record)| record.ghost == instance.target)?;
+    let (_entity, src_skin, _mesh, _material) = queries.sources.get(*source).ok()?;
+    let ibp = bindposes.get(&src_skin.inverse_bindposes)?;
+    let count = usize::try_from(instance.joint_count).ok()?;
+    let expected: Vec<Mat4> = src_skin
+        .joints
+        .iter()
+        .zip(ibp.iter())
+        .take(count)
+        .map(|(&joint, bindpose)| {
+            let global = queries
+                .globals
+                .get(joint)
+                .map_or(Mat4::IDENTITY, GlobalTransform::to_matrix);
+            offset_mat.mul_mat4(&global).mul_mat4(bindpose)
+        })
+        .collect();
+    Some(StagedReadback {
+        target: instance.target,
+        label: format!(
+            "agent={} ghost={} source={source}",
+            record.agent, record.ghost
+        ),
+        joint_count: instance.joint_count,
+        expected,
+    })
+}
 
-    // Resolve each ghost's skin into the shared pools (deduplicated), then
-    // stage the pass-D instance table.
-    let mut instances: Vec<StagedSkinInstance> = Vec::new();
-    // Split-borrow the registry so the dedup map and pools can be written
-    // while the ghost records are iterated.
-    let registry = &mut *registry;
-    for (source, record) in &mut registry.ghosts {
-        let Some(slot) = slot_of.get(&record.agent).copied() else {
-            continue;
-        };
-        if record.skin.is_none() {
-            let Ok((_entity, src_skin, _mesh, _material)) = queries.sources.get(*source) else {
-                continue;
-            };
-            let Some(ibp) = bindposes.get(&src_skin.inverse_bindposes) else {
-                // The inverse-bindpose asset has not loaded yet — normal
-                // during rez; retried every frame until it lands.
-                continue;
-            };
-            // Never all-or-nothing: an unresolvable joint takes the root
-            // fallback and is logged at WARN (once per source) instead of silently
-            // dropping the whole submesh's ghost from the pass-D table.
-            let (mapped, unresolved) =
-                resolve_joint_map(&src_skin.joints, record.agent, &joint_lookup, root_fallback);
-            if !unresolved.is_empty() && registry.warned_unresolved.insert(*source) {
-                let details: Vec<String> = unresolved
-                    .iter()
-                    .take(4)
-                    .map(|entry| match entry.owner {
-                        Some(owner) => format!(
-                            "#{} {} (belongs to agent {owner}, not the wearer)",
-                            entry.position, entry.joint
-                        ),
-                        None => format!(
-                            "#{} {} (not an avatar skeleton joint)",
-                            entry.position, entry.joint
-                        ),
-                    })
-                    .collect();
-                warn!(
-                    "GPU avatars: ghost skin for source {source} (agent {}, {} skin \
-                     joints) has {} unresolvable joint(s), mapped to the skeleton-root \
-                     fallback (canonical {root_fallback}): {}",
-                    record.agent,
-                    src_skin.joints.len(),
-                    unresolved.len(),
-                    details.join(", "),
-                );
-            }
-            // Bevy zips joints with bindposes, so the palette length is the
-            // shorter of the two.
-            let count = mapped.len().min(ibp.len());
-            let map: Vec<u32> = mapped.into_iter().take(count).collect();
-            let Ok(count_u32) = u32::try_from(count) else {
-                continue;
-            };
-            let key: SkinPoolKey = (src_skin.inverse_bindposes.id(), map.clone());
-            let resolved = match registry.skin_dedup.get(&key).copied() {
-                Some(resolved) => resolved,
-                None => {
-                    let (Ok(map_offset), Ok(ibp_offset)) = (
-                        u32::try_from(registry.pool_joint_map.len()),
-                        u32::try_from(registry.pool_ibps.len()),
-                    ) else {
-                        continue;
-                    };
-                    Arc::make_mut(&mut registry.pool_joint_map).extend_from_slice(&map);
-                    Arc::make_mut(&mut registry.pool_ibps).extend(ibp.iter().take(count).copied());
-                    registry.pool_generation = registry.pool_generation.wrapping_add(1);
-                    let resolved = (count_u32, map_offset, ibp_offset);
-                    let _prev = registry.skin_dedup.insert(key, resolved);
-                    resolved
-                }
-            };
-            record.skin = Some(resolved);
-        }
-        if let Some((count, map_offset, ibp_offset)) = record.skin {
-            instances.push(StagedSkinInstance {
-                ghost: record.ghost,
-                avatar_slot: slot,
-                joint_count: count,
-                joint_map_offset: map_offset,
-                ibp_offset,
-            });
-        }
-    }
-    instances.sort_by_key(|instance| instance.ghost);
-
-    // The debug readback: pick the most-jointed staged instance (the spike's
-    // convergence idiom — the mesh body, not an early system part) and compute
-    // its CPU-expected palette from the ORIGINAL's posed joint globals — the
-    // true CPU-path palette (`extract_skins` uploads exactly
-    // `joint_global * ibp`) composed with the ghost offset.
-    let readback = if mode.readback {
-        instances
-            .iter()
-            .max_by_key(|instance| instance.joint_count)
-            .and_then(|instance| {
-                let (source, record) = registry
-                    .ghosts
-                    .iter()
-                    .find(|(_source, record)| record.ghost == instance.ghost)?;
-                let (_entity, src_skin, _mesh, _material) = queries.sources.get(*source).ok()?;
-                let ibp = bindposes.get(&src_skin.inverse_bindposes)?;
-                let count = usize::try_from(instance.joint_count).ok()?;
-                let expected: Vec<Mat4> = src_skin
-                    .joints
-                    .iter()
-                    .zip(ibp.iter())
-                    .take(count)
-                    .map(|(&joint, bindpose)| {
-                        let global = queries
-                            .globals
-                            .get(joint)
-                            .map_or(Mat4::IDENTITY, GlobalTransform::to_matrix);
-                        offset_mat.mul_mat4(&global).mul_mat4(bindpose)
-                    })
-                    .collect();
-                Some(StagedReadback {
-                    ghost: instance.ghost,
-                    label: format!(
-                        "agent={} ghost={} source={source}",
-                        record.agent, record.ghost
-                    ),
-                    joint_count: instance.joint_count,
-                    expected,
-                })
-            })
-    } else {
-        None
-    };
-
-    *staging = GpuAvatarStaging {
-        joint_count: joint_count_u32,
-        slot_capacity: registry.slot_capacity,
-        frames,
-        local_pose,
-        rest: Arc::clone(&registry.assembled_rest),
-        rest_generation: registry.rest_generation,
-        joint_map: Arc::clone(&registry.pool_joint_map),
-        ibps: Arc::clone(&registry.pool_ibps),
-        pool_generation: registry.pool_generation,
-        instances,
-        readback,
-    };
+/// The real placement's readback expectation: the joint globals are frozen
+/// there, so the CPU-path truth is [`reference_fk`] — the golden-tested Rust
+/// mirror of the WGSL recurrence — over the very rest rows, local-pose rows
+/// and root the pipeline uploaded this frame, times the pooled inverse
+/// bindposes. A mismatch therefore isolates a GPU-side fault (upload, layout,
+/// shader), not a pose-source difference.
+fn real_readback_expected(
+    instance: &StagedSkinInstance,
+    registry: &GpuAvatarRegistry,
+    feed: &GpuAvatarPoseFeed,
+) -> Option<StagedReadback> {
+    let record = registry.real_skins.get(&instance.target)?;
+    let entry = feed.get(record.agent)?;
+    let (_generation, rest_rows) = registry.rest_rows.get(&record.agent)?;
+    let world = reference_fk(rest_rows, &entry.rows, entry.root);
+    let count = usize::try_from(instance.joint_count).ok()?;
+    let map_start = usize::try_from(instance.joint_map_offset).ok()?;
+    let ibp_start = usize::try_from(instance.ibp_offset).ok()?;
+    let map = registry
+        .pool_joint_map
+        .get(map_start..map_start.checked_add(count)?)?;
+    let ibps = registry
+        .pool_ibps
+        .get(ibp_start..ibp_start.checked_add(count)?)?;
+    let expected: Vec<Mat4> = map
+        .iter()
+        .zip(ibps)
+        .map(|(&canonical, bindpose)| {
+            let canonical = usize::try_from(canonical).unwrap_or(usize::MAX);
+            world
+                .get(canonical)
+                .copied()
+                .unwrap_or(Mat4::IDENTITY)
+                .mul_mat4(bindpose)
+        })
+        .collect();
+    Some(StagedReadback {
+        target: instance.target,
+        label: format!(
+            "agent={} target={} (in-place)",
+            record.agent, instance.target
+        ),
+        joint_count: instance.joint_count,
+        expected,
+    })
 }
 
 /// Keep freshly spawned ghosts' `Transform`s dirty for a spawn window (see

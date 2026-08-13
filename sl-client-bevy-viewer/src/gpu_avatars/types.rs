@@ -7,9 +7,7 @@
 //! recurrence, golden-tested against `deformed_world_matrices` itself so the
 //! shader has a bit-exact CPU reference to be compared to.
 
-#[cfg(test)]
-use bevy::math::Quat;
-use bevy::math::{Mat4, Vec3, Vec4};
+use bevy::math::{Mat4, Quat, Vec3, Vec4};
 use bevy::render::render_resource::ShaderType;
 use sl_client_bevy::{
     AnimationPose, BevySkeleton, JointOverrides, SkeletalDeformations, VolumeDeformations,
@@ -288,7 +286,6 @@ pub(crate) fn pose_rows(pose: &AnimationPose, joint_count: usize) -> Vec<GpuLoca
 /// falling back to identity rotation / zero position / **unit parent scale**.
 /// The `computed` guard below (and the matching `parent >= j` test in the
 /// WGSL) reproduces exactly that.
-#[cfg(test)]
 pub(crate) fn reference_fk(rest: &[GpuRestJoint], pose: &[GpuLocalPose], root: Mat4) -> Vec<Mat4> {
     let mut world_rot: Vec<Quat> = Vec::with_capacity(rest.len());
     let mut world_pos: Vec<Vec3> = Vec::with_capacity(rest.len());

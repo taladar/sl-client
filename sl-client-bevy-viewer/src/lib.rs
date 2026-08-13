@@ -1480,13 +1480,14 @@ fn run_session(
     // de-risking experiment for writing GPU-posed palettes into Bevy's own skin
     // path. Not a feature; delete or graft into Phase 1.
     .add_plugins(crate::gpu_avatar_spike::GpuAvatarSpikePlugin::from_env())
-    // Phase 1a of the GPU-avatar pipeline (context/gpu-avatars.md §1/§2):
-    // flag-gated by SL_VIEWER_GPU_AVATARS=1, read once here. Unset (the
-    // default), this is a no-op plugin and the viewer is byte-for-byte the
-    // normal path. Set, a compute pipeline re-runs the SL skeletal recurrence
-    // on the GPU and renders each avatar a second time as a "GPU ghost" ~2 m
-    // beside the CPU-posed original — the visual A/B for the GPU FK. The CPU
-    // pose path is unchanged either way.
+    // The GPU-avatar pose pipeline (context/gpu-avatars.md §1/§2, Phases
+    // 1a+1b): a compute pipeline re-runs the SL skeletal recurrence on the
+    // GPU and writes the skin palettes into Bevy's SkinUniforms buffer. The
+    // in-place path is the DEFAULT on a capable device (compute + storage
+    // buffers, checked once at startup with an automatic legacy-CPU
+    // fallback); SL_VIEWER_GPU_AVATARS overrides: `cpu`/`off` forces the
+    // legacy CPU pose path, `ghost` the Phase 1a side-by-side comparison
+    // harness (CPU in place + GPU-FK ghost 2 m aside). Env read once here.
     .add_plugins(crate::gpu_avatars::GpuAvatarsPlugin::from_env())
     // The client-side physics foundation (P31.1): an avian3d physics world with
     // Second Life gravity, a fixed timestep at the sim's target rate, and

@@ -2354,6 +2354,21 @@ impl AvatarState {
         self.joints.get(&agent)
     }
 
+    /// The attachment-point node entities of `agent`'s rigged avatar (P16.2),
+    /// in no particular order — the GPU-avatar real path's socket scan walks
+    /// them to find which attachment-point joints carry a worn subtree and
+    /// must therefore stay CPU-written while the skinning joints are frozen.
+    /// Empty for an avatar with no rigged body.
+    pub(crate) fn attachment_node_entities(
+        &self,
+        agent: AgentKey,
+    ) -> impl Iterator<Item = Entity> + '_ {
+        self.attachment_nodes
+            .get(&agent)
+            .into_iter()
+            .flat_map(|nodes| nodes.values().copied())
+    }
+
     /// The resolved skeletal deformations the animation driver (P18.3) folds a
     /// playing motion into when recomputing each joint's world matrix, as last
     /// shaped by [`apply_avatar_appearance`]. `None` for an avatar with no rigged

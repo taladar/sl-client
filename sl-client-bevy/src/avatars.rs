@@ -608,65 +608,8 @@ impl BevySkeleton {
         let mut local_scale: Vec<Vec3> = Vec::with_capacity(self.locals.len());
         let mut world: Vec<Mat4> = Vec::with_capacity(self.locals.len());
         for (index, local) in self.locals.iter().enumerate() {
-            let name = self.names.get(index).map_or("", String::as_str);
-            // A joint is either a bone (deformed by `param_skeleton`) or a collision
-            // volume (displaced by the morph params' `<volume_morph>` children); the
-            // two name spaces are disjoint (`mChest` vs `LEFT_PEC`), so summing both
-            // lookups is the same as choosing between them.
-            let volume = volumes.get(name).copied().unwrap_or_default();
-            let deform_scale = sum(deform.scale(name), volume.scale);
-            let deform_offset = sum(deform.offset(name), volume.position);
-            let override_pos = overrides.position(index);
-            // Component-wise so the workspace `arithmetic_side_effects` lint does
-            // not trip on the glam `Vec3` operators. An overridden joint with a
-            // scale lock keeps its default scale (the rig fits at that scale); every
-            // other joint takes the appearance-driven scale.
-            let scale = if override_pos.is_some() && overrides.lock_scale() {
-                local.scale
-            } else {
-                Vec3::new(
-                    local.scale.x + deform_scale[0],
-                    local.scale.y + deform_scale[1],
-                    local.scale.z + deform_scale[2],
-                )
-            };
-            // The joint's local rotation: the animation pose when it animates this
-            // joint (its keyframe local rotation replaces the identity rest — the
-            // animatable `m*` joints rest at zero rotation), else the rest rotation.
-            let local_rotation = pose.rotation(index).unwrap_or(local.rotation);
-            // The joint's base local position: a rig override, else the appearance
-            // offset shifts the default rest position.
-            let base_position = match override_pos {
-                Some(pos) => pos,
-                None => Vec3::new(
-                    local.translation.x + deform_offset[0],
-                    local.translation.y + deform_offset[1],
-                    local.translation.z + deform_offset[2],
-                ),
-            };
-            // A position track's meaning depends on the joint. It is an *offset*
-            // from rest — added to the base — for **`mPelvis`** (the historical
-            // pre-Bento pelvis translation, over ±`LL_MAX_PELVIS_OFFSET`; replacing
-            // would collapse the pelvis ~1 m to its parent origin) and for a
-            // **collision volume** (the body-physics breast / belly / butt
-            // displacements this pipeline writes into the pose as deltas, P34.2). For
-            // every **other** joint it is the joint's *absolute local position*,
-            // which replaces the rest (the reference's `LLJointState::setPosition` on
-            // a non-pelvis joint): a neutral-face Bento animation stores each face
-            // bone's own rest position, so adding it would double the offset and push
-            // the tongue / brow out of the face (viewer-avatar-tongue-protrudes). A
-            // rig's joint-position override (fitted mesh) still wins, as an
-            // attachment override does in the reference.
-            let is_volume = self.is_volume.get(index).copied().unwrap_or(false);
-            let position = match pose.position(index) {
-                Some(key) if is_volume || name == "mPelvis" => Vec3::new(
-                    base_position.x + key.x,
-                    base_position.y + key.y,
-                    base_position.z + key.z,
-                ),
-                Some(key) if override_pos.is_none() => key,
-                _ => base_position,
-            };
+            let (scale, local_rotation, position) =
+                self.deformed_joint_head(index, local, deform, volumes, overrides, pose);
             let (rotation, translation) = match self.parents.get(index).copied().flatten() {
                 Some(parent) => {
                     let parent_rot = world_rot.get(parent).copied().unwrap_or(Quat::IDENTITY);
@@ -701,6 +644,176 @@ impl BevySkeleton {
             ));
         }
         world
+    }
+
+    /// Every joint's deformed world matrix that the **ancestor closure of
+    /// `targets`** needs, by the same recurrence as
+    /// [`deformed_world_matrices`](Self::deformed_world_matrices) — bit-equal
+    /// on every computed joint, at the cost of only the requested chains (the
+    /// §5.4 **socket mini-FK** of `roadmap/context/gpu-avatars.md`: when the
+    /// GPU owns the full skeleton, the CPU still needs a handful of *socket*
+    /// joints — worn attachment points, the rigid eyeballs' eye joints, the
+    /// camera's head joint — without paying for all ~200).
+    ///
+    /// The closure walk stops at a **forward** parent reference (the appended
+    /// synthetic root): the full recurrence never reads a forward parent's
+    /// computed value — its `Vec::get` yields the identity fallback — so the
+    /// chain excludes it from the values a child depends on and reproduces the
+    /// fallback instead, keeping the results bit-equal. Out-of-range targets
+    /// are ignored. Returns the whole computed closure keyed by joint index.
+    #[must_use]
+    pub fn deformed_world_chain(
+        &self,
+        deform: &SkeletalDeformations,
+        volumes: &VolumeDeformations,
+        overrides: &JointOverrides,
+        pose: &AnimationPose,
+        targets: &[usize],
+    ) -> HashMap<usize, Mat4> {
+        // The ancestor closure, ascending (parents computed before children —
+        // exactly the full recurrence's iteration order restricted to it).
+        let mut closure: std::collections::BTreeSet<usize> = std::collections::BTreeSet::new();
+        for &target in targets {
+            if target >= self.locals.len() {
+                continue;
+            }
+            let mut current = target;
+            loop {
+                if !closure.insert(current) {
+                    break;
+                }
+                match self.parents.get(current).copied().flatten() {
+                    // Only a *backward* parent contributes computed values; a
+                    // forward one (the synthetic root) resolves to the
+                    // identity fallback below, never to its own chain.
+                    Some(parent) if parent < current => current = parent,
+                    _ => break,
+                }
+            }
+        }
+        let mut world_rot: HashMap<usize, Quat> = HashMap::new();
+        let mut world_pos: HashMap<usize, Vec3> = HashMap::new();
+        let mut chain_scale: HashMap<usize, Vec3> = HashMap::new();
+        let mut world: HashMap<usize, Mat4> = HashMap::new();
+        for &index in &closure {
+            let Some(local) = self.locals.get(index) else {
+                continue;
+            };
+            let (scale, local_rotation, position) =
+                self.deformed_joint_head(index, local, deform, volumes, overrides, pose);
+            let (rotation, translation) = match self.parents.get(index).copied().flatten() {
+                // A backward parent is in the closure and already computed
+                // (ascending iteration); a forward parent takes the identity /
+                // zero / unit fallbacks, which is bit-equal to what the full
+                // recurrence's out-of-range `Vec::get` produces.
+                Some(parent) if parent < index => {
+                    let parent_rot = world_rot.get(&parent).copied().unwrap_or(Quat::IDENTITY);
+                    let parent_pos = world_pos.get(&parent).copied().unwrap_or(Vec3::ZERO);
+                    let parent_scale = chain_scale.get(&parent).copied().unwrap_or(Vec3::ONE);
+                    let scaled = Vec3::new(
+                        parent_scale.x * position.x,
+                        parent_scale.y * position.y,
+                        parent_scale.z * position.z,
+                    );
+                    let rotated = parent_rot.mul_vec3(scaled);
+                    (
+                        parent_rot.mul_quat(local_rotation),
+                        Vec3::new(
+                            parent_pos.x + rotated.x,
+                            parent_pos.y + rotated.y,
+                            parent_pos.z + rotated.z,
+                        ),
+                    )
+                }
+                _forward_or_root => (local_rotation, position),
+            };
+            let _prev = world_rot.insert(index, rotation);
+            let _prev = world_pos.insert(index, translation);
+            let _prev = chain_scale.insert(index, scale);
+            let _prev = world.insert(
+                index,
+                Mat4::from_scale_rotation_translation(scale, rotation, translation),
+            );
+        }
+        world
+    }
+
+    /// The per-joint **head** of the Second Life recurrence, shared by
+    /// [`deformed_world_matrices`](Self::deformed_world_matrices) and
+    /// [`deformed_world_chain`](Self::deformed_world_chain) so the two can
+    /// never drift: the joint's composed local `(scale, rotation, position)`
+    /// after the appearance deformation, volume-morph displacement, rig
+    /// override (position replace + optional scale lock) and animated-pose
+    /// channels are folded in.
+    fn deformed_joint_head(
+        &self,
+        index: usize,
+        local: &Transform,
+        deform: &SkeletalDeformations,
+        volumes: &VolumeDeformations,
+        overrides: &JointOverrides,
+        pose: &AnimationPose,
+    ) -> (Vec3, Quat, Vec3) {
+        let name = self.names.get(index).map_or("", String::as_str);
+        // A joint is either a bone (deformed by `param_skeleton`) or a collision
+        // volume (displaced by the morph params' `<volume_morph>` children); the
+        // two name spaces are disjoint (`mChest` vs `LEFT_PEC`), so summing both
+        // lookups is the same as choosing between them.
+        let volume = volumes.get(name).copied().unwrap_or_default();
+        let deform_scale = sum(deform.scale(name), volume.scale);
+        let deform_offset = sum(deform.offset(name), volume.position);
+        let override_pos = overrides.position(index);
+        // Component-wise so the workspace `arithmetic_side_effects` lint does
+        // not trip on the glam `Vec3` operators. An overridden joint with a
+        // scale lock keeps its default scale (the rig fits at that scale); every
+        // other joint takes the appearance-driven scale.
+        let scale = if override_pos.is_some() && overrides.lock_scale() {
+            local.scale
+        } else {
+            Vec3::new(
+                local.scale.x + deform_scale[0],
+                local.scale.y + deform_scale[1],
+                local.scale.z + deform_scale[2],
+            )
+        };
+        // The joint's local rotation: the animation pose when it animates this
+        // joint (its keyframe local rotation replaces the identity rest — the
+        // animatable `m*` joints rest at zero rotation), else the rest rotation.
+        let local_rotation = pose.rotation(index).unwrap_or(local.rotation);
+        // The joint's base local position: a rig override, else the appearance
+        // offset shifts the default rest position.
+        let base_position = match override_pos {
+            Some(pos) => pos,
+            None => Vec3::new(
+                local.translation.x + deform_offset[0],
+                local.translation.y + deform_offset[1],
+                local.translation.z + deform_offset[2],
+            ),
+        };
+        // A position track's meaning depends on the joint. It is an *offset*
+        // from rest — added to the base — for **`mPelvis`** (the historical
+        // pre-Bento pelvis translation, over ±`LL_MAX_PELVIS_OFFSET`; replacing
+        // would collapse the pelvis ~1 m to its parent origin) and for a
+        // **collision volume** (the body-physics breast / belly / butt
+        // displacements this pipeline writes into the pose as deltas, P34.2). For
+        // every **other** joint it is the joint's *absolute local position*,
+        // which replaces the rest (the reference's `LLJointState::setPosition` on
+        // a non-pelvis joint): a neutral-face Bento animation stores each face
+        // bone's own rest position, so adding it would double the offset and push
+        // the tongue / brow out of the face (viewer-avatar-tongue-protrudes). A
+        // rig's joint-position override (fitted mesh) still wins, as an
+        // attachment override does in the reference.
+        let is_volume = self.is_volume.get(index).copied().unwrap_or(false);
+        let position = match pose.position(index) {
+            Some(key) if is_volume || name == "mPelvis" => Vec3::new(
+                base_position.x + key.x,
+                base_position.y + key.y,
+                base_position.z + key.z,
+            ),
+            Some(key) if override_pos.is_none() => key,
+            _ => base_position,
+        };
+        (scale, local_rotation, position)
     }
 
     /// Insert a synthetic identity **root** joint named `name` above the
@@ -2092,6 +2205,68 @@ mod tests {
             mesh.morph_target_names(),
             Some(["Fatten".to_owned()].as_slice())
         );
+        Ok(())
+    }
+
+    /// The socket mini-FK ([`BevySkeleton::deformed_world_chain`]) is
+    /// **bit-equal** to the full recurrence on every joint it computes —
+    /// under a shape deformation, a volume displacement, a rig override and
+    /// an animated pose at once, and across every joint as a target
+    /// (including the appended synthetic root and its forward-parent
+    /// fallback, and the rotated collision volumes).
+    #[test]
+    fn deformed_world_chain_matches_the_full_recurrence() -> Result<(), TestError> {
+        let skeleton = Skeleton::from_xml(MINI_SKELETON)?;
+        let mut bevy = BevySkeleton::from_skeleton(&skeleton);
+        bevy.insert_synthetic_root("mRoot");
+        let params = VisualParams::from_xml(TORSO_SCALE_LAD)?;
+        let deform = SkeletalDeformations::from_appearance(&params, &[255]);
+        let volume_params = VisualParams::from_xml(BELLY_VOLUME_LAD)?;
+        let volumes = VolumeDeformations::from_appearance(&volume_params, &[255]);
+        let mut overrides = JointOverrides::default();
+        let chest = bevy.find("mChest").ok_or("mChest")?;
+        overrides.set_position(chest, Vec3::new(-0.02, 0.01, 0.25));
+        let mut pose = AnimationPose::new();
+        let pelvis = bevy.find("mPelvis").ok_or("mPelvis")?;
+        let torso = bevy.find("mTorso").ok_or("mTorso")?;
+        let belly = bevy.find("BELLY").ok_or("BELLY")?;
+        pose.set_rotation(pelvis, bevy::math::Quat::from_rotation_z(0.4));
+        pose.set_position(pelvis, Vec3::new(0.1, -0.2, 0.3));
+        pose.set_rotation(torso, bevy::math::Quat::from_rotation_x(-0.25));
+        pose.set_position(belly, Vec3::new(0.0, 0.0, 0.05));
+
+        let full = bevy.deformed_world_matrices(&deform, &volumes, &overrides, &pose);
+        // Every joint as a single target, plus a combined multi-target call.
+        for target in 0..full.len() {
+            let chain = bevy.deformed_world_chain(&deform, &volumes, &overrides, &pose, &[target]);
+            let chained = chain.get(&target).ok_or("target missing from chain")?;
+            let expected = full.get(target).ok_or("target missing from full")?;
+            let worst = chained
+                .to_cols_array()
+                .iter()
+                .zip(expected.to_cols_array().iter())
+                .map(|(got, want)| (got - want).abs())
+                .fold(0.0_f32, f32::max);
+            // Non-negative fold: `<= 0.0` is bit-equality without a float `==`.
+            assert!(
+                worst <= 0.0,
+                "chain diverges from the full recurrence at joint {target} \
+                 (worst component diff {worst:e})"
+            );
+        }
+        let targets = [belly, chest, full.len().saturating_sub(1)];
+        let chain = bevy.deformed_world_chain(&deform, &volumes, &overrides, &pose, &targets);
+        for target in targets {
+            let chained = chain.get(&target).ok_or("multi-target missing")?;
+            let expected = full.get(target).ok_or("full missing")?;
+            assert!(
+                chained.abs_diff_eq(*expected, 0.0),
+                "multi-target chain diverges at joint {target}"
+            );
+        }
+        // An out-of-range target is ignored, not a panic or a bogus entry.
+        let chain = bevy.deformed_world_chain(&deform, &volumes, &overrides, &pose, &[usize::MAX]);
+        assert!(chain.is_empty());
         Ok(())
     }
 }

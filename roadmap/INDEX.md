@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 60 |
-| ready | 248 |
-| blocked | 81 |
-| in-progress | 16 |
-| bugs | 23 |
-| done | 777 |
+| ready | 249 |
+| blocked | 80 |
+| in-progress | 15 |
+| bugs | 24 |
+| done | 778 |
 | deferred | 23 |
 | wont-do | 10 |
-| **total** | **1238** |
+| **total** | **1239** |
 
 ## ideas (60)
 
@@ -151,7 +151,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (248)
+## ready (249)
 
 ### protocol
 
@@ -482,6 +482,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
+- [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](ready/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
+  — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
+  `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes` (done))
 - [`viewer-perf-gpu-avatar-phase3-gpu-picking`](ready/viewer-perf-gpu-avatar-phase3-gpu-picking.md)
   — GPU avatars Phase 3 — GPU ID-buffer picking (retire the CPU raycast)
   (blocked by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done))
@@ -748,7 +751,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (81)
+## blocked (80)
 
 ### protocol
 
@@ -872,9 +875,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-outfit-editor`)
 - [`viewer-p31-10`](blocked/viewer-p31-10-voice-lip-sync.md) — Voice lip-sync
   (blocked by `viewer-voice-audio`)
-- [`viewer-perf-gpu-avatar-phase2-gpu-sample-blend`](blocked/viewer-perf-gpu-avatar-phase2-gpu-sample-blend.md)
-  — GPU avatars Phase 2 — GPU clip sample + priority/ease blend (blocked by
-  `viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`)
 - [`viewer-perf-gpu-avatar-phase4-remove-scaffolding`](blocked/viewer-perf-gpu-avatar-phase4-remove-scaffolding.md)
   — GPU avatars Phase 4 — remove joint entities + CPU pose scaffolding (blocked
   by `viewer-perf-gpu-avatar-phase2-gpu-sample-blend`,
@@ -986,7 +986,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (16)
+## in-progress (15)
 
 ### viewer
 
@@ -1002,10 +1002,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
-- [`viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`](in-progress/viewer-perf-gpu-avatar-phase1-gpu-fk-palettes.md)
-  — GPU avatars Phase 1 — GPU FK + palettes (kills the serial extract) (blocked
-  by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done),
-  `viewer-perf-gpu-avatar-keystone-skinuniforms-spike` (done))
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1029,7 +1025,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (23)
+## bugs (24)
 
 ### protocol
 
@@ -1055,6 +1051,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
   — "Stop flycam" button overlaps the "Chat" button in the bottom bar
+- [`viewer-gpu-avatars-1b-slow-shutdown-high-rss`](bugs/viewer-gpu-avatars-1b-slow-shutdown-high-rss.md)
+  — GPU-avatar (1b) session — 10.6 GB RSS + ~2 min 263%-CPU shutdown spin
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1090,7 +1088,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (777)
+## done (778)
 
 ### protocol
 
@@ -1859,6 +1857,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU avatars keystone spike — validate the SkinUniforms write-in
 - [`viewer-perf-gpu-avatar-phase0-mesh-dedup`](done/viewer-perf-gpu-avatar-phase0-mesh-dedup.md)
   — GPU avatars Phase 0 — share rigged-submesh Mesh + IBP assets (instancing)
+- [`viewer-perf-gpu-avatar-phase1-gpu-fk-palettes`](done/viewer-perf-gpu-avatar-phase1-gpu-fk-palettes.md)
+  — GPU avatars Phase 1 — GPU FK + palettes (kills the serial extract) (blocked
+  by `viewer-perf-gpu-avatar-phase0-mesh-dedup` (done),
+  `viewer-perf-gpu-avatar-keystone-skinuniforms-spike` (done))
 - [`viewer-perf-gpu-particles`](done/viewer-perf-gpu-particles.md) —
   GPU-instanced particle rendering
 - [`viewer-perf-inventory-rows-amortise`](done/viewer-perf-inventory-rows-amortise.md)

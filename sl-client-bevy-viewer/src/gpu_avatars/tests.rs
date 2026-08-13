@@ -734,6 +734,11 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
     .add_plugins(SlFaceMaterialPlugin)
     .add_plugins(GpuAvatarsPlugin {
         mode: Some(GpuAvatarsMode {
+            // The render half is placement-agnostic (it writes whatever
+            // instances are staged); ghost placement documents that the
+            // fixture stages an explicit target entity.
+            placement: super::GpuAvatarPlacement::Ghost,
+            active: true,
             readback: true,
             // The test stages fixture data by hand instead of reading the
             // (absent) avatar state.
@@ -839,14 +844,14 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
                 ]),
                 pool_generation: 1,
                 instances: vec![StagedSkinInstance {
-                    ghost: quad,
+                    target: quad,
                     avatar_slot: 0,
                     joint_count: 2,
                     joint_map_offset: 0,
                     ibp_offset: 0,
                 }],
                 readback: Some(StagedReadback {
-                    ghost: quad,
+                    target: quad,
                     label: "headless fixture".to_owned(),
                     joint_count: 2,
                     expected: expected_for_startup.clone(),

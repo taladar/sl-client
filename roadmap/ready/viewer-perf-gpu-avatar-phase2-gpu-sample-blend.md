@@ -2,7 +2,7 @@
 id: viewer-perf-gpu-avatar-phase2-gpu-sample-blend
 title: GPU avatars Phase 2 — GPU clip sample + priority/ease blend
 topic: viewer
-status: blocked
+status: ready
 origin: GPU-avatar design (2026-08-12), context/gpu-avatars.md §2.2, §7 Phase 2
 refs: [viewer-perf-gpu-avatar-crowd, viewer-perf-animation-lod-pose-cache]
 blocked_by: [viewer-perf-gpu-avatar-phase1-gpu-fk-palettes]

@@ -247,16 +247,16 @@ pub(super) fn prepare_gpu_avatars(
     // Resolve the staged instances against Bevy's live skin allocation. An
     // instance whose skin is not (yet) registered is skipped this frame and
     // retried next frame — offsets are re-resolved every frame regardless.
-    let readback_ghost = staging.readback.as_ref().map(|request| request.ghost);
+    let readback_entity = staging.readback.as_ref().map(|request| request.target);
     let mut gpu_instances: Vec<GpuSkinInstance> = Vec::with_capacity(staging.instances.len());
     let mut max_skin_joints = 0_u32;
     let mut readback_instance = u32::MAX;
     for instance in &staging.instances {
-        let Some(palette_offset) = skin_uniforms.skin_index(MainEntity::from(instance.ghost))
+        let Some(palette_offset) = skin_uniforms.skin_index(MainEntity::from(instance.target))
         else {
             continue;
         };
-        if Some(instance.ghost) == readback_ghost {
+        if Some(instance.target) == readback_entity {
             readback_instance = u32::try_from(gpu_instances.len()).unwrap_or(u32::MAX);
         }
         max_skin_joints = max_skin_joints.max(instance.joint_count);

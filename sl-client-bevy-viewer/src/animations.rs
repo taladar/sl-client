@@ -47,8 +47,8 @@ use sl_anim::{
 };
 use sl_client_bevy::{
     AgentKey, AnimationPose, AssetCacheLimits, AssetKey, AssetStore, AssetType, BevyAssetFetcher,
-    BlobFetcher, CAP_VIEWER_ASSET, GateStats, SlCapabilities, SlEvent, SlSessionEvent, StoreStats,
-    Uuid, VolumeDeformations, sample_motion,
+    BevySkeleton, BlobFetcher, CAP_VIEWER_ASSET, GateStats, JointOverrides, SkeletalDeformations,
+    SlCapabilities, SlEvent, SlSessionEvent, StoreStats, Uuid, VolumeDeformations, sample_motion,
 };
 
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -1118,6 +1118,59 @@ pub(crate) fn log_pose_gate_churn(
     }
 }
 
+/// The GPU-avatar pipeline's hooks into the pose driver (`crate::gpu_avatars`),
+/// bundled into one system param:
+///
+/// - the **pose feed**, which receives each avatar's FINAL blended pose
+///   (keyframes + idle + look-at + IK + physics — exactly what the recurrence
+///   below consumes) plus its root matrix, so the GPU FK reproduces this
+///   frame's CPU result;
+/// - the **mode**, deciding whether the in-place real path owns the skinning
+///   joints (freezing them) this run;
+/// - the attachment-node queries the real path's **socket scan** needs to
+///   find which attachment-point joints carry a worn subtree.
+///
+/// Both resources exist only while the GPU pipeline is registered; absent
+/// (the `cpu` override) the hooks cost nothing and the driver is
+/// byte-for-byte the legacy CPU path.
+#[derive(SystemParam)]
+pub(crate) struct GpuAvatarHooks<'w, 's> {
+    /// The blended-pose feed pass C consumes.
+    feed: Option<ResMut<'w, crate::gpu_avatars::GpuAvatarPoseFeed>>,
+    /// The pipeline's placement / capability-checked activity.
+    mode: Option<Res<'w, crate::gpu_avatars::GpuAvatarsMode>>,
+    /// Attachment-node children (a node with children carries a worn
+    /// attachment).
+    children: Query<'w, 's, &'static Children>,
+    /// Attachment-node parents (the node's parent is its skeleton joint).
+    parents: Query<'w, 's, &'static ChildOf>,
+}
+
+impl GpuAvatarHooks<'_, '_> {
+    /// Whether the in-place GPU path owns the skinning joints this run: the
+    /// pipeline is registered, the device passed the startup capability
+    /// check, and the placement is `Real` (not the ghost harness).
+    fn real_active(&self) -> bool {
+        self.mode.as_deref().is_some_and(|mode| {
+            mode.active && mode.placement == crate::gpu_avatars::GpuAvatarPlacement::Real
+        })
+    }
+
+    /// Publish one avatar's final blended pose + root to the feed. No-op when
+    /// the pipeline is off — including when the startup capability check
+    /// demoted the device to the CPU path (nothing would consume the feed,
+    /// and the staging system that prunes it is idle then too).
+    fn publish(&mut self, agent: AgentKey, pose: &AnimationPose, joint_count: usize, root: Mat4) {
+        let active = self.mode.as_deref().is_some_and(|mode| mode.active);
+        if !active {
+            return;
+        }
+        if let Some(feed) = self.feed.as_mut() {
+            feed.publish(agent, pose, joint_count, root);
+        }
+    }
+}
+
 /// The procedural adjusters' resources, bundled so [`pose_avatar_skeletons`] stays
 /// inside Bevy's system-parameter limit — each fold (look-at, reach & aim, locomotion,
 /// body physics) contributes its own target and state resource, and the runtime-morph
@@ -1184,12 +1237,7 @@ pub(crate) fn pose_avatar_skeletons(
     parts: Query<(Entity, &AvatarBodyPart)>,
     anchors: Query<Ref<Transform>, With<crate::avatars::AvatarAnchor>>,
     mut globals: Query<&mut GlobalTransform>,
-    // The GPU-avatar pipeline's pose feed (`crate::gpu_avatars`): exists only
-    // while `SL_VIEWER_GPU_AVATARS` is on, and receives each avatar's FINAL
-    // blended pose (keyframes + idle + look-at + IK + physics, exactly what
-    // the recurrence below consumes) plus its root matrix, so the GPU FK
-    // reproduces this frame's CPU result. `None` = zero cost.
-    mut gpu_feed: Option<ResMut<crate::gpu_avatars::GpuAvatarPoseFeed>>,
+    mut gpu: GpuAvatarHooks<'_, '_>,
 ) {
     let (Some(library), Some(body)) = (library, body) else {
         return;
@@ -1223,6 +1271,10 @@ pub(crate) fn pose_avatar_skeletons(
     // runs of the viewer frame the same body from the same angle and can be compared
     // pixel for pixel (an avatar's AO would otherwise walk and turn it).
     let t_pose = t_pose_enabled();
+    // Whether the in-place GPU pipeline owns the skinning joints this run
+    // (Phase 1b): the full joint-global writes are replaced by the socket
+    // mini-FK, and the GPU consumes the published pose feed instead.
+    let gpu_real = gpu.real_active();
     let gate_enabled = pose_gate_enabled();
     // The quantised procedural idle clock (see [`POSE_IDLE_HZ`]).
     let idle_now = (now * POSE_IDLE_HZ).floor() / POSE_IDLE_HZ;
@@ -1372,21 +1424,36 @@ pub(crate) fn pose_avatar_skeletons(
         // procedural adjusters below folded in (they would tilt the head, plant the
         // feet and bounce the body, all of which move between runs).
         if t_pose {
-            let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
-            write_joint_globals(
-                &mut globals,
-                &parts,
-                &body,
-                agent,
-                &root_global,
-                joints,
-                &world,
-            );
-            // Feed the GPU pipeline the same (empty, T-pose) pose + root this
-            // frame's joint globals were written from.
-            if let Some(feed) = gpu_feed.as_mut() {
-                feed.publish(agent, &pose, joints.len(), root_global.to_matrix());
+            if gpu_real {
+                // In-place GPU path: the skinning joints stay frozen; only
+                // the socket subset is written, from the chain mini-FK.
+                write_socket_globals(
+                    &mut globals,
+                    &parts,
+                    &gpu,
+                    &state,
+                    &body,
+                    skeleton,
+                    agent,
+                    &root_global,
+                    joints,
+                    (deform, volumes, &overrides, &pose),
+                );
+            } else {
+                let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
+                write_joint_globals(
+                    &mut globals,
+                    &parts,
+                    &body,
+                    agent,
+                    &root_global,
+                    joints,
+                    &world,
+                );
             }
+            // Feed the GPU pipeline the same (empty, T-pose) pose + root this
+            // frame's pose was resolved under.
+            gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
             let _prev = gate.stamps.insert(agent, stamp);
             continue;
         }
@@ -1577,22 +1644,42 @@ pub(crate) fn pose_avatar_skeletons(
                 );
             }
         }
-        let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
-        write_joint_globals(
-            &mut globals,
-            &parts,
-            &body,
-            agent,
-            &root_global,
-            joints,
-            &world,
-        );
-        // Feed the GPU pipeline the FINAL blended pose (all folds applied) +
-        // the root matrix this frame's joint globals were composed under, so
-        // its FK re-derives exactly the `world` written above.
-        if let Some(feed) = gpu_feed.as_mut() {
-            feed.publish(agent, &pose, joints.len(), root_global.to_matrix());
+        if gpu_real {
+            // In-place GPU path (Phase 1b): the final full solve and the
+            // ~200 joint-global writes are dropped — the GPU re-runs FK from
+            // the published pose, and `extract_skins` sees no changed joints.
+            // Only the socket subset (worn attachment points, the rigid
+            // eyeballs' joints, the camera's head joint) is written, from the
+            // §5.4 chain mini-FK over the very same final pose.
+            write_socket_globals(
+                &mut globals,
+                &parts,
+                &gpu,
+                &state,
+                &body,
+                skeleton,
+                agent,
+                &root_global,
+                joints,
+                (deform, volumes, &overrides, &pose),
+            );
+        } else {
+            let world = skeleton.deformed_world_matrices(deform, volumes, &overrides, &pose);
+            write_joint_globals(
+                &mut globals,
+                &parts,
+                &body,
+                agent,
+                &root_global,
+                joints,
+                &world,
+            );
         }
+        // Feed the GPU pipeline the FINAL blended pose (all folds applied) +
+        // the root matrix this frame's pose was resolved under, so its FK
+        // re-derives exactly the world matrices the CPU path would have
+        // written.
+        gpu.publish(agent, &pose, joints.len(), root_global.to_matrix());
         let _prev = gate.stamps.insert(agent, stamp);
     }
 
@@ -1728,6 +1815,111 @@ fn write_joint_globals(
         }
         if let Some(index) = body.rigid_joint_index(part.part())
             && let Some(matrix) = world.get(index)
+            && let Ok(mut global) = globals.get_mut(entity)
+        {
+            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
+        }
+    }
+}
+
+/// Write one avatar's **socket subset** — and nothing else — while the
+/// in-place GPU pipeline owns the skinning joints (Phase 1b of
+/// `roadmap/context/gpu-avatars.md`, the §5.4 socket mini-FK): the rendered
+/// skin comes from the GPU palettes, but a handful of consumers still read
+/// joint `GlobalTransform`s and must keep tracking —
+///
+/// - **worn attachment-point joints** (an attachment node with children):
+///   [`pose_attachment_nodes`] re-propagates the worn subtrees off them;
+/// - the **rigid-part joints** (the eyeballs' eye joints) plus the rigid part
+///   entities themselves, exactly as [`write_joint_globals`] placed them;
+/// - **`mHead`**, the camera's third-person focus / mouselook eye
+///   (`crate::camera::own_avatar_head`).
+///
+/// The joint worlds come from
+/// [`BevySkeleton::deformed_world_chain`] over the same final pose — bit-equal
+/// to the full recurrence on these joints (golden-tested), at the cost of only
+/// their ancestor chains. Every other joint is left unwritten, so
+/// `extract_skins` sees no `Changed<GlobalTransform>` on it and the serial
+/// extract collapses (for avatars whose anchor did not move — a moving anchor
+/// makes Bevy propagation re-global the whole tree regardless, until Phase 4
+/// removes the joint entities).
+///
+/// `chain_inputs` bundles the recurrence inputs `(deform, volumes, overrides,
+/// pose)` to stay inside the argument-count lint.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the socket writer takes the pose driver's own borrowed context (queries, \
+              state, skeleton, per-avatar identifiers); packing them into a struct would \
+              only move the argument list into a struct literal at the two call sites"
+)]
+fn write_socket_globals(
+    globals: &mut Query<&mut GlobalTransform>,
+    parts: &Query<(Entity, &AvatarBodyPart)>,
+    hooks: &GpuAvatarHooks<'_, '_>,
+    state: &AvatarState,
+    body: &AvatarBody,
+    skeleton: &BevySkeleton,
+    agent: AgentKey,
+    root_global: &GlobalTransform,
+    joints: &[Entity],
+    chain_inputs: (
+        &SkeletalDeformations,
+        &VolumeDeformations,
+        &JointOverrides,
+        &AnimationPose,
+    ),
+) {
+    let (deform, volumes, overrides, pose) = chain_inputs;
+    // The socket subset: rigid-part joints (remembering the part entities for
+    // the re-place below), the camera's head joint, and every worn
+    // attachment-point joint.
+    let mut targets: Vec<usize> = Vec::new();
+    let mut rigid_parts: Vec<(Entity, usize)> = Vec::new();
+    for (entity, part) in parts {
+        if part.agent() != agent {
+            continue;
+        }
+        if let Some(index) = body.rigid_joint_index(part.part()) {
+            targets.push(index);
+            rigid_parts.push((entity, index));
+        }
+    }
+    if let Some(head) = body.joint_index("mHead") {
+        targets.push(head);
+    }
+    for node in state.attachment_node_entities(agent) {
+        // Worn = the node carries an attachment subtree.
+        let worn = hooks
+            .children
+            .get(node)
+            .is_ok_and(|children| !children.is_empty());
+        if !worn {
+            continue;
+        }
+        let Ok(child_of) = hooks.parents.get(node) else {
+            continue;
+        };
+        let joint_entity = child_of.parent();
+        if let Some(index) = joints.iter().position(|&joint| joint == joint_entity) {
+            targets.push(index);
+        }
+    }
+    let world = skeleton.deformed_world_chain(deform, volumes, overrides, pose, &targets);
+    // `mul_mat4` (a method, not `*`) keeps clear of the workspace
+    // `arithmetic_side_effects` lint.
+    let root_matrix = root_global.to_matrix();
+    for &index in &targets {
+        let (Some(matrix), Some(&joint)) = (world.get(&index), joints.get(index)) else {
+            continue;
+        };
+        if let Ok(mut global) = globals.get_mut(joint) {
+            *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
+        }
+    }
+    // Re-place the rigid parts (the eyeballs) from their joints' chain
+    // worlds, exactly as `write_joint_globals` does from the full solve.
+    for (entity, index) in rigid_parts {
+        if let Some(matrix) = world.get(&index)
             && let Ok(mut global) = globals.get_mut(entity)
         {
             *global = GlobalTransform::from(Affine3A::from_mat4(root_matrix.mul_mat4(matrix)));
