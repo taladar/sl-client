@@ -3409,3 +3409,17 @@ debug-settings-scope-global = Global
 debug-settings-scope-account = Account
 debug-settings-reset = Reset to default
 debug-settings-none-selected = Select a setting to inspect and edit it
+
+# The About floater (Help ▸ About): viewer version, system info, credits and
+# third-party licenses. The support block itself is deliberately English-only
+# (grep-able for support staff), so only the chrome has keys here.
+about-title = About
+about-tab-info = Info
+about-tab-credits = Credits
+about-tab-licenses = Licenses
+about-intro = Support information about this viewer, the connected grid and the host system. Use Copy to Clipboard when reporting a problem.
+about-copy = Copy to Clipboard
+about-credits-intro = sl-client-bevy-viewer is an independent open-source viewer for Second Life and OpenSimulator grids, built from scratch in Rust.
+about-credits-protocol = Second Life and the Second Life protocol are by Linden Research, Inc. (Linden Lab). This viewer speaks the same protocols but shares no code with the official viewer.
+about-credits-reference = The Firestorm viewer project and the OpenSimulator project served as read-only behavioural references; their source made faithful reimplementation possible.
+about-credits-engine = Rendering and UI are built on the Bevy engine and the wider Rust ecosystem — see the Licenses tab for every crate this viewer ships with.

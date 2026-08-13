@@ -94,6 +94,12 @@ pub enum Event {
     /// the `RegionHandshake` (emitted alongside [`Event::RegionHandshakeComplete`]
     /// on entry, and [`Event::RegionChanged`] after a teleport).
     RegionInfoHandshake(Box<RegionIdentity>),
+    /// The current (root) region simulator's version/channel string (e.g.
+    /// `"OpenSim 0.9.3 …"` or `"Second Life Server 2026-…"`), parsed from the
+    /// `AgentMovementComplete` `SimData.ChannelVersion` field — emitted at
+    /// login and again after each committed teleport handover. The reference
+    /// viewer surfaces this as the "server version" in its About window.
+    SimulatorVersion(String),
     /// The current region's agent and object limits, parsed from a `RegionInfo`
     /// reply to [`Session::request_region_info`](crate::Session::request_region_info).
     RegionLimits(RegionLimits),

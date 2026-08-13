@@ -28,6 +28,7 @@
 //! [`gallery::run`]) are `pub`; the module tree stays `pub(crate)` exactly as it
 //! was.
 
+mod about_floater;
 mod about_land;
 mod about_region;
 mod animations;
@@ -50,6 +51,7 @@ mod beacons;
 mod body_physics;
 mod bottom_toolbar;
 mod browser_widget;
+mod build_info;
 mod bump;
 mod camera;
 mod chat;
@@ -274,6 +276,7 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::about_floater::AboutFloaterPlugin;
 use crate::about_land::AboutLandPlugin;
 use crate::about_region::AboutRegionPlugin;
 use crate::animations::{
@@ -504,10 +507,12 @@ struct Options {
     #[clap(long)]
     start: Option<StartLocation>,
     /// The viewer channel reported to the grid.
-    #[clap(long, default_value = "sl-client-bevy-viewer")]
+    #[clap(long, default_value = build_info::VIEWER_NAME)]
     channel: String,
-    /// The viewer version reported to the grid.
-    #[clap(long, default_value = clap::crate_version!())]
+    /// The viewer version reported to the grid. Defaults to the crate version
+    /// extended with the build-time `git describe` metadata (e.g.
+    /// `0.1.0+ed81459`), so grid-side logs identify the exact build.
+    #[clap(long, default_value_t = build_info::full_version())]
     version: String,
     /// Directory holding the standard Linden `character/` assets
     /// (`avatar_skeleton.xml`, `avatar_lad.xml`, the base-body `.llm` meshes) —
@@ -939,6 +944,14 @@ fn run_session(
 
     let mut app = App::new();
     app.insert_resource(local_time_zone);
+    // The About floater's login-derived facts (grid, login URI, reported
+    // channel/version) — captured here where they are all still at hand.
+    app.insert_resource(crate::about_floater::AboutSessionInfo {
+        grid: grid.clone(),
+        login_uri: params.login_uri.to_string(),
+        channel: params.request.channel.clone(),
+        version: params.request.version.clone(),
+    });
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
@@ -1395,6 +1408,7 @@ fn run_session(
     // The Region / Estate floater (viewer-region-options-debug / -general /
     // -terrain / -estate): the region-and-estate info surface. Bound to the
     // current region, persistence-exempt; opened from the World menu.
+    .add_plugins(AboutFloaterPlugin)
     .add_plugins(AboutRegionPlugin)
     // The snapshot floater (viewer-snapshot-floater): a framed live world preview
     // (a second off-screen camera into an image) with resolution / format

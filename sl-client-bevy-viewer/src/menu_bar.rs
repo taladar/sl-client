@@ -38,8 +38,7 @@ use bevy::prelude::*;
 
 use crate::floater::toggle_floater;
 use crate::menu::{
-    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, NEVER_CONDITION, PrimaryMenuBar,
-    spawn_menu_bar,
+    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, PrimaryMenuBar, spawn_menu_bar,
 };
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 use crate::ui_element::{ElementCx, UiAction};
@@ -64,6 +63,9 @@ const PREFERENCES_OPEN: &str = "preferences-open";
 
 /// Condition: the debug-settings editor is open (drives its check mark).
 const DEBUG_SETTINGS_OPEN: &str = "debug-settings-open";
+
+/// Condition: the About floater is open (drives its check mark).
+const ABOUT_OPEN: &str = "about-open";
 
 /// The condition key that holds while the Conversations floater is open — drives
 /// the check mark on the Comm ▸ Conversations entry.
@@ -139,13 +141,6 @@ const ENV_MODERN_SUNSET_ACTIVE: &str = "env-modern-sunset-active";
 const ENV_MODERN_MIDNIGHT_ACTIVE: &str = "env-modern-midnight-active";
 /// See [`ENV_DAYCYCLE_SUNRISE_ACTIVE`].
 const ENV_SHARED_ACTIVE: &str = "env-shared-active";
-
-/// The placeholder shown in a menu that has no wired entries yet — a single
-/// disabled line, so the menu still opens and plainly reads as unpopulated. Its
-/// `enabled_when` names a condition the bar never sets, so it is always greyed.
-static PLACEHOLDER_ITEMS: &[MenuItemDef] = &[MenuItemDef::Command(
-    MenuCommand::new("(no entries yet)", "noop").enabled_when(NEVER_CONDITION),
-)];
 
 /// The Avatar (Me) menu — the entries with a live target today.
 static AVATAR_MENU: MenuDef = MenuDef {
@@ -355,10 +350,12 @@ static CONTENT_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The Help menu — a name for future help / about entries.
+/// The Help menu — the About window today; future help entries join it.
 static HELP_MENU: MenuDef = MenuDef {
     label: "Help",
-    items: PLACEHOLDER_ITEMS,
+    items: &[MenuItemDef::Command(
+        MenuCommand::new("About\u{2026}", "toggle-about").checked_when(ABOUT_OPEN),
+    )],
 };
 
 /// The Advanced menu — the reference viewer's power-user menu, after Help as
@@ -474,6 +471,7 @@ fn update_top_menu_conditions(
     };
     let preferences_open = open(crate::preferences::PREFERENCES_FLOATER_ID);
     let debug_settings_open = open(crate::debug_settings::DEBUG_SETTINGS_FLOATER_ID);
+    let about_open = open(crate::about_floater::ABOUT_FLOATER_ID);
     let inventory_open = open(crate::inventory::INVENTORY_FLOATER_ID);
     let conversations_open = open(crate::conversations::CONVERSATIONS_FLOATER_ID);
     let web_browser_open = open(crate::web_floater::WEB_FLOATER_ID);
@@ -488,6 +486,9 @@ fn update_top_menu_conditions(
     }
     if debug_settings_open {
         wanted.push(DEBUG_SETTINGS_OPEN);
+    }
+    if about_open {
+        wanted.push(ABOUT_OPEN);
     }
     if inventory_open {
         wanted.push(INVENTORY_OPEN);
@@ -629,6 +630,13 @@ fn handle_top_menu_actions(
                     &floaters,
                     &mut panels,
                     crate::debug_settings::DEBUG_SETTINGS_FLOATER_ID,
+                );
+            }
+            "toggle-about" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::about_floater::ABOUT_FLOATER_ID,
                 );
             }
             "toggle-inventory" => {

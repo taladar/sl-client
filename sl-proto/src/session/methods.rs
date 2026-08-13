@@ -1813,13 +1813,25 @@ impl Session {
                 self.events
                     .push_back(Event::RegionInfoHandshake(Box::new(identity)));
             }
-            AnyMessage::AgentMovementComplete(_) => {
+            AnyMessage::AgentMovementComplete(complete) => {
                 // The only child circuit we ever send `CompleteAgentMovement` to
                 // is a **pending teleport destination**, so its
                 // `AgentMovementComplete` confirms our arrival there: commit the
                 // deferred handover (promote it to root, tear down the source). A
                 // no-op if `from` is not the pending destination.
+                let confirmed = self
+                    .pending_handover
+                    .as_ref()
+                    .is_some_and(|pending| pending.dest == from);
                 self.commit_handover(from, now);
+                if confirmed {
+                    // The destination is now the root region: surface its
+                    // simulator version/channel string (About-window data).
+                    self.events
+                        .push_back(Event::SimulatorVersion(trimmed_string(
+                            &complete.sim_data.channel_version,
+                        )));
+                }
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -2647,11 +2659,16 @@ impl Session {
                     self.complete_arrival(now);
                 }
             }
-            AnyMessage::AgentMovementComplete(_) => {
+            AnyMessage::AgentMovementComplete(complete) => {
                 // After a teleport handover the destination promotes us to root
                 // and confirms with AgentMovementComplete; it may not re-send a
                 // RegionHandshake, so complete the arrival here too (idempotent).
                 self.complete_arrival(now);
+                // Surface the root region simulator's version/channel string
+                // (About-window data).
+                self.events.push_back(Event::SimulatorVersion(
+                    trimmed_string(&complete.sim_data.channel_version),
+                ));
                 // Backstop the own-avatar id for attachment detection: the
                 // message carries no region-local id, so read it from our own
                 // avatar object if it was already cached on this circuit.

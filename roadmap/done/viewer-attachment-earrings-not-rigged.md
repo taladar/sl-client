@@ -47,4 +47,4 @@ joint, not the rest global) and confirmed live in replay: the earrings now track
 the head as it sways.
 
 An unrelated hair transparency issue observed on the same avatar is tracked by
-[mesh-hair-and-hairbase](../bugs/viewer-avatar-mesh-hair-and-hairbase-both-render.md).
+[mesh-hair-and-hairbase](../deferred/viewer-avatar-mesh-hair-and-hairbase-both-render.md).

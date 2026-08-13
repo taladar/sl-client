@@ -200,6 +200,9 @@ tracing-tracy = { version = "0.11.4", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { version = "2.5.8" }
 
+[build-dependencies]
+fs-err = { version = "3.1.1" }
+
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
 sl-mesh = { version = "0.1.0", path = "../sl-mesh" }

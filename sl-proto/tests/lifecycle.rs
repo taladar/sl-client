@@ -11349,17 +11349,26 @@ mod test {
             },
         });
         session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
-        let changed = drain_events(&mut session)
-            .into_iter()
+        let events = drain_events(&mut session);
+        let changed = events
+            .iter()
             .find_map(|e| match e {
                 Event::RegionChanged {
                     region_handle, sim, ..
-                } => Some((region_handle, sim)),
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
         assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
+        // The confirmed handover also surfaces the new root simulator's
+        // version/channel string.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::SimulatorVersion(v) if v == "x")),
+            "expected a SimulatorVersion event, got {events:?}"
+        );
         Ok(())
     }
 
@@ -11475,17 +11484,26 @@ mod test {
             },
         });
         session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
-        let changed = drain_events(&mut session)
-            .into_iter()
+        let events = drain_events(&mut session);
+        let changed = events
+            .iter()
             .find_map(|e| match e {
                 Event::RegionChanged {
                     region_handle, sim, ..
-                } => Some((region_handle, sim)),
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
         assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
+        // The confirmed handover also surfaces the new root simulator's
+        // version/channel string.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::SimulatorVersion(v) if v == "x")),
+            "expected a SimulatorVersion event, got {events:?}"
+        );
         Ok(())
     }
 
@@ -14887,6 +14905,42 @@ mod test {
                 circuit,
                 sl_proto::RegionLocalObjectId(530)
             ))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn agent_movement_complete_surfaces_simulator_version() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The root region's `AgentMovementComplete` carries the simulator's
+        // version/channel string in `SimData.ChannelVersion`; the session
+        // surfaces it (trimmed of the trailing NUL) for e.g. an About window.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: OBJ_REGION,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"OpenSim 0.9.3 Yeti Dev\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&amc, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::SimulatorVersion(v) if v == "OpenSim 0.9.3 Yeti Dev")),
+            "expected a SimulatorVersion event, got {events:?}"
         );
         Ok(())
     }

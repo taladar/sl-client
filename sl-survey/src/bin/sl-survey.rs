@@ -800,6 +800,7 @@ impl Survey {
             | Event::LandStatReply { .. }
             | Event::SimStats(_)
             | Event::SimulatorTime(_)
+            | Event::SimulatorVersion(_)
             | Event::GenericMessage(_)
             | Event::LargeGenericMessage(_)
             | Event::GenericStreamingMessage(_)

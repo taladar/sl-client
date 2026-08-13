@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 77 |
 | in-progress | 15 |
 | bugs | 23 |
-| done | 783 |
+| done | 784 |
 | deferred | 23 |
 | wont-do | 10 |
-| **total** | **1228** |
+| **total** | **1229** |
 
 ## ideas (56)
 
@@ -166,9 +166,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
-- [`viewer-about-floater`](ready/viewer-about-floater.md) — About floater —
-  version, system info, credits, licenses (blocked by
-  `viewer-ui-widget-scaffold` (done))
 - [`viewer-about-landmark-floater`](ready/viewer-about-landmark-floater.md) —
   About Landmark floater — full detail view
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
@@ -601,6 +598,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
+- [`viewer-support-group-version-tags`](ready/viewer-support-group-version-tags.md)
+  — Support-group chat version tags (send + display) (blocked by
+  `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
@@ -1046,7 +1046,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (783)
+## done (784)
 
 ### protocol
 
@@ -1178,6 +1178,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
+  version, system info, credits, licenses (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
   About Land floater — Options tab
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)

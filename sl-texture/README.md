@@ -12,7 +12,7 @@ and keeps the results in a **level-of-detail-aware store**:
   texture is collectible as soon as the last external `Arc` to it drops
   (garbage collection follows pointer counts).
 - **LOD upgrade/downgrade in place** — one logical texture object upgrades to a
-  finer [`DiscardLevel`](sl_proto::DiscardLevel) by fetching more of the
+  finer `DiscardLevel` (`sl_proto::DiscardLevel`) by fetching more of the
   codestream and re-decoding, or downgrades to a coarser one by downsampling the
   existing pixels (no re-decode). A usage lease guards against freeing pixels
   that are mapped to the GPU or otherwise in use.

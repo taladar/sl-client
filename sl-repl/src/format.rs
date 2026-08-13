@@ -320,6 +320,7 @@ const fn event_name(event: &Event) -> &'static str {
         Event::RegionHandshakeComplete => "region_handshake_complete",
         Event::Ping { .. } => "ping",
         Event::RegionInfoHandshake(..) => "region_info_handshake",
+        Event::SimulatorVersion(..) => "simulator_version",
         Event::RegionLimits(..) => "region_limits",
         Event::SimStats(..) => "sim_stats",
         Event::SimulatorTime(..) => "simulator_time",
