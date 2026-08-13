@@ -3344,7 +3344,9 @@ impl Session {
             AnyMessage::TeleportProgress(progress) => {
                 if matches!(self.state, SessionState::Teleporting) {
                     self.events.push_back(Event::TeleportProgress {
-                        message: String::from_utf8_lossy(&progress.info.message).into_owned(),
+                        // The wire string is NUL-terminated; strip it like
+                        // every other text field.
+                        message: trimmed_string(&progress.info.message),
                         teleport_flags: progress.info.teleport_flags,
                     });
                 }
@@ -3377,11 +3379,13 @@ impl Session {
                         circuit.timers.teleport = None;
                     }
                 }
+                // The wire strings are NUL-terminated; strip them like every
+                // other text field.
                 self.events.push_back(Event::TeleportFailed {
-                    reason: String::from_utf8_lossy(&failed.info.reason).into_owned(),
+                    reason: trimmed_string(&failed.info.reason),
                     alert_info: failed.alert_info.first().map(|block| AlertInfo {
-                        message: String::from_utf8_lossy(&block.message).into_owned(),
-                        extra_params: String::from_utf8_lossy(&block.extra_params).into_owned(),
+                        message: trimmed_string(&block.message),
+                        extra_params: trimmed_string(&block.extra_params),
                     }),
                 });
             }

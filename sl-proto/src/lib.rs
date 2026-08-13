@@ -95,7 +95,9 @@ pub use session::{
 pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
 };
-pub use sim_session::{AgentUpdateInfo, ServerEvent, SimSession, TransferRequestSource};
+pub use sim_session::{
+    AgentPresence, AgentUpdateInfo, ServerEvent, SimSession, TransferRequestSource,
+};
 pub use terrain::encode_layer;
 pub use types::{
     ActiveGroup, AgentOrObjectKey, AlertInfo, Asset, AssetType, AssetUpdateLocation,

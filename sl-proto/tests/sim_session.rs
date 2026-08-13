@@ -9,6 +9,7 @@ mod test {
     use std::time::{Duration, Instant};
 
     use pretty_assertions::assert_eq;
+    use sl_proto::AgentPresence;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AlertInfo, AnimationKey, AssetKey, AssetType,
         AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, ChatChannel, ChatSource,
@@ -179,6 +180,39 @@ mod test {
             out.push(event);
         }
         out
+    }
+
+    /// Delivers all queued datagrams between the client and SEVERAL simulators
+    /// — the multi-region topology an inter-region teleport needs — routing
+    /// each client transmit to the simulator whose address matches its
+    /// [`Transmit::destination`], until nothing moves. The single-sim
+    /// [`pump`] stays as the common fast path.
+    fn pump_multi(
+        client: &mut Session,
+        sims: &mut [(SocketAddr, &mut SimSession)],
+        now: Instant,
+    ) -> Result<(), TestError> {
+        loop {
+            let mut moved = false;
+            while let Some(transmit) = client.poll_transmit() {
+                for (addr, sim) in sims.iter_mut() {
+                    if *addr == transmit.destination {
+                        sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+                        moved = true;
+                    }
+                }
+            }
+            for (addr, sim) in sims.iter_mut() {
+                while let Some(transmit) = sim.poll_transmit() {
+                    client.handle_datagram(*addr, &transmit.payload, now)?;
+                    moved = true;
+                }
+            }
+            if !moved {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// Delivers the simulator's queued CAPS events to the client over the real
@@ -5281,6 +5315,287 @@ mod test {
                 .iter()
                 .any(|e| matches!(e, ServerEvent::TransferRequested { .. })),
             "a legacy plain-asset request must not surface, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The destination simulator's UDP address for two-region tests.
+    fn dest_sim_addr() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9001)
+    }
+
+    /// The destination region handle for two-region tests (one region east of
+    /// [`REGION_HANDLE`]).
+    const DEST_HANDLE: u64 = 0x0000_03e9_0000_03e8;
+
+    /// An intra-region teleport round-trips: the client's `teleport_to`
+    /// surfaces [`ServerEvent::TeleportRequested`] with the requested handle
+    /// and position, and the driver's `send_teleport_start` +
+    /// `send_teleport_local` bring the client back to active with
+    /// [`Event::TeleportStarted`] and [`Event::TeleportLocal`].
+    #[test]
+    fn teleport_local_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let position = RegionCoordinates::new(10.0, 20.0, 30.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(REGION_HANDLE), position, look_at.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::TeleportRequested {
+                    region_handle,
+                    position: got,
+                    ..
+                } if *region_handle == RegionHandle(REGION_HANDLE) && *got == position
+            )),
+            "expected TeleportRequested, got {server_events:?}"
+        );
+
+        sim.send_teleport_start(0, now)?;
+        sim.send_teleport_local(position, look_at, 0, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events
+                .iter()
+                .any(|e| matches!(e, Event::TeleportStarted)),
+            "expected TeleportStarted, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportLocal { position: got } if *got == position
+            )),
+            "expected TeleportLocal, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A failed teleport surfaces its progress and reason and returns the
+    /// client to the active state (a follow-up request is accepted again).
+    #[test]
+    fn teleport_failed_returns_client_to_active() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let position = RegionCoordinates::new(1.0, 2.0, 3.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(DEST_HANDLE), position, look_at, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_teleport_start(0, now)?;
+        sim.send_teleport_progress("resolving destination", 0, now)?;
+        sim.send_teleport_failed("no such region", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportProgress { message, .. } if message == "resolving destination"
+            )),
+            "expected TeleportProgress, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFailed { reason, .. } if reason == "no such region"
+            )),
+            "expected TeleportFailed, got {client_events:?}"
+        );
+        // Back to active: a fresh request goes out again.
+        client.teleport_to(
+            RegionHandle(REGION_HANDLE),
+            position,
+            sl_types::lsl::Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::TeleportRequested { .. })),
+            "expected the follow-up TeleportRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The full inter-region teleport across TWO simulator sessions: the
+    /// source surfaces the request and drives the CAPS event-queue trio
+    /// (`EnableSimulator` + `EstablishAgentCommunication` opening a child
+    /// circuit on the destination, then `TeleportFinish`); the client promotes
+    /// the child, the destination confirms the arrival
+    /// (`CompleteAgentMovement` → root agent), and the client lands with
+    /// `RegionChanged`.
+    #[test]
+    fn inter_region_teleport_two_sims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut source) = setup(now)?;
+        drain_server(&mut source);
+        let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+
+        let position = RegionCoordinates::new(128.0, 128.0, 25.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(DEST_HANDLE), position, look_at, now)?;
+        pump(&mut client, &mut source, now)?;
+        let server_events = drain_server(&mut source);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::TeleportRequested { region_handle, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE)
+            )),
+            "expected TeleportRequested on the source, got {server_events:?}"
+        );
+
+        // The source accepts and announces the destination region.
+        source.send_teleport_start(0, now)?;
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_establish_agent_communication(
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/child-seed",
+        );
+        let caps_events = deliver_caps(&mut client, &mut source, now)?;
+        assert!(
+            caps_events
+                .iter()
+                .any(|e| matches!(e, Event::NeighborSeed { sim, .. } if *sim == dest_sim_addr())),
+            "expected the child seed, got {caps_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CircuitOpened { .. })),
+            "expected the child circuit on the destination, got {dest_events:?}"
+        );
+        assert_eq!(dest.agent_presence(), AgentPresence::Child);
+
+        // The source finishes the teleport; the client promotes the child.
+        source.enqueue_teleport_finish(dest_sim_addr(), "http://127.0.0.1:9001/seed", 21, 16);
+        let finish_events = deliver_caps(&mut client, &mut source, now)?;
+        assert!(
+            finish_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFinished { sim, .. } if *sim == dest_sim_addr()
+            )),
+            "expected TeleportFinished, got {finish_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentArrived)),
+            "expected the arrival on the destination, got {dest_events:?}"
+        );
+        assert!(dest.is_root_agent());
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::RegionChanged { region_handle, sim, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE) && *sim == dest_sim_addr()
+            )),
+            "expected RegionChanged, got {client_events:?}"
+        );
+
+        // The source retires the now-child circuit; the client tears it down
+        // without disturbing the new root.
+        source.send_disable_simulator(now)?;
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// A physical border crossing: the child circuit is pre-opened via the
+    /// event-queue announcements, then the source's `CrossedRegion` promotes
+    /// it to root with no teleport screen — the destination confirms the
+    /// arrival and the client lands with a non-world-resetting
+    /// `RegionChanged`.
+    #[test]
+    fn crossed_region_two_sims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut source) = setup(now)?;
+        drain_server(&mut source);
+        let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_establish_agent_communication(
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/child-seed",
+        );
+        deliver_caps(&mut client, &mut source, now)?;
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        drain_server(&mut dest);
+        assert_eq!(dest.agent_presence(), AgentPresence::Child);
+
+        source.enqueue_crossed_region(
+            RegionHandle(DEST_HANDLE),
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/seed",
+        );
+        deliver_caps(&mut client, &mut source, now)?;
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentArrived)),
+            "expected the crossing arrival, got {dest_events:?}"
+        );
+        assert!(dest.is_root_agent());
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::RegionChanged { region_handle, sim, world_reset: false, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE) && *sim == dest_sim_addr()
+            )),
+            "expected a non-resetting RegionChanged, got {client_events:?}"
         );
         Ok(())
     }

@@ -135,15 +135,17 @@ use uuid::Uuid;
 
 use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
-use crate::bookkeeping_ids::{PingId, QueryId, TransactionId, TransferId, XferId};
+use crate::bookkeeping_ids::{LureId, PingId, QueryId, TransactionId, TransferId, XferId};
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
     agent_drop_group_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, build_task_inventory, display_name_update_to_llsd,
-    instant_message, nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
-    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
-    sim_console_response_to_llsd, windlight_refresh_to_llsd,
+    build_map_item_reply, build_map_layer_reply, build_task_inventory, crossed_region_to_caps_llsd,
+    display_name_update_to_llsd, enable_simulator_to_caps_llsd,
+    establish_agent_communication_to_llsd, instant_message, nav_mesh_status_to_llsd,
+    open_region_info_to_llsd, region_handshake_message, required_voice_version_to_llsd,
+    set_display_name_reply_to_llsd, shape_from_object_shape_block, sim_console_response_to_llsd,
+    teleport_finish_to_llsd, windlight_refresh_to_llsd,
 };
 use crate::types::EventId;
 use crate::types::directory::category_from_wire;
@@ -173,6 +175,11 @@ use sl_wire::messages::{
     AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
     ConfirmXferPacket, ConfirmXferPacketXferIDBlock, RequestXfer, RequestXferXferIDBlock,
     SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+};
+use sl_wire::messages::{
+    DisableSimulator, TeleportFailed, TeleportFailedInfoBlock, TeleportLocal,
+    TeleportLocalInfoBlock, TeleportProgress, TeleportProgressAgentDataBlock,
+    TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock,
 };
 use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
@@ -376,6 +383,22 @@ struct SimXferReceive {
 /// (`MAX_PACKET_DATA_SIZE`); like OpenSim's `SendAsset`, packets are kept
 /// safely under a datagram's worth.
 const TRANSFER_CHUNK_SIZE: usize = 1000;
+
+/// Whether the circuit hosts a **child** agent (scene streaming only) or the
+/// **root** agent (the avatar is present in this region). A client opens a
+/// child circuit with `UseCircuitCode` alone — a neighbour holding presence
+/// ahead of a crossing, or a teleport destination before its confirmation —
+/// and promotes it by sending `CompleteAgentMovement`, exactly as the region
+/// servers distinguish child and root agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AgentPresence {
+    /// `UseCircuitCode` accepted, no `CompleteAgentMovement` yet: a child
+    /// agent (the region streams its scene, but the avatar is elsewhere).
+    Child,
+    /// `CompleteAgentMovement` answered: the root agent — the avatar is in
+    /// this region.
+    Root,
+}
 
 /// The decoded source of a client `TransferRequest`, surfaced on
 /// [`ServerEvent::TransferRequested`]. Only the two source types that remain
@@ -1309,6 +1332,34 @@ pub enum ServerEvent {
         /// `LandmarkID`) to teleport to the agent's home location.
         landmark: Option<AssetKey>,
     },
+    /// The client requested a teleport to an explicit region handle and
+    /// position (`TeleportLocationRequest`). The inverse of the client's
+    /// [`Session::teleport_to`](crate::Session::teleport_to). The driver
+    /// answers with the [`SimSession::send_teleport_start`] /
+    /// [`send_teleport_progress`](SimSession::send_teleport_progress) /
+    /// [`send_teleport_local`](SimSession::send_teleport_local) /
+    /// [`send_teleport_failed`](SimSession::send_teleport_failed) mechanics —
+    /// or, for an inter-region teleport, the CAPS event-queue trio
+    /// [`enqueue_enable_simulator`](SimSession::enqueue_enable_simulator) /
+    /// [`enqueue_establish_agent_communication`](SimSession::enqueue_establish_agent_communication)
+    /// / [`enqueue_teleport_finish`](SimSession::enqueue_teleport_finish).
+    TeleportRequested {
+        /// The destination region handle.
+        region_handle: RegionHandle,
+        /// The destination position within the region.
+        position: RegionCoordinates,
+        /// The direction the avatar should face on arrival.
+        look_at: Vector,
+    },
+    /// The client accepted a teleport lure and asks to be teleported to the
+    /// lure's destination (`TeleportLureRequest`). The inverse of the client's
+    /// [`Session::accept_teleport_lure`](crate::Session::accept_teleport_lure).
+    TeleportViaLure {
+        /// The lure offer id the client is accepting (the offering IM's id).
+        lure_id: LureId,
+        /// The teleport flags the client echoed (`via lure`, godlike variants).
+        teleport_flags: u32,
+    },
     /// The client cancelled an in-progress teleport (`TeleportCancel`). The
     /// inverse of the client's
     /// [`Session::cancel_teleport`](crate::Session::cancel_teleport).
@@ -1569,6 +1620,9 @@ pub struct SimSession {
     /// client-minted [`TransferId`] and holding the raw request params to echo
     /// back in the `TransferInfo` (as the reference serving side does).
     transfer_serves: BTreeMap<TransferId, Vec<u8>>,
+    /// Whether this circuit hosts a child or the root agent: `Child` from
+    /// `UseCircuitCode`, promoted to `Root` by `CompleteAgentMovement`.
+    agent_presence: AgentPresence,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -1604,8 +1658,24 @@ impl SimSession {
             next_xfer_id: XferId(1),
             secure_session_id: None,
             transfer_serves: BTreeMap::new(),
+            agent_presence: AgentPresence::Child,
             events: VecDeque::new(),
         }
+    }
+
+    /// Whether this circuit currently hosts a child agent or the root agent.
+    /// Meaningful once the circuit is open ([`Self::client_addr`] is set);
+    /// before that it reports `Child`.
+    #[must_use]
+    pub const fn agent_presence(&self) -> AgentPresence {
+        self.agent_presence
+    }
+
+    /// Whether the avatar is present in this region (the circuit was promoted
+    /// to root by a `CompleteAgentMovement`).
+    #[must_use]
+    pub const fn is_root_agent(&self) -> bool {
+        matches!(self.agent_presence, AgentPresence::Root)
     }
 
     /// The agent id once the circuit is open.
@@ -4087,6 +4157,192 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `TeleportStart` — the simulator accepted a teleport request and
+    /// the client should show its teleport screen (the inverse of the client's
+    /// [`Event::TeleportStarted`](crate::Event::TeleportStarted)). The
+    /// sequencing of a teleport is the driver's job: a sans-I/O session cannot
+    /// know whether an inter-region teleport succeeds (the destination is
+    /// another [`SimSession`]), so the driver strings together start /
+    /// progress / local / failed and the event-queue trio itself. Teleport
+    /// answers are a root-agent affair — sending them on a child circuit is
+    /// not an error here, but a real viewer would ignore them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_start(&mut self, teleport_flags: u32, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TeleportProgress` — a human-readable progress line for the
+    /// client's teleport screen (the inverse of the client's
+    /// [`Event::TeleportProgress`](crate::Event::TeleportProgress)). The
+    /// message is sent NUL-terminated, as a simulator does on the wire.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_progress(
+        &mut self,
+        message: &str,
+        teleport_flags: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportProgress(TeleportProgress {
+            agent_data: TeleportProgressAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            },
+            info: TeleportProgressInfoBlock {
+                teleport_flags,
+                message: with_nul(message),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TeleportLocal` — finishes an **intra-region** teleport by
+    /// placing the avatar at `position` with no circuit change (the inverse of
+    /// the client's [`Event::TeleportLocal`](crate::Event::TeleportLocal)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_local(
+        &mut self,
+        position: RegionCoordinates,
+        look_at: Vector,
+        teleport_flags: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportLocal(TeleportLocal {
+            info: TeleportLocalInfoBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                // The reference simulators send 0; the viewer ignores it.
+                location_id: 0,
+                position: Vector {
+                    x: position.x(),
+                    y: position.y(),
+                    z: position.z(),
+                },
+                look_at,
+                teleport_flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TeleportFailed` — refuses or aborts a requested teleport with
+    /// a human-readable `reason`, returning the client to its active state
+    /// (the inverse of the client's
+    /// [`Event::TeleportFailed`](crate::Event::TeleportFailed)). The reason is
+    /// sent NUL-terminated; no extended `AlertInfo` block is attached (pass
+    /// the reason itself, as OpenSim does).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_failed(&mut self, reason: &str, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportFailed(TeleportFailed {
+            info: TeleportFailedInfoBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                reason: with_nul(reason),
+            },
+            alert_info: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DisableSimulator` — tells the client to tear down this circuit
+    /// (used when retiring a child circuit, e.g. the source region after a
+    /// completed teleport or a neighbour leaving the interest set). The client
+    /// drops the circuit and reaps its objects.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_disable_simulator(&mut self, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DisableSimulator(DisableSimulator {});
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Enqueues a CAPS `EnableSimulator` event — announces a neighbouring (or
+    /// teleport-destination) region so the client opens a **child** circuit to
+    /// it (the modern event-queue path; the client answers with a
+    /// `UseCircuitCode` on `sim`).
+    pub fn enqueue_enable_simulator(&mut self, handle: RegionHandle, sim: SocketAddr) {
+        self.enqueue_caps_event(
+            "EnableSimulator",
+            enable_simulator_to_caps_llsd(handle.0, sim),
+        );
+    }
+
+    /// Enqueues a CAPS `EstablishAgentCommunication` event — hands the client
+    /// the child region's seed capability (this event has **no** UDP form).
+    /// The client caches the seed and surfaces it so its driver POSTs it,
+    /// which is what makes a region start streaming to the child agent.
+    pub fn enqueue_establish_agent_communication(&mut self, sim: SocketAddr, seed: &str) {
+        self.enqueue_caps_event(
+            "EstablishAgentCommunication",
+            establish_agent_communication_to_llsd(sim, seed),
+        );
+    }
+
+    /// Enqueues a CAPS `TeleportFinish` event — completes an **inter-region**
+    /// teleport by handing the client the destination simulator's address,
+    /// seed capability, maturity rating and teleport flags. The client sends
+    /// `CompleteAgentMovement` on its (child) circuit to `dest`; the
+    /// destination's `AgentMovementComplete` commits the handover.
+    pub fn enqueue_teleport_finish(
+        &mut self,
+        dest: SocketAddr,
+        seed: &str,
+        sim_access: u8,
+        teleport_flags: u32,
+    ) {
+        self.enqueue_caps_event(
+            "TeleportFinish",
+            teleport_finish_to_llsd(dest, seed, sim_access, teleport_flags),
+        );
+    }
+
+    /// Enqueues a CAPS `CrossedRegion` event — the avatar walked over a region
+    /// border; the client promotes its pre-opened child circuit to `dest` to
+    /// root (no teleport screen).
+    pub fn enqueue_crossed_region(&mut self, handle: RegionHandle, dest: SocketAddr, seed: &str) {
+        self.enqueue_caps_event(
+            "CrossedRegion",
+            crossed_region_to_caps_llsd(handle.0, dest, seed),
+        );
+    }
+
     /// Replies to a finished (or refused) legacy asset upload with an
     /// `AssetUploadComplete`, the message the uploading client surfaces as
     /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
@@ -4501,6 +4757,9 @@ impl SimSession {
                 });
             }
             AnyMessage::CompleteAgentMovement(_) => {
+                // The child agent becomes the root agent: login arrival, or a
+                // teleport/crossing destination confirming the handover.
+                self.agent_presence = AgentPresence::Root;
                 self.send_agent_movement_complete(now)?;
                 self.events.push_back(ServerEvent::AgentArrived);
             }
@@ -5564,6 +5823,24 @@ impl SimSession {
                 let landmark = (landmark_id != Uuid::nil()).then(|| AssetKey::from(landmark_id));
                 self.events
                     .push_back(ServerEvent::TeleportViaLandmark { landmark });
+            }
+            AnyMessage::TeleportLocationRequest(request) => {
+                let info = &request.info;
+                self.events.push_back(ServerEvent::TeleportRequested {
+                    region_handle: RegionHandle(info.region_handle),
+                    position: RegionCoordinates::new(
+                        info.position.x,
+                        info.position.y,
+                        info.position.z,
+                    ),
+                    look_at: info.look_at.clone(),
+                });
+            }
+            AnyMessage::TeleportLureRequest(request) => {
+                self.events.push_back(ServerEvent::TeleportViaLure {
+                    lure_id: LureId::new(request.info.lure_id),
+                    teleport_flags: request.info.teleport_flags,
+                });
             }
             AnyMessage::TeleportCancel(_) => {
                 self.events.push_back(ServerEvent::CancelTeleport);
