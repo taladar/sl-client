@@ -2,7 +2,7 @@
 id: protocol-sim-login
 title: Server-side login surface at full fidelity
 topic: protocol
-status: ready
+status: done
 origin: user request (2026-07) — complete simulator protocol surface
 points: 5
 refs: [viewer-fake-grid]

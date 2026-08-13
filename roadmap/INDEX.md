@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 222 |
+| ready | 221 |
 | blocked | 77 |
 | in-progress | 16 |
 | bugs | 22 |
-| done | 800 |
+| done | 801 |
 | deferred | 22 |
 | wont-do | 12 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (221)
 
 ### protocol
 
@@ -149,8 +149,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
 - [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
   server channels — grid info, map tiles, helper URIs
-- [`protocol-sim-login`](ready/protocol-sim-login.md) — Server-side login
-  surface at full fidelity
 - [`protocol-sim-udp-flows`](ready/protocol-sim-udp-flows.md) — Server-side
   state machines for the higher-level LLUDP flows
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
@@ -1010,7 +1008,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (800)
+## done (801)
 
 ### protocol
 
@@ -1135,6 +1133,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
+  at full fidelity
 - [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
