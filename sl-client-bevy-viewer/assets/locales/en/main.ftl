@@ -3390,3 +3390,22 @@ hovertip-prims = Prims:
 hovertip-land-impact = , Land Impact:
 hovertip-position = Position:
 hovertip-distance = Distance:
+
+# The raw debug-settings editor (viewer-preferences-debug-settings-editor):
+# the floater chrome, the list columns, and the detail pane's labels.
+debug-settings-title = Debug settings
+debug-settings-search-placeholder = Search settings
+debug-settings-col-changed = *
+debug-settings-col-name = Setting
+debug-settings-changed-only = Changed settings only
+debug-settings-copy-name = Copy name
+debug-settings-type = Type
+debug-settings-default = Default
+debug-settings-global = Global
+debug-settings-account = Account
+debug-settings-effective = Effective
+debug-settings-scope = Edit scope
+debug-settings-scope-global = Global
+debug-settings-scope-account = Account
+debug-settings-reset = Reset to default
+debug-settings-none-selected = Select a setting to inspect and edit it

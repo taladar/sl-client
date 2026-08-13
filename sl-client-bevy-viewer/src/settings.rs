@@ -86,6 +86,23 @@ impl ViewerSettings {
         self.declare(section, name, value, comment);
     }
 
+    /// Register a persisted setting grouped under a `[section]` that the raw
+    /// debug-settings editor **skips** — mechanical UI state (window geometry,
+    /// tab splits, table sort orders) that is saved and restored but is not a
+    /// knob anyone debugs by hand. The floater / table persistence layers call
+    /// this instead of [`register_in`](Self::register_in).
+    pub(crate) fn register_hidden_in(
+        &mut self,
+        section: &[&str],
+        name: &str,
+        value: SettingValue,
+        comment: &str,
+    ) {
+        if let Err(error) = self.store.register_hidden_in(section, name, value, comment) {
+            warn!("settings: could not register {name}: {error}");
+        }
+    }
+
     /// Register a runtime-only setting whose overrides are never persisted (the
     /// reference viewer's transient debug settings). The two-way binding demo
     /// ([`crate::settings_binding`]) uses this so its scratch values write no junk
@@ -280,6 +297,7 @@ impl ViewerSettings {
         crate::particles::register_settings(&mut settings);
         crate::ui_sounds::register_settings(&mut settings);
         crate::audio::register_settings(&mut settings);
+        crate::debug_settings::register_settings(&mut settings);
         settings.load_global();
         settings
     }

@@ -57,6 +57,7 @@ mod chat_input;
 mod clipboard;
 mod conversations;
 mod coords;
+mod debug_settings;
 mod diagnostics;
 mod double_click_teleport;
 mod edit_contents;
@@ -1406,6 +1407,12 @@ fn run_session(
     // per-tab tasks plug their panels into its registry. After FloaterPlugin,
     // whose spawn_floater and deferred-content build it rides.
     .add_plugins(crate::preferences::PreferencesPlugin)
+    // The raw debug-settings editor (viewer-preferences-debug-settings-editor):
+    // a separate floater over *every* registered setting — searchable list,
+    // per-kind detail editor, per-scope override editing. Live edits, no
+    // OK / Cancel snapshot. After FloaterPlugin, whose spawn_floater and
+    // deferred-content build it rides.
+    .add_plugins(crate::debug_settings::DebugSettingsPlugin)
     // The Quick Preferences panel (viewer-quick-preferences): the small
     // bottom-right floater of the settings reached-for hourly (draw distance,
     // particle cap, environment preset + time of day), a curated view over the

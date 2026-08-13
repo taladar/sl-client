@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 56 |
-| ready | 242 |
+| ready | 241 |
 | blocked | 77 |
 | in-progress | 15 |
 | bugs | 23 |
-| done | 782 |
+| done | 783 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1228** |
@@ -143,7 +143,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (242)
+## ready (241)
 
 ### protocol
 
@@ -517,8 +517,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-debug-settings-editor`](ready/viewer-preferences-debug-settings-editor.md)
-  — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
 - [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker` (done))
@@ -1048,7 +1046,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (782)
+## done (783)
 
 ### protocol
 
@@ -1887,6 +1885,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-colors-skins-tab`](done/viewer-preferences-colors-skins-tab.md)
   — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`
   (done), `viewer-ui-color-picker` (done))
+- [`viewer-preferences-debug-settings-editor`](done/viewer-preferences-debug-settings-editor.md)
+  — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))

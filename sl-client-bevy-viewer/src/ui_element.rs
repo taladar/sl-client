@@ -555,6 +555,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::preferences::spawn_preferences_specimen,
     },
     UiElement {
+        id: "debug-settings",
+        summary: "The raw debug-settings editor: a search box over a changed-marker settings \
+                  list beside the detail column — per-layer value read-outs, a scope combo, a \
+                  numeric editor and the copy / reset buttons. Static — the live floater \
+                  (`crate::debug_settings`) adds the store, the table and the commit paths.",
+        spawn: crate::debug_settings::spawn_debug_settings_specimen,
+    },
+    UiElement {
         id: "quick-preferences",
         summary: "The Quick Preferences panel: the environment preset / time-of-day combos over \
                   a divider and the curated setting slider rows (draw distance, particle cap). \

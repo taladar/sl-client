@@ -1336,7 +1336,7 @@ pub(crate) fn register_table_settings(
 ) {
     if let Some(name) = spec.sort_setting {
         let default = TableSort::from_defaults(spec.default_sort).encode(spec.columns);
-        settings.register_in(
+        settings.register_hidden_in(
             section,
             name,
             SettingValue::String(default),
@@ -1344,7 +1344,7 @@ pub(crate) fn register_table_settings(
         );
     }
     if let Some(name) = spec.widths_setting {
-        settings.register_in(
+        settings.register_hidden_in(
             section,
             name,
             SettingValue::String(String::new()),
