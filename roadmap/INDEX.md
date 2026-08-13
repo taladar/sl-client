@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 222 |
-| blocked | 78 |
-| in-progress | 16 |
+| ready | 223 |
+| blocked | 77 |
+| in-progress | 15 |
 | bugs | 22 |
-| done | 799 |
+| done | 800 |
 | deferred | 22 |
 | wont-do | 12 |
 | **total** | **1226** |
@@ -141,7 +141,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (223)
 
 ### protocol
 
@@ -367,6 +367,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-link-replace`](ready/viewer-inventory-link-replace.md) —
   Inventory link-replace tool (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
+  — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`
+  (done))
 - [`viewer-inventory-protected-folders`](ready/viewer-inventory-protected-folders.md)
   — Protected inventory folders (blocked by `viewer-inventory-folder-tree`
   (done))
@@ -683,7 +686,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (78)
+## blocked (77)
 
 ### protocol
 
@@ -758,8 +761,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
-- [`viewer-inventory-marketplace-operations`](blocked/viewer-inventory-marketplace-operations.md)
-  — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -911,12 +912,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (16)
-
-### protocol
-
-- [`protocol-slm-directdelivery`](in-progress/protocol-slm-directdelivery.md) —
-  sl-marketplace crate — SLM DirectDelivery JSON transport
+## in-progress (15)
 
 ### viewer
 
@@ -1014,7 +1010,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (799)
+## done (800)
 
 ### protocol
 
@@ -1139,6 +1135,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
+  sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
   — Defer handover teardown until the destination confirms (+ overlap safety)
 - [`protocol-teleport-timeout-strands-child-circuits`](done/protocol-teleport-timeout-strands-child-circuits.md)

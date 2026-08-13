@@ -2,7 +2,7 @@
 id: viewer-inventory-marketplace-operations
 title: Inventory marketplace operations
 topic: viewer
-status: blocked
+status: ready
 blocked_by: [protocol-slm-directdelivery]
 origin: reference-viewer parity notes on viewer-inventory-folder-tree (2026-07)
 ---

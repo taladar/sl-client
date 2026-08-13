@@ -2,7 +2,7 @@
 id: protocol-slm-directdelivery
 title: sl-marketplace crate — SLM DirectDelivery JSON transport
 topic: protocol
-status: in-progress
+status: done
 origin: split out of viewer-inventory-marketplace-operations
   (2026-07-22) — the SLM API is JSON over a cap URL, unlike every
   LLSD transport we speak, so it gets its own crate and book chapter
@@ -43,3 +43,12 @@ One task, four pieces:
   aditi only the transport level is reachable without a merchant
   store (`GET /merchant` answering with a proper non-merchant error,
   `GET /listings`) — record that as the conformance ceiling.
+
+Done (2026-08-13). The `marketplace-direct-delivery` case (the suite's
+first aditi-only case) passed live at the ceiling: aditi grants the
+`DirectDelivery` capability even to a storeless avatar, the merchant
+probe answered a proper 404 "not a merchant", and `GET /listings`
+answered a typed HTTP 404 "Not found" error — all recorded partial by
+design (`records/aditi/marketplace-direct-delivery.toml`); the
+mutation routes need a real merchant store and stay above the
+ceiling. Book chapter: `comms/marketplace.md`.
