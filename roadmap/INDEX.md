@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 55 |
-| ready | 227 |
+| ready | 226 |
 | blocked | 69 |
 | in-progress | 16 |
 | bugs | 22 |
-| done | 804 |
+| done | 805 |
 | deferred | 22 |
 | wont-do | 12 |
 | **total** | **1227** |
@@ -141,13 +141,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (227)
+## ready (226)
 
 ### protocol
 
-- [`protocol-sim-caps-agent-comms`](ready/protocol-sim-caps-agent-comms.md) —
-  Server-side agent-communication caps (blocked by `protocol-sim-caps-framework`
-  (done))
 - [`protocol-sim-caps-assets`](ready/protocol-sim-caps-assets.md) — Server-side
   asset delivery caps — GetTexture, GetMesh, ViewerAsset (blocked by
   `protocol-sim-caps-framework` (done))
@@ -1002,7 +999,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (804)
+## done (805)
 
 ### protocol
 
@@ -1127,6 +1124,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
+  Server-side agent-communication caps (blocked by `protocol-sim-caps-framework`
+  (done))
 - [`protocol-sim-caps-framework`](done/protocol-sim-caps-framework.md) —
   Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface

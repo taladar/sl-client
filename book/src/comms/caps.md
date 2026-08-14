@@ -183,6 +183,66 @@ OpenSim's event-queue module: a batch is dropped when it is serialized,
 so a response lost in transit loses that batch. Nothing keys on `ack`,
 which also makes the batch id's eventual `i32` wrap harmless.
 
+### The agent-communication handlers
+
+The first served capability family beyond the framework is the
+agent-communication cluster. Each handler reads and writes `SimSession`
+state and validates its request the same way (wrong HTTP method → `405`,
+non-LLSD or unroutable body → `400`):
+
+- **`ChatSessionRequest`** routes on the body's `method` string. An
+  `accept invitation` adds this circuit's agent to the session's roster
+  (the same registry `SimSession::open_chat_session` and the IM relay
+  maintain) and answers the roster as the modern `agent_info` map; an
+  unknown session answers an *empty* map rather than an error, mirroring
+  OpenSim's stubbed cap. A `decline invitation` removes the agent
+  (dropping an emptied session) and acks with an undefined body, as does
+  `decline p2p voice`. A `fetch history` answers the session's
+  server-side backlog (`SimChatSession::history`, fed by
+  `send_session_message` or the `record_session_history` driver API) as
+  the bare array the wire carries. Relaying joins and rosters to *other*
+  participants' sessions stays the driver's job — the same relay
+  topology as conference start — via `send_session_participant` and the
+  two event-queue pushes `enqueue_chatterbox_invitation` /
+  `enqueue_chatterbox_agent_list_updates`.
+- **`ReadOfflineMsgs`** is a GET serving the messages stored by
+  `SimSession::store_offline_message` while the agent was offline —
+  **deliver-once**, OpenSim's delete-on-fetch semantics: the fetch
+  drains the store, so a repeated GET answers an empty array.
+- **`GetDisplayNames`** is a GET answering each `ids` query parameter
+  from the session's display-name store (`SimSession::set_display_name`):
+  known agents as full `agents` records, unknown ids as `bad_ids` — the
+  grid's "could not resolve" form the client folds into placeholder
+  records.
+- **`AgentPreferences`** merges the POSTed `Some` fields into the
+  session's stored preference set and echoes the **full** stored set, so
+  the client's empty-body POST is the pure "get". The store starts at
+  OpenSim's defaults (access ceiling `M`, language `en-us` and public,
+  hover height 0, zero permission masks, god level 0); `god_level` in a
+  request is ignored (reply-only).
+- **`SendUserReport`** parses the abuse report and surfaces it as the
+  same `ServerEvent::AbuseReportReceived` the legacy UDP `UserReport`
+  path pushes; the reply is an undefined body the client discards.
+  **`SendUserReportWithScreenshot`** is the two-step uploader: the
+  report POST parks the report and answers
+  `{ state: "upload", uploader }`, minting the uploader URL as the
+  cap's own `screenshot` sub-path (path resolution tolerates sub-paths
+  below a token, so the second step routes back to the same handler);
+  the raw JPEG-2000 bytes POSTed there join the parked report as
+  `ServerEvent::AbuseReportWithScreenshotReceived` and answer
+  `{ state: "complete" }`. A bytes-POST with no parked report is a
+  `400`.
+
+The inverses added for this family follow the pairing convention:
+`chat_session_request_from_llsd` / `chat_session_roster_to_llsd` /
+`session_history_to_llsd` / `agent_list_voice_updates_to_llsd` next to
+their client counterparts in `sl-proto/src/session/conversions.rs`, and
+`build_asset_upload_response` next to `parse_asset_upload_response` in
+`sl-wire/src/llsd.rs`. The display-name, agent-preferences, and
+abuse-report codecs already had their server directions
+(`build_display_names_response`, `build_agent_preferences_response`,
+`parse_send_user_report`); this cluster wired them into the dispatch.
+
 ---
 
 > **In this codebase**
