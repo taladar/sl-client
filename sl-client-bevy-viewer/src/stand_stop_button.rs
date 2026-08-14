@@ -141,12 +141,18 @@ fn spawn_button(
                 // Size to the label and never be compressed below it, so the whole
                 // label stays on one line (the slot is wide enough to hold it).
                 flex_shrink: 0.0,
+                // Removed from layout until the state calls for it — NOT
+                // `Visibility::Hidden`, which only stops rendering and leaves the
+                // node occupying its full width in the slot's flex row. With both
+                // buttons `Hidden` they laid out side by side, overflowed the
+                // fixed-width slot, and the overflow drew over the neighbouring
+                // Chat button (viewer-flycam-stop-button-overlaps-chat). `None`
+                // collapses the inactive button so only the shown one takes space.
+                display: Display::None,
                 ..default()
             },
             BorderColor::all(BORDER),
             BackgroundColor(BACKGROUND),
-            // Hidden until the state calls for it.
-            Visibility::Hidden,
             Name::new(match kind {
                 StateButtonKind::Stand => "state-button:stand",
                 StateButtonKind::StopFlycam => "state-button:stop-flycam",
@@ -227,21 +233,27 @@ fn wanted_button(
 /// Show whichever state button the current state calls for and hide the other, so
 /// the reserved slot holds at most one — the sitting Stand or the flycam Stop, or
 /// nothing when neither state holds.
+///
+/// Toggles [`Display`] (not [`Visibility`]): the hidden button must be **removed
+/// from the flex layout**, or both buttons keep their width in the slot's row,
+/// overflow it, and the overflow overlaps the neighbouring Chat button
+/// (viewer-flycam-stop-button-overlaps-chat). Only writes on a state change (the
+/// value compare), so the layout is not touched every frame.
 fn update_state_button_visibility(
     parcel: Res<SlAgentParcel>,
     ground_sit: Res<SelfGroundSit>,
     mode: Res<CameraMode>,
-    mut buttons: Query<(&StateButtonKind, &mut Visibility)>,
+    mut buttons: Query<(&StateButtonKind, &mut Node)>,
 ) {
     let wanted = wanted_button(&parcel, &ground_sit, *mode);
-    for (kind, mut visibility) in &mut buttons {
+    for (kind, mut node) in &mut buttons {
         let next = if wanted == Some(*kind) {
-            Visibility::Inherited
+            Display::Flex
         } else {
-            Visibility::Hidden
+            Display::None
         };
-        if *visibility != next {
-            *visibility = next;
+        if node.display != next {
+            node.display = next;
         }
     }
 }

@@ -60,6 +60,7 @@ mod chat_input;
 mod clipboard;
 mod conversations;
 mod coords;
+mod crowd_debug_button;
 mod debug_settings;
 mod diagnostics;
 mod double_click_teleport;
@@ -1122,6 +1123,9 @@ fn run_session(
     // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
     // while in flycam.
     .add_plugins(StandStopButtonPlugin)
+    // The Spawn crowd debug button (SL_VIEWER_CROWD): only present while a
+    // synthetic crowd is armed, hands the user the manual capture trigger.
+    .add_plugins(crate::crowd_debug_button::CrowdDebugButtonPlugin)
     .add_plugins(crate::teleport_progress::TeleportProgressPlugin)
     .add_plugins(crate::double_click_teleport::DoubleClickTeleportPlugin)
     // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —

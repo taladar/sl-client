@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 63 |
-| ready | 222 |
+| ready | 223 |
 | blocked | 67 |
 | in-progress | 16 |
-| bugs | 28 |
-| done | 826 |
+| bugs | 27 |
+| done | 827 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1258** |
+| **total** | **1259** |
 
 ## ideas (63)
 
@@ -157,7 +157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (223)
 
 ### protocol
 
@@ -506,6 +506,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU-avatar pose LOD — phase-bucket temporal + bone-count LOD
 - [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
+- [`viewer-perf-media-hover-gpu-pick`](ready/viewer-perf-media-hover-gpu-pick.md)
+  — Media-hover off the per-frame MeshRayCast onto the GPU pick
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
   — Minimap minor-compass labels write Visibility unconditionally
 - [`viewer-perf-pipeline-overlay-text-churn`](ready/viewer-perf-pipeline-overlay-text-churn.md)
@@ -937,7 +939,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (28)
+## bugs (27)
 
 ### protocol
 
@@ -965,8 +967,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   terrain)
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
-- [`viewer-flycam-stop-button-overlaps-chat`](bugs/viewer-flycam-stop-button-overlaps-chat.md)
-  — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
@@ -1008,7 +1008,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (826)
+## done (827)
 
 ### protocol
 
@@ -1317,6 +1317,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   prims against their simulated geometry
 - [`viewer-flexi-resettle-after-snapshot`](done/viewer-flexi-resettle-after-snapshot.md)
   — Flexi prims re-settle after taking a snapshot
+- [`viewer-flycam-stop-button-overlaps-chat`](done/viewer-flycam-stop-button-overlaps-chat.md)
+  — "Stop flycam" button overlaps the "Chat" button in the bottom bar
 - [`viewer-fps-label-intermittent`](done/viewer-fps-label-intermittent.md) — FPS
   status readout intermittently drops its "fps" label
 - [`viewer-glow-bloom`](done/viewer-glow-bloom.md) — Full-screen glow / bloom

@@ -1,8 +1,19 @@
 //! The **synthetic-crowd debug spawner** (`SL_VIEWER_CROWD=N`, GPU-avatar
-//! Phase 5, step 1): once the local avatar's rigged body has resolved, this
-//! spawns `N` GPU-instanced copies of it laid out on a grid, so the payoff of
-//! Phases 1–4 (extract → stage → compute → draw at crowd scale) can finally be
-//! measured — every live test so far was 1–3 avatars.
+//! Phase 5, step 1): spawns `N` GPU-instanced copies of the local avatar laid
+//! out on a grid, so the payoff of Phases 1–4 (extract → stage → compute → draw
+//! at crowd scale) can finally be measured — every live test so far was 1–3
+//! avatars.
+//!
+//! **Manual trigger** ([`crate::crowd_debug_button`]). The crowd copies the
+//! local avatar's *currently visible* submeshes verbatim, so it must be captured
+//! only once the avatar is **fully** rezzed. A timing heuristic can't tell:
+//! asynchronous BOM bakes (client-side on OpenSim, server-side on the SL grids)
+//! flip body/head/clothing parts visible over many seconds with no reliable
+//! "done" signal, and an auto-capture repeatedly fired mid-load and froze a
+//! half-dressed crowd. So capture is **user-driven**: while a crowd is armed a
+//! "Spawn crowd" button sits on the bottom toolbar showing the live visible-part
+//! count; the user watches it plateau, confirms the avatar looks complete, and
+//! clicks to capture + spawn. Nothing is captured until that click.
 //!
 //! **Same-body instancing.** Each copy reuses the local avatar's **exact**
 //! skinned submesh `Mesh3d` + `MeshMaterial3d` handles (captured once into
@@ -45,24 +56,6 @@ const CELL_METRES: f32 = 1.75;
 /// How many copies to spawn per frame while ramping up to the target, so a
 /// large `N` does not stall one frame with thousands of spawn commands.
 const SPAWN_BATCH: u32 = 16;
-
-/// How many consecutive frames the local avatar's visible skinned-submesh set
-/// must stay unchanged before it is captured as the crowd template — long
-/// enough to wait out the async BOM bake / attachment loads (a mesh body/head
-/// is `Visibility::Hidden` until its bake resolves, so the visible set *grows*
-/// as those flip on, then holds steady). ~1–1.5 s at typical frame rates.
-const SETTLE_STABLE_FRAMES: u32 = 45;
-
-/// The minimum wall-clock time (seconds) to watch the visible set before
-/// capturing, even if it looks stable immediately — a floor under
-/// [`SETTLE_STABLE_FRAMES`] so an early momentary lull (hair/clothing visible,
-/// body still baking) cannot trigger an early capture.
-const SETTLE_MIN_DELAY_SECS: f32 = 2.0;
-
-/// The max-wait fallback (seconds): if the visible set has still not settled by
-/// now (a stuck / never-baked avatar), capture whatever is visible and warn, so
-/// the crowd still spawns rather than hanging forever.
-const SETTLE_MAX_WAIT_SECS: f32 = 18.0;
 
 /// The clip-phase spread, seconds: per-copy phase offsets fan out across this
 /// window so the crowd starts visibly desynced (roughly one long clip length).
@@ -123,23 +116,6 @@ impl CrowdCopy {
     }
 }
 
-/// The settle watch that waits for the local avatar's visible skinned-submesh
-/// set to stop changing before it is captured — the async BOM bake / attachment
-/// loads flip body/head parts visible over the first seconds, so a first-rigged
-/// capture would miss them (see [`resolve_template`]).
-#[derive(Default)]
-struct CrowdSettle {
-    /// The visible-set signature last observed: `(count, XOR of entity bits)` —
-    /// order-independent and cheap, changes whenever a submesh flips visibility.
-    signature: Option<(usize, u64)>,
-    /// Consecutive frames the visible set has been unchanged.
-    stable_frames: u32,
-    /// Wall-clock (`Time::elapsed_secs`) the watch began — the first frame the
-    /// avatar was rigged with at least one visible submesh, for the min-delay
-    /// floor and the max-wait fallback.
-    watch_start: Option<f32>,
-}
-
 /// The synthetic-crowd debug state (`SL_VIEWER_CROWD`): the target copy count,
 /// the resolved local-avatar template, the captured body submeshes, and the
 /// spawned copies. Empty (target 0) unless the env selects a crowd, so every
@@ -155,8 +131,15 @@ pub(crate) struct GpuCrowd {
     submeshes: Vec<CrowdSubmesh>,
     /// The spawned copies, in crowd-index order (index = position).
     copies: Vec<CrowdCopy>,
-    /// The visible-set settle watch, until the template is captured.
-    settle: CrowdSettle,
+    /// Set by the [Spawn crowd button](crate::crowd_debug_button) when the user
+    /// confirms the local avatar is fully rezzed: the template is captured on the
+    /// next frame the avatar has visible submeshes. Nothing spawns until this is
+    /// set — no timing heuristic (bakes give no reliable "done" signal).
+    spawn_requested: bool,
+    /// The local avatar's current visible skinned-submesh count, refreshed each
+    /// frame while a crowd is armed — the number the button shows so the user can
+    /// watch it plateau before clicking.
+    visible_parts: usize,
 }
 
 impl Default for GpuCrowd {
@@ -170,15 +153,40 @@ impl Default for GpuCrowd {
             template: None,
             submeshes: Vec::new(),
             copies: Vec::new(),
-            settle: CrowdSettle::default(),
+            spawn_requested: false,
+            visible_parts: 0,
         }
     }
 }
 
 impl GpuCrowd {
     /// Whether a crowd was requested (`SL_VIEWER_CROWD` ≥ 1).
-    const fn enabled(&self) -> bool {
+    pub(crate) const fn enabled(&self) -> bool {
         self.target > 0
+    }
+
+    /// The requested crowd size (`SL_VIEWER_CROWD`), for the button label.
+    pub(crate) const fn target(&self) -> u32 {
+        self.target
+    }
+
+    /// Whether the crowd is **armed but not yet captured** — a crowd was
+    /// requested and no template has been taken, so the Spawn crowd button is
+    /// live and the user's click still matters.
+    pub(crate) const fn awaiting_trigger(&self) -> bool {
+        self.enabled() && self.template.is_none()
+    }
+
+    /// The local avatar's current visible skinned-submesh count (what the button
+    /// shows so the user can watch it plateau before spawning).
+    pub(crate) const fn visible_parts(&self) -> usize {
+        self.visible_parts
+    }
+
+    /// Arm the capture: the user has confirmed the avatar is fully rezzed. The
+    /// template is taken on the next frame it has visible submeshes.
+    pub(crate) const fn request_spawn(&mut self) {
+        self.spawn_requested = true;
     }
 
     /// The local avatar whose shape / clips the crowd copies, once resolved.
@@ -236,32 +244,25 @@ type CrowdSourceQuery<'w, 's> = Query<
     ),
 >;
 
-/// Gather the local avatar's currently **visible** skinned submeshes and a
-/// signature of that set. A modern mesh-body avatar hides its system-body base
-/// parts where a worn mesh covers the region (`apply_avatar_part_visibility`
-/// sets them `Visibility::Hidden`), and its BOM mesh body/head stay hidden
-/// until their bake resolves asynchronously — the crowd copies are not
-/// `AvatarBodyPart` entities, so neither hide reaches them, so the visible set
-/// is filtered here. This reads `InheritedVisibility` (the propagated
-/// Hidden/Inherited chain), which is independent of frustum culling — so the
-/// captured template set does not depend on where the local avatar's parts
-/// happen to sit in the camera frustum (Phase 5 gave those parts a real posed
-/// `Aabb`; `ViewVisibility`, not `InheritedVisibility`, carries that cull).
-/// The signature is `(count, XOR of entity bits)` — order-independent, changing
-/// whenever any submesh flips visibility, so [`resolve_template`] can tell when
-/// the set has settled.
-fn visible_submeshes(
-    local: AgentKey,
-    sources: &CrowdSourceQuery<'_, '_>,
-) -> (Vec<CrowdSubmesh>, (usize, u64)) {
+/// Gather the local avatar's currently **visible** skinned submeshes. A modern
+/// mesh-body avatar hides its system-body base parts where a worn mesh covers the
+/// region (`apply_avatar_part_visibility` sets them `Visibility::Hidden`), and
+/// its BOM mesh body/head stay hidden until their bake resolves asynchronously —
+/// the crowd copies are not `AvatarBodyPart` entities, so neither hide reaches
+/// them, so the visible set is filtered here. This reads `InheritedVisibility`
+/// (the propagated Hidden/Inherited chain), which is independent of frustum
+/// culling — so the captured template set does not depend on where the local
+/// avatar's parts happen to sit in the camera frustum (Phase 5 gave those parts a
+/// real posed `Aabb`; `ViewVisibility`, not `InheritedVisibility`, carries that
+/// cull). The count is what the Spawn crowd button shows; the user watches it
+/// plateau before capturing.
+fn visible_submeshes(local: AgentKey, sources: &CrowdSourceQuery<'_, '_>) -> Vec<CrowdSubmesh> {
     let slot = PoseSlotKey::Avatar(local);
     let mut submeshes: Vec<CrowdSubmesh> = Vec::new();
-    let mut xor = 0_u64;
-    for (entity, mesh, material, skin, binding, visibility) in sources {
+    for (_entity, mesh, material, skin, binding, visibility) in sources {
         if binding.slot != slot || !visibility.get() {
             continue;
         }
-        xor ^= entity.to_bits();
         submeshes.push(CrowdSubmesh {
             mesh: mesh.clone(),
             material: material.clone(),
@@ -270,23 +271,21 @@ fn visible_submeshes(
             canonical: Arc::clone(&binding.canonical),
         });
     }
-    let signature = (submeshes.len(), xor);
-    (submeshes, signature)
+    submeshes
 }
 
-/// Capture the local avatar's visible skinned submeshes (shared handles) into
-/// [`GpuCrowd::submeshes`] and record it as the crowd template — once its
-/// **final draw set has settled**: rigged, appearance resolved, and the visible
-/// set unchanged for [`SETTLE_STABLE_FRAMES`] frames past
-/// [`SETTLE_MIN_DELAY_SECS`] (waiting out the async BOM bake / attachment
-/// loads), or the [`SETTLE_MAX_WAIT_SECS`] fallback for a stuck avatar. Returns
-/// whether the template is now ready.
+/// Refresh [`GpuCrowd::visible_parts`] (the count the button shows) and, **only
+/// once the user has clicked Spawn crowd** ([`GpuCrowd::request_spawn`]), capture
+/// the local avatar's currently-visible skinned submeshes (shared handles) into
+/// [`GpuCrowd::submeshes`] as the crowd template. There is no timing heuristic:
+/// asynchronous bakes give no reliable "fully rezzed" signal (an auto-capture
+/// repeatedly froze a half-loaded crowd), so the user is the oracle — they watch
+/// the live part count plateau and click. Returns whether the template is ready.
 fn resolve_template(
     crowd: &mut GpuCrowd,
     identity: &SlIdentity,
     state: &AvatarState,
     sources: &CrowdSourceQuery<'_, '_>,
-    now: f32,
 ) -> bool {
     if crowd.template.is_some() {
         return true;
@@ -295,47 +294,26 @@ fn resolve_template(
         return false;
     };
     // Wait until the local avatar is rigged and its appearance has resolved
-    // (a shape is present) before watching its visible set.
+    // (a shape is present) before counting / capturing its visible set.
     if !state.is_rigged(local) || state.deformations(local).is_none() {
         return false;
     }
-    let (submeshes, signature) = visible_submeshes(local, sources);
-    // Nothing drawn yet: keep waiting (do not start the watch on an empty set).
-    if submeshes.is_empty() {
+    let submeshes = visible_submeshes(local, sources);
+    // Keep the button's live part count current every frame while armed, so the
+    // user can watch it climb and plateau as bakes / attachments flip on.
+    crowd.visible_parts = submeshes.len();
+    // Capture only on the user's explicit click, and only once something is
+    // actually drawn (an early click before any submesh is visible is held —
+    // `spawn_requested` stays set and captures on the first frame it has parts).
+    if !crowd.spawn_requested || submeshes.is_empty() {
         return false;
-    }
-    // Advance the settle watch: reset the stable-frame count whenever the
-    // visible set changed (a bake / attachment just flipped a part on).
-    let watch_start = *crowd.settle.watch_start.get_or_insert(now);
-    if crowd.settle.signature == Some(signature) {
-        crowd.settle.stable_frames = crowd.settle.stable_frames.saturating_add(1);
-    } else {
-        crowd.settle.signature = Some(signature);
-        crowd.settle.stable_frames = 0;
-    }
-    let elapsed = now - watch_start;
-    let settled =
-        elapsed >= SETTLE_MIN_DELAY_SECS && crowd.settle.stable_frames >= SETTLE_STABLE_FRAMES;
-    let timed_out = elapsed >= SETTLE_MAX_WAIT_SECS;
-    if !settled && !timed_out {
-        return false;
-    }
-    if timed_out && !settled {
-        warn!(
-            "SL_VIEWER_CROWD={}: local-avatar visible set did not settle within {:.0}s \
-             (still baking / loading?); capturing {} visible submesh(es) anyway",
-            crowd.target,
-            SETTLE_MAX_WAIT_SECS,
-            submeshes.len()
-        );
     }
     info!(
         "SL_VIEWER_CROWD={}: captured {} visible local-avatar submesh(es) as the crowd \
-         template after {:.1}s (settled; hidden system-body parts excluded, BOM \
-         body/head included once baked)",
+         template on user request (hidden system-body parts excluded, BOM body/head \
+         included once baked)",
         crowd.target,
         submeshes.len(),
-        elapsed
     );
     crowd.submeshes = submeshes;
     crowd.template = Some(local);
@@ -351,7 +329,6 @@ pub(crate) fn spawn_crowd(
     identity: Res<SlIdentity>,
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
-    time: Res<Time>,
     sources: CrowdSourceQuery<'_, '_>,
     mut commands: Commands,
 ) {
@@ -361,7 +338,7 @@ pub(crate) fn spawn_crowd(
     let Some(body) = body else {
         return;
     };
-    if !resolve_template(&mut crowd, &identity, &state, &sources, time.elapsed_secs()) {
+    if !resolve_template(&mut crowd, &identity, &state, &sources) {
         return;
     }
     let dummy = body.dummy_joint();
@@ -458,8 +435,55 @@ const fn isqrt_ceil(n: u32) -> u32 {
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{AgentKey, Uuid};
 
-    use super::{CELL_METRES, crowd_fraction, grid_offset, isqrt_ceil};
+    use super::{CELL_METRES, GpuCrowd, crowd_fraction, grid_offset, isqrt_ceil};
+
+    /// A [`GpuCrowd`] armed for `target` copies with nothing captured yet — the
+    /// state right after `SL_VIEWER_CROWD=target` at login, before the user clicks
+    /// Spawn crowd. (Constructed directly rather than via `Default`, which reads
+    /// the process env var.)
+    fn armed(target: u32) -> GpuCrowd {
+        GpuCrowd {
+            target,
+            template: None,
+            submeshes: Vec::new(),
+            copies: Vec::new(),
+            spawn_requested: false,
+            visible_parts: 0,
+        }
+    }
+
+    /// The capture is gated on the user's click, never auto-triggered: a freshly
+    /// armed crowd is awaiting the trigger with `spawn_requested` clear;
+    /// `request_spawn` (the button press) sets it; and once a template is captured
+    /// the crowd stops awaiting the trigger, so the button retires. A disabled
+    /// crowd (`SL_VIEWER_CROWD` unset → target 0) is never awaiting a trigger.
+    #[test]
+    fn capture_is_gated_on_the_user_trigger() {
+        let mut crowd = armed(5);
+        assert!(crowd.enabled(), "target 5 is enabled");
+        assert!(crowd.awaiting_trigger(), "armed and uncaptured → awaiting");
+        assert!(
+            !crowd.spawn_requested,
+            "no timing heuristic auto-triggers it"
+        );
+
+        crowd.request_spawn();
+        assert!(crowd.spawn_requested, "the button press arms the capture");
+
+        // The capture (resolve_template on the requested frame) records a template.
+        crowd.template = Some(AgentKey::from(Uuid::from_u128(1)));
+        assert!(
+            !crowd.awaiting_trigger(),
+            "captured → no longer awaiting, so the Spawn crowd button retires",
+        );
+
+        assert!(
+            !armed(0).awaiting_trigger(),
+            "a disabled crowd never shows the button",
+        );
+    }
 
     #[test]
     fn isqrt_ceil_is_the_ceiling_of_the_square_root() {

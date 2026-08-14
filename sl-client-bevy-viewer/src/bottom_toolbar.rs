@@ -353,13 +353,9 @@ pub(crate) struct BottomArea {
     /// and quick-prefs controls). It sits beside the chat bar, not above it, so
     /// toggling the music cluster's visibility never moves the chat bar.
     pub(crate) upper_trailing: Entity,
-    /// The button-bar row itself. Still awaiting a consumer (a future control that
-    /// needs the bar strip directly rather than the upper row).
-    #[expect(
-        dead_code,
-        reason = "the bar-strip handle is published for a future bottom-edge control that targets \
-                  the button row directly; `area` and the upper slots are consumed"
-    )]
+    /// The button-bar row itself — the host a control that wants to sit directly
+    /// in the button row (rather than the upper row) parents into. The
+    /// [Spawn crowd debug button](crate::crowd_debug_button) uses it.
     pub(crate) bar: Entity,
     /// The reserved **state slot** at the bar's leading edge — a fixed-width host
     /// the Stand Up / Stop flycam state button ([`crate::stand_stop_button`])
@@ -517,14 +513,22 @@ fn spawn_bottom_toolbar(mut commands: Commands, root: Res<UiRoot>) {
 /// Spawn the reserved leading [state slot](STATE_SLOT_WIDTH) under the button bar —
 /// a fixed-width, non-blocking box the Stand Up / Stop flycam state button parents
 /// into. Fixed width so its (dis)appearing occupant never reflows the centred
-/// buttons; centres its own child so the button reads centred within the slot.
+/// buttons.
+///
+/// The button is aligned to the slot's **trailing** edge (`FlexEnd`) — the side
+/// the toolbar buttons sit on — so the gap between it and the first toolbar
+/// button is just the bar's `column_gap`, the same as every inter-button gap.
+/// Centring it instead left the slot's slack (the fixed width less the button's
+/// own width) sitting between the button and its neighbour, a visibly wider gap.
+/// The slack now falls on the leading edge, against the window edge, where there
+/// is no button for it to space away from.
 fn spawn_state_slot(commands: &mut Commands, bar: Entity) -> Entity {
     commands
         .spawn((
             Node {
                 width: Val::Px(STATE_SLOT_WIDTH),
                 flex_shrink: 0.0,
-                justify_content: JustifyContent::Center,
+                justify_content: JustifyContent::FlexEnd,
                 align_items: AlignItems::Center,
                 ..default()
             },
