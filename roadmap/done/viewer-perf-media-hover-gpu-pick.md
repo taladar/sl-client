@@ -2,7 +2,7 @@
 id: viewer-perf-media-hover-gpu-pick
 title: Media-hover off the per-frame MeshRayCast onto the GPU pick
 topic: viewer
-status: ready
+status: done
 origin: GPU-avatar crowd critical-path analysis (2026-08-14)
 refs: [viewer-perf-gpu-avatar-phase3-gpu-picking, viewer-perf-gpu-avatar-extract-skins-floor]
 ---
@@ -57,3 +57,23 @@ against all non-avatar prims, so it is a partial win, not the endgame.
 ~54 ms to sub-millisecond; media controls still appear over a media face, still
 suppressed when an avatar / prim occludes it, and click-through / `mouse_move`
 forwarding still work.
+
+## Outcome (2026-08-15): DONE
+
+Implemented the GPU-pick direction. Added a `PickPurpose::Media`;
+`hover_media_faces` now requests a Media pick at ~`PICK_HZ` while the cursor is
+over world content and consumes `GpuPickResolved` to remember the media face the
+pick landed on (the nearest visible thing under the cursor, so occlusion is
+correct by construction — the pick renders the real posed scene). The per-frame
+ray survives only as a **single-mesh** cast filtered to that one entity (the
+pick's `ObjectFace` "surface-refinement ray test"), purely to read the current
+surface UV for `mouse_move` forwarding — no whole-scene `MeshRayCast`. All the
+existing UV / interaction / `mouse_leave` logic is unchanged.
+
+So the 54 ms/frame whole-scene cast is gone: steady state is the O(1) pick plus,
+only while actually hovering a media face, a one-mesh UV cast.
+
+Live-verified on OpenSim: hovering a video-media prim still shows the media
+controls (user confirmed). Occlusion suppression follows by construction from
+the pick (the nearest-visible resolution); the crowd-scale perf number was not
+re-captured (the win is structural — the unfiltered cast is deleted).

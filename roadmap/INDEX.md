@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 63 |
-| ready | 223 |
+| ready | 224 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 27 |
-| done | 827 |
+| done | 828 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1259** |
+| **total** | **1261** |
 
 ## ideas (63)
 
@@ -157,7 +157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (223)
+## ready (224)
 
 ### protocol
 
@@ -333,6 +333,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
   Detail/property floaters — update values in place, don't rebuild structure
+- [`viewer-flycam-avatar-movement-keys`](ready/viewer-flycam-avatar-movement-keys.md)
+  — Avatar movement keys do nothing in flycam mode
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
 - [`viewer-generated-chat-notices`](ready/viewer-generated-chat-notices.md) —
@@ -496,6 +498,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screen-size mesh LOD for rigged avatar meshes (on-screen crowd draw)
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
+- [`viewer-perf-camera-collision-broad-phase`](ready/viewer-perf-camera-collision-broad-phase.md)
+  — Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
@@ -506,8 +510,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — GPU-avatar pose LOD — phase-bucket temporal + bone-count LOD
 - [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
-- [`viewer-perf-media-hover-gpu-pick`](ready/viewer-perf-media-hover-gpu-pick.md)
-  — Media-hover off the per-frame MeshRayCast onto the GPU pick
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
   — Minimap minor-compass labels write Visibility unconditionally
 - [`viewer-perf-pipeline-overlay-text-churn`](ready/viewer-perf-pipeline-overlay-text-churn.md)
@@ -1008,7 +1010,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (827)
+## done (828)
 
 ### protocol
 
@@ -1835,6 +1837,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-perf-material-intern`](done/viewer-perf-material-intern.md) — Intern
   face materials by content for shared handles + draw batching (blocked by
   `viewer-perf-prim-tessellation-cache` (done))
+- [`viewer-perf-media-hover-gpu-pick`](done/viewer-perf-media-hover-gpu-pick.md)
+  — Media-hover off the per-frame MeshRayCast onto the GPU pick
 - [`viewer-perf-minimap-layer-raster-offthread`](done/viewer-perf-minimap-layer-raster-offthread.md)
   — Minimap layer rasterization hitches the frame (up to 66 ms) during rez
 - [`viewer-perf-name-tag-layout-budget`](done/viewer-perf-name-tag-layout-budget.md)

@@ -36,6 +36,7 @@ use sl_client_bevy::{
 
 use crate::camera::ViewerCamera;
 use crate::face_material::{FaceMaterial, inert_face_material};
+use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud_pick::{pointer_over_blocking_ui, surface_info_from_hit};
 use crate::input_context::InputContext;
 use crate::media_engine::{
@@ -800,9 +801,11 @@ struct HoverPick<'w, 's> {
     scene: Query<'w, 's, &'static SceneObject>,
 }
 
-/// Hover: cast the cursor ray each frame (outside mouselook, world/media
-/// context), find the media face under it, update [`MediaFocus`]'s hover
-/// state, and forward pointer motion to its page when interaction is allowed.
+/// Hover: find the media face under the cursor via the GPU pick (occlusion-
+/// correct, so an avatar / wall in front of a media screen suppresses it),
+/// refine the surface UV with a single-mesh ray against just that face, update
+/// [`MediaFocus`]'s hover state, and forward pointer motion to its page when
+/// interaction is allowed.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the pick \
@@ -820,7 +823,51 @@ fn hover_media_faces(
     mouse: Res<ButtonInput<MouseButton>>,
     data: Res<MediaData>,
     objects: Res<ObjectState>,
+    // The GPU-pick plumbing, bundled into one tuple param (a Bevy system caps at
+    // 16 params): the picker to refresh the Media pick, this frame's resolved
+    // picks, and the clock for the ~PICK_HZ throttle.
+    pick_io: (ResMut<GpuPicker>, MessageReader<GpuPickResolved>, Res<Time>),
+    // The media face the last Media pick landed on (occlusion-correct), held
+    // between picks; the per-frame ray refines the surface UV against just this.
+    mut hovered: Local<Option<Entity>>,
+    // Seconds since the last Media pick request, for the ~PICK_HZ throttle.
+    mut since_pick: Local<f32>,
 ) {
+    let (mut picker, mut picks, time) = pick_io;
+
+    // Occlusion + selection come from the Phase 3 GPU pick: it renders the real
+    // scene under the cursor, so an avatar / wall in front of a media face
+    // correctly suppresses it (posed avatars included) — no whole-scene
+    // MeshRayCast (which at crowd scale cost ~54 ms/frame,
+    // [[viewer-perf-media-hover-gpu-pick]]). Consume this frame's Media picks and
+    // remember the media face the pick landed on, or clear it (a miss, or the
+    // nearest hit is not a media face — occluded / non-media).
+    for resolved in picks.read() {
+        if resolved.purpose != PickPurpose::Media {
+            continue;
+        }
+        *hovered = resolved.hit.as_ref().and_then(|hit| match &hit.resolution {
+            PickResolution::ObjectFace { entity, .. } if media_faces.contains(*entity) => {
+                Some(*entity)
+            }
+            _ => None,
+        });
+    }
+
+    let cursor = pick.windows.single().ok().and_then(Window::cursor_position);
+    let over_ui = pointer_over_blocking_ui(&pick.hover_map, &pick.pickables, &pick.node_sizes);
+
+    // Keep a ~PICK_HZ Media pick refreshed while the cursor is over world content
+    // (the 1–2 frame readback latency is invisible for hover).
+    *since_pick += time.delta_secs();
+    if let Some(cursor) = cursor
+        && !over_ui
+        && *since_pick >= 1.0 / PICK_HZ
+    {
+        picker.request(cursor, PickPurpose::Media);
+        *since_pick = 0.0;
+    }
+
     let previous = focus.hover;
     focus.hover = None;
     focus.hover_pixel = None;
@@ -828,13 +875,17 @@ fn hover_media_faces(
     // last face normal even while the cursor is over the bar itself.
 
     'pick: {
-        if pointer_over_blocking_ui(&pick.hover_map, &pick.pickables, &pick.node_sizes) {
-            break 'pick;
-        }
-        let Ok(window) = pick.windows.single() else {
+        // The GPU pick already chose the occlusion-correct media face; the
+        // per-frame ray only refines the current surface UV against that one
+        // entity (the pick's `ObjectFace` "surface-refinement ray test"), so it
+        // is a single-mesh cast, not a whole-scene one.
+        let Some(hovered_entity) = *hovered else {
             break 'pick;
         };
-        let Some(cursor) = window.cursor_position() else {
+        if over_ui {
+            break 'pick;
+        }
+        let Some(cursor) = cursor else {
             break 'pick;
         };
         let Ok((camera, camera_transform)) = pick.cameras.single() else {
@@ -843,7 +894,8 @@ fn hover_media_faces(
         let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
             break 'pick;
         };
-        let settings = MeshRayCastSettings::default();
+        let filter = |entity: Entity| entity == hovered_entity;
+        let settings = MeshRayCastSettings::default().with_filter(&filter);
         let Some((entity, hit)) = ray_cast.cast_ray(ray, &settings).first().cloned() else {
             break 'pick;
         };

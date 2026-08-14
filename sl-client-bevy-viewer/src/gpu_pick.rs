@@ -539,6 +539,11 @@ pub(crate) fn collect_pick_warm_set(
 pub(crate) enum PickPurpose {
     /// The hover tooltip's dwell pick.
     Hover,
+    /// The media-face hover (`hover_media_faces`): which media-on-prim face, if
+    /// any, is the nearest thing under the cursor — so an avatar / wall in front
+    /// of a media screen suppresses its controls, occlusion-correct and without a
+    /// whole-scene `MeshRayCast`.
+    Media,
     /// The left-click world touch.
     Touch,
     /// The right-click context-menu resolver.
