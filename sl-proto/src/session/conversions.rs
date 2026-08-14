@@ -3288,6 +3288,18 @@ pub fn chat_session_request_body(method: &str, session_id: Uuid) -> String {
     .to_llsd_xml()
 }
 
+/// Parses a `ChatSessionRequest` capability POST body into its `(method,
+/// session-id)` pair — the inverse of [`chat_session_request_body`], for the
+/// server side of the cap. Returns `None` when the body carries no `method`
+/// member (the request is unroutable without one); a missing or malformed
+/// `session-id` parses leniently as the nil uuid.
+#[must_use]
+pub fn chat_session_request_from_llsd(body: &Llsd) -> Option<(String, Uuid)> {
+    let method = body.get("method").and_then(Llsd::as_str)?.to_owned();
+    let session_id = uuid_member_lenient(body, "session-id");
+    Some((method, session_id))
+}
+
 /// The LLSD-XML body of an offline group-invitation response — the `{ "group":
 /// <uuid> }` payload the reference `response_group_invitation_coro` POSTs to the
 /// `AcceptGroupInvite` / `DeclineGroupInvite` capability. This is the modern
@@ -3356,6 +3368,22 @@ pub(crate) fn chat_session_roster_from_llsd(body: &Llsd) -> Vec<AgentKey> {
     Vec::new()
 }
 
+/// Serializes a chat-session roster as a `ChatSessionRequest` `"accept
+/// invitation"` reply body — the inverse of `chat_session_roster_from_llsd`,
+/// for the server side of the cap. Emits the modern `agent_info` map keyed by
+/// agent uuid; the per-agent info maps are empty (the client reads only the
+/// keys — voice/moderator flags are out of scope for this serializer). The
+/// `session-id` / `from_group` routing members are **not** emitted: the
+/// client's HTTP glue stamps those onto the reply itself.
+#[must_use]
+pub fn chat_session_roster_to_llsd(participants: &[AgentKey]) -> Llsd {
+    let agent_info = participants
+        .iter()
+        .map(|agent| (agent.uuid().to_string(), llsd_map(Vec::new())))
+        .collect();
+    llsd_map(vec![("agent_info", Llsd::Map(agent_info))])
+}
+
 /// Decodes a `ChatSessionRequest` `"fetch history"` reply into the session's
 /// server-side backlog, oldest-first as the server sends it. Accepts either the
 /// bare LLSD array the wire carries or the runtime's routing wrapper (the array
@@ -3389,6 +3417,38 @@ fn session_history_message_from_record(record: &Llsd) -> Option<ServerHistoryMes
         text: string_member(record, "message"),
         timestamp: epoch_member(record, "time"),
     })
+}
+
+/// Serializes a session's server-side backlog as a `ChatSessionRequest`
+/// `"fetch history"` reply body — the inverse of `session_history_from_llsd`,
+/// for the server side of the cap. Emits the bare LLSD array the wire carries
+/// (the `history` wrapper is the client runtime's routing envelope, not a wire
+/// shape), oldest-first in the given order. Each record is
+/// `{ from, from_id, message, num, time }`; `num` is the positional index and
+/// `time` is emitted only for a message with a known timestamp (the parser's
+/// `epoch_member` decodes an absent member to `None`).
+#[must_use]
+pub fn session_history_to_llsd(history: &[ServerHistoryMessage]) -> Llsd {
+    let records = history
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let mut entries = vec![
+                ("from", Llsd::String(message.sender_name.clone())),
+                ("from_id", Llsd::Uuid(message.sender.uuid())),
+                ("message", Llsd::String(message.text.clone())),
+                (
+                    "num",
+                    Llsd::Integer(i32::try_from(index).unwrap_or(i32::MAX)),
+                ),
+            ];
+            if let Some(timestamp) = message.timestamp {
+                entries.push(("time", u32_to_llsd(timestamp)));
+            }
+            llsd_map(entries)
+        })
+        .collect();
+    Llsd::Array(records)
 }
 
 /// Reads a Unix-epoch map member that Second Life sends as an LLSD integer
@@ -3490,6 +3550,38 @@ pub(crate) fn agent_list_voice_updates_from_llsd(
         })
         .collect();
     Some((session_id, members))
+}
+
+/// Serializes per-agent voice-membership updates as a
+/// `ChatterBoxSessionAgentListUpdates` CAPS event body — the inverse of
+/// `agent_list_voice_updates_from_llsd`, for the server side of the event
+/// queue. Each `(agent, in_voice_now)` pair becomes an `agent_updates` entry
+/// keyed by the agent uuid: `true` emits a `transition` of `"ENTER"` with
+/// `info.can_voice_chat` `true`, `false` emits `"LEAVE"` with `false` — exactly
+/// the two shapes the parser's `!leaving && can_voice` fold decodes back to the
+/// input flags.
+#[must_use]
+pub fn agent_list_voice_updates_to_llsd(session_id: Uuid, updates: &[(AgentKey, bool)]) -> Llsd {
+    let agent_updates = updates
+        .iter()
+        .map(|&(agent, in_voice)| {
+            let transition = if in_voice { "ENTER" } else { "LEAVE" };
+            (
+                agent.uuid().to_string(),
+                llsd_map(vec![
+                    ("transition", Llsd::String(transition.to_owned())),
+                    (
+                        "info",
+                        llsd_map(vec![("can_voice_chat", Llsd::Boolean(in_voice))]),
+                    ),
+                ]),
+            )
+        })
+        .collect();
+    llsd_map(vec![
+        ("session_id", Llsd::Uuid(session_id)),
+        ("agent_updates", Llsd::Map(agent_updates)),
+    ])
 }
 
 /// Reads a region-local position from an LLSD map's `position` member, encoded
@@ -5247,19 +5339,23 @@ mod caps_serializer_tests {
     use crate::types::LandArea;
     use sl_wire::Direction;
 
+    use super::ServerHistoryMessage;
     use super::{
-        CapsTeleportFinish, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
+        CapsTeleportFinish, agent_list_voice_updates_from_llsd, agent_list_voice_updates_to_llsd,
+        ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
         ais_updated_category_versions, bulk_update_inventory_from_llsd,
-        bulk_update_inventory_to_llsd, chatterbox_invitation_from_llsd,
-        chatterbox_invitation_to_llsd, created_category_from_llsd, created_category_to_llsd,
-        crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
+        bulk_update_inventory_to_llsd, chat_session_request_body, chat_session_request_from_llsd,
+        chat_session_roster_from_llsd, chat_session_roster_to_llsd,
+        chatterbox_invitation_from_llsd, chatterbox_invitation_to_llsd, created_category_from_llsd,
+        created_category_to_llsd, crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
         enable_simulator_from_caps_llsd, enable_simulator_to_caps_llsd,
         establish_agent_communication_from_llsd, establish_agent_communication_to_llsd,
         group_members_from_caps_llsd, group_members_to_caps_llsd, group_memberships_from_caps_llsd,
         group_memberships_to_caps_llsd, inventory_descendents_from_llsd,
         inventory_descendents_to_llsd, offline_messages_from_llsd, offline_messages_to_llsd,
         parcel_info_from_llsd, parcel_info_to_llsd, server_appearance_update_from_llsd,
-        server_appearance_update_to_llsd, teleport_finish_from_llsd, teleport_finish_to_llsd,
+        server_appearance_update_to_llsd, session_history_from_llsd, session_history_to_llsd,
+        teleport_finish_from_llsd, teleport_finish_to_llsd,
     };
     use crate::types::{
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
@@ -5899,6 +5995,75 @@ mod caps_serializer_tests {
             chatterbox_invitation_from_llsd(&chatterbox_invitation_to_llsd(&event)),
             Some(event)
         );
+    }
+
+    #[test]
+    fn chat_session_request_round_trips() -> Result<(), String> {
+        let session_id = Uuid::from_u128(0xe1);
+        for method in [
+            crate::CHAT_SESSION_ACCEPT,
+            crate::CHAT_SESSION_DECLINE,
+            crate::CHAT_SESSION_DECLINE_P2P_VOICE,
+            crate::CHAT_SESSION_FETCH_HISTORY,
+        ] {
+            let body = sl_wire::parse_llsd_xml(&chat_session_request_body(method, session_id))
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                chat_session_request_from_llsd(&body),
+                Some((method.to_owned(), session_id))
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn chat_session_roster_round_trips() {
+        let roster = vec![
+            AgentKey::from(Uuid::from_u128(0xe2)),
+            AgentKey::from(Uuid::from_u128(0xe3)),
+        ];
+        let mut parsed = chat_session_roster_from_llsd(&chat_session_roster_to_llsd(&roster));
+        parsed.sort();
+        assert_eq!(parsed, roster);
+    }
+
+    #[test]
+    fn session_history_round_trips() {
+        let history = vec![
+            ServerHistoryMessage {
+                sender: AgentKey::from(Uuid::from_u128(0xe4)),
+                sender_name: "Speaker One".to_owned(),
+                text: "first message".to_owned(),
+                timestamp: Some(1_700_002_000),
+            },
+            ServerHistoryMessage {
+                sender: AgentKey::from(Uuid::from_u128(0xe5)),
+                sender_name: "Speaker Two".to_owned(),
+                text: "second, undated".to_owned(),
+                timestamp: None,
+            },
+        ];
+        assert_eq!(
+            session_history_from_llsd(&session_history_to_llsd(&history)),
+            history
+        );
+    }
+
+    #[test]
+    fn agent_list_voice_updates_round_trip() -> Result<(), String> {
+        let session_id = Uuid::from_u128(0xe6);
+        let updates = vec![
+            (AgentKey::from(Uuid::from_u128(0xe7)), true),
+            (AgentKey::from(Uuid::from_u128(0xe8)), false),
+        ];
+        let (parsed_session, mut parsed_updates) = agent_list_voice_updates_from_llsd(
+            &agent_list_voice_updates_to_llsd(session_id, &updates),
+        )
+        .ok_or_else(|| "an agent_updates map decodes".to_owned())?;
+        parsed_updates.sort();
+        assert_eq!(parsed_session, session_id);
+        assert_eq!(parsed_updates, updates);
+        Ok(())
     }
 
     #[test]

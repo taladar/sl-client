@@ -396,6 +396,51 @@ fn upload_error_message(error: &Llsd) -> Option<String> {
         .map(str::to_owned)
 }
 
+/// Builds a CAPS asset-upload response body (either step of the two-step
+/// uploader) — the inverse of [`parse_asset_upload_response`], the server
+/// counterpart of the uploader-driving client. `state` is always emitted;
+/// `uploader`, `new_asset`, `new_inventory_item`, `error`, and `compiled` only
+/// when present, and `errors` only when non-empty — so a minimal
+/// `{ state: "upload", uploader }` first-step reply and a bare
+/// `{ state: "complete" }` second-step reply serialize without spurious
+/// members. Built on [`Llsd::to_llsd_xml`], so it round-trips: re-parsing the
+/// output yields an equal [`AssetUploadResponse`].
+#[must_use]
+pub fn build_asset_upload_response(response: &AssetUploadResponse) -> String {
+    let mut map = HashMap::from([("state".to_owned(), Llsd::String(response.state.clone()))]);
+    if let Some(uploader) = &response.uploader {
+        map.insert("uploader".to_owned(), Llsd::String(uploader.clone()));
+    }
+    if let Some(new_asset) = response.new_asset {
+        map.insert("new_asset".to_owned(), Llsd::Uuid(new_asset));
+    }
+    if let Some(new_inventory_item) = response.new_inventory_item {
+        map.insert(
+            "new_inventory_item".to_owned(),
+            Llsd::Uuid(new_inventory_item),
+        );
+    }
+    if let Some(error) = &response.error {
+        map.insert("error".to_owned(), Llsd::String(error.clone()));
+    }
+    if let Some(compiled) = response.compiled {
+        map.insert("compiled".to_owned(), Llsd::Boolean(compiled));
+    }
+    if !response.errors.is_empty() {
+        map.insert(
+            "errors".to_owned(),
+            Llsd::Array(
+                response
+                    .errors
+                    .iter()
+                    .map(|message| Llsd::String(message.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    Llsd::Map(map).to_llsd_xml()
+}
+
 /// Media-permission bit: no one (a `perms_interact` / `perms_control` value).
 pub const MEDIA_PERM_NONE: u8 = 0;
 /// Media-permission bit: the object owner.

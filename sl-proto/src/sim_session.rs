@@ -141,8 +141,9 @@ use crate::bookkeeping_ids::{
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
-    SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd, agent_state_update_to_llsd,
-    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd,
+    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
     enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, instant_message,
     nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
@@ -198,6 +199,7 @@ use sl_wire::messages::{
 use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
 };
+use sl_wire::{AgentPreferences, DisplayName, ObjectPermMasks};
 use sl_wire::{
     TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM,
     TransferSourceParamsEstate, TransferSourceParamsInvItem,
@@ -1279,6 +1281,17 @@ pub enum ServerEvent {
     /// message (the modern path is the `SendUserReport` capability). The
     /// simulator routes it to the grid's abuse desk; fire-and-forget.
     AbuseReportReceived(Box<AbuseReport>),
+    /// The client filed an abuse report bearing a snapshot over the
+    /// `SendUserReportWithScreenshot` two-step uploader: the first step
+    /// carried the report, the second the raw screenshot bytes (JPEG-2000,
+    /// kept verbatim). The simulator routes both to the grid's abuse desk;
+    /// fire-and-forget.
+    AbuseReportWithScreenshotReceived {
+        /// The parsed abuse report from the first upload step.
+        report: Box<AbuseReport>,
+        /// The raw screenshot bytes from the second upload step.
+        screenshot: Vec<u8>,
+    },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
@@ -1963,8 +1976,40 @@ pub struct SimSession {
     /// (a group session's id **is** the group id) —
     /// [`SimSession::chat_session`].
     chat_sessions: BTreeMap<ImSessionId, SimChatSession>,
+    /// Instant messages stored while the agent was offline, awaiting the
+    /// deliver-once `ReadOfflineMsgs` fetch ([`SimSession::take_offline_messages`]).
+    offline_messages: Vec<InstantMessage>,
+    /// The people-service display-name store the `GetDisplayNames` capability
+    /// serves from, keyed by agent ([`SimSession::set_display_name`]).
+    display_names: BTreeMap<AgentKey, DisplayName>,
+    /// The agent's server-stored preferences, served and updated by the
+    /// `AgentPreferences` capability ([`SimSession::agent_preferences`]).
+    agent_preferences: AgentPreferences,
+    /// An abuse report parked by the first `SendUserReportWithScreenshot` step
+    /// until the second step delivers the screenshot bytes.
+    pending_report_screenshot: Option<Box<AbuseReport>>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
+}
+
+/// The `AgentPreferences` set a fresh session starts from — OpenSim's stored
+/// defaults (`IAgentPreferencesService.cs`): hover height `0.0`, zero default
+/// permission masks, access ceiling `"M"`, language `"en-us"` marked public,
+/// and god level `0`. Every field is `Some` so the capability always echoes a
+/// full set.
+fn default_agent_preferences() -> AgentPreferences {
+    AgentPreferences {
+        hover_height: Some(0.0),
+        default_object_perm_masks: Some(ObjectPermMasks {
+            group: 0,
+            everyone: 0,
+            next_owner: 0,
+        }),
+        max_access_pref: Some("M".to_owned()),
+        language: Some("en-us".to_owned()),
+        language_is_public: Some(true),
+        god_level: Some(0),
+    }
 }
 
 impl SimSession {
@@ -2003,6 +2048,10 @@ impl SimSession {
             script_questions: BTreeMap::new(),
             script_grants: BTreeMap::new(),
             chat_sessions: BTreeMap::new(),
+            offline_messages: Vec::new(),
+            display_names: BTreeMap::new(),
+            agent_preferences: default_agent_preferences(),
+            pending_report_screenshot: None,
             events: VecDeque::new(),
         }
     }
@@ -2065,6 +2114,148 @@ impl SimSession {
     #[must_use]
     pub fn chat_session(&self, session_id: ImSessionId) -> Option<&SimChatSession> {
         self.chat_sessions.get(&session_id)
+    }
+
+    /// Stores an instant message that arrived while the agent was offline, to
+    /// be served (once) by the `ReadOfflineMsgs` capability — the driver API
+    /// feeding [`SimSession::take_offline_messages`].
+    pub fn store_offline_message(&mut self, message: InstantMessage) {
+        self.offline_messages.push(message);
+    }
+
+    /// Drains the stored offline messages, oldest-first — OpenSim's
+    /// delete-on-fetch deliver-once semantics: the `ReadOfflineMsgs` handler
+    /// serves the batch and a repeated fetch yields an empty list.
+    pub fn take_offline_messages(&mut self) -> Vec<InstantMessage> {
+        std::mem::take(&mut self.offline_messages)
+    }
+
+    /// Registers (or replaces) an avatar's display-name record in the store
+    /// the `GetDisplayNames` capability serves from, keyed by the record's
+    /// [`id`](DisplayName::id) — the driver API for the people service.
+    pub fn set_display_name(&mut self, name: DisplayName) {
+        self.display_names.insert(name.id, name);
+    }
+
+    /// The stored display-name record for `agent`, if the people-service store
+    /// knows one ([`SimSession::set_display_name`]).
+    #[must_use]
+    pub fn display_name(&self, agent: AgentKey) -> Option<&DisplayName> {
+        self.display_names.get(&agent)
+    }
+
+    /// The agent's server-stored preferences — the full set the
+    /// `AgentPreferences` capability echoes on every request. Starts at
+    /// OpenSim's defaults (`IAgentPreferencesService.cs`): hover height `0.0`,
+    /// zero permission masks, access ceiling `"M"`, language `"en-us"` and
+    /// public, god level `0`.
+    #[must_use]
+    pub const fn agent_preferences(&self) -> &AgentPreferences {
+        &self.agent_preferences
+    }
+
+    /// Merges an `AgentPreferences` capability update into the stored set:
+    /// each `Some` field of `update` overwrites the stored value. `god_level`
+    /// is ignored — it is reply-only (the grid reports the agent's
+    /// administrative level; clients cannot set it).
+    pub(crate) fn merge_agent_preferences(&mut self, update: &AgentPreferences) {
+        if let Some(hover_height) = update.hover_height {
+            self.agent_preferences.hover_height = Some(hover_height);
+        }
+        if let Some(masks) = update.default_object_perm_masks {
+            self.agent_preferences.default_object_perm_masks = Some(masks);
+        }
+        if let Some(max_access_pref) = &update.max_access_pref {
+            self.agent_preferences.max_access_pref = Some(max_access_pref.clone());
+        }
+        if let Some(language) = &update.language {
+            self.agent_preferences.language = Some(language.clone());
+        }
+        if let Some(language_is_public) = update.language_is_public {
+            self.agent_preferences.language_is_public = Some(language_is_public);
+        }
+    }
+
+    /// Accepts a chat-session invitation on behalf of this circuit's agent
+    /// (the `ChatSessionRequest` `"accept invitation"` server side): adds the
+    /// agent (when the circuit knows one) to the session's roster and returns
+    /// the roster snapshot for the accept reply, or `None` for a session this
+    /// simulator does not know. Relaying the join to the *other* participants'
+    /// sessions stays the driver's job
+    /// ([`SimSession::send_session_participant`] /
+    /// [`SimSession::enqueue_chatterbox_agent_list_updates`]).
+    pub(crate) fn chat_session_accept(&mut self, session_id: ImSessionId) -> Option<Vec<AgentKey>> {
+        let chat_session = self.chat_sessions.get_mut(&session_id)?;
+        if let Some(agent) = self.agent_id {
+            chat_session.participants.insert(agent);
+        }
+        Some(chat_session.participants.iter().copied().collect())
+    }
+
+    /// Declines a chat-session invitation on behalf of this circuit's agent
+    /// (the `ChatSessionRequest` `"decline invitation"` server side): removes
+    /// the agent from the session's roster, dropping the session when the
+    /// roster empties (the same rule as
+    /// [`SimSession::send_session_participant`]). A decline for an unknown
+    /// session is a no-op.
+    pub(crate) fn chat_session_decline(&mut self, session_id: ImSessionId) {
+        let Some(agent) = self.agent_id else {
+            return;
+        };
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            chat_session.participants.remove(&agent);
+            if chat_session.participants.is_empty() {
+                self.chat_sessions.remove(&session_id);
+            }
+        }
+    }
+
+    /// Appends a message to a known chat session's server-side history without
+    /// any wire traffic — the driver API for the relay topology (the sending
+    /// agent's region logs via [`SimSession::send_session_message`], but each
+    /// *other* participant's session must record the history it will serve to
+    /// a `ChatSessionRequest` `"fetch history"`). Keeps the history cap. A
+    /// record for an unknown session is dropped.
+    pub fn record_session_history(
+        &mut self,
+        session_id: ImSessionId,
+        message: ServerHistoryMessage,
+    ) {
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            chat_session.log(message);
+        }
+    }
+
+    /// Routes an abuse report received over the modern `SendUserReport`
+    /// capability to the driver as [`ServerEvent::AbuseReportReceived`] — the
+    /// same event the legacy UDP `UserReport` path pushes.
+    pub(crate) fn push_abuse_report(&mut self, report: AbuseReport) {
+        self.events
+            .push_back(ServerEvent::AbuseReportReceived(Box::new(report)));
+    }
+
+    /// Parks the report from the first `SendUserReportWithScreenshot` step
+    /// until the second step delivers the screenshot bytes; a re-POST
+    /// replaces the pending report.
+    pub(crate) fn set_pending_screenshot_report(&mut self, report: AbuseReport) {
+        self.pending_report_screenshot = Some(Box::new(report));
+    }
+
+    /// Takes the parked screenshot-bearing report, if a first
+    /// `SendUserReportWithScreenshot` step stored one.
+    pub(crate) const fn take_pending_screenshot_report(&mut self) -> Option<Box<AbuseReport>> {
+        self.pending_report_screenshot.take()
+    }
+
+    /// Routes a completed two-step `SendUserReportWithScreenshot` upload to
+    /// the driver as [`ServerEvent::AbuseReportWithScreenshotReceived`].
+    pub(crate) fn push_abuse_report_with_screenshot(
+        &mut self,
+        report: Box<AbuseReport>,
+        screenshot: Vec<u8>,
+    ) {
+        self.events
+            .push_back(ServerEvent::AbuseReportWithScreenshotReceived { report, screenshot });
     }
 
     /// The agent id once the circuit is open.
@@ -5104,6 +5295,23 @@ impl SimSession {
         self.enqueue_caps_event(
             "ChatterBoxInvitation",
             chatterbox_invitation_to_llsd(invitation),
+        );
+    }
+
+    /// Enqueues a CAPS `ChatterBoxSessionAgentListUpdates` push: per-agent
+    /// voice-membership changes in the chat session `session_id`. Each
+    /// `(agent, in_voice_now)` pair emits an `ENTER` (voice-capable) or
+    /// `LEAVE` transition — the shape
+    /// [`agent_list_voice_updates_to_llsd`](crate::agent_list_voice_updates_to_llsd)
+    /// serializes and the client's voice-participant handler folds.
+    pub fn enqueue_chatterbox_agent_list_updates(
+        &mut self,
+        session_id: Uuid,
+        updates: &[(AgentKey, bool)],
+    ) {
+        self.enqueue_caps_event(
+            "ChatterBoxSessionAgentListUpdates",
+            agent_list_voice_updates_to_llsd(session_id, updates),
         );
     }
 

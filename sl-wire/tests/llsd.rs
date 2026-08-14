@@ -117,6 +117,40 @@ mod test {
     }
 
     #[test]
+    fn asset_upload_step_response_round_trips() -> Result<(), TestError> {
+        let step1 = sl_wire::AssetUploadResponse {
+            state: "upload".to_owned(),
+            uploader: Some("http://127.0.0.1:9001/cap/5/screenshot".to_owned()),
+            ..sl_wire::AssetUploadResponse::default()
+        };
+        let xml = sl_wire::build_asset_upload_response(&step1);
+        assert_eq!(sl_wire::parse_asset_upload_response(&xml)?, step1);
+        Ok(())
+    }
+
+    #[test]
+    fn asset_upload_complete_response_round_trips() -> Result<(), TestError> {
+        let complete = sl_wire::AssetUploadResponse {
+            state: "complete".to_owned(),
+            ..sl_wire::AssetUploadResponse::default()
+        };
+        let xml = sl_wire::build_asset_upload_response(&complete);
+        assert_eq!(sl_wire::parse_asset_upload_response(&xml)?, complete);
+
+        let with_ids = sl_wire::AssetUploadResponse {
+            state: "complete".to_owned(),
+            new_asset: Some("11111111-1111-1111-1111-111111111111".parse::<uuid::Uuid>()?),
+            new_inventory_item: Some("22222222-2222-2222-2222-222222222222".parse::<uuid::Uuid>()?),
+            compiled: Some(false),
+            errors: vec!["syntax error".to_owned()],
+            ..sl_wire::AssetUploadResponse::default()
+        };
+        let xml = sl_wire::build_asset_upload_response(&with_ids);
+        assert_eq!(sl_wire::parse_asset_upload_response(&xml)?, with_ids);
+        Ok(())
+    }
+
+    #[test]
     fn parses_scalar_llsd_types() -> Result<(), TestError> {
         let xml = "<llsd><map>\
             <key>i</key><integer>42</integer>\

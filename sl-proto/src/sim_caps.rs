@@ -26,11 +26,27 @@
 
 use std::collections::{BTreeMap, HashMap};
 
-use sl_wire::{build_seed_response, parse_event_queue_request, parse_seed_request};
+use sl_types::key::AgentKey;
+use sl_wire::{
+    AssetUploadResponse, DisplayName, Llsd, build_agent_preferences_response,
+    build_asset_upload_response, build_display_names_response, build_seed_response,
+    parse_agent_preferences, parse_display_names_query, parse_event_queue_request, parse_llsd_xml,
+    parse_seed_request, parse_send_user_report,
+};
 use url::Url;
 use uuid::Uuid;
 
+use crate::bookkeeping_ids::ImSessionId;
+use crate::session::{
+    chat_session_request_from_llsd, chat_session_roster_to_llsd, session_history_to_llsd,
+};
 use crate::sim_session::SimSession;
+use crate::{
+    CAP_AGENT_PREFERENCES, CAP_CHAT_SESSION_REQUEST, CAP_GET_DISPLAY_NAMES, CAP_READ_OFFLINE_MSGS,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CHAT_SESSION_ACCEPT,
+    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
+    offline_messages_to_llsd,
+};
 
 /// The LLSD-XML media type CAPS bodies use.
 pub const LLSD_XML_CONTENT_TYPE: &str = "application/llsd+xml";
@@ -41,13 +57,28 @@ const TEXT_PLAIN_CONTENT_TYPE: &str = "text/plain";
 /// The capability-name key of the event-queue long-poll.
 const EVENT_QUEUE_GET: &str = "EventQueueGet";
 
+/// The LLSD-XML body of a data-less `200` ack (`<llsd><undef /></llsd>`).
+const UNDEF_LLSD_BODY: &str = "<llsd><undef /></llsd>";
+
+/// The sub-path under the `SendUserReportWithScreenshot` cap URL that step 1
+/// mints as its uploader URL and step 2 POSTs the screenshot bytes to.
+const SCREENSHOT_SUB_PATH: &str = "screenshot";
+
 /// The capability names this simulator can serve — the registry keys.
 ///
 /// [`SimCaps::handler_for`] maps each entry to its [`CapHandler`]; the
 /// `protocol-sim-caps-*` cluster tasks grow both together (plus the pinned
 /// coverage table below, which tracks this list against
 /// [`REQUESTED_CAPABILITIES`](crate::REQUESTED_CAPABILITIES)).
-const SERVED_CAPABILITIES: &[&str] = &[EVENT_QUEUE_GET];
+const SERVED_CAPABILITIES: &[&str] = &[
+    EVENT_QUEUE_GET,
+    CAP_CHAT_SESSION_REQUEST,
+    CAP_READ_OFFLINE_MSGS,
+    CAP_GET_DISPLAY_NAMES,
+    CAP_AGENT_PREFERENCES,
+    CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+];
 
 /// How the simulator serves one capability name.
 ///
@@ -62,6 +93,25 @@ pub enum CapHandler {
     /// ([`SimSession::enqueue_caps_event`] /
     /// [`SimSession::take_event_queue_response`]).
     EventQueue,
+    /// The `ChatSessionRequest` chat-session lifecycle (accept / decline /
+    /// decline p2p voice / fetch history), served from [`SimSession`]'s
+    /// chat-session registry.
+    ChatSession,
+    /// The deliver-once `ReadOfflineMsgs` fetch of messages stored while the
+    /// agent was offline ([`SimSession::take_offline_messages`]).
+    OfflineMessages,
+    /// The `GetDisplayNames` people-service lookup, served from
+    /// [`SimSession`]'s display-name store ([`SimSession::display_name`]).
+    DisplayNames,
+    /// The `AgentPreferences` merge-and-echo of the agent's server-stored
+    /// preferences ([`SimSession::agent_preferences`]).
+    AgentPreferences,
+    /// The one-step `SendUserReport` abuse-report POST.
+    UserReport,
+    /// The two-step `SendUserReportWithScreenshot` uploader: the report POST
+    /// answers with an uploader URL (a sub-path of the cap's own URL), the
+    /// raw screenshot bytes complete it.
+    UserReportScreenshot,
 }
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
@@ -215,6 +265,12 @@ impl SimCaps {
     fn handler_for(name: &str) -> Option<CapHandler> {
         match name {
             EVENT_QUEUE_GET => Some(CapHandler::EventQueue),
+            CAP_CHAT_SESSION_REQUEST => Some(CapHandler::ChatSession),
+            CAP_READ_OFFLINE_MSGS => Some(CapHandler::OfflineMessages),
+            CAP_GET_DISPLAY_NAMES => Some(CapHandler::DisplayNames),
+            CAP_AGENT_PREFERENCES => Some(CapHandler::AgentPreferences),
+            CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
+            CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
             _ => None,
         }
     }
@@ -257,7 +313,12 @@ impl SimCaps {
     /// ([`CapsDispatch::EventQueueWouldBlock`]; the runtime holds and
     /// eventually answers [`SimCaps::event_queue_timeout`]), `done=true`
     /// teardown (`200`, then `404` for every later poll), and `404` once the
-    /// session is closed.
+    /// session is closed. The agent-communication capabilities
+    /// (`ChatSessionRequest`, `ReadOfflineMsgs`, `GetDisplayNames`,
+    /// `AgentPreferences`, `SendUserReport`,
+    /// `SendUserReportWithScreenshot`) answer immediately from and into the
+    /// [`SimSession`]'s state; each handler documents its own status
+    /// contract.
     ///
     /// The `ack` field is parsed but deliberately fire-and-forget, exactly
     /// like OpenSim's event-queue module: a batch is dropped when
@@ -272,6 +333,24 @@ impl SimCaps {
             ResolvedPath::Seed => CapsDispatch::Response(self.respond_seed(request)),
             ResolvedPath::Capability(name) => match Self::handler_for(name) {
                 Some(CapHandler::EventQueue) => self.dispatch_event_queue(sim, request),
+                Some(CapHandler::ChatSession) => {
+                    CapsDispatch::Response(Self::dispatch_chat_session(sim, request))
+                }
+                Some(CapHandler::OfflineMessages) => {
+                    CapsDispatch::Response(Self::dispatch_offline_messages(sim, request))
+                }
+                Some(CapHandler::DisplayNames) => {
+                    CapsDispatch::Response(Self::dispatch_display_names(sim, request))
+                }
+                Some(CapHandler::AgentPreferences) => {
+                    CapsDispatch::Response(Self::dispatch_agent_preferences(sim, request))
+                }
+                Some(CapHandler::UserReport) => {
+                    CapsDispatch::Response(Self::dispatch_user_report(sim, request))
+                }
+                Some(CapHandler::UserReportScreenshot) => {
+                    CapsDispatch::Response(self.dispatch_user_report_screenshot(sim, request))
+                }
                 // Tokens are only minted for served capabilities, so a
                 // resolved name always has a handler; answer 404 rather than
                 // panic if that invariant is ever broken.
@@ -325,14 +404,194 @@ impl SimCaps {
         };
         if poll.done {
             self.event_queue_done = true;
-            return CapsDispatch::Response(CapsResponse::llsd_xml(
-                "<llsd><undef /></llsd>".to_owned(),
-            ));
+            return CapsDispatch::Response(CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned()));
         }
         match sim.take_event_queue_response() {
             Some(xml) => CapsDispatch::Response(CapsResponse::llsd_xml(xml)),
             None => CapsDispatch::EventQueueWouldBlock,
         }
+    }
+
+    /// Serves one `ChatSessionRequest` POST: routes on the body's `method`
+    /// member. `"accept invitation"` answers the session's roster (an empty
+    /// `agent_info` map for an unknown session — tolerant, mirroring
+    /// OpenSim's stubbed cap); `"decline invitation"` drops this agent from
+    /// the roster and acks with an undefined body; `"decline p2p voice"` is a
+    /// pure ack; `"fetch history"` answers the session's server-side backlog
+    /// (an empty array for an unknown session). Any other method — or a
+    /// method-less / malformed body — answers `400`.
+    fn dispatch_chat_session(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Some((method, session_uuid)) = chat_session_request_from_llsd(&body) else {
+            return CapsResponse::bad_request();
+        };
+        let session_id = ImSessionId::from(session_uuid);
+        match method.as_str() {
+            CHAT_SESSION_ACCEPT => {
+                let roster = sim.chat_session_accept(session_id).unwrap_or_default();
+                CapsResponse::llsd_xml(chat_session_roster_to_llsd(&roster).to_llsd_xml())
+            }
+            CHAT_SESSION_DECLINE => {
+                sim.chat_session_decline(session_id);
+                CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+            }
+            CHAT_SESSION_DECLINE_P2P_VOICE => CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned()),
+            CHAT_SESSION_FETCH_HISTORY => {
+                let history = sim.chat_session(session_id).map_or_else(
+                    || Llsd::Array(Vec::new()),
+                    |chat_session| session_history_to_llsd(&chat_session.history),
+                );
+                CapsResponse::llsd_xml(history.to_llsd_xml())
+            }
+            _ => CapsResponse::bad_request(),
+        }
+    }
+
+    /// Serves one `ReadOfflineMsgs` GET: the messages stored while the agent
+    /// was offline, serialized as the capability's array body. Deliver-once
+    /// (OpenSim's delete-on-fetch): the fetch drains the store, so a repeated
+    /// GET answers an empty array. The client sends no body, so none is
+    /// parsed.
+    fn dispatch_offline_messages(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let messages = sim.take_offline_messages();
+        CapsResponse::llsd_xml(offline_messages_to_llsd(&messages).to_llsd_xml())
+    }
+
+    /// Serves one `GetDisplayNames` GET: looks each `ids` query parameter up
+    /// in the session's display-name store. Known agents answer as full
+    /// `agents` records, unknown ids as `bad_ids` (the grid's "could not
+    /// resolve" form). No ids — or no query at all — answers an empty
+    /// `agents` array (tolerant).
+    fn dispatch_display_names(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let query = request.query.unwrap_or_default();
+        let ids = parse_display_names_query(&format!("?{query}"));
+        let records = ids
+            .into_iter()
+            .map(|id| {
+                let agent = AgentKey::from(id);
+                sim.display_name(agent)
+                    .cloned()
+                    .unwrap_or_else(|| DisplayName {
+                        id: agent,
+                        missing: true,
+                        ..DisplayName::default()
+                    })
+            })
+            .collect::<Vec<DisplayName>>();
+        CapsResponse::llsd_xml(build_display_names_response(&records))
+    }
+
+    /// Serves one `AgentPreferences` POST: merges the request's `Some` fields
+    /// into the session's stored preferences and echoes the full stored set —
+    /// so an empty-body POST is the pure "get". A malformed body answers
+    /// `400`; `god_level` in a request is ignored (reply-only).
+    fn dispatch_agent_preferences(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(update) = parse_agent_preferences(&body) else {
+            return CapsResponse::bad_request();
+        };
+        sim.merge_agent_preferences(&update);
+        CapsResponse::llsd_xml(build_agent_preferences_response(sim.agent_preferences()))
+    }
+
+    /// Serves one `SendUserReport` POST: parses the abuse report and routes
+    /// it to the driver as
+    /// [`ServerEvent::AbuseReportReceived`](crate::ServerEvent::AbuseReportReceived)
+    /// (the same event as the legacy UDP `UserReport` path). The reply body
+    /// is undefined — the client discards it.
+    fn dispatch_user_report(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(report) = parse_send_user_report(&body) else {
+            return CapsResponse::bad_request();
+        };
+        sim.push_abuse_report(report);
+        CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+    }
+
+    /// Serves the two-step `SendUserReportWithScreenshot` uploader. The cap
+    /// URL itself (step 1) takes the report POST, parks it, and answers
+    /// `{ state: "upload", uploader }` with an uploader URL minted as the
+    /// cap's own `screenshot` sub-path. That sub-path (step 2) takes the raw
+    /// screenshot bytes (not LLSD — the body is stored verbatim), joins them
+    /// with the parked report into
+    /// [`ServerEvent::AbuseReportWithScreenshotReceived`](crate::ServerEvent::AbuseReportWithScreenshotReceived),
+    /// and answers `{ state: "complete" }`. A step-2 POST with no parked
+    /// report answers `400`; a re-POST of step 1 replaces the parked report;
+    /// any other sub-path answers `404`.
+    fn dispatch_user_report_screenshot(
+        &self,
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        match cap_sub_path(request.path) {
+            None => {
+                let Some(body) = parse_llsd_body(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Ok(report) = parse_send_user_report(&body) else {
+                    return CapsResponse::bad_request();
+                };
+                sim.set_pending_screenshot_report(report);
+                let uploader = self.screenshot_uploader_url();
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "upload".to_owned(),
+                    uploader: Some(uploader.to_string()),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+            Some(SCREENSHOT_SUB_PATH) => {
+                let Some(report) = sim.take_pending_screenshot_report() else {
+                    return CapsResponse::bad_request();
+                };
+                sim.push_abuse_report_with_screenshot(report, request.body.to_vec());
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "complete".to_owned(),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+            Some(_) => CapsResponse::not_found(),
+        }
+    }
+
+    /// The uploader URL step 1 of `SendUserReportWithScreenshot` answers
+    /// with: the cap's own URL plus the `screenshot` sub-path (which
+    /// [`SimCaps::resolve`] tolerates and
+    /// [`SimCaps::dispatch_user_report_screenshot`] routes on).
+    fn screenshot_uploader_url(&self) -> Url {
+        let token = self
+            .tokens
+            .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
+            .copied()
+            .unwrap_or_default();
+        let mut url = self.cap_url(token);
+        if let Ok(mut segments) = url.path_segments_mut() {
+            segments.push(SCREENSHOT_SUB_PATH);
+        }
+        url
     }
 
     /// Mints the URL for one capability token: `{base}/cap/{token}`.
@@ -371,6 +630,26 @@ impl SimCaps {
                 ResolvedPath::Capability(name)
             })
     }
+}
+
+/// Parses a CAPS request body as LLSD-XML, or `None` (→ `400`) when it is not
+/// UTF-8 or not well-formed.
+fn parse_llsd_body(body: &[u8]) -> Option<Llsd> {
+    let text = std::str::from_utf8(body).ok()?;
+    parse_llsd_xml(text).ok()
+}
+
+/// The sub-path below a capability URL's token, if any: the segment(s) after
+/// the last `/cap/<token>/`, without a leading slash. Mirrors
+/// [`SimCaps::resolve`]'s tolerance for sub-paths — `resolve` routes on the
+/// token and ignores what follows; handlers that serve sub-resources (the
+/// screenshot uploader) route on this.
+fn cap_sub_path(path: &str) -> Option<&str> {
+    let (_, after) = path.rsplit_once("/cap/")?;
+    after
+        .split_once('/')
+        .map(|(_token, sub_path)| sub_path)
+        .filter(|sub_path| !sub_path.is_empty())
 }
 
 #[cfg(test)]
@@ -454,26 +733,26 @@ mod tests {
             ("IsExperienceContributor", CapStatus::Pending),
             ("UpdateExperience", CapStatus::Pending),
             ("RegionExperiences", CapStatus::Pending),
-            ("ReadOfflineMsgs", CapStatus::Pending),
-            ("ChatSessionRequest", CapStatus::Pending),
+            ("ReadOfflineMsgs", CapStatus::Served),
+            ("ChatSessionRequest", CapStatus::Served),
             ("AcceptGroupInvite", CapStatus::Pending),
             ("DeclineGroupInvite", CapStatus::Pending),
             ("InventoryAPIv3", CapStatus::Pending),
             ("LibraryAPIv3", CapStatus::Pending),
             ("CreateInventoryCategory", CapStatus::Pending),
             ("ExtEnvironment", CapStatus::Pending),
-            ("GetDisplayNames", CapStatus::Pending),
+            ("GetDisplayNames", CapStatus::Served),
             ("RemoteParcelRequest", CapStatus::Pending),
             ("SimulatorFeatures", CapStatus::Pending),
             ("LSLSyntax", CapStatus::Pending),
-            ("AgentPreferences", CapStatus::Pending),
+            ("AgentPreferences", CapStatus::Served),
             ("GetObjectCost", CapStatus::Pending),
             ("ResourceCostSelected", CapStatus::Pending),
             ("GetObjectPhysicsData", CapStatus::Pending),
             ("AttachmentResources", CapStatus::Pending),
             ("LandResources", CapStatus::Pending),
-            ("SendUserReport", CapStatus::Pending),
-            ("SendUserReportWithScreenshot", CapStatus::Pending),
+            ("SendUserReport", CapStatus::Served),
+            ("SendUserReportWithScreenshot", CapStatus::Served),
             ("DirectDelivery", CapStatus::Pending),
         ];
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
