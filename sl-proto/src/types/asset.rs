@@ -158,6 +158,40 @@ impl AssetType {
         }
     }
 
+    /// The asset class a `GetAsset` / `ViewerAsset` query-parameter name
+    /// selects — the inverse of [`get_asset_query_key`](Self::get_asset_query_key),
+    /// used by the *server* side to classify an incoming
+    /// `?<class>_id=<uuid>` request. `None` for an unrecognised key.
+    ///
+    /// The pairing is pinned by a round-trip test: every key
+    /// [`get_asset_query_key`](Self::get_asset_query_key) produces maps back
+    /// to its class here.
+    #[must_use]
+    pub fn from_asset_query_key(key: &str) -> Option<Self> {
+        match key {
+            "texture_id" => Some(Self::Texture),
+            "sound_id" => Some(Self::Sound),
+            "callcard_id" => Some(Self::CallingCard),
+            "landmark_id" => Some(Self::Landmark),
+            "clothing_id" => Some(Self::Clothing),
+            "object_id" => Some(Self::Object),
+            "notecard_id" => Some(Self::Notecard),
+            "lsltext_id" => Some(Self::ScriptText),
+            "lslbyte_id" => Some(Self::ScriptBytecode),
+            "txtr_tga_id" => Some(Self::TextureTga),
+            "bodypart_id" => Some(Self::Bodypart),
+            "snd_wav_id" => Some(Self::SoundWav),
+            "img_tga_id" => Some(Self::ImageTga),
+            "jpeg_id" => Some(Self::ImageJpeg),
+            "animatn_id" => Some(Self::Animation),
+            "gesture_id" => Some(Self::Gesture),
+            "mesh_id" => Some(Self::Mesh),
+            "settings_id" => Some(Self::Settings),
+            "material_id" => Some(Self::Material),
+            _ => None,
+        }
+    }
+
     /// The short asset-type name the CAPS upload (`NewFileAgentInventory`)
     /// expects for this asset class (LL's `LLAssetType` `mTypeName`, e.g.
     /// `"texture"`, `"animatn"`, `"lsltext"`), or `None` for classes that are not
@@ -792,6 +826,44 @@ mod tests {
             AssetType::from_type_name(AssetType::Other(99).to_type_name()),
             AssetType::Other(-1)
         );
+    }
+
+    /// Every asset class that carries a `ViewerAsset` query key survives a
+    /// `get_asset_query_key` → `from_asset_query_key` round-trip, and an
+    /// unknown key resolves to `None`. This keeps the server-side asset caps'
+    /// request classifier in step with the client's fetch-URL builder.
+    #[test]
+    fn asset_query_key_round_trips() {
+        // The exact key each class is fetched by — both directions pinned.
+        let pairs = [
+            (AssetType::Texture, "texture_id"),
+            (AssetType::Sound, "sound_id"),
+            (AssetType::CallingCard, "callcard_id"),
+            (AssetType::Landmark, "landmark_id"),
+            (AssetType::Clothing, "clothing_id"),
+            (AssetType::Object, "object_id"),
+            (AssetType::Notecard, "notecard_id"),
+            (AssetType::ScriptText, "lsltext_id"),
+            (AssetType::ScriptBytecode, "lslbyte_id"),
+            (AssetType::TextureTga, "txtr_tga_id"),
+            (AssetType::Bodypart, "bodypart_id"),
+            (AssetType::SoundWav, "snd_wav_id"),
+            (AssetType::ImageTga, "img_tga_id"),
+            (AssetType::ImageJpeg, "jpeg_id"),
+            (AssetType::Animation, "animatn_id"),
+            (AssetType::Gesture, "gesture_id"),
+            (AssetType::Mesh, "mesh_id"),
+            (AssetType::Settings, "settings_id"),
+            (AssetType::Material, "material_id"),
+        ];
+        for (variant, key) in pairs {
+            assert_eq!(variant.get_asset_query_key(), Some(key));
+            assert_eq!(AssetType::from_asset_query_key(key), Some(variant));
+        }
+        // A class with no query key, and an unrecognised key, both resolve to
+        // `None`.
+        assert_eq!(AssetType::Gltf.get_asset_query_key(), None);
+        assert_eq!(AssetType::from_asset_query_key("nope_id"), None);
     }
 
     /// Every named [`InventoryType`] variant survives a `to_type_name` →

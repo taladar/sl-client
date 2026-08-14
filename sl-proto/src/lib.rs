@@ -1,7 +1,9 @@
 #![doc = include_str!("../README.md")]
 
 mod appearance;
+mod asset_caps;
 mod asset_keys;
+mod asset_source;
 mod bookkeeping_ids;
 mod chat_log;
 mod command;
@@ -20,7 +22,9 @@ mod terrain;
 mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
+pub use asset_caps::{AssetCapHandler, AssetCaps};
 pub use asset_keys::{AnimationKey, AssetKey};
+pub use asset_source::{AssetSource, InMemoryAssetSource};
 pub use bookkeeping_ids::{
     GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
     TransactionId, TransferId, XferId,

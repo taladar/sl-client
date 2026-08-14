@@ -11,10 +11,11 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AgentKey, AgentPreferences, CAP_CHAT_SESSION_REQUEST,
-        CAP_READ_OFFLINE_MSGS, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-        CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
-        CapsDispatch, CapsRequest, ChatSessionKind, DisplayName, Event, ImDialog, ImSessionId,
+        AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey,
+        CAP_CHAT_SESSION_REQUEST, CAP_GET_TEXTURE, CAP_READ_OFFLINE_MSGS, CAP_VIEWER_ASSET,
+        CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+        CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG, CapsDispatch, CapsRequest,
+        ChatSessionKind, DisplayName, Event, ImDialog, ImSessionId, InMemoryAssetSource,
         InstantMessage, LLSD_XML_CONTENT_TYPE, LoginParams, REQUESTED_CAPABILITIES,
         RegionCoordinates, RegionHandle, ServerEvent, ServerHistoryMessage, Session, SimCaps,
         SimChatSessionKind, SimSession, StartLocation, build_event_queue_request,
@@ -60,6 +61,7 @@ mod test {
             method: "POST",
             path,
             query: None,
+            range: None,
             body: body.as_bytes(),
         }
     }
@@ -98,7 +100,10 @@ mod test {
             .collect();
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
-        assert_eq!(granted.len(), 7);
+        // Seven sim caps plus the four asset-delivery caps
+        // (GetTexture/GetMesh/GetMesh2/ViewerAsset) the composed asset surface
+        // advertises.
+        assert_eq!(granted.len(), 11);
         Ok(())
     }
 
@@ -120,13 +125,17 @@ mod test {
     fn unsupported_caps_are_omitted_from_the_grant() -> Result<(), TestError> {
         let mut caps = new_caps()?;
         let mut sim = new_sim();
-        let request_body = build_seed_request(&["EventQueueGet", "GetTexture", "NoSuchCapability"]);
+        // `GetObjectCost` is still a Pending capability (no handler), so it
+        // stands in here for "requested but unsupported"; `GetTexture` is now
+        // served by the composed asset surface and would be granted.
+        let request_body =
+            build_seed_request(&["EventQueueGet", "GetObjectCost", "NoSuchCapability"]);
         let seed_path = caps.seed_url().path().to_owned();
         let (status, body) = respond(&mut caps, &mut sim, &post(&seed_path, &request_body))?;
         assert_eq!(status, 200);
         let granted = parse_seed_response(&body)?;
         assert!(granted.contains_key("EventQueueGet"));
-        assert!(!granted.contains_key("GetTexture"));
+        assert!(!granted.contains_key("GetObjectCost"));
         assert!(!granted.contains_key("NoSuchCapability"));
         Ok(())
     }
@@ -152,6 +161,7 @@ mod test {
             method: "GET",
             path,
             query,
+            range: None,
             body: b"",
         }
     }
@@ -310,6 +320,7 @@ mod test {
             method: "GET",
             path: &seed_path,
             query: None,
+            range: None,
             body: b"",
         };
         let (status, _) = respond(&mut caps, &mut sim, &get)?;
@@ -698,6 +709,7 @@ mod test {
             method: "POST",
             path: &format!("{path}/screenshot"),
             query: None,
+            range: None,
             body: b"jp2 bytes",
         };
         let (status, _) = respond(&mut caps, &mut sim, &premature)?;
@@ -717,6 +729,7 @@ mod test {
             method: "POST",
             path: uploader.path(),
             query: None,
+            range: None,
             body: b"jp2 bytes",
         };
         let (status, reply) = respond(&mut caps, &mut sim, &screenshot)?;
@@ -769,6 +782,116 @@ mod test {
         let path = granted_cap_path(&caps, "ChatSessionRequest")?;
         let (status, _) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
         assert_eq!(status, 400);
+        Ok(())
+    }
+
+    /// The chunk size the progressive-fetch loop below pulls the asset in —
+    /// small, so a modest fixture spans several `206` responses.
+    const ASSET_CHUNK: usize = 64;
+
+    /// An asset `GET` request against a granted cap URL, with an optional
+    /// `Range` header. The asset caps dispatch on
+    /// [`SimCaps::assets`](sl_proto::SimCaps::assets), not `SimCaps::dispatch`.
+    fn asset_get<'a>(path: &'a str, query: &'a str, range: Option<&'a str>) -> CapsRequest<'a> {
+        CapsRequest {
+            method: "GET",
+            path,
+            query: Some(query),
+            range,
+            body: b"",
+        }
+    }
+
+    /// The seed grant advertises the four asset-delivery caps, and a
+    /// `GetTexture` fetch round-trips: a whole `200`, a hand-rolled
+    /// progressive `206` loop that reassembles the exact bytes the store
+    /// holds, an out-of-range `416`, and a missing-asset `404` — the client's
+    /// byte-range contract, driven with no HTTP.
+    #[test]
+    fn asset_caps_round_trip() -> Result<(), TestError> {
+        let caps = new_caps()?;
+
+        // The seed grant carries the asset caps alongside the sim caps.
+        let granted = caps.grant(
+            &REQUESTED_CAPABILITIES
+                .iter()
+                .map(|name| (*name).to_owned())
+                .collect::<Vec<String>>(),
+        );
+        for name in [CAP_GET_TEXTURE, "GetMesh", "GetMesh2", CAP_VIEWER_ASSET] {
+            assert!(
+                granted.contains_key(name),
+                "{name} not advertised in the grant"
+            );
+        }
+
+        // A deterministic multi-chunk texture: 3.5 chunks, so the loop makes
+        // four requests, the last one short.
+        let id = uuid::Uuid::from_u128(0xa55e7);
+        let total = ASSET_CHUNK * 3 + ASSET_CHUNK / 2;
+        let bytes = (0..total)
+            .map(|byte| u8::try_from(byte % 256).unwrap_or(0))
+            .collect::<Vec<u8>>();
+        let source = InMemoryAssetSource::new().with_asset(AssetKey::from(id), bytes.clone());
+
+        let texture_path: url::Url = granted
+            .get(CAP_GET_TEXTURE)
+            .ok_or("GetTexture not granted")?
+            .parse()?;
+        let path = texture_path.path().to_owned();
+        let query = format!("texture_id={id}");
+
+        // Whole fetch: no `Range` → 200 with the full codestream.
+        let whole = caps
+            .assets()
+            .dispatch(&source, &asset_get(&path, &query, None));
+        assert_eq!(whole.status, 200);
+        assert_eq!(whole.content_type, "image/x-j2c");
+        assert_eq!(whole.content_range, None);
+        assert_eq!(whole.body, bytes);
+
+        // Progressive fetch: pull `ASSET_CHUNK` at a time, reassembling.
+        let mut reassembled: Vec<u8> = Vec::new();
+        let mut start = 0_usize;
+        let mut requests = 0_usize;
+        while start < total {
+            let last = (start + ASSET_CHUNK - 1).min(total - 1);
+            let range = format!("bytes={start}-{last}");
+            let chunk = caps
+                .assets()
+                .dispatch(&source, &asset_get(&path, &query, Some(&range)));
+            assert_eq!(chunk.status, 206, "chunk at {start}");
+            assert_eq!(
+                chunk.content_range.as_deref(),
+                Some(format!("bytes {start}-{last}/{total}").as_str())
+            );
+            reassembled.extend_from_slice(&chunk.body);
+            start = last + 1;
+            requests += 1;
+        }
+        assert_eq!(reassembled, bytes);
+        // ceil(3.5 chunks) = 4 requests.
+        assert_eq!(requests, 4);
+
+        // A range past the end of the existing asset → 416 (the client turns
+        // it into an empty chunk and stops).
+        let over = format!("bytes={total}-{}", total + 10);
+        let response = caps
+            .assets()
+            .dispatch(&source, &asset_get(&path, &query, Some(&over)));
+        assert_eq!(response.status, 416);
+        assert_eq!(
+            response.content_range.as_deref(),
+            Some(format!("bytes */{total}").as_str())
+        );
+        assert!(response.body.is_empty());
+
+        // A UUID not in the store → 404 (the client's hard NotFound).
+        let missing = format!("texture_id={}", uuid::Uuid::from_u128(0xdead));
+        let response = caps
+            .assets()
+            .dispatch(&source, &asset_get(&path, &missing, None));
+        assert_eq!(response.status, 404);
         Ok(())
     }
 }

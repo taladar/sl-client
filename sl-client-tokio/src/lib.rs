@@ -152,7 +152,7 @@ pub use sl_material::{
     parse_material_override,
 };
 
-pub use crate::assets::ReqwestAssetFetcher;
+pub use crate::assets::{ReqwestAssetFetcher, load_asset_dir};
 pub use crate::meshes::ReqwestMeshFetcher;
 pub use crate::textures::ReqwestTextureFetcher;
 

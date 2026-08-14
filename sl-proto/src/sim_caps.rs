@@ -36,6 +36,7 @@ use sl_wire::{
 use url::Url;
 use uuid::Uuid;
 
+use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
     chat_session_request_from_llsd, chat_session_roster_to_llsd, session_history_to_llsd,
@@ -116,10 +117,11 @@ pub enum CapHandler {
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
 ///
-/// Only `method`, `path` and `body` are consumed today; `query` (and the
-/// sub-path below a capability URL) are carried so the asset (HTTP `Range`,
-/// 206) and AIS inventory (sub-path routing) cluster tasks extend this type
-/// instead of redesigning it — more fields may grow here.
+/// `method`, `path`, `body`, `query` and `range` are all consumed: the
+/// agent-communication caps read `query`/`body`, and the asset-delivery caps
+/// read `query` (the `?<class>_id=<uuid>` selector) and `range` (the byte
+/// range). The AIS inventory (sub-path routing) cluster task may extend this
+/// type further instead of redesigning it — more fields may grow here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CapsRequest<'a> {
     /// The HTTP method, uppercase (`"GET"`, `"POST"`, …).
@@ -128,6 +130,10 @@ pub struct CapsRequest<'a> {
     pub path: &'a str,
     /// The raw query string without the `?`, if any.
     pub query: Option<&'a str>,
+    /// The raw `Range` header value without the header name (e.g.
+    /// `bytes=0-1023`), if the client sent one. Consumed only by the
+    /// asset-delivery caps' partial-content path.
+    pub range: Option<&'a str>,
     /// The request body (LLSD-XML for seed and event-queue requests).
     pub body: &'a [u8],
 }
@@ -139,6 +145,10 @@ pub struct CapsResponse {
     pub status: u16,
     /// The `Content-Type` header value.
     pub content_type: &'static str,
+    /// The `Content-Range` header value without the header name (e.g.
+    /// `bytes 0-1023/4096`), set on the asset-delivery caps' `206` and `416`
+    /// responses and `None` otherwise.
+    pub content_range: Option<String>,
     /// The response body.
     pub body: Vec<u8>,
 }
@@ -149,6 +159,7 @@ impl CapsResponse {
         Self {
             status: 200,
             content_type: LLSD_XML_CONTENT_TYPE,
+            content_range: None,
             body: body.into_bytes(),
         }
     }
@@ -158,19 +169,20 @@ impl CapsResponse {
         Self {
             status,
             content_type: TEXT_PLAIN_CONTENT_TYPE,
+            content_range: None,
             body: Vec::new(),
         }
     }
 
-    /// `404 Not Found` — an unknown capability URL, or an event-queue poll
-    /// after teardown (the client's "stop polling" signal).
-    const fn not_found() -> Self {
+    /// `404 Not Found` — an unknown capability URL, an event-queue poll after
+    /// teardown (the client's "stop polling" signal), or a missing asset.
+    pub(crate) const fn not_found() -> Self {
         Self::empty(404)
     }
 
     /// `405 Method Not Allowed` — a known capability URL hit with the wrong
     /// HTTP method.
-    const fn method_not_allowed() -> Self {
+    pub(crate) const fn method_not_allowed() -> Self {
         Self::empty(405)
     }
 
@@ -184,6 +196,49 @@ impl CapsResponse {
     /// event-queue poll whose hold expired.
     const fn bad_gateway() -> Self {
         Self::empty(502)
+    }
+
+    /// `200 OK` carrying a whole asset of the given content type — the answer
+    /// to an asset fetch with no (or an unparsable) `Range` header.
+    pub(crate) const fn asset_whole(content_type: &'static str, body: Vec<u8>) -> Self {
+        Self {
+            status: 200,
+            content_type,
+            content_range: None,
+            body,
+        }
+    }
+
+    /// `206 Partial Content` carrying `body` (the asset bytes `start..=last`)
+    /// with `Content-Range: bytes {start}-{last}/{total}` (inclusive `last`,
+    /// per the client's byte-range contract).
+    pub(crate) fn asset_partial(
+        content_type: &'static str,
+        body: Vec<u8>,
+        start: usize,
+        last: usize,
+        total: usize,
+    ) -> Self {
+        Self {
+            status: 206,
+            content_type,
+            content_range: Some(format!("bytes {start}-{last}/{total}")),
+            body,
+        }
+    }
+
+    /// `416 Range Not Satisfiable` with `Content-Range: bytes */{total}` — a
+    /// range whose start is past the end of an *existing* asset. HTTP-correct;
+    /// the client turns it into an empty chunk and stops. (OpenSim instead
+    /// serves the whole asset here to dodge a reference-viewer 416 bug; our
+    /// client handles 416 cleanly, so we stay spec-correct.)
+    pub(crate) fn range_not_satisfiable(total: usize) -> Self {
+        Self {
+            status: 416,
+            content_type: TEXT_PLAIN_CONTENT_TYPE,
+            content_range: Some(format!("bytes */{total}")),
+            body: Vec::new(),
+        }
     }
 }
 
@@ -232,30 +287,80 @@ pub struct SimCaps {
     /// One pre-minted URL token per served capability
     /// ([`SERVED_CAPABILITIES`]).
     tokens: BTreeMap<&'static str, Uuid>,
+    /// The composed asset-delivery surface, held so a single seed grant
+    /// advertises the asset caps alongside the sim caps. Its dispatch path is
+    /// independent (it needs an [`AssetSource`](crate::AssetSource), not a
+    /// [`SimSession`]) and may serve from a different process.
+    assets: AssetCaps,
     /// Set once the client has polled with `done`; later polls answer `404`.
     event_queue_done: bool,
 }
 
 impl SimCaps {
-    /// Creates the CAPS surface for one agent's presence on a region.
+    /// Creates the CAPS surface for one agent's presence on a region, with the
+    /// asset caps served from the **same** base URL as the sim caps (the
+    /// OpenSim-style co-located layout).
     ///
     /// `base_url` is the public HTTP(S) base the capability URLs are minted
     /// under; `seed_token` is the seed capability's own URL token (the login
     /// side embeds the resulting [`SimCaps::seed_url`] in its login
     /// response); `mint_token` supplies the randomness for the per-capability
     /// tokens — sans-I/O purity means the caller owns randomness (a runtime
-    /// passes `Uuid::new_v4`, tests pass a deterministic counter).
+    /// passes `Uuid::new_v4`, tests pass a deterministic counter). The asset
+    /// tokens come from the same `mint_token` stream, so one call seeds every
+    /// capability.
     pub fn new(base_url: Url, seed_token: Uuid, mut mint_token: impl FnMut() -> Uuid) -> Self {
         let tokens = SERVED_CAPABILITIES
             .iter()
             .map(|name| (*name, mint_token()))
             .collect::<BTreeMap<&'static str, Uuid>>();
+        let assets = AssetCaps::new(base_url.clone(), &mut mint_token);
         Self {
             base_url,
             seed_token,
             tokens,
+            assets,
             event_queue_done: false,
         }
+    }
+
+    /// Creates the CAPS surface with the asset caps minted under a **separate**
+    /// base URL — a content delivery network on a different host from the
+    /// simulator, as Second Life serves them.
+    ///
+    /// The sim caps and seed are minted under `sim_base`; the four asset caps
+    /// under `asset_base`. Both sets of URLs are advertised by the one seed
+    /// grant, but the asset URLs point at the CDN host; a CDN process rebuilds
+    /// the asset surface with [`AssetCaps::from_tokens`] from
+    /// [`SimCaps::assets`]'s [`tokens`](AssetCaps::tokens).
+    pub fn new_split(
+        sim_base: Url,
+        asset_base: Url,
+        seed_token: Uuid,
+        mut mint_token: impl FnMut() -> Uuid,
+    ) -> Self {
+        let tokens = SERVED_CAPABILITIES
+            .iter()
+            .map(|name| (*name, mint_token()))
+            .collect::<BTreeMap<&'static str, Uuid>>();
+        let assets = AssetCaps::new(asset_base, &mut mint_token);
+        Self {
+            base_url: sim_base,
+            seed_token,
+            tokens,
+            assets,
+            event_queue_done: false,
+        }
+    }
+
+    /// The composed asset-delivery surface. The in-process HTTP glue routes an
+    /// asset request here — `if caps.assets().handles_path(path) {
+    /// caps.assets().dispatch(source, &req) }` — because that path needs the
+    /// [`AssetSource`](crate::AssetSource), not the [`SimSession`], and
+    /// everything else through [`SimCaps::dispatch`].
+    #[must_use]
+    pub const fn assets(&self) -> &AssetCaps {
+        &self.assets
     }
 
     /// The handler for a served capability name — the dispatch registry.
@@ -289,20 +394,25 @@ impl SimCaps {
     }
 
     /// Grants capability URLs for the requested names — the server side of
-    /// the seed round-trip. Unsupported names are silently omitted (the
-    /// protocol's feature negotiation); requested order is irrelevant since
-    /// the response is a map. Pure and stable: equal requests yield equal
-    /// grants, which [`build_seed_response`] serializes byte-identically.
+    /// the seed round-trip. Merges the sim-cap grant with the composed
+    /// [`AssetCaps`]'s grant so one response advertises every capability, sim
+    /// and asset alike (the asset URLs may point at a different host).
+    /// Unsupported names are silently omitted (the protocol's feature
+    /// negotiation); requested order is irrelevant since the response is a
+    /// map. Pure and stable: equal requests yield equal grants, which
+    /// [`build_seed_response`] serializes byte-identically.
     #[must_use]
     pub fn grant(&self, requested: &[String]) -> HashMap<String, String> {
-        requested
+        let mut granted = requested
             .iter()
             .filter_map(|name| {
                 self.tokens
                     .get(name.as_str())
                     .map(|token| (name.clone(), self.cap_url(*token).to_string()))
             })
-            .collect()
+            .collect::<HashMap<String, String>>();
+        granted.extend(self.assets.grant(requested));
+        granted
     }
 
     /// Routes one CAPS request to its handler.
@@ -698,10 +808,10 @@ mod tests {
             ("FetchInventoryDescendents2", CapStatus::Pending),
             ("FetchLibDescendents2", CapStatus::Pending),
             ("GroupMemberData", CapStatus::Pending),
-            ("GetTexture", CapStatus::Pending),
-            ("GetMesh", CapStatus::Pending),
-            ("GetMesh2", CapStatus::Pending),
-            ("ViewerAsset", CapStatus::Pending),
+            ("GetTexture", CapStatus::Served),
+            ("GetMesh", CapStatus::Served),
+            ("GetMesh2", CapStatus::Served),
+            ("ViewerAsset", CapStatus::Served),
             ("UpdateAvatarAppearance", CapStatus::Pending),
             ("NewFileAgentInventory", CapStatus::Pending),
             ("UploadBakedTexture", CapStatus::Pending),
@@ -758,7 +868,13 @@ mod tests {
         let actual: Vec<(&str, CapStatus)> = REQUESTED_CAPABILITIES
             .iter()
             .map(|name| {
-                if SimCaps::handler_for(name).is_some() {
+                // A capability is served if either the sim-cap registry
+                // ([`SimCaps::handler_for`]) or the asset-cap registry
+                // ([`AssetCaps::handler_for`]) handles it — the asset caps
+                // live on a separate, session-free surface.
+                if SimCaps::handler_for(name).is_some()
+                    || crate::asset_caps::AssetCaps::handler_for(name).is_some()
+                {
                     (*name, CapStatus::Served)
                 } else {
                     (*name, CapStatus::Pending)
@@ -804,8 +920,11 @@ mod tests {
         Ok(())
     }
 
-    /// `grant` serves only registered capabilities and is a pure read:
-    /// repeated grants return identical maps.
+    /// `grant` serves only registered capabilities (sim caps here, plus the
+    /// asset caps the composed surface advertises) and is a pure read:
+    /// repeated grants return identical maps. `SimCaps::supports` reports only
+    /// the sim caps — the asset caps live on the separate
+    /// [`SimCaps::assets`] surface.
     #[test]
     fn grant_omits_unsupported_and_is_stable() -> Result<(), TestError> {
         let caps = caps()?;
@@ -815,11 +934,16 @@ mod tests {
             "NoSuchCap".to_owned(),
         ];
         let granted = caps.grant(&requested);
-        assert_eq!(granted.len(), 1);
+        // A sim cap and an asset cap are granted; the unknown name is omitted.
+        assert_eq!(granted.len(), 2);
         assert!(granted.contains_key("EventQueueGet"));
+        assert!(granted.contains_key("GetTexture"));
+        assert!(!granted.contains_key("NoSuchCap"));
         assert_eq!(granted, caps.grant(&requested));
+        // `supports` is the sim-cap registry; GetTexture is an asset cap.
         assert!(caps.supports("EventQueueGet"));
         assert!(!caps.supports("GetTexture"));
+        assert!(caps.assets().supports("GetTexture"));
         Ok(())
     }
 
