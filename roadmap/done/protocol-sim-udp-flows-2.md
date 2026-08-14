@@ -2,7 +2,7 @@
 id: protocol-sim-udp-flows-2
 title: Server-side mirrors for the remaining Session flow machines
 topic: protocol
-status: ready
+status: done
 origin: follow-up from the protocol-sim-udp-flows flow audit (2026-08)
 points: 5
 refs: [protocol-sim-udp-flows, protocol-sim-caps-agent-comms]
@@ -38,3 +38,29 @@ and flip their rows to `Mirrored`:
 Stateless request/reply surfaces (money, selection, appearance, group
 management edits, directory queries) stay non-rows: `SimSession`'s
 canned `send_*` replies already cover them without a machine.
+
+Done (2026-08-14): all four rows flipped to `Mirrored`, one commit per
+flow, each proven by loopback tests (the friendship and conference ones
+on a new two-avatar harness — `setup_pair`, one SimSession per client,
+the test body as relaying driver). Decisions worth recording:
+
+- **`ImDialog::FriendshipDeclined` (40) was added** — the enum jumped
+  39→41, but both OpenSim (`FriendsModule.LocalFriendshipDenied`) and
+  the reference viewer (`IM_FRIENDSHIP_DECLINED_DEPRECATED`) relay a
+  decline to the offerer with dialog 40; the sole client-side change.
+- **Friendship keeps no SimSession state**: buddy store/presence are
+  grid-level services (a region only relays), and an offer's outcome
+  spans two clients' sessions — driver-sequenced per the teleport
+  precedent. The mirror is the typed decode/send surface
+  (`send_instant_message` relay primitive, presence/rights pushes).
+- **Chat sessions DO get a registry** (`SimChatSession`: kind, roster,
+  capped server history). A `SessionSend` into an unknown session
+  surfaces but creates no state (the server polices membership — the
+  client's lazy-open is deliberately not mirrored). The history is
+  the backlog the `ChatSessionRequest` cap's `fetch history` will
+  serve from [[protocol-sim-caps-agent-comms]]; cap dispatch stays
+  there.
+- **Sit**: ground-sit is not modelled server-side (a pure animation
+  state, same rationale as the client); refusing a sit is not
+  answering (no refusal message exists — the client's timeout
+  recovers).
