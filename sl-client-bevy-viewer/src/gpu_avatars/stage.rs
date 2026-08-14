@@ -27,6 +27,7 @@ use bevy::render::extract_resource::ExtractResource;
 use sl_client_bevy::{AgentKey, AssetKey, ObjectKey, SkeletalDeformations, VolumeDeformations};
 
 use super::GpuAvatarsMode;
+use super::crowd::{CrowdCopy, GpuCrowd};
 use super::types::{
     ClipArena, GpuAvatarFrame, GpuClipHeader, GpuCorrection, GpuJointTrack, GpuLocalPose,
     GpuPlayState, GpuRestJoint, GpuSampleJob, JOINT_NONE, MAX_ACTIVE_CLIPS, MAX_GPU_JOINTS,
@@ -49,6 +50,13 @@ pub(crate) enum PoseSlotKey {
     /// An animesh control avatar, keyed by its animated-object root
     /// ([`ObjectKey`]) — it has no wearer agent.
     Animesh(ObjectKey),
+    /// A synthetic **debug-crowd copy** of the local avatar
+    /// (`SL_VIEWER_CROWD`, [`crate::gpu_avatars::crowd`]), keyed by its crowd
+    /// index. It carries no real agent: it reuses the local avatar's shape,
+    /// clips and body submesh handles but stages its own slot, so passes A–D
+    /// run at crowd scale for perf measurement. Never allocated when the env is
+    /// unset (the crowd resource is empty), so a normal run never sees it.
+    Crowd(u32),
 }
 
 /// The GPU-avatar **skin binding** written at skin-build time
@@ -117,6 +125,18 @@ impl GpuAvatarPoseFeed {
     /// The latest entry for `slot`, if it has published at least once.
     fn get(&self, slot: PoseSlotKey) -> Option<&FeedEntry> {
         self.entries.get(&slot)
+    }
+
+    /// The root matrix and a clone of the sparse corrections of `slot` — the
+    /// synthetic-crowd publisher ([`crate::gpu_avatars::crowd`]) reads the
+    /// local avatar's freshly published entry to derive each copy's grid-offset
+    /// root and share its corrections.
+    pub(crate) fn template_entry(
+        &self,
+        slot: PoseSlotKey,
+    ) -> Option<(Mat4, Vec<(u32, GpuLocalPose)>)> {
+        self.get(slot)
+            .map(|entry| (entry.root, (*entry.corrections).clone()))
     }
 
     /// Drop entries of slots that are no longer rigged.
@@ -402,7 +422,8 @@ pub(crate) struct BlendInputs<'w, 's> {
     reason = "a Bevy system's parameters are its injected resources / queries; the \
               scheduling inputs are already bundled into one `BlendInputs` param and \
               what remains is the avatar state, the asset library, the pipeline's \
-              own three resources, the source query, the mode, and the bindpose assets"
+              own three resources, the source query, the mode, the bindpose assets, \
+              and the debug synthetic-crowd resource"
 )]
 pub(crate) fn stage_gpu_avatars(
     state: Res<AvatarState>,
@@ -415,6 +436,7 @@ pub(crate) fn stage_gpu_avatars(
     queries: StageQueries<'_, '_>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,
     blend_inputs: BlendInputs<'_, '_>,
+    crowd: Res<GpuCrowd>,
 ) {
     // The startup capability check demoted this device (no compute / storage
     // skinning): stage nothing, so the render half never dispatches.
@@ -461,6 +483,9 @@ pub(crate) fn stage_gpu_avatars(
             .animesh_roots()
             .map(PoseSlotKey::Animesh),
     );
+    // The synthetic debug crowd (`SL_VIEWER_CROWD`): each spawned copy is its
+    // own rigged slot. Empty unless the env selected a crowd.
+    rigged.extend(crowd.slots().map(PoseSlotKey::Crowd));
     feed.retain_rigged(&rigged);
 
     // Free the slots (and cached rest rows) of slots that de-rigged.
@@ -554,6 +579,52 @@ pub(crate) fn stage_gpu_avatars(
             registry.rest_dirty = true;
         }
         active.push((slot_key, slot));
+    }
+    // Synthetic crowd copies (`SL_VIEWER_CROWD`): every copy reuses the local
+    // template avatar's shape, so all crowd slots share one composed rest-row
+    // block (composed at most once per frame, only when a slot is stale) at the
+    // template's `pose_inputs_generation`.
+    let crowd_template = crowd.template().and_then(|template| {
+        state
+            .deformations(template)
+            .map(|deform| (template, deform))
+    });
+    if let Some((template, deform)) = crowd_template {
+        let volumes = state.volume_deformations(template).unwrap_or(&no_volumes);
+        let overrides = state
+            .effective_joint_overrides(template)
+            .unwrap_or_default();
+        let mut shared_rest: Option<Arc<Vec<GpuRestJoint>>> = None;
+        for index in crowd.slots() {
+            let slot_key = PoseSlotKey::Crowd(index);
+            if feed.get(slot_key).is_none() {
+                continue;
+            }
+            let slot = match registry.slots.get(&slot_key).copied() {
+                Some(slot) => slot,
+                None => {
+                    let Some(slot) = registry.alloc_slot() else {
+                        continue;
+                    };
+                    let _prev = registry.slots.insert(slot_key, slot);
+                    slot
+                }
+            };
+            let stale = registry
+                .rest_rows
+                .get(&slot_key)
+                .is_none_or(|(at, _rows)| *at != avatar_generation);
+            if stale {
+                let rows = shared_rest.get_or_insert_with(|| {
+                    Arc::new(compose_rest_joints(skeleton, deform, volumes, &overrides))
+                });
+                let _prev = registry
+                    .rest_rows
+                    .insert(slot_key, (avatar_generation, Arc::clone(rows)));
+                registry.rest_dirty = true;
+            }
+            active.push((slot_key, slot));
+        }
     }
     // Deterministic frame order (HashSet iteration is not).
     active.sort_by_key(|(_slot_key, slot)| *slot);
@@ -656,9 +727,22 @@ pub(crate) fn stage_gpu_avatars(
             // an animesh's from its control avatar — decoded motions only, capped
             // to the MAX_ACTIVE most recently activated, in id order for
             // deterministic cache-base assignment frame over frame.
+            // A crowd copy replays the local template avatar's clips; its
+            // desync `(phase offset, rate)` is applied to the sampling clock
+            // below so the copies are never frame-locked. A real slot has none.
+            let (crowd_offset, crowd_rate) = match slot_key {
+                PoseSlotKey::Crowd(index) => {
+                    crowd.copy(*index).map_or((0.0, 1.0), CrowdCopy::desync)
+                }
+                _other => (0.0, 1.0),
+            };
             let mut states = match slot_key {
                 PoseSlotKey::Avatar(agent) => playback.merged_active(*agent),
                 PoseSlotKey::Animesh(object) => blend_inputs.control.merged_active(*object),
+                PoseSlotKey::Crowd(_index) => match crowd.template() {
+                    Some(template) => playback.merged_active(template),
+                    None => Vec::new(),
+                },
             };
             states.retain(|(id, _play)| manager.motion(AssetKey::from(*id)).is_some());
             if states.len() > MAX_ACTIVE_CLIPS {
@@ -684,8 +768,12 @@ pub(crate) fn stage_gpu_avatars(
                     continue;
                 };
                 // The motion-elapsed sampling phase: the walk-speed clock skew
-                // folds in here, so the GPU play state needs no anim_offset.
-                let elapsed = now - play.start() + play.anim_offset();
+                // folds in here, so the GPU play state needs no anim_offset. A
+                // crowd copy scales this by its rate and shifts it by its phase
+                // offset, so it samples a different point of the same clip than
+                // its neighbours (the ease weight still runs off the shared
+                // `start`, so the readback mirror stays exact).
+                let elapsed = (now - play.start() + play.anim_offset()) * crowd_rate + crowd_offset;
                 let bucketed = far && motion.loops;
                 let phase = if bucketed {
                     (elapsed * PHASE_BUCKET_HZ).round() / PHASE_BUCKET_HZ

@@ -23,3 +23,30 @@ impostors remain only the opt-in extreme-count / low-end fallback.
 
 Honor the memory lesson: throttle **pose recompute**, never render-resource
 cadence (the probe-cadence frame-spike trap).
+
+## Progress + measured direction (2026-08-14)
+
+**Step 1 — synthetic-crowd harness landed** (`SL_VIEWER_CROWD=N`, module
+`gpu_avatars/crowd.rs`): N GPU-instanced copies of the local avatar, same-body
+handles (so they batch), a golden-ratio phase offset + rate jitter per copy
+(realistic desync, and it exercises the phase-bucket LOD), a `⌈√N⌉²` grid, and
+settle-detection so it captures the avatar's *final* baked draw set (BOM
+body/head included, system body excluded). No-op when unset. This is the
+measurement/verification tool for the rest of Phase 5.
+
+**What the `CROWD=100` measurement changed:** the **pose compute is negligible
+at 100 avatars** (`run_gpu_avatar_compute` 0.16 ms, `stage_gpu_avatars` ~3 ms),
+so the originally-headline pose-LOD knobs (phase-bucket coarsening, bone-count
+LOD) target already-cheap work — **demoted to small follow-ups** (phase-bucket
+still worth ~the stage residual for off-screen avatars). The crowd cost is the
+**draw + Bevy per-visible-skin extract**. So the **first knob is the
+GPU-computed skinned bounds → retire `NoFrustumCulling`** (removes off-screen
+avatars from draw + `extract_skins`, both `ViewVisibility`-gated) — scoped as
+"compute correct posed bounds first, then enable culling", since the current
+`NoFrustumCulling` is load-bearing (bind-pose/dummy-joint bounds are
+meaningless). A large **on-screen** crowd is draw-bound in a way culling can't
+help (they're all visible) → separate **mesh-LOD** task filed
+([[viewer-perf-avatar-mesh-lod-screen-size]]); impostors
+([[viewer-avatar-impostors-billboard]]) stay the extreme fallback. Also noted:
+`collect_pick_warm_set` scales with the crowd (~4 ms at 100) — the pick pre-warm
+touching un-pickable copies, a bug to fix.

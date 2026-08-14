@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 62 |
-| ready | 250 |
+| ready | 251 |
 | blocked | 78 |
 | in-progress | 15 |
 | bugs | 25 |
 | done | 782 |
 | deferred | 23 |
 | wont-do | 10 |
-| **total** | **1245** |
+| **total** | **1246** |
 
 ## ideas (62)
 
@@ -155,7 +155,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (250)
+## ready (251)
 
 ### protocol
 
@@ -484,6 +484,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
 - [`viewer-perf-asset-streaming-frame-spikes`](ready/viewer-perf-asset-streaming-frame-spikes.md)
   — Budget asset upload/prep to kill single-digit-FPS streaming spikes
+- [`viewer-perf-avatar-mesh-lod-screen-size`](ready/viewer-perf-avatar-mesh-lod-screen-size.md)
+  — Screen-size mesh LOD for rigged avatar meshes (on-screen crowd draw)
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)

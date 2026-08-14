@@ -42,6 +42,7 @@
 //! the design's later migration — their control-avatar joints are a separate
 //! joint set kept intact this phase).
 
+pub(crate) mod crowd;
 pub(crate) mod render;
 pub(crate) mod stage;
 pub(crate) mod types;
@@ -174,6 +175,7 @@ impl Plugin for GpuAvatarsPlugin {
             .init_resource::<GpuAvatarPoseFeed>()
             .init_resource::<stage::GpuAvatarRegistry>()
             .init_resource::<stage::GpuAvatarStaging>()
+            .init_resource::<crowd::GpuCrowd>()
             .add_plugins(ExtractResourcePlugin::<stage::GpuAvatarStaging>::default())
             // The device capability gate: runs once before anything else
             // (the render device exists after plugin finish) and demotes an
@@ -181,15 +183,30 @@ impl Plugin for GpuAvatarsPlugin {
             .add_systems(PreStartup, select_gpu_avatar_path);
         if mode.live {
             app.add_systems(
+                // The synthetic-crowd debug spawner (`SL_VIEWER_CROWD`): a no-op
+                // unless the env selected a crowd. Runs in `Update` so its spawn
+                // commands flush before `PostUpdate` stages the copies.
+                Update,
+                crowd::spawn_crowd,
+            )
+            .add_systems(
                 PostUpdate,
-                // After the pose driver, so the feed holds this frame's final
-                // blended poses and (in ghost mode) the joint globals are
-                // posed.
-                // After both pose feeds: avatars publish in `pose_avatar_skeletons`,
-                // animesh in `publish_control_avatars`.
-                stage::stage_gpu_avatars
-                    .after(crate::animations::pose_avatar_skeletons)
-                    .after(crate::animesh::publish_control_avatars),
+                (
+                    // After the pose driver, so the feed holds this frame's final
+                    // blended poses and (in ghost mode) the joint globals are
+                    // posed.
+                    // After both pose feeds: avatars publish in `pose_avatar_skeletons`,
+                    // animesh in `publish_control_avatars`.
+                    // The crowd publisher runs between: after the template
+                    // avatar published, before the stage reads the feed.
+                    crowd::publish_crowd
+                        .after(crate::animations::pose_avatar_skeletons)
+                        .after(crate::animesh::publish_control_avatars),
+                    stage::stage_gpu_avatars
+                        .after(crate::animations::pose_avatar_skeletons)
+                        .after(crate::animesh::publish_control_avatars)
+                        .after(crowd::publish_crowd),
+                ),
             );
         }
         if mode.readback {
