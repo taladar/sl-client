@@ -41,14 +41,16 @@ use crate::notifications::NOTIFICATIONS;
 use crate::preferences::{
     CHECK_OFF, CHECK_SIZE, CONTROL_BORDER, PREF_TABS, PrefCheckboxBox, PreferencesExtraHits,
     PreferencesState, apply_preferences_filter, mirror_preferences_filter, spawn_pref_checkbox,
-    spawn_pref_section,
+    spawn_pref_combo, spawn_pref_section, spawn_pref_text,
 };
 use crate::settings_binding::SettingBinding;
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
     set_table_cell, spawn_table, spawn_table_row,
 };
+use crate::ui_text_input::TextInputKind;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use sl_settings::SettingValue;
 
 /// The stable id of this tab in [`PREF_TABS`].
 const TAB_ID: &str = "alerts";
@@ -171,6 +173,66 @@ pub(crate) fn build_alerts_tab(commands: &mut Commands, panel: Entity) {
         panel,
         "preferences-row-auto-accept-inventory",
         SettingBinding::account(crate::offers_invites::SETTING_AUTO_ACCEPT_INVENTORY),
+    );
+
+    // The radar's enter / leave reports (viewer-avatar-radar): each an opt-in
+    // per-avatar toggle, plus the output channel and the young-account alert.
+    spawn_pref_section(commands, panel, "preferences-section-radar-alerts");
+    for (label_key, setting) in [
+        (
+            "preferences-row-radar-chat-enter",
+            crate::radar::SETTING_CHAT_ENTER,
+        ),
+        (
+            "preferences-row-radar-chat-leave",
+            crate::radar::SETTING_CHAT_LEAVE,
+        ),
+        (
+            "preferences-row-radar-draw-enter",
+            crate::radar::SETTING_DRAW_ENTER,
+        ),
+        (
+            "preferences-row-radar-draw-leave",
+            crate::radar::SETTING_DRAW_LEAVE,
+        ),
+        (
+            "preferences-row-radar-sim-enter",
+            crate::radar::SETTING_SIM_ENTER,
+        ),
+        (
+            "preferences-row-radar-sim-leave",
+            crate::radar::SETTING_SIM_LEAVE,
+        ),
+        (
+            "preferences-row-radar-age-alert",
+            crate::radar::SETTING_AGE_ALERT,
+        ),
+    ] {
+        spawn_pref_checkbox(commands, panel, label_key, SettingBinding::account(setting));
+    }
+    spawn_pref_combo(
+        commands,
+        panel,
+        "preferences-row-radar-output",
+        SettingBinding::account(crate::radar::SETTING_ALERT_OUTPUT),
+        &[
+            (
+                "preferences-radar-output-chat",
+                SettingValue::String("chat".to_owned()),
+            ),
+            (
+                "preferences-radar-output-toast",
+                SettingValue::String("toast".to_owned()),
+            ),
+        ],
+    );
+    spawn_pref_text(
+        commands,
+        panel,
+        "preferences-row-radar-age-days",
+        SettingBinding::account(crate::radar::SETTING_AGE_DAYS),
+        TextInputKind::Integer,
+        1.0,
     );
 
     spawn_pref_section(commands, panel, "preferences-section-alert-popups");

@@ -866,6 +866,22 @@ pub(crate) struct OpenConversation {
     pub(crate) key: ConversationKey,
 }
 
+/// A viewer-generated system line for the **Nearby Chat transcript** — e.g. a
+/// radar enter / leave report ([`crate::radar`]). This is deliberately a
+/// separate channel from the transient overlay
+/// ([`crate::chat::LocalChatNotice`]); a producer that wants the line in both
+/// places writes both messages.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct NearbyChatNotice {
+    /// The speaker label shown before the body (empty for a bare notice).
+    pub(crate) speaker: String,
+    /// The agent the speaker label links to, if any (a clickable name, like
+    /// the reference's radar chat lines).
+    pub(crate) speaker_agent: Option<AgentKey>,
+    /// The line body.
+    pub(crate) body: String,
+}
+
 /// Which surface currently owns the conversations floater's shared strip and
 /// panel area: a **conversation** pane, or an **external** pane hosted in the
 /// same strip (the People / Contacts tab, [`crate::people`]). The two are
@@ -944,6 +960,7 @@ impl Plugin for ConversationsPlugin {
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
             .add_message::<OpenConversation>()
+            .add_message::<NearbyChatNotice>()
             .add_systems(
                 Startup,
                 spawn_conversations_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -952,6 +969,7 @@ impl Plugin for ConversationsPlugin {
                 Update,
                 (
                     ingest_conversation_events,
+                    ingest_nearby_notices,
                     open_conversations,
                     apply_conversation_selection,
                     respond_to_invites,
@@ -1485,6 +1503,28 @@ fn spawn_invite_button(
 // ---------------------------------------------------------------------------
 // Ingest
 // ---------------------------------------------------------------------------
+
+/// Fold viewer-generated [`NearbyChatNotice`] lines into the Nearby
+/// transcript as system lines (with a clickable speaker when an agent is
+/// attached).
+fn ingest_nearby_notices(
+    mut notices: MessageReader<NearbyChatNotice>,
+    mut model: ResMut<ConversationModel>,
+) {
+    for notice in notices.read() {
+        model.push_line(
+            ConversationKey::Nearby,
+            TranscriptLine {
+                own: false,
+                speaker: notice.speaker.clone(),
+                speaker_link: notice
+                    .speaker_agent
+                    .map_or(SpeakerLink::None, SpeakerLink::Agent),
+                body: notice.body.clone(),
+            },
+        );
+    }
+}
 
 /// Fold every relevant inbound event into the model: chat / IM / group /
 /// conference lines, typing notifications, invites, and the name caches behind

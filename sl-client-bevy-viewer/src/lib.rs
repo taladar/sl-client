@@ -172,6 +172,8 @@ mod probe_layers;
 mod probes;
 mod procedural;
 mod quick_preferences;
+mod radar;
+mod radar_model;
 mod reach;
 pub mod render_gallery;
 mod render_priority;
@@ -1349,6 +1351,7 @@ fn run_session(
     // list hosted as a pinned tab inside the Conversations floater. After
     // ConversationsPlugin, whose strip / panel area it adds its tab and pane into.
     .add_plugins(PeoplePlugin)
+    .add_plugins(crate::radar::RadarPlugin)
     // The Groups list (viewer-social-groups): the member's own groups, built into
     // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
     // content slot it fills.

@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 56 |
 | ready | 240 |
-| blocked | 77 |
+| blocked | 76 |
 | in-progress | 15 |
 | bugs | 23 |
-| done | 785 |
+| done | 786 |
 | deferred | 23 |
 | wont-do | 10 |
 | **total** | **1229** |
@@ -203,8 +203,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   debug & maintenance tools (incl. Rebake)
 - [`viewer-avatar-impostors-billboard`](ready/viewer-avatar-impostors-billboard.md)
   — Billboard impostors for distant avatars
-- [`viewer-avatar-radar`](ready/viewer-avatar-radar.md) — Avatar radar
-  (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -398,6 +396,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
+- [`viewer-minimap-click-radar-select`](ready/viewer-minimap-click-radar-select.md)
+  — Minimap single-click selects the avatar in the radar (blocked by
+  `viewer-avatar-radar` (done))
 - [`viewer-minimap-menu-cam-face`](ready/viewer-minimap-menu-cam-face.md) —
   Minimap context menu — Cam / Face towards avatar
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
@@ -719,7 +720,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (77)
+## blocked (76)
 
 ### protocol
 
@@ -814,9 +815,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done))
 - [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
-- [`viewer-minimap-click-radar-select`](blocked/viewer-minimap-click-radar-select.md)
-  — Minimap single-click selects the avatar in the radar (blocked by
-  `viewer-avatar-radar`)
 - [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
   `viewer-block-list`, `viewer-report-abuse`, `viewer-derender-blacklist`)
@@ -1044,7 +1042,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (785)
+## done (786)
 
 ### protocol
 
@@ -1215,6 +1213,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
+- [`viewer-avatar-radar`](done/viewer-avatar-radar.md) — Avatar radar
+  (nearby-avatar list)
 - [`viewer-avatar-state-dump-replay`](done/viewer-avatar-state-dump-replay.md) —
   Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —

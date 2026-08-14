@@ -743,6 +743,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::minimap::spawn_minimap_specimen,
     },
     UiElement {
+        id: "radar",
+        summary: "The avatar radar's content (`crate::radar`): the counts line, the nearby-avatar \
+                  table with its status glyphs and band-coloured ranges, and the action buttons. \
+                  The live floater binds a virtualized table off the radar model; here it is \
+                  static so its layout is swept.",
+        spawn: crate::radar::spawn_radar_specimen,
+    },
+    UiElement {
         id: "worldmap",
         summary: "The world-map floater's layout (`crate::world_map`): a tile-ish map surface \
                   with region fills and markers beside the search side panel with result rows. \

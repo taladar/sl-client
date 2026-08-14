@@ -2,7 +2,7 @@
 id: viewer-minimap-click-radar-select
 title: Minimap single-click selects the avatar in the radar
 topic: viewer
-status: blocked
+status: ready
 origin: split from viewer-minimap-interactions (2026-07-23)
 blocked_by: [viewer-avatar-radar]
 refs: [viewer-minimap-avatar-dots]

@@ -126,9 +126,11 @@ const MAX_CLASSIFIEDS: usize = 100;
 /// The profile-flags bit for "show in search" (`AVATAR_ALLOW_PUBLISH`).
 const FLAG_ALLOW_PUBLISH: u32 = 1;
 /// The profile-flags bit for "payment info on file" (`AVATAR_IDENTIFIED`).
-const FLAG_IDENTIFIED: u32 = 1 << 2;
+/// Shared with the avatar radar's payment column.
+pub(crate) const FLAG_IDENTIFIED: u32 = 1 << 2;
 /// The profile-flags bit for "payment info used" (`AVATAR_TRANSACTED`).
-const FLAG_TRANSACTED: u32 = 1 << 3;
+/// Shared with the avatar radar's payment column.
+pub(crate) const FLAG_TRANSACTED: u32 = 1 << 3;
 /// The profile-flags bit for "currently online" (`AVATAR_ONLINE`).
 const FLAG_ONLINE: u32 = 1 << 4;
 

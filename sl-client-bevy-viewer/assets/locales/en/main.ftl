@@ -544,6 +544,7 @@ bottom-toolbar-inventory = Inventory
 bottom-toolbar-appearance = Appearance
 bottom-toolbar-map = Map
 bottom-toolbar-minimap = Mini-map
+bottom-toolbar-radar = Radar
 bottom-toolbar-people = People
 # The chat *window* toggle (distinct from the always-visible nearby-chat input
 # bar that will sit above the button row).
@@ -810,6 +811,42 @@ minimap-tooltip-owner = Owner: { $name }
 minimap-tooltip-sale = For sale: L$ { $price } ({ $area } m²)
 minimap-tooltip-hint-teleport = Double-click to teleport
 minimap-tooltip-hint-map = Double-click to open the world map
+
+## The avatar radar floater (radar.rs, viewer-avatar-radar): the nearby-avatar
+## table, its enter / leave reports, and the row actions.
+
+radar-title = Radar
+radar-filter-placeholder = Filter by name
+# The label beside the range-limit checkbox and its metres field.
+radar-limit-range = Limit range (m)
+# The counts line above the table.
+radar-counts = { $total } nearby — { $region } in region, { $chat } in chat range
+# Column headers. Region and status are glyph columns: the region dot is
+# filled for a fully-streamed avatar and hollow for a coarse-only one, and the
+# status column shows T (typing), S (sitting) and A (away) letter glyphs.
+radar-col-name = Name
+radar-col-region = ●
+radar-col-status = TSA
+radar-col-title = Title
+radar-col-payment = $
+radar-col-age = Age
+radar-col-seen = Seen
+radar-col-range = Range
+# The trailing action buttons, acting on the selected row.
+radar-action-profile = Profile
+radar-action-im = IM
+# Alert lines; each is prefixed with the avatar's name by the reporter. The
+# -unknown variants are used when the distance is unknown (coarse altitude).
+radar-alert-chat-enter = entered chat range ({ $distance } m).
+radar-alert-chat-enter-unknown = entered chat range.
+radar-alert-chat-leave = left chat range.
+radar-alert-draw-enter = entered draw distance ({ $distance } m).
+radar-alert-draw-enter-unknown = entered draw distance.
+radar-alert-draw-leave = left draw distance.
+radar-alert-sim-enter = entered the region ({ $distance } m).
+radar-alert-sim-enter-unknown = entered the region.
+radar-alert-sim-leave = left the region.
+radar-alert-age = triggered the age alert. Age: { $days } day(s).
 
 ## The world-map floater (world_map.rs).
 
@@ -3304,6 +3341,20 @@ preferences-section-alert-headlines = Notices
 preferences-row-friend-online-toasts = Notify me when my friends log in or out
 preferences-row-group-notice-toasts = Show a toast when a group notice arrives
 preferences-row-auto-accept-inventory = Automatically accept incoming inventory offers
+# The radar's enter / leave reports (viewer-avatar-radar): opt-in per-avatar
+# toggles, the output channel, and the young-account alert.
+preferences-section-radar-alerts = Radar reports
+preferences-row-radar-chat-enter = Report avatars entering chat range
+preferences-row-radar-chat-leave = Report avatars leaving chat range
+preferences-row-radar-draw-enter = Report avatars entering draw distance
+preferences-row-radar-draw-leave = Report avatars leaving draw distance
+preferences-row-radar-sim-enter = Report avatars entering the region
+preferences-row-radar-sim-leave = Report avatars leaving the region
+preferences-row-radar-age-alert = Alert me about new accounts on the radar
+preferences-row-radar-output = Radar reports go to
+preferences-radar-output-chat = Nearby chat
+preferences-radar-output-toast = Notification toasts
+preferences-row-radar-age-days = Age alert threshold (days)
 preferences-section-alert-popups = Viewer alerts that can be shown or hidden
 preferences-alerts-col-show = Show
 preferences-alerts-col-label = Alert

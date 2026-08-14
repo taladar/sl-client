@@ -91,6 +91,10 @@ const MINIMAP_OPEN: &str = "minimap-open";
 /// the check mark on the World ▸ World Map entry.
 const WORLD_MAP_OPEN: &str = "world-map-open";
 
+/// The condition key that holds while the avatar radar floater is open —
+/// drives the check mark on the World ▸ Radar entry.
+const RADAR_OPEN: &str = "radar-open";
+
 /// The condition key that holds while the in-world property lines are shown —
 /// drives the check mark on the World ▸ Property Lines entry.
 const PROPERTY_LINES_ON: &str = "property-lines-on";
@@ -273,6 +277,8 @@ static WORLD_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("Mini-Map", "toggle-minimap").checked_when(MINIMAP_OPEN),
         ),
+        // The nearby-avatar radar (viewer-avatar-radar).
+        MenuItemDef::Command(MenuCommand::new("Radar", "toggle-radar").checked_when(RADAR_OPEN)),
         MenuItemDef::Command(
             MenuCommand::new("World Map", "toggle-world-map")
                 .accel("Ctrl+M")
@@ -476,6 +482,7 @@ fn update_top_menu_conditions(
     let conversations_open = open(crate::conversations::CONVERSATIONS_FLOATER_ID);
     let web_browser_open = open(crate::web_floater::WEB_FLOATER_ID);
     let minimap_open = open(crate::minimap::MINIMAP_FLOATER_ID);
+    let radar_open = open(crate::radar::RADAR_FLOATER_ID);
     let world_map_open = open(crate::world_map::WORLD_MAP_FLOATER_ID);
     let search_open = open(crate::search::SEARCH_FLOATER_ID);
     let build_tools_open = open(crate::edit_tool::BUILD_TOOLS_FLOATER_ID);
@@ -501,6 +508,9 @@ fn update_top_menu_conditions(
     }
     if minimap_open {
         wanted.push(MINIMAP_OPEN);
+    }
+    if radar_open {
+        wanted.push(RADAR_OPEN);
     }
     if world_map_open {
         wanted.push(WORLD_MAP_OPEN);
@@ -658,6 +668,9 @@ fn handle_top_menu_actions(
             }
             "toggle-minimap" => {
                 toggle_floater(&floaters, &mut panels, crate::minimap::MINIMAP_FLOATER_ID);
+            }
+            "toggle-radar" => {
+                toggle_floater(&floaters, &mut panels, crate::radar::RADAR_FLOATER_ID);
             }
             "toggle-world-map" => {
                 toggle_floater(

@@ -531,8 +531,9 @@ pub(crate) fn compose_tag(
 }
 
 /// The AWAY built-in animation's id, resolved once — the signalled-set entry
-/// is the protocol's only carrier of another avatar's away state.
-static AWAY_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
+/// is the protocol's only carrier of another avatar's away state. Shared
+/// with the avatar radar's away column.
+pub(crate) static AWAY_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
     std::sync::LazyLock::new(|| {
         sl_anim::registry::builtin_animation_by_name("away").map(|animation| animation.id)
     });
