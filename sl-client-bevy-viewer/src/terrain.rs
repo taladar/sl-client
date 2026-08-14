@@ -113,6 +113,7 @@ pub(crate) fn drive_terrain_lighting(
 }
 use sl_terrain::TerrainComposition;
 
+use crate::asset_budget::MeshUploadBudget;
 use crate::camera::ViewerCamera;
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::probe_layers::environment_render_layers;
@@ -387,29 +388,6 @@ pub(crate) fn recenter_terrain(
     }
 }
 
-/// The default for [`TerrainRebuildBudget`]: deferred patch-mesh rebuilds per
-/// frame.
-const DEFAULT_TERRAIN_REBUILD_BUDGET: usize = 8;
-
-/// The per-frame cap on deferred terrain patch-mesh rebuilds drained by
-/// [`drain_patch_rebuilds`] (env `SL_VIEWER_TERRAIN_REBUILD_BUDGET`).
-#[derive(Resource)]
-pub(crate) struct TerrainRebuildBudget {
-    /// How many queued patch rebuilds may run each frame.
-    per_frame: usize,
-}
-
-impl Default for TerrainRebuildBudget {
-    fn default() -> Self {
-        let per_frame = std::env::var("SL_VIEWER_TERRAIN_REBUILD_BUDGET")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_TERRAIN_REBUILD_BUDGET);
-        Self { per_frame }
-    }
-}
-
 /// Patch-mesh rebuilds deferred to [`drain_patch_rebuilds`]'s per-frame
 /// budget, deduped — during a region stream the neighbour-seam pass re-queues
 /// the same patches over and over, and a `RegionInfoHandshake` queues a whole
@@ -436,11 +414,13 @@ impl PendingPatchRebuilds {
 /// heightfield mesh, learn each region's compositing parameters and request its
 /// detail textures, and swap each decoded texture into the right material(s).
 ///
-/// A freshly arrived patch still builds inline (its own latency matters); the
-/// seam-closing neighbour rebuilds and the handshake's whole-region rebuild
-/// are **queued** into [`PendingPatchRebuilds`] and drained a few per frame by
-/// [`drain_patch_rebuilds`], so a region streaming in no longer rebuilds an
-/// unbounded number of patch meshes in one frame.
+/// A freshly arrived patch builds inline **while the shared per-frame mesh budget
+/// holds** (its own latency matters); once that budget is spent — and for the
+/// seam-closing neighbour rebuilds and the handshake's whole-region rebuild — the
+/// patch is **queued** into [`PendingPatchRebuilds`] and drained a few per frame by
+/// [`drain_patch_rebuilds`], so a region streaming in no longer uploads an unbounded
+/// number of patch meshes in one frame (the serial `extract_render_asset<RenderMesh>`
+/// spike).
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected ECS resources and event \
@@ -452,6 +432,7 @@ pub(crate) fn update_terrain(
     mut decoded: MessageReader<TextureDecoded>,
     mut state: ResMut<TerrainState>,
     mut rebuilds: ResMut<PendingPatchRebuilds>,
+    mut mesh_budget: ResMut<MeshUploadBudget>,
     mut manager: ResMut<TextureManager>,
     lighting: Res<CurrentTerrainLighting>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -475,7 +456,16 @@ pub(crate) fn update_terrain(
                 // ground floor keeps answering (see [`TerrainState::land_cache`]).
                 state.land_cache.insert(key, (**patch).clone());
                 state.bump_revision(patch.region_handle);
-                spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands);
+                // Build inline while the shared per-frame mesh budget holds; once it
+                // is spent, defer to the budgeted `drain_patch_rebuilds` so a region
+                // streaming in cannot upload a whole region of land patches at once.
+                if mesh_budget.has_budget() {
+                    if spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands) {
+                        mesh_budget.remaining = mesh_budget.remaining.saturating_sub(1);
+                    }
+                } else {
+                    rebuilds.push(key);
+                }
                 // This patch supplies the shared far edge for its west / south
                 // neighbours in the same region, so rebuild them (a few per
                 // frame, deduped) to close seams.
@@ -537,19 +527,23 @@ fn ensure_region(
 
 /// Spawn a fresh entity for the land patch at `key`, or replace the mesh and
 /// transform of the entity already rendering that grid position.
+///
+/// Returns `true` when it built and inserted a patch mesh (a new `Assets<Mesh>`
+/// upload — the budgeted unit), `false` when the key had no raw patch data / no
+/// composition yet and so did nothing.
 fn spawn_or_replace_patch(
     state: &mut TerrainState,
     key: PatchKey,
     meshes: &mut Assets<Mesh>,
     commands: &mut Commands,
-) {
+) -> bool {
     let (region, patch_x, patch_y) = key;
     let composition = state
         .regions
         .get(&region)
         .and_then(|entry| entry.composition);
     let Some(mesh_data) = build_patch_mesh(&state.raw_patches, composition.as_ref(), key) else {
-        return;
+        return false;
     };
     let mesh = meshes.add(mesh_data);
     let size = state.raw_patches.get(&key).map_or(0, |patch| patch.size);
@@ -582,29 +576,7 @@ fn spawn_or_replace_patch(
             );
         }
     }
-}
-
-/// Rebuild the mesh of an already-spawned patch (its entity, material, and
-/// transform stay); a no-op if that key has no entity yet.
-fn rebuild_existing(
-    state: &TerrainState,
-    key: PatchKey,
-    meshes: &mut Assets<Mesh>,
-    commands: &mut Commands,
-) {
-    let (region, _, _) = key;
-    let Some(entity) = state.patches.get(&key).copied() else {
-        return;
-    };
-    let composition = state
-        .regions
-        .get(&region)
-        .and_then(|entry| entry.composition);
-    let Some(mesh_data) = build_patch_mesh(&state.raw_patches, composition.as_ref(), key) else {
-        return;
-    };
-    let mesh = meshes.add(mesh_data);
-    commands.entity(entity).insert(Mesh3d(mesh));
+    true
 }
 
 /// Queue a rebuild of the west / south / south-west neighbours of the patch at
@@ -657,25 +629,28 @@ fn queue_region_rebuilds(
     }
 }
 
-/// Drain up to [`TerrainRebuildBudget`] queued patch-mesh rebuilds. A queued
-/// key whose patch has since vanished is free; a rebuild always reads the
-/// state current at drain time, so a deferred rebuild is never stale.
+/// Drain queued patch-mesh (re)builds from the shared per-frame
+/// [`MeshUploadBudget`] — both the seam / region rebuilds and the initial patch
+/// spawns [`update_terrain`] deferred past the budget. A queued key whose patch has
+/// since vanished is free (it builds nothing, spends nothing); a build always reads
+/// the state current at drain time, so a deferred build is never stale.
 pub(crate) fn drain_patch_rebuilds(
     mut rebuilds: ResMut<PendingPatchRebuilds>,
-    budget: Res<TerrainRebuildBudget>,
-    state: Res<TerrainState>,
+    mut budget: ResMut<MeshUploadBudget>,
+    mut state: ResMut<TerrainState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
 ) {
-    let mut built = 0_usize;
-    while built < budget.per_frame {
+    while budget.has_budget() {
         let Some(key) = rebuilds.queue.pop_front() else {
             break;
         };
         let _was_queued = rebuilds.queued.remove(&key);
-        if state.patches.contains_key(&key) {
-            rebuild_existing(&state, key, &mut meshes, &mut commands);
-            built = built.saturating_add(1);
+        // `spawn_or_replace_patch` spawns a not-yet-rendered patch or replaces an
+        // existing one's mesh, and reports whether it actually built — only a real
+        // mesh upload spends budget, so a vanished key does not waste it.
+        if spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands) {
+            budget.remaining = budget.remaining.saturating_sub(1);
         }
     }
 }

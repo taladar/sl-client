@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 223 |
 | blocked | 67 |
 | in-progress | 16 |
-| bugs | 27 |
+| bugs | 28 |
 | done | 825 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1257** |
+| **total** | **1258** |
 
 ## ideas (63)
 
@@ -939,7 +939,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (27)
+## bugs (28)
 
 ### protocol
 
@@ -949,6 +949,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
+  — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
   — Animesh surrounded by an almost-transparent box shell
 - [`viewer-arrival-orientation-snap`](bugs/viewer-arrival-orientation-snap.md) —

@@ -35,6 +35,7 @@ mod about_region;
 mod animations;
 mod animesh;
 mod appearance;
+mod asset_budget;
 mod asset_retry;
 mod attachment_menu;
 mod audio;
@@ -293,6 +294,7 @@ use crate::animesh::{
     ControlAvatarState, drive_control_avatars, ingest_object_animations, publish_control_avatars,
 };
 use crate::appearance::{ServerBakeState, drive_server_bake};
+use crate::asset_budget::{MeshUploadBudget, reset_mesh_upload_budget};
 use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatar_menu::AvatarMenuPlugin;
@@ -379,11 +381,10 @@ use crate::notification_host::{
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
-    GeometryApplyBudget, LodApplyBudget, ObjectState, PendingDecodedMeshes, PendingDecodedSculpts,
-    PendingObjectEvents, PrimLodTargets, RiggedBindSkipLog, SpawnBudget, TreeLodTargets,
-    adopt_pending_attachments, apply_object_meshes, apply_object_sculpts, apply_prim_lod,
-    apply_rigged_attachments, apply_tree_lod, log_suspicious_objects, pick_object,
-    prune_control_avatars, recenter_objects, reset_geometry_apply_budget, reset_lod_apply_budget,
+    ObjectState, PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents, PrimLodTargets,
+    RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
+    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
+    log_suspicious_objects, pick_object, prune_control_avatars, recenter_objects,
     spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
@@ -413,8 +414,7 @@ use crate::sky::{
 use crate::spacenav::SpacenavPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::terrain::{
-    PendingPatchRebuilds, TerrainRebuildBudget, TerrainState, drain_patch_rebuilds,
-    recenter_terrain, update_terrain,
+    PendingPatchRebuilds, TerrainState, drain_patch_rebuilds, recenter_terrain, update_terrain,
 };
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
@@ -1663,14 +1663,13 @@ fn run_session(
         .init_resource::<VolumeMorphGain>()
         .init_resource::<TerrainState>()
         .init_resource::<PendingPatchRebuilds>()
-        .init_resource::<TerrainRebuildBudget>()
+        // One shared per-frame mesh-upload lane spent by object spawn / geometry /
+        // LOD / terrain apply (replaces their old independent budgets).
+        .init_resource::<MeshUploadBudget>()
         .init_resource::<crate::terrain::CurrentTerrainLighting>()
         .init_resource::<ObjectState>()
         .init_resource::<PendingObjectEvents>()
-        .init_resource::<SpawnBudget>()
-        .init_resource::<GeometryApplyBudget>()
         .init_resource::<RiggedBindSkipLog>()
-        .init_resource::<LodApplyBudget>()
         .init_resource::<PendingDecodedMeshes>()
         .init_resource::<PendingDecodedSculpts>()
         // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
@@ -1798,6 +1797,17 @@ fn run_session(
         // shared asset. Scheduled in `PreUpdate` so the swap's commands are
         // applied at the schedule boundary, ahead of every mutator.
         .add_systems(PreUpdate, material_cache::detach_shared_face_materials)
+        // Refill the shared per-frame asset-upload budgets in `PreUpdate`, ahead of
+        // every `Update` apply system that spends from them — the image lane
+        // (`TextureApplyBudget`, drawn by the texture / PBR-map / bump / legacy / bake
+        // systems) and the mesh lane (`MeshUploadBudget`, drawn by object spawn /
+        // geometry / LOD / terrain). Resetting here rather than inside the scattered
+        // Update tuples guarantees the refill precedes all consumers regardless of
+        // their relative order.
+        .add_systems(
+            PreUpdate,
+            (reset_texture_apply_budget, reset_mesh_upload_budget),
+        )
         .add_systems(
             Update,
             (
@@ -1863,17 +1873,11 @@ fn run_session(
                     (recenter_objects, update_objects).chain(),
                 ),
                 // Build the geometry of any mesh object whose asset just decoded, and
-                // of any sculpted prim whose sculpt map just decoded — chained after
-                // the shared decode-apply budget refill so a decode burst's builds
-                // spread across frames (`GeometryApplyBudget`;
-                // `apply_rigged_attachments` spends from the same pool via its
-                // `.after(apply_object_meshes)` edge).
-                (
-                    reset_geometry_apply_budget,
-                    apply_object_meshes,
-                    apply_object_sculpts,
-                )
-                    .chain(),
+                // of any sculpted prim whose sculpt map just decoded — both spend from
+                // the shared `MeshUploadBudget` (refilled in `PreUpdate`) so a decode
+                // burst's builds spread across frames; `apply_rigged_attachments`
+                // spends from the same pool via its `.after(apply_object_meshes)` edge.
+                (apply_object_meshes, apply_object_sculpts).chain(),
                 // Apply decoded diffuse textures to parked faces, then the PBR (GLTF)
                 // render-material pipeline (P27.1): keep the material store's
                 // `ViewerAsset` cap current, register each newly-spawned face's
@@ -1892,7 +1896,6 @@ fn run_session(
                     // whatever budget is left. Chained so each drain sees the budget the
                     // earlier steps spent (see `TextureApplyBudget`).
                     (
-                        reset_texture_apply_budget,
                         apply_prim_textures,
                         crate::textures::patch_parked_decoded_textures,
                         drain_deferred_face_textures,
@@ -2125,14 +2128,14 @@ fn run_session(
                 // entity despawned) — the cache holds only weak asset ids, so
                 // that is bookkeeping, not asset freeing.
                 (
-                    // Budget the LOD re-tessellations across frames: refill the
-                    // shared `LodApplyBudget`, then `apply_prim_lod` and (P26.2)
-                    // `apply_tree_lod` — which regenerates any tree whose
-                    // branching / billboard tier the driver changed — each spend
-                    // from it, so a tick's whole batch spreads over frames instead
-                    // of a single command-flush spike. Chained so tree sees the
-                    // budget prim spent; all after the driver has picked levels.
-                    (reset_lod_apply_budget, apply_prim_lod, apply_tree_lod)
+                    // Budget the LOD re-tessellations across frames: `apply_prim_lod`
+                    // and (P26.2) `apply_tree_lod` — which regenerates any tree whose
+                    // branching / billboard tier the driver changed — each spend from
+                    // the shared `MeshUploadBudget` (refilled in `PreUpdate`), so a
+                    // tick's whole batch spreads over frames instead of a single
+                    // command-flush spike. Chained so tree sees the budget prim spent;
+                    // all after the driver has picked levels.
+                    (apply_prim_lod, apply_tree_lod)
                         .chain()
                         .after(drive_render_priority),
                     geometry_cache::prune_geometry_cache.run_if(

@@ -55,7 +55,9 @@ use crate::face_material::{
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
-use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
+use crate::textures::{
+    PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
+};
 
 /// A face-material identity: the scoped object id and its Linden face index — the
 /// key both a registered face material and an incoming per-face GLTF override
@@ -1383,6 +1385,7 @@ fn drop_texture_patches(
 pub(crate) fn apply_pbr_textures(
     mut manager: ResMut<MaterialManager>,
     textures: Res<TextureManager>,
+    mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
@@ -1397,8 +1400,21 @@ pub(crate) fn apply_pbr_textures(
             continue;
         };
         let patches = manager.texture_pending.remove(&id).unwrap_or_default();
+        // Overflow past this frame's shared image budget re-parks for a later frame,
+        // so a cache-warm burst of PBR maps does not upload every slot at once (the
+        // serial `extract_render_asset<GpuImage>` spike).
+        let mut deferred: Vec<PbrTexturePatch> = Vec::new();
         for patch in patches {
-            let image = manager.slot_image(&mut images, id, patch.slot.is_srgb(), &decoded);
+            let srgb = patch.slot.is_srgb();
+            // A slot image already uploaded for this (id, srgb) is free to reuse; only
+            // a first-use build spends image budget. When the budget is spent, defer
+            // the uncached patches — the cached ones still apply for free.
+            let cached = manager.images.contains_key(&(id, srgb));
+            if !cached && !budget.take_image() {
+                deferred.push(patch);
+                continue;
+            }
+            let image = manager.slot_image(&mut images, id, srgb, &decoded);
             let Some(mut material_asset) = materials.get_mut(&patch.material) else {
                 continue;
             };
@@ -1422,6 +1438,13 @@ pub(crate) fn apply_pbr_textures(
                     material_asset.extension.params.map_flags |= MAP_FLAG_EMISSIVE;
                 }
             }
+        }
+        if !deferred.is_empty() {
+            manager
+                .texture_pending
+                .entry(id)
+                .or_default()
+                .extend(deferred);
         }
     }
 }

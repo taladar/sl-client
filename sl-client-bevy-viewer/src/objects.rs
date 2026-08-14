@@ -54,6 +54,7 @@ use sl_client_bevy::{
 };
 
 use crate::animesh::ControlAvatarState;
+use crate::asset_budget::MeshUploadBudget;
 use crate::avatars::{
     AvatarBody, AvatarPickTarget, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
@@ -1397,19 +1398,6 @@ const fn local_translation(position: &Vector) -> Vec3 {
     Vec3::new(position.x, position.y, position.z)
 }
 
-/// Default cap on how many object geometry-builds [`update_objects`] performs per
-/// frame — a new object's spawn, or a known object's reshape / retexture
-/// re-tessellation, each of which creates the object's face materials. A region
-/// streaming in delivers a burst of object updates; spawning every object's faces in
-/// one frame creates hundreds of face materials at once, and Bevy's render world then
-/// builds all their bindless bind groups in one `prepare_erased_assets` (a
-/// multi-millisecond spike — the dominant rez hitch measured on Aditi). Bounding the
-/// builds per frame spreads a linkset's rez across a few frames (progressive
-/// pop-in, as the reference viewer does). A move / remove is free (it builds no
-/// geometry). At ~0.27 ms per object build this keeps the drain's main-thread cost
-/// bounded. Tune with `SL_VIEWER_OBJECT_SPAWN_BUDGET`.
-const DEFAULT_OBJECT_SPAWN_BUDGET: usize = 16;
-
 /// One buffered object-stream event awaiting processing under the per-frame spawn
 /// budget (see [`PendingObjectEvents`]). Upsert snapshots live out-of-line in
 /// [`PendingObjectEvents::payloads`] so a newer snapshot for a still-queued
@@ -1424,7 +1412,7 @@ enum PendingObjectEvent {
 }
 
 /// The FIFO backlog of object-stream events, drained front-to-back by
-/// [`update_objects`] at up to [`SpawnBudget`] geometry-builds per frame so a
+/// [`update_objects`] at up to [`MeshUploadBudget`] geometry-builds per frame so a
 /// region-rez burst does not spawn every object (and build every face material) in
 /// one frame. Kept in strict arrival order, so a linkset's root still spawns before
 /// its children and an update / remove still lands after the add it targets — exactly
@@ -1499,120 +1487,12 @@ fn pop_upsert_payload(
     object
 }
 
-/// The per-frame object geometry-build budget (see [`DEFAULT_OBJECT_SPAWN_BUDGET`]).
-#[derive(Resource)]
-pub(crate) struct SpawnBudget {
-    /// How many geometry-builds [`update_objects`] may perform each frame.
-    per_frame: usize,
-}
-
-impl Default for SpawnBudget {
-    fn default() -> Self {
-        let per_frame = std::env::var("SL_VIEWER_OBJECT_SPAWN_BUDGET")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_OBJECT_SPAWN_BUDGET);
-        Self { per_frame }
-    }
-}
-
-/// The default for [`GeometryApplyBudget`]: geometry builds per frame across
-/// the three decode-result apply passes.
-const DEFAULT_GEOMETRY_APPLY_BUDGET: usize = 8;
-
 /// The most decoded keys [`apply_object_meshes`] / [`apply_object_sculpts`]
 /// pop per frame: each popped key costs one scan of the tracked-object map
 /// even when nothing is pending on it (most `TextureDecoded` ids are ordinary
 /// face textures, not sculpt maps), so the scans are capped separately from
 /// the build budget.
 const GEOMETRY_APPLY_SCAN_CAP: usize = 64;
-
-/// The shared per-frame budget for decode-result geometry builds: mesh
-/// submesh builds ([`apply_object_meshes`]), sculpt face builds
-/// ([`apply_object_sculpts`]), and rigged binds
-/// ([`apply_rigged_attachments`]) spend from one pool, refilled by
-/// [`reset_geometry_apply_budget`] each frame — so a cache-warm login (every
-/// asset decodes at once) builds a few objects per frame instead of the whole
-/// backlog in one. Deliberately separate from [`SpawnBudget`], so a decode
-/// burst cannot starve object spawning (or vice versa). A key whose objects
-/// number more than the remaining budget still finishes that key (soft
-/// overrun) — per-key work is not resumable without duplicate LOD rebuilds.
-#[derive(Resource)]
-pub(crate) struct GeometryApplyBudget {
-    /// The per-frame pool (env `SL_VIEWER_GEOMETRY_APPLY_BUDGET`).
-    per_frame: usize,
-    /// What remains this frame; refilled by [`reset_geometry_apply_budget`].
-    remaining: usize,
-}
-
-impl Default for GeometryApplyBudget {
-    fn default() -> Self {
-        let per_frame = std::env::var("SL_VIEWER_GEOMETRY_APPLY_BUDGET")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_GEOMETRY_APPLY_BUDGET);
-        Self {
-            per_frame,
-            remaining: per_frame,
-        }
-    }
-}
-
-/// Refill the shared [`GeometryApplyBudget`] at the start of each frame's
-/// apply pass (runs before the three spending systems).
-pub(crate) fn reset_geometry_apply_budget(mut budget: ResMut<GeometryApplyBudget>) {
-    budget.remaining = budget.per_frame;
-}
-
-/// The default for [`LodApplyBudget`]: prim/tree LOD re-tessellations applied
-/// per frame across [`apply_prim_lod`] and [`apply_tree_lod`].
-const DEFAULT_LOD_APPLY_BUDGET: usize = 8;
-
-/// The shared per-frame budget for **LOD re-tessellation** application, spent by
-/// [`apply_prim_lod`] and [`apply_tree_lod`] from one pool and refilled by
-/// [`reset_lod_apply_budget`] each frame. Kept separate from
-/// [`GeometryApplyBudget`] (as that is from [`SpawnBudget`]) so a login decode
-/// burst does not starve LOD catch-up and a camera-sweep LOD burst does not
-/// starve decode application — the two rarely coincide (decode is login, LOD is
-/// camera movement).
-///
-/// `drive_render_priority` re-derives the whole visible-object LOD target set
-/// every throttled tick (`REPRIORITIZE_INTERVAL_SECS`, 4 Hz): it clears the maps
-/// and re-inserts a desired level for every visible prim/tree. Without a budget,
-/// the one frame per tick that applied a freshly repopulated set re-tessellated
-/// the entire batch at once (a ~358 ms `apply_prim_lod` command-flush spike in
-/// the 2026-08-10 aditi capture). Budgeting spreads that batch across the frames
-/// until the next tick; a target left un-applied is simply re-derived then (its
-/// actual level has not changed), so no work is lost.
-#[derive(Resource)]
-pub(crate) struct LodApplyBudget {
-    /// The per-frame pool (env `SL_VIEWER_LOD_APPLY_BUDGET`).
-    per_frame: usize,
-    /// What remains this frame; refilled by [`reset_lod_apply_budget`].
-    remaining: usize,
-}
-
-impl Default for LodApplyBudget {
-    fn default() -> Self {
-        let per_frame = std::env::var("SL_VIEWER_LOD_APPLY_BUDGET")
-            .ok()
-            .and_then(|value| value.parse::<usize>().ok())
-            .filter(|value| *value > 0)
-            .unwrap_or(DEFAULT_LOD_APPLY_BUDGET);
-        Self {
-            per_frame,
-            remaining: per_frame,
-        }
-    }
-}
-
-/// Refill the shared [`LodApplyBudget`] at the start of each frame's LOD apply
-/// pass (runs before [`apply_prim_lod`] / [`apply_tree_lod`]).
-pub(crate) fn reset_lod_apply_budget(mut budget: ResMut<LodApplyBudget>) {
-    budget.remaining = budget.per_frame;
-}
 
 /// The outcome of examining one LOD target in [`retain_lod_budgeted`].
 enum LodOutcome {
@@ -1708,7 +1588,7 @@ fn drain_budgeted<T>(
 /// Fold the object event stream into the scene graph: spawn / update / despawn
 /// entities, classify them, keep their transforms current, and maintain linkset
 /// parenting — draining any earlier-frame backlog first, then applying new events
-/// inline (no clone) while the queue is empty and the [`SpawnBudget`] holds, else
+/// inline (no clone) while the queue is empty and the [`MeshUploadBudget`] holds, else
 /// buffering the overflow into [`PendingObjectEvents`] for a later frame.
 #[expect(
     clippy::too_many_arguments,
@@ -1718,7 +1598,7 @@ pub(crate) fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
     mut pending: ResMut<PendingObjectEvents>,
-    spawn_budget: Res<SpawnBudget>,
+    mut mesh_budget: ResMut<MeshUploadBudget>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -1728,7 +1608,10 @@ pub(crate) fn update_objects(
     mut cache: ResMut<GeometryCache>,
     mut material_cache: ResMut<MaterialCache>,
 ) {
-    let mut budget = spawn_budget.per_frame;
+    // Object spawns draw from the shared per-frame mesh-upload lane, in schedule
+    // order with the other mesh-inserting systems — seed a local counter from what
+    // the lane has left and write the remainder back so later systems see it spent.
+    let mut budget = mesh_budget.remaining;
     // 1. Drain any backlog carried over from earlier frames first (FIFO), so new
     //    events never jump ahead of it. Only a spawn / re-tessellation (`apply_object`
     //    returns `true`) costs budget; a move or remove is free.
@@ -1815,6 +1698,8 @@ pub(crate) fn update_objects(
             }
         }
     }
+    // Hand the unspent remainder back to the shared lane for the later mesh systems.
+    mesh_budget.remaining = budget;
 }
 
 /// A scale component (metres) above this is unusual for ordinary content and
@@ -4134,7 +4019,7 @@ fn tracked_descendants(state: &ObjectState, root: ScopedObjectId) -> Vec<ScopedO
 /// update re-requests the mesh).
 ///
 /// Budgeted: freshly decoded keys park in [`PendingDecodedMeshes`] and drain
-/// under the shared [`GeometryApplyBudget`], so a decode burst (a cache-warm
+/// under the shared [`MeshUploadBudget`], so a decode burst (a cache-warm
 /// login resolves everything at once) builds a few keys per frame instead of
 /// the whole backlog in one. Deferral is safe — the apply reads the store's
 /// current (newest) block when its key's turn comes.
@@ -4145,7 +4030,7 @@ fn tracked_descendants(state: &ObjectState, root: ScopedObjectId) -> Vec<ScopedO
 pub(crate) fn apply_object_meshes(
     mut decoded: MessageReader<MeshDecoded>,
     mut pending_keys: ResMut<PendingDecodedMeshes>,
-    mut budget: ResMut<GeometryApplyBudget>,
+    mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4317,7 +4202,7 @@ pub(crate) fn apply_object_meshes(
 )]
 pub(crate) fn apply_prim_lod(
     mut targets: ResMut<PrimLodTargets>,
-    mut budget: ResMut<LodApplyBudget>,
+    mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4328,7 +4213,7 @@ pub(crate) fn apply_prim_lod(
     mut material_cache: ResMut<MaterialCache>,
 ) {
     // Budgeted so a tick's worth of re-tessellations spreads across frames
-    // instead of a single command-flush spike (see `LodApplyBudget`). Shared
+    // instead of a single command-flush spike (see `MeshUploadBudget`). Shared
     // with `apply_tree_lod`, which runs after and sees the remaining budget.
     let builds = retain_lod_budgeted(
         &mut targets.0,
@@ -4389,7 +4274,7 @@ pub(crate) fn apply_prim_lod(
 
 /// Regenerate each tree the render-priority driver picked a new [`TreeTier`] for
 /// (P26.2) — the tree counterpart of [`apply_prim_lod`], sharing its
-/// [`LodApplyBudget`]. For any tree whose desired tier differs from its current
+/// [`MeshUploadBudget`]. For any tree whose desired tier differs from its current
 /// one, despawns its face and regenerates the branch / leaf geometry (or the
 /// billboard imposter) at the new tier, up to the remaining per-frame budget.
 #[expect(
@@ -4398,7 +4283,7 @@ pub(crate) fn apply_prim_lod(
 )]
 pub(crate) fn apply_tree_lod(
     mut targets: ResMut<TreeLodTargets>,
-    mut budget: ResMut<LodApplyBudget>,
+    mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -4406,7 +4291,7 @@ pub(crate) fn apply_tree_lod(
     mut manager: ResMut<TextureManager>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
-    // Budgeted from the shared `LodApplyBudget`, spent after `apply_prim_lod`.
+    // Budgeted from the shared `MeshUploadBudget`, spent after `apply_prim_lod`.
     let builds = retain_lod_budgeted(
         &mut targets.0,
         budget.remaining,
@@ -4560,7 +4445,7 @@ const fn pending_kind(pending: Option<&PendingGeometry>) -> &'static str {
 /// [`adopt_pending_attachments`] does not also pin it to a rigid
 /// attachment-point node.
 ///
-/// Budgeted: skinned builds spend from the shared [`GeometryApplyBudget`], so
+/// Budgeted: skinned builds spend from the shared [`MeshUploadBudget`], so
 /// a crowd's rigged bodies bind over several frames; the not-yet-built rest
 /// stays pending and is re-collected next frame (the cheap not-ready retries
 /// — skeleton or finest LOD still loading — are free, as before).
@@ -4574,7 +4459,7 @@ pub(crate) fn apply_rigged_attachments(
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
     mesh_manager: Res<MeshManager>,
-    mut budget: ResMut<GeometryApplyBudget>,
+    mut budget: ResMut<MeshUploadBudget>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -5210,7 +5095,7 @@ fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Opt
 /// consumers never contend for the same decoded texture.
 ///
 /// Budgeted: decoded keys park in [`PendingDecodedSculpts`] and drain under
-/// the shared [`GeometryApplyBudget`] (and the per-frame scan cap, since most
+/// the shared [`MeshUploadBudget`] (and the per-frame scan cap, since most
 /// decoded textures are not sculpt maps), spreading a decode burst's sculpt
 /// tessellation across frames.
 #[expect(
@@ -5220,7 +5105,7 @@ fn log_rigged_face(mesh_key: MeshKey, index: usize, face: &TextureFace, bom: Opt
 pub(crate) fn apply_object_sculpts(
     mut decoded: MessageReader<TextureDecoded>,
     mut pending_keys: ResMut<PendingDecodedSculpts>,
-    mut budget: ResMut<GeometryApplyBudget>,
+    mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,

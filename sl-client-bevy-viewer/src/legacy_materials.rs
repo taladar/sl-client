@@ -53,7 +53,7 @@ use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
-use crate::textures::TextureManager;
+use crate::textures::{TextureApplyBudget, TextureManager};
 
 /// The fetch priority a legacy material's normal map is requested at — the same
 /// modest boost the PBR pipeline uses for its maps, so the map loads at full
@@ -591,6 +591,7 @@ pub(crate) fn preview_legacy_material(
 pub(crate) fn apply_legacy_normal_maps(
     mut manager: ResMut<LegacyMaterialManager>,
     textures: Res<TextureManager>,
+    mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
@@ -605,6 +606,18 @@ pub(crate) fn apply_legacy_normal_maps(
             continue;
         };
         let handles = manager.texture_pending.remove(&id).unwrap_or_default();
+        // One linear normal map is built per texture (then cached). When this frame's
+        // shared image budget is spent, re-park the whole texture's faces for a later
+        // frame so a cache-warm burst does not upload every map at once (the serial
+        // `extract_render_asset<GpuImage>` spike). A cached map is free to reuse.
+        if !manager.images.contains_key(&id) && !budget.take_image() {
+            manager
+                .texture_pending
+                .entry(id)
+                .or_default()
+                .extend(handles);
+            continue;
+        }
         let image = manager.normal_image(&mut images, id, &decoded);
         for handle in handles {
             if let Some(mut material) = materials.get_mut(&handle) {
@@ -621,6 +634,7 @@ pub(crate) fn apply_legacy_normal_maps(
 pub(crate) fn apply_legacy_specular_maps(
     mut manager: ResMut<LegacyMaterialManager>,
     textures: Res<TextureManager>,
+    mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
@@ -635,6 +649,13 @@ pub(crate) fn apply_legacy_specular_maps(
             continue;
         };
         let handles = manager.spec_pending.remove(&id).unwrap_or_default();
+        // One sRGB specular map is built per texture (then cached); mirror the
+        // normal-map lane's budget gate so a specular burst cannot spike the serial
+        // image upload either. A cached map is free to reuse.
+        if !manager.spec_images.contains_key(&id) && !budget.take_image() {
+            manager.spec_pending.entry(id).or_default().extend(handles);
+            continue;
+        }
         let image = manager.spec_image(&mut images, id, &decoded);
         for handle in handles {
             if let Some(mut material) = materials.get_mut(&handle) {

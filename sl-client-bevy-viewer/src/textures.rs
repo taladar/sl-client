@@ -890,6 +890,25 @@ impl Default for TextureApplyBudget {
     }
 }
 
+impl TextureApplyBudget {
+    /// Try to spend one image-build from this frame's shared image lane. Returns
+    /// `true` (and decrements) when there was budget, `false` when the lane is spent
+    /// and the caller should leave its decoded image parked for a later frame. This
+    /// lane is shared by **every** image-inserting apply system — prim diffuse here,
+    /// plus the PBR-map / bump-normal / legacy-map / avatar-bake systems in other
+    /// modules — so the combined new-`Image` count per frame is bounded and the
+    /// serial `extract_render_asset<GpuImage>` upload cannot spike from stacked
+    /// per-system budgets.
+    pub(crate) const fn take_image(&mut self) -> bool {
+        if self.image_remaining > 0 {
+            self.image_remaining = self.image_remaining.saturating_sub(1);
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// A positive per-frame budget from `var`, or `default` when it is unset /
 /// unparsable / zero.
 pub(crate) fn env_budget(var: &str, default: usize) -> usize {

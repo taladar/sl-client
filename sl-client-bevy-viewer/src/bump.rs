@@ -57,7 +57,7 @@ use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::render_priority::TERRAIN_BOOST_PRIORITY;
-use crate::textures::TextureManager;
+use crate::textures::{TextureApplyBudget, TextureManager};
 
 /// The reference viewer's `SHININESS_TO_ALPHA` table (`llface.cpp`): the
 /// environment-reflection intensity for each of the four shiny levels (none / low
@@ -292,6 +292,7 @@ pub(crate) fn register_bump_faces(
 pub(crate) fn apply_bump_normals(
     mut manager: ResMut<BumpManager>,
     textures: Res<TextureManager>,
+    mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
@@ -311,11 +312,26 @@ pub(crate) fn apply_bump_normals(
             parked.len(),
             id.uuid()
         );
+        // Overflow past this frame's shared image budget re-parks for a later frame,
+        // so a cache-warm burst of generated normal maps does not upload every map at
+        // once (the serial `extract_render_asset<GpuImage>` spike).
+        let mut deferred: Vec<(Handle<FaceMaterial>, bool)> = Vec::new();
         for (handle, invert) in parked {
+            // A generated normal map already uploaded for this (id, polarity) is free
+            // to reuse; only a first-use build spends image budget. Defer the uncached
+            // faces once the budget is spent — cached ones still apply for free.
+            let cached = manager.normals.contains_key(&(id, invert));
+            if !cached && !budget.take_image() {
+                deferred.push((handle, invert));
+                continue;
+            }
             let image = manager.normal_image(&mut images, id, invert, &decoded);
             if let Some(mut material) = materials.get_mut(&handle) {
                 material.base.normal_map_texture = Some(image);
             }
+        }
+        if !deferred.is_empty() {
+            manager.pending.entry(id).or_default().extend(deferred);
         }
     }
 }

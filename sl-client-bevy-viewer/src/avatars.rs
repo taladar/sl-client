@@ -65,7 +65,7 @@ use crate::name_tag_content::TagContent;
 use crate::objects::ObjectState;
 use crate::physics::{AvatarInterp, AvatarMotion};
 use crate::probe_layers::dynamic_render_layers;
-use crate::textures::{TextureDecoded, TextureManager, tint_color};
+use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -3593,21 +3593,41 @@ pub(crate) fn assign_avatar_bake_materials(
     state.bake_dirty.clear();
 }
 
-/// Fill each newly decoded avatar bake into the region materials parked on it
-/// (P14.2): upload (and cache) the baked [`Image`], then drop it into every parked
-/// material's `base_color_texture`. Mirrors [`apply_prim_textures`](crate::textures::apply_prim_textures);
-/// a decode that failed leaves the parked materials on their fallback skin tint.
+/// Fill each decoded avatar bake into the region materials parked on it (P14.2):
+/// upload (and cache) the baked [`Image`], then drop it into every parked material's
+/// `base_color_texture`. Mirrors
+/// [`patch_parked_decoded_textures`](crate::textures::patch_parked_decoded_textures)
+/// — it re-scans the parked set for **any** decoded bake (not just a fresh decode
+/// event), so a region material parked *after* its bake decoded is still filled, and
+/// the per-frame overflow simply stays parked. A decode that failed leaves the
+/// parked materials on their fallback skin tint.
+///
+/// New-image uploads spend the shared image budget
+/// ([`TextureApplyBudget::take_image`]): a crowd rez that decodes many avatars'
+/// bakes in one frame would otherwise upload every bake at once, adding to the
+/// serial `extract_render_asset<GpuImage>` spike. A bake already uploaded (cached)
+/// is free to reuse, so it always applies even with the budget spent.
 pub(crate) fn apply_avatar_bake_textures(
-    mut decoded: MessageReader<TextureDecoded>,
     manager: Res<TextureManager>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
+    mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
+    let ready: Vec<TextureKey> = bake_mats
+        .pending
+        .keys()
+        .copied()
+        .filter(|id| bake_mats.images.contains_key(id) || manager.decoded(*id).is_some())
+        .collect();
     let mut filled = 0_usize;
-    for &TextureDecoded(id) in decoded.read() {
+    for id in ready {
+        // A cached bake image is free; only a first-use upload spends image budget.
+        // When the budget is spent, leave the uncached bake parked for a later frame.
+        if !bake_mats.images.contains_key(&id) && !budget.take_image() {
+            continue;
+        }
         let Some(parked) = bake_mats.pending.remove(&id) else {
-            // Not a bake any avatar region is waiting on (e.g. a prim texture).
             continue;
         };
         let Some((image, alpha)) = bake_mats.ensure_bake(id, &manager, &mut images) else {

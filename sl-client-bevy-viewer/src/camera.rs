@@ -1202,6 +1202,9 @@ pub(crate) fn position_camera(
     // pose from current-frame local transforms (see [`sit_camera_pose`]).
     seat_chain: SeatChainQuery,
     motions: Query<&AvatarMotion>,
+    // The own avatar's mesh sub-hierarchy, so the collision ray can ignore the
+    // agent's own body (see [`collide_camera`]).
+    children: Query<&Children>,
     // Tracks whether the scripted-sit-camera path was active last frame, so the
     // diagnostic below logs only on the transition.
     mut sit_camera_active: Local<bool>,
@@ -1219,6 +1222,23 @@ pub(crate) fn position_camera(
     // it has arrived. Read from the current-frame anchor `Transform`, not the
     // frame-late `GlobalTransform`, so the follow does not trail by a frame.
     let avatar_pose = own_avatar_pose(&identity, &avatars, &transforms, &motions);
+
+    // The own avatar's mesh entities (its anchor and the whole rigged-body
+    // sub-hierarchy), so [`collide_camera`] does not treat the agent's own body as
+    // an occluder. Without this the ray cast from the head focus exits through the
+    // skull / hair a few centimetres out and yanks the camera into the head — worst
+    // while the walk animation tilts the head into the rearward ray. The reference
+    // viewer excludes the agent's own avatar from the same occlusion test.
+    let own_avatar_entities: std::collections::HashSet<Entity> = identity
+        .agent_id
+        .and_then(|agent| avatars.body_root_of(agent))
+        .map(|anchor| {
+            let mut set: std::collections::HashSet<Entity> =
+                children.iter_descendants(anchor).collect();
+            set.insert(anchor);
+            set
+        })
+        .unwrap_or_default();
 
     match *mode {
         CameraMode::Flycam => {
@@ -1338,7 +1358,7 @@ pub(crate) fn position_camera(
             // Camera collision: pull the eye in toward the focus if the line of
             // sight is obstructed, so the camera does not clip through a wall.
             if collide {
-                eye = collide_camera(&mut ray_cast, focus, eye);
+                eye = collide_camera(&mut ray_cast, focus, eye, &own_avatar_entities);
             }
             apply_pose(
                 &mut transform,
@@ -1442,14 +1462,23 @@ fn apply_pose(
 /// of sight, leaving [`COLLISION_PADDING`] of clearance — the reference's
 /// occlusion pushback. Casts from the focus outward (so the near surface, not a far
 /// one, is what limits the camera).
-fn collide_camera(ray_cast: &mut MeshRayCast, focus: Vec3, eye: Vec3) -> Vec3 {
+fn collide_camera(
+    ray_cast: &mut MeshRayCast,
+    focus: Vec3,
+    eye: Vec3,
+    ignore: &std::collections::HashSet<Entity>,
+) -> Vec3 {
     let offset = vsub(eye, focus);
     let distance = offset.length();
     let Some(direction) = Dir3::new(offset).ok() else {
         return eye;
     };
     let ray = Ray3d::new(focus, direction);
-    let settings = MeshRayCastSettings::default();
+    // Ignore the agent's own avatar: the focus sits inside the head, so the ray
+    // would otherwise hit the back of the skull / hair immediately and pull the
+    // camera into the head. Everything else (walls, other objects) still occludes.
+    let filter = |entity: Entity| !ignore.contains(&entity);
+    let settings = MeshRayCastSettings::default().with_filter(&filter);
     let Some((_entity, hit)) = ray_cast.cast_ray(ray, &settings).first() else {
         return eye;
     };
