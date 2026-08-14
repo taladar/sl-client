@@ -13,7 +13,7 @@ use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, secs_metric,
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, is_aditi, secs_metric,
 };
 
 /// The secondary is invited to two distinct group IM sessions and answers each
@@ -63,6 +63,32 @@ pub struct ChatInviteAcceptDecline;
 /// because it bridges the join reply through the Groups V2 backend.
 const MEMBERSHIP_SETTLE: Duration = Duration::from_secs(2);
 
+/// How long each invitation attempt waits before re-sending a fresh marker
+/// (Second Life propagates a fresh group/join through its group service
+/// asynchronously and drops messages into it meanwhile).
+const DELIVERY_ATTEMPT_WINDOW: Duration = Duration::from_secs(10);
+
+/// How many markers to send before concluding delivery genuinely fails.
+const DELIVERY_ATTEMPTS: u32 = 6;
+
+/// The outcome when no invitation was delivered within the retry budget: an
+/// honest partial on Second Life (its group service drops messages into a
+/// freshly created group until membership has propagated — observed live), a
+/// hard failure on OpenSim (delivery is deterministic there).
+fn no_invitation_outcome(ctx: &mut TestContext, grid: Grid, half: &str) -> Result<(), TestFailure> {
+    if is_aditi(grid) {
+        ctx.mark_partial(&format!(
+            "no group-session invitation was delivered within the retry budget for the \
+             {half} half — Second Life drops messages into a freshly created group until \
+             its group service has propagated the membership"
+        ));
+        return Ok(());
+    }
+    Err(TestFailure::Assertion(format!(
+        "group invitation was never delivered ({half} half)"
+    )))
+}
+
 impl GridTest for ChatInviteAcceptDecline {
     fn name(&self) -> &'static str {
         "chat-invite-accept-decline"
@@ -73,7 +99,7 @@ impl GridTest for ChatInviteAcceptDecline {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -82,6 +108,7 @@ impl GridTest for ChatInviteAcceptDecline {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let grid = ctx.grid();
             // Both avatars must be logged in and active before group traffic can
             // be routed between them.
             ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
@@ -100,8 +127,11 @@ impl GridTest for ChatInviteAcceptDecline {
             })?;
 
             // --- Accept path: invite the secondary to a group, then accept. ---
-            let (accept_group, accept_source, accept_rtt) =
-                provoke_group_invitation(ctx, primary_id, 0, "accept").await?;
+            let Some((accept_group, accept_source, accept_rtt)) =
+                provoke_group_invitation(ctx, primary_id, 0, "accept").await?
+            else {
+                return no_invitation_outcome(ctx, grid, "accept");
+            };
             let accept_session = ChatSessionKind::Group {
                 group_id: accept_group,
             };
@@ -129,8 +159,11 @@ impl GridTest for ChatInviteAcceptDecline {
             )?;
 
             // --- Decline path: invite the secondary to a second group, decline. ---
-            let (decline_group, decline_source, decline_rtt) =
-                provoke_group_invitation(ctx, primary_id, 1, "decline").await?;
+            let Some((decline_group, decline_source, decline_rtt)) =
+                provoke_group_invitation(ctx, primary_id, 1, "decline").await?
+            else {
+                return no_invitation_outcome(ctx, grid, "decline");
+            };
             let decline_session = ChatSessionKind::Group {
                 group_id: decline_group,
             };
@@ -212,7 +245,7 @@ async fn provoke_group_invitation(
     primary_id: AgentKey,
     index: usize,
     purpose: &str,
-) -> Result<(GroupKey, GroupSource, Duration), TestFailure> {
+) -> Result<Option<(GroupKey, GroupSource, Duration)>, TestFailure> {
     // The throwaway group's name carries a wall-clock suffix so repeated
     // create-per-run does not collide on the grid's unique-name constraint; it is
     // ignored on the pre-made path. The primary owns the group either way.
@@ -222,7 +255,7 @@ async fn provoke_group_invitation(
     let group = support::membership_group(
         ctx,
         index,
-        &format!("sl-client chat-invite {purpose} {unique}"),
+        &format!("slc inv {purpose} {unique}"),
         "throwaway group for the chat-invite-accept-decline conformance case",
     )
     .await?;
@@ -252,29 +285,33 @@ async fn provoke_group_invitation(
     // the distribution pass lists the secondary and routes it the invitation.
     tokio::time::sleep(MEMBERSHIP_SETTLE).await;
 
-    // The primary opens the group session and sends a marker tagged with its own
-    // agent id (so the predicate ignores unrelated background group traffic).
+    // The primary opens the group session and sends a marker tagged with its
+    // own agent id and the attempt number (so the predicate ignores unrelated
+    // background group traffic). Second Life's group service propagates a
+    // fresh group/join asynchronously and drops messages into it meanwhile
+    // (see [`super::group_session_message`]), so the send is retried with a
+    // fresh marker; delivery exhaustion returns `Ok(None)` for the caller to
+    // record honestly.
     ctx.primary()
         .send(Command::StartGroupSession(group_id))
         .await?;
-    let marker = format!("chat-invite {purpose} {primary_id}");
     let sent_at = Instant::now();
-    ctx.primary()
-        .send(Command::SendGroupMessage {
-            group_id,
-            message: marker.clone(),
-        })
-        .await?;
-
-    // The secondary observes the invitation: a `ChatterBoxInvitation` from the
-    // primary on this group's session, carrying the marker inline.
-    let invited_session = {
-        let marker = marker.clone();
-        ctx.secondary()
+    let mut attempt: u32 = 0;
+    let invited_session = loop {
+        attempt = attempt.saturating_add(1);
+        let marker = format!("chat-invite {purpose} {primary_id} a{attempt}");
+        ctx.primary()
+            .send(Command::SendGroupMessage {
+                group_id,
+                message: marker.clone(),
+            })
+            .await?;
+        match ctx
+            .secondary()
             .ok_or_else(|| {
                 TestFailure::Assertion("two-account test ran without a secondary".to_owned())
             })?
-            .wait_for(REPLY_TIMEOUT, move |event| match event {
+            .wait_for(DELIVERY_ATTEMPT_WINDOW, move |event| match event {
                 Event::ConferenceInvited {
                     session_id,
                     from_agent_id,
@@ -290,7 +327,13 @@ async fn provoke_group_invitation(
                 }
                 _ => None,
             })
-            .await?
+            .await
+        {
+            Ok(session) => break session,
+            Err(TestFailure::Timeout(_)) if attempt < DELIVERY_ATTEMPTS => {}
+            Err(TestFailure::Timeout(_)) => return Ok(None),
+            Err(other) => return Err(other),
+        }
     };
     let invite_rtt = sent_at.elapsed();
     check_eq(
@@ -298,7 +341,7 @@ async fn provoke_group_invitation(
         &GroupKey::from(invited_session),
         &group_id,
     )?;
-    Ok((group_id, group.source, invite_rtt))
+    Ok(Some((group_id, group.source, invite_rtt)))
 }
 
 /// Queries the secondary's chat-session registry and returns the entry for

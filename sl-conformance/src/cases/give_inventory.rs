@@ -60,7 +60,19 @@ use sl_client_tokio::{
 use crate::context::{Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
-use crate::support::{check_eq, secs_metric, send_then_wait};
+use crate::support::{check_eq, is_aditi, secs_metric, send_then_wait};
+
+/// The giver-facing acceptance IM wait: the full [`REPLY_TIMEOUT`] on OpenSim
+/// (where it is a hard assertion), a short best-effort probe on Second Life
+/// (which does not relay one — the item-landed check is the real
+/// confirmation there).
+const fn giver_ack_timeout(grid: Grid) -> Duration {
+    if is_aditi(grid) {
+        Duration::from_secs(10)
+    } else {
+        REPLY_TIMEOUT
+    }
+}
 
 /// How long to wait for the region to become active.
 const REGION_TIMEOUT: Duration = Duration::from_secs(60);
@@ -179,6 +191,32 @@ where
     }
 }
 
+/// Re-fetch `parent` until an item named `name` appears, returning its id, or
+/// fail with `description` once [`VERIFY_TIMEOUT`] elapses. Matches on the
+/// unique per-run name rather than a pre-known id, since Second Life assigns
+/// the recipient's copy id on accept (unlike OpenSim, which files the copy at
+/// offer time with a bucket-carried id).
+async fn poll_for_item(
+    session: &mut Session,
+    parent: InventoryFolderKey,
+    name: &str,
+    description: &str,
+) -> Result<InventoryKey, TestFailure> {
+    let start = Instant::now();
+    loop {
+        let items = fetch_items(session, parent).await?;
+        if let Some(item) = items.iter().find(|entry| entry.name == name) {
+            return Ok(item.item_id);
+        }
+        if start.elapsed() >= VERIFY_TIMEOUT {
+            return Err(TestFailure::Assertion(format!(
+                "inventory never reached expected state: {description}"
+            )));
+        }
+        tokio::time::sleep(VERIFY_POLL_INTERVAL).await;
+    }
+}
+
 /// Gives an inventory item from the primary to the secondary, confirming the
 /// offer, the acceptance round-trip, and the item's arrival in the recipient's
 /// inventory.
@@ -195,7 +233,7 @@ impl GridTest for GiveInventory {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -204,6 +242,7 @@ impl GridTest for GiveInventory {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let grid = ctx.grid();
             // Both avatars must be logged in and active before an offer can be
             // routed between them.
             ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
@@ -243,8 +282,11 @@ impl GridTest for GiveInventory {
             let primary_notecards =
                 find_system_folder(primary, primary_root, FolderType::Notecard).await?;
 
-            let wanted = item_name.clone();
-            let original = send_then_wait(
+            // Capture the first created-item reply rather than filtering on the
+            // exact name, then assert the name afterwards — a grid that echoes
+            // the item back differently fails with a named field mismatch
+            // instead of a silent timeout.
+            let created = send_then_wait(
                 primary,
                 Command::CreateInventoryItem(NewInventoryItem {
                     folder_id: primary_notecards,
@@ -258,13 +300,13 @@ impl GridTest for GiveInventory {
                 }),
                 REPLY_TIMEOUT,
                 move |event| match event {
-                    Event::InventoryItemCreated { item, .. } if item.name == wanted => {
-                        Some(item.item_id)
-                    }
+                    Event::InventoryItemCreated { item, .. } => Some(item.clone()),
                     _ => None,
                 },
             )
             .await?;
+            check_eq("created item name", &created.name, &item_name)?;
+            let original = created.item_id;
             poll_items(
                 primary,
                 primary_notecards,
@@ -311,20 +353,21 @@ impl GridTest for GiveInventory {
             let offer_rtt = given_at.elapsed();
 
             // The offer is attributed to the primary and describes a single
-            // notecard item (not a folder). OpenSim rewrites the bucket to carry
-            // the recipient's copy id, so this is the id to verify against the
-            // recipient's inventory.
+            // notecard item (not a folder). OpenSim rewrites the bucket to
+            // carry the recipient's copy id; Second Life leaves the id to be
+            // assigned on accept, so the offered id is validated as an item
+            // here but the landed copy is matched by name below.
             check_eq("offer from_agent_id", &offer.from_agent_id, &primary_id)?;
             check_eq("offer asset_type", &offer.asset_type, &AssetType::Notecard)?;
             check_eq("offer from_task", &offer.from_task, &false)?;
-            let copy_id: InventoryKey = match offer.item_id {
-                InventoryItemOrFolderKey::Item(id) => id,
+            match offer.item_id {
+                InventoryItemOrFolderKey::Item(_) => {}
                 InventoryItemOrFolderKey::Folder(_) => {
                     return Err(TestFailure::Assertion(
                         "inventory offer carried a folder, expected a single item".to_owned(),
                     ));
                 }
-            };
+            }
 
             // --- Secondary accepts, filing the item into its Notecards folder, and
             // confirms the item physically landed there (never trusting the
@@ -343,10 +386,18 @@ impl GridTest for GiveInventory {
                 })
                 .await?;
 
-            // --- Primary observes the acceptance the grid relays back. This is the
-            // round-trip confirmation that OpenSim's calling-card accept lacks.
-            ctx.primary()
-                .wait_for(REPLY_TIMEOUT, |event| match event {
+            // --- Primary observes the acceptance the grid relays back to the
+            // *giver*. OpenSim's `InventoryTransferModule` relays an
+            // `IM_INVENTORY_ACCEPTED` IM to the giver — the round-trip
+            // confirmation OpenSim's calling-card accept lacks. Second Life
+            // does **not** relay a giver-facing acceptance IM (the modern
+            // viewer confirms the give via inventory/AIS state, not an IM;
+            // observed live), so the assertion is OpenSim-only — on SL it is a
+            // best-effort metric and the authoritative confirmation is the
+            // item physically landing in the recipient's folder below.
+            let giver_ack_seen = match ctx
+                .primary()
+                .wait_for(giver_ack_timeout(grid), |event| match event {
                     Event::InstantMessageReceived(im)
                         if im.from_agent_id == secondary_id
                             && im.dialog == ImDialog::InventoryAccepted =>
@@ -355,23 +406,27 @@ impl GridTest for GiveInventory {
                     }
                     _ => None,
                 })
-                .await?;
+                .await
+            {
+                Ok(()) => true,
+                Err(TestFailure::Timeout(_)) if is_aditi(grid) => false,
+                Err(other) => return Err(other),
+            };
             let accept_rtt = accepted_at.elapsed();
 
-            // --- Verify the offered item's copy is in the recipient's Notecards
-            // folder (OpenSim files it there at offer time), matched on both the
-            // copy id and the name.
+            // --- Verify the offered item's copy is in the recipient's
+            // Notecards folder — the authoritative "the give worked" signal on
+            // both grids. Match on the unique per-run name (OpenSim files the
+            // copy at offer time and rewrites the bucket to carry the copy id;
+            // Second Life assigns the id on accept, so the id is not knowable
+            // up front), and capture the landed id for cleanup.
             let secondary = ctx.secondary().ok_or_else(|| {
                 TestFailure::Assertion("two-account test ran without a secondary".to_owned())
             })?;
-            poll_items(
+            let landed = poll_for_item(
                 secondary,
                 secondary_notecards,
-                |items| {
-                    items
-                        .iter()
-                        .any(|entry| entry.item_id == copy_id && entry.name == wanted_name)
-                },
+                &wanted_name,
                 "the given item did not appear in the recipient's Notecards folder",
             )
             .await?;
@@ -380,7 +435,7 @@ impl GridTest for GiveInventory {
             // received copy, the giver deletes its original. Item deletion is not
             // Trash-gated, so neither needs the move-to-Trash dance.
             secondary
-                .send(Command::RemoveInventoryItems(vec![copy_id]))
+                .send(Command::RemoveInventoryItems(vec![landed]))
                 .await?;
             ctx.primary()
                 .send(Command::RemoveInventoryItems(vec![original]))
@@ -388,6 +443,7 @@ impl GridTest for GiveInventory {
 
             let metrics = ctx.metrics();
             metrics.set("path", "udp");
+            metrics.set("giver_ack_seen", giver_ack_seen);
             metrics.set_timing(&secs_metric("offer_rtt"), offer_rtt.as_secs_f64());
             metrics.set_timing(&secs_metric("accept_rtt"), accept_rtt.as_secs_f64());
             Ok(())

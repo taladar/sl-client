@@ -22,6 +22,10 @@ it, each targeting the object by [`ScopedObjectId`](world.md#objects):
   surfacing the parsed items as `Event::TaskInventoryContents` (the
   `TaskInventoryReply` is still emitted first). See [Xfer File
   Transfer](../comms/xfer.md) for the download mechanism and the listing format.
+  To read a listed item's *asset* — a script or notecard body — fetch it over
+  the [UDP asset Transfer](../comms/transfer.md) path
+  (`Command::FetchTaskItemAsset`), the only path for task-item assets on
+  either grid.
 - `Command::UpdateTaskInventory { target, key, item }` writes (adds or replaces)
   an item. `key` is a `TaskInventoryKey` choosing whether the simulator matches
   the existing entry by item id or by asset id; `item` is the full inventory
@@ -148,6 +152,16 @@ messages decode the same way — `ServerEvent::RequestTaskInventory` /
 `ServerEvent::RezScript`, and `ServerEvent::RevokeScriptPermissions` — and a
 `RequestTaskInventory` is answered with `SimSession::send_reply_task_inventory`.
 
+The permission handshake is mirrored as a machine:
+`SimSession::send_script_question` asks the agent (recording the asked set as
+outstanding — `SimSession::script_question`), the client's `ScriptAnswerYes`
+decodes as `ServerEvent::ScriptPermissionAnswer` and settles into a grant
+mirror with the same tri-state as the client's
+(`SimSession::script_grant`: never asked, explicitly denied — an empty
+answer — or granted). The taken-controls side pairs the existing
+`send_script_control_change` with the decoded
+`ServerEvent::ForceScriptControlRelease`.
+
 ---
 
 > **In this codebase**
@@ -160,6 +174,11 @@ messages decode the same way — `ServerEvent::RequestTaskInventory` /
 > - Event `ScriptRunning` is decoded in `sl-proto/src/session/methods.rs`.
 > - Server events `RequestScriptRunning`, `SetScriptRunning`, `ResetScript`,
 >   plus `send_script_running_reply`, are in `sl-proto/src/sim_session.rs`.
+> - The sim side of the permission machine — `send_script_question`,
+>   `ServerEvent::ScriptPermissionAnswer`, and the `script_question` /
+>   `script_grant` accessors — is in `sl-proto/src/sim_session.rs`; the
+>   loopback proofs are the `script_permission_*` tests in
+>   `sl-proto/tests/sim_session.rs`.
 > - REPL commands `request_script_running`, `set_script_running` (the `running`
 >   flag accepts `true`/`false`), and `reset_script`.
 > - The existing dialog/permission surface is the commands `reply_script_dialog`

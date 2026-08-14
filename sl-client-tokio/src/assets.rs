@@ -7,14 +7,53 @@
 //! [`ArcSwapOption`] so [`Client::run`](crate::Client::run) can refresh it at
 //! startup and on every region change without rebuilding the store.
 
+use std::path::Path;
+
 use arc_swap::ArcSwapOption;
 use async_trait::async_trait;
 use bytes::Bytes;
 use reqwest::Client as ReqwestClient;
 use reqwest::StatusCode as ReqwestStatusCode;
 use sl_asset::{AssetFetcher, AssetRef, FetchChunk, FetchError};
+use sl_proto::{AssetKey, InMemoryAssetSource};
+use uuid::Uuid;
 
 use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
+
+/// Eagerly loads every asset file in `dir` into an
+/// [`InMemoryAssetSource`], for a fake grid or a loopback test that serves the
+/// asset-delivery caps ([`AssetCaps`](sl_proto::AssetCaps)) from real bytes on
+/// disk.
+///
+/// This is the directory-backed counterpart of the pure in-memory source: it
+/// reads the whole directory once at construction and hands back an in-memory
+/// source, so the caps' serving path stays free of filesystem access (the
+/// `sl-proto` sans-I/O invariant). Each file's **stem** must be a UUID; the
+/// extension is ignored (bare `<uuid>`, `<uuid>.j2c`, `<uuid>.mesh` and
+/// `<uuid>.asset` all load), because the source is keyed by UUID alone. Files
+/// whose stem is not a UUID, and sub-directories, are skipped. The directory
+/// is flat — it is not the sharded on-disk cache layout `sl-asset` uses.
+///
+/// # Errors
+///
+/// Returns the first I/O error reading the directory or a file.
+pub fn load_asset_dir(dir: &Path) -> std::io::Result<InMemoryAssetSource> {
+    let mut source = InMemoryAssetSource::new();
+    for entry in fs_err::read_dir(dir)? {
+        let path = entry?.path();
+        if !path.is_file() {
+            continue;
+        }
+        let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let Ok(uuid) = Uuid::parse_str(stem) else {
+            continue;
+        };
+        source.insert(AssetKey::from(uuid), fs_err::read(&path)?);
+    }
+    Ok(source)
+}
 
 /// Summarizes a failed HTTP response as a one-line `status; body: …` string
 /// (body whitespace-collapsed and truncated), so a fetch error carries what the

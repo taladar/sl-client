@@ -36,6 +36,26 @@ pub fn build_seed_request(capability_names: &[&str]) -> String {
     out
 }
 
+/// Parses a capability-seed request — the inverse of [`build_seed_request`]:
+/// an LLSD array of the capability names the client wants granted. Entries
+/// that are not strings are skipped; a body that is not an array yields an
+/// empty list. The requested order is preserved.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_seed_request(xml: &str) -> Result<Vec<String>, roxmltree::Error> {
+    let mut names = Vec::new();
+    if let Llsd::Array(entries) = parse_llsd_xml(xml)? {
+        for entry in entries {
+            if let Some(name) = entry.as_str() {
+                names.push(name.to_owned());
+            }
+        }
+    }
+    Ok(names)
+}
+
 /// Builds the LLSD-XML body for an `EventQueueGet` poll: `{ ack, done }`.
 #[must_use]
 pub fn build_event_queue_request(ack: Option<i32>, done: bool) -> String {
@@ -47,6 +67,32 @@ pub fn build_event_queue_request(ack: Option<i32>, done: bool) -> String {
     format!(
         "<llsd><map><key>ack</key>{ack_xml}<key>done</key><boolean>{done_xml}</boolean></map></llsd>"
     )
+}
+
+/// A parsed `EventQueueGet` long-poll request body: `{ ack, done }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EventQueueRequest {
+    /// The last batch id the client received (echoed from the previous
+    /// response's `id`), or `None` (`<undef />`) on the first poll of a
+    /// session.
+    pub ack: Option<i32>,
+    /// Whether the client is tearing the queue down (sent on region exit).
+    pub done: bool,
+}
+
+/// Parses an `EventQueueGet` request — the inverse of
+/// [`build_event_queue_request`], the server counterpart of
+/// [`parse_event_queue_response`]. A missing or `<undef />` `ack` is `None`;
+/// a missing `done` is `false`.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_event_queue_request(xml: &str) -> Result<EventQueueRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let ack = root.get("ack").and_then(Llsd::as_i32);
+    let done = root.get("done").and_then(Llsd::as_bool).unwrap_or(false);
+    Ok(EventQueueRequest { ack, done })
 }
 
 /// Builds the LLSD-XML body for a `FetchInventoryDescendents2` request: a
@@ -107,6 +153,19 @@ pub fn build_update_avatar_appearance_request(cof_version: i32) -> String {
     format!("<llsd><map><key>cof_version</key><integer>{cof_version}</integer></map></llsd>")
 }
 
+/// Parses an `UpdateAvatarAppearance` capability request — the inverse of
+/// [`build_update_avatar_appearance_request`], the simulator counterpart of
+/// the client's server-side-bake trigger. Returns the Current Outfit Folder
+/// version the client asked the grid to bake; a missing `cof_version` is `0`.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_update_avatar_appearance_request(xml: &str) -> Result<i32, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    Ok(root.get("cof_version").and_then(Llsd::as_i32).unwrap_or(0))
+}
+
 /// Builds the LLSD-XML metadata body for the first step of a
 /// `NewFileAgentInventory` capability upload (the modern path that stores a new
 /// asset *and* creates an inventory item). The simulator replies with an
@@ -159,6 +218,85 @@ pub fn build_new_file_agent_inventory_request(
     out
 }
 
+/// A parsed `NewFileAgentInventory` step-1 metadata body — the simulator view
+/// of the client's [`build_new_file_agent_inventory_request`] fields. A
+/// missing field falls back to the empty string / nil key / `0`, matching the
+/// lenient request parsers elsewhere in this module.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct NewFileAgentInventoryRequest {
+    /// The inventory folder the created item is filed in.
+    pub folder_id: InventoryFolderKey,
+    /// LL's short asset-type name (e.g. `"texture"`, `"animatn"`, `"mesh"`).
+    pub asset_type: String,
+    /// LL's short inventory-type name (e.g. `"texture"`, `"animation"`).
+    pub inventory_type: String,
+    /// The created item's name.
+    pub name: String,
+    /// The created item's description.
+    pub description: String,
+    /// The permission bitfield granted to the next owner.
+    pub next_owner_mask: u32,
+    /// The permission bitfield granted to the group.
+    pub group_mask: u32,
+    /// The permission bitfield granted to everyone.
+    pub everyone_mask: u32,
+    /// The L$ price the client expects the upload to cost.
+    pub expected_upload_cost: i32,
+}
+
+/// Parses a `NewFileAgentInventory` step-1 metadata body — the inverse of
+/// [`build_new_file_agent_inventory_request`]. Lenient: a missing field takes
+/// its [`Default`], mirroring [`parse_event_queue_request`].
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_new_file_agent_inventory_request(
+    xml: &str,
+) -> Result<NewFileAgentInventoryRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    Ok(NewFileAgentInventoryRequest {
+        folder_id: InventoryFolderKey::from(caps_upload_uuid(&root, "folder_id")),
+        asset_type: caps_upload_string(&root, "asset_type"),
+        inventory_type: caps_upload_string(&root, "inventory_type"),
+        name: caps_upload_string(&root, "name"),
+        description: caps_upload_string(&root, "description"),
+        next_owner_mask: caps_upload_mask(&root, "next_owner_mask"),
+        group_mask: caps_upload_mask(&root, "group_mask"),
+        everyone_mask: caps_upload_mask(&root, "everyone_mask"),
+        expected_upload_cost: root
+            .get("expected_upload_cost")
+            .and_then(Llsd::as_i32)
+            .unwrap_or(0),
+    })
+}
+
+/// Reads an optional string map member, defaulting to the empty string.
+fn caps_upload_string(root: &Llsd, key: &str) -> String {
+    root.get(key)
+        .and_then(Llsd::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+/// Reads an optional UUID map member, defaulting to the nil UUID (the "absent"
+/// key for the `From<Uuid>` newtypes these request parsers wrap).
+fn caps_upload_uuid(root: &Llsd, key: &str) -> Uuid {
+    root.get(key).and_then(Llsd::as_uuid).unwrap_or_default()
+}
+
+/// Reads a permission-mask map member as a `u32`. The wire carries masks as
+/// LLSD `<integer>` (`i32`); LL's masks are non-negative (`PERM_ALL` is
+/// `0x7fffffff`), so a plain `try_from` recovers the value and an
+/// out-of-range/negative encoding falls back to `0`.
+fn caps_upload_mask(root: &Llsd, key: &str) -> u32 {
+    root.get(key)
+        .and_then(Llsd::as_i32)
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or(0)
+}
+
 /// Builds the LLSD-XML metadata body for the first step of an
 /// `Update*AgentInventory` capability upload (replacing the asset of an
 /// existing inventory item — gesture, notecard, script, or settings): a map
@@ -167,6 +305,18 @@ pub fn build_new_file_agent_inventory_request(
 #[must_use]
 pub fn build_update_item_asset_request(item_id: InventoryKey) -> String {
     format!("<llsd><map><key>item_id</key><uuid>{item_id}</uuid></map></llsd>")
+}
+
+/// Parses an `Update*AgentInventory` step-1 metadata body — the inverse of
+/// [`build_update_item_asset_request`]. Returns the `item_id` whose asset is
+/// being replaced, or the nil key if the field is absent.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_update_item_asset_request(xml: &str) -> Result<InventoryKey, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    Ok(InventoryKey::from(caps_upload_uuid(&root, "item_id")))
 }
 
 /// Builds the LLSD-XML metadata body for the first step of an
@@ -185,6 +335,34 @@ pub fn build_update_task_item_asset_request(task_id: ObjectKey, item_id: Invento
     )
 }
 
+/// A parsed `Update*TaskInventory` step-1 metadata body — the holding object
+/// (`task_id`) and the item within it (`item_id`) whose asset is replaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UpdateTaskItemAssetRequest {
+    /// The in-world object holding the task inventory.
+    pub task_id: ObjectKey,
+    /// The task-inventory item whose asset is replaced.
+    pub item_id: InventoryKey,
+}
+
+/// Parses an `Update*TaskInventory` step-1 metadata body — the inverse of
+/// [`build_update_task_item_asset_request`]. Absent fields default to the nil
+/// key.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_update_task_item_asset_request(
+    xml: &str,
+) -> Result<UpdateTaskItemAssetRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    Ok(UpdateTaskItemAssetRequest {
+        task_id: ObjectKey::from(caps_upload_uuid(&root, "task_id")),
+        item_id: InventoryKey::from(caps_upload_uuid(&root, "item_id")),
+    })
+}
+
 /// Builds the LLSD-XML metadata body for the first step of an `UpdateScriptAgent`
 /// capability upload (replacing an **agent-inventory** script item's source and
 /// compiling it): a map carrying the `item_id` and the compile `target`
@@ -199,6 +377,33 @@ pub fn build_update_script_agent_request(item_id: InventoryKey, target: &str) ->
     push_escaped(&mut out, target);
     out.push_str("</string></map></llsd>");
     out
+}
+
+/// A parsed `UpdateScriptAgent` step-1 metadata body — the agent-inventory
+/// script item (`item_id`) and its compile `target` (`"mono"`/`"lsl2"`/`"luau"`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UpdateScriptAgentRequest {
+    /// The agent-inventory script item whose source is replaced.
+    pub item_id: InventoryKey,
+    /// The compile target the client asked for.
+    pub target: String,
+}
+
+/// Parses an `UpdateScriptAgent` step-1 metadata body — the inverse of
+/// [`build_update_script_agent_request`].
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_update_script_agent_request(
+    xml: &str,
+) -> Result<UpdateScriptAgentRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    Ok(UpdateScriptAgentRequest {
+        item_id: InventoryKey::from(caps_upload_uuid(&root, "item_id")),
+        target: caps_upload_string(&root, "target"),
+    })
 }
 
 /// Builds the LLSD-XML metadata body for the first step of an `UpdateScriptTask`
@@ -231,6 +436,51 @@ pub fn build_update_script_task_request(
     }
     out.push_str("</map></llsd>");
     out
+}
+
+/// A parsed `UpdateScriptTask` step-1 metadata body — the holding object, the
+/// task-inventory script item, its requested run state, compile `target`, and
+/// the optional `experience` it runs under.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct UpdateScriptTaskRequest {
+    /// The in-world object holding the task inventory.
+    pub task_id: ObjectKey,
+    /// The task-inventory script item whose source is replaced.
+    pub item_id: InventoryKey,
+    /// Whether the script should be running after the update.
+    pub is_script_running: bool,
+    /// The compile target the client asked for.
+    pub target: String,
+    /// The experience the script runs under, if any.
+    pub experience: Option<ExperienceKey>,
+}
+
+/// Parses an `UpdateScriptTask` step-1 metadata body — the inverse of
+/// [`build_update_script_task_request`]. A missing `experience` (or a nil id)
+/// is `None`.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_update_script_task_request(
+    xml: &str,
+) -> Result<UpdateScriptTaskRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    Ok(UpdateScriptTaskRequest {
+        task_id: ObjectKey::from(caps_upload_uuid(&root, "task_id")),
+        item_id: InventoryKey::from(caps_upload_uuid(&root, "item_id")),
+        is_script_running: root
+            .get("is_script_running")
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        target: caps_upload_string(&root, "target"),
+        experience: root
+            .get("experience")
+            .and_then(Llsd::as_uuid)
+            .filter(|id| !id.is_nil())
+            .map(ExperienceKey::from),
+    })
 }
 
 /// Builds the LLSD-XML metadata body for the first step of an
@@ -348,6 +598,51 @@ fn upload_error_message(error: &Llsd) -> Option<String> {
         .get("message")
         .and_then(Llsd::as_str)
         .map(str::to_owned)
+}
+
+/// Builds a CAPS asset-upload response body (either step of the two-step
+/// uploader) — the inverse of [`parse_asset_upload_response`], the server
+/// counterpart of the uploader-driving client. `state` is always emitted;
+/// `uploader`, `new_asset`, `new_inventory_item`, `error`, and `compiled` only
+/// when present, and `errors` only when non-empty — so a minimal
+/// `{ state: "upload", uploader }` first-step reply and a bare
+/// `{ state: "complete" }` second-step reply serialize without spurious
+/// members. Built on [`Llsd::to_llsd_xml`], so it round-trips: re-parsing the
+/// output yields an equal [`AssetUploadResponse`].
+#[must_use]
+pub fn build_asset_upload_response(response: &AssetUploadResponse) -> String {
+    let mut map = HashMap::from([("state".to_owned(), Llsd::String(response.state.clone()))]);
+    if let Some(uploader) = &response.uploader {
+        map.insert("uploader".to_owned(), Llsd::String(uploader.clone()));
+    }
+    if let Some(new_asset) = response.new_asset {
+        map.insert("new_asset".to_owned(), Llsd::Uuid(new_asset));
+    }
+    if let Some(new_inventory_item) = response.new_inventory_item {
+        map.insert(
+            "new_inventory_item".to_owned(),
+            Llsd::Uuid(new_inventory_item),
+        );
+    }
+    if let Some(error) = &response.error {
+        map.insert("error".to_owned(), Llsd::String(error.clone()));
+    }
+    if let Some(compiled) = response.compiled {
+        map.insert("compiled".to_owned(), Llsd::Boolean(compiled));
+    }
+    if !response.errors.is_empty() {
+        map.insert(
+            "errors".to_owned(),
+            Llsd::Array(
+                response
+                    .errors
+                    .iter()
+                    .map(|message| Llsd::String(message.clone()))
+                    .collect(),
+            ),
+        );
+    }
+    Llsd::Map(map).to_llsd_xml()
 }
 
 /// Media-permission bit: no one (a `perms_interact` / `perms_control` value).
@@ -775,6 +1070,126 @@ impl ObjectMediaResponse {
             faces,
         })
     }
+
+    /// Serializes an [`ObjectMediaResponse`] as an `ObjectMedia` GET reply body
+    /// (`{ object_id, object_media_version, object_media_data }`) — the inverse
+    /// of [`ObjectMediaResponse::from_llsd`], the simulator counterpart of the
+    /// media-fetching client. Round-trips: parsing the output back through
+    /// [`from_llsd`](Self::from_llsd) yields an equal value.
+    #[must_use]
+    pub fn to_llsd(&self) -> String {
+        let mut out = String::from("<llsd><map><key>object_id</key><uuid>");
+        out.push_str(&self.object_id.uuid().to_string());
+        out.push_str("</uuid><key>object_media_version</key><string>");
+        push_escaped(&mut out, &self.version);
+        out.push_str("</string><key>object_media_data</key><array>");
+        for face in &self.faces {
+            match face {
+                Some(entry) => entry.push_llsd_map(&mut out),
+                None => out.push_str("<undef />"),
+            }
+        }
+        out.push_str("</array></map></llsd>");
+        out
+    }
+}
+
+/// A parsed `ObjectMedia` capability request, routed on the body's `verb`
+/// member — the simulator side of [`build_object_media_get_request`] /
+/// [`build_object_media_update_request`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum ObjectMediaRequest {
+    /// `verb: "GET"` — fetch the object's current per-face media.
+    Get {
+        /// The object whose media is fetched.
+        object_id: ObjectKey,
+    },
+    /// `verb: "UPDATE"` — set the object's per-face media.
+    Update {
+        /// The object whose media is set.
+        object_id: ObjectKey,
+        /// The new per-face media (one slot per prim face; `None` for a face
+        /// without media).
+        faces: Vec<Option<MediaEntry>>,
+    },
+}
+
+/// Parses an `ObjectMedia` capability request from its already-decoded LLSD
+/// body — the inverse of the `build_object_media_{get,update}_request` pair.
+/// Routes on the `verb` member; a missing `object_id` or a `verb` other than
+/// `"GET"` / `"UPDATE"` yields `None` (the handler answers `400`).
+#[must_use]
+pub fn parse_object_media_request(body: &Llsd) -> Option<ObjectMediaRequest> {
+    let verb = body.get("verb").and_then(Llsd::as_str)?;
+    let object_id = body
+        .get("object_id")
+        .and_then(Llsd::as_uuid)
+        .map(ObjectKey::from)?;
+    match verb {
+        "GET" => Some(ObjectMediaRequest::Get { object_id }),
+        "UPDATE" => Some(ObjectMediaRequest::Update {
+            object_id,
+            faces: object_media_faces(body),
+        }),
+        _ => None,
+    }
+}
+
+/// Reads the `object_media_data` per-face array leniently: a map entry decodes
+/// to `Some(MediaEntry)` (a malformed one to `None`), any other entry to
+/// `None`, mirroring [`ObjectMediaResponse::from_llsd`].
+fn object_media_faces(body: &Llsd) -> Vec<Option<MediaEntry>> {
+    body.get("object_media_data")
+        .and_then(Llsd::as_array)
+        .map(|array| {
+            array
+                .iter()
+                .map(|entry| match entry {
+                    Llsd::Map(_) => MediaEntry::from_llsd(entry).ok(),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// A parsed `ObjectMediaNavigate` capability request — the object, the prim
+/// face (`texture_index`), and the URL the client is navigating that face to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct ObjectMediaNavigateRequest {
+    /// The object whose media face is navigated.
+    pub object_id: ObjectKey,
+    /// The prim face (`texture_index`) being navigated.
+    pub face: u8,
+    /// The URL the face is navigated to (`current_url`).
+    pub url: String,
+}
+
+/// Parses an `ObjectMediaNavigate` request from its already-decoded LLSD body —
+/// the inverse of [`build_object_media_navigate_request`]. A missing
+/// `object_id` or an out-of-range `texture_index` yields `None`.
+#[must_use]
+pub fn parse_object_media_navigate_request(body: &Llsd) -> Option<ObjectMediaNavigateRequest> {
+    let object_id = body
+        .get("object_id")
+        .and_then(Llsd::as_uuid)
+        .map(ObjectKey::from)?;
+    let face = body
+        .get("texture_index")
+        .and_then(Llsd::as_i32)
+        .and_then(|index| u8::try_from(index).ok())?;
+    let url = body
+        .get("current_url")
+        .and_then(Llsd::as_str)
+        .unwrap_or_default()
+        .to_owned();
+    Some(ObjectMediaNavigateRequest {
+        object_id,
+        face,
+        url,
+    })
 }
 
 /// A single event from an [`EventQueueResponse`].
@@ -810,6 +1225,21 @@ pub fn parse_seed_response(xml: &str) -> Result<HashMap<String, String>, roxmltr
         }
     }
     Ok(capabilities)
+}
+
+/// Builds a capability-seed grant response — the inverse of
+/// [`parse_seed_response`], the server counterpart of the client's
+/// [`build_seed_request`]: an LLSD map of granted capability name to URL.
+/// Built on [`Llsd::to_llsd_xml`], whose sorted map keys make the output
+/// deterministic — equal grants serialize byte-identically, so a retried
+/// seed POST can be answered with an identical body.
+#[must_use]
+pub fn build_seed_response(capabilities: &HashMap<String, String>) -> String {
+    let map = capabilities
+        .iter()
+        .map(|(name, url)| (name.clone(), Llsd::String(url.clone())))
+        .collect();
+    Llsd::Map(map).to_llsd_xml()
 }
 
 /// Parses an `EventQueueGet` response into its id and events.

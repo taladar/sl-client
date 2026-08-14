@@ -493,6 +493,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::ServerFileDownloaded { .. }
             | Event::XferUploaded { .. }
             | Event::XferAborted { .. }
+            | Event::TaskItemAssetReceived { .. }
+            | Event::EstateCovenantAssetReceived { .. }
+            | Event::TransferFailed { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }
@@ -554,7 +557,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportFinished { .. }
-            | Event::TeleportLocal
+            | Event::TeleportLocal { .. }
             | Event::TeleportFailed { .. }
             | Event::TimeDilation { .. }
             | Event::TerrainPatch(_)
@@ -617,9 +620,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::SimConsoleResponse { .. }
             | Event::RequiredVoiceVersion(_)
             | Event::OpenRegionInfo(_)
+            | Event::MarketplaceMerchantStatus(_)
+            | Event::MarketplaceListings(_)
+            | Event::MarketplaceListing(_)
+            | Event::MarketplaceListingCreated(_)
+            | Event::MarketplaceListingUpdated(_)
+            | Event::MarketplaceInventoryAssociated(_)
+            | Event::MarketplaceListingDeleted(_)
+            | Event::MarketplaceListingGone(_)
+            | Event::MarketplaceError { .. }
             | Event::ChatSessions(_)
             | Event::ChatHistoryPage { .. }
             | Event::NearbyChatHistoryPage { .. }
+            | Event::SessionServerHistory { .. }
             | Event::FriendsSnapshot(_)
             | Event::InventoryFolderPage { .. }
             | Event::InventoryRoots { .. }

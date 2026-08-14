@@ -16,39 +16,46 @@ mod test {
         DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
         DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayName, DisplayNameUpdate,
         EjectAction, EstateCovenant, Event, EventId, EventInfo, FeatureDisabled, FollowCamProperty,
-        FollowCamPropertyValue, FreezeAction, FriendKey, GenericMessage, GenericStreamingMessage,
-        GestureActivation, GlobalCoordinates, GodRegionUpdate, GridCoordinates, GridRectangle,
-        GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary,
-        GroupAccountTransaction, GroupAccountTransactions, GroupActiveProposalItem, GroupKey,
-        GroupName, GroupRequestId, GroupRoleKey, GroupVote, GroupVoteHistoryItem, ImDialog,
-        InventoryFolderKey, InventoryItemMove, InventoryItemOrFolderKey, InventoryKey,
-        InventoryType, InvoiceId, Kick, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-        LandSearchType, LandStatItem, LandStatReportType, LightData, LindenAmount, LindenBalance,
-        LoginParams, MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags,
-        Maturity, MeanCollision, MeanCollisionType, MovementMode, NavMeshBuildStatus,
-        NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey,
-        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
-        ParcelDetails, ParcelKey, ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5,
-        PingId, PlacesResult, PointAtType, Postcard, PrimShapeParams, ProductType, QueryId,
-        RegionCoordinates, RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId,
-        RegionStats, RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
+        FollowCamPropertyValue, FreezeAction, FriendKey, FriendRights, GenericMessage,
+        GenericStreamingMessage, GestureActivation, GlobalCoordinates, GodRegionUpdate,
+        GridCoordinates, GridRectangle, GroupAccountDetails, GroupAccountDetailsEntry,
+        GroupAccountSummary, GroupAccountTransaction, GroupAccountTransactions,
+        GroupActiveProposalItem, GroupKey, GroupName, GroupRequestId, GroupRoleKey, GroupVote,
+        GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolderKey, InventoryItem,
+        InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryType, InvoiceId, Kick,
+        LandArea, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
+        LandStatReportType, LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES,
+        MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
+        MeanCollisionType, MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink,
+        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
+        ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
+        ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult,
+        PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
+        RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
+        RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
         RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ScriptPermissions, ServerError, ServerEvent, Session,
-        SetDisplayNameReply, SimSession, SimStatId, SimWideDeleteFlags, SimulatorTime,
-        StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        enable_simulator_to_caps_llsd, parse_event_queue_response,
+        ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions,
+        ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId,
+        SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem,
+        TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource, TransferStatus,
+        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+    };
+    use sl_proto::{
+        AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
     };
     use sl_proto::{
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
     };
     use sl_wire::messages::{
-        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
-        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
-        OnlineNotificationAgentBlockBlock, StartPingCheck, StartPingCheckPingIDBlock,
+        AbortXfer, AbortXferXferIDBlock, ImprovedInstantMessage,
+        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+        ImprovedInstantMessageMessageBlockBlock, OfflineNotification,
+        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
+        StartPingCheck, StartPingCheckPingIDBlock, TransferRequest,
+        TransferRequestTransferInfoBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
@@ -100,34 +107,15 @@ mod test {
 
     /// A successful login response pointing at the test simulator.
     fn success() -> Result<LoginResponse, TestError> {
-        Ok(LoginResponse::Success(Box::new(LoginSuccess {
-            agent_id: AgentKey::from(uuid::Uuid::from_u128(1)),
-            session_id: uuid::Uuid::from_u128(2),
-            secure_session_id: uuid::Uuid::from_u128(3),
-            circuit_code: CircuitCode(0x0011_2233),
-            sim_ip: Ipv4Addr::new(127, 0, 0, 1),
-            sim_port: 9000,
-            seed_capability: "http://127.0.0.1:9000/seed".parse()?,
-            message: None,
-            mfa_hash: None,
-            inventory_root: None,
-            inventory_skeleton: Vec::new(),
-            buddy_list: Vec::new(),
-            home: None,
-            look_at: None,
-            region_x: None,
-            region_y: None,
-            agent_access: None,
-            agent_access_max: None,
-            max_agent_groups: None,
-            library_root: None,
-            library_owner: None,
-            library_skeleton: Vec::new(),
-            agent_appearance_service: None,
-            map_server_url: None,
-            openid_url: None,
-            openid_token: None,
-        })))
+        Ok(LoginResponse::Success(Box::new(LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        ))))
     }
 
     /// Builds an inbound datagram carrying a fully encoded client message.
@@ -159,17 +147,25 @@ mod test {
         Ok(AnyMessage::decode(id, &mut reader)?)
     }
 
-    /// Delivers all queued datagrams between the client and simulator (in both
-    /// directions) until neither has anything more to send.
-    fn pump(client: &mut Session, sim: &mut SimSession, now: Instant) -> Result<(), TestError> {
+    /// Delivers all queued datagrams between a client and simulator (in both
+    /// directions) at explicit endpoint addresses until neither has anything
+    /// more to send — the address-parameterized core of [`pump`], shared with
+    /// the two-avatar [`PairEnd`] topology.
+    fn pump_at(
+        client: &mut Session,
+        sim: &mut SimSession,
+        client_addr: SocketAddr,
+        sim_addr: SocketAddr,
+        now: Instant,
+    ) -> Result<(), TestError> {
         loop {
             let mut moved = false;
             while let Some(transmit) = client.poll_transmit() {
-                sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+                sim.handle_datagram(client_addr, &transmit.payload, now)?;
                 moved = true;
             }
             while let Some(transmit) = sim.poll_transmit() {
-                client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+                client.handle_datagram(sim_addr, &transmit.payload, now)?;
                 moved = true;
             }
             if !moved {
@@ -177,6 +173,12 @@ mod test {
             }
         }
         Ok(())
+    }
+
+    /// Delivers all queued datagrams between the client and simulator (in both
+    /// directions) until neither has anything more to send.
+    fn pump(client: &mut Session, sim: &mut SimSession, now: Instant) -> Result<(), TestError> {
+        pump_at(client, sim, client_addr(), sim_addr(), now)
     }
 
     /// Drains all queued server events.
@@ -195,6 +197,39 @@ mod test {
             out.push(event);
         }
         out
+    }
+
+    /// Delivers all queued datagrams between the client and SEVERAL simulators
+    /// — the multi-region topology an inter-region teleport needs — routing
+    /// each client transmit to the simulator whose address matches its
+    /// [`Transmit::destination`], until nothing moves. The single-sim
+    /// [`pump`] stays as the common fast path.
+    fn pump_multi(
+        client: &mut Session,
+        sims: &mut [(SocketAddr, &mut SimSession)],
+        now: Instant,
+    ) -> Result<(), TestError> {
+        loop {
+            let mut moved = false;
+            while let Some(transmit) = client.poll_transmit() {
+                for (addr, sim) in sims.iter_mut() {
+                    if *addr == transmit.destination {
+                        sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+                        moved = true;
+                    }
+                }
+            }
+            for (addr, sim) in sims.iter_mut() {
+                while let Some(transmit) = sim.poll_transmit() {
+                    client.handle_datagram(*addr, &transmit.payload, now)?;
+                    moved = true;
+                }
+            }
+            if !moved {
+                break;
+            }
+        }
+        Ok(())
     }
 
     /// Delivers the simulator's queued CAPS events to the client over the real
@@ -227,6 +262,131 @@ mod test {
         let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
         pump(&mut client, &mut sim, now)?;
         Ok((client, sim))
+    }
+
+    /// The login-fixture identity for one end of a two-avatar pair.
+    struct EndParams {
+        /// The avatar's first name (the last name is always "User").
+        first_name: &'static str,
+        /// The agent id (as a `u128`).
+        agent: u128,
+        /// The session id (as a `u128`).
+        session: u128,
+        /// The secure session id (as a `u128`).
+        secure: u128,
+        /// The circuit code.
+        circuit: u32,
+        /// The simulator's UDP port on 127.0.0.1.
+        sim_port: u16,
+        /// The client's UDP port on 127.0.0.1, as the simulator sees it.
+        client_port: u16,
+    }
+
+    /// One avatar's client `Session` wired to its **own** [`SimSession`] — the
+    /// two-avatar relay topology (one simulator session per client; the test
+    /// body plays the driver, relaying `ServerEvent`s off one end's sim into
+    /// `send_*` calls on the other's).
+    struct PairEnd {
+        /// The avatar's client session.
+        client: Session,
+        /// The simulator session serving this client.
+        sim: SimSession,
+        /// The client's UDP address, as the simulator sees it.
+        client_addr: SocketAddr,
+        /// The simulator's UDP address.
+        sim_addr: SocketAddr,
+    }
+
+    /// [`pump`] for one [`PairEnd`]: delivers this end's queued datagrams in
+    /// both directions until quiet.
+    fn pump_end(end: &mut PairEnd, now: Instant) -> Result<(), TestError> {
+        pump_at(
+            &mut end.client,
+            &mut end.sim,
+            end.client_addr,
+            end.sim_addr,
+            now,
+        )
+    }
+
+    /// Logs one avatar in against its own fresh [`SimSession`] (the
+    /// [`setup`] dance, parameterized by [`EndParams`]) and returns the
+    /// active [`PairEnd`].
+    fn setup_end(params: &EndParams, now: Instant) -> Result<PairEnd, TestError> {
+        let mut client = Session::new(LoginParams {
+            login_uri: format!("http://127.0.0.1:{}/", params.sim_port).parse()?,
+            request: LoginRequest::new(
+                params.first_name,
+                "User",
+                "secret",
+                StartLocation::Last,
+                "MyViewer",
+                "1.2.3",
+            ),
+        });
+        client.handle_login_response(
+            LoginResponse::Success(Box::new(LoginSuccess::minimal(
+                AgentKey::from(uuid::Uuid::from_u128(params.agent)),
+                uuid::Uuid::from_u128(params.session),
+                uuid::Uuid::from_u128(params.secure),
+                CircuitCode(params.circuit),
+                Ipv4Addr::new(127, 0, 0, 1),
+                params.sim_port,
+                format!("http://127.0.0.1:{}/seed", params.sim_port).parse()?,
+            ))),
+            now,
+        )?;
+        client.notify_capabilities_ready(now)?;
+        let sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
+        let mut end = PairEnd {
+            client,
+            sim,
+            client_addr: SocketAddr::new(
+                IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                params.client_port,
+            ),
+            sim_addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), params.sim_port),
+        };
+        pump_end(&mut end, now)?;
+        Ok(end)
+    }
+
+    /// The agent id of pair end A ("Test User" — the [`success`] fixture
+    /// identity).
+    const PAIR_A_AGENT: u128 = 1;
+
+    /// The agent id of pair end B ("Peer User").
+    const PAIR_B_AGENT: u128 = 0xB1;
+
+    /// Sets up the two-avatar relay topology: end A is the [`success`]
+    /// fixture identity on the usual ports, end B a second avatar on its own
+    /// simulator and ports.
+    fn setup_pair(now: Instant) -> Result<(PairEnd, PairEnd), TestError> {
+        let a = setup_end(
+            &EndParams {
+                first_name: "Test",
+                agent: PAIR_A_AGENT,
+                session: 2,
+                secure: 3,
+                circuit: 0x0011_2233,
+                sim_port: 9000,
+                client_port: 40000,
+            },
+            now,
+        )?;
+        let b = setup_end(
+            &EndParams {
+                first_name: "Peer",
+                agent: PAIR_B_AGENT,
+                session: 0xB2,
+                secure: 0xB3,
+                circuit: 0x0011_2234,
+                sim_port: 9001,
+                client_port: 40001,
+            },
+            now,
+        )?;
+        Ok((a, b))
     }
 
     #[test]
@@ -3966,6 +4126,184 @@ mod test {
         Ok(())
     }
 
+    /// Losing a reliable client datagram's first transmission must not lose
+    /// the message: the resend timer re-emits the same sequence with the
+    /// `RESENT` wire flag, the simulator processes the retransmitted copy
+    /// normally, and a duplicate delivery of the same datagram is
+    /// acknowledged but not dispatched a second time.
+    #[test]
+    fn client_reliable_resend_survives_loss_and_sim_deduplicates() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        client.say("resend me", ChatType::Normal, ChatChannel(0), now)?;
+
+        // "Lose" the chat datagram: keep its sequence but do not deliver it;
+        // everything else flows normally.
+        let mut lost_sequence = None;
+        while let Some(transmit) = client.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::ChatFromViewer(_)) {
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "chat is sent reliably"
+                );
+                assert!(
+                    !parsed.flags.contains(PacketFlags::RESENT),
+                    "the first transmission is not flagged RESENT"
+                );
+                lost_sequence = Some(parsed.sequence);
+            } else {
+                sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+            }
+        }
+        let lost_sequence = lost_sequence.ok_or("expected the chat datagram")?;
+        assert!(
+            !drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::Chat { .. })),
+            "the dropped chat must not have reached the simulator"
+        );
+
+        // Past the resend timeout the client re-emits the same sequence,
+        // now carrying the RESENT flag.
+        let later = after(now, 1_600)?;
+        client.handle_timeout(later);
+        let mut resent_payload = None;
+        while let Some(transmit) = client.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::ChatFromViewer(_)) {
+                assert_eq!(
+                    parsed.sequence, lost_sequence,
+                    "a resend reuses the original sequence number"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RESENT),
+                    "a resend carries the RESENT wire flag"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "a resend stays reliable"
+                );
+                resent_payload = Some(transmit.payload.clone());
+            } else {
+                sim.handle_datagram(client_addr(), &transmit.payload, later)?;
+            }
+        }
+        let resent_payload = resent_payload.ok_or("expected the chat to be retransmitted")?;
+
+        // The retransmitted copy dispatches normally...
+        sim.handle_datagram(client_addr(), &resent_payload, later)?;
+        let delivered = drain_server(&mut sim)
+            .iter()
+            .filter(|e| matches!(e, ServerEvent::Chat { .. }))
+            .count();
+        assert_eq!(
+            delivered, 1,
+            "the retransmitted chat dispatches exactly once"
+        );
+
+        // ...and a duplicate delivery of the very same datagram is
+        // deduplicated by the inbound seen-window (still acked, not
+        // re-dispatched).
+        sim.handle_datagram(client_addr(), &resent_payload, later)?;
+        let duplicated = drain_server(&mut sim)
+            .iter()
+            .filter(|e| matches!(e, ServerEvent::Chat { .. }))
+            .count();
+        assert_eq!(
+            duplicated, 0,
+            "a duplicate reliable datagram is not re-dispatched"
+        );
+
+        // The ack flow settles the circuit (the client stops resending).
+        pump(&mut client, &mut sim, later)?;
+        Ok(())
+    }
+
+    /// The simulator-side mirror: a lost reliable simulator datagram is
+    /// retransmitted with the `RESENT` flag and the same sequence, the client
+    /// processes the retransmitted copy normally, and a duplicate delivery is
+    /// not surfaced twice.
+    #[test]
+    fn sim_reliable_resend_survives_loss_and_client_deduplicates() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        sim.send_alert_message("resent notice", &[], &[], now)?;
+
+        // "Lose" the alert datagram: keep its sequence but do not deliver it.
+        let mut lost_sequence = None;
+        while let Some(transmit) = sim.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                assert!(
+                    parsed.flags.contains(PacketFlags::RELIABLE),
+                    "the alert is sent reliably"
+                );
+                lost_sequence = Some(parsed.sequence);
+            } else {
+                client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+            }
+        }
+        let lost_sequence = lost_sequence.ok_or("expected the alert datagram")?;
+        assert!(
+            !drain_client(&mut client)
+                .iter()
+                .any(|e| matches!(e, Event::AlertMessage { .. })),
+            "the dropped alert must not have reached the client"
+        );
+
+        // Past the resend timeout the simulator re-emits the same sequence
+        // with the RESENT flag.
+        let later = after(now, 1_600)?;
+        sim.handle_timeout(later);
+        let mut resent_payload = None;
+        while let Some(transmit) = sim.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                assert_eq!(
+                    parsed.sequence, lost_sequence,
+                    "a resend reuses the original sequence number"
+                );
+                assert!(
+                    parsed.flags.contains(PacketFlags::RESENT),
+                    "a resend carries the RESENT wire flag"
+                );
+                resent_payload = Some(transmit.payload.clone());
+            } else {
+                client.handle_datagram(sim_addr(), &transmit.payload, later)?;
+            }
+        }
+        let resent_payload = resent_payload.ok_or("expected the alert to be retransmitted")?;
+
+        // The retransmitted copy dispatches normally; a duplicate delivery of
+        // the same datagram is deduplicated.
+        client.handle_datagram(sim_addr(), &resent_payload, later)?;
+        let delivered = drain_client(&mut client)
+            .iter()
+            .filter(|e| matches!(e, Event::AlertMessage { .. }))
+            .count();
+        assert_eq!(
+            delivered, 1,
+            "the retransmitted alert dispatches exactly once"
+        );
+        client.handle_datagram(sim_addr(), &resent_payload, later)?;
+        let duplicated = drain_client(&mut client)
+            .iter()
+            .filter(|e| matches!(e, Event::AlertMessage { .. }))
+            .count();
+        assert_eq!(
+            duplicated, 0,
+            "a duplicate reliable datagram is not re-surfaced"
+        );
+
+        pump(&mut client, &mut sim, later)?;
+        Ok(())
+    }
+
     #[test]
     fn inactivity_times_out() -> Result<(), TestError> {
         let now = Instant::now();
@@ -4609,6 +4947,1753 @@ mod test {
             })
             .ok_or("expected the group name on the client")?;
         assert_eq!(group.name, "The Club");
+        Ok(())
+    }
+
+    /// The secure session id of the [`success`] login fixture, which the
+    /// simulator needs to derive legacy-upload asset ids the same way the
+    /// client predicts them.
+    fn secure_session() -> uuid::Uuid {
+        uuid::Uuid::from_u128(3)
+    }
+
+    /// A minimal wearable inventory item for the legacy asset-upload tests.
+    fn wearable_item() -> InventoryItem {
+        InventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x11)),
+            folder_id: InventoryFolderKey::from(uuid::Uuid::from_u128(0x12)),
+            name: "Tattered Shirt".to_owned(),
+            description: String::new(),
+            asset_id: uuid::Uuid::nil(),
+            item_type: 5,
+            inv_type: 18,
+            flags: 0,
+            sale_type: 0,
+            sale_price: None,
+            creation_date: 1_700_000_000,
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))),
+            last_owner_id: uuid::Uuid::nil(),
+            creator_id: AgentKey::from(uuid::Uuid::from_u128(1)),
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::ALL,
+                owner: Permissions::ALL,
+                group: Permissions::NONE,
+                everyone: Permissions::NONE,
+                next_owner: Permissions::ALL,
+            },
+        }
+    }
+
+    /// A task-inventory item fixture for the serving round-trip.
+    fn task_script_item(task: ObjectKey) -> TaskInventoryItem {
+        let creator = AgentKey::from(uuid::Uuid::from_u128(0x44));
+        TaskInventoryItem {
+            item_id: InventoryKey::from(uuid::Uuid::from_u128(0x33)),
+            parent_task: task,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0008_e000),
+            },
+            creator_id: creator,
+            last_owner_id: creator,
+            owner: OwnerKey::Agent(creator),
+            group: None,
+            group_owned: false,
+            asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(0x55))),
+            asset_type: AssetType::ScriptText,
+            inv_type: InventoryType::Script,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: LindenAmount(0),
+            name: "Hello World Script".to_owned(),
+            description: String::new(),
+            creation_date: 1_700_000_000,
+        }
+    }
+
+    /// A small legacy asset upload round-trips inline: the client's
+    /// `save_inventory_asset` carries the bytes in the `AssetUploadRequest`
+    /// itself, the simulator derives the stored asset id as
+    /// `combine(transaction, secure_session)` exactly as the client predicts
+    /// it, replies with an `AssetUploadComplete`, and both sides surface their
+    /// completion events.
+    #[test]
+    fn inline_asset_upload_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        sim.set_secure_session_id(secure_session());
+
+        let txn = TransactionId::new(uuid::Uuid::from_u128(0xABCD));
+        let data = vec![7_u8; 100];
+        client.save_inventory_asset(
+            &wearable_item(),
+            AssetType::Clothing,
+            data.clone(),
+            txn,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let expected_asset = sl_wire::combine_uuids(txn.get(), secure_session());
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AssetUploadRequested {
+                    transaction_id,
+                    asset_type: AssetType::Clothing,
+                    inline: true,
+                    ..
+                } if *transaction_id == txn
+            )),
+            "expected an inline AssetUploadRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AssetUploaded {
+                    asset_id,
+                    asset_type: AssetType::Clothing,
+                    transaction_id,
+                    data: got,
+                } if asset_id.uuid() == expected_asset && *transaction_id == txn && *got == data
+            )),
+            "expected the uploaded asset bytes, got {server_events:?}"
+        );
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::InventoryAssetSaved { asset_id, success: true } if *asset_id == expected_asset
+            )),
+            "expected InventoryAssetSaved, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// An oversized legacy asset upload is pulled over `Xfer`: the client sends
+    /// an empty `AssetData`, the simulator issues a `RequestXfer` keyed by the
+    /// predicted `VFileID`, the client streams the bytes (seq-0 size prefix,
+    /// high-bit end marker, one packet per confirmation), and the reassembled
+    /// asset is byte-identical before the `AssetUploadComplete` closes the
+    /// client side.
+    #[test]
+    fn oversize_asset_upload_pulls_via_xfer() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        sim.set_secure_session_id(secure_session());
+
+        let txn = TransactionId::new(uuid::Uuid::from_u128(0xBEEF));
+        // Several Xfer chunks (chunk size is 1000 bytes).
+        let data: Vec<u8> = (0..3500_u32)
+            .map(|i| u8::try_from(i % 251).unwrap_or(0))
+            .collect();
+        client.save_inventory_asset(
+            &wearable_item(),
+            AssetType::Bodypart,
+            data.clone(),
+            txn,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let expected_asset = sl_wire::combine_uuids(txn.get(), secure_session());
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AssetUploadRequested { inline: false, .. })),
+            "expected an Xfer-pull AssetUploadRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::AssetUploaded {
+                    asset_id,
+                    asset_type: AssetType::Bodypart,
+                    transaction_id,
+                    data: got,
+                } if asset_id.uuid() == expected_asset && *transaction_id == txn && *got == data
+            )),
+            "expected the reassembled asset bytes, got {server_events:?}"
+        );
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::InventoryAssetSaved { asset_id, success: true } if *asset_id == expected_asset
+            )),
+            "expected InventoryAssetSaved, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A registered file serves over `Xfer`: the client's `request_xfer`
+    /// downloads it chunk-by-chunk (paced by its own confirmations) and
+    /// receives the exact registered bytes; the simulator surfaces the request
+    /// and the completed send.
+    #[test]
+    fn xfer_file_serving_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // More than two chunks, so the pacing loop is exercised.
+        let bytes: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 199).unwrap_or(0))
+            .collect();
+        sim.register_xfer_file("motd.txt", bytes.clone());
+        let xfer_id = client.request_xfer("motd.txt", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferDownloaded { xfer_id: got, data } if *got == xfer_id && *data == bytes
+            )),
+            "expected the downloaded bytes, got {client_events:?}"
+        );
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferRequested { xfer_id: got, filename, served: true }
+                    if *got == xfer_id && filename == "motd.txt"
+            )),
+            "expected XferRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferServed { xfer_id: got, filename, byte_count }
+                    if *got == xfer_id && filename == "motd.txt" && *byte_count == bytes.len()
+            )),
+            "expected XferServed, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A `RequestXfer` for a name that was never registered is refused with an
+    /// `AbortXfer`, so the requesting client is not left waiting.
+    #[test]
+    fn xfer_request_for_unknown_file_aborts() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let xfer_id = client.request_xfer("nope.txt", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferAborted { xfer_id: got, result: -1 } if *got == xfer_id
+            )),
+            "expected XferAborted, got {client_events:?}"
+        );
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::XferRequested { served: false, .. })),
+            "expected a refused XferRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// Both abort directions: a simulator-side `abort_xfer` mid-send reaches
+    /// the client as [`Event::XferAborted`] (and the download never
+    /// completes), and a client-sent `AbortXfer` drops the simulator's send
+    /// and surfaces [`ServerEvent::XferAborted`].
+    #[test]
+    fn abort_xfer_paths() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        // Simulator-side abort: deliver only the request, then abort before
+        // the client sees the remaining packets.
+        sim.register_xfer_file("big.bin", vec![9_u8; 2500]);
+        let xfer_id = client.request_xfer("big.bin", now)?;
+        while let Some(transmit) = client.poll_transmit() {
+            sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+        }
+        sim.abort_xfer(xfer_id, 3, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferAborted { xfer_id: got, result: 3 } if *got == xfer_id
+            )),
+            "expected the sim abort on the client, got {client_events:?}"
+        );
+        assert!(
+            !client_events
+                .iter()
+                .any(|e| matches!(e, Event::XferDownloaded { .. })),
+            "the aborted download must not complete, got {client_events:?}"
+        );
+        drain_server(&mut sim);
+
+        // Client-side abort (no client helper API sends `AbortXfer`, so it is
+        // injected as a wire datagram): the sim drops its in-flight send and
+        // surfaces the abort.
+        sim.register_xfer_file("cancelme.bin", vec![4_u8; 2500]);
+        let second = client.request_xfer("cancelme.bin", now)?;
+        while let Some(transmit) = client.poll_transmit() {
+            sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+        }
+        let abort = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: second.get(),
+                result: -7,
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&abort, 9000, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferAborted { xfer_id: got, result: -7 } if *got == second
+            )),
+            "expected the client abort on the sim, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A task-inventory item's asset round-trips over the legacy UDP Transfer
+    /// path: the client's `fetch_task_item_asset` sends a `TransferRequest`
+    /// whose params the simulator decodes field-for-field, the driver answers
+    /// with `send_transfer_asset`, and the multi-packet stream reassembles
+    /// byte-identically on the client (a single-packet body works too).
+    #[test]
+    fn task_item_asset_transfer_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xAAAA));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xBBBB));
+        let asset = AssetKey::from(uuid::Uuid::from_u128(0xCCCC));
+        let transfer_id =
+            client.fetch_task_item_asset(task, item, asset, AssetType::ScriptText, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let server_events = drain_server(&mut sim);
+        let params = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::TransferRequested {
+                    transfer_id: got,
+                    source: TransferRequestSource::TaskInventoryItem(params),
+                    ..
+                } if *got == transfer_id => Some(*params),
+                _ => None,
+            })
+            .ok_or("expected a task-item TransferRequested")?;
+        assert_eq!(params.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(params.session_id, uuid::Uuid::from_u128(2));
+        assert_eq!(params.task_id, task.uuid());
+        assert_eq!(params.item_id, item.uuid());
+        assert_eq!(params.asset_id, asset.uuid());
+        assert_eq!(params.asset_type, AssetType::ScriptText.to_code());
+
+        // Multi-packet body (chunk size is 1000 bytes).
+        let body: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 241).unwrap_or(0))
+            .collect();
+        sim.send_transfer_asset(transfer_id, &body, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskItemAssetReceived {
+                    transfer_id: got,
+                    task: got_task,
+                    item: got_item,
+                    asset_type: AssetType::ScriptText,
+                    data,
+                } if *got == transfer_id && *got_task == task && *got_item == item && *data == body
+            )),
+            "expected the assembled task-item asset, got {client_events:?}"
+        );
+
+        // A body that fits one packet round-trips too.
+        let second = client.fetch_task_item_asset(task, item, asset, AssetType::Notecard, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_transfer_asset(second, b"tiny", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskItemAssetReceived { transfer_id: got, data, .. }
+                    if *got == second && data == b"tiny"
+            )),
+            "expected the single-packet asset, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The estate covenant notecard round-trips over the legacy UDP Transfer
+    /// path: `fetch_estate_covenant_asset` sends the `SimEstate` request
+    /// (estate asset type `covenant`), and the served bytes surface as
+    /// [`Event::EstateCovenantAssetReceived`].
+    #[test]
+    fn estate_covenant_transfer_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let transfer_id = client.fetch_estate_covenant_asset(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        let params = server_events
+            .iter()
+            .find_map(|e| match e {
+                ServerEvent::TransferRequested {
+                    transfer_id: got,
+                    source: TransferRequestSource::Estate(params),
+                    ..
+                } if *got == transfer_id => Some(*params),
+                _ => None,
+            })
+            .ok_or("expected an estate TransferRequested")?;
+        assert_eq!(params.agent_id, uuid::Uuid::from_u128(1));
+        assert_eq!(params.estate_asset_type, sl_wire::ESTATE_ASSET_COVENANT);
+
+        sim.send_transfer_asset(transfer_id, b"Covenant text.", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::EstateCovenantAssetReceived { transfer_id: got, data }
+                    if *got == transfer_id && data == b"Covenant text."
+            )),
+            "expected the covenant asset, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// Transfer failure and abort paths: a `send_transfer_fail` refusal
+    /// surfaces as [`Event::TransferFailed`]; a client `abort_transfer`
+    /// surfaces as [`ServerEvent::TransferAborted`] and invalidates the
+    /// pending answer; and a legacy plain-asset (source 2) request is
+    /// auto-refused without surfacing a server event.
+    #[test]
+    fn transfer_fail_and_abort_paths() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xAAAA));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xBBBB));
+        let asset = AssetKey::from(uuid::Uuid::from_u128(0xCCCC));
+
+        // Refusal: the client learns the asset is missing.
+        let refused =
+            client.fetch_task_item_asset(task, item, asset, AssetType::ScriptText, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_transfer_fail(refused, TransferStatus::UnknownSource, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TransferFailed {
+                    transfer_id: got,
+                    status: TransferStatus::UnknownSource,
+                } if *got == refused
+            )),
+            "expected TransferFailed, got {client_events:?}"
+        );
+
+        // Client-side abort: the sim surfaces it and the pending answer dies.
+        let aborted =
+            client.fetch_task_item_asset(task, item, asset, AssetType::ScriptText, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        client.abort_transfer(aborted, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::TransferAborted { transfer_id: got } if *got == aborted
+            )),
+            "expected TransferAborted, got {server_events:?}"
+        );
+        assert!(matches!(
+            sim.send_transfer_asset(aborted, b"late", now),
+            Err(sl_proto::Error::UnknownTransfer)
+        ));
+
+        // Legacy plain-asset source: auto-refused, no server event surfaced.
+        let legacy = AnyMessage::TransferRequest(TransferRequest {
+            transfer_info: TransferRequestTransferInfoBlock {
+                transfer_id: uuid::Uuid::from_u128(0xDEAD),
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                source_type: sl_wire::TRANSFER_SOURCE_ASSET,
+                priority: 100.0,
+                params: asset.uuid().as_bytes().to_vec(),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&legacy, 9100, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            !server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::TransferRequested { .. })),
+            "a legacy plain-asset request must not surface, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The object-sit flow round-trips: the client's `sit_on` surfaces
+    /// [`ServerEvent::SitRequested`], the driver's `send_avatar_sit_response`
+    /// seats the client — whose completing `AgentSit` surfaces
+    /// [`ServerEvent::SitConfirmed`] and marks the sim-side machine seated —
+    /// and standing up via the transient `STAND_UP` control flag surfaces
+    /// [`ServerEvent::StoodUp`] and resets both mirrors.
+    #[test]
+    fn object_sit_flow_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let target = ObjectKey::from(uuid::Uuid::from_u128(0x5EA7));
+        let offset = sl_types::lsl::Vector {
+            x: 0.5,
+            y: -0.25,
+            z: 1.0,
+        };
+        client.sit_on(target, offset.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SitRequested { target: t, offset: o }
+                    if *t == target && *o == offset
+            )),
+            "expected SitRequested, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+
+        let transform = SitTransform {
+            autopilot: true,
+            sit_position: sl_types::lsl::Vector {
+                x: 0.1,
+                y: 0.2,
+                z: 0.6,
+            },
+            sit_rotation: sl_types::lsl::Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 1.0,
+                s: 0.0,
+            },
+            camera_eye_offset: sl_types::lsl::Vector {
+                x: -3.0,
+                y: 0.0,
+                z: 1.5,
+            },
+            camera_at_offset: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.5,
+            },
+            force_mouselook: true,
+        };
+        sim.send_avatar_sit_response(target, &transform, now)?;
+        // One pump both delivers the response and returns the client's
+        // completing `AgentSit`.
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        let result = events
+            .iter()
+            .find_map(|e| match e {
+                Event::SitResult {
+                    sit_object,
+                    autopilot,
+                    sit_position,
+                    sit_rotation,
+                    camera_eye_offset,
+                    camera_at_offset,
+                    force_mouselook,
+                } => Some((
+                    *sit_object,
+                    *autopilot,
+                    sit_position.clone(),
+                    sit_rotation.clone(),
+                    camera_eye_offset.clone(),
+                    camera_at_offset.clone(),
+                    *force_mouselook,
+                )),
+                _ => None,
+            })
+            .ok_or("expected a SitResult client event")?;
+        assert_eq!(
+            result,
+            (
+                target,
+                transform.autopilot,
+                transform.sit_position.clone(),
+                transform.sit_rotation.clone(),
+                transform.camera_eye_offset.clone(),
+                transform.camera_at_offset.clone(),
+                transform.force_mouselook,
+            )
+        );
+        assert_eq!(client.seat(), Some(target));
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SitConfirmed { on: Some(on) } if *on == target)),
+            "expected SitConfirmed, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), Some(target));
+
+        client.stand(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::StoodUp)),
+            "expected StoodUp, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+        assert_eq!(client.seat(), None);
+        Ok(())
+    }
+
+    /// An `AgentSit` with no outstanding sit response is surfaced with
+    /// `on: None` and leaves the sim-side machine not sitting (the mirror of
+    /// the client ignoring an unsolicited `AvatarSitResponse`).
+    #[test]
+    fn unsolicited_agent_sit_leaves_sim_not_sitting() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let message = AnyMessage::AgentSit(sl_wire::messages::AgentSit {
+            agent_data: sl_wire::messages::AgentSitAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&message, 9000, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SitConfirmed { on: None })),
+            "expected an unsolicited SitConfirmed, got {server_events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+        Ok(())
+    }
+
+    /// The script permission/control flow round-trips: the sim's
+    /// `send_script_question` surfaces on the client, the client's
+    /// `answer_script_permissions` converges both grant mirrors
+    /// ([`ServerEvent::ScriptPermissionAnswer`]), the sim's
+    /// `send_script_control_change` folds the client's taken-controls
+    /// tracker, and `release_script_controls` surfaces
+    /// [`ServerEvent::ForceScriptControlRelease`].
+    #[test]
+    fn script_permission_and_control_flow_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x5C41));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5C42));
+        let asked = ScriptPermissions(
+            ScriptPermissions::TAKE_CONTROLS | ScriptPermissions::TRIGGER_ANIMATION,
+        );
+        let question = ScriptPermissionRequest {
+            task_id: task,
+            item_id: item,
+            object_name: "Dance Ball".to_owned(),
+            object_owner: "Test User".to_owned(),
+            experience_id: None,
+            permissions: asked,
+        };
+        sim.send_script_question(&question, now)?;
+        assert_eq!(sim.script_question(task, item), Some(asked));
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        let received = events
+            .iter()
+            .find_map(|e| match e {
+                Event::ScriptPermissionRequest(request) => Some((**request).clone()),
+                _ => None,
+            })
+            .ok_or("expected a ScriptPermissionRequest client event")?;
+        assert_eq!(received, question);
+
+        // Grant a subset; both mirrors converge on the answer.
+        let granted = ScriptPermissions(ScriptPermissions::TAKE_CONTROLS);
+        client.answer_script_permissions(task, item, granted, None, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ScriptPermissionAnswer {
+                    task_id,
+                    item_id,
+                    permissions,
+                } if *task_id == task && *item_id == item && *permissions == granted
+            )),
+            "expected ScriptPermissionAnswer, got {server_events:?}"
+        );
+        assert_eq!(sim.script_question(task, item), None);
+        assert_eq!(sim.script_grant(task, item), Some(granted));
+        assert_eq!(client.granted_permissions(task, item), granted);
+
+        // The granted TAKE_CONTROLS now lets a script take controls.
+        sim.send_script_control_change(
+            &[ScriptControl {
+                action: ScriptControlAction::Take,
+                controls: ControlFlags::AT_POS,
+                pass_to_agent: false,
+            }],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ScriptControlChange(changes)
+                    if changes.iter().any(|change| change.controls == ControlFlags::AT_POS)
+            )),
+            "expected ScriptControlChange, got {events:?}"
+        );
+        assert_eq!(client.script_controls().taken, ControlFlags::AT_POS);
+
+        client.release_script_controls(now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::ForceScriptControlRelease)),
+            "expected ForceScriptControlRelease, got {server_events:?}"
+        );
+        assert_eq!(client.script_controls().taken, ControlFlags::empty());
+        Ok(())
+    }
+
+    /// An all-clear `ScriptAnswerYes` is recorded as an explicit deny on both
+    /// mirrors — `Some(empty)` on the sim, `Denied` on the client — distinct
+    /// from a never-asked holder.
+    #[test]
+    fn script_permission_deny_is_recorded() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0xDE41));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0xDE42));
+        sim.send_script_question(
+            &ScriptPermissionRequest {
+                task_id: task,
+                item_id: item,
+                object_name: "Grabby Cube".to_owned(),
+                object_owner: "Test User".to_owned(),
+                experience_id: None,
+                permissions: ScriptPermissions(ScriptPermissions::DEBIT),
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+
+        client.answer_script_permissions(task, item, ScriptPermissions(0), None, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ScriptPermissionAnswer {
+                    permissions: ScriptPermissions(0),
+                    ..
+                }
+            )),
+            "expected an explicit-deny ScriptPermissionAnswer, got {server_events:?}"
+        );
+        assert_eq!(sim.script_grant(task, item), Some(ScriptPermissions(0)));
+        assert_eq!(
+            client.script_permission_status(task, item),
+            ScriptPermissionStatus::Denied
+        );
+        Ok(())
+    }
+
+    /// Drives A's friendship offer through to an accepted friendship on both
+    /// [`setup_pair`] ends, playing the relaying driver: the offer IM off A's
+    /// sim is delivered via B's sim, B accepts, and the acceptance is relayed
+    /// back to A as a [`ImDialog::FriendshipAccepted`] IM. Returns the offer
+    /// transaction id.
+    fn befriend(a: &mut PairEnd, b: &mut PairEnd, now: Instant) -> Result<uuid::Uuid, TestError> {
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+
+        a.client
+            .send_friendship_offer(b_agent, "be my friend", now)?;
+        pump_end(a, now)?;
+        let offer = drain_server(&mut a.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::InstantMessage(im) if im.dialog == ImDialog::FriendshipOffered => {
+                    Some(*im)
+                }
+                _ => None,
+            })
+            .ok_or("expected the friendship-offer IM on A's sim")?;
+        assert_eq!(offer.to_agent_id, b_agent);
+
+        // Relay the offer to B unchanged; B sees it and accepts, echoing the
+        // offer IM's id as the transaction.
+        b.sim.send_instant_message(&offer, now)?;
+        pump_end(b, now)?;
+        let received = drain_client(&mut b.client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::InstantMessageReceived(im) if im.dialog == ImDialog::FriendshipOffered => {
+                    Some(*im)
+                }
+                _ => None,
+            })
+            .ok_or("expected the relayed friendship offer on B's client")?;
+        assert_eq!(received.from_agent_id, a_agent);
+
+        b.client.accept_friendship(
+            TransactionId::from(received.id),
+            FriendKey::from(a_agent.uuid()),
+            InventoryFolderKey::from(uuid::Uuid::from_u128(0xCA11)),
+            now,
+        )?;
+        pump_end(b, now)?;
+        let transaction = drain_server(&mut b.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::FriendshipAccepted { transaction, .. } => Some(transaction),
+                _ => None,
+            })
+            .ok_or("expected FriendshipAccepted on B's sim")?;
+        assert_eq!(transaction.get(), received.id);
+
+        // Relay the acceptance back to the offerer as a FriendshipAccepted IM
+        // (the simulators notify only the original offerer).
+        let accepted = InstantMessage {
+            from_agent_id: b_agent,
+            from_agent_name: "Peer User".to_owned(),
+            to_agent_id: a_agent,
+            dialog: ImDialog::FriendshipAccepted,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: received.id,
+            parent_estate_id: 0,
+            message: "Peer User accepted your friendship offer.".to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        a.sim.send_instant_message(&accepted, now)?;
+        pump_end(a, now)?;
+        drain_client(&mut a.client);
+        Ok(received.id)
+    }
+
+    /// The friendship offer/accept handshake relays end-to-end between two
+    /// avatars (one `SimSession` per client, the test as the relaying
+    /// driver), leaving both buddy caches with the default rights; presence
+    /// pushes then mark each end's new friend online.
+    #[test]
+    fn friendship_offer_accept_relays_between_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+        befriend(&mut a, &mut b, now)?;
+
+        let default_rights = FriendRights(FriendRights::CAN_SEE_ONLINE);
+        let a_friend = a
+            .client
+            .friend(FriendKey::from(b_agent.uuid()))
+            .ok_or("expected B in A's buddy cache")?;
+        assert_eq!(a_friend.rights_granted, default_rights);
+        assert_eq!(a_friend.rights_received, default_rights);
+        let b_friend = b
+            .client
+            .friend(FriendKey::from(a_agent.uuid()))
+            .ok_or("expected A in B's buddy cache")?;
+        assert_eq!(b_friend.rights_granted, default_rights);
+        assert_eq!(b_friend.rights_received, default_rights);
+
+        // The grid-level presence service (the driver) pushes each end's new
+        // friend online.
+        a.sim
+            .send_online_notification(&[FriendKey::from(b_agent.uuid())], now)?;
+        b.sim
+            .send_online_notification(&[FriendKey::from(a_agent.uuid())], now)?;
+        pump_end(&mut a, now)?;
+        pump_end(&mut b, now)?;
+        assert!(a.client.is_online(FriendKey::from(b_agent.uuid())));
+        assert!(b.client.is_online(FriendKey::from(a_agent.uuid())));
+        Ok(())
+    }
+
+    /// A rights change and a termination relay between two avatars: the
+    /// `GrantUserRights` surfaces on the granter's sim, the driver's
+    /// `send_change_user_rights` echo + push update both buddy caches, and a
+    /// `TerminateFriendship` request confirms on both ends.
+    #[test]
+    fn friendship_rights_and_termination_relay() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+        befriend(&mut a, &mut b, now)?;
+
+        // B grants A object-modify rights on top of the default.
+        let new_rights =
+            FriendRights(FriendRights::CAN_SEE_ONLINE | FriendRights::CAN_MODIFY_OBJECTS);
+        b.client
+            .grant_user_rights(FriendKey::from(a_agent.uuid()), new_rights, now)?;
+        pump_end(&mut b, now)?;
+        let granted = drain_server(&mut b.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::UserRightsGranted { rights } => Some(rights),
+                _ => None,
+            })
+            .ok_or("expected UserRightsGranted on B's sim")?;
+        assert_eq!(
+            granted,
+            vec![UserRightsEntry {
+                agent: FriendKey::from(a_agent.uuid()),
+                rights: new_rights,
+            }]
+        );
+
+        // Driver: echo the change to the granter (changer = B's own agent,
+        // entry names the friend)…
+        b.sim.send_change_user_rights(
+            b_agent,
+            &[UserRightsEntry {
+                agent: FriendKey::from(a_agent.uuid()),
+                rights: new_rights,
+            }],
+            now,
+        )?;
+        pump_end(&mut b, now)?;
+        let events = drain_client(&mut b.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::FriendRightsChanged {
+                    friend_id,
+                    rights,
+                    granted_to_us: false,
+                } if *friend_id == FriendKey::from(a_agent.uuid()) && *rights == new_rights
+            )),
+            "expected the echo FriendRightsChanged on B, got {events:?}"
+        );
+        assert_eq!(
+            b.client
+                .friend(FriendKey::from(a_agent.uuid()))
+                .map(|f| f.rights_granted),
+            Some(new_rights)
+        );
+
+        // …and push it to the affected friend (changer = the friend B, the
+        // entry names the receiving agent, as the reference simulators send).
+        a.sim.send_change_user_rights(
+            b_agent,
+            &[UserRightsEntry {
+                agent: FriendKey::from(a_agent.uuid()),
+                rights: new_rights,
+            }],
+            now,
+        )?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::FriendRightsChanged {
+                    friend_id,
+                    rights,
+                    granted_to_us: true,
+                } if *friend_id == FriendKey::from(b_agent.uuid()) && *rights == new_rights
+            )),
+            "expected the push FriendRightsChanged on A, got {events:?}"
+        );
+        assert_eq!(
+            a.client
+                .friend(FriendKey::from(b_agent.uuid()))
+                .map(|f| f.rights_received),
+            Some(new_rights)
+        );
+
+        // B removes the friendship; the driver confirms on both ends.
+        b.client
+            .terminate_friendship(FriendKey::from(a_agent.uuid()), now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::FriendshipTerminationRequested { other }
+                    if *other == FriendKey::from(a_agent.uuid())
+            )),
+            "expected FriendshipTerminationRequested, got {server_events:?}"
+        );
+        b.sim
+            .send_terminate_friendship(FriendKey::from(a_agent.uuid()), now)?;
+        a.sim
+            .send_terminate_friendship(FriendKey::from(b_agent.uuid()), now)?;
+        pump_end(&mut a, now)?;
+        pump_end(&mut b, now)?;
+        assert!(
+            drain_client(&mut a.client)
+                .iter()
+                .any(|e| matches!(e, Event::FriendshipTerminated { .. })),
+            "expected FriendshipTerminated on A"
+        );
+        assert!(
+            drain_client(&mut b.client)
+                .iter()
+                .any(|e| matches!(e, Event::FriendshipTerminated { .. })),
+            "expected FriendshipTerminated on B"
+        );
+        assert_eq!(a.client.friend(FriendKey::from(b_agent.uuid())), None);
+        assert_eq!(b.client.friend(FriendKey::from(a_agent.uuid())), None);
+        Ok(())
+    }
+
+    /// A declined friendship offer relays back to the offerer as an
+    /// [`ImDialog::FriendshipDeclined`] IM (dialog 40 — the byte both
+    /// OpenSim and the reference viewer use for the decline notification).
+    #[test]
+    fn friendship_decline_relays_between_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+
+        a.client.send_friendship_offer(b_agent, "friends?", now)?;
+        pump_end(&mut a, now)?;
+        let offer = drain_server(&mut a.sim)
+            .into_iter()
+            .find_map(|e| match e {
+                ServerEvent::InstantMessage(im) if im.dialog == ImDialog::FriendshipOffered => {
+                    Some(*im)
+                }
+                _ => None,
+            })
+            .ok_or("expected the friendship-offer IM on A's sim")?;
+        b.sim.send_instant_message(&offer, now)?;
+        pump_end(&mut b, now)?;
+        drain_client(&mut b.client);
+
+        b.client
+            .decline_friendship(TransactionId::from(offer.id), now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::FriendshipDeclined { transaction }
+                    if transaction.get() == offer.id
+            )),
+            "expected FriendshipDeclined, got {server_events:?}"
+        );
+
+        let declined = InstantMessage {
+            from_agent_id: b_agent,
+            from_agent_name: "Peer User".to_owned(),
+            to_agent_id: a_agent,
+            dialog: ImDialog::FriendshipDeclined,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: offer.id,
+            parent_estate_id: 0,
+            message: "Peer User declined your friendship offer.".to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        a.sim.send_instant_message(&declined, now)?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::InstantMessageReceived(im)
+                    if im.dialog == ImDialog::FriendshipDeclined
+                        && im.from_agent_id == b_agent
+            )),
+            "expected the relayed decline IM on A, got {events:?}"
+        );
+        assert_eq!(a.client.friend(FriendKey::from(b_agent.uuid())), None);
+        Ok(())
+    }
+
+    /// A group chat session's lifecycle on the sim side: the client's
+    /// start/send/leave fold the sim's registry (roster + server history),
+    /// and the sim's `send_session_message` / `send_session_participant`
+    /// surface as the client's group-session events.
+    #[test]
+    fn group_session_lifecycle_and_history_on_sim() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let own_agent = AgentKey::from(uuid::Uuid::from_u128(1));
+        let peer = AgentKey::from(uuid::Uuid::from_u128(0x9EE7));
+        let group = GroupKey::from(uuid::Uuid::from_u128(0x64019));
+        let session_id = ImSessionId::from(group.uuid());
+
+        client.start_group_session(group, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::GroupSessionStartRequested { group_id } if *group_id == group
+            )),
+            "expected GroupSessionStartRequested, got {server_events:?}"
+        );
+        let session = sim
+            .chat_session(session_id)
+            .ok_or("expected the group session in the sim registry")?;
+        assert_eq!(session.kind, SimChatSessionKind::Group { group_id: group });
+        assert!(session.participants.contains(&own_agent));
+
+        // The sim announces a peer joining the group channel.
+        sim.send_session_participant(session_id, peer, "Peer User", true, true, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::GroupSessionParticipant {
+                    group_id,
+                    agent_id,
+                    joined: true,
+                } if *group_id == group && *agent_id == peer
+            )),
+            "expected the joined GroupSessionParticipant, got {events:?}"
+        );
+
+        // The client's own message lands in the sim's server history…
+        client.send_group_message(group, "hello group", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionMessageSent { session_id: sid, message }
+                    if *sid == session_id && message == "hello group"
+            )),
+            "expected SessionMessageSent, got {server_events:?}"
+        );
+        // …as does a relayed peer message, which the client folds as group chat.
+        sim.send_session_message(session_id, peer, "Peer User", "hi back", true, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let events = drain_client(&mut client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::GroupSessionMessage {
+                    group_id,
+                    from_agent_id,
+                    from_name,
+                    message,
+                } if *group_id == group
+                    && *from_agent_id == peer
+                    && from_name == "Peer User"
+                    && message == "hi back"
+            )),
+            "expected GroupSessionMessage, got {events:?}"
+        );
+        let history: Vec<(String, String)> = sim
+            .chat_session(session_id)
+            .ok_or("expected the group session in the sim registry")?
+            .history
+            .iter()
+            .map(|entry| (entry.sender_name.clone(), entry.text.clone()))
+            .collect();
+        assert_eq!(
+            history,
+            vec![
+                ("Test User".to_owned(), "hello group".to_owned()),
+                ("Peer User".to_owned(), "hi back".to_owned()),
+            ]
+        );
+
+        // Leaving drops the client from the roster (the peer keeps the
+        // session alive).
+        client.leave_group_session(group, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionLeaveRequested { session_id: sid } if *sid == session_id
+            )),
+            "expected SessionLeaveRequested, got {server_events:?}"
+        );
+        let session = sim
+            .chat_session(session_id)
+            .ok_or("expected the session to survive while the peer remains")?;
+        assert!(!session.participants.contains(&own_agent));
+        assert!(session.participants.contains(&peer));
+        Ok(())
+    }
+
+    /// An ad-hoc conference relays between two avatars: A's conference start
+    /// registers on A's sim, the driver materialises it on B's sim and
+    /// delivers the `ChatterBoxInvitation` over B's event queue, B joins and
+    /// speaks, and the relayed message lands in both sims' server histories
+    /// and A's client events.
+    #[test]
+    fn conference_relays_between_avatars() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut a, mut b) = setup_pair(now)?;
+        let a_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_A_AGENT));
+        let b_agent = AgentKey::from(uuid::Uuid::from_u128(PAIR_B_AGENT));
+        let session_id = ImSessionId::from(uuid::Uuid::from_u128(0xC04F));
+
+        a.client
+            .start_conference(session_id, &[b_agent], "join us", now)?;
+        pump_end(&mut a, now)?;
+        let server_events = drain_server(&mut a.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::ConferenceStartRequested {
+                    session_id: sid,
+                    invitees,
+                    message,
+                } if *sid == session_id && *invitees == vec![b_agent] && message == "join us"
+            )),
+            "expected ConferenceStartRequested, got {server_events:?}"
+        );
+        let session = a
+            .sim
+            .chat_session(session_id)
+            .ok_or("expected the conference on A's sim")?;
+        assert_eq!(session.kind, SimChatSessionKind::Conference);
+        assert!(session.participants.contains(&a_agent));
+        assert!(session.participants.contains(&b_agent));
+
+        // Driver: materialise the conference on B's sim and deliver the
+        // invitation over B's event queue.
+        b.sim.open_chat_session(
+            session_id,
+            SimChatSessionKind::Conference,
+            &[a_agent, b_agent],
+        );
+        b.sim
+            .enqueue_chatterbox_invitation(&Event::ConferenceInvited {
+                session_id: session_id.get(),
+                from_agent_id: a_agent,
+                from_name: "Test User".to_owned(),
+                dialog: ImDialog::SessionConferenceStart,
+                from_group: false,
+                session_name: "join us".to_owned(),
+                message: "join us".to_owned(),
+                region_id: uuid::Uuid::nil(),
+                position: RegionCoordinates::new(1.0, 2.0, 3.0),
+                parent_estate_id: 1,
+                timestamp: None,
+                binary_bucket: Vec::new(),
+            });
+        deliver_caps(&mut b.client, &mut b.sim, now)?;
+        let kind = ChatSessionKind::Conference { id: session_id };
+        let info = b
+            .client
+            .chat_sessions_info()
+            .find(|info| info.kind == kind)
+            .ok_or("expected the invited conference on B's client")?;
+        assert!(matches!(info.lifecycle, ChatLifecycleView::Invited { .. }));
+
+        // B accepts and speaks; the message reaches B's sim (and history).
+        b.client.accept_chat_invite(session_id, false, now);
+        b.client.send_conference_message(session_id, "here", now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionMessageSent { session_id: sid, message }
+                    if *sid == session_id && message == "here"
+            )),
+            "expected SessionMessageSent on B's sim, got {server_events:?}"
+        );
+
+        // Driver relays B's message to A, whose client folds it as a
+        // conference message.
+        a.sim
+            .send_session_message(session_id, b_agent, "Peer User", "here", false, now)?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ConferenceSessionMessage {
+                    session_id: sid,
+                    from_agent_id,
+                    from_name,
+                    message,
+                } if *sid == session_id.get()
+                    && *from_agent_id == b_agent
+                    && from_name == "Peer User"
+                    && message == "here"
+            )),
+            "expected ConferenceSessionMessage on A, got {events:?}"
+        );
+        for (label, sim) in [("A", &a.sim), ("B", &b.sim)] {
+            let history = &sim
+                .chat_session(session_id)
+                .ok_or_else(|| format!("expected the conference on {label}'s sim"))?
+                .history;
+            assert!(
+                history
+                    .iter()
+                    .any(|entry| entry.sender == b_agent && entry.text == "here"),
+                "expected the message in {label}'s server history, got {history:?}"
+            );
+        }
+
+        // B leaves; the driver notifies A's client via A's sim.
+        b.client.leave_conference(session_id, now)?;
+        pump_end(&mut b, now)?;
+        let server_events = drain_server(&mut b.sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::SessionLeaveRequested { session_id: sid } if *sid == session_id
+            )),
+            "expected SessionLeaveRequested on B's sim, got {server_events:?}"
+        );
+        a.sim
+            .send_session_participant(session_id, b_agent, "Peer User", false, false, now)?;
+        pump_end(&mut a, now)?;
+        let events = drain_client(&mut a.client);
+        assert!(
+            events.iter().any(|e| matches!(
+                e,
+                Event::ConferenceSessionParticipant {
+                    session_id: sid,
+                    agent_id,
+                    joined: false,
+                } if *sid == session_id.get() && *agent_id == b_agent
+            )),
+            "expected the left ConferenceSessionParticipant on A, got {events:?}"
+        );
+        Ok(())
+    }
+
+    /// **The `Session` ↔ `SimSession` flow-mirroring coverage table, pinned.**
+    /// One row per flow-level (multi-message) state machine the client
+    /// `Session` implements — the committed audit the `protocol-sim-udp-flows`
+    /// task opened with. `Mirrored` rows are proven by the loopback tests in
+    /// this file; `Pending` rows await a follow-up `protocol-sim-*` task;
+    /// `Legacy` rows are deliberately skipped because BOTH grids offer a
+    /// modern (CAPS) alternative. Any drift is a loud diff — if intended,
+    /// bless it by editing this table (and `SESSION_FLOW_COVERAGE`).
+    #[test]
+    fn flow_coverage_table_is_pinned() {
+        let expected: Vec<(&str, FlowMirrorStatus)> = vec![
+            ("root circuit lifecycle", FlowMirrorStatus::Mirrored),
+            ("child-agent circuits", FlowMirrorStatus::Mirrored),
+            ("teleport / region handover", FlowMirrorStatus::Mirrored),
+            ("object sit", FlowMirrorStatus::Mirrored),
+            ("Xfer download", FlowMirrorStatus::Mirrored),
+            ("Xfer upload", FlowMirrorStatus::Mirrored),
+            (
+                "legacy transaction asset upload",
+                FlowMirrorStatus::Mirrored,
+            ),
+            ("task-inventory fetch", FlowMirrorStatus::Mirrored),
+            (
+                "UDP asset Transfer (task item + estate covenant)",
+                FlowMirrorStatus::Mirrored,
+            ),
+            ("UDP texture download", FlowMirrorStatus::Legacy),
+            ("UDP inventory-folder fetch", FlowMirrorStatus::Legacy),
+            (
+                "chat-session lifecycle + server history",
+                FlowMirrorStatus::Mirrored,
+            ),
+            ("friendship / presence", FlowMirrorStatus::Mirrored),
+            (
+                "script permission / control mirror",
+                FlowMirrorStatus::Mirrored,
+            ),
+        ];
+        assert_eq!(
+            SESSION_FLOW_COVERAGE.to_vec(),
+            expected,
+            "a Session flow's server-side mirror status changed — if \
+             intended, bless it by editing this table"
+        );
+    }
+
+    /// The destination simulator's UDP address for two-region tests.
+    fn dest_sim_addr() -> SocketAddr {
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 9001)
+    }
+
+    /// The destination region handle for two-region tests (one region east of
+    /// [`REGION_HANDLE`]).
+    const DEST_HANDLE: u64 = 0x0000_03e9_0000_03e8;
+
+    /// An intra-region teleport round-trips: the client's `teleport_to`
+    /// surfaces [`ServerEvent::TeleportRequested`] with the requested handle
+    /// and position, and the driver's `send_teleport_start` +
+    /// `send_teleport_local` bring the client back to active with
+    /// [`Event::TeleportStarted`] and [`Event::TeleportLocal`].
+    #[test]
+    fn teleport_local_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let position = RegionCoordinates::new(10.0, 20.0, 30.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(REGION_HANDLE), position, look_at.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::TeleportRequested {
+                    region_handle,
+                    position: got,
+                    ..
+                } if *region_handle == RegionHandle(REGION_HANDLE) && *got == position
+            )),
+            "expected TeleportRequested, got {server_events:?}"
+        );
+
+        sim.send_teleport_start(0, now)?;
+        sim.send_teleport_local(position, look_at, 0, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events
+                .iter()
+                .any(|e| matches!(e, Event::TeleportStarted)),
+            "expected TeleportStarted, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportLocal { position: got } if *got == position
+            )),
+            "expected TeleportLocal, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A failed teleport surfaces its progress and reason and returns the
+    /// client to the active state (a follow-up request is accepted again).
+    #[test]
+    fn teleport_failed_returns_client_to_active() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let position = RegionCoordinates::new(1.0, 2.0, 3.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 0.0,
+            y: 1.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(DEST_HANDLE), position, look_at, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        sim.send_teleport_start(0, now)?;
+        sim.send_teleport_progress("resolving destination", 0, now)?;
+        sim.send_teleport_failed("no such region", now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportProgress { message, .. } if message == "resolving destination"
+            )),
+            "expected TeleportProgress, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFailed { reason, .. } if reason == "no such region"
+            )),
+            "expected TeleportFailed, got {client_events:?}"
+        );
+        // Back to active: a fresh request goes out again.
+        client.teleport_to(
+            RegionHandle(REGION_HANDLE),
+            position,
+            sl_types::lsl::Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::TeleportRequested { .. })),
+            "expected the follow-up TeleportRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The full inter-region teleport across TWO simulator sessions: the
+    /// source surfaces the request and drives the CAPS event-queue trio
+    /// (`EnableSimulator` + `EstablishAgentCommunication` opening a child
+    /// circuit on the destination, then `TeleportFinish`); the client promotes
+    /// the child, the destination confirms the arrival
+    /// (`CompleteAgentMovement` → root agent), and the client lands with
+    /// `RegionChanged`.
+    #[test]
+    fn inter_region_teleport_two_sims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut source) = setup(now)?;
+        drain_server(&mut source);
+        let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+
+        let position = RegionCoordinates::new(128.0, 128.0, 25.0);
+        let look_at = sl_types::lsl::Vector {
+            x: 1.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        client.teleport_to(RegionHandle(DEST_HANDLE), position, look_at, now)?;
+        pump(&mut client, &mut source, now)?;
+        let server_events = drain_server(&mut source);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::TeleportRequested { region_handle, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE)
+            )),
+            "expected TeleportRequested on the source, got {server_events:?}"
+        );
+
+        // The source accepts and announces the destination region.
+        source.send_teleport_start(0, now)?;
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_establish_agent_communication(
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/child-seed",
+        );
+        let caps_events = deliver_caps(&mut client, &mut source, now)?;
+        assert!(
+            caps_events
+                .iter()
+                .any(|e| matches!(e, Event::NeighborSeed { sim, .. } if *sim == dest_sim_addr())),
+            "expected the child seed, got {caps_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CircuitOpened { .. })),
+            "expected the child circuit on the destination, got {dest_events:?}"
+        );
+        assert_eq!(dest.agent_presence(), AgentPresence::Child);
+
+        // The source finishes the teleport; the client promotes the child.
+        source.enqueue_teleport_finish(dest_sim_addr(), "http://127.0.0.1:9001/seed", 21, 16);
+        let finish_events = deliver_caps(&mut client, &mut source, now)?;
+        assert!(
+            finish_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFinished { sim, .. } if *sim == dest_sim_addr()
+            )),
+            "expected TeleportFinished, got {finish_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentArrived)),
+            "expected the arrival on the destination, got {dest_events:?}"
+        );
+        assert!(dest.is_root_agent());
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::RegionChanged { region_handle, sim, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE) && *sim == dest_sim_addr()
+            )),
+            "expected RegionChanged, got {client_events:?}"
+        );
+
+        // The source retires the now-child circuit; the client tears it down
+        // without disturbing the new root.
+        source.send_disable_simulator(now)?;
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        Ok(())
+    }
+
+    /// A physical border crossing: the child circuit is pre-opened via the
+    /// event-queue announcements, then the source's `CrossedRegion` promotes
+    /// it to root with no teleport screen — the destination confirms the
+    /// arrival and the client lands with a non-world-resetting
+    /// `RegionChanged`.
+    #[test]
+    fn crossed_region_two_sims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut source) = setup(now)?;
+        drain_server(&mut source);
+        let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_establish_agent_communication(
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/child-seed",
+        );
+        deliver_caps(&mut client, &mut source, now)?;
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        drain_server(&mut dest);
+        assert_eq!(dest.agent_presence(), AgentPresence::Child);
+
+        source.enqueue_crossed_region(
+            RegionHandle(DEST_HANDLE),
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/seed",
+        );
+        deliver_caps(&mut client, &mut source, now)?;
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentArrived)),
+            "expected the crossing arrival, got {dest_events:?}"
+        );
+        assert!(dest.is_root_agent());
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::RegionChanged { region_handle, sim, world_reset: false, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE) && *sim == dest_sim_addr()
+            )),
+            "expected a non-resetting RegionChanged, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The full task-inventory serving path: the client's
+    /// `fetch_task_inventory` sends the request, the driver answers with
+    /// `serve_task_inventory` (listing writer + `Xfer` registration +
+    /// `ReplyTaskInventory`), and the client downloads and parses the listing
+    /// back into the exact served items.
+    #[test]
+    fn task_inventory_fetch_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        client.fetch_task_inventory(ScopedObjectId::new(circuit, RegionLocalObjectId(77)), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::RequestTaskInventory { local_id } if *local_id == RegionLocalObjectId(77)
+            )),
+            "expected RequestTaskInventory, got {server_events:?}"
+        );
+
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x2222));
+        let items = vec![task_script_item(task)];
+        sim.serve_task_inventory(task, 5, &items, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskInventoryReply(reply)
+                    if reply.task == task && reply.serial == 5 && !reply.filename.is_empty()
+            )),
+            "expected TaskInventoryReply, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TaskInventoryContents { task: got, serial: 5, items: parsed }
+                    if *got == task && *parsed == items
+            )),
+            "expected the parsed task inventory, got {client_events:?}"
+        );
         Ok(())
     }
 }

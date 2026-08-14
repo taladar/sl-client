@@ -207,8 +207,12 @@ conventions.
 ## Out of scope (not LLUDP/CAPS protocol)
 
 Rendering/physics engines, J2C/mesh *display* (vs. decode), the in-viewer UI,
-and the Marketplace (web, not protocol) are deliberately excluded — this roadmap
-covers protocol features only. **Server roles are in scope as of Tier F
+and the Marketplace *website* (browsing/purchase, web not protocol) are
+deliberately excluded — this roadmap covers protocol features only. (The
+Marketplace's **DirectDelivery listing-management API** turned out to be a
+protocol surface after all — a JSON transport behind a region capability —
+and is in scope as [[protocol-slm-directdelivery]] / the `sl-marketplace`
+crate.) **Server roles are in scope as of Tier F
 (#52–#65) — the bidirectional codec and the per-role sans-I/O skeletons — but
 a *running* grid is not: world authority, persistence, multi-client broadcast,
 and the socket/event-loop I/O remain the consumer's job, not these crates'.**
@@ -239,11 +243,20 @@ usable later by a real simulator). Conventions:
   (pinned-table convention — updating it is a deliberate edit).
 - **Flow mirroring.** For every high-level flow the client `Session`
   implements above individual messages (asset upload via Xfer, Transfer
-  downloads, UDP inventory serving, teleport, …), `SimSession` gains the
-  mirroring server-side state machine, proven by in-memory
-  `Session` ↔ `SimSession` loopback tests
-  (`sl-proto/tests/sim_session.rs` is the template), with its own
-  committed flow-coverage table.
+  downloads, teleport, …), `SimSession` gains the mirroring server-side
+  state machine, proven by in-memory `Session` ↔ `SimSession` loopback
+  tests (`sl-proto/tests/sim_session.rs` is the template), with its own
+  committed flow-coverage table (`SESSION_FLOW_COVERAGE` +
+  `flow_coverage_table_is_pinned`).
+- **Legacy-skip rule.** A legacy UDP flow is *not* mirrored (or newly
+  implemented) when **both** Second Life and OpenSim offer a modern
+  (CAPS) alternative for the same job — verified against the Firestorm
+  and OpenSim sources, not assumed. Skips are pinned as `Legacy` rows in
+  the coverage table so each one stays a deliberate, documented
+  decision (e.g. UDP `FetchInventoryDescendents` serving is skipped —
+  `FetchInventoryDescendents2`/AISv3 exist on both grids — while the
+  Xfer transaction upload stays: the in-place wearable save has no cap
+  on either grid).
 - **Boundary unchanged.** Protocol surface is in scope; the
   world-authority grid — persistence, physics, multi-client broadcast,
   socket/event-loop I/O — remains the consumer's job (the `sl-fake-grid`

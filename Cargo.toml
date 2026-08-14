@@ -19,6 +19,7 @@ members = [
     "sl-llsd",
     "sl-lsl",
     "sl-lsl-lsp",
+    "sl-marketplace",
     "sl-material",
     "sl-media",
     "sl-mesh",

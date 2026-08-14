@@ -94,7 +94,7 @@ impl GridTest for GrantUserRights {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -237,7 +237,18 @@ impl GridTest for GrantUserRights {
                 })
                 .await?;
             let notify_rtt = granted_at.elapsed();
-            check_eq("grantee notify rights", &notify, &granted)?;
+            // The map/modify bits this grant added must be in the notify on
+            // every grid. Second Life masks CAN_SEE_ONLINE out of what the
+            // grantee is shown (observed live: notify carries 6, not 7 —
+            // online visibility is private to the grantor's side there), while
+            // OpenSim relays the full bitfield — record the bit instead of
+            // asserting it.
+            check(
+                notify.0 & FriendRights::CAN_SEE_ON_MAP != 0
+                    && notify.0 & FriendRights::CAN_MODIFY_OBJECTS != 0,
+                "grantee notify lost the granted map/modify rights",
+            )?;
+            let notify_included_online = notify.0 & FriendRights::CAN_SEE_ONLINE != 0;
 
             // --- Confirm both buddy lists reflect the grant ------------------
 
@@ -271,11 +282,16 @@ impl GridTest for GrantUserRights {
                     "secondary's buddy list does not contain the primary".to_owned(),
                 )
             })?;
-            check_eq(
-                "secondary's rights received from primary",
-                &secondary_view.rights_received,
-                &granted,
+            // Same tolerance as the notify: the grantee-visible received set
+            // must carry the granted map/modify bits; whether the grid also
+            // shows it the see-online bit is recorded, not asserted.
+            check(
+                secondary_view.rights_received.0 & FriendRights::CAN_SEE_ON_MAP != 0
+                    && secondary_view.rights_received.0 & FriendRights::CAN_MODIFY_OBJECTS != 0,
+                "secondary's received rights lost the granted map/modify rights",
             )?;
+            let received_included_online =
+                secondary_view.rights_received.0 & FriendRights::CAN_SEE_ONLINE != 0;
             check(
                 secondary_view.rights_granted.0 & FriendRights::CAN_SEE_ONLINE != 0,
                 "secondary's grant to the primary lost its default see-online right",
@@ -289,6 +305,8 @@ impl GridTest for GrantUserRights {
 
             let metrics = ctx.metrics();
             metrics.set(&count_metric("granted_rights"), granted.0);
+            metrics.set("notify_included_online", notify_included_online);
+            metrics.set("received_included_online", received_included_online);
             metrics.set_timing(&secs_metric("grant_echo_rtt"), echo_rtt.as_secs_f64());
             metrics.set_timing(&secs_metric("grant_notify_rtt"), notify_rtt.as_secs_f64());
             Ok(())

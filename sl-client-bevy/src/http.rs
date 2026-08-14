@@ -6,8 +6,8 @@ use crate::lsl_syntax_cache::LslSyntaxCache;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
-    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid,
+    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CHAT_SESSION_FETCH_HISTORY_TAG,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid,
     build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
 };
 use std::collections::HashMap;
@@ -91,6 +91,57 @@ pub(crate) fn run_chat_session_request(
     let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
     caps_tx
         .send((CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)))
+        .ok();
+}
+
+/// POSTs a `ChatSessionRequest` `fetch history` `body` (blocking) and forwards
+/// the reply to `caps_tx` tagged [`CHAT_SESSION_FETCH_HISTORY_TAG`] — the
+/// synthetic routing tag, because the reply is a **bare LLSD array** (the
+/// session's server-side backlog, oldest-first) that a plain
+/// [`CAP_CHAT_SESSION_REQUEST`] tag would misroute into the roster decoder.
+/// Like the roster path above, the reply carries no session identity of its
+/// own, so it is wrapped as
+/// `{ "history": <array>, "session-id": <uuid>, "from_group": <bool> }` for
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event) to
+/// rebuild the session kind. Mirrors the tokio
+/// `post_chat_session_fetch_history`.
+pub(crate) fn run_chat_session_fetch_history(
+    cap_url: &str,
+    body: String,
+    session_id: Uuid,
+    from_group: bool,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    else {
+        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
+        return;
+    };
+    let Ok(response) = http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    else {
+        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
+        return;
+    };
+    let Ok(text) = response.text() else {
+        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
+        return;
+    };
+    let Ok(reply) = parse_llsd_xml(&text) else {
+        report_caps_failure(caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG);
+        return;
+    };
+    let mut map = HashMap::new();
+    let _previous = map.insert("history".to_owned(), reply);
+    let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
+    let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
+    caps_tx
+        .send((CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)))
         .ok();
 }
 

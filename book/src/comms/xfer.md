@@ -41,16 +41,19 @@ against the Firestorm viewer and the OpenSim server sources):
   `EstateOwnerMessage` `estateaccessdelta` is the common UDP path.
 - **Generic named file** (download): any message that hands the client a raw
   Xfer `filename` — fetched with `Session::request_xfer`.
-- **Legacy asset upload** (upload): a large `AssetUploadRequest` streamed the
-  asset back over Xfer. This was the **one** Xfer consumer with a both-grids
-  CAPS replacement — `NewFileAgentInventory` — so it (and only it) **has been
-  retired** in favour of CAPS; the client no longer uploads assets over Xfer.
-  See [Uploads and transport choice](#uploads-and-transport-choice).
+- **Legacy asset upload** (upload): a large `AssetUploadRequest` streams the
+  asset over Xfer. For **new-item** uploads this is retired — the
+  `NewFileAgentInventory` capability exists on both grids and is the only
+  path this client uses to mint items. But the **in-place save** of an
+  existing wearable/body-part asset has **no capability on either grid**
+  (the reference viewer's `saveNewAsset` cap code is commented out; OpenSim
+  registers no wearable update cap), so that save still rides the UDP
+  transaction upload — inline when small, pulled over Xfer when large. See
+  [Uploads and transport choice](#uploads-and-transport-choice).
 
-Net: the Xfer transport itself **stays** (the mute list pins the download half,
-terrain RAW pins the upload half). The legacy *asset* upload has already
-migrated to CAPS — the only rider with a modern path on both grids — so the
-client's asset-upload-over-Xfer code is gone.
+Net: the Xfer transport itself **stays** (the mute list pins the download half;
+terrain RAW and the in-place wearable save pin the upload half). Only the
+*new-item* asset upload has migrated to CAPS.
 
 ## The transfer
 
@@ -160,34 +163,64 @@ inventory, so a parsed item's asset id is optional.
 
 ## Uploads and transport choice
 
-Legacy asset **uploads** historically ran over the same messages in the other
-direction: a small asset was inlined in the `AssetUploadRequest`, while a large
-one was answered with a `RequestXfer` and the client streamed it back in
-`SendXferPacket`s (driven by the simulator's `ConfirmXferPacket`s). That was the
-Xfer *upload* path's asset consumer — and it has since been **removed** from the
-client.
+Legacy asset **uploads** run over the same messages in the other direction: a
+small asset is inlined in the `AssetUploadRequest`, while a large one is
+answered with a `RequestXfer` and the client streams it back in
+`SendXferPacket`s (driven by the simulator's `ConfirmXferPacket`s). The
+simulator derives the stored asset id as `combine(transaction_id,
+secure_session_id)` — the same combine the uploading client predicts — and
+closes the exchange with an `AssetUploadComplete`.
 
-The modern alternative — now the **only** upload path — is the CAPS
-`NewFileAgentInventory` uploader: a two-step HTTP exchange (POST the metadata,
-then POST the bytes to the returned uploader URL), no Xfer involved. The
-runtimes' single `UploadAsset` command drives it, storing the asset *and*
-creating the inventory item in one step and surfacing `Event::AssetUploaded`; if
-the region does not advertise the capability the command fails with
-`Event::AssetUploadFailed` (there is no longer a UDP fallback).
+Which upload path a client should take depends on what exists on **both**
+grids:
 
-This works because **both** Second Life and OpenSim advertise
-`NewFileAgentInventory` (OpenSim registers it in its capability seed), and the
-modern viewer uploads exclusively over it. So — unlike terrain RAW or the mute
-list, which have no CAPS path on either grid — the legacy UDP asset upload was
-the one Xfer rider with a both-grids modern replacement, which is why it (and
-only it) could be dropped. The `asset-upload` conformance case is CAPS-only.
+- **New-item uploads** go over the CAPS `NewFileAgentInventory` uploader: a
+  two-step HTTP exchange (POST the metadata, then POST the bytes to the
+  returned uploader URL), no Xfer involved. Both grids advertise it, so the
+  runtimes' `UploadAsset` command is CAPS-only — there is no UDP fallback for
+  minting a new item, and the `asset-upload` conformance case is CAPS-only.
+- **In-place saves of an existing item's asset** use the *update* caps where
+  they exist (`UpdateNotecardAgentInventory`, `UpdateScriptAgent`,
+  `UpdateGestureAgentInventory`, …, on both grids). But plain
+  **wearables/body parts have no update capability on either grid** — the
+  reference viewer's wearable save still calls the legacy `storeAssetData`
+  path — so `Session::save_inventory_asset` speaks the UDP transaction upload
+  above: `AssetUploadRequest` (+ the `UpdateInventoryItem` binding the
+  transaction to the item), the simulator's Xfer pull for an oversized asset,
+  and `Event::InventoryAssetSaved` on the `AssetUploadComplete`.
 
-Dropping it did **not** remove the Xfer transport: the `RequestXfer` →
-`SendXferPacket` machinery stays for terrain RAW (and any future bulk-file
-upload), which have no CAPS equivalent on either grid. Only the asset-specific
-layer (`AssetUploadRequest`, the predicted-asset-id bookkeeping, and the
-`SendXferPacket` sender) was removed — the generated wire codec for those
-messages is kept for the server-side `SimSession` and the trace tool.
+So the Xfer upload machinery stays for terrain RAW and the in-place wearable
+save — the two riders with no CAPS equivalent on either grid — while
+everything with a both-grids modern path uses it.
+
+## The server side
+
+The simulator half of every exchange above lives in the sans-I/O
+`SimSession`, proven by in-memory `Session` ↔ `SimSession` loopback tests:
+
+- **File serving** is a registry: `register_xfer_file(filename, bytes)` makes
+  a file downloadable; the client's `RequestXfer` consumes the entry (the
+  requests ask for delete-on-completion) and starts the one-packet-in-flight
+  `SendXferPacket` stream, each next chunk released by the client's
+  `ConfirmXferPacket`. An unregistered name is refused with an `AbortXfer`
+  so the requester is not left hanging.
+- **Task-inventory serving** composes the pieces: `serve_task_inventory`
+  writes the contents listing with the mirror *writer* of the client's
+  parser (`build_task_inventory`, byte-compatible with OpenSim's
+  `RequestInventoryFile` text format), registers it under a deterministic
+  `inventory_<task>.tmp` name, and sends the `ReplyTaskInventory` — the
+  full server half of `Command::FetchTaskInventory`.
+- **Upload receive** mirrors the wearable in-place save: an inline
+  `AssetUploadRequest` completes immediately; an oversized one makes the
+  sim issue the `RequestXfer` keyed by the predicted `VFileID`
+  (`combine(transaction, secure_session)` — give the sim the secure session
+  id via `set_secure_session_id`), reassemble the client's packet stream,
+  and reply `AssetUploadComplete`. The assembled bytes surface as
+  `ServerEvent::AssetUploaded`.
+
+The sequencing rules are exactly the client's, mirrored: seq-0 length
+prefix, high-bit EOF marker, strictly one packet in flight, `AbortXfer`
+honoured in both directions.
 
 ---
 
@@ -198,21 +231,29 @@ messages is kept for the server-side `SimSession` and the trace tool.
 >   `XferDownload` carrying an `XferPurpose`). The single `SendXferPacket`
 >   handler and the completion
 >   routing are in `sl-proto/src/session/methods.rs`.
-> - Low-level sends (`RequestXfer` / `ConfirmXferPacket`, the download half) are
->   in `sl-proto/src/session/circuit.rs`; `XferId` is in
->   `sl-proto/src/bookkeeping_ids.rs`. The `SendXferPacket` *sender* (the upload
->   half) was removed with the legacy asset upload and will return when terrain
->   RAW upload lands.
+> - Low-level sends (`RequestXfer` / `ConfirmXferPacket` / `SendXferPacket` /
+>   `AssetUploadRequest`) are in `sl-proto/src/session/circuit.rs`; `XferId`
+>   is in `sl-proto/src/bookkeeping_ids.rs`.
 > - Public API: `Session::request_xfer` (→ `Event::XferDownloaded`),
 >   `Session::request_mute_list` (→ `Event::MuteList`),
->   `Session::fetch_task_inventory` (→ `Event::TaskInventoryContents`), and
+>   `Session::fetch_task_inventory` (→ `Event::TaskInventoryContents`),
 >   `Session::request_region_terrain_download` (→ `Event::ServerFileDownloaded`,
->   after the simulator's `InitiateDownload` the handler follows automatically).
+>   after the simulator's `InitiateDownload` the handler follows automatically),
+>   `Session::request_region_terrain_upload` (→ `Event::XferUploaded`), and
+>   `Session::save_inventory_asset` (→ `Event::InventoryAssetSaved`).
 >   The runtime commands are `Command::RequestXfer` /
 >   `Command::FetchTaskInventory` / `Command::RequestRegionTerrainDownload`,
 >   wired identically in `sl-client-tokio` and `sl-client-bevy`.
 > - The task-inventory text parser is `parse_task_inventory` in
 >   `sl-proto/src/session/conversions.rs` (alongside `parse_mute_list`),
->   producing `TaskInventoryItem` (`sl-proto/src/types/object.rs`). The
->   asset/inventory type-name maps it needs are `AssetType::from_type_name` /
->   `InventoryType::from_type_name` in `sl-proto/src/types/asset.rs`.
+>   producing `TaskInventoryItem` (`sl-proto/src/types/object.rs`); its mirror
+>   writer is `build_task_inventory` next to it. The asset/inventory type-name
+>   maps they share are `AssetType::from_type_name`/`to_type_name` and
+>   `InventoryType::from_type_name`/`to_type_name` in
+>   `sl-proto/src/types/asset.rs`.
+> - Server side: `SimSession::{register_xfer_file, serve_task_inventory,
+>   abort_xfer, set_secure_session_id}` and the
+>   `ServerEvent::{XferRequested, XferServed, XferAborted,
+>   AssetUploadRequested, AssetUploaded}` events in
+>   `sl-proto/src/sim_session.rs`; loopback tests in
+>   `sl-proto/tests/sim_session.rs`.

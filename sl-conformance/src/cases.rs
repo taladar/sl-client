@@ -5,6 +5,7 @@
 //! report through the [`Metrics`](crate::metrics::Metrics) collector instead of
 //! stdout, so the runner can stamp and store the result.
 
+pub mod agent_alert;
 pub mod ais3_folder_lifecycle;
 pub mod animation_play_stop;
 pub mod asset_decode;
@@ -52,10 +53,12 @@ pub mod inventory_fetch;
 pub mod inventory_item_ops;
 pub mod inventory_tree_crawl;
 pub mod keepalive_ping;
+pub mod kick_user;
 pub mod library_tree_fetch;
 pub mod login_handshake;
 pub mod logout_clean;
 pub mod map_blocks_items;
+pub mod marketplace_direct_delivery;
 pub mod mesh_fetch_http;
 pub mod modify_land;
 pub mod money_balance;
@@ -84,6 +87,7 @@ pub mod script_permissions;
 pub mod script_running;
 pub mod script_upload;
 pub mod server_appearance_bake;
+pub mod server_error;
 pub mod session_mark_read;
 pub mod set_appearance;
 pub mod simulator_features;

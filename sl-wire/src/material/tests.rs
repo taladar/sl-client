@@ -8,9 +8,10 @@ use pretty_assertions::assert_eq;
 use super::{
     FaceMaterialPut, GltfMaterialOverride, LegacyMaterial, MaterialOverrideUpdate,
     RenderMaterialEntry, build_gltf_material_override, build_modify_material_params_request,
-    build_render_materials_put_request, build_render_materials_request,
-    build_render_materials_response, parse_gltf_material_override,
-    parse_modify_material_params_request, parse_render_materials_response, read_binary_value,
+    build_modify_material_params_response, build_render_materials_put_request,
+    build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
+    parse_modify_material_params_request, parse_render_materials_put_request,
+    parse_render_materials_request, parse_render_materials_response, read_binary_value,
     write_binary_value,
 };
 use crate::field::Reader;
@@ -187,6 +188,66 @@ fn render_materials_response_round_trip() -> Result<(), String> {
     let decoded = entries.first().ok_or("no entry")?;
     assert_eq!(decoded, &entry);
     Ok(())
+}
+
+/// A `RenderMaterials` POST **request** built by the client parses back to the
+/// queried ids on the server side (the inverse of the id-list builder).
+#[test]
+fn render_materials_request_round_trip() {
+    let ids = vec![
+        Uuid::from_u128(0x00ab_cdef_0011_2233_4455_6677_8899_aabb),
+        Uuid::from_u128(0x1122_3344_5566_7788_99aa_bbcc_ddee_ff00),
+    ];
+    let body = build_render_materials_request(&ids);
+    assert_eq!(parse_render_materials_request(&body), ids);
+    // An empty "fetch all" body (no `Zipped`) parses to no ids.
+    assert!(parse_render_materials_request("<llsd><map /></llsd>").is_empty());
+}
+
+/// A `RenderMaterials` PUT built by the client parses back to the same face
+/// assignments on the server side (cleared faces included).
+#[test]
+fn render_materials_put_request_round_trip() {
+    let updates = vec![
+        FaceMaterialPut {
+            local_id: 0x0089_aabb,
+            face: 3,
+            material: Some(LegacyMaterial {
+                normal_map: TextureKey::from(Uuid::from_u128(0x1234)),
+                normal_offset: (0.5, -0.25),
+                normal_repeat: (2.0, 4.0),
+                normal_rotation: 1.5,
+                specular_map: TextureKey::from(Uuid::from_u128(0x5678)),
+                specular_offset: (0.1, 0.2),
+                specular_repeat: (1.0, 1.0),
+                specular_rotation: 0.0,
+                specular_color: [10, 20, 30, 255],
+                specular_exponent: 51,
+                environment_intensity: 7,
+                diffuse_alpha_mode: 2,
+                alpha_mask_cutoff: 128,
+            }),
+        },
+        FaceMaterialPut {
+            local_id: 0x0089_aabb,
+            face: 4,
+            material: None,
+        },
+    ];
+    let body = build_render_materials_put_request(&updates);
+    assert_eq!(parse_render_materials_put_request(&body), updates);
+}
+
+/// The `ModifyMaterialParams` `{ success, message }` response builder emits a
+/// body the (inline, client-side) reader decodes — spot-checked structurally.
+#[test]
+fn modify_material_params_response_body() {
+    let ok = build_modify_material_params_response(true, "");
+    assert!(ok.contains("<key>success</key><boolean>1</boolean>"));
+    assert!(ok.contains("<key>message</key><string></string>"));
+    let err = build_modify_material_params_response(false, "no perms");
+    assert!(err.contains("<key>success</key><boolean>0</boolean>"));
+    assert!(err.contains("<key>message</key><string>no perms</string>"));
 }
 
 /// A `RenderMaterials` PUT body carries `FullMaterialsPerFace` with the face,

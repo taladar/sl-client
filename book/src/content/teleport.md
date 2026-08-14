@@ -103,6 +103,42 @@ region seamlessly — a deliberate teleport is just the long-distance version.
 > at each region (via the map), which is simpler for a headless crawler that
 > does not need continuity of presence.
 
+## The server side
+
+The sans-I/O `SimSession` provides the simulator half as **mechanics the
+driver sequences** — deliberately without a sim-side teleport phase
+machine, because one session cannot know whether an inter-region
+teleport succeeds: the destination is *another* `SimSession`, and only
+the driver (a fake grid, a test) sees both.
+
+A request surfaces as a typed event (`TeleportRequested` with handle,
+position and look-at; `TeleportViaLandmark`; `TeleportViaLure`;
+`CancelTeleport`). The driver then strings together:
+
+- **UDP mechanics** on the source circuit: `send_teleport_start`,
+  `send_teleport_progress`, and either `send_teleport_local` (an
+  intra-region finish — no circuit change) or `send_teleport_failed`
+  (back to active with a reason).
+- **The event-queue trio** for an inter-region teleport, enqueued on the
+  source's CAPS event queue: `enqueue_enable_simulator` (the client
+  opens a *child* circuit to the destination),
+  `enqueue_establish_agent_communication` (the child's seed capability —
+  this event has **no** UDP form), and `enqueue_teleport_finish` (the
+  client promotes the child and sends `CompleteAgentMovement` on it).
+  `enqueue_crossed_region` is the border-crossing variant (no teleport
+  screen).
+
+The destination `SimSession` tracks **agent presence**: a circuit opened
+by `UseCircuitCode` alone hosts a *child* agent
+(`AgentPresence::Child`), and `CompleteAgentMovement` promotes it to the
+*root* agent — exactly how the region servers distinguish the two. The
+source retires its now-child circuit with `send_disable_simulator`.
+
+The two-`SimSession` loopback test drives a real client `Session`
+through the whole sequence — request, child circuit, finish, promotion,
+arrival confirmation, teardown — over the real wire path plus the real
+event-queue serialization.
+
 ---
 
 > **In this codebase**
@@ -129,3 +165,12 @@ region seamlessly — a deliberate teleport is just the long-distance version.
 > - Neighbour/handover events are `NeighborDiscovered` and `NeighborSeed` in the
 >   same `event.rs`; the `Session` (`sl-proto/src/session.rs`) tracks the
 >   pending handover and promotes the child circuit.
+> - Server side (`sl-proto/src/sim_session.rs`):
+>   `ServerEvent::{TeleportRequested, TeleportViaLure}` (beside the existing
+>   landmark/cancel events), the `send_teleport_*` /
+>   `send_disable_simulator` mechanics, the `enqueue_enable_simulator` /
+>   `enqueue_establish_agent_communication` / `enqueue_teleport_finish` /
+>   `enqueue_crossed_region` event-queue wrappers, and
+>   `AgentPresence` (`agent_presence()` / `is_root_agent()`). The two-sim
+>   loopback tests are `inter_region_teleport_two_sims` and
+>   `crossed_region_two_sims` in `sl-proto/tests/sim_session.rs`.

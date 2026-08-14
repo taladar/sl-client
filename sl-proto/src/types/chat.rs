@@ -331,6 +331,11 @@ pub enum ImDialog {
     FriendshipOffered,
     /// A friendship offer was accepted (`IM_FRIENDSHIP_ACCEPTED`).
     FriendshipAccepted,
+    /// A friendship offer was declined (`IM_FRIENDSHIP_DECLINED_DEPRECATED`).
+    /// "Deprecated" only in the reference viewer's constant name — both
+    /// OpenSim and Second Life still relay a decline to the offerer as an IM
+    /// with this dialog.
+    FriendshipDeclined,
     /// A group-membership invitation was accepted
     /// (`IM_GROUP_INVITATION_ACCEPT`) — the reply the invitee sends back to the
     /// group to join it.
@@ -376,6 +381,7 @@ impl ImDialog {
             36 => Self::GroupInvitationDecline,
             38 => Self::FriendshipOffered,
             39 => Self::FriendshipAccepted,
+            40 => Self::FriendshipDeclined,
             41 => Self::TypingStart,
             42 => Self::TypingStop,
             other => Self::Unknown(other),
@@ -411,6 +417,7 @@ impl ImDialog {
             Self::GroupInvitationDecline => 36,
             Self::FriendshipOffered => 38,
             Self::FriendshipAccepted => 39,
+            Self::FriendshipDeclined => 40,
             Self::TypingStart => 41,
             Self::TypingStop => 42,
             Self::Unknown(other) => other,

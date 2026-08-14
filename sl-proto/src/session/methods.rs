@@ -22,8 +22,8 @@ use super::conversions::{
     parse_lure_region_handle, parse_mute_list, parse_task_inventory, parse_uuid_string, pick_info,
     region_identity, region_limits, required_voice_version_from_llsd, script_dialog,
     script_permission_request, script_running_from_caps_llsd, server_appearance_update_from_llsd,
-    set_display_name_reply_from_llsd, sim_console_response_from_llsd, skeleton_folder,
-    teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
+    session_history_from_llsd, set_display_name_reply_from_llsd, sim_console_response_from_llsd,
+    skeleton_folder, teleport_finish_from_llsd, trimmed_string, voice_channel_info_from_llsd,
     windlight_refresh_from_llsd,
 };
 use super::{
@@ -36,20 +36,22 @@ use super::{
     CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO, ChatLifecycleView,
-    ChatSession, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, Circuit,
-    DEFAULT_DRAW_DISTANCE, FolderState, FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION,
-    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MessageCursor, PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT,
-    TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload, VoiceChannelInfo,
-    XFER_UPLOAD_CHUNK_SIZE, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
+    ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
+    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory, InventoryOwner,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MessageCursor,
+    PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
+    SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
+    TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE,
+    XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
 use crate::bookkeeping_ids::{
     GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
-    TransactionId, XferId,
+    TransactionId, TransferId, XferId,
 };
 use crate::error::Error;
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
@@ -82,8 +84,8 @@ use crate::types::{
     ScriptTeleportRequest, ServerError, SimStatId, SimWideDeleteFlags, SimulatorTime, SoundFlags,
     SoundPreload, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TaskInventoryReply,
     TelehubInfo, TeleportFlags, TerrainLayerType, TerrainPatch, Texture, TextureEntry, Throttle,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    Wearable, WearableType,
+    TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, Wearable, WearableType,
 };
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
@@ -181,6 +183,7 @@ impl Session {
     pub const fn new(login: LoginParams) -> Self {
         Self {
             login,
+            login_method: None,
             state: SessionState::New,
             circuit: None,
             children: BTreeMap::new(),
@@ -219,6 +222,8 @@ impl Session {
             pending_task_inventory: BTreeSet::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
+            transfer_downloads: BTreeMap::new(),
+            next_transfer_id: 1,
             objects: BTreeMap::new(),
             requested_parents: BTreeSet::new(),
             terrain: BTreeMap::new(),
@@ -229,6 +234,7 @@ impl Session {
             own_avatar: BTreeMap::new(),
             inventory: Inventory::new(),
             background_inventory_fetch: false,
+            fetch_server_chat_history: ServerHistoryFetch::Enabled,
             events: VecDeque::new(),
             diagnostics_enabled: false,
             diagnostics: VecDeque::new(),
@@ -926,6 +932,46 @@ impl Session {
                     }
                 }
             }
+            // The reply to a `ChatSessionRequest` "fetch history" POST: the
+            // session's server-side recent-message backlog. The wire reply is a
+            // bare LLSD array with no session identity, so the runtime wraps it
+            // as `{ history, session-id, from_group }` under this synthetic tag
+            // (see `CHAT_SESSION_FETCH_HISTORY_TAG`); the kind is rebuilt from
+            // the stamp exactly as the accept-roster arm above does — always
+            // group or conference, the only kinds a fetch is issued for. The
+            // backlog is de-duplicated against the live ring on store (the
+            // message that triggered a lazy-open fetch arrives both ways) and
+            // surfaced as `Event::SessionServerHistory` when non-empty; it is
+            // never written to the on-disk transcript.
+            CHAT_SESSION_FETCH_HISTORY_TAG => {
+                let session_uuid = body
+                    .get("session-id")
+                    .and_then(Llsd::as_uuid)
+                    .unwrap_or_default();
+                let from_group = body
+                    .get("from_group")
+                    .and_then(Llsd::as_bool)
+                    .unwrap_or(false);
+                let kind = if from_group {
+                    ChatSessionKind::Group {
+                        group_id: GroupKey::from(session_uuid),
+                    }
+                } else {
+                    ChatSessionKind::Conference {
+                        id: ImSessionId::from(session_uuid),
+                    }
+                };
+                let messages = session_history_from_llsd(body);
+                let session = self.chat_session_mut(kind, now);
+                session.store_server_history(messages);
+                let stored = session.server_history.clone();
+                if !stored.is_empty() {
+                    self.events.push_back(Event::SessionServerHistory {
+                        kind,
+                        messages: stored,
+                    });
+                }
+            }
             // A `ChatterBoxSessionAgentListUpdates` push (#28): the modern voice
             // participant list for a session we are in. Fold the per-agent voice
             // flag into that session's `voice.members` (B8) — adding the
@@ -1130,8 +1176,11 @@ impl Session {
     /// crossing), a distant region clears it — apply the destination seed, unseat
     /// the agent and drop its in-world grants (attachments cross with it), arm the
     /// new root's keep-alives, and emit [`Event::RegionChanged`]. A no-op unless a
-    /// handover to exactly `dest` is pending.
-    fn commit_handover(&mut self, dest: SocketAddr, now: Instant) {
+    /// handover to exactly `dest` is pending. `arrival` is the destination's own
+    /// `AgentMovementComplete` `Data.RegionHandle` — preferred (when non-zero)
+    /// over the pending handover's requested handle, which for a lure teleport
+    /// on Second Life is an opaque-id guess, not a real handle.
+    fn commit_handover(&mut self, dest: SocketAddr, arrival: RegionHandle, now: Instant) {
         let Some(pending) = self.pending_handover.take() else {
             return;
         };
@@ -1155,6 +1204,13 @@ impl Session {
                 alert_info: None,
             });
             return;
+        };
+        // The destination's own statement of where we arrived wins over the
+        // request-time guess; fall back to the guess only if the sim sent 0.
+        let region_handle = if arrival == RegionHandle(0) {
+            pending.region_handle
+        } else {
+            arrival
         };
         self.child_seeds.remove(&dest);
         let old_root = self.circuit.replace(new_root);
@@ -1187,7 +1243,7 @@ impl Session {
         // `EnableSimulator`; a fresh circuit cleared `regions` above and needs it
         // re-added.
         if let Some(circuit_id) = self.circuit.as_ref().map(|circuit| circuit.id) {
-            self.regions.insert(circuit_id, pending.region_handle);
+            self.regions.insert(circuit_id, region_handle);
         }
         // A teleport unseats the agent (a crossing keeps the seat), and leaves its
         // in-world objects behind — drop their permission grants (attachments
@@ -1211,7 +1267,7 @@ impl Session {
             .map(|circuit| (circuit.sim_addr, circuit.id))
         {
             self.events.push_back(Event::RegionChanged {
-                region_handle: pending.region_handle,
+                region_handle,
                 sim,
                 circuit,
                 world_reset: pending.world_reset,
@@ -1443,13 +1499,21 @@ impl Session {
     }
 
     /// The XML-RPC login request the driver must perform, or `None` once login
-    /// has already been answered.
+    /// has already been answered. After a login redirect re-armed the session
+    /// (see [`handle_login_response`](Self::handle_login_response)), this is
+    /// the follow-up request aimed at the redirect's `next_url`/`next_method`.
     #[must_use]
     pub fn login_http_request(&self) -> Option<LoginHttpRequest> {
         if matches!(self.state, SessionState::New) {
+            let body = match &self.login_method {
+                Some(method) => {
+                    sl_wire::build_login_request_with_method(&self.login.request, method)
+                }
+                None => build_login_request(&self.login.request),
+            };
             Some(LoginHttpRequest {
                 url: self.login.login_uri.clone(),
-                body: build_login_request(&self.login.request),
+                body,
                 user_agent: self.login.request.user_agent(),
             })
         } else {
@@ -1460,13 +1524,20 @@ impl Session {
     /// Feeds back the parsed login response, bootstrapping the circuit on
     /// success or closing the session on failure.
     ///
+    /// A [`sl_wire::LoginResponse::Redirect`] (`login = "indeterminate"`)
+    /// keeps the session in its fresh state and re-arms
+    /// [`login_http_request`](Self::login_http_request) with the redirect's
+    /// `next_url`/`next_method`, so the driver simply performs the login HTTP
+    /// request again (bounding the number of hops is the driver's job).
+    ///
     /// # Errors
     ///
     /// Returns [`Error::SessionClosed`] if the session has already reached its
     /// terminal closed/disconnected state, or [`Error::AlreadyLoggedIn`] if it
-    /// is already logged in — login is valid only once, from the freshly
-    /// constructed state, so a relogin must use a fresh [`Session`]. Returns
-    /// [`Error::Wire`] if a bootstrap packet fails to encode.
+    /// is already logged in — login is answered only once, from the freshly
+    /// constructed state (redirects re-arm rather than answer it), so a
+    /// relogin must use a fresh [`Session`]. Returns [`Error::Wire`] if a
+    /// bootstrap packet fails to encode.
     pub fn handle_login_response(
         &mut self,
         response: sl_wire::LoginResponse,
@@ -1501,6 +1572,12 @@ impl Session {
                     reason: "mfa_challenge".to_owned(),
                     message: challenge.message,
                 });
+            }
+            // A login redirect: stay in the fresh state and aim the pending
+            // login request at the new endpoint; the driver re-POSTs it.
+            sl_wire::LoginResponse::Redirect(redirect) => {
+                self.login.login_uri = redirect.next_url;
+                self.login_method = Some(redirect.next_method);
             }
             sl_wire::LoginResponse::Success(success) => {
                 let sim_addr = SocketAddr::new(IpAddr::V4(success.sim_ip), success.sim_port);
@@ -1818,20 +1895,14 @@ impl Session {
                 // is a **pending teleport destination**, so its
                 // `AgentMovementComplete` confirms our arrival there: commit the
                 // deferred handover (promote it to root, tear down the source). A
-                // no-op if `from` is not the pending destination.
-                let confirmed = self
-                    .pending_handover
-                    .as_ref()
-                    .is_some_and(|pending| pending.dest == from);
-                self.commit_handover(from, now);
-                if confirmed {
-                    // The destination is now the root region: surface its
-                    // simulator version/channel string (About-window data).
-                    self.events
-                        .push_back(Event::SimulatorVersion(trimmed_string(
-                            &complete.sim_data.channel_version,
-                        )));
-                }
+                // no-op if `from` is not the pending destination. The message's
+                // own `Data.RegionHandle` is the authoritative arrival region —
+                // the pending handover's handle can be a guess (a lure's true
+                // destination is unknowable up front: OpenSim encodes the handle
+                // in the lure id, but Second Life's lure id is opaque, so the
+                // parsed value is garbage there).
+                let arrival = RegionHandle(complete.data.region_handle);
+                self.commit_handover(from, arrival, now);
             }
             AnyMessage::PacketAck(ack) => {
                 if let Some(circuit) = self.children.get_mut(&from) {
@@ -3304,12 +3375,14 @@ impl Session {
             AnyMessage::TeleportProgress(progress) => {
                 if matches!(self.state, SessionState::Teleporting) {
                     self.events.push_back(Event::TeleportProgress {
-                        message: String::from_utf8_lossy(&progress.info.message).into_owned(),
+                        // The wire string is NUL-terminated; strip it like
+                        // every other text field.
+                        message: trimmed_string(&progress.info.message),
                         teleport_flags: progress.info.teleport_flags,
                     });
                 }
             }
-            AnyMessage::TeleportLocal(_) => {
+            AnyMessage::TeleportLocal(local) => {
                 // An intra-region teleport: no new circuit, just resume activity.
                 if matches!(self.state, SessionState::Teleporting) {
                     self.state = SessionState::Active;
@@ -3320,7 +3393,13 @@ impl Session {
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.timers.teleport = None;
                     }
-                    self.events.push_back(Event::TeleportLocal);
+                    self.events.push_back(Event::TeleportLocal {
+                        position: RegionCoordinates::new(
+                            local.info.position.x,
+                            local.info.position.y,
+                            local.info.position.z,
+                        ),
+                    });
                 }
             }
             AnyMessage::TeleportFailed(failed) => {
@@ -3331,11 +3410,13 @@ impl Session {
                         circuit.timers.teleport = None;
                     }
                 }
+                // The wire strings are NUL-terminated; strip them like every
+                // other text field.
                 self.events.push_back(Event::TeleportFailed {
-                    reason: String::from_utf8_lossy(&failed.info.reason).into_owned(),
+                    reason: trimmed_string(&failed.info.reason),
                     alert_info: failed.alert_info.first().map(|block| AlertInfo {
-                        message: String::from_utf8_lossy(&block.message).into_owned(),
-                        extra_params: String::from_utf8_lossy(&block.extra_params).into_owned(),
+                        message: trimmed_string(&block.message),
+                        extra_params: trimmed_string(&block.extra_params),
                     }),
                 });
             }
@@ -3540,6 +3621,72 @@ impl Session {
                         xfer_id,
                         result: abort.xfer_id.result,
                     });
+                }
+            }
+            AnyMessage::TransferInfo(info) => {
+                // The header of a legacy UDP asset Transfer we requested: a
+                // non-`Ok` status is the refusal (asset missing, no
+                // permission); `Ok` records the declared size and the packets
+                // follow (or already arrived — packet buffering handles either
+                // order).
+                let transfer_id = TransferId::new(info.transfer_info.transfer_id);
+                if self.transfer_downloads.contains_key(&transfer_id) {
+                    let status = TransferStatus::from_code(info.transfer_info.status);
+                    if matches!(status, TransferStatus::Ok) {
+                        if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
+                            download.expected_size = usize::try_from(info.transfer_info.size).ok();
+                        }
+                    } else {
+                        let _download = self.transfer_downloads.remove(&transfer_id);
+                        self.events.push_back(Event::TransferFailed {
+                            transfer_id,
+                            status,
+                        });
+                    }
+                }
+            }
+            AnyMessage::TransferPacket(packet) => {
+                // One chunk of a legacy UDP asset Transfer. Packets are
+                // buffered by index (out-of-order arrival is legal); the
+                // `Done`-status packet marks the last index, and the assembled
+                // bytes are routed once the stream is contiguous.
+                let transfer_id = TransferId::new(packet.transfer_data.transfer_id);
+                if self.transfer_downloads.contains_key(&transfer_id) {
+                    let index = u32::try_from(packet.transfer_data.packet).unwrap_or(0);
+                    let status = TransferStatus::from_code(packet.transfer_data.status);
+                    let completed =
+                        if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
+                            download
+                                .chunks
+                                .insert(index, packet.transfer_data.data.clone());
+                            if matches!(status, TransferStatus::Done) {
+                                download.last_packet = Some(index);
+                            }
+                            download.is_complete()
+                        } else {
+                            false
+                        };
+                    if completed && let Some(download) = self.transfer_downloads.remove(&transfer_id)
+                    {
+                        let data = download.assemble();
+                        match download.purpose {
+                            TransferPurpose::TaskInventoryItem { task, item } => {
+                                self.events.push_back(Event::TaskItemAssetReceived {
+                                    transfer_id,
+                                    task,
+                                    item,
+                                    asset_type: download.asset_type,
+                                    data,
+                                });
+                            }
+                            TransferPurpose::EstateCovenant => {
+                                self.events.push_back(Event::EstateCovenantAssetReceived {
+                                    transfer_id,
+                                    data,
+                                });
+                            }
+                        }
+                    }
                 }
             }
             AnyMessage::ImageData(image) => {
@@ -5798,6 +5945,19 @@ impl Session {
             .flat_map(|chat_session| chat_session.history.iter())
     }
 
+    /// The server-side chat backlog of `session`, oldest-first, as stored by the
+    /// last `fetch history` reply — already de-duplicated against the live ring
+    /// and separate from [`Self::history`]. Yields nothing for a session that is
+    /// not open, was never fetched, or on a grid without the capability.
+    pub fn server_history(
+        &self,
+        session: ChatSessionKind,
+    ) -> impl Iterator<Item = &ServerHistoryMessage> {
+        self.chat_session(session)
+            .into_iter()
+            .flat_map(|chat_session| chat_session.server_history.iter())
+    }
+
     /// The number of unread inbound messages in `session` (zero if the session is
     /// not open). Reset by our own outbound send and by [`Self::mark_session_read`].
     #[must_use]
@@ -7671,6 +7831,139 @@ impl Session {
         self.start_xfer_download(XferPurpose::Generic, filename, now)
     }
 
+    /// Mints the next [`TransferId`] for a legacy UDP asset Transfer (never
+    /// nil).
+    fn alloc_transfer_id(&mut self) -> TransferId {
+        let id = TransferId::new(Uuid::from_u128(self.next_transfer_id));
+        self.next_transfer_id = self.next_transfer_id.checked_add(1).unwrap_or(1);
+        id
+    }
+
+    /// Starts a legacy UDP asset Transfer (`TransferRequest`) with the given
+    /// routing `purpose`, `source_type` and packed `params`, registering the
+    /// reassembly state under a fresh [`TransferId`].
+    fn start_transfer_download(
+        &mut self,
+        purpose: TransferPurpose,
+        asset_type: AssetType,
+        source_type: i32,
+        params: Vec<u8>,
+        now: Instant,
+    ) -> Result<TransferId, Error> {
+        let transfer_id = self.alloc_transfer_id();
+        self.transfer_downloads.insert(
+            transfer_id,
+            TransferDownload {
+                purpose,
+                asset_type,
+                expected_size: None,
+                chunks: BTreeMap::new(),
+                last_packet: None,
+            },
+        );
+        if let Some(circuit) = self.circuit.as_mut() {
+            circuit.send_transfer_request(transfer_id, source_type, params, now)?;
+        }
+        Ok(transfer_id)
+    }
+
+    /// Fetches a task-inventory item's asset — a script or notecard body out
+    /// of a prim's contents — over the legacy UDP Transfer path
+    /// (`TransferRequest`, source `SimInvItem`), the only path for this asset
+    /// source on both grids (the `ViewerAsset` HTTP capability does not cover
+    /// task-inventory items). Pass the ids a
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
+    /// listing reported for the item (a nil/absent `asset_id` there means the
+    /// simulator redacted it and the fetch will be refused). The assembled
+    /// bytes surface as [`Event::TaskItemAssetReceived`]; a refusal surfaces
+    /// as [`Event::TransferFailed`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn fetch_task_item_asset(
+        &mut self,
+        task: ObjectKey,
+        item_id: InventoryKey,
+        asset_id: AssetKey,
+        asset_type: AssetType,
+        now: Instant,
+    ) -> Result<TransferId, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let agent_id = self.agent_id().map_or_else(Uuid::nil, |a| a.uuid());
+        let params = sl_wire::TransferSourceParamsInvItem {
+            agent_id,
+            session_id: self.session_id().unwrap_or_else(Uuid::nil),
+            // The reference viewer passes the item's owner; the simulator
+            // authorizes by agent/session, so the requesting agent is used.
+            owner_id: agent_id,
+            task_id: task.uuid(),
+            item_id: item_id.uuid(),
+            asset_id: asset_id.uuid(),
+            asset_type: asset_type.to_code(),
+        }
+        .encode();
+        self.start_transfer_download(
+            TransferPurpose::TaskInventoryItem {
+                task,
+                item: item_id,
+            },
+            asset_type,
+            sl_wire::TRANSFER_SOURCE_SIM_INV_ITEM,
+            params,
+            now,
+        )
+    }
+
+    /// Fetches the estate covenant notecard's asset over the legacy UDP
+    /// Transfer path (`TransferRequest`, source `SimEstate`), the only path
+    /// for estate assets on both grids. Request the covenant metadata first
+    /// via [`request_estate_covenant`](Self::request_estate_covenant) — the
+    /// [`Event::EstateCovenant`](crate::Event::EstateCovenant) reply carries
+    /// the covenant's asset id (nil when the estate has none); this call then
+    /// fetches the notecard body itself, surfacing it as
+    /// [`Event::EstateCovenantAssetReceived`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
+    pub fn fetch_estate_covenant_asset(&mut self, now: Instant) -> Result<TransferId, Error> {
+        if self.circuit.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let params = sl_wire::TransferSourceParamsEstate {
+            agent_id: self.agent_id().map_or_else(Uuid::nil, |a| a.uuid()),
+            session_id: self.session_id().unwrap_or_else(Uuid::nil),
+            estate_asset_type: sl_wire::ESTATE_ASSET_COVENANT,
+        }
+        .encode();
+        self.start_transfer_download(
+            TransferPurpose::EstateCovenant,
+            AssetType::Notecard,
+            sl_wire::TRANSFER_SOURCE_SIM_ESTATE,
+            params,
+            now,
+        )
+    }
+
+    /// Aborts an in-flight legacy UDP asset Transfer (`TransferAbort`),
+    /// dropping its reassembly state. No completion or failure event follows.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the abort fails to encode.
+    pub fn abort_transfer(&mut self, transfer_id: TransferId, now: Instant) -> Result<(), Error> {
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_transfer_abort(transfer_id, now)?;
+        let _download = self.transfer_downloads.remove(&transfer_id);
+        Ok(())
+    }
+
     /// Requests the agent's mute (block) list (`MuteListRequest` with a zero
     /// CRC, forcing a fresh download). The simulator replies with the list (the
     /// file is downloaded over the `Xfer` path and surfaced as
@@ -8909,6 +9202,71 @@ impl Session {
     #[must_use]
     pub const fn background_inventory_fetch(&self) -> bool {
         self.background_inventory_fetch
+    }
+
+    /// The group / conference sessions whose server-side chat backlog should be
+    /// fetched now — every `Joined` group / conference session not yet swept,
+    /// each flipped to `Requested` so it is returned exactly once per login.
+    /// Returns an **empty** batch while the auto-fetch is disabled
+    /// ([`Session::set_fetch_server_chat_history`], default **enabled**).
+    ///
+    /// The runtime shell calls this once per loop iteration **only while the
+    /// `ChatSessionRequest` capability is known** (the defer-until-cap
+    /// convention, exactly like the inventory crawl) and POSTs a
+    /// [`CHAT_SESSION_FETCH_HISTORY`](crate::CHAT_SESSION_FETCH_HISTORY) for
+    /// each returned kind; the reply folds in via [`Session::handle_caps_event`]
+    /// and surfaces as [`Event::SessionServerHistory`]. On a grid without the
+    /// capability (stock OpenSim) the runtime never calls this, so nothing is
+    /// ever marked `Requested` there. `Direct` sessions never schedule (the
+    /// reference fetches no 1:1 backlog), nor do still-`Invited` sessions.
+    pub fn next_server_history_fetches(&mut self) -> Vec<ChatSessionKind> {
+        if !self.fetch_server_chat_history.is_enabled() {
+            return Vec::new();
+        }
+        self.chat_sessions
+            .iter_mut()
+            .filter(|(kind, chat_session)| {
+                !matches!(kind, ChatSessionKind::Direct { .. })
+                    && matches!(chat_session.lifecycle, ChatSessionLifecycle::Joined)
+                    && matches!(
+                        chat_session.server_history_state,
+                        ServerHistoryState::Unfetched
+                    )
+            })
+            .map(|(kind, chat_session)| {
+                chat_session.server_history_state = ServerHistoryState::Requested;
+                *kind
+            })
+            .collect()
+    }
+
+    /// Marks `session`'s server-history fetch cycle `Requested` without waiting
+    /// for the scheduler — the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// path calls this when it POSTs, so a manual fetch also suppresses a later
+    /// duplicate auto-fetch of the same session. A no-op for an unopened
+    /// session.
+    pub fn note_server_history_requested(&mut self, session: ChatSessionKind) {
+        if let Some(chat_session) = self.chat_session_get_mut(session) {
+            chat_session.server_history_state = ServerHistoryState::Requested;
+        }
+    }
+
+    /// Enables or disables the automatic server-side chat-backlog fetch for
+    /// newly joined group / conference sessions (default **enabled**, matching
+    /// the reference viewer's `FetchGroupChatHistory`). While disabled,
+    /// [`Session::next_server_history_fetches`] returns empty; the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// works regardless.
+    pub const fn set_fetch_server_chat_history(&mut self, enabled: bool) {
+        self.fetch_server_chat_history = ServerHistoryFetch::from_enabled(enabled);
+    }
+
+    /// Whether the automatic server-side chat-backlog fetch is enabled (see
+    /// [`Session::set_fetch_server_chat_history`]).
+    #[must_use]
+    pub const fn fetch_server_chat_history(&self) -> bool {
+        self.fetch_server_chat_history.is_enabled()
     }
 
     /// Whether the `owner` inventory tree is fully fetched — no folder under it is

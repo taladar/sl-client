@@ -111,7 +111,7 @@ impl GridTest for TeleportOfferAccept {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -202,7 +202,7 @@ impl GridTest for TeleportOfferAccept {
                     .wait_for(REGION_TIMEOUT, |event| match event {
                         Event::TeleportStarted => Some(Ok(Phase::Started)),
                         Event::TeleportProgress { .. } => Some(Ok(Phase::Progress)),
-                        Event::TeleportLocal => Some(Ok(Phase::Local)),
+                        Event::TeleportLocal { .. } => Some(Ok(Phase::Local)),
                         Event::RegionChanged { .. } => Some(Ok(Phase::RegionChanged)),
                         Event::TeleportFailed { reason, .. } => Some(Err(reason.clone())),
                         _ => None,

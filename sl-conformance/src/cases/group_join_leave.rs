@@ -13,13 +13,14 @@
 //! owns the group while the **secondary** performs the membership round-trip the
 //! case is actually testing.
 //!
-//! Both ends are observable on OpenSim. A join replies with `JoinGroupReply`
-//! ([`Event::JoinGroupResult`] carrying `success`). A leave is a two-event
-//! transition: `GroupsModule.LeaveGroupRequest` sends `LeaveGroupReply`
-//! ([`Event::LeaveGroupResult`] with `success`) *and then* `AgentDropGroup`
-//! ([`Event::DroppedFromGroup`]) — the membership-list update that proves the
-//! agent is genuinely out of the group, not merely acked. The case asserts both
-//! so the leave is a real transition, not a bare reply.
+//! Both ends are observable on both grids. A join replies with
+//! `JoinGroupReply` ([`Event::JoinGroupResult`] carrying `success`). A leave
+//! is acked with `LeaveGroupReply` ([`Event::LeaveGroupResult`] with
+//! `success`), and the membership-list confirmation that proves the agent is
+//! genuinely out differs per grid: OpenSim follows with an `AgentDropGroup`
+//! ([`Event::DroppedFromGroup`]), while Second Life sends nothing further on
+//! a voluntary leave — the reference viewer re-requests agent data and trusts
+//! the refreshed membership list, so the case accepts either signal.
 //!
 //! The group the secondary churns through comes from
 //! [`support::membership_group`]: on OpenSim a throwaway group is created per run
@@ -56,7 +57,7 @@ impl GridTest for GroupJoinLeave {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -87,7 +88,7 @@ impl GridTest for GroupJoinLeave {
             let group = support::membership_group(
                 ctx,
                 0,
-                &format!("sl-client group-join-leave {unique}"),
+                &format!("slc jl {unique}"),
                 "throwaway group for the group-join-leave conformance case",
             )
             .await?;
@@ -113,11 +114,8 @@ impl GridTest for GroupJoinLeave {
             let join_rtt = joined_at.elapsed();
             check(join_ok, "secondary failed to join the group")?;
 
-            // The secondary leaves the group. OpenSim's `LeaveGroupRequest` first
-            // sends a `LeaveGroupReply` (the ack) and then an `AgentDropGroup`
-            // (the membership-list update). Assert both: the reply proves the
-            // command was accepted, the drop proves the agent is genuinely out of
-            // the group — and leaves a reused pre-made group clean for next time.
+            // The secondary leaves the group; the `LeaveGroupReply` ack proves
+            // the command was accepted.
             let left_at = Instant::now();
             secondary.send(Command::LeaveGroup(group_id)).await?;
             let leave_ok = secondary
@@ -130,14 +128,9 @@ impl GridTest for GroupJoinLeave {
                 })
                 .await?;
             check(leave_ok, "secondary's leave-group request was rejected")?;
-            secondary
-                .wait_for(REPLY_TIMEOUT, |event| match event {
-                    Event::DroppedFromGroup { group_id: dropped } if *dropped == group_id => {
-                        Some(())
-                    }
-                    _ => None,
-                })
-                .await?;
+            // Confirm the membership genuinely dropped — the per-grid signal
+            // difference lives in [`support::confirm_group_departure`].
+            support::confirm_group_departure(secondary, group_id).await?;
             let leave_rtt = left_at.elapsed();
 
             let metrics = ctx.metrics();

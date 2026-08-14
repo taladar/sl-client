@@ -70,6 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             account_dirs: None,
             inventory_cache_config: InventoryCacheConfig::default(),
             background_inventory_fetch: false,
+            fetch_server_chat_history: true,
             offline: false,
         })
         .insert_resource(ProbeState {
@@ -184,6 +185,7 @@ fn on_events(
             | SlSessionEvent::ChatSessions(_)
             | SlSessionEvent::ChatHistoryPage { .. }
             | SlSessionEvent::NearbyChatHistoryPage { .. }
+            | SlSessionEvent::SessionServerHistory { .. }
             | SlSessionEvent::FriendsSnapshot(_)
             | SlSessionEvent::InventoryFolderPage { .. }
             | SlSessionEvent::InventoryRoots { .. }
@@ -230,6 +232,9 @@ fn on_events(
             | SlSessionEvent::ServerFileDownloaded { .. }
             | SlSessionEvent::XferUploaded { .. }
             | SlSessionEvent::XferAborted { .. }
+            | SlSessionEvent::TaskItemAssetReceived { .. }
+            | SlSessionEvent::EstateCovenantAssetReceived { .. }
+            | SlSessionEvent::TransferFailed { .. }
             | SlSessionEvent::UserInfo(..)
             | SlSessionEvent::DeRezAck { .. }
             | SlSessionEvent::ForceObjectSelect { .. }
@@ -256,7 +261,7 @@ fn on_events(
             | SlSessionEvent::TeleportStarted
             | SlSessionEvent::TeleportProgress { .. }
             | SlSessionEvent::TeleportFinished { .. }
-            | SlSessionEvent::TeleportLocal
+            | SlSessionEvent::TeleportLocal { .. }
             | SlSessionEvent::VoiceAccountProvisioned(_)
             | SlSessionEvent::ParcelVoiceInfo(_)
             | SlSessionEvent::ExperienceInfo(_)
@@ -334,6 +339,15 @@ fn on_events(
             | SlSessionEvent::SimConsoleResponse { .. }
             | SlSessionEvent::RequiredVoiceVersion(_)
             | SlSessionEvent::OpenRegionInfo(_)
+            | SlSessionEvent::MarketplaceMerchantStatus(_)
+            | SlSessionEvent::MarketplaceListings(_)
+            | SlSessionEvent::MarketplaceListing(_)
+            | SlSessionEvent::MarketplaceListingCreated(_)
+            | SlSessionEvent::MarketplaceListingUpdated(_)
+            | SlSessionEvent::MarketplaceInventoryAssociated(_)
+            | SlSessionEvent::MarketplaceListingDeleted(_)
+            | SlSessionEvent::MarketplaceListingGone(_)
+            | SlSessionEvent::MarketplaceError { .. }
             | SlSessionEvent::Ping { .. }
             | SlSessionEvent::Environment(_) => {}
             SlSessionEvent::TeleportFailed { reason, .. } => warn!("teleport failed: {reason}"),

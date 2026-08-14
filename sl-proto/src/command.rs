@@ -8,26 +8,27 @@ use crate::j2c::DiscardLevel;
 use crate::scoped_id::{ScopedObjectId, ScopedParcelId};
 use crate::{
     AbuseReport, AgentKey, AgentPreferences, AnimationKey, AnyMessage, AssetKey, AssetType,
-    AssetUpdateLocation, AttachmentMode, AttachmentPoint, Camera, ChatChannel, ChatSessionKind,
-    ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility, Distance,
-    EjectAction, EstateAccessDelta, EstateInfoUpdate, EventId, ExperienceKey, ExperiencePermission,
-    ExperienceUpdate, FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights,
-    GestureActivation, GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey,
-    GroupRequestId, GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId,
-    InterestsUpdate, InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey,
-    InventoryOffer, InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount,
-    LureId, MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
-    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
-    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
-    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
-    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate,
-    RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
-    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdatableAssetType,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
+    ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
+    ControlFlags, CreateGroupParams, CreateListing, DeRezDestination, DetachOrder, DirFindFlags,
+    DirectoryVisibility, Distance, EjectAction, EstateAccessDelta, EstateInfoUpdate, EventId,
+    ExperienceKey, ExperiencePermission, ExperienceUpdate, FaceMaterialPut, FolderType,
+    FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate, GroupKey,
+    GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
+    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryCursor,
+    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
+    LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId, MapItemType, Material,
+    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
+    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
+    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
+    ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle, RegionInfoUpdate,
+    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
+    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
+    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -1663,6 +1664,31 @@ pub enum Command {
         /// The `Xfer` filename to download.
         filename: String,
     },
+    /// Fetch a task-inventory item's asset — a script or notecard body out of
+    /// a prim's contents — over the legacy UDP Transfer path
+    /// (`TransferRequest`, the only path for this source on both grids). Pass
+    /// the ids an
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
+    /// listing reported. The bytes arrive as
+    /// [`Event::TaskItemAssetReceived`](crate::Event::TaskItemAssetReceived);
+    /// a refusal as
+    /// [`Event::TransferFailed`](crate::Event::TransferFailed).
+    FetchTaskItemAsset {
+        /// The prim whose task inventory holds the item.
+        task: ObjectKey,
+        /// The task-inventory item whose asset is fetched.
+        item_id: InventoryKey,
+        /// The item's asset id, from the task-inventory listing.
+        asset_id: AssetKey,
+        /// The item's asset type, from the task-inventory listing.
+        asset_type: AssetType,
+    },
+    /// Fetch the estate covenant notecard's asset over the legacy UDP
+    /// Transfer path (`TransferRequest`, the only path for estate assets on
+    /// both grids). Request the covenant metadata first via
+    /// [`Command::RequestEstateCovenant`]; the bytes arrive as
+    /// [`Event::EstateCovenantAssetReceived`](crate::Event::EstateCovenantAssetReceived).
+    FetchEstateCovenantAsset,
     /// Write (add or replace) an item in an in-world object's task inventory
     /// (`UpdateTaskInventory`).
     UpdateTaskInventory {
@@ -2523,6 +2549,22 @@ pub enum Command {
         /// The maximum number of lines in the page.
         limit: usize,
     },
+    /// Fetch a group / conference session's **server-side recent-message
+    /// backlog** explicitly, POSTing the `ChatSessionRequest` capability's
+    /// `fetch history` method (see
+    /// [`CHAT_SESSION_FETCH_HISTORY`](crate::CHAT_SESSION_FETCH_HISTORY)). The
+    /// reply is decoded by [`Session::handle_caps_event`](crate::Session::handle_caps_event)
+    /// into [`Event::SessionServerHistory`](crate::Event::SessionServerHistory).
+    /// Bypasses the [`Session::set_fetch_server_chat_history`](crate::Session::set_fetch_server_chat_history)
+    /// auto-fetch gate. Second Life serves the method; on a grid without the
+    /// capability (stock OpenSim) the command is silently dropped — the cap is
+    /// absent, so there is nothing to POST to.
+    FetchSessionHistory {
+        /// Which chat session's backlog to fetch. Only `Group` / `Conference`
+        /// sessions have a server backlog; a `Direct` kind is silently ignored
+        /// (the reference never fetches for 1:1 IM).
+        kind: ChatSessionKind,
+    },
     /// Query the buddy cache with each friend's online flag. The runtime replies
     /// with [`Event::FriendsSnapshot`](crate::Event::FriendsSnapshot) built from
     /// [`Session::friends_presence`](crate::Session::friends_presence); no wire
@@ -2675,6 +2717,47 @@ pub enum Command {
         /// snapshot).
         snapshot: Option<TextureKey>,
     },
+    /// Probe the agent's Second Life Marketplace merchant status over the
+    /// **SLM JSON** path (`GET /merchant` on the `DirectDelivery`
+    /// capability). The reply arrives as
+    /// [`Event::MarketplaceMerchantStatus`](crate::Event::MarketplaceMerchantStatus).
+    /// SL-only — on a grid without the capability (OpenSim) the runtimes
+    /// answer with a connection failure.
+    MarketplaceMerchantStatus,
+    /// Fetch all of the agent's marketplace listings over the **SLM JSON**
+    /// path (`GET /listings`). The reply arrives as
+    /// [`Event::MarketplaceListings`](crate::Event::MarketplaceListings).
+    /// SL-only.
+    MarketplaceListings,
+    /// Fetch one marketplace listing over the **SLM JSON** path
+    /// (`GET /listing/<id>`). The reply arrives as
+    /// [`Event::MarketplaceListing`](crate::Event::MarketplaceListing), or as
+    /// [`Event::MarketplaceListingGone`](crate::Event::MarketplaceListingGone)
+    /// when the service answers 404 (the listing was deleted server-side).
+    /// SL-only.
+    MarketplaceListing(ListingId),
+    /// Create a marketplace listing from a listing folder over the **SLM
+    /// JSON** path (`POST /listings`). The reply arrives as
+    /// [`Event::MarketplaceListingCreated`](crate::Event::MarketplaceListingCreated).
+    /// SL-only.
+    MarketplaceCreateListing(CreateListing),
+    /// Update a marketplace listing (list / unlist, switch the version
+    /// folder, stock count) over the **SLM JSON** path
+    /// (`PUT /listing/<id>`). The reply arrives as
+    /// [`Event::MarketplaceListingUpdated`](crate::Event::MarketplaceListingUpdated).
+    /// SL-only.
+    MarketplaceUpdateListing(UpdateListing),
+    /// Associate a listing folder with an existing marketplace listing id
+    /// over the **SLM JSON** path (`PUT /associate_inventory/<id>`). The
+    /// reply arrives as
+    /// [`Event::MarketplaceInventoryAssociated`](crate::Event::MarketplaceInventoryAssociated).
+    /// SL-only.
+    MarketplaceAssociateListing(AssociateInventory),
+    /// Delete (archive) a marketplace listing over the **SLM JSON** path
+    /// (`DELETE /listing/<id>`). The reply arrives as
+    /// [`Event::MarketplaceListingDeleted`](crate::Event::MarketplaceListingDeleted).
+    /// SL-only.
+    MarketplaceDeleteListing(ListingId),
     /// Begin a clean logout.
     Logout,
 }

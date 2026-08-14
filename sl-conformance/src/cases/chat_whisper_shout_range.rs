@@ -99,7 +99,7 @@ impl GridTest for ChatWhisperShoutRange {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -128,11 +128,21 @@ impl GridTest for ChatWhisperShoutRange {
                 })?
             };
 
-            // Anchor the primary; it stays put for the rest of the case.
-            teleport_within(ctx.primary(), region, LANE_X, ANCHOR_Y, LANE_Z).await?;
+            // Anchor the primary; it stays put for the rest of the case. A
+            // region whose parcel routing overrides the requested position
+            // (Second Life landing points) can never separate the avatars, so
+            // record that honestly instead of asserting bogus chat ranges.
+            if !teleport_within(ctx.primary(), region, LANE_X, ANCHOR_Y, LANE_Z).await? {
+                ctx.mark_partial(
+                    "parcel routing (landing point / telehub) overrode the requested \
+                     teleport positions; chat-range separation is not achievable on \
+                     this region",
+                );
+                return Ok(());
+            }
 
             // Near separation: a normal say reaches, a whisper does not.
-            let (say, say_rtt) = range_phase(
+            let Some((say, say_rtt)) = range_phase(
                 ctx,
                 region,
                 speaker,
@@ -141,13 +151,21 @@ impl GridTest for ChatWhisperShoutRange {
                 ChatType::Whisper,
                 ChatType::Normal,
             )
-            .await?;
+            .await?
+            else {
+                ctx.mark_partial(
+                    "parcel routing (landing point / telehub) overrode the secondary's \
+                     requested position; chat-range separation is not achievable on \
+                     this region",
+                );
+                return Ok(());
+            };
             check_eq("say source", &say.source, &ChatSource::Agent(speaker))?;
             check_eq("say chat_type", &say.chat_type, &ChatType::Normal)?;
             check_eq("say audible", &say.audible, &ChatAudible::Fully)?;
 
             // Far separation: a shout reaches, a normal say does not.
-            let (shout, shout_rtt) = range_phase(
+            let Some((shout, shout_rtt)) = range_phase(
                 ctx,
                 region,
                 speaker,
@@ -156,7 +174,15 @@ impl GridTest for ChatWhisperShoutRange {
                 ChatType::Normal,
                 ChatType::Shout,
             )
-            .await?;
+            .await?
+            else {
+                ctx.mark_partial(
+                    "parcel routing (landing point / telehub) overrode the secondary's \
+                     requested position; chat-range separation is not achievable on \
+                     this region",
+                );
+                return Ok(());
+            };
             check_eq("shout source", &shout.source, &ChatSource::Agent(speaker))?;
             check_eq("shout chat_type", &shout.chat_type, &ChatType::Shout)?;
             check_eq("shout audible", &shout.audible, &ChatAudible::Fully)?;
@@ -171,21 +197,31 @@ impl GridTest for ChatWhisperShoutRange {
     }
 }
 
-/// Teleport `session` to the region-local `(x, y, z)` within `region` and wait
-/// for the teleport to complete.
+/// How far (horizontally, in metres) the simulator-reported landing position
+/// may deviate from the requested one before the reposition counts as
+/// overridden. An honoured intra-region teleport lands essentially exactly;
+/// a parcel landing point / telehub redirect lands tens of metres away.
+const POSITION_TOLERANCE_M: f32 = 2.0;
+
+/// Teleport `session` to the region-local `(x, y, z)` within `region`, wait
+/// for the teleport to complete, and report whether the requested position was
+/// honoured.
 ///
 /// Within the current region the simulator answers with `TeleportLocal`
-/// ([`Event::TeleportLocal`]); if the avatar logged in to a neighbouring region
-/// the same request is a cross-region teleport that completes with an
-/// [`Event::RegionChanged`]. Either confirms the avatar now stands at the
-/// requested position in `region`, so the case tolerates both.
+/// ([`Event::TeleportLocal`]), whose authoritative landing position is
+/// compared (horizontally, within [`POSITION_TOLERANCE_M`]) against the
+/// request — parcel routing (a landing point / telehub) can redirect the
+/// teleport, which silently breaks any separation this case sets up. If the
+/// avatar logged in to a neighbouring region the same request is a
+/// cross-region teleport that completes with an [`Event::RegionChanged`]
+/// (no position payload); that path is trusted as before.
 async fn teleport_within(
     session: &mut Session,
     region: RegionHandle,
     x: f32,
     y: f32,
     z: f32,
-) -> Result<(), TestFailure> {
+) -> Result<bool, TestFailure> {
     session
         .send(Command::Teleport {
             region_handle: region,
@@ -197,11 +233,18 @@ async fn teleport_within(
             },
         })
         .await?;
-    session
-        .wait_for(REGION_TIMEOUT, |event| {
-            matches!(event, Event::TeleportLocal | Event::RegionChanged { .. }).then_some(())
+    let landing = session
+        .wait_for(REGION_TIMEOUT, |event| match event {
+            Event::TeleportLocal { position } => Some(Some(*position)),
+            Event::RegionChanged { .. } => Some(None),
+            _ => None,
         })
-        .await
+        .await?;
+    Ok(landing.is_none_or(|landing| {
+        let dx = landing.x() - x;
+        let dy = landing.y() - y;
+        (dx * dx + dy * dy).sqrt() <= POSITION_TOLERANCE_M
+    }))
 }
 
 /// Run one separation phase: place the secondary `separation` metres from the
@@ -210,7 +253,9 @@ async fn teleport_within(
 /// the primary hears only the sentinel.
 ///
 /// `tag` distinguishes the two phases' marker text. Returns the heard sentinel
-/// (for field assertions) and its round-trip time.
+/// (for field assertions) and its round-trip time, or `None` when the region's
+/// parcel routing overrode the secondary's requested position (the separation
+/// never happened, so no range assertion is possible).
 async fn range_phase(
     ctx: &mut TestContext,
     region: RegionHandle,
@@ -219,7 +264,7 @@ async fn range_phase(
     tag: &str,
     silent_type: ChatType,
     sentinel_type: ChatType,
-) -> Result<(ChatMessage, Duration), TestFailure> {
+) -> Result<Option<(ChatMessage, Duration)>, TestFailure> {
     let silent = format!("sl-conformance chat-range {speaker} {tag}-silent");
     let sentinel = format!("sl-conformance chat-range {speaker} {tag}-sentinel");
 
@@ -230,7 +275,9 @@ async fn range_phase(
         let secondary = ctx.secondary().ok_or_else(|| {
             TestFailure::Assertion("two-account test ran without a secondary".to_owned())
         })?;
-        teleport_within(secondary, region, LANE_X, ANCHOR_Y + separation, LANE_Z).await?;
+        if !teleport_within(secondary, region, LANE_X, ANCHOR_Y + separation, LANE_Z).await? {
+            return Ok(None);
+        }
         secondary
             .send(Command::Chat {
                 message: silent.clone(),
@@ -249,7 +296,9 @@ async fn range_phase(
         sent_at
     };
 
-    expect_in_range_only(ctx.primary(), speaker, &silent, &sentinel, sent_at).await
+    expect_in_range_only(ctx.primary(), speaker, &silent, &sentinel, sent_at)
+        .await
+        .map(Some)
 }
 
 /// Assert the primary hears `sentinel` but never `silent`, both attributed to

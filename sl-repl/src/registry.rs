@@ -49,28 +49,29 @@ use sl_proto::RegionCoordinates;
 use sl_proto::TextureKey;
 use sl_proto::TransactionId;
 use sl_proto::{
-    AbuseReport, AbuseReportType, AgentPreferences, AssetType, AttachmentMode, AttachmentPoint,
-    Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
-    CreateGroupParams, DeRezDestination, DetachOrder, DirFindFlags, DirectoryVisibility,
-    EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate, ExtendedMesh,
-    FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation, GodRegionUpdate,
-    GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
-    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
-    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType, LightData,
-    LightImage, LindenAmount, LookAtType, MapItemType, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem,
-    NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings,
-    ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-    ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate, PermissionField, Permissions,
-    Permissions5, PickKey, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams,
-    ProfileUpdate, ProposalVoteId, ReflectionProbe, ReflectionProbeFlags, RegionHandle,
-    RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId, RegionName, RenderMaterialRef,
-    RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType,
-    ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget,
-    ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot,
-    TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle, UpdatableAssetType,
-    UpdateGroupInfoParams, Uuid, Vector, ViewerEffect, ViewerEffectData, ViewerEffectType,
-    VoiceProvisionRequest, Wearable, WearableType,
+    AbuseReport, AbuseReportType, AgentPreferences, AssetType, AssociateInventory, AttachmentMode,
+    AttachmentPoint, Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
+    CreateGroupParams, CreateListing, DeRezDestination, DetachOrder, DirFindFlags,
+    DirectoryVisibility, EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
+    ExtendedMesh, FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation,
+    GodRegionUpdate, GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange,
+    GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer,
+    InventoryType, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType,
+    LightData, LightImage, LindenAmount, ListingId, LookAtType, MapItemType,
+    MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
+    NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectFlagSettings, ObjectPermMasks, ObjectTransform, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
+    PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType, Postcard,
+    PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, ReflectionProbe,
+    ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
+    RegionName, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
+    Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions,
+    ScriptTarget, ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags,
+    StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -4351,6 +4352,23 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_task_item_asset",
+            usage: "<task_id> <item_id> <asset_id> <asset_type>",
+            build: |args, ctx| {
+                Ok(Command::FetchTaskItemAsset {
+                    task: ObjectKey::from(args.req_uuid(ctx, "task_id", 0)?),
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
+                    asset_id: AssetKey::from(args.req_uuid(ctx, "asset_id", 2)?),
+                    asset_type: enum_arg(args, ctx, "asset_type", 3, parse_asset_type)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "fetch_estate_covenant_asset",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::FetchEstateCovenantAsset),
+        },
+        CommandSpec {
             name: "request_xfer",
             usage: "<filename>",
             build: |args, ctx| {
@@ -5486,6 +5504,19 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "fetch_session_history",
+            usage: "<group|conference> <id>",
+            // Explicit server-backlog fetch (`ChatSessionRequest` "fetch
+            // history"); Second-Life only — on a grid without the cap the
+            // command silently degrades. A `direct` kind parses but is ignored
+            // by the runtimes (1:1 IM has no server backlog).
+            build: |args, ctx| {
+                Ok(Command::FetchSessionHistory {
+                    kind: build_chat_session_kind(args, ctx, 0)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "query_nearby_chat_history_page",
             usage: "[already_shown] [limit]",
             // Recall older nearby (local) chat from the on-disk transcript. The
@@ -5514,6 +5545,122 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_offline_messages",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestOfflineMessages),
+        },
+        CommandSpec {
+            name: "marketplace_merchant_status",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::MarketplaceMerchantStatus),
+        },
+        CommandSpec {
+            name: "marketplace_listings",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::MarketplaceListings),
+        },
+        CommandSpec {
+            name: "marketplace_listing",
+            usage: "<listing_id>",
+            build: |args, ctx| {
+                Ok(Command::MarketplaceListing(ListingId(
+                    args.req_parse::<u32>(ctx, "listing_id", 0, "a numeric listing id")?,
+                )))
+            },
+        },
+        CommandSpec {
+            name: "marketplace_create_listing",
+            usage: "<name> <listing_folder_id> <version_folder_id> [count_on_hand=0]",
+            build: |args, ctx| {
+                Ok(Command::MarketplaceCreateListing(CreateListing {
+                    name: args.req_str(ctx, "name", 0)?,
+                    inventory_info: MarketplaceInventoryInfo {
+                        listing_folder_id: InventoryFolderKey::from(args.req_uuid(
+                            ctx,
+                            "listing_folder_id",
+                            1,
+                        )?),
+                        version_folder_id: InventoryFolderKey::from(args.req_uuid(
+                            ctx,
+                            "version_folder_id",
+                            2,
+                        )?),
+                        count_on_hand: args.parse_or::<i32>(
+                            ctx,
+                            "count_on_hand",
+                            3,
+                            "a stock count",
+                            0,
+                        )?,
+                    },
+                }))
+            },
+        },
+        CommandSpec {
+            name: "marketplace_update_listing",
+            usage: "<listing_id> <is_listed> <listing_folder_id> <version_folder_id> [count_on_hand=0]",
+            build: |args, ctx| {
+                Ok(Command::MarketplaceUpdateListing(UpdateListing {
+                    id: ListingId(args.req_parse::<u32>(
+                        ctx,
+                        "listing_id",
+                        0,
+                        "a numeric listing id",
+                    )?),
+                    is_listed: args.req_bool(ctx, "is_listed", 1)?,
+                    inventory_info: MarketplaceInventoryInfo {
+                        listing_folder_id: InventoryFolderKey::from(args.req_uuid(
+                            ctx,
+                            "listing_folder_id",
+                            2,
+                        )?),
+                        version_folder_id: InventoryFolderKey::from(args.req_uuid(
+                            ctx,
+                            "version_folder_id",
+                            3,
+                        )?),
+                        count_on_hand: args.parse_or::<i32>(
+                            ctx,
+                            "count_on_hand",
+                            4,
+                            "a stock count",
+                            0,
+                        )?,
+                    },
+                }))
+            },
+        },
+        CommandSpec {
+            name: "marketplace_associate_listing",
+            usage: "<listing_id> <listing_folder_id> <version_folder_id>",
+            build: |args, ctx| {
+                Ok(Command::MarketplaceAssociateListing(AssociateInventory {
+                    id: ListingId(args.req_parse::<u32>(
+                        ctx,
+                        "listing_id",
+                        0,
+                        "a numeric listing id",
+                    )?),
+                    inventory_info: MarketplaceAssociateInventoryInfo {
+                        listing_folder_id: InventoryFolderKey::from(args.req_uuid(
+                            ctx,
+                            "listing_folder_id",
+                            1,
+                        )?),
+                        version_folder_id: InventoryFolderKey::from(args.req_uuid(
+                            ctx,
+                            "version_folder_id",
+                            2,
+                        )?),
+                    },
+                }))
+            },
+        },
+        CommandSpec {
+            name: "marketplace_delete_listing",
+            usage: "<listing_id>",
+            build: |args, ctx| {
+                Ok(Command::MarketplaceDeleteListing(ListingId(
+                    args.req_parse::<u32>(ctx, "listing_id", 0, "a numeric listing id")?,
+                )))
+            },
         },
         CommandSpec {
             name: "logout",

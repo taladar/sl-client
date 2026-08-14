@@ -229,6 +229,7 @@ impl Plugin for ViewerSkinPlugin {
         app.add_plugins(FlairPlugin);
         register_logical_properties(app);
         register_caret_properties(app);
+        register_chat_band_properties(app);
         // The `-sk-uisnd-<key>` UI-sound overrides (`viewer-ui-sound-effects`):
         // registered here because the skin plugin owns `bevy_flair`, before the
         // CSS loader snapshots the property registry.
@@ -393,6 +394,65 @@ fn register_caret_properties(app: &mut App) {
         "unfocused-selection-color",
         SkinTextCaret::property_field_ref("selection_unfocused"),
     );
+}
+
+/// The skin-driven transcript **band** colours of the Conversations floater —
+/// the reference viewer's three-way message-class distinction in IM / group
+/// windows: recalled local transcript lines, server-fetched session history,
+/// and live messages. Written by the `chat-recall-color` /
+/// `chat-server-history-color` / `chat-live-color` CSS properties (the
+/// `.sk-conversations` rule in `common.css`, whose values are the
+/// `--chat-recall` / `--chat-server-history` / `--chat-live` role tokens) and
+/// read by `crate::conversations::refresh_conversations` when it rebuilds a
+/// transcript pane.
+///
+/// The same shim pattern as [`SkinTextCaret`]: transcript lines are spawned
+/// dynamically with per-line [`crate::linkified_text::LinkTextStyle`] colours,
+/// which `bevy_flair` cannot drive directly, so the skin lands the resolved
+/// colours here (on the floater root) and the rebuild reads them off.
+#[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
+#[properties(auto_insert_remove)]
+#[reflect(Default)]
+pub(crate) struct SkinChatBands {
+    /// Local transcript recall (the reference `ChatHistoryMessageFromLog`).
+    pub(crate) recall: Color,
+    /// Server-fetched session history (the reference — Firestorm-only —
+    /// `ChatHistoryMessageFromServerLog`).
+    pub(crate) server_history: Color,
+    /// Live messages (the reference `AgentChatColor`).
+    pub(crate) live: Color,
+}
+
+impl Default for SkinChatBands {
+    /// The reference colour values, used unchanged by the stock skins and as
+    /// the fallback for an unskinned pane: mid grey `0.5 0.5 0.5` for local
+    /// recall, muted green `0.37 0.51 0.38` for server history
+    /// (`fschathistory.cpp:1566-1582`), white for live lines.
+    fn default() -> Self {
+        Self {
+            recall: Color::srgb(0.5, 0.5, 0.5),
+            server_history: Color::srgb(0.37, 0.51, 0.38),
+            live: Color::WHITE,
+        }
+    }
+}
+
+/// Register the Conversations transcript-band CSS properties on the
+/// `bevy_flair` registry, mapping the three `chat-*-color` properties onto
+/// [`SkinChatBands`]'s fields. Runs in `build`, before the CSS asset loader
+/// snapshots the registry at plugin `finish`.
+fn register_chat_band_properties(app: &mut App) {
+    app.register_component_properties::<SkinChatBands>();
+    let css = app.world().resource::<CssPropertyRegistry>();
+    css.register_property(
+        "chat-recall-color",
+        SkinChatBands::property_field_ref("recall"),
+    );
+    css.register_property(
+        "chat-server-history-color",
+        SkinChatBands::property_field_ref("server_history"),
+    );
+    css.register_property("chat-live-color", SkinChatBands::property_field_ref("live"));
 }
 
 // ---------------------------------------------------------------------------

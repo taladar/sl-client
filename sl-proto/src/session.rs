@@ -1,11 +1,11 @@
 //! The sans-I/O session state machine: login, circuit establishment,
 //! keep-alive, and clean logout, driven entirely by passed-in time.
 
-use crate::bookkeeping_ids::{PingId, XferId};
+use crate::bookkeeping_ids::{PingId, TransferId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId};
 use crate::types::{
-    Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object, ParcelInfo,
-    TerrainPatch, Throttle,
+    AssetType, Camera, Diagnostic, Event, Friend, ImageCodec, LoginAccount, LoginParams, Object,
+    ParcelInfo, TerrainPatch, Throttle,
 };
 use sl_types::key::{AgentKey, ExperienceKey, FriendKey, InventoryKey, ObjectKey};
 use sl_types::lsl::Rotation;
@@ -363,6 +363,24 @@ pub const CHAT_SESSION_DECLINE: &str = "decline invitation";
 /// [`CHAT_SESSION_DECLINE`] (Firestorm `llimview.cpp` voice-call teardown).
 pub const CHAT_SESSION_DECLINE_P2P_VOICE: &str = "decline p2p voice";
 
+/// The `ChatSessionRequest` method that fetches the **server-side recent-message
+/// backlog** of a group / conference session (Firestorm `chatterBoxHistoryCoro`,
+/// `llimview.cpp:784`). The reply body is a bare LLSD *array* (oldest→newest,
+/// bounded by the server) of `{ from, from_id, message, num, time }` maps.
+/// Second Life serves it; OpenSim has no `ChatSessionRequest` handler at all, so
+/// on the local grid the fetch is simply never issued (the cap is absent).
+pub const CHAT_SESSION_FETCH_HISTORY: &str = "fetch history";
+
+/// The tag the runtimes attach when forwarding a
+/// [`CHAT_SESSION_FETCH_HISTORY`] reply to [`Session::handle_caps_event`].
+/// A synthetic routing key (never a real capability name): the reply is a bare
+/// LLSD array with no session identity of its own, so the runtime wraps it as
+/// `{ "history": <array>, "session-id": <uuid>, "from_group": <bool> }` under
+/// this tag — the fetch-history analogue of the roster-reply stamping the plain
+/// [`CAP_CHAT_SESSION_REQUEST`] tag carries (and of the transient
+/// [`LAND_RESOURCE_SUMMARY_TAG`] convention).
+pub const CHAT_SESSION_FETCH_HISTORY_TAG: &str = "ChatSessionRequest/fetch history";
+
 /// Inventory mutation (#30): the modern Second Life **AIS3** REST inventory
 /// capability (`InventoryAPIv3`). Folder/item create/update/move/remove are HTTP
 /// verbs against path suffixes under this base URL (see `sl_wire::inventory`).
@@ -516,6 +534,19 @@ pub const CAP_SEND_USER_REPORT: &str = "SendUserReport";
 /// `llfloaterreporter.cpp` `sendReportViaCaps` / `LLARScreenShotUploader`.
 pub const CAP_SEND_USER_REPORT_WITH_SCREENSHOT: &str = "SendUserReportWithScreenshot";
 
+/// The HTTP capability for the **Second Life Marketplace (SLM)
+/// DirectDelivery API** (`DirectDelivery`): the base URL of the
+/// marketplace listing-management REST service. Unlike every other
+/// capability this one speaks **plain JSON**, not LLSD — routes
+/// (`/merchant`, `/listings`, `/listing/<id>`,
+/// `/associate_inventory/<id>`) are appended verbatim to the cap URL
+/// (the reference viewer's `getSLMConnectURL` in
+/// `llmarketplacefunctions.cpp`). Request builders and response
+/// parsers live in the `sl-marketplace` crate; the runtimes drive it
+/// via the `Marketplace*` commands. Second Life only; OpenSim grids do
+/// not serve this capability at all.
+pub const CAP_DIRECT_DELIVERY: &str = "DirectDelivery";
+
 /// The capability names the client requests from the region seed. A driver POSTs
 /// these to the seed URL to obtain the capability map, then uses `EventQueueGet`
 /// for the event-queue long-poll, [`CAP_FETCH_INVENTORY`] for inventory fetches,
@@ -585,6 +616,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_LAND_RESOURCES,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_DIRECT_DELIVERY,
 ];
 
 /// The maximum UDP datagram size an I/O driver should be prepared to receive.
@@ -701,6 +733,70 @@ impl TextureDownload {
 
     /// Concatenates the buffered packets in index order into the full encoded
     /// image bytes.
+    fn assemble(&self) -> Vec<u8> {
+        let mut data = Vec::new();
+        for chunk in self.chunks.values() {
+            data.extend_from_slice(chunk);
+        }
+        data
+    }
+}
+
+/// What a completed legacy UDP asset Transfer download is for — the routing
+/// tag stored alongside each in-flight transfer in
+/// [`Session::transfer_downloads`](Session::transfer_downloads), so the single
+/// `TransferPacket` handler can route the assembled asset bytes to the right
+/// typed event.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+enum TransferPurpose {
+    /// A task-inventory item's asset (a script/notecard body in a prim's
+    /// contents): surface as
+    /// [`Event::TaskItemAssetReceived`](crate::Event::TaskItemAssetReceived).
+    TaskInventoryItem {
+        /// The prim whose task inventory holds the item.
+        task: ObjectKey,
+        /// The task-inventory item whose asset was requested.
+        item: InventoryKey,
+    },
+    /// The estate covenant notecard: surface as
+    /// [`Event::EstateCovenantAssetReceived`](crate::Event::EstateCovenantAssetReceived).
+    EstateCovenant,
+}
+
+/// An in-flight legacy UDP asset Transfer download: the buffered packets and
+/// what to do with them once the final (`Done`-status) packet arrives and the
+/// stream is contiguous. Packets are buffered by index so an out-of-order
+/// arrival still reassembles correctly (mirroring the reference viewer's
+/// `LLTransferTarget` delayed-packet buffer).
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TransferDownload {
+    /// What the assembled asset bytes should be routed to on completion.
+    purpose: TransferPurpose,
+    /// The asset type the request named, echoed on the completion event.
+    asset_type: AssetType,
+    /// The declared total size from the `TransferInfo` header, once received
+    /// (currently informational; completion is driven by the `Done` packet).
+    expected_size: Option<usize>,
+    /// The received packet payloads, keyed by packet index (from 0).
+    chunks: BTreeMap<u32, Vec<u8>>,
+    /// The index of the final packet (the one carrying the `Done` status),
+    /// once seen.
+    last_packet: Option<u32>,
+}
+
+impl TransferDownload {
+    /// Whether every packet `0..=last` has been received.
+    fn is_complete(&self) -> bool {
+        self.last_packet.is_some_and(|last| {
+            usize::try_from(last)
+                .ok()
+                .and_then(|count| count.checked_add(1))
+                .is_some_and(|expected| self.chunks.len() == expected)
+        })
+    }
+
+    /// Concatenates the buffered packets in index order into the full asset
+    /// bytes.
     fn assemble(&self) -> Vec<u8> {
         let mut data = Vec::new();
         for chunk in self.chunks.values() {
@@ -1049,6 +1145,10 @@ struct TakenControls {
 pub struct Session {
     /// The login parameters.
     login: LoginParams,
+    /// The XML-RPC method name for the login call when a redirect
+    /// (`login = "indeterminate"`) re-armed it with a `next_method` other
+    /// than the standard `login_to_simulator`. `None` until then.
+    login_method: Option<String>,
     /// The current lifecycle state.
     state: SessionState,
     /// The active (root) circuit, once login has succeeded.
@@ -1235,6 +1335,16 @@ pub struct Session {
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
     texture_downloads: BTreeMap<Uuid, TextureDownload>,
+    /// In-flight legacy UDP asset Transfers (`TransferRequest` →
+    /// `TransferInfo` + `TransferPacket` stream), keyed by the client-minted
+    /// [`TransferId`]. Started by [`Session::fetch_task_item_asset`] /
+    /// [`Session::fetch_estate_covenant_asset`] — the two source types that
+    /// remain UDP-only on both grids (no `ViewerAsset` coverage).
+    transfer_downloads: BTreeMap<TransferId, TransferDownload>,
+    /// A monotonic counter for minting [`TransferId`]s (never nil). The
+    /// reference viewer mints random transfer ids; a sans-I/O session has no
+    /// randomness, and the id only correlates replies on this circuit.
+    next_transfer_id: u128,
     /// The scene-graph object cache, keyed by the circuit instance the objects
     /// belong to (the root region *and* every child/neighbour circuit), then by
     /// region-local id. Region-local ids are only unique within a circuit, so
@@ -1311,6 +1421,17 @@ pub struct Session {
     /// [`Session::set_background_inventory_fetch`] and consulted by
     /// [`Session::next_inventory_fetch_batch`].
     background_inventory_fetch: bool,
+    /// Whether a joined group / conference session's server-side chat backlog
+    /// is fetched automatically (`ChatSessionRequest` `fetch history`).
+    /// [`Enabled`](ServerHistoryFetch::Enabled) by default, matching the
+    /// reference viewer's `FetchGroupChatHistory` setting — unlike the opt-in
+    /// inventory crawl, seeing what was said before you were listening is the
+    /// expected chat experience. Toggled by
+    /// [`Session::set_fetch_server_chat_history`] and consulted by
+    /// [`Session::next_server_history_fetches`]; the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// works regardless.
+    fetch_server_chat_history: ServerHistoryFetch,
     /// Pending high-level events for the driver.
     events: VecDeque<Event>,
     /// Whether protocol diagnostics are collected. Off by default so the
@@ -1329,29 +1450,33 @@ mod inventory;
 mod inventory_cache;
 mod methods;
 
-use self::chat_session::{ChatSession, TYPING_TIMEOUT};
+use self::chat_session::{ChatSession, ServerHistoryFetch, ServerHistoryState, TYPING_TIMEOUT};
 use self::inventory::Inventory;
 pub use chat_session::{
     ChatLifecycleView, ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FriendPresence,
-    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, SessionMessage,
-    VoiceChannelInfo, VoiceChannelState,
+    InviteChannel, MessageCursor, NearbyHistoryLine, PendingInvite, ServerHistoryMessage,
+    SessionMessage, VoiceChannelInfo, VoiceChannelState,
 };
 pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
+pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub(crate) use conversions::{
-    ZERO_VECTOR, instant_message, region_handshake_message, shape_from_object_shape_block,
+    ZERO_VECTOR, build_task_inventory, instant_message, parse_copy_inventory_from_notecard,
+    region_handshake_message, shape_from_object_shape_block, unpack_uuids,
 };
 pub use conversions::{
-    agent_drop_group_to_llsd, agent_state_update_to_llsd, ais_inventory_update_to_llsd,
-    build_map_block_reply, build_map_item_reply, build_map_layer_reply,
-    bulk_update_inventory_to_llsd, chat_session_request_body, chatterbox_invitation_to_llsd,
+    agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
+    ais_inventory_update_to_llsd, build_map_block_reply, build_map_item_reply,
+    build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_request_body,
+    chat_session_request_from_llsd, chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
     copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
     display_name_update_to_llsd, enable_simulator_to_caps_llsd, environment_asset_from_bytes,
     environment_to_llsd, establish_agent_communication_to_llsd, group_invite_response_body,
     group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
     nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
     parcel_info_to_llsd, required_voice_version_to_llsd, server_appearance_update_to_llsd,
-    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
+    session_history_to_llsd, set_display_name_reply_to_llsd, sim_console_response_to_llsd,
+    sky_settings_from_asset, teleport_finish_to_llsd, water_settings_from_asset,
+    windlight_refresh_to_llsd,
 };

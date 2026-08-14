@@ -2,9 +2,9 @@
 
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
-    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, LAND_RESOURCE_DETAIL_TAG,
-    LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey, build_land_resources_request,
-    parse_land_resources_reply, parse_llsd_xml,
+    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CHAT_SESSION_FETCH_HISTORY_TAG,
+    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, Llsd, ParcelKey,
+    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
 };
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -69,6 +69,52 @@ pub(crate) async fn post_chat_session_request(
     let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
     caps_tx
         .send((CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)))
+        .await
+        .ok();
+}
+
+/// POSTs a `ChatSessionRequest` `fetch history` `body` to the cap URL and
+/// forwards the reply to `caps_tx` tagged
+/// [`CHAT_SESSION_FETCH_HISTORY_TAG`] — the synthetic routing tag, because the
+/// reply is a **bare LLSD array** (the session's server-side backlog,
+/// oldest-first) that a plain [`CAP_CHAT_SESSION_REQUEST`] tag would misroute
+/// into the roster decoder. Like the roster path above, the reply carries no
+/// session identity of its own, so it is wrapped as
+/// `{ "history": <array>, "session-id": <uuid>, "from_group": <bool> }` for
+/// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event) to
+/// rebuild the session kind.
+pub(crate) async fn post_chat_session_fetch_history(
+    cap_url: String,
+    body: String,
+    session_id: Uuid,
+    from_group: bool,
+    http: ReqwestClient,
+    caps_tx: mpsc::Sender<(String, Llsd)>,
+) {
+    let Ok(response) = http
+        .post(&cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+        .await
+    else {
+        report_caps_failure(&caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG).await;
+        return;
+    };
+    let Ok(text) = response.text().await else {
+        report_caps_failure(&caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG).await;
+        return;
+    };
+    let Ok(reply) = parse_llsd_xml(&text) else {
+        report_caps_failure(&caps_tx, CHAT_SESSION_FETCH_HISTORY_TAG).await;
+        return;
+    };
+    let mut map = HashMap::new();
+    let _previous = map.insert("history".to_owned(), reply);
+    let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
+    let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
+    caps_tx
+        .send((CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)))
         .await
         .ok();
 }

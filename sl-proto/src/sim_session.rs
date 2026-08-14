@@ -19,7 +19,7 @@
 //! `PacketFlags`/`PacketAck`), so a [`SimSession`] and a client [`Session`] can
 //! be driven against each other through the real wire path.
 
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 
@@ -135,39 +135,80 @@ use uuid::Uuid;
 
 use crate::AssetKey;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
-use crate::bookkeeping_ids::{PingId, QueryId, TransactionId};
+use crate::bookkeeping_ids::{
+    ImSessionId, LureId, PingId, QueryId, TransactionId, TransferId, XferId,
+};
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
-    agent_drop_group_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, display_name_update_to_llsd, instant_message,
+    SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd,
+    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    chatterbox_invitation_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
+    enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, instant_message,
     nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
     required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
-    sim_console_response_to_llsd, windlight_refresh_to_llsd,
+    sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
-use crate::types::EventId;
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
     ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult,
     DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     DirectoryVisibility, DisplayNameUpdate, EjectAction, EstateCovenant, EventInfo,
-    FeatureDisabled, FollowCamPropertyValue, FreezeAction, GenericMessage, GenericStreamingMessage,
-    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
-    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem,
-    InstantMessage, InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize,
-    LandEdit, LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
-    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags,
-    SimulatorTime, StartLocationSlot, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TextureEntry, Throttle, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType,
+    FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
+    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
+    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryItemMove, InventoryType, Kick,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
+    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
+    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
+    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, StartLocationSlot,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
+use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
+use sl_wire::combine_uuids;
+use sl_wire::messages::{
+    AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
+    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, RequestXfer, RequestXferXferIDBlock,
+    SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+};
+use sl_wire::messages::{
+    AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
+    ScriptQuestion, ScriptQuestionDataBlock, ScriptQuestionExperienceBlock,
+};
+use sl_wire::messages::{
+    ChangeUserRights, ChangeUserRightsAgentDataBlock, ChangeUserRightsRightsBlock,
+    ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+    ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+    OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+    OnlineNotificationAgentBlockBlock,
+};
+use sl_wire::messages::{
+    DisableSimulator, TeleportFailed, TeleportFailedInfoBlock, TeleportLocal,
+    TeleportLocalInfoBlock, TeleportProgress, TeleportProgressAgentDataBlock,
+    TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock,
+};
+use sl_wire::messages::{
+    TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
+};
+use sl_wire::{AgentPreferences, DisplayName, ObjectPermMasks};
+use sl_wire::{
+    FaceMaterialPut, LegacyMaterial, MaterialOverrideUpdate, MediaEntry,
+    NewFileAgentInventoryRequest, RenderMaterialEntry, UpdateScriptAgentRequest,
+    UpdateScriptTaskRequest,
+};
+use sl_wire::{
+    TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM,
+    TransferSourceParamsEstate, TransferSourceParamsInvItem,
+};
 
 /// Decodes a [`RestoreItem`] from one of the field-identical inventory-item
 /// blocks the rez messages carry (`RezRestoreToWorld`, `RezObject`, `RezScript`).
@@ -320,6 +361,141 @@ enum SimState {
     Closed,
 }
 
+/// An outbound server-side `Xfer` file send in flight — the mirror of the
+/// client's inbound [`Session::request_xfer`](crate::Session::request_xfer)
+/// download. The registered file bytes are streamed one `SendXferPacket` at a
+/// time, each released by the client's `ConfirmXferPacket` (the same
+/// one-packet-in-flight pacing the client's own upload side uses).
+#[derive(Debug)]
+struct SimXferSend {
+    /// The filename the file was registered (and requested) under.
+    filename: String,
+    /// The complete file bytes being streamed.
+    data: Vec<u8>,
+    /// How many bytes of [`data`](Self::data) have already been sent.
+    sent: usize,
+    /// The sequence number of the next `SendXferPacket` (the first is 0).
+    next_sequence: u32,
+    /// Whether the final packet (high-bit end-of-file marker) has been sent
+    /// and is only awaiting its confirmation.
+    last_sent: bool,
+}
+
+/// An inbound server-side `Xfer` pull in flight — the byte stream of an
+/// oversized legacy asset upload
+/// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset))
+/// the simulator requested from the client by its predicted `VFileID`.
+#[derive(Debug)]
+struct SimXferReceive {
+    /// The predicted stored asset id,
+    /// `combine(transaction_id, secure_session_id)`.
+    asset_id: Uuid,
+    /// The asset type declared by the `AssetUploadRequest`.
+    asset_type: AssetType,
+    /// The upload's transaction id, echoed on
+    /// [`ServerEvent::AssetUploaded`].
+    transaction_id: TransactionId,
+    /// The file bytes accumulated so far (the seq-0 length prefix stripped).
+    buffer: Vec<u8>,
+}
+
+/// The maximum number of asset bytes carried in a single outbound
+/// `TransferPacket`. The reference viewer accepts up to 2048
+/// (`MAX_PACKET_DATA_SIZE`); like OpenSim's `SendAsset`, packets are kept
+/// safely under a datagram's worth.
+const TRANSFER_CHUNK_SIZE: usize = 1000;
+
+/// The server-side mirror status of one client-[`Session`](crate::Session)
+/// flow-level state machine, as pinned in [`SESSION_FLOW_COVERAGE`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum FlowMirrorStatus {
+    /// The [`SimSession`] implements the mirroring server-side machine,
+    /// proven by `Session` ↔ `SimSession` loopback tests.
+    Mirrored,
+    /// No server-side machine yet — a follow-up `protocol-sim-*` task will
+    /// mirror it.
+    Pending,
+    /// Deliberately **not** mirrored: both Second Life and OpenSim offer a
+    /// modern (CAPS) alternative for this flow, so the legacy UDP leg is
+    /// skipped per the legacy-skip rule (`roadmap/context/protocol.md`).
+    Legacy,
+}
+
+/// **The `Session` ↔ [`SimSession`] flow-mirroring coverage table.** One row
+/// per flow-level (multi-message) state machine the client
+/// [`Session`](crate::Session) implements, with its server-side mirror
+/// status. Pinned by the `flow_coverage_table_is_pinned` loopback test —
+/// changing a row is a deliberate edit there.
+///
+/// Stateless request/reply surfaces (money, object selection, appearance,
+/// group management edits, directory/map/profile queries) are *not* rows:
+/// they carry no per-flow client state, so a canned `send_*` reply — most of
+/// which [`SimSession`] already has — covers them without a state machine.
+///
+/// The `Legacy` rows are pinned so skipping them stays a deliberate,
+/// documented decision: the UDP texture download is superseded by the
+/// `GetTexture` capability on both grids, and the UDP inventory-folder fetch
+/// by `FetchInventoryDescendents2`/AISv3 (whose *server* side belongs to the
+/// `protocol-sim-caps-inventory` task).
+pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
+    ("root circuit lifecycle", FlowMirrorStatus::Mirrored),
+    ("child-agent circuits", FlowMirrorStatus::Mirrored),
+    ("teleport / region handover", FlowMirrorStatus::Mirrored),
+    ("object sit", FlowMirrorStatus::Mirrored),
+    ("Xfer download", FlowMirrorStatus::Mirrored),
+    ("Xfer upload", FlowMirrorStatus::Mirrored),
+    (
+        "legacy transaction asset upload",
+        FlowMirrorStatus::Mirrored,
+    ),
+    ("task-inventory fetch", FlowMirrorStatus::Mirrored),
+    (
+        "UDP asset Transfer (task item + estate covenant)",
+        FlowMirrorStatus::Mirrored,
+    ),
+    ("UDP texture download", FlowMirrorStatus::Legacy),
+    ("UDP inventory-folder fetch", FlowMirrorStatus::Legacy),
+    (
+        "chat-session lifecycle + server history",
+        FlowMirrorStatus::Mirrored,
+    ),
+    ("friendship / presence", FlowMirrorStatus::Mirrored),
+    (
+        "script permission / control mirror",
+        FlowMirrorStatus::Mirrored,
+    ),
+];
+
+/// Whether the circuit hosts a **child** agent (scene streaming only) or the
+/// **root** agent (the avatar is present in this region). A client opens a
+/// child circuit with `UseCircuitCode` alone — a neighbour holding presence
+/// ahead of a crossing, or a teleport destination before its confirmation —
+/// and promotes it by sending `CompleteAgentMovement`, exactly as the region
+/// servers distinguish child and root agents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum AgentPresence {
+    /// `UseCircuitCode` accepted, no `CompleteAgentMovement` yet: a child
+    /// agent (the region streams its scene, but the avatar is elsewhere).
+    Child,
+    /// `CompleteAgentMovement` answered: the root agent — the avatar is in
+    /// this region.
+    Root,
+}
+
+/// The decoded source of a client `TransferRequest`, surfaced on
+/// [`ServerEvent::TransferRequested`]. Only the two source types that remain
+/// UDP-only on both grids are decoded; a plain asset-by-id request
+/// (superseded by the `ViewerAsset` HTTP capability) is auto-refused and not
+/// surfaced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum TransferRequestSource {
+    /// A task-inventory item's asset (source `SimInvItem`) — a script or
+    /// notecard body in a prim's contents.
+    TaskInventoryItem(TransferSourceParamsInvItem),
+    /// An estate asset (source `SimEstate`) — the covenant notecard.
+    Estate(TransferSourceParamsEstate),
+}
+
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
 /// and to drive its interest list, mirroring what the client
@@ -341,6 +517,113 @@ pub struct AgentUpdateInfo {
     pub state: u8,
     /// The `AgentUpdate` flags byte.
     pub flags: u8,
+}
+
+/// The seat placement an `AvatarSitResponse` carries — the server-authored
+/// half of the sit handshake, mirroring the fields the client surfaces on
+/// [`Event::SitResult`](crate::Event::SitResult).
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SitTransform {
+    /// Whether the viewer should autopilot (walk) to the seat first (the
+    /// target is out of immediate sit range).
+    pub autopilot: bool,
+    /// The seat position relative to the object, in metres.
+    pub sit_position: Vector,
+    /// The seated orientation relative to the object — which way the avatar
+    /// faces once seated.
+    pub sit_rotation: Rotation,
+    /// The scripted-sit camera eye position relative to the seat
+    /// (`llSetCameraEyeOffset`); the zero vector when the seat's script sets
+    /// no custom camera.
+    pub camera_eye_offset: Vector,
+    /// The scripted-sit camera focus point relative to the seat
+    /// (`llSetCameraAtOffset`); the zero vector when the seat's script sets
+    /// no custom camera.
+    pub camera_at_offset: Vector,
+    /// Whether sitting forces the avatar into mouselook (set by vehicles and
+    /// weapon huds).
+    pub force_mouselook: bool,
+}
+
+/// One friend-rights change entry, shared by the client's `GrantUserRights`
+/// decode ([`ServerEvent::UserRightsGranted`]) and the server's
+/// [`SimSession::send_change_user_rights`] push (a `RightsBlock` on either
+/// wire message).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct UserRightsEntry {
+    /// The related agent (`AgentRelated` on the wire): the friend whose
+    /// rights are being set, or — on a [`SimSession::send_change_user_rights`]
+    /// push where the *friend* changed what they grant — the receiving agent.
+    pub agent: FriendKey,
+    /// The complete rights bitfield now in force (`RelatedRights`), not a
+    /// delta.
+    pub rights: FriendRights,
+}
+
+/// What a simulator-side chat session is — a group's IM channel or an ad-hoc
+/// conference. The server twin of the client's `ChatSessionKind` (a 1:1
+/// exchange is not a server-side session: it is plain IM relay).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum SimChatSessionKind {
+    /// A group's IM session; the wire session id is the group id.
+    Group {
+        /// The group whose channel this is.
+        group_id: GroupKey,
+    },
+    /// An ad-hoc conference of individual agents, keyed by a minted session
+    /// id.
+    Conference,
+}
+
+/// One live chat session on the simulator side — the mirror of the client's
+/// session registry entry, plus the **server history** backlog the
+/// `ChatSessionRequest` capability's `fetch history` method serves (the cap
+/// dispatch belongs to the CAPS surface; the state lives here).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SimChatSession {
+    /// Whether this is a group channel or an ad-hoc conference.
+    pub kind: SimChatSessionKind,
+    /// The current participant roster.
+    pub participants: BTreeSet<AgentKey>,
+    /// The recent-message backlog (newest last, capped like the client's
+    /// mirror): every message relayed through this session, whether sent by
+    /// this session's own client ([`ServerEvent::SessionMessageSent`]) or
+    /// pushed to it ([`SimSession::send_session_message`]).
+    pub history: Vec<ServerHistoryMessage>,
+}
+
+impl SimChatSession {
+    /// Appends one message to the history backlog, dropping the oldest
+    /// entries beyond the cap.
+    fn log(&mut self, message: ServerHistoryMessage) {
+        self.history.push(message);
+        if self.history.len() > SERVER_HISTORY_CAP {
+            let excess = self.history.len().saturating_sub(SERVER_HISTORY_CAP);
+            self.history.drain(..excess);
+        }
+    }
+}
+
+/// The server-side sit state machine — the mirror of the client's private
+/// `SitState` (`AwaitingResponse` on the client corresponds to nothing here:
+/// the request is surfaced as [`ServerEvent::SitRequested`] and the machine
+/// only advances once the driver answers).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+enum SimSitState {
+    /// The agent is not seated and no sit offer is outstanding.
+    NotSitting,
+    /// [`SimSession::send_avatar_sit_response`] was sent; awaiting the
+    /// client's completing `AgentSit`.
+    ResponseSent {
+        /// The object offered as a seat.
+        on: ObjectKey,
+    },
+    /// The client completed the handshake with `AgentSit`; the agent is
+    /// seated.
+    Seated {
+        /// The object sat upon.
+        on: ObjectKey,
+    },
 }
 
 /// A server-side event decoded from a client-only message, the inverse of the
@@ -388,8 +671,109 @@ pub enum ServerEvent {
         /// The chat type (whisper/normal/shout/typing/…).
         chat_type: ChatType,
     },
-    /// The client sent an instant message (`ImprovedInstantMessage`).
+    /// The client sent an instant message (`ImprovedInstantMessage`). The
+    /// group/conference **session dialogs** do not take this path — they
+    /// decode into the typed session events below, exactly as the client
+    /// routes them away from its own generic IM event.
     InstantMessage(Box<InstantMessage>),
+    /// The client asked to start (join) a group's IM session
+    /// (`ImprovedInstantMessage`, `SessionGroupStart`) — the inverse of the
+    /// client's
+    /// [`Session::start_group_session`](crate::Session::start_group_session).
+    /// The registry entry is created with the sender in its roster
+    /// ([`SimSession::chat_session`]).
+    GroupSessionStartRequested {
+        /// The group whose session the client joins (the wire session id).
+        group_id: GroupKey,
+    },
+    /// The client started an ad-hoc conference (`ImprovedInstantMessage`,
+    /// `SessionConferenceStart`) — the inverse of the client's
+    /// [`Session::start_conference`](crate::Session::start_conference). The
+    /// registry entry is created with the sender and the invitees in its
+    /// roster; the driver materialises the session on each invitee's
+    /// [`SimSession`] ([`SimSession::open_chat_session`]) and delivers the
+    /// invitation over its event queue
+    /// ([`SimSession::enqueue_chatterbox_invitation`]).
+    ConferenceStartRequested {
+        /// The conference's minted session id.
+        session_id: ImSessionId,
+        /// The invited agents, unpacked from the binary bucket.
+        invitees: Vec<AgentKey>,
+        /// The accompanying invitation message text.
+        message: String,
+    },
+    /// The client sent a message into a group/conference session
+    /// (`ImprovedInstantMessage`, `SessionSend`) — the inverse of the
+    /// client's [`Session::send_group_message`](crate::Session::send_group_message)
+    /// / [`Session::send_conference_message`](crate::Session::send_conference_message).
+    /// When the session is known the message is appended to its server
+    /// history; an unknown session still surfaces (the simulator is
+    /// authoritative for membership — the driver polices). The driver relays
+    /// to the other participants' sessions with
+    /// [`SimSession::send_session_message`].
+    SessionMessageSent {
+        /// The session the message was sent into.
+        session_id: ImSessionId,
+        /// The message text.
+        message: String,
+    },
+    /// The client left a group/conference session
+    /// (`ImprovedInstantMessage`, `SessionLeave`) — the inverse of the
+    /// client's [`Session::leave_group_session`](crate::Session::leave_group_session)
+    /// / [`Session::leave_conference`](crate::Session::leave_conference). The
+    /// sender is dropped from the roster (an emptied session is removed); the
+    /// driver notifies the remaining participants with
+    /// [`SimSession::send_session_participant`].
+    SessionLeaveRequested {
+        /// The session being left.
+        session_id: ImSessionId,
+    },
+    /// The client accepted a friendship offer (`AcceptFriendship`) — the
+    /// inverse of the client's
+    /// [`Session::accept_friendship`](crate::Session::accept_friendship). The
+    /// `transaction` echoes the offer IM's id. The driver relays the outcome
+    /// to the offerer's [`SimSession`] as an
+    /// [`ImDialog::FriendshipAccepted`](crate::ImDialog::FriendshipAccepted)
+    /// IM ([`SimSession::send_instant_message`]) — the grid-level buddy store
+    /// itself stays the driver's job.
+    FriendshipAccepted {
+        /// The offer transaction being accepted (the offer IM's id).
+        transaction: TransactionId,
+        /// The accepter's inventory folder(s) for the new friend's calling
+        /// card (the accepter's own inventory — a relaying driver normally
+        /// drops this).
+        calling_card_folders: Vec<InventoryFolderKey>,
+    },
+    /// The client declined a friendship offer (`DeclineFriendship`) — the
+    /// inverse of the client's
+    /// [`Session::decline_friendship`](crate::Session::decline_friendship).
+    /// The driver relays the outcome to the offerer's [`SimSession`] as an
+    /// [`ImDialog::FriendshipDeclined`](crate::ImDialog::FriendshipDeclined)
+    /// IM.
+    FriendshipDeclined {
+        /// The offer transaction being declined (the offer IM's id).
+        transaction: TransactionId,
+    },
+    /// The client asked to end a friendship (`TerminateFriendship`) — the
+    /// inverse of the client's
+    /// [`Session::terminate_friendship`](crate::Session::terminate_friendship).
+    /// The driver confirms with
+    /// [`SimSession::send_terminate_friendship`] on this session and relays
+    /// the removal to the former friend's [`SimSession`].
+    FriendshipTerminationRequested {
+        /// The former friend being removed.
+        other: FriendKey,
+    },
+    /// The client set the rights it grants some friends (`GrantUserRights`) —
+    /// the inverse of the client's
+    /// [`Session::grant_user_rights`](crate::Session::grant_user_rights). The
+    /// driver echoes each entry back with
+    /// [`SimSession::send_change_user_rights`] (changer = this agent) and
+    /// pushes the change to each affected friend's [`SimSession`].
+    UserRightsGranted {
+        /// The rights entries, one per friend whose grant changed.
+        rights: Vec<UserRightsEntry>,
+    },
     /// The client asked the simulator to resolve agent ids to legacy names
     /// (`UUIDNameRequest`). The server answers with
     /// [`SimSession::send_avatar_names`].
@@ -490,6 +874,22 @@ pub enum ServerEvent {
     /// taken (`ForceScriptControlRelease`); the simulator should drop all
     /// script-held controls for this agent.
     ForceScriptControlRelease,
+    /// The client answered a [`SimSession::send_script_question`]
+    /// (`ScriptAnswerYes`), granting `permissions` to the script `item_id` in
+    /// object `task_id` — the inverse of the client's
+    /// [`Session::answer_script_permissions`](crate::Session::answer_script_permissions).
+    /// An empty set is an explicit deny. The answer is recorded in the grant
+    /// mirror ([`SimSession::script_grant`]) whether or not a question was
+    /// outstanding — the simulator stays authoritative for enforcement; the
+    /// mirror only records what the agent answered.
+    ScriptPermissionAnswer {
+        /// The task (object) id holding the script.
+        task_id: ObjectKey,
+        /// The script item id within the object.
+        item_id: InventoryKey,
+        /// The granted permission subset (empty = explicit deny).
+        permissions: ScriptPermissions,
+    },
     /// The client asked to track an agent's position (`TrackAgent`); the
     /// simulator would stream the tracked agent's coarse location back via
     /// [`SimSession::send_coarse_location_update`].
@@ -886,6 +1286,91 @@ pub enum ServerEvent {
     /// message (the modern path is the `SendUserReport` capability). The
     /// simulator routes it to the grid's abuse desk; fire-and-forget.
     AbuseReportReceived(Box<AbuseReport>),
+    /// The client filed an abuse report bearing a snapshot over the
+    /// `SendUserReportWithScreenshot` two-step uploader: the first step
+    /// carried the report, the second the raw screenshot bytes (JPEG-2000,
+    /// kept verbatim). The simulator routes both to the grid's abuse desk;
+    /// fire-and-forget.
+    AbuseReportWithScreenshotReceived {
+        /// The parsed abuse report from the first upload step.
+        report: Box<AbuseReport>,
+        /// The raw screenshot bytes from the second upload step.
+        screenshot: Vec<u8>,
+    },
+    /// A two-stage CAPS asset upload completed: the raw bytes arrived at the
+    /// uploader URL and the simulator minted the stored asset id (plus, for the
+    /// inventory-creating caps, an inventory item id). Covers
+    /// `NewFileAgentInventory`, `UploadBakedTexture`, and every
+    /// `Update{Gesture,Notecard,Script,Settings,Material}{Agent,Task}Inventory`
+    /// cap — the metadata says which. Fire-and-forget for the driver to persist.
+    CapsAssetUploaded {
+        /// The parsed step-1 metadata identifying what was uploaded.
+        metadata: Box<CapsUploadMetadata>,
+        /// The stored asset id the simulator minted and returned to the client.
+        new_asset: AssetKey,
+        /// The created/updated inventory item id (`None` for a temporary
+        /// `UploadBakedTexture` bake).
+        new_inventory_item: Option<InventoryKey>,
+        /// The complete uploaded asset bytes from the second step.
+        data: Vec<u8>,
+    },
+    /// The client asked the grid to server-side bake its appearance
+    /// (`UpdateAvatarAppearance`) at the given Current Outfit Folder version.
+    /// The baked-texture ids arrive separately over UDP `AvatarAppearance`; the
+    /// capability itself answers the client with the accept reply
+    /// (`{ success: true }`).
+    ServerAppearanceRequested {
+        /// The Current Outfit Folder version the client asked the grid to bake.
+        cof_version: i32,
+    },
+    /// The client copied an item embedded in a notecard into inventory
+    /// (`CopyInventoryFromNotecard`). Fire-and-forget: the copied item is
+    /// delivered over the normal inventory-update stream, so there is no reply.
+    CopyInventoryFromNotecardRequested {
+        /// The notecard holding the embedded item.
+        notecard_id: InventoryKey,
+        /// The in-world object holding the notecard, or `None` for an
+        /// agent-inventory notecard.
+        object_id: Option<ObjectKey>,
+        /// The embedded item copied.
+        item_id: InventoryKey,
+        /// The destination folder, or `None` to let the simulator pick the
+        /// system folder for the item's type.
+        folder_id: Option<InventoryFolderKey>,
+    },
+    /// The client set legacy (normal/specular) materials on object faces via
+    /// the `RenderMaterials` PUT. A world mutation — the driver applies it and
+    /// echoes the assigned material ids on the faces' texture entries.
+    RenderMaterialsSet {
+        /// One entry per affected face (a cleared face has `material: None`).
+        updates: Vec<FaceMaterialPut>,
+    },
+    /// The client set GLTF (PBR) material params on object faces
+    /// (`ModifyMaterialParams`). A world mutation for the driver to apply.
+    MaterialParamsModified {
+        /// One entry per affected face.
+        updates: Vec<MaterialOverrideUpdate>,
+    },
+    /// The client set the per-face media on an object (`ObjectMedia` UPDATE
+    /// verb). The simulator has recorded it and advanced the media version.
+    ObjectMediaSet {
+        /// The object whose media was set.
+        object_id: ObjectKey,
+        /// The new per-face media (one slot per prim face; `None` for a face
+        /// without media).
+        faces: Vec<Option<MediaEntry>>,
+    },
+    /// The client navigated the media on one object face
+    /// (`ObjectMediaNavigate`). The simulator has advanced the object's media
+    /// version rather than replying with media data.
+    ObjectMediaNavigated {
+        /// The object whose media face was navigated.
+        object_id: ObjectKey,
+        /// The prim face navigated.
+        face: u8,
+        /// The URL the face was navigated to.
+        url: String,
+    },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
@@ -1075,6 +1560,96 @@ pub enum ServerEvent {
         /// The inventory item id being removed.
         item_id: InventoryKey,
     },
+    /// The client asked to download a file over the legacy `Xfer` path
+    /// (`RequestXfer`). When the named file was registered
+    /// ([`SimSession::register_xfer_file`]) the simulator began streaming it;
+    /// otherwise it refused with an `AbortXfer`. The inverse of the client's
+    /// [`Session::request_xfer`](crate::Session::request_xfer).
+    XferRequested {
+        /// The client-chosen transfer id.
+        xfer_id: XferId,
+        /// The requested filename.
+        filename: String,
+        /// Whether a registered file matched and streaming began.
+        served: bool,
+    },
+    /// The client confirmed the final packet of a served `Xfer` file send —
+    /// the download completed. The inverse of the client's
+    /// [`Event::XferDownloaded`](crate::Event::XferDownloaded).
+    XferServed {
+        /// The transfer id.
+        xfer_id: XferId,
+        /// The filename the file was registered under.
+        filename: String,
+        /// The number of file bytes streamed.
+        byte_count: usize,
+    },
+    /// The client aborted an in-flight `Xfer` transfer (`AbortXfer`), in
+    /// either direction. The inverse of the client's
+    /// [`Event::XferAborted`](crate::Event::XferAborted).
+    XferAborted {
+        /// The transfer id.
+        xfer_id: XferId,
+        /// The abort result code.
+        result: i32,
+    },
+    /// The client started a legacy transaction asset upload
+    /// (`AssetUploadRequest`) — the in-place wearable-save path. Small assets
+    /// arrive inline and complete immediately; an oversized one is pulled from
+    /// the client over `Xfer` first. Completion (either way) surfaces
+    /// separately as [`ServerEvent::AssetUploaded`]. The inverse of the
+    /// client's
+    /// [`Session::save_inventory_asset`](crate::Session::save_inventory_asset).
+    AssetUploadRequested {
+        /// The upload's transaction id (the stored asset id is
+        /// `combine(transaction_id, secure_session_id)`).
+        transaction_id: TransactionId,
+        /// The declared asset type.
+        asset_type: AssetType,
+        /// Whether the asset bytes were carried inline (small upload) rather
+        /// than pulled over `Xfer`.
+        inline: bool,
+        /// Whether the asset is a temporary upload.
+        tempfile: bool,
+        /// Whether the asset should only be stored sim-locally.
+        store_local: bool,
+    },
+    /// A legacy transaction asset upload finished: the asset bytes are fully
+    /// received (inline, or over the `Xfer` pull) and the simulator has
+    /// replied with an `AssetUploadComplete`. The inverse of the client's
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    AssetUploaded {
+        /// The stored asset id, `combine(transaction_id, secure_session_id)`.
+        asset_id: AssetKey,
+        /// The asset type.
+        asset_type: AssetType,
+        /// The upload's transaction id.
+        transaction_id: TransactionId,
+        /// The complete asset bytes.
+        data: Vec<u8>,
+    },
+    /// The client asked to download an asset over the legacy UDP Transfer
+    /// path (`TransferRequest`) from a source that is still UDP-only on both
+    /// grids (task-inventory item asset, estate covenant). The driver answers
+    /// with [`SimSession::send_transfer_asset`] or
+    /// [`SimSession::send_transfer_fail`]. The inverse of the client's
+    /// [`Session::fetch_task_item_asset`](crate::Session::fetch_task_item_asset)
+    /// / [`Session::fetch_estate_covenant_asset`](crate::Session::fetch_estate_covenant_asset).
+    TransferRequested {
+        /// The client-minted transfer id, to pass back to the answer.
+        transfer_id: TransferId,
+        /// The transfer priority the client asked for.
+        priority: f32,
+        /// The decoded request source.
+        source: TransferRequestSource,
+    },
+    /// The client cancelled an in-flight asset Transfer (`TransferAbort`).
+    /// The inverse of the client's
+    /// [`Session::abort_transfer`](crate::Session::abort_transfer).
+    TransferAborted {
+        /// The transfer id that was cancelled.
+        transfer_id: TransferId,
+    },
     /// The client applied a terraform brush stroke (`ModifyLand`). The inverse
     /// of the client's
     /// [`Session::modify_land`](crate::Session::modify_land).
@@ -1148,10 +1723,63 @@ pub enum ServerEvent {
         /// `LandmarkID`) to teleport to the agent's home location.
         landmark: Option<AssetKey>,
     },
+    /// The client requested a teleport to an explicit region handle and
+    /// position (`TeleportLocationRequest`). The inverse of the client's
+    /// [`Session::teleport_to`](crate::Session::teleport_to). The driver
+    /// answers with the [`SimSession::send_teleport_start`] /
+    /// [`send_teleport_progress`](SimSession::send_teleport_progress) /
+    /// [`send_teleport_local`](SimSession::send_teleport_local) /
+    /// [`send_teleport_failed`](SimSession::send_teleport_failed) mechanics —
+    /// or, for an inter-region teleport, the CAPS event-queue trio
+    /// [`enqueue_enable_simulator`](SimSession::enqueue_enable_simulator) /
+    /// [`enqueue_establish_agent_communication`](SimSession::enqueue_establish_agent_communication)
+    /// / [`enqueue_teleport_finish`](SimSession::enqueue_teleport_finish).
+    TeleportRequested {
+        /// The destination region handle.
+        region_handle: RegionHandle,
+        /// The destination position within the region.
+        position: RegionCoordinates,
+        /// The direction the avatar should face on arrival.
+        look_at: Vector,
+    },
+    /// The client accepted a teleport lure and asks to be teleported to the
+    /// lure's destination (`TeleportLureRequest`). The inverse of the client's
+    /// [`Session::accept_teleport_lure`](crate::Session::accept_teleport_lure).
+    TeleportViaLure {
+        /// The lure offer id the client is accepting (the offering IM's id).
+        lure_id: LureId,
+        /// The teleport flags the client echoed (`via lure`, godlike variants).
+        teleport_flags: u32,
+    },
     /// The client cancelled an in-progress teleport (`TeleportCancel`). The
     /// inverse of the client's
     /// [`Session::cancel_teleport`](crate::Session::cancel_teleport).
     CancelTeleport,
+    /// The client asked to sit on an object (`AgentRequestSit`). The inverse
+    /// of the client's [`Session::sit_on`](crate::Session::sit_on). The
+    /// driver answers with [`SimSession::send_avatar_sit_response`] (the
+    /// client then completes the handshake with `AgentSit`).
+    SitRequested {
+        /// The object the client wants to sit on.
+        target: ObjectKey,
+        /// The clicked sit offset relative to the object, in metres.
+        offset: Vector,
+    },
+    /// The client completed the sit handshake (`AgentSit`). `on` is the seat
+    /// from the outstanding [`SimSession::send_avatar_sit_response`] (the
+    /// agent is now seated — [`SimSession::seated_on`] reports it); `None`
+    /// for an unsolicited `AgentSit`, which leaves the sit state untouched
+    /// (mirroring the client ignoring an unsolicited `AvatarSitResponse`).
+    SitConfirmed {
+        /// The object sat upon, when a sit response was outstanding.
+        on: Option<ObjectKey>,
+    },
+    /// The client stood up: an `AgentUpdate` carried the transient
+    /// `STAND_UP` control flag while the agent was seated (or awaiting the
+    /// completing `AgentSit`). The inverse of the client's
+    /// [`Session::stand`](crate::Session::stand). The sit state resets to
+    /// not-sitting.
+    StoodUp,
     /// The client recorded a start location (`SetStartLocationRequest`): stores
     /// the region-local `position` and `look_at` as the named [`StartLocationSlot`]
     /// (the everyday case being [`StartLocationSlot::Home`], "set home to here").
@@ -1386,8 +2014,166 @@ pub struct SimSession {
     /// The id of the next `EventQueueGet` batch (echoed as the client's next
     /// `ack`).
     event_queue_id: i32,
+    /// Files registered for the client to download over the legacy `Xfer`
+    /// path, keyed by filename. An entry is consumed by the `RequestXfer`
+    /// that starts its download (requests ask for delete-on-completion), so
+    /// re-serving a name needs a fresh
+    /// [`SimSession::register_xfer_file`].
+    xfer_files: BTreeMap<String, Vec<u8>>,
+    /// Outbound `Xfer` file sends in flight, keyed by the client-chosen id.
+    xfer_sends: BTreeMap<XferId, SimXferSend>,
+    /// Inbound `Xfer` asset pulls in flight (oversized legacy uploads),
+    /// keyed by the simulator-assigned id.
+    xfer_receives: BTreeMap<XferId, SimXferReceive>,
+    /// The next simulator-assigned `Xfer` id for an asset pull (never zero).
+    next_xfer_id: XferId,
+    /// The account's secure session id — the extra entropy the legacy asset
+    /// upload path combines with a transaction id to derive the stored asset
+    /// id. `None` until [`SimSession::set_secure_session_id`]; an upload
+    /// arriving while unset is refused with a failed `AssetUploadComplete`.
+    secure_session_id: Option<Uuid>,
+    /// Asset Transfer requests awaiting the driver's answer, keyed by the
+    /// client-minted [`TransferId`] and holding the raw request params to echo
+    /// back in the `TransferInfo` (as the reference serving side does).
+    transfer_serves: BTreeMap<TransferId, Vec<u8>>,
+    /// Whether this circuit hosts a child or the root agent: `Child` from
+    /// `UseCircuitCode`, promoted to `Root` by `CompleteAgentMovement`.
+    agent_presence: AgentPresence,
+    /// The agent's sit state (the server-side mirror of the client's sit
+    /// machine).
+    sit: SimSitState,
+    /// Outstanding `ScriptQuestion`s awaiting the client's `ScriptAnswerYes`,
+    /// keyed by (task, item) and holding the asked permission set
+    /// ([`SimSession::script_question`]).
+    script_questions: BTreeMap<(ObjectKey, InventoryKey), ScriptPermissions>,
+    /// Recorded script-permission answers — the server twin of the client's
+    /// grant registry ([`SimSession::script_grant`]). An empty
+    /// [`ScriptPermissions`] is an explicit deny, distinct from an absent
+    /// (never-answered) holder.
+    script_grants: BTreeMap<(ObjectKey, InventoryKey), ScriptPermissions>,
+    /// The live group/conference chat sessions, keyed by the wire session id
+    /// (a group session's id **is** the group id) —
+    /// [`SimSession::chat_session`].
+    chat_sessions: BTreeMap<ImSessionId, SimChatSession>,
+    /// Instant messages stored while the agent was offline, awaiting the
+    /// deliver-once `ReadOfflineMsgs` fetch ([`SimSession::take_offline_messages`]).
+    offline_messages: Vec<InstantMessage>,
+    /// The people-service display-name store the `GetDisplayNames` capability
+    /// serves from, keyed by agent ([`SimSession::set_display_name`]).
+    display_names: BTreeMap<AgentKey, DisplayName>,
+    /// The agent's server-stored preferences, served and updated by the
+    /// `AgentPreferences` capability ([`SimSession::agent_preferences`]).
+    agent_preferences: AgentPreferences,
+    /// An abuse report parked by the first `SendUserReportWithScreenshot` step
+    /// until the second step delivers the screenshot bytes.
+    pending_report_screenshot: Option<Box<AbuseReport>>,
+    /// Two-stage CAPS uploads parked between step 1 (the metadata POST, which
+    /// mints the uploader URL) and step 2 (the raw-bytes POST that completes
+    /// them), keyed by capability name — one in-flight upload per cap, the same
+    /// shape as [`pending_report_screenshot`](Self::pending_report_screenshot)
+    /// generalised across the whole `Update*`/`NewFile*` family.
+    pending_caps_uploads: BTreeMap<&'static str, CapsUploadMetadata>,
+    /// A monotonic source for the ids the two-stage uploader mints on
+    /// completion (`new_asset` / `new_inventory_item`) and the `ObjectMedia`
+    /// version serials — a sim-server simplification. A real grid mints random
+    /// asset ids; the client stores whatever id it is handed, so the value's
+    /// structure is immaterial, and a deterministic counter keeps `SimSession`
+    /// pure (no clock, no RNG).
+    next_sim_serial: u128,
+    /// The GLTF/legacy materials the `RenderMaterials` query serves, keyed by
+    /// material id ([`SimSession::set_region_material`]). Driver-populated: the
+    /// authoritative prim/material database is out of scope, so this is a small
+    /// serving store like [`display_names`](Self::display_names).
+    region_materials: BTreeMap<Uuid, LegacyMaterial>,
+    /// The per-object media the `ObjectMedia` GET serves, keyed by object
+    /// ([`SimSession::set_object_media`]). Driver-populated.
+    object_media: BTreeMap<ObjectKey, ObjectMediaState>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
+}
+
+/// The parsed step-1 metadata of a two-stage CAPS upload, parked in
+/// [`SimSession`] until the raw-bytes step completes it. One variant per upload
+/// family; carries exactly what the completion event needs to describe the
+/// stored asset.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum CapsUploadMetadata {
+    /// `NewFileAgentInventory` — store a new asset and create an inventory item.
+    NewFileInventory(NewFileAgentInventoryRequest),
+    /// `UploadBakedTexture` — a temporary avatar bake (no inventory item).
+    BakedTexture,
+    /// An `Update*AgentInventory` asset replacement (gesture / notecard /
+    /// settings / material), carrying the cap name and the item being updated.
+    UpdateAgentItem {
+        /// The capability name (which asset kind is being replaced).
+        cap: String,
+        /// The agent-inventory item whose asset is replaced.
+        item_id: InventoryKey,
+    },
+    /// An `Update*TaskInventory` asset replacement (notecard task), carrying the
+    /// holding object and the item within it.
+    UpdateTaskItem {
+        /// The capability name.
+        cap: String,
+        /// The in-world object holding the task inventory.
+        task_id: ObjectKey,
+        /// The task-inventory item whose asset is replaced.
+        item_id: InventoryKey,
+    },
+    /// `UpdateScriptAgent` — replace and compile an agent-inventory script.
+    UpdateScriptAgent(UpdateScriptAgentRequest),
+    /// `UpdateScriptTask` — replace and compile a task-inventory script.
+    UpdateScriptTask(UpdateScriptTaskRequest),
+}
+
+impl CapsUploadMetadata {
+    /// Whether this upload compiles a script — its completion reply carries the
+    /// `{ compiled, errors }` result the client folds into
+    /// [`Event::ScriptUploaded`](crate::Event::ScriptUploaded).
+    #[must_use]
+    pub(crate) const fn is_script(&self) -> bool {
+        matches!(self, Self::UpdateScriptAgent(_) | Self::UpdateScriptTask(_))
+    }
+
+    /// Whether this upload creates or updates an inventory item (so the
+    /// completion carries a `new_inventory_item`). `UploadBakedTexture` is the
+    /// sole exception — a temporary bake produces no inventory item.
+    const fn creates_inventory_item(&self) -> bool {
+        !matches!(self, Self::BakedTexture)
+    }
+}
+
+/// The per-object media state the `ObjectMedia` GET serves — the media version
+/// string and the per-face media entries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectMediaState {
+    /// The media version string (`x-mv:<serial>/<uuid>`), advanced on every
+    /// media change.
+    pub version: String,
+    /// Per-face media, one slot per prim face in order; `None` for a face
+    /// without media.
+    pub faces: Vec<Option<MediaEntry>>,
+}
+
+/// The `AgentPreferences` set a fresh session starts from — OpenSim's stored
+/// defaults (`IAgentPreferencesService.cs`): hover height `0.0`, zero default
+/// permission masks, access ceiling `"M"`, language `"en-us"` marked public,
+/// and god level `0`. Every field is `Some` so the capability always echoes a
+/// full set.
+fn default_agent_preferences() -> AgentPreferences {
+    AgentPreferences {
+        hover_height: Some(0.0),
+        default_object_perm_masks: Some(ObjectPermMasks {
+            group: 0,
+            everyone: 0,
+            next_owner: 0,
+        }),
+        max_access_pref: Some("M".to_owned()),
+        language: Some("en-us".to_owned()),
+        language_is_public: Some(true),
+        god_level: Some(0),
+    }
 }
 
 impl SimSession {
@@ -1415,8 +2201,368 @@ impl SimSession {
             ping: None,
             caps_events: Vec::new(),
             event_queue_id: 1,
+            xfer_files: BTreeMap::new(),
+            xfer_sends: BTreeMap::new(),
+            xfer_receives: BTreeMap::new(),
+            next_xfer_id: XferId(1),
+            secure_session_id: None,
+            transfer_serves: BTreeMap::new(),
+            agent_presence: AgentPresence::Child,
+            sit: SimSitState::NotSitting,
+            script_questions: BTreeMap::new(),
+            script_grants: BTreeMap::new(),
+            chat_sessions: BTreeMap::new(),
+            offline_messages: Vec::new(),
+            display_names: BTreeMap::new(),
+            agent_preferences: default_agent_preferences(),
+            pending_report_screenshot: None,
+            pending_caps_uploads: BTreeMap::new(),
+            next_sim_serial: 0,
+            region_materials: BTreeMap::new(),
+            object_media: BTreeMap::new(),
             events: VecDeque::new(),
         }
+    }
+
+    /// Whether this circuit currently hosts a child agent or the root agent.
+    /// Meaningful once the circuit is open ([`Self::client_addr`] is set);
+    /// before that it reports `Child`.
+    #[must_use]
+    pub const fn agent_presence(&self) -> AgentPresence {
+        self.agent_presence
+    }
+
+    /// Whether the avatar is present in this region (the circuit was promoted
+    /// to root by a `CompleteAgentMovement`).
+    #[must_use]
+    pub const fn is_root_agent(&self) -> bool {
+        matches!(self.agent_presence, AgentPresence::Root)
+    }
+
+    /// The object the agent is seated on, once the sit handshake completed
+    /// with the client's `AgentSit` (the mirror of the client's
+    /// [`Session::seat`](crate::Session::seat)). `None` while not sitting or
+    /// while an [`SimSession::send_avatar_sit_response`] is still awaiting
+    /// its `AgentSit`.
+    #[must_use]
+    pub const fn seated_on(&self) -> Option<ObjectKey> {
+        match self.sit {
+            SimSitState::Seated { on } => Some(on),
+            SimSitState::NotSitting | SimSitState::ResponseSent { .. } => None,
+        }
+    }
+
+    /// The permission set a [`SimSession::send_script_question`] asked for the
+    /// script `item_id` in object `task_id`, while its answer is still
+    /// outstanding (`None` once answered or never asked).
+    #[must_use]
+    pub fn script_question(
+        &self,
+        task_id: ObjectKey,
+        item_id: InventoryKey,
+    ) -> Option<ScriptPermissions> {
+        self.script_questions.get(&(task_id, item_id)).copied()
+    }
+
+    /// The recorded answer to a `ScriptQuestion` for the script `item_id` in
+    /// object `task_id`: `None` when never answered, `Some` of an empty set
+    /// for an explicit deny — the server twin of the client's tri-state
+    /// [`Session::script_permission_status`](crate::Session::script_permission_status).
+    #[must_use]
+    pub fn script_grant(
+        &self,
+        task_id: ObjectKey,
+        item_id: InventoryKey,
+    ) -> Option<ScriptPermissions> {
+        self.script_grants.get(&(task_id, item_id)).copied()
+    }
+
+    /// The live chat session keyed by `session_id` (a group session's id is
+    /// the group id), or `None` if this session does not know it.
+    #[must_use]
+    pub fn chat_session(&self, session_id: ImSessionId) -> Option<&SimChatSession> {
+        self.chat_sessions.get(&session_id)
+    }
+
+    /// Stores an instant message that arrived while the agent was offline, to
+    /// be served (once) by the `ReadOfflineMsgs` capability — the driver API
+    /// feeding [`SimSession::take_offline_messages`].
+    pub fn store_offline_message(&mut self, message: InstantMessage) {
+        self.offline_messages.push(message);
+    }
+
+    /// Drains the stored offline messages, oldest-first — OpenSim's
+    /// delete-on-fetch deliver-once semantics: the `ReadOfflineMsgs` handler
+    /// serves the batch and a repeated fetch yields an empty list.
+    pub fn take_offline_messages(&mut self) -> Vec<InstantMessage> {
+        std::mem::take(&mut self.offline_messages)
+    }
+
+    /// Registers (or replaces) an avatar's display-name record in the store
+    /// the `GetDisplayNames` capability serves from, keyed by the record's
+    /// [`id`](DisplayName::id) — the driver API for the people service.
+    pub fn set_display_name(&mut self, name: DisplayName) {
+        self.display_names.insert(name.id, name);
+    }
+
+    /// The stored display-name record for `agent`, if the people-service store
+    /// knows one ([`SimSession::set_display_name`]).
+    #[must_use]
+    pub fn display_name(&self, agent: AgentKey) -> Option<&DisplayName> {
+        self.display_names.get(&agent)
+    }
+
+    /// The agent's server-stored preferences — the full set the
+    /// `AgentPreferences` capability echoes on every request. Starts at
+    /// OpenSim's defaults (`IAgentPreferencesService.cs`): hover height `0.0`,
+    /// zero permission masks, access ceiling `"M"`, language `"en-us"` and
+    /// public, god level `0`.
+    #[must_use]
+    pub const fn agent_preferences(&self) -> &AgentPreferences {
+        &self.agent_preferences
+    }
+
+    /// Merges an `AgentPreferences` capability update into the stored set:
+    /// each `Some` field of `update` overwrites the stored value. `god_level`
+    /// is ignored — it is reply-only (the grid reports the agent's
+    /// administrative level; clients cannot set it).
+    pub(crate) fn merge_agent_preferences(&mut self, update: &AgentPreferences) {
+        if let Some(hover_height) = update.hover_height {
+            self.agent_preferences.hover_height = Some(hover_height);
+        }
+        if let Some(masks) = update.default_object_perm_masks {
+            self.agent_preferences.default_object_perm_masks = Some(masks);
+        }
+        if let Some(max_access_pref) = &update.max_access_pref {
+            self.agent_preferences.max_access_pref = Some(max_access_pref.clone());
+        }
+        if let Some(language) = &update.language {
+            self.agent_preferences.language = Some(language.clone());
+        }
+        if let Some(language_is_public) = update.language_is_public {
+            self.agent_preferences.language_is_public = Some(language_is_public);
+        }
+    }
+
+    /// Accepts a chat-session invitation on behalf of this circuit's agent
+    /// (the `ChatSessionRequest` `"accept invitation"` server side): adds the
+    /// agent (when the circuit knows one) to the session's roster and returns
+    /// the roster snapshot for the accept reply, or `None` for a session this
+    /// simulator does not know. Relaying the join to the *other* participants'
+    /// sessions stays the driver's job
+    /// ([`SimSession::send_session_participant`] /
+    /// [`SimSession::enqueue_chatterbox_agent_list_updates`]).
+    pub(crate) fn chat_session_accept(&mut self, session_id: ImSessionId) -> Option<Vec<AgentKey>> {
+        let chat_session = self.chat_sessions.get_mut(&session_id)?;
+        if let Some(agent) = self.agent_id {
+            chat_session.participants.insert(agent);
+        }
+        Some(chat_session.participants.iter().copied().collect())
+    }
+
+    /// Declines a chat-session invitation on behalf of this circuit's agent
+    /// (the `ChatSessionRequest` `"decline invitation"` server side): removes
+    /// the agent from the session's roster, dropping the session when the
+    /// roster empties (the same rule as
+    /// [`SimSession::send_session_participant`]). A decline for an unknown
+    /// session is a no-op.
+    pub(crate) fn chat_session_decline(&mut self, session_id: ImSessionId) {
+        let Some(agent) = self.agent_id else {
+            return;
+        };
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            chat_session.participants.remove(&agent);
+            if chat_session.participants.is_empty() {
+                self.chat_sessions.remove(&session_id);
+            }
+        }
+    }
+
+    /// Appends a message to a known chat session's server-side history without
+    /// any wire traffic — the driver API for the relay topology (the sending
+    /// agent's region logs via [`SimSession::send_session_message`], but each
+    /// *other* participant's session must record the history it will serve to
+    /// a `ChatSessionRequest` `"fetch history"`). Keeps the history cap. A
+    /// record for an unknown session is dropped.
+    pub fn record_session_history(
+        &mut self,
+        session_id: ImSessionId,
+        message: ServerHistoryMessage,
+    ) {
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            chat_session.log(message);
+        }
+    }
+
+    /// Routes an abuse report received over the modern `SendUserReport`
+    /// capability to the driver as [`ServerEvent::AbuseReportReceived`] — the
+    /// same event the legacy UDP `UserReport` path pushes.
+    pub(crate) fn push_abuse_report(&mut self, report: AbuseReport) {
+        self.events
+            .push_back(ServerEvent::AbuseReportReceived(Box::new(report)));
+    }
+
+    /// Parks the report from the first `SendUserReportWithScreenshot` step
+    /// until the second step delivers the screenshot bytes; a re-POST
+    /// replaces the pending report.
+    pub(crate) fn set_pending_screenshot_report(&mut self, report: AbuseReport) {
+        self.pending_report_screenshot = Some(Box::new(report));
+    }
+
+    /// Takes the parked screenshot-bearing report, if a first
+    /// `SendUserReportWithScreenshot` step stored one.
+    pub(crate) const fn take_pending_screenshot_report(&mut self) -> Option<Box<AbuseReport>> {
+        self.pending_report_screenshot.take()
+    }
+
+    /// Routes a completed two-step `SendUserReportWithScreenshot` upload to
+    /// the driver as [`ServerEvent::AbuseReportWithScreenshotReceived`].
+    pub(crate) fn push_abuse_report_with_screenshot(
+        &mut self,
+        report: Box<AbuseReport>,
+        screenshot: Vec<u8>,
+    ) {
+        self.events
+            .push_back(ServerEvent::AbuseReportWithScreenshotReceived { report, screenshot });
+    }
+
+    /// Bumps and returns the monotonic sim serial that mints upload asset ids
+    /// and media versions ([`next_sim_serial`](Self::next_sim_serial)).
+    const fn next_serial(&mut self) -> u128 {
+        self.next_sim_serial = self.next_sim_serial.wrapping_add(1);
+        self.next_sim_serial
+    }
+
+    /// Parks the parsed step-1 metadata of a two-stage CAPS upload under its
+    /// capability name until the raw-bytes step completes it. A re-POST of
+    /// step 1 replaces the parked metadata (the same rule as the screenshot
+    /// uploader).
+    pub(crate) fn park_caps_upload(&mut self, cap: &'static str, metadata: CapsUploadMetadata) {
+        self.pending_caps_uploads.insert(cap, metadata);
+    }
+
+    /// Takes the parked step-1 metadata for `cap`, if a first step stored one.
+    pub(crate) fn take_caps_upload(&mut self, cap: &'static str) -> Option<CapsUploadMetadata> {
+        self.pending_caps_uploads.remove(cap)
+    }
+
+    /// Completes a two-stage CAPS upload: mints the stored asset id (and, for
+    /// the inventory-creating caps, an inventory item id), routes the upload to
+    /// the driver as [`ServerEvent::CapsAssetUploaded`], and returns the minted
+    /// ids for the `{ state: "complete", new_asset, new_inventory_item? }`
+    /// reply. The ids come from the deterministic sim serial
+    /// ([`next_sim_serial`](Self::next_sim_serial)).
+    pub(crate) fn complete_caps_upload(
+        &mut self,
+        metadata: CapsUploadMetadata,
+        data: Vec<u8>,
+    ) -> (AssetKey, Option<InventoryKey>) {
+        let new_asset = AssetKey::from(Uuid::from_u128(self.next_serial()));
+        let new_inventory_item = metadata
+            .creates_inventory_item()
+            .then(|| InventoryKey::from(Uuid::from_u128(self.next_serial())));
+        self.events.push_back(ServerEvent::CapsAssetUploaded {
+            metadata: Box::new(metadata),
+            new_asset,
+            new_inventory_item,
+            data,
+        });
+        (new_asset, new_inventory_item)
+    }
+
+    /// Registers (or replaces) a material in the store the `RenderMaterials`
+    /// query serves from, keyed by material id — the driver API for the
+    /// materials service.
+    pub fn set_region_material(&mut self, material_id: Uuid, material: LegacyMaterial) {
+        self.region_materials.insert(material_id, material);
+    }
+
+    /// The materials the `RenderMaterials` query asks for: the subset of the
+    /// store whose ids are in `ids`, or — when `ids` is empty (the "fetch all
+    /// region materials" form) — every stored material. Unknown ids are
+    /// omitted.
+    pub(crate) fn region_materials(&self, ids: &[Uuid]) -> Vec<RenderMaterialEntry> {
+        let entry = |(id, material): (&Uuid, &LegacyMaterial)| RenderMaterialEntry {
+            material_id: *id,
+            material: material.clone(),
+        };
+        if ids.is_empty() {
+            return self.region_materials.iter().map(entry).collect();
+        }
+        ids.iter()
+            .filter_map(|id| {
+                self.region_materials
+                    .get_key_value(id)
+                    .map(|(id, material)| entry((id, material)))
+            })
+            .collect()
+    }
+
+    /// Registers (or replaces) an object's per-face media in the store the
+    /// `ObjectMedia` GET serves from — the driver API for media-on-a-prim.
+    pub fn set_object_media(&mut self, object_id: ObjectKey, state: ObjectMediaState) {
+        self.object_media.insert(object_id, state);
+    }
+
+    /// The stored media for `object_id`, if the `ObjectMedia` store knows it
+    /// ([`SimSession::set_object_media`]).
+    pub(crate) fn object_media(&self, object_id: ObjectKey) -> Option<&ObjectMediaState> {
+        self.object_media.get(&object_id)
+    }
+
+    /// Records an `ObjectMedia` UPDATE: stores the new per-face media under a
+    /// freshly minted media version and routes it to the driver as
+    /// [`ServerEvent::ObjectMediaSet`]. Returns the new version string (for the
+    /// handler's ack, though the reference just acks with an undefined body).
+    pub(crate) fn set_object_media_update(
+        &mut self,
+        object_id: ObjectKey,
+        faces: Vec<Option<MediaEntry>>,
+    ) {
+        let version = self.mint_media_version(object_id);
+        self.object_media.insert(
+            object_id,
+            ObjectMediaState {
+                version,
+                faces: faces.clone(),
+            },
+        );
+        self.events
+            .push_back(ServerEvent::ObjectMediaSet { object_id, faces });
+    }
+
+    /// Records an `ObjectMediaNavigate`: advances the object's media version
+    /// (creating an empty media record if the object is unknown) and routes the
+    /// navigation to the driver as [`ServerEvent::ObjectMediaNavigated`].
+    pub(crate) fn navigate_object_media(&mut self, object_id: ObjectKey, face: u8, url: String) {
+        let version = self.mint_media_version(object_id);
+        self.object_media
+            .entry(object_id)
+            .or_insert_with(|| ObjectMediaState {
+                version: String::new(),
+                faces: Vec::new(),
+            })
+            .version = version;
+        self.events.push_back(ServerEvent::ObjectMediaNavigated {
+            object_id,
+            face,
+            url,
+        });
+    }
+
+    /// Mints the next media version string (`x-mv:<serial>/<object-uuid>`) — the
+    /// `MediaURL`-style token the simulator advances on every media change.
+    fn mint_media_version(&mut self, object_id: ObjectKey) -> String {
+        let serial = self.next_serial();
+        format!("x-mv:{serial:010}/{}", object_id.uuid())
+    }
+
+    /// Routes a fire-and-forget server event to the driver. Used by the CAPS
+    /// content handlers whose only side effect is surfacing a world mutation
+    /// (appearance bake, notecard copy, materials set) the world authority —
+    /// out of scope here — would apply.
+    pub(crate) fn push_content_event(&mut self, event: ServerEvent) {
+        self.events.push_back(event);
     }
 
     /// The agent id once the circuit is open.
@@ -1810,6 +2956,47 @@ impl SimSession {
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ScriptQuestion` asking the agent to grant
+    /// `question.permissions` to the script `question.item_id` in object
+    /// `question.task_id` (`llRequestPermissions`). Surfaces on the client as
+    /// [`Event::ScriptPermissionRequest`](crate::Event::ScriptPermissionRequest);
+    /// the client answers with `ScriptAnswerYes`
+    /// ([`ServerEvent::ScriptPermissionAnswer`]). The asked set is recorded
+    /// as outstanding ([`SimSession::script_question`]) until the answer
+    /// arrives. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_script_question(
+        &mut self,
+        question: &ScriptPermissionRequest,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ScriptQuestion(ScriptQuestion {
+            data: ScriptQuestionDataBlock {
+                task_id: question.task_id.uuid(),
+                item_id: question.item_id.uuid(),
+                object_name: with_nul(&question.object_name),
+                object_owner: with_nul(&question.object_owner),
+                questions: question.permissions.0,
+            },
+            experience: ScriptQuestionExperienceBlock {
+                experience_id: question
+                    .experience_id
+                    .map_or_else(Uuid::nil, |experience| experience.uuid()),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        self.script_questions
+            .insert((question.task_id, question.item_id), question.permissions);
         Ok(())
     }
 
@@ -3367,6 +4554,282 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a fully-specified `ImprovedInstantMessage` to the client — the
+    /// simulator-side IM delivery, the inverse of the client's
+    /// [`Event::InstantMessageReceived`](crate::Event::InstantMessageReceived)
+    /// (or the typed session/friendship events its dialog folds into). This
+    /// is the relay primitive for agent-to-agent traffic: a driver takes a
+    /// [`ServerEvent::InstantMessage`] off the sender's [`SimSession`] and
+    /// passes it — unchanged or with the dialog swapped (e.g. a
+    /// [`ImDialog::FriendshipDeclined`](crate::ImDialog::FriendshipDeclined)
+    /// relay of a decline) — to the recipient's session. Every
+    /// dialog-dependent field ([`InstantMessage::id`](crate::InstantMessage::id),
+    /// `from_group`, the binary bucket) is the caller's. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_instant_message(&mut self, im: &InstantMessage, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ImprovedInstantMessage(ImprovedInstantMessage {
+            agent_data: ImprovedInstantMessageAgentDataBlock {
+                agent_id: im.from_agent_id.uuid(),
+                // A simulator-sent IM carries no viewer session id.
+                session_id: Uuid::nil(),
+            },
+            message_block: ImprovedInstantMessageMessageBlockBlock {
+                from_group: im.from_group,
+                to_agent_id: im.to_agent_id.uuid(),
+                parent_estate_id: im.parent_estate_id,
+                region_id: crate::types::optional_uuid_to_wire(im.region_id),
+                position: Vector {
+                    x: im.position.x(),
+                    y: im.position.y(),
+                    z: im.position.z(),
+                },
+                offline: u8::from(im.offline),
+                dialog: im.dialog.to_u8(),
+                id: im.id,
+                timestamp: crate::types::optional_u32_to_wire(im.timestamp),
+                from_agent_name: with_nul(&im.from_agent_name),
+                message: with_nul(&im.message),
+                binary_bucket: im.binary_bucket.clone(),
+            },
+            estate_block: ImprovedInstantMessageEstateBlockBlock { estate_id: 0 },
+            meta_data: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `OnlineNotification` — tells the client the listed friends
+    /// are online (the inverse of the client's
+    /// [`Event::FriendsOnline`](crate::Event::FriendsOnline)). Presence is a
+    /// grid-level service — the driver decides who to notify when; this
+    /// session only delivers. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_online_notification(
+        &mut self,
+        friends: &[FriendKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::OnlineNotification(OnlineNotification {
+            agent_block: friends
+                .iter()
+                .map(|friend| OnlineNotificationAgentBlockBlock {
+                    agent_id: friend.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `OfflineNotification` — tells the client the listed friends
+    /// went offline (the inverse of the client's
+    /// [`Event::FriendsOffline`](crate::Event::FriendsOffline)). Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_offline_notification(
+        &mut self,
+        friends: &[FriendKey],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::OfflineNotification(OfflineNotification {
+            agent_block: friends
+                .iter()
+                .map(|friend| OfflineNotificationAgentBlockBlock {
+                    agent_id: friend.uuid(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `ChangeUserRights` — tells the client a friendship's rights
+    /// changed (the inverse of the client's
+    /// [`Event::FriendRightsChanged`](crate::Event::FriendRightsChanged)).
+    /// The client decodes the direction from `changer`: this circuit's own
+    /// agent id means each entry echoes a grant *this* agent made
+    /// ([`UserRightsEntry::agent`] is the friend); any other id means that
+    /// friend changed what they grant this agent ([`UserRightsEntry::agent`]
+    /// is then this circuit's agent id, as the reference simulators send it).
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_change_user_rights(
+        &mut self,
+        changer: AgentKey,
+        rights: &[UserRightsEntry],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ChangeUserRights(ChangeUserRights {
+            agent_data: ChangeUserRightsAgentDataBlock {
+                agent_id: changer.uuid(),
+            },
+            rights: rights
+                .iter()
+                .map(|entry| ChangeUserRightsRightsBlock {
+                    agent_related: entry.agent.uuid(),
+                    related_rights: entry.rights.0,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a group/conference session message from `from` into
+    /// `session_id` — the relay half of [`ServerEvent::SessionMessageSent`]
+    /// (a `SessionSend` IM; `from_group` selects how the client folds it:
+    /// `true` surfaces as a group message, `false` as a conference message).
+    /// When this session knows `session_id`, the message is also appended to
+    /// its server history. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_session_message(
+        &mut self,
+        session_id: ImSessionId,
+        from: AgentKey,
+        from_name: &str,
+        message: &str,
+        from_group: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let im = InstantMessage {
+            from_agent_id: from,
+            from_agent_name: from_name.to_owned(),
+            to_agent_id: self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+            dialog: ImDialog::SessionSend,
+            from_group,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: session_id.get(),
+            parent_estate_id: 0,
+            message: message.to_owned(),
+            binary_bucket: Vec::new(),
+        };
+        self.send_instant_message(&im, now)?;
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            chat_session.log(ServerHistoryMessage {
+                sender: from,
+                sender_name: from_name.to_owned(),
+                text: message.to_owned(),
+                timestamp: None,
+            });
+        }
+        Ok(())
+    }
+
+    /// Sends a group/conference roster notification: `agent` joined
+    /// (`SessionAdd`) or left (`SessionLeave`) `session_id` — the relay half
+    /// of [`ServerEvent::SessionLeaveRequested`] and of a peer joining
+    /// (`from_group` selects the client-side fold, as on
+    /// [`SimSession::send_session_message`]). When this session knows
+    /// `session_id`, its roster is folded the same way (a session emptied by
+    /// a leave is removed). Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_session_participant(
+        &mut self,
+        session_id: ImSessionId,
+        agent: AgentKey,
+        agent_name: &str,
+        joined: bool,
+        from_group: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let im = InstantMessage {
+            from_agent_id: agent,
+            from_agent_name: agent_name.to_owned(),
+            to_agent_id: self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil())),
+            dialog: if joined {
+                ImDialog::SessionAdd
+            } else {
+                ImDialog::SessionLeave
+            },
+            from_group,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id: session_id.get(),
+            parent_estate_id: 0,
+            message: String::new(),
+            binary_bucket: Vec::new(),
+        };
+        self.send_instant_message(&im, now)?;
+        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+            if joined {
+                chat_session.participants.insert(agent);
+            } else {
+                chat_session.participants.remove(&agent);
+                if chat_session.participants.is_empty() {
+                    self.chat_sessions.remove(&session_id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Materialises a chat session in this session's registry without any
+    /// wire traffic — the driver API for the relay topology: a conference
+    /// started on one client's [`SimSession`]
+    /// ([`ServerEvent::ConferenceStartRequested`]) must also exist on each
+    /// invitee's session (whose region never saw the starter's
+    /// conference-start IM) before messages relay through it. Extends the
+    /// roster of an already-known session.
+    pub fn open_chat_session(
+        &mut self,
+        session_id: ImSessionId,
+        kind: SimChatSessionKind,
+        participants: &[AgentKey],
+    ) {
+        let chat_session = self
+            .chat_sessions
+            .entry(session_id)
+            .or_insert_with(|| SimChatSession {
+                kind,
+                participants: BTreeSet::new(),
+                history: Vec::new(),
+            });
+        chat_session
+            .participants
+            .extend(participants.iter().copied());
+    }
+
     /// Sends an `OfferCallingCard` — another agent offers this agent their
     /// calling card (the inverse of the client's
     /// [`Event::CallingCardOffered`](crate::Event::CallingCardOffered)), a
@@ -3652,6 +5115,531 @@ impl SimSession {
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
+    }
+
+    /// Sets the account's secure session id (from the login response), enabling
+    /// the legacy transaction asset upload path: the simulator derives a stored
+    /// asset id as `combine(transaction_id, secure_session_id)`, exactly as the
+    /// uploading client predicts it. An `AssetUploadRequest` arriving while this
+    /// is unset is refused with a failed `AssetUploadComplete`.
+    pub const fn set_secure_session_id(&mut self, id: Uuid) {
+        self.secure_session_id = Some(id);
+    }
+
+    /// Registers `filename` as servable over the legacy `Xfer` download path:
+    /// the next client `RequestXfer` naming it streams `data` in
+    /// `SendXferPacket`s (one in flight, paced by the client's
+    /// `ConfirmXferPacket`s). The entry is consumed by that request — the
+    /// transfers ask for delete-on-completion — so re-serving the same name
+    /// needs a fresh registration.
+    pub fn register_xfer_file(&mut self, filename: impl Into<String>, data: Vec<u8>) {
+        let _prev = self.xfer_files.insert(filename.into(), data);
+    }
+
+    /// Serves an in-world object's task inventory — the full server side of the
+    /// client's
+    /// [`Session::fetch_task_inventory`](crate::Session::fetch_task_inventory):
+    /// writes the contents listing in the exact `RequestInventoryFile` text
+    /// format (the inverse of the client-side parser behind
+    /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)),
+    /// registers it under the deterministic name
+    /// `inventory_<task>.tmp` (a real simulator mints a random temp name; the
+    /// client treats it as opaque, and a sans-I/O session has no randomness),
+    /// and sends the `ReplyTaskInventory` naming it. Pass the current contents
+    /// `serial`. For a task whose inventory is empty a real simulator sends an
+    /// empty filename instead — use
+    /// [`send_reply_task_inventory`](Self::send_reply_task_inventory) directly
+    /// for that case.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the reply fails to encode.
+    pub fn serve_task_inventory(
+        &mut self,
+        task: ObjectKey,
+        serial: i16,
+        items: &[TaskInventoryItem],
+        now: Instant,
+    ) -> Result<(), Error> {
+        let filename = format!("inventory_{}.tmp", task.uuid());
+        let listing = build_task_inventory(task, items);
+        self.register_xfer_file(filename.clone(), listing.into_bytes());
+        self.send_reply_task_inventory(
+            &TaskInventoryReply {
+                task,
+                serial,
+                filename,
+            },
+            now,
+        )
+    }
+
+    /// Aborts an in-flight `Xfer` transfer (either direction) with the given
+    /// result code: drops its state and tells the client (`AbortXfer`), the
+    /// inverse of the client's abort handling that surfaces
+    /// [`Event::XferAborted`](crate::Event::XferAborted).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn abort_xfer(&mut self, xfer_id: XferId, result: i32, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let _send = self.xfer_sends.remove(&xfer_id);
+        let _receive = self.xfer_receives.remove(&xfer_id);
+        let message = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: xfer_id.get(),
+                result,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Allocates the next simulator-assigned `Xfer` id (used for asset pulls),
+    /// mirroring the client's own mint: monotonically increasing, never zero.
+    fn alloc_xfer_id(&mut self) -> XferId {
+        let id = self.next_xfer_id;
+        self.next_xfer_id = XferId(self.next_xfer_id.get().checked_add(1).unwrap_or(1));
+        id
+    }
+
+    /// Streams the next chunk of the outbound `Xfer` send `xfer_id` as a
+    /// `SendXferPacket` — the server side of the strictly one-packet-in-flight
+    /// pacing, the mirror of the client's `send_next_xfer_upload_packet`. The
+    /// first packet (sequence 0) carries a 4-byte little-endian total-size
+    /// prefix before the data; the final packet sets the high-bit end-of-file
+    /// marker in its packet number. A no-op if the send is already gone.
+    fn send_next_xfer_send_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
+        let Some(send) = self.xfer_sends.get_mut(&xfer_id) else {
+            return Ok(());
+        };
+        let sequence = send.next_sequence;
+        let is_first = sequence == 0;
+        let remaining = send.data.len().saturating_sub(send.sent);
+        let take = remaining.min(crate::session::XFER_UPLOAD_CHUNK_SIZE);
+        let end = send.sent.saturating_add(take);
+        let chunk = send.data.get(send.sent..end).unwrap_or(&[]);
+        let mut payload = Vec::with_capacity(take.saturating_add(4));
+        if is_first {
+            #[expect(
+                clippy::little_endian_bytes,
+                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
+            )]
+            let total_le = u32::try_from(send.data.len())
+                .unwrap_or(u32::MAX)
+                .to_le_bytes();
+            payload.extend_from_slice(&total_le);
+        }
+        payload.extend_from_slice(chunk);
+        send.sent = end;
+        let is_last = send.sent >= send.data.len();
+        send.last_sent = is_last;
+        send.next_sequence = sequence.wrapping_add(1);
+        let packet = if is_last {
+            sequence | 0x8000_0000
+        } else {
+            sequence
+        };
+        let message = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id.get(),
+                packet,
+            },
+            data_packet: SendXferPacketDataPacketBlock { data: payload },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Answers a [`ServerEvent::TransferRequested`] with the asset bytes: a
+    /// `TransferInfo` header (status `Ok`, the declared size, the request
+    /// params echoed back) followed by the `TransferPacket` stream — status
+    /// `Ok` per packet and `Done` on the last, exactly as the reference
+    /// serving side sends them. Packets need no per-packet acknowledgement
+    /// (all ride the reliable channel).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open,
+    /// [`Error::UnknownTransfer`] if `transfer_id` is not awaiting an answer
+    /// (never requested, already answered, or cancelled), or a wire error if a
+    /// message fails to encode.
+    pub fn send_transfer_asset(
+        &mut self,
+        transfer_id: TransferId,
+        data: &[u8],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let Some(params) = self.transfer_serves.remove(&transfer_id) else {
+            return Err(Error::UnknownTransfer);
+        };
+        let info = AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id: transfer_id.get(),
+                channel_type: TRANSFER_CHANNEL_ASSET,
+                target_type: 0,
+                status: TransferStatus::Ok.to_code(),
+                size: i32::try_from(data.len()).unwrap_or(i32::MAX),
+                params,
+            },
+        });
+        self.send(&info, Reliability::Reliable, now)?;
+        // Stream the packets; an empty asset is one empty `Done` packet.
+        let mut index: i32 = 0;
+        let mut offset = 0_usize;
+        loop {
+            let end = offset.saturating_add(TRANSFER_CHUNK_SIZE).min(data.len());
+            let chunk = data.get(offset..end).unwrap_or(&[]);
+            let is_last = end >= data.len();
+            let status = if is_last {
+                TransferStatus::Done
+            } else {
+                TransferStatus::Ok
+            };
+            let packet = AnyMessage::TransferPacket(TransferPacket {
+                transfer_data: TransferPacketTransferDataBlock {
+                    transfer_id: transfer_id.get(),
+                    channel_type: TRANSFER_CHANNEL_ASSET,
+                    packet: index,
+                    status: status.to_code(),
+                    data: chunk.to_vec(),
+                },
+            });
+            self.send(&packet, Reliability::Reliable, now)?;
+            if is_last {
+                break;
+            }
+            offset = end;
+            index = index.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    /// Answers a [`ServerEvent::TransferRequested`] with a refusal: a
+    /// `TransferInfo` carrying the non-`Ok` `status` (asset missing ⇒
+    /// [`TransferStatus::UnknownSource`], no permission ⇒
+    /// [`TransferStatus::InsufficientPermissions`]) and size 0, which the
+    /// requesting client surfaces as
+    /// [`Event::TransferFailed`](crate::Event::TransferFailed).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open,
+    /// [`Error::UnknownTransfer`] if `transfer_id` is not awaiting an answer,
+    /// or a wire error if the message fails to encode.
+    pub fn send_transfer_fail(
+        &mut self,
+        transfer_id: TransferId,
+        status: TransferStatus,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let Some(params) = self.transfer_serves.remove(&transfer_id) else {
+            return Err(Error::UnknownTransfer);
+        };
+        let message = AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id: transfer_id.get(),
+                channel_type: TRANSFER_CHANNEL_ASSET,
+                target_type: 0,
+                status: status.to_code(),
+                size: 0,
+                params,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AvatarSitResponse` — accepts a [`ServerEvent::SitRequested`]
+    /// by placing the agent on `sit_object` with the given seat `transform`
+    /// (the inverse of the client's
+    /// [`Event::SitResult`](crate::Event::SitResult)). The sit machine then
+    /// awaits the client's completing `AgentSit`
+    /// ([`ServerEvent::SitConfirmed`]); refusing a sit request is simply not
+    /// answering (the reference simulators send no refusal message — the
+    /// client's own sit timeout recovers it).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_avatar_sit_response(
+        &mut self,
+        sit_object: ObjectKey,
+        transform: &SitTransform,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::AvatarSitResponse(AvatarSitResponse {
+            sit_object: AvatarSitResponseSitObjectBlock {
+                id: sit_object.uuid(),
+            },
+            sit_transform: AvatarSitResponseSitTransformBlock {
+                auto_pilot: transform.autopilot,
+                sit_position: transform.sit_position.clone(),
+                sit_rotation: transform.sit_rotation.clone(),
+                camera_eye_offset: transform.camera_eye_offset.clone(),
+                camera_at_offset: transform.camera_at_offset.clone(),
+                force_mouselook: transform.force_mouselook,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        self.sit = SimSitState::ResponseSent { on: sit_object };
+        Ok(())
+    }
+
+    /// Sends a `TeleportStart` — the simulator accepted a teleport request and
+    /// the client should show its teleport screen (the inverse of the client's
+    /// [`Event::TeleportStarted`](crate::Event::TeleportStarted)). The
+    /// sequencing of a teleport is the driver's job: a sans-I/O session cannot
+    /// know whether an inter-region teleport succeeds (the destination is
+    /// another [`SimSession`]), so the driver strings together start /
+    /// progress / local / failed and the event-queue trio itself. Teleport
+    /// answers are a root-agent affair — sending them on a child circuit is
+    /// not an error here, but a real viewer would ignore them.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_start(&mut self, teleport_flags: u32, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportStart(TeleportStart {
+            info: TeleportStartInfoBlock { teleport_flags },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TeleportProgress` — a human-readable progress line for the
+    /// client's teleport screen (the inverse of the client's
+    /// [`Event::TeleportProgress`](crate::Event::TeleportProgress)). The
+    /// message is sent NUL-terminated, as a simulator does on the wire.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_progress(
+        &mut self,
+        message: &str,
+        teleport_flags: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportProgress(TeleportProgress {
+            agent_data: TeleportProgressAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+            },
+            info: TeleportProgressInfoBlock {
+                teleport_flags,
+                message: with_nul(message),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TeleportLocal` — finishes an **intra-region** teleport by
+    /// placing the avatar at `position` with no circuit change (the inverse of
+    /// the client's [`Event::TeleportLocal`](crate::Event::TeleportLocal)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_local(
+        &mut self,
+        position: RegionCoordinates,
+        look_at: Vector,
+        teleport_flags: u32,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportLocal(TeleportLocal {
+            info: TeleportLocalInfoBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                // The reference simulators send 0; the viewer ignores it.
+                location_id: 0,
+                position: Vector {
+                    x: position.x(),
+                    y: position.y(),
+                    z: position.z(),
+                },
+                look_at,
+                teleport_flags,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `TeleportFailed` — refuses or aborts a requested teleport with
+    /// a human-readable `reason`, returning the client to its active state
+    /// (the inverse of the client's
+    /// [`Event::TeleportFailed`](crate::Event::TeleportFailed)). The reason is
+    /// sent NUL-terminated; no extended `AlertInfo` block is attached (pass
+    /// the reason itself, as OpenSim does).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_teleport_failed(&mut self, reason: &str, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::TeleportFailed(TeleportFailed {
+            info: TeleportFailedInfoBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |a| a.uuid()),
+                reason: with_nul(reason),
+            },
+            alert_info: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `DisableSimulator` — tells the client to tear down this circuit
+    /// (used when retiring a child circuit, e.g. the source region after a
+    /// completed teleport or a neighbour leaving the interest set). The client
+    /// drops the circuit and reaps its objects.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_disable_simulator(&mut self, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::DisableSimulator(DisableSimulator {});
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Enqueues a CAPS `EnableSimulator` event — announces a neighbouring (or
+    /// teleport-destination) region so the client opens a **child** circuit to
+    /// it (the modern event-queue path; the client answers with a
+    /// `UseCircuitCode` on `sim`).
+    pub fn enqueue_enable_simulator(&mut self, handle: RegionHandle, sim: SocketAddr) {
+        self.enqueue_caps_event(
+            "EnableSimulator",
+            enable_simulator_to_caps_llsd(handle.0, sim),
+        );
+    }
+
+    /// Enqueues a CAPS `EstablishAgentCommunication` event — hands the client
+    /// the child region's seed capability (this event has **no** UDP form).
+    /// The client caches the seed and surfaces it so its driver POSTs it,
+    /// which is what makes a region start streaming to the child agent.
+    pub fn enqueue_establish_agent_communication(&mut self, sim: SocketAddr, seed: &str) {
+        self.enqueue_caps_event(
+            "EstablishAgentCommunication",
+            establish_agent_communication_to_llsd(sim, seed),
+        );
+    }
+
+    /// Enqueues a CAPS `TeleportFinish` event — completes an **inter-region**
+    /// teleport by handing the client the destination simulator's address,
+    /// seed capability, maturity rating and teleport flags. The client sends
+    /// `CompleteAgentMovement` on its (child) circuit to `dest`; the
+    /// destination's `AgentMovementComplete` commits the handover.
+    pub fn enqueue_teleport_finish(
+        &mut self,
+        dest: SocketAddr,
+        seed: &str,
+        sim_access: u8,
+        teleport_flags: u32,
+    ) {
+        self.enqueue_caps_event(
+            "TeleportFinish",
+            teleport_finish_to_llsd(dest, seed, sim_access, teleport_flags),
+        );
+    }
+
+    /// Enqueues a CAPS `CrossedRegion` event — the avatar walked over a region
+    /// border; the client promotes its pre-opened child circuit to `dest` to
+    /// root (no teleport screen).
+    pub fn enqueue_crossed_region(&mut self, handle: RegionHandle, dest: SocketAddr, seed: &str) {
+        self.enqueue_caps_event(
+            "CrossedRegion",
+            crossed_region_to_caps_llsd(handle.0, dest, seed),
+        );
+    }
+
+    /// Queues a `ChatterBoxInvitation` on the event queue — invites this
+    /// session's client into a group/conference chat (the inverse of the
+    /// client's
+    /// [`Event::ConferenceInvited`](crate::Event::ConferenceInvited), which
+    /// is also the expected `invitation` payload — the shape
+    /// [`chatterbox_invitation_to_llsd`](crate::chatterbox_invitation_to_llsd)
+    /// serializes). Any other [`Event`] variant enqueues nothing (the same
+    /// contract as the conversion, which serializes it as undefined).
+    pub fn enqueue_chatterbox_invitation(&mut self, invitation: &Event) {
+        if !matches!(invitation, Event::ConferenceInvited { .. }) {
+            return;
+        }
+        self.enqueue_caps_event(
+            "ChatterBoxInvitation",
+            chatterbox_invitation_to_llsd(invitation),
+        );
+    }
+
+    /// Enqueues a CAPS `ChatterBoxSessionAgentListUpdates` push: per-agent
+    /// voice-membership changes in the chat session `session_id`. Each
+    /// `(agent, in_voice_now)` pair emits an `ENTER` (voice-capable) or
+    /// `LEAVE` transition — the shape
+    /// [`agent_list_voice_updates_to_llsd`](crate::agent_list_voice_updates_to_llsd)
+    /// serializes and the client's voice-participant handler folds.
+    pub fn enqueue_chatterbox_agent_list_updates(
+        &mut self,
+        session_id: Uuid,
+        updates: &[(AgentKey, bool)],
+    ) {
+        self.enqueue_caps_event(
+            "ChatterBoxSessionAgentListUpdates",
+            agent_list_voice_updates_to_llsd(session_id, updates),
+        );
+    }
+
+    /// Replies to a finished (or refused) legacy asset upload with an
+    /// `AssetUploadComplete`, the message the uploading client surfaces as
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved).
+    fn send_asset_upload_complete(
+        &mut self,
+        asset_id: Uuid,
+        asset_type: AssetType,
+        success: bool,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AssetUploadComplete(AssetUploadComplete {
+            asset_block: AssetUploadCompleteAssetBlockBlock {
+                uuid: asset_id,
+                r#type: i8::try_from(asset_type.to_code()).unwrap_or_default(),
+                success,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
     }
 
     /// Sends a `UserInfoReply` — the agent's own account contact preferences, in
@@ -4048,6 +6036,9 @@ impl SimSession {
                 });
             }
             AnyMessage::CompleteAgentMovement(_) => {
+                // The child agent becomes the root agent: login arrival, or a
+                // teleport/crossing destination confirming the handover.
+                self.agent_presence = AgentPresence::Root;
                 self.send_agent_movement_complete(now)?;
                 self.events.push_back(ServerEvent::AgentArrived);
             }
@@ -4082,11 +6073,12 @@ impl SimSession {
             }
             AnyMessage::AgentUpdate(update) => {
                 let data = &update.agent_data;
+                let controls = ControlFlags::from_bits(data.control_flags);
                 self.events
                     .push_back(ServerEvent::AgentUpdate(Box::new(AgentUpdateInfo {
                         body_rotation: data.body_rotation.clone(),
                         head_rotation: data.head_rotation.clone(),
-                        controls: ControlFlags::from_bits(data.control_flags),
+                        controls,
                         camera: Camera::new_unchecked(
                             data.camera_center.clone(),
                             data.camera_at_axis.clone(),
@@ -4097,6 +6089,28 @@ impl SimSession {
                         state: data.state,
                         flags: data.flags,
                     })));
+                if controls.contains(ControlFlags::STAND_UP)
+                    && !matches!(self.sit, SimSitState::NotSitting)
+                {
+                    self.sit = SimSitState::NotSitting;
+                    self.events.push_back(ServerEvent::StoodUp);
+                }
+            }
+            AnyMessage::AgentRequestSit(request) => {
+                self.events.push_back(ServerEvent::SitRequested {
+                    target: ObjectKey::from(request.target_object.target_id),
+                    offset: request.target_object.offset.clone(),
+                });
+            }
+            AnyMessage::AgentSit(_) => {
+                let on = match self.sit {
+                    SimSitState::ResponseSent { on } => {
+                        self.sit = SimSitState::Seated { on };
+                        Some(on)
+                    }
+                    SimSitState::NotSitting | SimSitState::Seated { .. } => None,
+                };
+                self.events.push_back(ServerEvent::SitConfirmed { on });
             }
             AnyMessage::ChatFromViewer(chat) => {
                 self.events.push_back(ServerEvent::Chat {
@@ -4106,11 +6120,120 @@ impl SimSession {
                 });
             }
             AnyMessage::ImprovedInstantMessage(im) => {
+                // The session dialogs get typed events and fold the session
+                // registry (mirroring how the client routes them away from its
+                // generic IM event); everything else stays the plain IM path.
+                let block = &im.message_block;
+                let sender = AgentKey::from(im.agent_data.agent_id);
+                match ImDialog::from_u8(block.dialog) {
+                    ImDialog::SessionGroupStart => {
+                        let group_id = GroupKey::from(block.id);
+                        let chat_session = self
+                            .chat_sessions
+                            .entry(ImSessionId::from(block.id))
+                            .or_insert_with(|| SimChatSession {
+                                kind: SimChatSessionKind::Group { group_id },
+                                participants: BTreeSet::new(),
+                                history: Vec::new(),
+                            });
+                        chat_session.participants.insert(sender);
+                        self.events
+                            .push_back(ServerEvent::GroupSessionStartRequested { group_id });
+                    }
+                    ImDialog::SessionConferenceStart => {
+                        let session_id = ImSessionId::from(block.id);
+                        let invitees: Vec<AgentKey> = unpack_uuids(&block.binary_bucket)
+                            .into_iter()
+                            .map(AgentKey::from)
+                            .collect();
+                        let chat_session =
+                            self.chat_sessions.entry(session_id).or_insert_with(|| {
+                                SimChatSession {
+                                    kind: SimChatSessionKind::Conference,
+                                    participants: BTreeSet::new(),
+                                    history: Vec::new(),
+                                }
+                            });
+                        chat_session.participants.insert(sender);
+                        chat_session.participants.extend(invitees.iter().copied());
+                        self.events
+                            .push_back(ServerEvent::ConferenceStartRequested {
+                                session_id,
+                                invitees,
+                                message: trimmed_string(&block.message),
+                            });
+                    }
+                    ImDialog::SessionSend => {
+                        let session_id = ImSessionId::from(block.id);
+                        let message = trimmed_string(&block.message);
+                        // A send into an unknown session surfaces but creates
+                        // no state: membership is the simulator's call, and
+                        // the driver polices it (deliberately NOT the client's
+                        // lazy-open — the client trusts inbound traffic, the
+                        // server must not).
+                        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+                            chat_session.log(ServerHistoryMessage {
+                                sender,
+                                sender_name: trimmed_string(&block.from_agent_name),
+                                text: message.clone(),
+                                timestamp: None,
+                            });
+                        }
+                        self.events.push_back(ServerEvent::SessionMessageSent {
+                            session_id,
+                            message,
+                        });
+                    }
+                    ImDialog::SessionLeave => {
+                        let session_id = ImSessionId::from(block.id);
+                        if let Some(chat_session) = self.chat_sessions.get_mut(&session_id) {
+                            chat_session.participants.remove(&sender);
+                            if chat_session.participants.is_empty() {
+                                self.chat_sessions.remove(&session_id);
+                            }
+                        }
+                        self.events
+                            .push_back(ServerEvent::SessionLeaveRequested { session_id });
+                    }
+                    _ => {
+                        self.events.push_back(ServerEvent::InstantMessage(Box::new(
+                            instant_message(&im.agent_data, block),
+                        )));
+                    }
+                }
+            }
+            AnyMessage::AcceptFriendship(accept) => {
+                self.events.push_back(ServerEvent::FriendshipAccepted {
+                    transaction: TransactionId::from(accept.transaction_block.transaction_id),
+                    calling_card_folders: accept
+                        .folder_data
+                        .iter()
+                        .map(|folder| InventoryFolderKey::from(folder.folder_id))
+                        .collect(),
+                });
+            }
+            AnyMessage::DeclineFriendship(decline) => {
+                self.events.push_back(ServerEvent::FriendshipDeclined {
+                    transaction: TransactionId::from(decline.transaction_block.transaction_id),
+                });
+            }
+            AnyMessage::TerminateFriendship(terminate) => {
                 self.events
-                    .push_back(ServerEvent::InstantMessage(Box::new(instant_message(
-                        &im.agent_data,
-                        &im.message_block,
-                    ))));
+                    .push_back(ServerEvent::FriendshipTerminationRequested {
+                        other: FriendKey::from(terminate.ex_block.other_id),
+                    });
+            }
+            AnyMessage::GrantUserRights(grant) => {
+                self.events.push_back(ServerEvent::UserRightsGranted {
+                    rights: grant
+                        .rights
+                        .iter()
+                        .map(|block| UserRightsEntry {
+                            agent: FriendKey::from(block.agent_related),
+                            rights: FriendRights(block.related_rights),
+                        })
+                        .collect(),
+                });
             }
             AnyMessage::UUIDNameRequest(request) => {
                 let ids = request
@@ -4265,6 +6388,21 @@ impl SimSession {
             AnyMessage::ForceScriptControlRelease(_release) => {
                 self.events
                     .push_back(ServerEvent::ForceScriptControlRelease);
+            }
+            AnyMessage::ScriptAnswerYes(answer) => {
+                let task_id = ObjectKey::from(answer.data.task_id);
+                let item_id = InventoryKey::from(answer.data.item_id);
+                // The answer settles any outstanding question; an unsolicited
+                // answer is still recorded — the mirror observes the agent's
+                // stated answer, enforcement stays with the simulator.
+                self.script_questions.remove(&(task_id, item_id));
+                let permissions = ScriptPermissions(answer.data.questions);
+                self.script_grants.insert((task_id, item_id), permissions);
+                self.events.push_back(ServerEvent::ScriptPermissionAnswer {
+                    task_id,
+                    item_id,
+                    permissions,
+                });
             }
             AnyMessage::TrackAgent(track) => {
                 self.events.push_back(ServerEvent::TrackAgent {
@@ -4790,6 +6928,221 @@ impl SimSession {
                     item_id: InventoryKey::from(remove.inventory_data.item_id),
                 });
             }
+            AnyMessage::RequestXfer(request) => {
+                // The client asks to download a file by name. Only registered
+                // files are served; the client picked the transfer id. An
+                // unknown name is refused with an `AbortXfer` so the requester
+                // is not left hanging.
+                let xfer_id = XferId(request.xfer_id.id);
+                let filename = trimmed_string(&request.xfer_id.filename);
+                let served = if let Some(data) = self.xfer_files.remove(&filename) {
+                    self.xfer_sends.insert(
+                        xfer_id,
+                        SimXferSend {
+                            filename: filename.clone(),
+                            data,
+                            sent: 0,
+                            next_sequence: 0,
+                            last_sent: false,
+                        },
+                    );
+                    self.send_next_xfer_send_packet(xfer_id, now)?;
+                    true
+                } else {
+                    let abort = AnyMessage::AbortXfer(AbortXfer {
+                        xfer_id: AbortXferXferIDBlock {
+                            id: xfer_id.get(),
+                            // The reference `LL_ERR_ASSET_REQUEST_FAILED`.
+                            result: -1,
+                        },
+                    });
+                    self.send(&abort, Reliability::Reliable, now)?;
+                    false
+                };
+                self.events.push_back(ServerEvent::XferRequested {
+                    xfer_id,
+                    filename,
+                    served,
+                });
+            }
+            AnyMessage::ConfirmXferPacket(confirm) => {
+                // The client confirmed the packet we last sent for an outbound
+                // file send; release the next one, or finish if that was the
+                // final packet (strictly one packet in flight).
+                let xfer_id = XferId(confirm.xfer_id.id);
+                if let Some(send) = self.xfer_sends.get(&xfer_id) {
+                    if send.last_sent {
+                        if let Some(send) = self.xfer_sends.remove(&xfer_id) {
+                            self.events.push_back(ServerEvent::XferServed {
+                                xfer_id,
+                                filename: send.filename,
+                                byte_count: send.data.len(),
+                            });
+                        }
+                    } else {
+                        self.send_next_xfer_send_packet(xfer_id, now)?;
+                    }
+                }
+            }
+            AnyMessage::AssetUploadRequest(request) => {
+                // The legacy transaction asset upload (the in-place wearable
+                // save). Small assets arrive inline; an oversized one sent an
+                // empty `AssetData`, and we pull it from the client over
+                // `Xfer` by its predicted `VFileID`.
+                let block = &request.asset_block;
+                let transaction_id = TransactionId::new(block.transaction_id);
+                let asset_type = AssetType::from_code(i32::from(block.r#type));
+                let inline = !block.asset_data.is_empty();
+                self.events.push_back(ServerEvent::AssetUploadRequested {
+                    transaction_id,
+                    asset_type,
+                    inline,
+                    tempfile: block.tempfile,
+                    store_local: block.store_local,
+                });
+                if let Some(secure) = self.secure_session_id {
+                    let asset_id = combine_uuids(block.transaction_id, secure);
+                    if inline {
+                        self.send_asset_upload_complete(asset_id, asset_type, true, now)?;
+                        self.events.push_back(ServerEvent::AssetUploaded {
+                            asset_id: AssetKey::from(asset_id),
+                            asset_type,
+                            transaction_id,
+                            data: block.asset_data.clone(),
+                        });
+                    } else {
+                        let xfer_id = self.alloc_xfer_id();
+                        self.xfer_receives.insert(
+                            xfer_id,
+                            SimXferReceive {
+                                asset_id,
+                                asset_type,
+                                transaction_id,
+                                buffer: Vec::new(),
+                            },
+                        );
+                        let pull = AnyMessage::RequestXfer(RequestXfer {
+                            xfer_id: RequestXferXferIDBlock {
+                                id: xfer_id.get(),
+                                filename: Vec::new(),
+                                file_path: 0,
+                                delete_on_completion: false,
+                                use_big_packets: false,
+                                v_file_id: asset_id,
+                                v_file_type: i16::from(block.r#type),
+                            },
+                        });
+                        self.send(&pull, Reliability::Reliable, now)?;
+                    }
+                } else {
+                    // Without the secure session id the stored asset id cannot
+                    // be derived; refuse so the client's save does not hang.
+                    self.send_asset_upload_complete(Uuid::nil(), asset_type, false, now)?;
+                }
+            }
+            AnyMessage::SendXferPacket(packet) => {
+                // A chunk of an oversized asset upload we are pulling from the
+                // client — the mirror of the client's download handler: strip
+                // the seq-0 length prefix, confirm every packet, finish on the
+                // high-bit end-of-file marker.
+                let xfer_id = XferId(packet.xfer_id.id);
+                let packet_num = packet.xfer_id.packet;
+                let is_last = packet_num & 0x8000_0000 != 0;
+                let sequence = packet_num & 0x7fff_ffff;
+                if self.xfer_receives.contains_key(&xfer_id) {
+                    let chunk: &[u8] = if sequence == 0 {
+                        packet.data_packet.data.get(4..).unwrap_or(&[])
+                    } else {
+                        &packet.data_packet.data
+                    };
+                    if let Some(receive) = self.xfer_receives.get_mut(&xfer_id) {
+                        receive.buffer.extend_from_slice(chunk);
+                    }
+                    let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
+                        xfer_id: ConfirmXferPacketXferIDBlock {
+                            id: xfer_id.get(),
+                            packet: packet_num,
+                        },
+                    });
+                    self.send(&confirm, Reliability::Reliable, now)?;
+                    if is_last && let Some(receive) = self.xfer_receives.remove(&xfer_id) {
+                        self.send_asset_upload_complete(
+                            receive.asset_id,
+                            receive.asset_type,
+                            true,
+                            now,
+                        )?;
+                        self.events.push_back(ServerEvent::AssetUploaded {
+                            asset_id: AssetKey::from(receive.asset_id),
+                            asset_type: receive.asset_type,
+                            transaction_id: receive.transaction_id,
+                            data: receive.buffer,
+                        });
+                    }
+                }
+            }
+            AnyMessage::AbortXfer(abort) => {
+                // The client aborted an in-flight transfer in either direction;
+                // drop the state and surface the reason.
+                let xfer_id = XferId(abort.xfer_id.id);
+                let aborted = self.xfer_sends.remove(&xfer_id).is_some()
+                    || self.xfer_receives.remove(&xfer_id).is_some();
+                if aborted {
+                    self.events.push_back(ServerEvent::XferAborted {
+                        xfer_id,
+                        result: abort.xfer_id.result,
+                    });
+                }
+            }
+            AnyMessage::TransferRequest(request) => {
+                // A legacy UDP asset Transfer download. Only the two source
+                // types with no HTTP alternative on either grid are served
+                // (task-inventory item asset, estate asset); anything else —
+                // including the ViewerAsset-superseded plain asset source — is
+                // auto-refused as unknown, per the legacy-skip rule.
+                let block = &request.transfer_info;
+                let transfer_id = TransferId::new(block.transfer_id);
+                let source = if block.source_type == TRANSFER_SOURCE_SIM_INV_ITEM {
+                    TransferSourceParamsInvItem::decode(&block.params)
+                        .ok()
+                        .map(TransferRequestSource::TaskInventoryItem)
+                } else if block.source_type == TRANSFER_SOURCE_SIM_ESTATE {
+                    TransferSourceParamsEstate::decode(&block.params)
+                        .ok()
+                        .map(TransferRequestSource::Estate)
+                } else {
+                    None
+                };
+                if let Some(source) = source {
+                    let _prev = self
+                        .transfer_serves
+                        .insert(transfer_id, block.params.clone());
+                    self.events.push_back(ServerEvent::TransferRequested {
+                        transfer_id,
+                        priority: block.priority,
+                        source,
+                    });
+                } else {
+                    let refuse = AnyMessage::TransferInfo(TransferInfo {
+                        transfer_info: TransferInfoTransferInfoBlock {
+                            transfer_id: block.transfer_id,
+                            channel_type: TRANSFER_CHANNEL_ASSET,
+                            target_type: 0,
+                            status: TransferStatus::UnknownSource.to_code(),
+                            size: 0,
+                            params: block.params.clone(),
+                        },
+                    });
+                    self.send(&refuse, Reliability::Reliable, now)?;
+                }
+            }
+            AnyMessage::TransferAbort(abort) => {
+                let transfer_id = TransferId::new(abort.transfer_info.transfer_id);
+                if self.transfer_serves.remove(&transfer_id).is_some() {
+                    self.events
+                        .push_back(ServerEvent::TransferAborted { transfer_id });
+                }
+            }
             AnyMessage::ModifyLand(modify) => {
                 let block = &modify.modify_block;
                 // Prefer the authoritative metre radius from the extended block,
@@ -4896,6 +7249,24 @@ impl SimSession {
                 let landmark = (landmark_id != Uuid::nil()).then(|| AssetKey::from(landmark_id));
                 self.events
                     .push_back(ServerEvent::TeleportViaLandmark { landmark });
+            }
+            AnyMessage::TeleportLocationRequest(request) => {
+                let info = &request.info;
+                self.events.push_back(ServerEvent::TeleportRequested {
+                    region_handle: RegionHandle(info.region_handle),
+                    position: RegionCoordinates::new(
+                        info.position.x,
+                        info.position.y,
+                        info.position.z,
+                    ),
+                    look_at: info.look_at.clone(),
+                });
+            }
+            AnyMessage::TeleportLureRequest(request) => {
+                self.events.push_back(ServerEvent::TeleportViaLure {
+                    lure_id: LureId::new(request.info.lure_id),
+                    teleport_flags: request.info.teleport_flags,
+                });
             }
             AnyMessage::TeleportCancel(_) => {
                 self.events.push_back(ServerEvent::CancelTeleport);

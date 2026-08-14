@@ -1,24 +1,30 @@
 #![doc = include_str!("../README.md")]
 
 mod appearance;
+mod asset_caps;
 mod asset_keys;
+mod asset_source;
 mod bookkeeping_ids;
 mod chat_log;
 mod command;
 mod error;
 mod extra_params;
 pub mod j2c;
+mod marketplace;
 pub mod mesh_lod;
 mod object_update;
 mod particles;
 mod scoped_id;
 mod session;
+mod sim_caps;
 mod sim_session;
 mod terrain;
 mod types;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
+pub use asset_caps::{AssetCapHandler, AssetCaps};
 pub use asset_keys::{AnimationKey, AssetKey};
+pub use asset_source::{AssetSource, InMemoryAssetSource};
 pub use bookkeeping_ids::{
     GroupRequestId, ImSessionId, InventoryCallbackId, InvoiceId, LureId, PingId, QueryId,
     TransactionId, TransferId, XferId,
@@ -34,6 +40,15 @@ pub use command::Command;
 pub use error::Error;
 pub use extra_params::encode_extra_params;
 pub use j2c::{DiscardLevel, MAX_DISCARD_LEVEL};
+pub use marketplace::{
+    AssociateInventory, CreateListing, Listing, ListingId, MarketplaceApiError,
+    MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo, MarketplaceBuildRequestError,
+    MarketplaceInventoryInfo, MarketplaceMethod, MarketplaceOperation, MarketplaceRequest,
+    MerchantStatus, UpdateListing, associate_inventory_request, create_listing_request,
+    delete_listing_request, listing_request, listings_request, marketplace_failure_event,
+    marketplace_reply_event, merchant_status_request, parse_deleted_ids, parse_listings_response,
+    parse_merchant_status, update_listing_request,
+};
 pub use mesh_lod::{DEFAULT_LOD_FACTOR, MESH_LOD_COUNT, MeshLod};
 pub use object_update::{
     TerseUpdate, encode_compressed_object, encode_object_motion, encode_terse_object_data,
@@ -46,41 +61,50 @@ pub use scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 pub use session::{
     CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH, CAP_GET_MESH2, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
-    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_ANIMATION, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
-    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, ChatLifecycleView,
-    ChatSessionInfo, ChatSessionKind, ChatSessionLifecycle, FolderState, FriendPresence,
-    INVENTORY_CACHE_VERSION, INVENTORY_FETCH_MAX_IN_FLIGHT, InventoryOwner, InviteChannel,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, MessageCursor, NearbyHistoryLine,
-    PendingInvite, RECV_BUFFER_SIZE, REQUESTED_CAPABILITIES, Session, SessionMessage,
-    VoiceChannelInfo, VoiceChannelState, agent_drop_group_to_llsd, agent_state_update_to_llsd,
-    ais_inventory_update_to_llsd, build_map_block_reply, build_map_item_reply,
-    build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_request_body,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_MESH,
+    CAP_GET_MESH2, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE,
+    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_ANIMATION,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSessionInfo,
+    ChatSessionKind, ChatSessionLifecycle, FolderState, FriendPresence, INVENTORY_CACHE_VERSION,
+    INVENTORY_FETCH_MAX_IN_FLIGHT, InventoryOwner, InviteChannel, LAND_RESOURCE_DETAIL_TAG,
+    LAND_RESOURCE_SUMMARY_TAG, MessageCursor, NearbyHistoryLine, PendingInvite, RECV_BUFFER_SIZE,
+    REQUESTED_CAPABILITIES, ServerHistoryMessage, Session, SessionMessage, VoiceChannelInfo,
+    VoiceChannelState, agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd,
+    agent_state_update_to_llsd, ais_inventory_update_to_llsd, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
+    chat_session_request_body, chat_session_request_from_llsd, chat_session_roster_to_llsd,
     chatterbox_invitation_to_llsd, copy_inventory_from_notecard_body, created_category_to_llsd,
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     environment_asset_from_bytes, environment_to_llsd, establish_agent_communication_to_llsd,
     group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
     inventory_descendents_to_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
     open_region_info_to_llsd, parcel_info_to_llsd, required_voice_version_to_llsd,
-    server_appearance_update_to_llsd, set_display_name_reply_to_llsd, sim_console_response_to_llsd,
-    sky_settings_from_asset, teleport_finish_to_llsd, water_settings_from_asset,
-    windlight_refresh_to_llsd,
+    server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
+    sim_console_response_to_llsd, sky_settings_from_asset, teleport_finish_to_llsd,
+    water_settings_from_asset, windlight_refresh_to_llsd,
 };
-pub use sim_session::{AgentUpdateInfo, ServerEvent, SimSession};
+pub use sim_caps::{
+    CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
+};
+pub use sim_session::{
+    AgentPresence, AgentUpdateInfo, CapsUploadMetadata, FlowMirrorStatus, ObjectMediaState,
+    SESSION_FLOW_COVERAGE, ServerEvent, SimChatSession, SimChatSessionKind, SimSession,
+    SitTransform, TransferRequestSource, UserRightsEntry,
+};
 pub use terrain::encode_layer;
 pub use types::{
     ActiveGroup, AgentOrObjectKey, AlertInfo, Asset, AssetType, AssetUpdateLocation,
@@ -149,44 +173,47 @@ pub use sl_wire::{
     AbuseReport, AbuseReportType, AgentPreferences, AisCategoryCreate, AisItemUpdate, AisUpdate,
     AnimatedObjects, AnyMessage, AssetUploadResponse, AttachmentLocation,
     AttachmentResourcesReport, CircuitCode, ControlFlags, CreateInventoryCategoryRequest,
-    Direction, DisplayName, EventQueueEvent, EventQueueResponse, ExperienceInfo,
+    Direction, DisplayName, EventQueueEvent, EventQueueRequest, EventQueueResponse, ExperienceInfo,
     ExperiencePermission, ExperienceProperties, ExperienceUpdate, FaceMaterialPut,
-    GLTF_MATERIAL_OVERRIDE_METHOD, GlobalCoordinates, GltfMaterialOverride, HomeLocation,
-    IceCandidate, LSL_SYNTAX_VERSION, LandResourcesUrls, LegacyMaterial, Llsd, LoginFailure,
-    LoginRejectKind, LoginRequest, LoginResponse, LslArgument, LslConstant, LslEvent, LslFunction,
-    LslKeyword, LslSyntax, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
-    MEDIA_PERM_OWNER, MaterialOverrideUpdate, MediaEntry, MessageId, MfaChallenge, ObjectCost,
-    ObjectMediaResponse, ObjectPermMasks, ObjectPhysicsData, OpenSimExtras, ParcelFlags,
-    ParcelScriptResources, ParcelVoiceInfo, Permissions, Permissions5, PhysicsShapeType,
-    PhysicsShapeTypes, ReflectionProbeFlags, RegionFlags, RegionHandle, RegionLocalObjectId,
-    RegionLocalParcelId, RemoteParcelRequest, RenderMaterialEntry, ResourceAmount, ResourceSummary,
-    ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind, SelectedResourceCost,
-    SequenceNumber, SimulatorFeatures, StartLocation, StartLocationParseError, SymbolKind,
-    UserInfoCapReply, UserInfoUpdate, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
-    VoiceAccountInfo, VoiceProvisionRequest, WireError, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
-    build_agent_preferences_request, build_agent_preferences_response,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body, build_ais_update_response,
-    build_attachment_resources_response, build_create_inventory_category_request,
-    build_create_inventory_category_response, build_display_names_response,
-    build_event_queue_request, build_event_queue_response, build_experience_ids_response,
-    build_experience_infos_response, build_experience_permissions_response,
-    build_experience_status_response, build_fetch_inventory_request, build_get_object_cost_request,
-    build_get_object_cost_response, build_get_object_physics_data_request,
-    build_get_object_physics_data_response, build_gltf_material_override,
-    build_group_member_data_request, build_land_resource_detail_response,
-    build_land_resource_summary_response, build_land_resources_request,
-    build_land_resources_response, build_login_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_get_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_object_physics_properties, build_parcel_voice_info_request,
-    build_parcel_voice_info_response, build_provision_voice_account_request,
-    build_provision_voice_account_response, build_region_experiences_request,
-    build_region_experiences_response, build_remote_parcel_request, build_remote_parcel_response,
-    build_render_materials_put_request, build_render_materials_request,
-    build_render_materials_response, build_resource_cost_selected_request,
-    build_resource_cost_selected_response, build_seed_request, build_send_user_report,
+    GLTF_MATERIAL_OVERRIDE_METHOD, GestureEntry, GlobalCoordinates, GlobalTextures,
+    GltfMaterialOverride, HomeLocation, IceCandidate, InitialOutfit, LSL_SYNTAX_VERSION,
+    LandResourcesUrls, LegacyMaterial, Llsd, LoginCategory, LoginFailure, LoginFlags, LoginGates,
+    LoginRedirect, LoginRejectKind, LoginRequest, LoginResponse, LoginServer, LoginSuccess,
+    LslArgument, LslConstant, LslEvent, LslFunction, LslKeyword, LslSyntax, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MaterialOverrideUpdate,
+    MediaEntry, MessageId, MfaChallenge, NewUserConfig, ObjectCost, ObjectMediaResponse,
+    ObjectPermMasks, ObjectPhysicsData, OpenSimExtras, ParcelFlags, ParcelScriptResources,
+    ParcelVoiceInfo, Permissions, Permissions5, PhysicsShapeType, PhysicsShapeTypes,
+    ReflectionProbeFlags, RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId,
+    RemoteParcelRequest, RenderMaterialEntry, ResourceAmount, ResourceSummary, ScriptedObjectInfo,
+    ScriptedObjectResources, SelectedCostKind, SelectedResourceCost, SequenceNumber,
+    SimulatorFeatures, StartLocation, StartLocationParseError, SymbolKind, TutorialSetting,
+    UiConfig, UserInfoCapReply, UserInfoUpdate, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
+    VoiceAccountInfo, VoiceConfig, VoiceProvisionRequest, WireError,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, build_agent_preferences_request,
+    build_agent_preferences_response, build_ais_create_category_body, build_ais_create_link_body,
+    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
+    build_ais_update_response, build_asset_upload_response, build_attachment_resources_response,
+    build_create_inventory_category_request, build_create_inventory_category_response,
+    build_display_names_response, build_event_queue_request, build_event_queue_response,
+    build_experience_ids_response, build_experience_infos_response,
+    build_experience_permissions_response, build_experience_status_response,
+    build_fetch_inventory_request, build_get_object_cost_request, build_get_object_cost_response,
+    build_get_object_physics_data_request, build_get_object_physics_data_response,
+    build_gltf_material_override, build_group_member_data_request,
+    build_land_resource_detail_response, build_land_resource_summary_response,
+    build_land_resources_request, build_land_resources_response, build_login_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_get_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_object_physics_properties,
+    build_parcel_voice_info_request, build_parcel_voice_info_response,
+    build_provision_voice_account_request, build_provision_voice_account_response,
+    build_region_experiences_request, build_region_experiences_response,
+    build_remote_parcel_request, build_remote_parcel_response, build_render_materials_put_request,
+    build_render_materials_request, build_render_materials_response,
+    build_resource_cost_selected_request, build_resource_cost_selected_response,
+    build_seed_request, build_seed_response, build_send_user_report,
     build_set_experience_permission_request, build_simulator_features_response,
     build_update_avatar_appearance_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
@@ -199,19 +226,19 @@ pub use sl_wire::{
     parse_ais_create_category_url, parse_ais_item_url, parse_ais_move_body,
     parse_ais_rename_category_body, parse_ais_update_item_body, parse_asset_upload_response,
     parse_attachment_resources, parse_create_inventory_category_request, parse_display_names,
-    parse_display_names_query, parse_event_queue_response, parse_experience_id_query,
-    parse_experience_ids, parse_experience_info_query, parse_experience_infos,
-    parse_experience_permissions, parse_experience_status, parse_find_experience_query,
-    parse_forget_experience_query, parse_get_object_cost, parse_get_object_physics_data,
-    parse_get_object_physics_data_request, parse_gltf_material_override,
-    parse_group_experiences_query, parse_land_resource_detail, parse_land_resource_summary,
-    parse_land_resources_reply, parse_land_resources_request, parse_llsd_xml, parse_login_response,
-    parse_modify_material_params_request, parse_object_physics_properties,
-    parse_provision_voice_account_request, parse_region_experiences,
-    parse_region_experiences_request, parse_remote_parcel_reply, parse_remote_parcel_request,
-    parse_render_materials_response, parse_resource_cost_selected,
-    parse_resource_cost_selected_request, parse_seed_response, parse_send_user_report,
-    parse_set_experience_permission_request, parse_simulator_features,
+    parse_display_names_query, parse_event_queue_request, parse_event_queue_response,
+    parse_experience_id_query, parse_experience_ids, parse_experience_info_query,
+    parse_experience_infos, parse_experience_permissions, parse_experience_status,
+    parse_find_experience_query, parse_forget_experience_query, parse_get_object_cost,
+    parse_get_object_physics_data, parse_get_object_physics_data_request,
+    parse_gltf_material_override, parse_group_experiences_query, parse_land_resource_detail,
+    parse_land_resource_summary, parse_land_resources_reply, parse_land_resources_request,
+    parse_llsd_xml, parse_login_response, parse_modify_material_params_request,
+    parse_object_physics_properties, parse_provision_voice_account_request,
+    parse_region_experiences, parse_region_experiences_request, parse_remote_parcel_reply,
+    parse_remote_parcel_request, parse_render_materials_response, parse_resource_cost_selected,
+    parse_resource_cost_selected_request, parse_seed_request, parse_seed_response,
+    parse_send_user_report, parse_set_experience_permission_request, parse_simulator_features,
     parse_update_experience_request, parse_user_info_reply, parse_user_info_update,
     parse_voice_signaling_request, region_name_from_wire, region_name_to_wire, sim_access,
 };

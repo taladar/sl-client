@@ -664,6 +664,7 @@ impl Survey {
             | Event::ChatSessions(_)
             | Event::ChatHistoryPage { .. }
             | Event::NearbyChatHistoryPage { .. }
+            | Event::SessionServerHistory { .. }
             | Event::FriendsSnapshot(_)
             | Event::InventoryFolderPage { .. }
             | Event::InventoryRoots { .. }
@@ -714,6 +715,9 @@ impl Survey {
             | Event::ServerFileDownloaded { .. }
             | Event::XferUploaded { .. }
             | Event::XferAborted { .. }
+            | Event::TaskItemAssetReceived { .. }
+            | Event::EstateCovenantAssetReceived { .. }
+            | Event::TransferFailed { .. }
             | Event::UserInfo(..)
             | Event::DeRezAck { .. }
             | Event::ForceObjectSelect { .. }
@@ -730,7 +734,7 @@ impl Survey {
             | Event::TeleportStarted
             | Event::TeleportProgress { .. }
             | Event::TeleportFinished { .. }
-            | Event::TeleportLocal
+            | Event::TeleportLocal { .. }
             | Event::ParcelOverlay(_)
             | Event::ParcelMediaCommand { .. }
             | Event::ParcelMediaUpdate(_)
@@ -816,6 +820,15 @@ impl Survey {
             | Event::SimConsoleResponse { .. }
             | Event::RequiredVoiceVersion(_)
             | Event::OpenRegionInfo(_)
+            | Event::MarketplaceMerchantStatus(_)
+            | Event::MarketplaceListings(_)
+            | Event::MarketplaceListing(_)
+            | Event::MarketplaceListingCreated(_)
+            | Event::MarketplaceListingUpdated(_)
+            | Event::MarketplaceInventoryAssociated(_)
+            | Event::MarketplaceListingDeleted(_)
+            | Event::MarketplaceListingGone(_)
+            | Event::MarketplaceError { .. }
             | Event::Ping { .. }
             | Event::Environment(_) => {}
         }

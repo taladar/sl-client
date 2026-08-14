@@ -162,6 +162,31 @@ top:
   (`Event::AvatarAnimation`),
 - and the usual name/identity data.
 
+### Sitting on objects
+
+Sitting is a three-message handshake. The client asks with `AgentRequestSit`
+(the target object and the clicked offset); the simulator answers with an
+`AvatarSitResponse` carrying the **sit transform** — the seat position and
+rotation relative to the object, the scripted-camera eye/focus offsets, a
+force-mouselook flag, and whether the viewer should autopilot into range
+first; the client completes with `AgentSit`. The result surfaces as
+`Event::SitResult`, and `Session::seat` reports the current seat. Refusing a
+sit is simply not answering — there is no refusal message; the client's sit
+timeout recovers.
+
+Standing up is not a message at all: one `AgentUpdate` with the transient
+`STAND_UP` control flag (`Session::stand`). Sitting on the ground is likewise
+just the `SIT_ON_GROUND` control flag (`Session::sit_on_ground`) — a pure
+animation state with no object involved.
+
+On the server side `SimSession` mirrors the machine: `AgentRequestSit`
+decodes as `ServerEvent::SitRequested`, the driver answers with
+`send_avatar_sit_response` (a `SitTransform`), the completing `AgentSit`
+surfaces as `ServerEvent::SitConfirmed` (marking the agent seated —
+`SimSession::seated_on`), and the stand-up control flag folds into
+`ServerEvent::StoodUp`. The loopback proof is `object_sit_flow_round_trips`
+in `sl-proto/tests/sim_session.rs`.
+
 ## The world map
 
 The world map is assembled from three separate queries, all sent to the current

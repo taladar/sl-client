@@ -134,7 +134,7 @@ impl GridTest for TeleportLocalPhases {
                     .wait_for(REGION_TIMEOUT, |event| match event {
                         Event::TeleportStarted => Some(Ok(Phase::Started)),
                         Event::TeleportProgress { .. } => Some(Ok(Phase::Progress)),
-                        Event::TeleportLocal => Some(Ok(Phase::Local)),
+                        Event::TeleportLocal { .. } => Some(Ok(Phase::Local)),
                         Event::RegionChanged { .. } => Some(Ok(Phase::RegionChanged)),
                         Event::TeleportFailed { reason, .. } => Some(Err(reason.clone())),
                         _ => None,

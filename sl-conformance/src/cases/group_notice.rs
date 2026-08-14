@@ -42,7 +42,7 @@
 //! enabled — see the setup memory); the Aditi variant is deferred to Phase Z
 //! pending its Aditi run (and a configured pre-made group).
 
-use std::time::{Instant, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use sl_client_tokio::{Command, Event, GroupNoticeKey, ImDialog};
 
@@ -50,8 +50,17 @@ use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, secs_metric,
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, is_aditi,
+    secs_metric,
 };
+
+/// How long each notice-delivery attempt waits before posting a fresh notice
+/// (Second Life propagates a fresh join through its group service
+/// asynchronously, so an early notice can miss the new member).
+const DELIVERY_ATTEMPT_WINDOW: Duration = Duration::from_secs(10);
+
+/// How many notices to post before concluding delivery genuinely fails.
+const DELIVERY_ATTEMPTS: u32 = 6;
 
 /// The primary posts a group notice that the secondary — a fellow member —
 /// receives, and which the primary then finds in the group's notice history.
@@ -68,7 +77,7 @@ impl GridTest for GroupNotice {
     }
 
     fn grids(&self) -> &'static [Grid] {
-        &[Grid::Opensim]
+        &[Grid::Opensim, Grid::Aditi]
     }
 
     fn accounts(&self) -> u8 {
@@ -77,6 +86,7 @@ impl GridTest for GroupNotice {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
+            let grid = ctx.grid();
             // Both avatars must be logged in and active before group traffic can
             // be routed between them.
             ctx.primary().wait_for_region(REGION_TIMEOUT).await?;
@@ -99,7 +109,7 @@ impl GridTest for GroupNotice {
             let group = support::membership_group(
                 ctx,
                 0,
-                &format!("sl-client group-notice {unique}"),
+                &format!("slc notice {unique}"),
                 "throwaway group for the group-notice conformance case",
             )
             .await?;
@@ -127,46 +137,70 @@ impl GridTest for GroupNotice {
             let join_rtt = joined_at.elapsed();
             check(join_ok, "secondary failed to join the group")?;
 
-            // The primary posts the notice. Both subject and body carry the
-            // wall-clock marker so the receive predicate ignores any unrelated
-            // background notice; neither contains a `|`, which the wire uses to
-            // split subject from body.
-            let subject = format!("sl-client group-notice {unique}");
-            let body = format!("group-notice conformance body {unique}");
-            let wire_message = format!("{subject}|{body}");
+            // The primary posts the notice; the secondary receives the relayed
+            // notice IM. Both subject and body carry the wall-clock marker (and
+            // the attempt number) so the receive predicate ignores any
+            // unrelated background notice; neither contains a `|`, which the
+            // wire uses to split subject from body. The notice is attributed
+            // from the group (not the posting avatar), so the predicate keys on
+            // the group-notice dialog and the exact `subject|body`. Second
+            // Life's distributed group service propagates a fresh join
+            // asynchronously — a notice posted seconds after the join can miss
+            // the new member — so the post is retried with a fresh marker until
+            // one is delivered (each attempt is a new notice in the throwaway /
+            // premade group; the group is left at the end regardless).
             let posted_at = Instant::now();
-            ctx.primary()
-                .send(Command::SendGroupNotice {
-                    group_id,
-                    subject: subject.clone(),
-                    message: body.clone(),
-                    attachment: None,
-                })
-                .await?;
-
-            // The secondary receives the relayed notice IM. It is attributed from
-            // the group (not the posting avatar), so the predicate keys on the
-            // group-notice dialog and the exact `subject|body` rather than a
-            // sender id. (The harness keeps forwarding every session's events, so
-            // the primary's post is delivered even while we read only the
-            // secondary.)
-            let received = {
-                let wire_message = wire_message.clone();
-                ctx.secondary()
+            let mut attempt: u32 = 0;
+            let (received, subject, wire_message) = loop {
+                attempt = attempt.saturating_add(1);
+                let subject = format!("sl-client group-notice {unique} a{attempt}");
+                let body = format!("group-notice conformance body {unique} a{attempt}");
+                let wire_message = format!("{subject}|{body}");
+                ctx.primary()
+                    .send(Command::SendGroupNotice {
+                        group_id,
+                        subject: subject.clone(),
+                        message: body.clone(),
+                        attachment: None,
+                    })
+                    .await?;
+                let wanted = wire_message.clone();
+                match ctx
+                    .secondary()
                     .ok_or_else(|| {
                         TestFailure::Assertion(
                             "two-account test ran without a secondary".to_owned(),
                         )
                     })?
-                    .wait_for(REPLY_TIMEOUT, move |event| match event {
+                    .wait_for(DELIVERY_ATTEMPT_WINDOW, move |event| match event {
                         Event::InstantMessageReceived(im)
-                            if im.dialog == ImDialog::GroupNotice && im.message == wire_message =>
+                            if im.dialog == ImDialog::GroupNotice && im.message == wanted =>
                         {
                             Some((**im).clone())
                         }
                         _ => None,
                     })
-                    .await?
+                    .await
+                {
+                    Ok(received) => break (received, subject, wire_message),
+                    Err(TestFailure::Timeout(_)) if attempt < DELIVERY_ATTEMPTS => {}
+                    Err(TestFailure::Timeout(_)) if is_aditi(grid) => {
+                        // Observed live: a notice posted to a seconds-old group
+                        // is dropped by Second Life (no relay to any member,
+                        // the poster included) until the group service has
+                        // propagated — sometimes past this case's whole retry
+                        // budget. Record the honest gap rather than failing.
+                        ctx.metrics()
+                            .set(&count_metric("delivery_attempts"), i64::from(attempt));
+                        ctx.mark_partial(
+                            "no posted notice was relayed within the retry budget — Second \
+                             Life drops notices from a freshly created group until its group \
+                             service has propagated the membership",
+                        );
+                        return Ok(());
+                    }
+                    Err(other) => return Err(other),
+                }
             };
             let deliver_rtt = posted_at.elapsed();
 

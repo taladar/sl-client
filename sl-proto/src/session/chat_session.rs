@@ -30,6 +30,21 @@ pub(crate) const HISTORY_CAP: usize = 256;
 /// value matches Firestorm's `OTHER_TYPING_TIMEOUT` (`fsfloaterim.cpp:88`).
 pub(crate) const TYPING_TIMEOUT: Duration = Duration::from_secs(9);
 
+/// The most server-history messages retained per session (see
+/// [`ChatSession::server_history`]). The server already bounds a
+/// `fetch history` reply to its own recent window; this cap only guards against
+/// a pathological oversized reply, keeping the **newest** entries when it
+/// trims. Deliberately the same order of magnitude as [`HISTORY_CAP`].
+pub(crate) const SERVER_HISTORY_CAP: usize = 256;
+
+/// The timestamp tolerance when de-duplicating a fetched server-history entry
+/// against the live ring: two messages with equal sender and text are the same
+/// message when their Unix timestamps differ by at most this many seconds (or
+/// when either side carries no timestamp at all — live lines log
+/// `timestamp: None`). Firestorm's merge effectively compares at datetime
+/// granularity (`llimview.cpp:1385`), so one minute of slack is faithful.
+pub(crate) const SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS: u32 = 60;
+
 /// Which of the three IM-session kinds a chat session is, carrying that kind's
 /// *typed* canonical id. This is the key of the chat-session registry: the enum
 /// discriminant keeps the three id spaces disjoint, so a group id never aliases a
@@ -143,6 +158,81 @@ pub struct SessionMessage {
     /// that carry no timestamp — the sans-IO layer has no wall-clock of its own,
     /// so insertion order is the authoritative sequence.
     pub timestamp: Option<u32>,
+}
+
+/// One message of the **server-side recent-message backlog** of a group /
+/// conference session, fetched via the `ChatSessionRequest` capability's
+/// `fetch history` method and carried by
+/// [`Event::SessionServerHistory`](crate::Event::SessionServerHistory).
+/// Distinct from the live-ring [`SessionMessage`]: the backlog record carries
+/// the sender's **display name** as the server rendered it (a consumer showing
+/// history from before it was listening has no roster to resolve the key
+/// against), and it is what was said *before* this client joined — it is never
+/// written to the on-disk transcript (transcript = what this client heard
+/// live).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ServerHistoryMessage {
+    /// Who sent the message (the record's `from_id`).
+    pub sender: AgentKey,
+    /// The sender's display name as the server rendered it (the record's
+    /// `from`).
+    pub sender_name: String,
+    /// The message text (the record's `message`).
+    pub text: String,
+    /// The message's Unix timestamp (the record's `time`, which Second Life
+    /// sends as an integer or a real), or `None` when absent/zero.
+    pub timestamp: Option<u32>,
+}
+
+/// Where a session stands in the once-per-login server-history fetch cycle —
+/// the state the [`Session::next_server_history_fetches`](crate::Session::next_server_history_fetches)
+/// scheduler flips so each group / conference session is fetched exactly once.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServerHistoryState {
+    /// No fetch has been issued for this session yet; the scheduler will
+    /// return it once the session is joined (and the cap is known).
+    Unfetched,
+    /// A fetch was handed to the runtime. A reply flips this to
+    /// [`Fetched`](Self::Fetched); a failed POST deliberately leaves it here —
+    /// the backlog is a convenience, so there is no retry storm.
+    Requested,
+    /// A reply was received and folded into
+    /// [`ChatSession::server_history`].
+    Fetched,
+}
+
+/// Whether the automatic server-side chat-backlog fetch is enabled — the
+/// `Session`-level gate behind
+/// [`Session::set_fetch_server_chat_history`](crate::Session::set_fetch_server_chat_history).
+/// A two-variant enum rather than a bare bool so the `Session` struct stays
+/// within the workspace's `struct_excessive_bools` budget; the public setter /
+/// getter API stays `bool`-shaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ServerHistoryFetch {
+    /// Newly joined group / conference sessions are swept by
+    /// [`Session::next_server_history_fetches`](crate::Session::next_server_history_fetches)
+    /// (the default, matching the reference `FetchGroupChatHistory`).
+    Enabled,
+    /// The sweep returns nothing; only the explicit
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)
+    /// fetches.
+    Disabled,
+}
+
+impl ServerHistoryFetch {
+    /// The enum for a bool-shaped setter argument.
+    pub(crate) const fn from_enabled(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    /// Whether the auto-fetch is enabled (the bool-shaped getter view).
+    pub(crate) const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
 }
 
 /// One recalled line of **nearby (local) chat** history, read back from the
@@ -269,6 +359,15 @@ pub(crate) struct ChatSession {
     /// join sets it. Persists across teleport with the rest of the session and is
     /// folded by the presence-driven reset (an offlined friend leaves `members`).
     pub(crate) voice: VoiceChannelState,
+    /// The server-side recent-message backlog (`fetch history`), oldest-first,
+    /// already de-duplicated against the live [`history`](Self::history) ring —
+    /// **separate** from that ring so its unread / [`HISTORY_CAP`] semantics
+    /// stay untouched. Capped at [`SERVER_HISTORY_CAP`] keeping the newest;
+    /// replaced wholesale by each fetch. Empty on grids without the cap.
+    pub(crate) server_history: Vec<ServerHistoryMessage>,
+    /// Where this session stands in the once-per-login server-history fetch
+    /// cycle (see [`ServerHistoryState`]).
+    pub(crate) server_history_state: ServerHistoryState,
 }
 
 impl ChatSession {
@@ -292,6 +391,8 @@ impl ChatSession {
                 joined: false,
                 members: BTreeSet::new(),
             },
+            server_history: Vec::new(),
+            server_history_state: ServerHistoryState::Unfetched,
         }
     }
 
@@ -320,6 +421,43 @@ impl ChatSession {
     pub(crate) fn log_outbound(&mut self, message: SessionMessage) {
         self.unread = 0;
         self.push_history(message);
+    }
+
+    /// Whether a fetched server-history entry duplicates a message already in
+    /// the live ring: equal sender and text, with compatible timestamps —
+    /// compatible meaning either side carries none (live lines log
+    /// `timestamp: None`) or they differ by at most
+    /// [`SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS`]. This is how the message
+    /// that *triggered* a lazy-open fetch, which arrives both live and inside
+    /// the fetched backlog, is dropped from the backlog.
+    fn duplicates_ring(&self, message: &ServerHistoryMessage) -> bool {
+        self.history.iter().any(|live| {
+            live.sender == message.sender
+                && live.text == message.text
+                && match (live.timestamp, message.timestamp) {
+                    (Some(a), Some(b)) => a.abs_diff(b) <= SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS,
+                    _ => true,
+                }
+        })
+    }
+
+    /// Replaces the stored server-history backlog with `messages`
+    /// (oldest-first, as fetched), dropping entries that duplicate a live-ring
+    /// message ([`Self::duplicates_ring`]) and trimming to the **newest**
+    /// [`SERVER_HISTORY_CAP`] entries, then marks the fetch cycle
+    /// [`Fetched`](ServerHistoryState::Fetched). Replacing wholesale (rather
+    /// than appending) makes an explicit re-fetch idempotent. The live ring,
+    /// the unread counter, and the on-disk transcript are untouched.
+    pub(crate) fn store_server_history(&mut self, messages: Vec<ServerHistoryMessage>) {
+        let mut kept: Vec<ServerHistoryMessage> = messages
+            .into_iter()
+            .filter(|message| !self.duplicates_ring(message))
+            .collect();
+        if kept.len() > SERVER_HISTORY_CAP {
+            kept.drain(..kept.len().saturating_sub(SERVER_HISTORY_CAP));
+        }
+        self.server_history = kept;
+        self.server_history_state = ServerHistoryState::Fetched;
     }
 }
 
@@ -440,5 +578,145 @@ impl MessageCursor {
     #[must_use]
     pub const fn consumed_count(self) -> usize {
         self.0
+    }
+}
+
+#[cfg(test)]
+mod server_history_tests {
+    use super::{
+        ChatSession, SERVER_HISTORY_CAP, SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS,
+        ServerHistoryMessage, ServerHistoryState, SessionMessage,
+    };
+    use crate::types::ImDialog;
+    use pretty_assertions::assert_eq;
+    use sl_types::key::AgentKey;
+    use std::time::Instant;
+    use uuid::Uuid;
+
+    /// A live-ring entry from `sender` with `text` and `timestamp`.
+    fn ring_message(sender: AgentKey, text: &str, timestamp: Option<u32>) -> SessionMessage {
+        SessionMessage {
+            sender,
+            dialog: ImDialog::SessionSend,
+            text: text.to_owned(),
+            timestamp,
+        }
+    }
+
+    /// A fetched backlog record from `sender` with `text` and `timestamp`.
+    fn server_message(
+        sender: AgentKey,
+        text: &str,
+        timestamp: Option<u32>,
+    ) -> ServerHistoryMessage {
+        ServerHistoryMessage {
+            sender,
+            sender_name: "Some Speaker".to_owned(),
+            text: text.to_owned(),
+            timestamp,
+        }
+    }
+
+    /// The message that triggered a lazy-open fetch arrives both live (with
+    /// `timestamp: None` — live lines carry no wire timestamp) and inside the
+    /// fetched backlog (with the server's epoch): the either-side-`None`
+    /// timestamp rule de-duplicates it on sender + text alone, while the other
+    /// backlog entries survive.
+    #[test]
+    fn store_drops_the_live_trigger_duplicate() {
+        let now = Instant::now();
+        let mut session = ChatSession::new(now);
+        let sender = AgentKey::from(Uuid::from_u128(0xC1));
+        session.log_inbound(ring_message(sender, "trigger", None), None);
+
+        session.store_server_history(vec![
+            server_message(sender, "older line", Some(1_700_000_100)),
+            server_message(sender, "trigger", Some(1_700_000_200)),
+        ]);
+        assert_eq!(
+            session.server_history,
+            vec![server_message(sender, "older line", Some(1_700_000_100))]
+        );
+        assert!(matches!(
+            session.server_history_state,
+            ServerHistoryState::Fetched
+        ));
+        // The live ring and its unread bookkeeping are untouched by a store.
+        assert_eq!(session.history.len(), 1);
+        assert_eq!(session.unread, 1);
+    }
+
+    /// Timestamped-both-sides de-dup honours the slack boundary: equal sender +
+    /// text within the slack is the same message, one second past it is not —
+    /// and the same text from a *different* sender is never de-duplicated.
+    #[test]
+    fn store_dedup_respects_slack_and_sender() {
+        let now = Instant::now();
+        let mut session = ChatSession::new(now);
+        let sender = AgentKey::from(Uuid::from_u128(0xC2));
+        let other = AgentKey::from(Uuid::from_u128(0xC3));
+        session.log_inbound(ring_message(sender, "hello", Some(1_000_000)), None);
+
+        session.store_server_history(vec![
+            server_message(
+                sender,
+                "hello",
+                Some(1_000_000 + SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS),
+            ),
+            server_message(
+                sender,
+                "hello",
+                Some(1_000_000 + SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS + 1),
+            ),
+            server_message(other, "hello", Some(1_000_000)),
+        ]);
+        let kept: Vec<(AgentKey, Option<u32>)> = session
+            .server_history
+            .iter()
+            .map(|entry| (entry.sender, entry.timestamp))
+            .collect();
+        assert_eq!(
+            kept,
+            vec![
+                (
+                    sender,
+                    Some(1_000_000 + SERVER_HISTORY_TIMESTAMP_SLACK_SECONDS + 1)
+                ),
+                (other, Some(1_000_000)),
+            ]
+        );
+    }
+
+    /// A store replaces the previous backlog wholesale (an explicit re-fetch is
+    /// idempotent, never accumulating), and an oversized backlog is trimmed to
+    /// the **newest** [`SERVER_HISTORY_CAP`] entries.
+    #[test]
+    fn store_replaces_and_caps_keeping_newest() {
+        let now = Instant::now();
+        let mut session = ChatSession::new(now);
+        let sender = AgentKey::from(Uuid::from_u128(0xC4));
+        session.store_server_history(vec![server_message(sender, "first fetch", None)]);
+        assert_eq!(session.server_history.len(), 1);
+
+        let oversized: Vec<ServerHistoryMessage> = (0..SERVER_HISTORY_CAP + 10)
+            .map(|index| server_message(sender, &format!("line {index}"), None))
+            .collect();
+        session.store_server_history(oversized);
+        assert_eq!(session.server_history.len(), SERVER_HISTORY_CAP);
+        // The oldest overflow (0..=9) is what was trimmed; the newest survive.
+        assert_eq!(
+            session
+                .server_history
+                .first()
+                .map(|entry| entry.text.clone()),
+            Some("line 10".to_owned())
+        );
+        assert_eq!(
+            session
+                .server_history
+                .last()
+                .map(|entry| entry.text.clone()),
+            Some(format!("line {}", SERVER_HISTORY_CAP + 9))
+        );
     }
 }

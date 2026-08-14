@@ -1,7 +1,7 @@
 //! Wire/LLSD <-> value-type converters shared by the session impls, plus the
 //! server-side CAPS serializers and their round-trip tests.
 
-use super::chat_session::{InviteChannel, VoiceChannelInfo};
+use super::chat_session::{InviteChannel, ServerHistoryMessage, VoiceChannelInfo};
 use crate::GroupRoleKey;
 use crate::appearance;
 use crate::types::{
@@ -143,6 +143,16 @@ pub(crate) fn pack_uuids(uuids: &[Uuid]) -> Vec<u8> {
         packed.extend_from_slice(id.as_bytes());
     }
     packed
+}
+
+/// Splits a conference-start invitee bucket back into its packed 16-byte ids —
+/// the inverse of [`pack_uuids`], used by the simulator side to decode a
+/// client's `SessionConferenceStart`. A trailing partial chunk is ignored.
+pub(crate) fn unpack_uuids(bucket: &[u8]) -> Vec<Uuid> {
+    bucket
+        .chunks_exact(16)
+        .filter_map(|chunk| Uuid::from_slice(chunk).ok())
+        .collect()
 }
 
 /// Extracts the region handle encoded in a teleport lure id (OpenSim's
@@ -475,6 +485,105 @@ fn parse_i32_field(field: &'static str, value: &str) -> Result<i32, sl_wire::Wir
             field,
             value: value.to_owned(),
         })
+}
+
+/// Builds a task-inventory `Xfer` listing — the exact tab-delimited text format
+/// OpenSim's `SceneObjectPartInventory.RequestInventoryFile` writes, and the
+/// mirror of [`parse_task_inventory`]: a leading `inv_object` block for the
+/// virtual `Contents` folder of `task` (the folder id is the holding prim, the
+/// parent nil), then one `inv_item` block per item with nested `permissions`
+/// and `sale_info` sections, 8-digit lowercase-hex masks, and `|`-terminated
+/// `name`/`desc` values. A redacted asset id ([`None`]) writes the nil UUID,
+/// exactly as a simulator does for a requester without inventory-edit
+/// permission. Unlike OpenSim (which hardcodes `not`/`0`), the item's real
+/// sale type and price are written; the parser reads both forms.
+pub(crate) fn build_task_inventory(task: ObjectKey, items: &[TaskInventoryItem]) -> String {
+    let mut out = String::new();
+    out.push_str("\tinv_object\t0\n\t{\n");
+    push_listing_line(&mut out, "obj_id", &task.uuid().to_string());
+    push_listing_line(&mut out, "parent_id", &Uuid::nil().to_string());
+    push_listing_line(&mut out, "type", "category");
+    push_listing_line(&mut out, "name", "Contents|");
+    out.push_str("\t}\n");
+    for item in items {
+        let (owner_id, group_id) = crate::types::object_owner_to_wire(item.owner, item.group);
+        out.push_str("\tinv_item\t0\n\t{\n");
+        push_listing_line(&mut out, "item_id", &item.item_id.uuid().to_string());
+        push_listing_line(&mut out, "parent_id", &item.parent_task.uuid().to_string());
+        out.push_str("\tpermissions 0\n\t{\n");
+        push_listing_line(
+            &mut out,
+            "base_mask",
+            &hex_mask(item.permissions.base.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "owner_mask",
+            &hex_mask(item.permissions.owner.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "group_mask",
+            &hex_mask(item.permissions.group.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "everyone_mask",
+            &hex_mask(item.permissions.everyone.bits()),
+        );
+        push_listing_line(
+            &mut out,
+            "next_owner_mask",
+            &hex_mask(item.permissions.next_owner.bits()),
+        );
+        push_listing_line(&mut out, "creator_id", &item.creator_id.uuid().to_string());
+        push_listing_line(
+            &mut out,
+            "last_owner_id",
+            &item.last_owner_id.uuid().to_string(),
+        );
+        push_listing_line(&mut out, "group_id", &group_id.to_string());
+        push_listing_line(&mut out, "owner_id", &owner_id.to_string());
+        push_listing_line(
+            &mut out,
+            "group_owned",
+            if item.group_owned { "1" } else { "0" },
+        );
+        out.push_str("\t}\n");
+        let asset_id = item
+            .asset_id
+            .as_ref()
+            .map_or_else(Uuid::nil, AssetKey::uuid);
+        push_listing_line(&mut out, "asset_id", &asset_id.to_string());
+        push_listing_line(&mut out, "type", item.asset_type.to_type_name());
+        push_listing_line(&mut out, "inv_type", item.inv_type.to_type_name());
+        push_listing_line(&mut out, "flags", &hex_mask(item.flags));
+        out.push_str("\tsale_info\t0\n\t{\n");
+        push_listing_line(&mut out, "sale_type", item.sale_type.to_sale_name());
+        push_listing_line(&mut out, "sale_price", &item.sale_price.0.to_string());
+        out.push_str("\t}\n");
+        push_listing_line(&mut out, "name", &format!("{}|", item.name));
+        push_listing_line(&mut out, "desc", &format!("{}|", item.description));
+        push_listing_line(&mut out, "creation_date", &item.creation_date.to_string());
+        out.push_str("\t}\n");
+    }
+    out
+}
+
+/// Appends one `\t\t<name>\t<value>\n` listing line (OpenSim's
+/// `InventoryStringBuilder.AddNameValueLine`).
+fn push_listing_line(out: &mut String, name: &str, value: &str) {
+    out.push_str("\t\t");
+    out.push_str(name);
+    out.push('\t');
+    out.push_str(value);
+    out.push('\n');
+}
+
+/// Formats a permission/flags mask as LL's `UIntToHexString` does: 8 lowercase
+/// hex digits, no prefix.
+fn hex_mask(bits: u32) -> String {
+    format!("{bits:08x}")
 }
 
 /// Builds a [`RegionIdentity`] from a `RegionHandshake`'s region-info blocks. The
@@ -3179,6 +3288,18 @@ pub fn chat_session_request_body(method: &str, session_id: Uuid) -> String {
     .to_llsd_xml()
 }
 
+/// Parses a `ChatSessionRequest` capability POST body into its `(method,
+/// session-id)` pair — the inverse of [`chat_session_request_body`], for the
+/// server side of the cap. Returns `None` when the body carries no `method`
+/// member (the request is unroutable without one); a missing or malformed
+/// `session-id` parses leniently as the nil uuid.
+#[must_use]
+pub fn chat_session_request_from_llsd(body: &Llsd) -> Option<(String, Uuid)> {
+    let method = body.get("method").and_then(Llsd::as_str)?.to_owned();
+    let session_id = uuid_member_lenient(body, "session-id");
+    Some((method, session_id))
+}
+
 /// The LLSD-XML body of an offline group-invitation response — the `{ "group":
 /// <uuid> }` payload the reference `response_group_invitation_coro` POSTs to the
 /// `AcceptGroupInvite` / `DeclineGroupInvite` capability. This is the modern
@@ -3223,6 +3344,38 @@ pub fn copy_inventory_from_notecard_body(
     .to_llsd_xml()
 }
 
+/// A parsed `CopyInventoryFromNotecard` capability request — the simulator
+/// view of [`copy_inventory_from_notecard_body`]. A nil `object-id` /
+/// `folder-id` is normalised to `None` (an agent-inventory notecard / a
+/// server-picked system folder), mirroring the builder's `Option` inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CopyInventoryFromNotecardRequest {
+    /// The notecard holding the embedded item.
+    pub notecard: InventoryKey,
+    /// The in-world object holding the notecard, or `None` for an
+    /// agent-inventory notecard.
+    pub object: Option<ObjectKey>,
+    /// The embedded item to copy.
+    pub item: InventoryKey,
+    /// The destination folder, or `None` to let the simulator pick the system
+    /// folder for the item's type.
+    pub folder: Option<InventoryFolderKey>,
+}
+
+/// Parses a `CopyInventoryFromNotecard` capability request from its decoded
+/// LLSD body — the inverse of [`copy_inventory_from_notecard_body`]. Lenient:
+/// absent ids default to nil (and nil `object-id`/`folder-id` fold to `None`).
+pub(crate) fn parse_copy_inventory_from_notecard(body: &Llsd) -> CopyInventoryFromNotecardRequest {
+    let uuid = |key: &str| body.get(key).and_then(Llsd::as_uuid).unwrap_or_default();
+    let non_nil = |id: Uuid| (!id.is_nil()).then_some(id);
+    CopyInventoryFromNotecardRequest {
+        notecard: InventoryKey::from(uuid("notecard-id")),
+        object: non_nil(uuid("object-id")).map(ObjectKey::from),
+        item: InventoryKey::from(uuid("item-id")),
+        folder: non_nil(uuid("folder-id")).map(InventoryFolderKey::from),
+    }
+}
+
 /// Decodes the agent roster carried by a `ChatSessionRequest` `"accept
 /// invitation"` reply into the participant agent ids. Handles both the modern
 /// `agent_info` map (whose keys are the agent uuids) and the deprecated `agents`
@@ -3245,6 +3398,122 @@ pub(crate) fn chat_session_roster_from_llsd(body: &Llsd) -> Vec<AgentKey> {
             .collect();
     }
     Vec::new()
+}
+
+/// Serializes a chat-session roster as a `ChatSessionRequest` `"accept
+/// invitation"` reply body — the inverse of `chat_session_roster_from_llsd`,
+/// for the server side of the cap. Emits the modern `agent_info` map keyed by
+/// agent uuid; the per-agent info maps are empty (the client reads only the
+/// keys — voice/moderator flags are out of scope for this serializer). The
+/// `session-id` / `from_group` routing members are **not** emitted: the
+/// client's HTTP glue stamps those onto the reply itself.
+#[must_use]
+pub fn chat_session_roster_to_llsd(participants: &[AgentKey]) -> Llsd {
+    let agent_info = participants
+        .iter()
+        .map(|agent| (agent.uuid().to_string(), llsd_map(Vec::new())))
+        .collect();
+    llsd_map(vec![("agent_info", Llsd::Map(agent_info))])
+}
+
+/// Decodes a `ChatSessionRequest` `"fetch history"` reply into the session's
+/// server-side backlog, oldest-first as the server sends it. Accepts either the
+/// bare LLSD array the wire carries or the runtime's routing wrapper (the array
+/// under a `history` member — see
+/// [`CHAT_SESSION_FETCH_HISTORY_TAG`](crate::CHAT_SESSION_FETCH_HISTORY_TAG)).
+/// Each record is a map `{ from, from_id, message, num, time }` (Firestorm
+/// `chatterBoxHistoryCoro`, `llimview.cpp:835`); the `num` index is ignored
+/// (order is positional) and `time` may arrive as an integer **or a real** —
+/// both decode ([`epoch_member`]). Non-map records are skipped; a non-array
+/// body decodes to an empty backlog.
+pub(crate) fn session_history_from_llsd(body: &Llsd) -> Vec<ServerHistoryMessage> {
+    let records = body
+        .as_array()
+        .or_else(|| body.get("history").and_then(Llsd::as_array))
+        .unwrap_or_default();
+    records
+        .iter()
+        .filter_map(session_history_message_from_record)
+        .collect()
+}
+
+/// Decodes one `fetch history` record map into a [`ServerHistoryMessage`];
+/// returns `None` for a non-map element.
+fn session_history_message_from_record(record: &Llsd) -> Option<ServerHistoryMessage> {
+    if !matches!(record, Llsd::Map(_)) {
+        return None;
+    }
+    Some(ServerHistoryMessage {
+        sender: AgentKey::from(uuid_member_lenient(record, "from_id")),
+        sender_name: string_member(record, "from"),
+        text: string_member(record, "message"),
+        timestamp: epoch_member(record, "time"),
+    })
+}
+
+/// Serializes a session's server-side backlog as a `ChatSessionRequest`
+/// `"fetch history"` reply body — the inverse of `session_history_from_llsd`,
+/// for the server side of the cap. Emits the bare LLSD array the wire carries
+/// (the `history` wrapper is the client runtime's routing envelope, not a wire
+/// shape), oldest-first in the given order. Each record is
+/// `{ from, from_id, message, num, time }`; `num` is the positional index and
+/// `time` is emitted only for a message with a known timestamp (the parser's
+/// `epoch_member` decodes an absent member to `None`).
+#[must_use]
+pub fn session_history_to_llsd(history: &[ServerHistoryMessage]) -> Llsd {
+    let records = history
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let mut entries = vec![
+                ("from", Llsd::String(message.sender_name.clone())),
+                ("from_id", Llsd::Uuid(message.sender.uuid())),
+                ("message", Llsd::String(message.text.clone())),
+                (
+                    "num",
+                    Llsd::Integer(i32::try_from(index).unwrap_or(i32::MAX)),
+                ),
+            ];
+            if let Some(timestamp) = message.timestamp {
+                entries.push(("time", u32_to_llsd(timestamp)));
+            }
+            llsd_map(entries)
+        })
+        .collect();
+    Llsd::Array(records)
+}
+
+/// Reads a Unix-epoch map member that Second Life sends as an LLSD integer
+/// **or real** (the `fetch history` `time` field arrives as `r1.66501e+09`;
+/// the reference reads it with `.asInteger()`, `llimview.cpp:836`). Absent,
+/// zero, negative, or non-finite values decode to `None`.
+fn epoch_member(map: &Llsd, key: &str) -> Option<u32> {
+    let value = map.get(key)?;
+    let seconds = match value.as_i32() {
+        Some(int) => u32::try_from(int).ok()?,
+        None => {
+            let real = value.as_f64()?;
+            if !real.is_finite() || real < 0.0 || real > f64::from(u32::MAX) {
+                return None;
+            }
+            epoch_f64_to_u32(real)
+        }
+    };
+    crate::types::optional_u32_from_wire(seconds)
+}
+
+/// Narrows a finite, range-checked (`0.0..=u32::MAX`) epoch real to the `u32`
+/// seconds value it encodes. The caller ([`epoch_member`]) has already done the
+/// range guard, so the truncation is exact for any epoch the grid can send.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a fetch-history epoch is a whole-second u32 value widened to an LLSD real; \
+              the caller range-checks before narrowing"
+)]
+const fn epoch_f64_to_u32(seconds: f64) -> u32 {
+    seconds as u32
 }
 
 /// Reads a non-empty string from an LLSD map member, or `None` when the member is
@@ -3313,6 +3582,38 @@ pub(crate) fn agent_list_voice_updates_from_llsd(
         })
         .collect();
     Some((session_id, members))
+}
+
+/// Serializes per-agent voice-membership updates as a
+/// `ChatterBoxSessionAgentListUpdates` CAPS event body — the inverse of
+/// `agent_list_voice_updates_from_llsd`, for the server side of the event
+/// queue. Each `(agent, in_voice_now)` pair becomes an `agent_updates` entry
+/// keyed by the agent uuid: `true` emits a `transition` of `"ENTER"` with
+/// `info.can_voice_chat` `true`, `false` emits `"LEAVE"` with `false` — exactly
+/// the two shapes the parser's `!leaving && can_voice` fold decodes back to the
+/// input flags.
+#[must_use]
+pub fn agent_list_voice_updates_to_llsd(session_id: Uuid, updates: &[(AgentKey, bool)]) -> Llsd {
+    let agent_updates = updates
+        .iter()
+        .map(|&(agent, in_voice)| {
+            let transition = if in_voice { "ENTER" } else { "LEAVE" };
+            (
+                agent.uuid().to_string(),
+                llsd_map(vec![
+                    ("transition", Llsd::String(transition.to_owned())),
+                    (
+                        "info",
+                        llsd_map(vec![("can_voice_chat", Llsd::Boolean(in_voice))]),
+                    ),
+                ]),
+            )
+        })
+        .collect();
+    llsd_map(vec![
+        ("session_id", Llsd::Uuid(session_id)),
+        ("agent_updates", Llsd::Map(agent_updates)),
+    ])
 }
 
 /// Reads a region-local position from an LLSD map's `position` member, encoded
@@ -5070,19 +5371,23 @@ mod caps_serializer_tests {
     use crate::types::LandArea;
     use sl_wire::Direction;
 
+    use super::ServerHistoryMessage;
     use super::{
-        CapsTeleportFinish, ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
+        CapsTeleportFinish, agent_list_voice_updates_from_llsd, agent_list_voice_updates_to_llsd,
+        ais_inventory_update_from_llsd, ais_inventory_update_to_llsd,
         ais_updated_category_versions, bulk_update_inventory_from_llsd,
-        bulk_update_inventory_to_llsd, chatterbox_invitation_from_llsd,
-        chatterbox_invitation_to_llsd, created_category_from_llsd, created_category_to_llsd,
-        crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
+        bulk_update_inventory_to_llsd, chat_session_request_body, chat_session_request_from_llsd,
+        chat_session_roster_from_llsd, chat_session_roster_to_llsd,
+        chatterbox_invitation_from_llsd, chatterbox_invitation_to_llsd, created_category_from_llsd,
+        created_category_to_llsd, crossed_region_from_caps_llsd, crossed_region_to_caps_llsd,
         enable_simulator_from_caps_llsd, enable_simulator_to_caps_llsd,
         establish_agent_communication_from_llsd, establish_agent_communication_to_llsd,
         group_members_from_caps_llsd, group_members_to_caps_llsd, group_memberships_from_caps_llsd,
         group_memberships_to_caps_llsd, inventory_descendents_from_llsd,
         inventory_descendents_to_llsd, offline_messages_from_llsd, offline_messages_to_llsd,
         parcel_info_from_llsd, parcel_info_to_llsd, server_appearance_update_from_llsd,
-        server_appearance_update_to_llsd, teleport_finish_from_llsd, teleport_finish_to_llsd,
+        server_appearance_update_to_llsd, session_history_from_llsd, session_history_to_llsd,
+        teleport_finish_from_llsd, teleport_finish_to_llsd,
     };
     use crate::types::{
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
@@ -5121,6 +5426,99 @@ mod caps_serializer_tests {
             super::parse_u32_field("f", "-1"),
             Err(sl_wire::WireError::InvalidScalar { .. })
         ));
+    }
+
+    /// The `fetch history` reply decoder: a bare oldest-first array of record
+    /// maps decodes in order, and the `time` epoch decodes whether the grid
+    /// sends it as an LLSD integer or — as Second Life actually does
+    /// (`llimview.cpp:835`) — as a real. Non-map entries are skipped, a
+    /// zero / negative time is the "absent" sentinel, and field order is
+    /// preserved (oldest-first, matching the ring's orientation).
+    #[test]
+    fn session_history_decodes_int_and_real_time() {
+        let body = Llsd::Array(vec![
+            super::llsd_map(vec![
+                ("from", Llsd::String("First Speaker".to_owned())),
+                ("from_id", Llsd::Uuid(Uuid::from_u128(0xA1))),
+                ("message", Llsd::String("hello".to_owned())),
+                ("num", Llsd::Integer(1)),
+                ("time", Llsd::Integer(1_700_000_500)),
+            ]),
+            super::llsd_map(vec![
+                ("from", Llsd::String("Second Speaker".to_owned())),
+                ("from_id", Llsd::Uuid(Uuid::from_u128(0xA2))),
+                ("message", Llsd::String("world".to_owned())),
+                ("num", Llsd::Integer(2)),
+                ("time", Llsd::Real(1_700_000_600.0)),
+            ]),
+            // A non-map element is skipped, not an error.
+            Llsd::Integer(7),
+            super::llsd_map(vec![
+                ("from", Llsd::String("Third Speaker".to_owned())),
+                ("from_id", Llsd::Uuid(Uuid::from_u128(0xA3))),
+                ("message", Llsd::String("no time".to_owned())),
+                ("time", Llsd::Integer(0)),
+            ]),
+        ]);
+        assert_eq!(
+            super::session_history_from_llsd(&body),
+            vec![
+                super::ServerHistoryMessage {
+                    sender: AgentKey::from(Uuid::from_u128(0xA1)),
+                    sender_name: "First Speaker".to_owned(),
+                    text: "hello".to_owned(),
+                    timestamp: Some(1_700_000_500),
+                },
+                super::ServerHistoryMessage {
+                    sender: AgentKey::from(Uuid::from_u128(0xA2)),
+                    sender_name: "Second Speaker".to_owned(),
+                    text: "world".to_owned(),
+                    timestamp: Some(1_700_000_600),
+                },
+                super::ServerHistoryMessage {
+                    sender: AgentKey::from(Uuid::from_u128(0xA3)),
+                    sender_name: "Third Speaker".to_owned(),
+                    text: "no time".to_owned(),
+                    timestamp: None,
+                },
+            ]
+        );
+    }
+
+    /// A non-array `fetch history` body decodes to an empty backlog (lenient,
+    /// like the other CAPS decoders), and the runtime's routing wrapper — the
+    /// array under a `history` member beside the stamped session identity — is
+    /// accepted transparently.
+    #[test]
+    fn session_history_accepts_wrapper_and_rejects_non_array() {
+        assert_eq!(
+            super::session_history_from_llsd(&Llsd::Boolean(true)),
+            Vec::new()
+        );
+        let wrapped = super::llsd_map(vec![
+            (
+                "history",
+                Llsd::Array(vec![super::llsd_map(vec![
+                    ("from", Llsd::String("Speaker".to_owned())),
+                    ("from_id", Llsd::Uuid(Uuid::from_u128(0xB1))),
+                    ("message", Llsd::String("wrapped".to_owned())),
+                    ("time", Llsd::Real(1.665_01e9)),
+                ])]),
+            ),
+            ("session-id", Llsd::Uuid(Uuid::from_u128(0xB2))),
+            ("from_group", Llsd::Boolean(true)),
+        ]);
+        // `r1.66501e+09` truncates to whole seconds, as the reference's
+        // `.asInteger()` read does.
+        assert_eq!(
+            super::session_history_from_llsd(&wrapped),
+            vec![super::ServerHistoryMessage {
+                sender: AgentKey::from(Uuid::from_u128(0xB1)),
+                sender_name: "Speaker".to_owned(),
+                text: "wrapped".to_owned(),
+                timestamp: Some(1_665_010_000),
+            }]
+        );
     }
 
     /// A mute-list line with an unparsable UUID or flags is a hard error rather
@@ -5242,6 +5640,88 @@ mod caps_serializer_tests {
         assert_eq!(note.inv_type, crate::types::InventoryType::Notecard);
         assert_eq!(note.name, "Readme");
         assert_eq!(note.description, "a note");
+        Ok(())
+    }
+
+    /// [`build_task_inventory`] writes the exact OpenSim
+    /// `RequestInventoryFile` listing shape — folder header included — and
+    /// [`parse_task_inventory`] reads it back item-for-item, covering a
+    /// redacted (`None`) asset id, a group-owned item, and a non-default sale
+    /// block: the server side serves listings the client parser accepts
+    /// verbatim.
+    #[test]
+    fn build_task_inventory_round_trips() -> Result<(), sl_wire::WireError> {
+        use crate::asset_keys::AssetKey;
+        use crate::types::{AssetType, InventoryType, SaleType, TaskInventoryItem};
+        use sl_types::key::{GroupKey, OwnerKey};
+
+        let prim = ObjectKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222));
+        let creator = AgentKey::from(Uuid::from_u128(0x4444_4444_4444_4444_4444_4444_4444_4444));
+        let group = GroupKey::from(Uuid::from_u128(0x6666_6666_6666_6666_6666_6666_6666_6666));
+        let script = TaskInventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(0x3333_3333_3333_3333_3333_3333_3333_3333)),
+            parent_task: prim,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x7fff_ffff),
+                owner: Permissions::from_bits(0x7fff_ffff),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0008_e000),
+            },
+            creator_id: creator,
+            last_owner_id: creator,
+            owner: OwnerKey::Agent(creator),
+            group: None,
+            group_owned: false,
+            asset_id: Some(AssetKey::from(Uuid::from_u128(
+                0x5555_5555_5555_5555_5555_5555_5555_5555,
+            ))),
+            asset_type: AssetType::ScriptText,
+            inv_type: InventoryType::Script,
+            flags: 0,
+            sale_type: SaleType::Copy,
+            sale_price: LindenAmount(25),
+            name: "Hello World Script".to_owned(),
+            description: String::new(),
+            creation_date: 1_700_000_000,
+        };
+        let note = TaskInventoryItem {
+            item_id: InventoryKey::from(Uuid::from_u128(0x7777_7777_7777_7777_7777_7777_7777_7777)),
+            parent_task: prim,
+            permissions: Permissions5 {
+                base: Permissions::from_bits(0x0007_ffff),
+                owner: Permissions::from_bits(0x0007_ffff),
+                group: Permissions::from_bits(0),
+                everyone: Permissions::from_bits(0),
+                next_owner: Permissions::from_bits(0x0007_ffff),
+            },
+            creator_id: creator,
+            last_owner_id: creator,
+            owner: OwnerKey::Group(group),
+            group: Some(group),
+            group_owned: true,
+            asset_id: None,
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            flags: 0,
+            sale_type: SaleType::NotForSale,
+            sale_price: LindenAmount(0),
+            name: "Readme".to_owned(),
+            description: "a note".to_owned(),
+            creation_date: 1_700_000_001,
+        };
+
+        let listing = super::build_task_inventory(prim, &[script.clone(), note.clone()]);
+        // The folder header is the OpenSim shape: the holding prim as the
+        // folder id, a nil parent, the `Contents` category.
+        let prim_uuid = prim.uuid();
+        assert!(listing.starts_with(&format!(
+            "\tinv_object\t0\n\t{{\n\t\tobj_id\t{prim_uuid}\n\
+             \t\tparent_id\t00000000-0000-0000-0000-000000000000\n\
+             \t\ttype\tcategory\n\t\tname\tContents|\n\t}}\n"
+        )));
+        let parsed = super::parse_task_inventory(listing.as_bytes())?;
+        assert_eq!(parsed, vec![script, note]);
         Ok(())
     }
 
@@ -5547,6 +6027,75 @@ mod caps_serializer_tests {
             chatterbox_invitation_from_llsd(&chatterbox_invitation_to_llsd(&event)),
             Some(event)
         );
+    }
+
+    #[test]
+    fn chat_session_request_round_trips() -> Result<(), String> {
+        let session_id = Uuid::from_u128(0xe1);
+        for method in [
+            crate::CHAT_SESSION_ACCEPT,
+            crate::CHAT_SESSION_DECLINE,
+            crate::CHAT_SESSION_DECLINE_P2P_VOICE,
+            crate::CHAT_SESSION_FETCH_HISTORY,
+        ] {
+            let body = sl_wire::parse_llsd_xml(&chat_session_request_body(method, session_id))
+                .map_err(|error| error.to_string())?;
+            assert_eq!(
+                chat_session_request_from_llsd(&body),
+                Some((method.to_owned(), session_id))
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn chat_session_roster_round_trips() {
+        let roster = vec![
+            AgentKey::from(Uuid::from_u128(0xe2)),
+            AgentKey::from(Uuid::from_u128(0xe3)),
+        ];
+        let mut parsed = chat_session_roster_from_llsd(&chat_session_roster_to_llsd(&roster));
+        parsed.sort();
+        assert_eq!(parsed, roster);
+    }
+
+    #[test]
+    fn session_history_round_trips() {
+        let history = vec![
+            ServerHistoryMessage {
+                sender: AgentKey::from(Uuid::from_u128(0xe4)),
+                sender_name: "Speaker One".to_owned(),
+                text: "first message".to_owned(),
+                timestamp: Some(1_700_002_000),
+            },
+            ServerHistoryMessage {
+                sender: AgentKey::from(Uuid::from_u128(0xe5)),
+                sender_name: "Speaker Two".to_owned(),
+                text: "second, undated".to_owned(),
+                timestamp: None,
+            },
+        ];
+        assert_eq!(
+            session_history_from_llsd(&session_history_to_llsd(&history)),
+            history
+        );
+    }
+
+    #[test]
+    fn agent_list_voice_updates_round_trip() -> Result<(), String> {
+        let session_id = Uuid::from_u128(0xe6);
+        let updates = vec![
+            (AgentKey::from(Uuid::from_u128(0xe7)), true),
+            (AgentKey::from(Uuid::from_u128(0xe8)), false),
+        ];
+        let (parsed_session, mut parsed_updates) = agent_list_voice_updates_from_llsd(
+            &agent_list_voice_updates_to_llsd(session_id, &updates),
+        )
+        .ok_or_else(|| "an agent_updates map decodes".to_owned())?;
+        parsed_updates.sort();
+        assert_eq!(parsed_session, session_id);
+        assert_eq!(parsed_updates, updates);
+        Ok(())
     }
 
     #[test]

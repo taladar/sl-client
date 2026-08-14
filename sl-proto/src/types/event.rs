@@ -27,6 +27,9 @@ use super::{
     SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
     TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
+use crate::marketplace::{
+    Listing, ListingId, MarketplaceApiError, MarketplaceOperation, MerchantStatus,
+};
 use sl_types::key::{
     AgentKey, ExperienceKey, FriendKey, GroupKey, InventoryFolderKey, InventoryKey, ObjectKey,
     ParcelKey, TextureKey,
@@ -53,11 +56,11 @@ use sl_wire::SimulatorFeatures;
 use sl_wire::VoiceAccountInfo;
 use uuid::Uuid;
 
-use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, XferId};
+use crate::bookkeeping_ids::{InventoryCallbackId, TransactionId, TransferId, XferId};
 use crate::scoped_id::{CircuitId, ScopedObjectId, ScopedParcelId};
 use crate::{
     ChatSessionInfo, ChatSessionKind, FriendPresence, MessageCursor, NearbyHistoryLine,
-    SessionMessage,
+    ServerHistoryMessage, SessionMessage,
 };
 
 /// A high-level event surfaced to the driver/application.
@@ -363,8 +366,13 @@ pub enum Event {
         teleport_flags: u32,
     },
     /// An intra-region teleport completed (`TeleportLocal`); the circuit did not
-    /// change, so no [`Event::RegionChanged`] follows.
-    TeleportLocal,
+    /// change, so no [`Event::RegionChanged`] follows. Carries the simulator's
+    /// authoritative landing position, which can differ from the requested one
+    /// when parcel routing (a landing point / telehub) redirects the teleport.
+    TeleportLocal {
+        /// The region-local position the agent actually landed at.
+        position: RegionCoordinates,
+    },
     /// A teleport failed (`TeleportFailed` or a teleport timeout); the session
     /// remains connected to the current region.
     TeleportFailed {
@@ -733,6 +741,46 @@ pub enum Event {
         /// error, per the reference viewer).
         result: i32,
     },
+    /// A task-inventory item's asset arrived over the legacy UDP Transfer path
+    /// (`TransferInfo` + `TransferPacket` stream), in reply to a
+    /// [`Session::fetch_task_item_asset`](crate::Session::fetch_task_item_asset)
+    /// — how a script or notecard body is read out of a prim's contents (this
+    /// source type has no HTTP capability on either grid).
+    TaskItemAssetReceived {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The prim whose task inventory holds the item.
+        task: ObjectKey,
+        /// The task-inventory item whose asset this is.
+        item: InventoryKey,
+        /// The asset type the request named.
+        asset_type: AssetType,
+        /// The complete asset bytes.
+        data: Vec<u8>,
+    },
+    /// The estate covenant notecard's asset arrived over the legacy UDP
+    /// Transfer path, in reply to a
+    /// [`Session::fetch_estate_covenant_asset`](crate::Session::fetch_estate_covenant_asset)
+    /// (estate assets have no HTTP capability on either grid).
+    EstateCovenantAssetReceived {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The complete notecard asset bytes.
+        data: Vec<u8>,
+    },
+    /// A legacy UDP asset Transfer failed: the `TransferInfo` reported a
+    /// non-`Ok` status (e.g. [`UnknownSource`](TransferStatus::UnknownSource)
+    /// for a missing asset, or
+    /// [`InsufficientPermissions`](TransferStatus::InsufficientPermissions)),
+    /// so no asset bytes will arrive. Distinct from
+    /// [`Event::AssetTransferFailed`](Event::AssetTransferFailed), which
+    /// reports the modern HTTP fetch path.
+    TransferFailed {
+        /// The transfer id the fetch returned.
+        transfer_id: TransferId,
+        /// The failure status the simulator reported.
+        status: TransferStatus,
+    },
     /// The agent's own account contact preferences (`UserInfoReply`), in reply
     /// to a `UserInfoRequest`.
     UserInfo(UserInfo),
@@ -1069,6 +1117,25 @@ pub enum Event {
         /// A cursor for the next (older) page, or `None` at the oldest line on
         /// disk.
         prev: Option<MessageCursor>,
+    },
+    /// A group / conference session's **server-side recent-message backlog**,
+    /// decoded from a `ChatSessionRequest` `fetch history` reply (auto-issued
+    /// when the session is joined, or requested explicitly via
+    /// [`Command::FetchSessionHistory`](crate::Command::FetchSessionHistory)).
+    /// `messages` is oldest-first and already de-duplicated against the live
+    /// ring (the message that triggered a lazy-open fetch arrives both live and
+    /// in the backlog) — exactly the buffer
+    /// [`Session::server_history`](crate::Session::server_history) then holds.
+    /// Emitted only when the de-duplicated backlog is non-empty. Server history
+    /// is what was said *before* this client was listening; it is **never
+    /// written to the on-disk transcript** (transcript = what this client heard
+    /// live). Second-Life only — stock OpenSim has no `ChatSessionRequest`
+    /// capability, so this event never fires there.
+    SessionServerHistory {
+        /// Which chat session the backlog belongs to.
+        kind: ChatSessionKind,
+        /// The backlog, oldest-first, de-duplicated against the live ring.
+        messages: Vec<ServerHistoryMessage>,
     },
     /// The buddy cache with each friend's online flag, surfaced in reply to a
     /// [`Command::QueryFriends`](crate::Command::QueryFriends) and **synthesized
@@ -1815,6 +1882,51 @@ pub enum Event {
     /// OpenSim's extended per-region settings/limits (`OpenRegionInfo`, pushed
     /// over the CAPS event queue). OpenSim-only — Second Life never sends it.
     OpenRegionInfo(Box<OpenRegionInfo>),
+    /// The reply to the SLM `GET /merchant` probe (the runtime
+    /// `MarketplaceMerchantStatus` command): whether the agent is a
+    /// marketplace merchant. Second Life only — OpenSim serves no
+    /// `DirectDelivery` capability, so there the runtimes answer with
+    /// [`MerchantStatus::ConnectionFailure`].
+    MarketplaceMerchantStatus(MerchantStatus),
+    /// The reply to an SLM `GET /listings` (the runtime
+    /// `MarketplaceListings` command): all of the agent's marketplace
+    /// listings. SL-only.
+    MarketplaceListings(Vec<Listing>),
+    /// The reply to an SLM `GET /listing/<id>` (the runtime
+    /// `MarketplaceListing` command): the queried listing (the wire
+    /// envelope is an array even for a single listing). SL-only.
+    MarketplaceListing(Vec<Listing>),
+    /// The reply to an SLM `POST /listings` (the runtime
+    /// `MarketplaceCreateListing` command): the created listing(s).
+    /// SL-only.
+    MarketplaceListingCreated(Vec<Listing>),
+    /// The reply to an SLM `PUT /listing/<id>` (the runtime
+    /// `MarketplaceUpdateListing` command): the listing(s) after the
+    /// update. SL-only.
+    MarketplaceListingUpdated(Vec<Listing>),
+    /// The reply to an SLM `PUT /associate_inventory/<id>` (the runtime
+    /// `MarketplaceAssociateListing` command): the listing(s) after the
+    /// association. SL-only.
+    MarketplaceInventoryAssociated(Vec<Listing>),
+    /// The reply to an SLM `DELETE /listing/<id>` (the runtime
+    /// `MarketplaceDeleteListing` command): the ids of the deleted
+    /// (archived) listings. SL-only.
+    MarketplaceListingDeleted(Vec<ListingId>),
+    /// An SLM `GET /listing/<id>` answered HTTP 404: the listing no
+    /// longer exists on the marketplace and a client mirroring it
+    /// should drop its local record (reference-viewer semantics; not
+    /// an error). SL-only.
+    MarketplaceListingGone(ListingId),
+    /// An SLM request failed: the service answered with an error
+    /// status, the reply body did not decode, or the request never
+    /// completed (including the missing-`DirectDelivery`-capability
+    /// case, e.g. on OpenSim). SL-only.
+    MarketplaceError {
+        /// The route the failed request belonged to.
+        operation: MarketplaceOperation,
+        /// The typed error detail.
+        error: MarketplaceApiError,
+    },
     /// The session logged out cleanly (a `LogoutReply` was received).
     LoggedOut,
     /// The session disconnected for the given reason.

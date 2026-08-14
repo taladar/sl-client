@@ -62,6 +62,36 @@ offer/accept handshake correlated by a `TransactionId`:
 Calling cards are largely a Second Life feature; OpenSim does not surface
 calling-card offers.
 
+## The server side
+
+`SimSession` mirrors the friendship and presence surface from the simulator's
+seat, but deliberately keeps **no friendship state**: the buddy store and
+presence are grid-level services (OpenSim's Friends module — a region only
+relays), and whether an offer succeeds is decided across *two* clients'
+sessions, which a single sans-I/O session cannot see. As with teleports, the
+driver sequences the outcome; the session provides the typed decode/send
+surface.
+
+The relay topology is one `SimSession` per client. A friendship offer arrives
+on the offerer's session as an ordinary `ServerEvent::InstantMessage` with
+the friendship-offer dialog; the driver delivers it to the recipient via
+`SimSession::send_instant_message` (the general IM relay primitive). The
+recipient's reply decodes as `ServerEvent::FriendshipAccepted` (echoing the
+offer's transaction id, plus the accepter's calling-card folder) or
+`ServerEvent::FriendshipDeclined`; the driver relays the outcome back to the
+offerer as an IM with the accepted (39) or declined (40) dialog — the
+declined byte is "deprecated" only in the reference viewer's constant name;
+both grids still send it.
+
+The remaining pushes are canned sends the driver invokes as its grid-level
+services decide: `send_online_notification` / `send_offline_notification`
+(presence), `send_change_user_rights` (whose `AgentData` id tells the client
+whether it sees the echo of its own grant or a friend's change — the
+direction rule on `Event::FriendRightsChanged`), and the existing
+`send_terminate_friendship`. A client's own `GrantUserRights` /
+`TerminateFriendship` requests decode as `ServerEvent::UserRightsGranted` /
+`FriendshipTerminationRequested`.
+
 ---
 
 > **In this codebase**
@@ -85,3 +115,12 @@ calling-card offers.
 >   client→server calling-card commands surface as
 >   `ServerEvent::{CallingCardOffered, CallingCardAccepted, CallingCardDeclined}`
 >   (`sl-proto/src/sim_session.rs`).
+> - The friendship/presence mirror adds `SimSession::send_instant_message`,
+>   `send_online_notification`, `send_offline_notification`, and
+>   `send_change_user_rights` (entries are `UserRightsEntry`), plus the
+>   decodes `ServerEvent::{FriendshipAccepted, FriendshipDeclined,
+>   FriendshipTerminationRequested, UserRightsGranted}`. The decline-relay
+>   dialog is `ImDialog::FriendshipDeclined` (byte 40). The two-avatar
+>   loopback proof (one `SimSession` per client, the test as the relaying
+>   driver) is the `friendship_*` tests and the `setup_pair` harness in
+>   `sl-proto/tests/sim_session.rs`.

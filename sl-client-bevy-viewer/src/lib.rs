@@ -599,6 +599,14 @@ struct Options {
     /// Has no effect off Second Life (OpenSim sends no OpenID token).
     #[clap(long)]
     no_web_auth: bool,
+    /// Do not auto-fetch a joined group / conference session's server-side
+    /// chat backlog (`chat-group-history-server-side`): the Conversations
+    /// floater then shows no muted-green server-history band, only local
+    /// recall and live lines. Has no effect off Second Life (OpenSim has no
+    /// `ChatSessionRequest` capability, so nothing is fetched there either
+    /// way).
+    #[clap(long)]
+    no_group_chat_history: bool,
     /// Render a captured avatar-state bundle **offline** (no login, no grid):
     /// `--replay <dir>` where `<dir>` is a bundle written by the capture
     /// (**Ctrl+Alt+D** with `SL_VIEWER_DUMP_DIR` set). The viewer rebuilds the
@@ -899,6 +907,7 @@ fn run_session(
     camera: CameraStartup,
     skin: SkinRuntime,
     media: MediaRuntime,
+    fetch_server_chat_history: bool,
     replay: Option<crate::avatar_replay::ReplayConfig>,
 ) -> LoginOutcome {
     // Offline (avatar-state replay) mode: the plugin registers its event/resource
@@ -1012,6 +1021,7 @@ fn run_session(
             cache_library: true,
         },
         background_inventory_fetch: false,
+        fetch_server_chat_history,
         offline,
     })
     // The viewer UI scaffold (viewer-ui-widget-scaffold): the `bevy_ui` +
@@ -2549,6 +2559,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 video: !options.disable_video_media,
                 web_auth: !options.no_web_auth,
             },
+            !options.no_group_chat_history,
             None,
         );
         if let Some(challenge) = outcome.challenge {
@@ -2678,6 +2689,9 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             video: false,
             web_auth: false,
         },
+        // Offline there is no session thread, so the flag is inert; false keeps
+        // the no-network intent explicit.
+        false,
         Some(config),
     );
     info!("replay ended");

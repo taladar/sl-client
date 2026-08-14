@@ -13,22 +13,23 @@ use std::collections::{BTreeSet, HashMap};
 use sl_proto::{
     CAP_ACCEPT_GROUP_INVITE, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
-    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_USER_INFO, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, ChatSessionKind, Event as SessionEvent,
-    INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, MessageCursor, RECV_BUFFER_SIZE,
-    SelectedCostKind, Session, SessionMessage, UserInfoUpdate, ais_category_children_fetch_url,
-    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_DECLINE_GROUP_INVITE, CAP_DIRECT_DELIVERY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_EXPERIENCES, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CHAT_SESSION_FETCH_HISTORY, Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd,
+    LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage, UserInfoUpdate,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    ais_create_category_url, ais_item_url, associate_inventory_request,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
     build_create_inventory_category_request, build_get_object_cost_request,
@@ -42,9 +43,10 @@ use sl_proto::{
     build_update_script_agent_request, build_update_script_task_request,
     build_update_task_item_asset_request, build_upload_baked_texture_request,
     build_user_info_update, build_voice_signaling_request, chat_session_request_body,
-    copy_inventory_from_notecard_body, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    group_invite_response_body, parse_login_response,
+    copy_inventory_from_notecard_body, create_listing_request, delete_listing_request,
+    display_names_query, experience_id_query, experience_info_query, find_experience_query,
+    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
+    listings_request, merchant_status_request, parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -52,33 +54,35 @@ use sl_proto::{
 // Bevy's `Event` derive.
 pub use sl_proto::{
     ActiveGroup, AgentKey, AgentOrObjectKey, AgentPreferences, AnimatedObjects, AnimationKey,
-    AnyMessage, AssetKey, AssetUpdateLocation, AttachmentMode, AttachmentPoint, AvatarAppearance,
-    AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName, AvatarPick,
-    AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig, ChatMessage,
-    ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child, CircuitCode, CircuitId,
-    ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, ClickAction,
-    ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command, ControlFlags,
-    ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination, DetachOrder,
-    Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
-    DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate,
-    EventId, EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
-    ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
-    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
-    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
-    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
-    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
-    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
-    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
-    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
-    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
-    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandSearchType,
-    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance,
-    LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams, LoginRejectKind,
-    LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MfaChallenge, MoneyBalance,
+    AnyMessage, AssetKey, AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint,
+    AvatarAppearance, AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarName,
+    AvatarPick, AvatarProperties, Camera, CameraError, ChatAudible, ChatChannel, ChatLogConfig,
+    ChatMessage, ChatSessionKind, ChatSource, ChatSourceType, ChatType, ChatTypeNotAVolume, Child,
+    CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate,
+    ClickAction, ClientDirectories, ClockStyle, CoarseLocation, Color, ColorAlpha, Command,
+    ControlFlags, ConversationKind, CreateGroupParams, CreateListing, DayCycle, DayCycleFrame,
+    DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult, DirEventResult, DirFindFlags,
+    DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult, Direction, DirectoryVisibility,
+    DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentAsset,
+    EnvironmentSettings, EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateFlags,
+    EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceInfo, ExperienceKey,
+    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FaceMaterialPut,
+    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
+    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
+    GridCoordinates, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
+    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
+    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
+    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
+    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
+    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
+    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
+    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
+    LindenBalance, Listing, ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure,
+    LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
+    MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
+    MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
+    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
@@ -99,17 +103,17 @@ pub use sl_proto::{
     SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError, ScriptControl,
     ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest, ScriptPermissions,
     ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey,
-    SequenceNumber, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
-    StartLocation, StartLocationParseError, SurfaceInfo, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TerrainLayerType, TerrainPatch, TextureAnimation, TextureEntry,
-    TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError, TimestampFormat,
-    TransactionId, TransferId, Transmit, UpdatableAssetType, UpdateGroupInfoParams, UserInfo, Uuid,
-    Vector, ViewerEffect, ViewerEffectData, ViewerEffectType, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, avatar_texture,
-    azimuth_altitude_to_rotation, decode_particle_system, decode_texture_anim,
-    decode_texture_entry, encode_texture_entry, environment_asset_from_bytes, grid_to_handle,
-    group_powers, handle_to_global, handle_to_grid, particle_pattern, pcode, sim_access,
-    texture_anim_mode,
+    SequenceNumber, ServerHistoryMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings,
+    SoundFlags, SoundPreload, StartLocation, StartLocationParseError, StartLocationSlot,
+    SurfaceInfo, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerrainLayerType,
+    TerrainPatch, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
+    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
+    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, ViewerEffect,
+    ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
+    Wearable, WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation,
+    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
+    environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
+    particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
@@ -302,6 +306,7 @@ pub mod http_proxy;
 mod inventory;
 mod inventory_cache;
 mod lsl_syntax_cache;
+mod marketplace;
 mod materials;
 mod media;
 pub mod meshes;
@@ -358,8 +363,9 @@ use crate::chat_log::ChatLog;
 use crate::experiences::{run_experience_status, run_group_experiences};
 use crate::fetch::{run_asset_fetch, run_generic_asset_fetch, run_texture_fetch};
 use crate::http::{
-    run_caps_oneway, run_chat_session_request, run_delete_caps_llsd, run_fetch_lsl_syntax,
-    run_get_caps_llsd, run_land_resources, run_patch_caps_llsd, run_put_caps_llsd,
+    run_caps_oneway, run_chat_session_fetch_history, run_chat_session_request,
+    run_delete_caps_llsd, run_fetch_lsl_syntax, run_get_caps_llsd, run_land_resources,
+    run_patch_caps_llsd, run_put_caps_llsd,
 };
 use crate::inventory::{
     fetch_folder_contents, run_group_members_fetch, run_inventory_fetch,
@@ -367,6 +373,7 @@ use crate::inventory::{
 };
 use crate::inventory_cache::InventoryCache;
 use crate::lsl_syntax_cache::LslSyntaxCache;
+use crate::marketplace::dispatch_marketplace_request;
 use crate::materials::{
     run_modify_material_params, run_render_materials_fetch, run_set_render_materials,
 };
@@ -417,6 +424,13 @@ pub struct AccountDirsConfig {
 }
 
 /// The Bevy plugin that drives a sans-I/O [`Session`] from ECS systems.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "these are independent, orthogonal feature toggles — diagnostics, the inventory \
+              crawl, the server chat-backlog fetch, offline mode — that a consumer sets in any \
+              combination; each mirrors a bool-shaped Session/Client switch, so an enum per flag \
+              would only obscure plainly-named yes/no options"
+)]
 #[derive(Debug, Clone)]
 pub struct SlClientPlugin {
     /// The login parameters used to start the session.
@@ -454,6 +468,15 @@ pub struct SlClientPlugin {
     /// (`RequestFolderContents` / `FetchInventoryFolders`), so a consumer that
     /// ignores inventory pays nothing.
     pub background_inventory_fetch: bool,
+    /// Whether to auto-fetch a joined group / conference session's server-side
+    /// chat backlog (`ChatSessionRequest` `fetch history`; **on** matches the
+    /// reference viewer's `FetchGroupChatHistory` default). While enabled, the
+    /// driver POSTs one fetch per session that reaches joined — when the grid
+    /// serves the capability; stock OpenSim does not, so nothing is ever sent
+    /// there — and the backlog surfaces as
+    /// [`Event::SessionServerHistory`](sl_proto::Event::SessionServerHistory).
+    /// The explicit [`Command::FetchSessionHistory`] works regardless.
+    pub fetch_server_chat_history: bool,
     /// Run the plugin **offline**: register the same event/resource substrate
     /// ([`SlEvent`], [`SlCommand`], [`SlIdentity`], …) but never perform the
     /// XML-RPC login or open a circuit, so nothing touches the network. The
@@ -479,6 +502,7 @@ impl Plugin for SlClientPlugin {
                 account_dirs: self.account_dirs.clone(),
                 inventory_cache_config: self.inventory_cache_config,
                 background_inventory_fetch: self.background_inventory_fetch,
+                fetch_server_chat_history: self.fetch_server_chat_history,
                 offline: self.offline,
             })
             .init_resource::<SlIdentity>()
@@ -534,6 +558,11 @@ pub struct SlLoginRejected(pub LoginFailure);
 pub struct SlCommand(pub Command);
 
 /// The plugin configuration resource.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the resource mirror of `SlClientPlugin`'s independent feature toggles (see its \
+              matching expect)"
+)]
 #[derive(Resource, Debug)]
 struct SlConfig {
     /// The login parameters.
@@ -550,6 +579,9 @@ struct SlConfig {
     inventory_cache_config: InventoryCacheConfig,
     /// Whether the automatic background inventory crawl is enabled (default off).
     background_inventory_fetch: bool,
+    /// Whether the automatic server-side chat-backlog fetch is enabled (the
+    /// convention is on — see [`SlClientPlugin::fetch_server_chat_history`]).
+    fetch_server_chat_history: bool,
     /// Whether to run offline (skip login; feed the session synthetic events).
     offline: bool,
 }
@@ -696,6 +728,7 @@ fn start_login(mut commands: Commands, config: Res<SlConfig>) {
     let mut session = Session::new(config.params.clone());
     session.set_diagnostics(config.diagnostics);
     session.set_background_inventory_fetch(config.background_inventory_fetch);
+    session.set_fetch_server_chat_history(config.fetch_server_chat_history);
     let (command_tx, command_rx) = unbounded();
     let (outbound_tx, outbound_rx) = unbounded();
     let net_config = NetThreadConfig {
@@ -731,11 +764,7 @@ fn run_network_thread(
     commands: &Receiver<Command>,
     outbound: &Sender<NetOutbound>,
 ) {
-    let Some(request) = session.login_http_request() else {
-        return;
-    };
-    let body = perform_login(request.url.as_str(), &request.user_agent, request.body);
-    let Some(mut running) = login_phase(session, body, config, Instant::now(), outbound) else {
+    let Some(mut running) = login_phase(session, config, outbound) else {
         return;
     };
     // Sleep *inside* `recv_from`: a datagram wakes the tick immediately, and
@@ -854,21 +883,65 @@ fn send_disconnect(outbound: &Sender<NetOutbound>, reason: DisconnectReason) {
         .ok();
 }
 
-/// Handles the login response (on the network thread), building the
+/// The maximum number of login redirects (`login = "indeterminate"`) the
+/// login phase follows before giving up, protecting against a grid that
+/// redirects in a loop.
+const MAX_LOGIN_REDIRECTS: u32 = 5;
+
+/// Performs the blocking XML-RPC login — following bounded redirects — and
+/// handles the response (on the network thread), building the
 /// [`RunningSession`] on success; `None` ends the thread (a failure, an MFA
 /// challenge, or a retryable rejection — each surfaced over `outbound`).
 fn login_phase(
     mut session: Box<Session>,
-    body: Result<String, String>,
     config: &NetThreadConfig,
-    now: Instant,
     outbound: &Sender<NetOutbound>,
 ) -> Option<RunningSession> {
-    let Ok(body) = body else {
-        send_disconnect(outbound, DisconnectReason::ProtocolError);
-        return None;
+    let mut redirects: u32 = 0;
+    // A redirect response re-arms the session's pending login request at its
+    // `next_url` (see `Session::handle_login_response`), so the loop simply
+    // performs the request again until a terminal response arrives.
+    let response = loop {
+        let request = session.login_http_request()?;
+        let body = perform_login(request.url.as_str(), &request.user_agent, request.body);
+        let Ok(body) = body else {
+            send_disconnect(outbound, DisconnectReason::ProtocolError);
+            return None;
+        };
+        match parse_login_response(&body) {
+            Ok(LoginResponse::Redirect(redirect)) => {
+                if redirects >= MAX_LOGIN_REDIRECTS {
+                    send_disconnect(
+                        outbound,
+                        DisconnectReason::LoginFailed {
+                            reason: "indeterminate".to_owned(),
+                            message: format!(
+                                "login redirected more than {MAX_LOGIN_REDIRECTS} times \
+                                 (next: {})",
+                                redirect.next_url
+                            ),
+                        },
+                    );
+                    return None;
+                }
+                redirects = redirects.saturating_add(1);
+                tracing::info!(
+                    "login redirected to {} (hop {redirects})",
+                    redirect.next_url
+                );
+                if session
+                    .handle_login_response(LoginResponse::Redirect(redirect), Instant::now())
+                    .is_err()
+                {
+                    send_disconnect(outbound, DisconnectReason::ProtocolError);
+                    return None;
+                }
+            }
+            other => break other,
+        }
     };
-    match parse_login_response(&body) {
+    let now = Instant::now();
+    match response {
         Ok(LoginResponse::Success(success)) => {
             if session
                 .handle_login_response(LoginResponse::Success(success), now)
@@ -954,6 +1027,12 @@ fn login_phase(
                     },
                 );
             }
+            None
+        }
+        // The redirect loop above consumes every redirect before breaking, so
+        // one cannot reach this match; handle it defensively all the same.
+        Ok(LoginResponse::Redirect(_redirect)) => {
+            send_disconnect(outbound, DisconnectReason::ProtocolError);
             None
         }
         Err(_parse) => {
@@ -1228,6 +1307,32 @@ fn advance_running(
                         }
                     }
                 }
+            }
+        }
+
+        // Server-side chat backlog: when a group / conference session has
+        // reached joined and the `ChatSessionRequest` capability is known, POST
+        // one `fetch history` per newly joined session. Self-gating and
+        // once-per-session — `next_server_history_fetches` flips each returned
+        // session to requested and returns empty while the auto-fetch is
+        // disabled. On a grid without the capability (stock OpenSim) the gate
+        // never opens, so the fetch silently never fires. Mirrors the tokio run
+        // loop's sweep.
+        if let (Some(url), Some(own_agent)) = (
+            caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned(),
+            session.agent_id(),
+        ) {
+            for kind in session.next_server_history_fetches() {
+                let session_id = kind.canonical_session_id(own_agent);
+                let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_id);
+                let from_group = matches!(kind, ChatSessionKind::Group { .. });
+                let events_tx = caps.events_tx.clone();
+                let fetch_url = url.clone();
+                std::thread::spawn(move || {
+                    run_chat_session_fetch_history(
+                        &fetch_url, body, session_id, from_group, &events_tx,
+                    );
+                });
             }
         }
     }
@@ -2943,6 +3048,19 @@ fn advance_running(
             Command::FetchTaskInventory { target } => {
                 session.fetch_task_inventory(*target, now).ok();
             }
+            Command::FetchTaskItemAsset {
+                task,
+                item_id,
+                asset_id,
+                asset_type,
+            } => {
+                session
+                    .fetch_task_item_asset(*task, *item_id, *asset_id, *asset_type, now)
+                    .ok();
+            }
+            Command::FetchEstateCovenantAsset => {
+                session.fetch_estate_covenant_asset(now).ok();
+            }
             Command::RequestXfer { filename } => {
                 session.request_xfer(filename, now).ok();
             }
@@ -3713,6 +3831,32 @@ fn advance_running(
                     }
                 }
             }
+            Command::FetchSessionHistory { kind } => {
+                // Explicit server-backlog fetch, bypassing the auto-fetch gate.
+                // Only group / conference sessions have a server backlog; on a
+                // grid without the cap (stock OpenSim) there is nothing to POST
+                // to, so the command silently degrades. Mirrors the tokio arm.
+                if !matches!(kind, ChatSessionKind::Direct { .. })
+                    && let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref())
+                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+                {
+                    // Suppress a later duplicate auto-fetch of the same session.
+                    session.note_server_history_requested(*kind);
+                    let session_uuid = kind.canonical_session_id(own);
+                    let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
+                    let from_group = matches!(kind, ChatSessionKind::Group { .. });
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_chat_session_fetch_history(
+                            &url,
+                            body,
+                            session_uuid,
+                            from_group,
+                            &events_tx,
+                        );
+                    });
+                }
+            }
             Command::QueryChatSessions => {
                 // Local query: build the light session list and surface it on the
                 // event stream. (A bevy system may instead borrow the Session and
@@ -3959,6 +4103,76 @@ fn advance_running(
             }
             Command::ViewerStartAuction { parcel, snapshot } => {
                 session.viewer_start_auction(*parcel, *snapshot, now).ok();
+            }
+            Command::MarketplaceMerchantStatus => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::MerchantStatus,
+                        Ok(merchant_status_request()),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceListings => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::GetListings,
+                        Ok(listings_request()),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceListing(id) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::GetListing(*id),
+                        Ok(listing_request(*id)),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceCreateListing(payload) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::CreateListing,
+                        create_listing_request(payload),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceUpdateListing(payload) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::UpdateListing(payload.id),
+                        update_listing_request(payload),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceAssociateListing(payload) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::AssociateInventory(payload.id),
+                        associate_inventory_request(payload),
+                        &caps.asset_tx,
+                    );
+                }
+            }
+            Command::MarketplaceDeleteListing(id) => {
+                if let Some(caps) = caps.as_ref() {
+                    dispatch_marketplace_request(
+                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                        MarketplaceOperation::DeleteListing(*id),
+                        Ok(delete_listing_request(*id)),
+                        &caps.asset_tx,
+                    );
+                }
             }
             Command::Logout => session.initiate_logout(now),
         }

@@ -117,6 +117,59 @@ pub fn count_metric(base: &str) -> String {
     format!("{base}_count")
 }
 
+/// One round of the group-departure confirmation poll: how long to wait for
+/// either the `AgentDropGroup` or a refreshed membership list before
+/// re-requesting agent data (the overall wait is bounded by [`REPLY_TIMEOUT`]).
+const GROUP_DROP_POLL: Duration = Duration::from_secs(5);
+
+/// How long each group-creation attempt waits for a `CreateGroupReply` before
+/// re-sending with a fresh per-attempt name suffix.
+const GROUP_CREATE_ATTEMPT_WINDOW: Duration = Duration::from_secs(15);
+
+/// How many creation attempts before concluding the grid genuinely refuses.
+const GROUP_CREATE_ATTEMPTS: u32 = 3;
+
+/// Confirm `session`'s agent is no longer a member of `group_id`.
+///
+/// The membership-list confirmation differs per grid: OpenSim pushes an
+/// `AgentDropGroup` ([`Event::DroppedFromGroup`])
+/// after a leave or ejection, while Second Life sends no drop message for
+/// either — the reference viewer re-requests agent data
+/// (`sendAgentDataUpdateRequest`) and trusts the refreshed membership list.
+/// Accept whichever arrives first: watch for the drop while re-requesting
+/// ([`Command::RequestAgentDataUpdate`]) until the membership list no longer
+/// contains the group.
+///
+/// # Errors
+///
+/// Propagates send/wait failures; times out with [`TestFailure::Timeout`]
+/// when neither signal arrives within [`REPLY_TIMEOUT`].
+pub async fn confirm_group_departure(
+    session: &mut Session,
+    group_id: sl_client_tokio::GroupKey,
+) -> Result<(), TestFailure> {
+    let started = Instant::now();
+    loop {
+        session.send(Command::RequestAgentDataUpdate).await?;
+        match session
+            .wait_for(GROUP_DROP_POLL, |event| match event {
+                Event::DroppedFromGroup { group_id: dropped } if *dropped == group_id => Some(()),
+                Event::GroupMemberships(groups)
+                    if !groups.iter().any(|entry| entry.group_id == group_id) =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await
+        {
+            Ok(()) => return Ok(()),
+            Err(TestFailure::Timeout(_)) if started.elapsed() < REPLY_TIMEOUT => {}
+            Err(other) => return Err(other),
+        }
+    }
+}
+
 /// Where the group a membership/messaging case operates on came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GroupSource {
@@ -170,6 +223,12 @@ pub struct MembershipGroup {
 /// The returned group is one the **primary** owns or belongs to, so the primary
 /// can drive group traffic on it; a secondary then joins it.
 ///
+/// Keep `name` **between 4 and 35 characters** (the reference viewer's
+/// `DB_GROUP_NAME_MIN_LEN`/`DB_GROUP_NAME_STR_LEN`): Second Life's server
+/// silently discards a `CreateGroupRequest` whose name is over the limit — no
+/// `CreateGroupReply` at all, observed live on aditi — while OpenSim accepts
+/// any length. The cases use short `"slc <tag> <millis>"` names for this.
+///
 /// # Errors
 ///
 /// Returns [`TestFailure`] if creating the group fails (channel closed, timeout,
@@ -190,28 +249,48 @@ pub async fn membership_group(
 
     let session = ctx.primary();
     let created_at = Instant::now();
-    session
-        .send(Command::CreateGroup(CreateGroupParams {
-            name: name.to_owned(),
-            charter: charter.to_owned(),
-            show_in_list: false,
-            insignia_id: None,
-            membership_fee: LindenAmount(0),
-            open_enrollment: true,
-            allow_publish: false,
-            mature_publish: false,
-        }))
-        .await?;
-    let (group_id, create_ok, create_message) = session
-        .wait_for(REPLY_TIMEOUT, |event| match event {
-            Event::CreateGroupResult {
-                group_id,
-                success,
-                message,
-            } => Some((*group_id, *success, message.clone())),
-            _ => None,
-        })
-        .await?;
+    // Second Life silently drops a `CreateGroupRequest` that arrives too soon
+    // after another create by the same agent (observed live: a case needing
+    // two groups back-to-back got only one `CreateGroupReply`), so retry with
+    // a per-attempt name suffix. A retry after a merely-slow first reply can
+    // leave an orphan single-member group; SL purges those within ~24-48 h,
+    // and the wait accepts whichever attempt's reply arrives first.
+    let mut attempt: u32 = 0;
+    let (group_id, create_ok, create_message) = loop {
+        attempt = attempt.saturating_add(1);
+        let attempt_name = if attempt == 1 {
+            name.to_owned()
+        } else {
+            format!("{name} a{attempt}")
+        };
+        session
+            .send(Command::CreateGroup(CreateGroupParams {
+                name: attempt_name,
+                charter: charter.to_owned(),
+                show_in_list: false,
+                insignia_id: None,
+                membership_fee: LindenAmount(0),
+                open_enrollment: true,
+                allow_publish: false,
+                mature_publish: false,
+            }))
+            .await?;
+        match session
+            .wait_for(GROUP_CREATE_ATTEMPT_WINDOW, |event| match event {
+                Event::CreateGroupResult {
+                    group_id,
+                    success,
+                    message,
+                } => Some((*group_id, *success, message.clone())),
+                _ => None,
+            })
+            .await
+        {
+            Ok(reply) => break reply,
+            Err(TestFailure::Timeout(_)) if attempt < GROUP_CREATE_ATTEMPTS => {}
+            Err(other) => return Err(other),
+        }
+    };
     let create_rtt = created_at.elapsed();
     check(
         create_ok,

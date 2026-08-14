@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 63 |
-| ready | 247 |
-| blocked | 76 |
-| in-progress | 15 |
+| ready | 223 |
+| blocked | 67 |
+| in-progress | 16 |
 | bugs | 27 |
-| done | 793 |
+| done | 825 |
 | deferred | 24 |
-| wont-do | 10 |
-| **total** | **1255** |
+| wont-do | 12 |
+| **total** | **1257** |
 
 ## ideas (63)
 
@@ -157,24 +157,27 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (247)
+## ready (223)
 
 ### protocol
 
-- [`protocol-sim-caps-framework`](ready/protocol-sim-caps-framework.md) —
-  Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
+- [`protocol-sim-caps-experiences`](ready/protocol-sim-caps-experiences.md) —
+  Server-side experience caps (blocked by `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-inventory`](ready/protocol-sim-caps-inventory.md) —
+  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-region-info`](ready/protocol-sim-caps-region-info.md) —
+  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
+  (done))
 - [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
   server channels — grid info, map tiles, helper URIs
-- [`protocol-sim-login`](ready/protocol-sim-login.md) — Server-side login
-  surface at full fidelity
-- [`protocol-sim-udp-flows`](ready/protocol-sim-udp-flows.md) — Server-side
-  state machines for the higher-level LLUDP flows
+- [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
+  Server-side voice provisioning and WebRTC signalling stub (blocked by
+  `protocol-sim-caps-framework` (done))
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
   sl-lsl (LslSyntax) types
-- [`protocol-slm-directdelivery`](ready/protocol-slm-directdelivery.md) —
-  sl-marketplace crate — SLM DirectDelivery JSON transport
 
 ### viewer
 
@@ -324,6 +327,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-fake-grid`](ready/viewer-fake-grid.md) — A loopback fake grid over
+  SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -381,6 +386,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-inventory-link-replace`](ready/viewer-inventory-link-replace.md) —
   Inventory link-replace tool (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
+  — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`
+  (done))
 - [`viewer-inventory-protected-folders`](ready/viewer-inventory-protected-folders.md)
   — Protected inventory folders (blocked by `viewer-inventory-folder-tree`
   (done))
@@ -681,96 +689,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out
 
-### chat
-
-- [`chat-group-history-server-side`](ready/chat-group-history-server-side.md) —
-  Server-side group / session chat history ("fetch history")
-
 ### test
 
-- [`test-agent-alert`](ready/test-agent-alert-observe-agentalertmessage-alertmessage.md)
-  — observe AgentAlertMessage / AlertMessage
-- [`test-calling-card-aditi`](ready/test-calling-card-aditi-add-the-aditi-variant.md)
-  — Calling card — [aditi] variant
-- [`test-chat-hear-other-aditi`](ready/test-chat-hear-other-aditi-add-the-aditi-variant.md)
-  — Chat hear other — [aditi] variant
-- [`test-chat-invite-accept-decline-aditi`](ready/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
-  — Chat invite accept/decline — [aditi] variant
-- [`test-chat-whisper-shout-range-aditi`](ready/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
-  — Chat whisper/shout range — [aditi] variant
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-friendship-offer-accept-aditi`](ready/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
-  — Friendship offer/accept — [aditi] variant
-- [`test-friendship-terminate-aditi`](ready/test-friendship-terminate-aditi-add-the-aditi-variant.md)
-  — Friendship terminate — [aditi] variant
-- [`test-give-inventory-aditi`](ready/test-give-inventory-aditi-add-the-aditi-variant.md)
-  — Give inventory — [aditi] variant
-- [`test-grant-user-rights-aditi`](ready/test-grant-user-rights-aditi-add-the-aditi-variant.md)
-  — Grant user rights — [aditi] variant
-- [`test-group-admin-aditi`](ready/test-group-admin-aditi-add-the-aditi-variant.md)
-  — Group admin — [aditi] variant
-- [`test-group-join-leave-aditi`](ready/test-group-join-leave-aditi-add-the-aditi-variant.md)
-  — Group join/leave — [aditi] variant
-- [`test-group-notice-aditi`](ready/test-group-notice-aditi-add-the-aditi-variant.md)
-  — Group notice — [aditi] variant
-- [`test-group-proposal-vote`](ready/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
-  — start a proposal, cast a ballot
-- [`test-group-session-message-aditi`](ready/test-group-session-message-aditi-add-the-aditi-variant.md)
-  — Group session message — [aditi] variant
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-im-1to1-aditi`](ready/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
-  1:1 — [aditi] variant
-- [`test-im-typing-aditi`](ready/test-im-typing-aditi-add-the-aditi-variant.md)
-  — IM typing — [aditi] variant
-- [`test-kick-user`](ready/test-kick-user-observe-kickuser-handling.md) —
-  observe KickUser handling
-- [`test-offline-msg-fetch-aditi`](ready/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
-  — Offline message fetch — [aditi] variant
-- [`test-presence-online-offline-aditi`](ready/test-presence-online-offline-aditi-add-the-aditi-variant.md)
-  — Presence online/offline — [aditi] variant
-- [`test-reliable-retransmit`](ready/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
-  — exercise reliable resend under loss
-- [`test-server-error`](ready/test-server-error-provoke-and-assert-error-featuredisabled.md)
-  — provoke and assert Error / FeatureDisabled
-- [`test-session-mark-read-aditi`](ready/test-session-mark-read-aditi-add-the-aditi-variant.md)
-  — Session mark-read — [aditi] variant
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
-- [`test-teleport-offer-accept-aditi`](ready/test-teleport-offer-accept-aditi-add-the-aditi-variant.md)
-  — Teleport offer/accept — [aditi] variant
-- [`test-typing-indicator-aditi`](ready/test-typing-indicator-aditi-add-the-aditi-variant.md)
-  — Typing indicator — [aditi] variant
 
-### repl
-
-- [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
-
-## blocked (76)
-
-### protocol
-
-- [`protocol-sim-caps-agent-comms`](blocked/protocol-sim-caps-agent-comms.md) —
-  Server-side agent-communication caps (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-assets`](blocked/protocol-sim-caps-assets.md) —
-  Server-side asset delivery caps — GetTexture, GetMesh, ViewerAsset (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-content`](blocked/protocol-sim-caps-content.md) —
-  Server-side content upload/update caps, materials and MOAP (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-experiences`](blocked/protocol-sim-caps-experiences.md) —
-  Server-side experience caps (blocked by `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-inventory`](blocked/protocol-sim-caps-inventory.md) —
-  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
-  `protocol-sim-caps-framework`)
-- [`protocol-sim-caps-region-info`](blocked/protocol-sim-caps-region-info.md) —
-  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`)
-- [`protocol-sim-voice-signalling`](blocked/protocol-sim-voice-signalling.md) —
-  Server-side voice provisioning and WebRTC signalling stub (blocked by
-  `protocol-sim-caps-framework`)
+## blocked (67)
 
 ### viewer
 
@@ -790,8 +719,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-fake-grid`](blocked/viewer-fake-grid.md) — A loopback fake grid over
-  SimSession (blocked by `protocol-sim-caps-framework`)
 - [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
   The real client stack against the fake grid (blocked by `viewer-fake-grid`)
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
@@ -820,8 +747,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Key-binding configuration UI (blocked by `viewer-input-rebinding-persistence`,
   `viewer-input-conflict-detection`, `viewer-ui-text-input-widget` (done),
   `viewer-ui-settings-binding` (done))
-- [`viewer-inventory-marketplace-operations`](blocked/viewer-inventory-marketplace-operations.md)
-  — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`)
 - [`viewer-login-tos`](blocked/viewer-login-tos.md) — Login TOS /
   critical-message acceptance (blocked by `viewer-login-screen`)
 - [`viewer-lsl-editor-highlight`](blocked/viewer-lsl-editor-highlight.md) — LSL
@@ -970,7 +895,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (15)
+## in-progress (16)
 
 ### viewer
 
@@ -1008,6 +933,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream issue — font selection cannot see glyph-format renderability
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
+
+### chat
+
+- [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
+  — Server-side group / session chat history ("fetch history")
 
 ## bugs (27)
 
@@ -1078,7 +1008,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (793)
+## done (825)
 
 ### protocol
 
@@ -1203,6 +1133,25 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
+- [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
+  Server-side agent-communication caps (blocked by `protocol-sim-caps-framework`
+  (done))
+- [`protocol-sim-caps-assets`](done/protocol-sim-caps-assets.md) — Server-side
+  asset delivery caps — GetTexture, GetMesh, ViewerAsset (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-content`](done/protocol-sim-caps-content.md) — Server-side
+  content upload/update caps, materials and MOAP (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-framework`](done/protocol-sim-caps-framework.md) —
+  Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
+- [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
+  at full fidelity
+- [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state
+  machines for the higher-level LLUDP flows
+- [`protocol-sim-udp-flows-2`](done/protocol-sim-udp-flows-2.md) — Server-side
+  mirrors for the remaining Session flow machines
+- [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
+  sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
   — Defer handover teardown until the destination confirms (+ overlap safety)
 - [`protocol-teleport-timeout-strands-child-circuits`](done/protocol-teleport-timeout-strands-child-circuits.md)
@@ -2509,6 +2458,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-agent-alert`](done/test-agent-alert-observe-agentalertmessage-alertmessage.md)
+  — observe AgentAlertMessage / AlertMessage
 - [`test-ais3-folder-lifecycle`](done/test-ais3-folder-lifecycle-create-rename-move-remove-purge-a-folder-caps-ais3-on-sl-gat.md)
   — create / rename / move / remove / purge a folder (CAPS AIS3 on SL; gat
 - [`test-animation-play-stop`](done/test-animation-play-stop-play-and-stop-an-animation.md)
@@ -2529,14 +2480,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — upload a client-baked avatar texture over the UploadBakedTexture capab
 - [`test-calling-card`](done/test-calling-card-offer-accept-calling-card.md) —
   offer/accept calling card
+- [`test-calling-card-aditi`](done/test-calling-card-aditi-add-the-aditi-variant.md)
+  — Calling card — [aditi] variant
 - [`test-chat-hear-other`](done/test-chat-hear-other-second-avatar-says-primary-hears.md)
   — second avatar says, primary hears
+- [`test-chat-hear-other-aditi`](done/test-chat-hear-other-aditi-add-the-aditi-variant.md)
+  — Chat hear other — [aditi] variant
 - [`test-chat-invite-accept-decline`](done/test-chat-invite-accept-decline-acceptchatinvite-declinechatinvite-and-the-caps-chatsessionr.md)
   — AcceptChatInvite / DeclineChatInvite and the CAPS ChatSessionRequest p
+- [`test-chat-invite-accept-decline-aditi`](done/test-chat-invite-accept-decline-aditi-add-the-aditi-variant.md)
+  — Chat invite accept/decline — [aditi] variant
 - [`test-chat-self-echo`](done/test-chat-self-echo-say-on-a-channel-and-observe-own-chatfromsimulator.md)
   — say on a channel and observe own ChatFromSimulator
 - [`test-chat-whisper-shout-range`](done/test-chat-whisper-shout-range-verify-whisper-shout-reach-vs-normal.md)
   — verify whisper/shout reach vs normal
+- [`test-chat-whisper-shout-range-aditi`](done/test-chat-whisper-shout-range-aditi-add-the-aditi-variant.md)
+  — Chat whisper/shout range — [aditi] variant
 - [`test-current-outfit-folder`](done/test-current-outfit-folder-read-the-current-outfit-folder-the-cof-ais3-way-to-know-what.md)
   — read the Current Outfit Folder (the COF / AIS3 way to know what the av
 - [`test-dir-find-people-groups-events`](done/test-dir-find-people-groups-events-dirfindquery-across-types.md)
@@ -2565,34 +2524,54 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
+- [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)
+  — Friendship offer/accept — [aditi] variant
 - [`test-friendship-terminate`](done/test-friendship-terminate-terminate-confirm-removal.md)
   — terminate, confirm removal
+- [`test-friendship-terminate-aditi`](done/test-friendship-terminate-aditi-add-the-aditi-variant.md)
+  — Friendship terminate — [aditi] variant
 - [`test-gestures`](done/test-gestures-activate-deactivate-gestures.md) —
   activate / deactivate gestures
 - [`test-give-inventory`](done/test-give-inventory-give-an-item-to-another-avatar-peer-accepts.md)
   — give an item to another avatar; peer accepts
+- [`test-give-inventory-aditi`](done/test-give-inventory-aditi-add-the-aditi-variant.md)
+  — Give inventory — [aditi] variant
 - [`test-grant-user-rights`](done/test-grant-user-rights-grant-see-online-map-modify-rights-confirm.md)
   — grant see-online / map / modify rights; confirm
+- [`test-grant-user-rights-aditi`](done/test-grant-user-rights-aditi-add-the-aditi-variant.md)
+  — Grant user rights — [aditi] variant
 - [`test-group-accounting`](done/test-group-accounting-account-summary-details-transactions.md)
   — account summary / details / transactions
 - [`test-group-admin`](done/test-group-admin-eject-member-change-role-members.md)
   — eject member / change role members
+- [`test-group-admin-aditi`](done/test-group-admin-aditi-add-the-aditi-variant.md)
+  — Group admin — [aditi] variant
 - [`test-group-create-activate`](done/test-group-create-activate-create-a-group-activate-it.md)
   — create a group, activate it
 - [`test-group-join-leave`](done/test-group-join-leave-join-and-leave.md) — join
   and leave
+- [`test-group-join-leave-aditi`](done/test-group-join-leave-aditi-add-the-aditi-variant.md)
+  — Group join/leave — [aditi] variant
 - [`test-group-notice`](done/test-group-notice-send-and-receive-a-group-notice.md)
   — send and receive a group notice
+- [`test-group-notice-aditi`](done/test-group-notice-aditi-add-the-aditi-variant.md)
+  — Group notice — [aditi] variant
 - [`test-group-roster`](done/test-group-roster-fetch-members-roles-titles-profile.md)
   — fetch members / roles / titles / profile
 - [`test-group-session-message`](done/test-group-session-message-open-a-group-session-send-leave.md)
   — open a group session, send, leave
+- [`test-group-session-message-aditi`](done/test-group-session-message-aditi-add-the-aditi-variant.md)
+  — Group session message — [aditi] variant
 - [`test-handover-mock-grid-harness`](done/test-handover-mock-grid-harness.md) —
   Mock-grid simulator harness for deterministic handover/timeout testing
 - [`test-im-1to1`](done/test-im-1to1-send-im-peer-receives-reply-back.md) — send
   IM, peer receives; reply back
+- [`test-im-1to1-aditi`](done/test-im-1to1-aditi-add-the-aditi-variant.md) — IM
+  1:1 — [aditi] variant
 - [`test-im-typing`](done/test-im-typing-im-typing-start-stop.md) — IM typing
   start/stop
+- [`test-im-typing-aditi`](done/test-im-typing-aditi-add-the-aditi-variant.md) —
+  IM typing — [aditi] variant
 - [`test-inventory-cache-skip`](done/test-inventory-cache-skip-refetch-with-matching-version-is-skipped.md)
   — refetch with matching version is skipped
 - [`test-inventory-item-ops`](done/test-inventory-item-ops-create-copy-move-link-an-item.md)
@@ -2601,6 +2580,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — background/full-tree fetch beyond the root; record folder/item totals
 - [`test-keepalive-ping`](done/test-keepalive-ping-observe-start-complete-ping-round-trip-over-the-circuit-reco.md)
   — observe start/complete ping round-trip over the circuit; record RTT
+- [`test-kick-user`](done/test-kick-user-observe-kickuser-handling.md) — observe
+  KickUser handling
 - [`test-library-tree-fetch`](done/test-library-tree-fetch-fetch-the-read-only-library-tree.md)
   — fetch the read-only Library tree
 - [`test-logout-clean`](done/test-logout-clean-request-logout-assert-clean-logoutreply-shutdown.md)
@@ -2633,6 +2614,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — receive and decode the object-update stream; count primitives
 - [`test-offline-msg-fetch`](done/test-offline-msg-fetch-fetch-offline-ims-caps-readofflinemsgs-vs-udp-retrieveinstan.md)
   — fetch offline IMs (CAPS ReadOfflineMsgs vs UDP RetrieveInstantMessages
+- [`test-offline-msg-fetch-aditi`](done/test-offline-msg-fetch-aditi-add-the-aditi-variant.md)
+  — Offline message fetch — [aditi] variant
 - [`test-open-region-info`](done/test-open-region-info-openregioninfo-limits-bag.md)
   — OpenRegionInfo limits bag
 - [`test-p0-01`](done/test-p0-01-cases-common-rs-or-a-support-module-with.md) —
@@ -2665,8 +2648,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request and edit picks / classifieds
 - [`test-presence-online-offline`](done/test-presence-online-offline-observe-onlinenotification-offlinenotification-as-the-peer-l.md)
   — observe OnlineNotification / OfflineNotification as the peer logs in/o
+- [`test-presence-online-offline-aditi`](done/test-presence-online-offline-aditi-add-the-aditi-variant.md)
+  — Presence online/offline — [aditi] variant
 - [`test-profile-edit-roundtrip`](done/test-profile-edit-roundtrip-update-profile-interests-read-back.md)
   — update profile / interests; read back
+- [`test-reliable-retransmit`](done/test-reliable-retransmit-exercise-reliable-resend-under-loss.md)
+  — exercise reliable resend under loss
 - [`test-script-dialog`](done/test-script-dialog-receive-a-scriptdialog-reply.md)
   — receive a ScriptDialog, reply
 - [`test-script-permissions`](done/test-script-permissions-request-grant-revoke-a-script-permission.md)
@@ -2677,8 +2664,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — create a script, upload source, read the compile
 - [`test-server-appearance-bake`](done/test-server-appearance-bake-trigger-a-modern-server-side-appearance-bake-over-the-update.md)
   — trigger a modern **server-side** appearance bake over the UpdateAvatar
+- [`test-server-error`](done/test-server-error-provoke-and-assert-error-featuredisabled.md)
+  — provoke and assert Error / FeatureDisabled
 - [`test-session-mark-read`](done/test-session-mark-read-unread-mark-read-transition.md)
   — unread → mark-read transition
+- [`test-session-mark-read-aditi`](done/test-session-mark-read-aditi-add-the-aditi-variant.md)
+  — Session mark-read — [aditi] variant
 - [`test-set-appearance`](done/test-set-appearance-publish-appearance-agentsetappearance-and-query-the-baked-te.md)
   — publish appearance (AgentSetAppearance) and query the baked-texture ca
 - [`test-setup-cost-appendix-open`](done/test-setup-cost-appendix-open-setup-cost-appendix-opensim.md)
@@ -2695,6 +2686,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — local teleport; assert the phase sequence Starting → Progress → Landin
 - [`test-teleport-offer-accept`](done/test-teleport-offer-accept-offer-a-lure-peer-accepts.md)
   — offer a lure, peer accepts
+- [`test-teleport-offer-accept-aditi`](done/test-teleport-offer-accept-aditi-add-the-aditi-variant.md)
+  — Teleport offer/accept — [aditi] variant
 - [`test-terrain-composition`](done/test-terrain-composition-read-the-region-s-terrain-detail-assets-and-their-elevation.md)
   — read the region's terrain detail assets and their elevation bands, and
 - [`test-terrain-raw-transfer-download`](done/test-terrain-raw-transfer-download-download-the-region-s-raw-heightmap-over-the-xfer-path.md)
@@ -2707,6 +2700,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — apply a Throttle preset and confirm it is accepted
 - [`test-typing-indicator`](done/test-typing-indicator-set-typing-start-stop-observed-by-the-other.md)
   — set_typing start/stop observed by the other
+- [`test-typing-indicator-aditi`](done/test-typing-indicator-aditi-add-the-aditi-variant.md)
+  — Typing indicator — [aditi] variant
 - [`test-wearables-request`](done/test-wearables-request-request-current-wearables-agentwearablesrequest-and-assert-t.md)
   — request current wearables (AgentWearablesRequest) and assert the simul
 
@@ -2767,6 +2762,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (book/)
 - [`repl-e2`](done/repl-e2-local-opensim-verification-both-runtimes.md) — Local
   OpenSim verification (both runtimes)
+- [`repl-e3`](done/repl-e3-live-aditi-run.md) — Live aditi run
 
 ### aditi
 
@@ -2778,11 +2774,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   CAPS event AgentStateUpdate
 
 ## deferred (24)
-
-### protocol
-
-- [`protocol-34`](deferred/protocol-34-experience-key-value-store.md) —
-  Experience key-value store
 
 ### viewer
 
@@ -2847,8 +2838,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-phase-z-deferred-04`](deferred/test-phase-z-deferred-04-script-upload-on-aditi-sl-drops-the-task-inventory-write-the.md)
   — script-upload on aditi — SL drops the task-inventory write.** The scri
+- [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
+  — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (10)
+## wont-do (12)
+
+### protocol
+
+- [`protocol-34`](wont-do/protocol-34-experience-key-value-store.md) —
+  Experience key-value store
 
 ### viewer
 
@@ -2875,5 +2873,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-group-proposal-vote`](wont-do/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
+  — start a proposal, cast a ballot
 - [`test-parcel-voice-info`](wont-do/test-parcel-voice-info-request-parcel-voice-info.md)
   — request parcel voice info

@@ -158,6 +158,40 @@ impl AssetType {
         }
     }
 
+    /// The asset class a `GetAsset` / `ViewerAsset` query-parameter name
+    /// selects — the inverse of [`get_asset_query_key`](Self::get_asset_query_key),
+    /// used by the *server* side to classify an incoming
+    /// `?<class>_id=<uuid>` request. `None` for an unrecognised key.
+    ///
+    /// The pairing is pinned by a round-trip test: every key
+    /// [`get_asset_query_key`](Self::get_asset_query_key) produces maps back
+    /// to its class here.
+    #[must_use]
+    pub fn from_asset_query_key(key: &str) -> Option<Self> {
+        match key {
+            "texture_id" => Some(Self::Texture),
+            "sound_id" => Some(Self::Sound),
+            "callcard_id" => Some(Self::CallingCard),
+            "landmark_id" => Some(Self::Landmark),
+            "clothing_id" => Some(Self::Clothing),
+            "object_id" => Some(Self::Object),
+            "notecard_id" => Some(Self::Notecard),
+            "lsltext_id" => Some(Self::ScriptText),
+            "lslbyte_id" => Some(Self::ScriptBytecode),
+            "txtr_tga_id" => Some(Self::TextureTga),
+            "bodypart_id" => Some(Self::Bodypart),
+            "snd_wav_id" => Some(Self::SoundWav),
+            "img_tga_id" => Some(Self::ImageTga),
+            "jpeg_id" => Some(Self::ImageJpeg),
+            "animatn_id" => Some(Self::Animation),
+            "gesture_id" => Some(Self::Gesture),
+            "mesh_id" => Some(Self::Mesh),
+            "settings_id" => Some(Self::Settings),
+            "material_id" => Some(Self::Material),
+            _ => None,
+        }
+    }
+
     /// The short asset-type name the CAPS upload (`NewFileAgentInventory`)
     /// expects for this asset class (LL's `LLAssetType` `mTypeName`, e.g.
     /// `"texture"`, `"animatn"`, `"lsltext"`), or `None` for classes that are not
@@ -223,6 +257,42 @@ impl AssetType {
             "category" | "root" => Self::Folder,
             "script" => Self::Other(4),
             _ => Self::Other(-1),
+        }
+    }
+
+    /// The short asset-type name written into a task-inventory `Xfer` listing
+    /// (OpenSim's `Utils.AssetTypeToString`, the total inverse of
+    /// [`from_type_name`](Self::from_type_name)). The legacy `AT_SCRIPT`
+    /// bytecode ([`Other(4)`](Self::Other)) maps back to `"script"`; any other
+    /// [`Other`](Self::Other) code has no name and writes the `"unknown"`
+    /// sentinel (which parses back to `Other(-1)`).
+    #[must_use]
+    pub const fn to_type_name(self) -> &'static str {
+        match self {
+            Self::Texture => "texture",
+            Self::Sound => "sound",
+            Self::CallingCard => "callcard",
+            Self::Landmark => "landmark",
+            Self::Clothing => "clothing",
+            Self::Object => "object",
+            Self::Notecard => "notecard",
+            Self::ScriptText => "lsltext",
+            Self::ScriptBytecode => "lslbyte",
+            Self::TextureTga => "txtr_tga",
+            Self::Bodypart => "bodypart",
+            Self::SoundWav => "snd_wav",
+            Self::ImageTga => "img_tga",
+            Self::ImageJpeg => "jpeg",
+            Self::Animation => "animatn",
+            Self::Gesture => "gesture",
+            Self::Mesh => "mesh",
+            Self::Settings => "settings",
+            Self::Material => "material",
+            Self::Gltf => "gltf",
+            Self::GltfBin => "glbin",
+            Self::Folder => "category",
+            Self::Other(4) => "script",
+            Self::Other(_) => "unknown",
         }
     }
 
@@ -529,6 +599,34 @@ impl InventoryType {
             _ => Self::Other(-1),
         }
     }
+
+    /// The short inventory-type name written into a task-inventory `Xfer`
+    /// listing (OpenSim's `Utils.InventoryTypeToString`, the total inverse of
+    /// [`from_type_name`](Self::from_type_name)). [`Other`](Self::Other) codes
+    /// have no name and write the `"unknown"` sentinel (which parses back to
+    /// `Other(-1)`).
+    #[must_use]
+    pub const fn to_type_name(self) -> &'static str {
+        match self {
+            Self::Texture => "texture",
+            Self::Sound => "sound",
+            Self::CallingCard => "callcard",
+            Self::Landmark => "landmark",
+            Self::Object => "object",
+            Self::Notecard => "notecard",
+            Self::Category => "category",
+            Self::Script => "script",
+            Self::Snapshot => "snapshot",
+            Self::Attachment => "attach",
+            Self::Wearable => "wearable",
+            Self::Animation => "animation",
+            Self::Gesture => "gesture",
+            Self::Mesh => "mesh",
+            Self::Settings => "settings",
+            Self::Material => "material",
+            Self::Other(_) => "unknown",
+        }
+    }
 }
 
 /// The image codec of a texture delivered over the legacy UDP image path
@@ -614,6 +712,23 @@ impl TransferStatus {
         }
     }
 
+    /// The `LLTSCode` status integer for this status (the inverse of
+    /// [`from_code`](Self::from_code)), as a serving simulator writes it into
+    /// a `TransferInfo`/`TransferPacket`.
+    #[must_use]
+    pub const fn to_code(self) -> i32 {
+        match self {
+            Self::Ok => 0,
+            Self::Done => 1,
+            Self::Skip => 2,
+            Self::Abort => 3,
+            Self::Error => -1,
+            Self::UnknownSource => -2,
+            Self::InsufficientPermissions => -3,
+            Self::Other(code) => code,
+        }
+    }
+
     /// Whether this status indicates the transfer succeeded (`LLTS_DONE`).
     #[must_use]
     pub const fn is_success(self) -> bool {
@@ -668,6 +783,122 @@ mod tests {
         assert_eq!(AssetType::from_code(57), AssetType::Material);
         // The asset-type number must not decode as the Material inventory type.
         assert_eq!(InventoryType::from_code(57), InventoryType::Other(57));
+    }
+
+    /// Every named [`AssetType`] variant survives a `to_type_name` →
+    /// `from_type_name` round-trip, including the two aliased corners: the
+    /// legacy `AT_SCRIPT` bytecode (`Other(4)` ⇄ `"script"`) and the
+    /// `"unknown"` sentinel every other [`AssetType::Other`] code writes
+    /// (which parses back to `Other(-1)`). This is what keeps the server-side
+    /// task-inventory listing writer and [`parse_task_inventory`]'s reader in
+    /// agreement.
+    #[test]
+    fn asset_type_name_round_trips() {
+        let named = [
+            AssetType::Texture,
+            AssetType::Sound,
+            AssetType::CallingCard,
+            AssetType::Landmark,
+            AssetType::Clothing,
+            AssetType::Object,
+            AssetType::Notecard,
+            AssetType::ScriptText,
+            AssetType::ScriptBytecode,
+            AssetType::TextureTga,
+            AssetType::Bodypart,
+            AssetType::SoundWav,
+            AssetType::ImageTga,
+            AssetType::ImageJpeg,
+            AssetType::Animation,
+            AssetType::Gesture,
+            AssetType::Mesh,
+            AssetType::Settings,
+            AssetType::Material,
+            AssetType::Gltf,
+            AssetType::GltfBin,
+            AssetType::Folder,
+            AssetType::Other(4),
+        ];
+        for variant in named {
+            assert_eq!(AssetType::from_type_name(variant.to_type_name()), variant);
+        }
+        assert_eq!(
+            AssetType::from_type_name(AssetType::Other(99).to_type_name()),
+            AssetType::Other(-1)
+        );
+    }
+
+    /// Every asset class that carries a `ViewerAsset` query key survives a
+    /// `get_asset_query_key` → `from_asset_query_key` round-trip, and an
+    /// unknown key resolves to `None`. This keeps the server-side asset caps'
+    /// request classifier in step with the client's fetch-URL builder.
+    #[test]
+    fn asset_query_key_round_trips() {
+        // The exact key each class is fetched by — both directions pinned.
+        let pairs = [
+            (AssetType::Texture, "texture_id"),
+            (AssetType::Sound, "sound_id"),
+            (AssetType::CallingCard, "callcard_id"),
+            (AssetType::Landmark, "landmark_id"),
+            (AssetType::Clothing, "clothing_id"),
+            (AssetType::Object, "object_id"),
+            (AssetType::Notecard, "notecard_id"),
+            (AssetType::ScriptText, "lsltext_id"),
+            (AssetType::ScriptBytecode, "lslbyte_id"),
+            (AssetType::TextureTga, "txtr_tga_id"),
+            (AssetType::Bodypart, "bodypart_id"),
+            (AssetType::SoundWav, "snd_wav_id"),
+            (AssetType::ImageTga, "img_tga_id"),
+            (AssetType::ImageJpeg, "jpeg_id"),
+            (AssetType::Animation, "animatn_id"),
+            (AssetType::Gesture, "gesture_id"),
+            (AssetType::Mesh, "mesh_id"),
+            (AssetType::Settings, "settings_id"),
+            (AssetType::Material, "material_id"),
+        ];
+        for (variant, key) in pairs {
+            assert_eq!(variant.get_asset_query_key(), Some(key));
+            assert_eq!(AssetType::from_asset_query_key(key), Some(variant));
+        }
+        // A class with no query key, and an unrecognised key, both resolve to
+        // `None`.
+        assert_eq!(AssetType::Gltf.get_asset_query_key(), None);
+        assert_eq!(AssetType::from_asset_query_key("nope_id"), None);
+    }
+
+    /// Every named [`InventoryType`] variant survives a `to_type_name` →
+    /// `from_type_name` round-trip; an [`InventoryType::Other`] code writes the
+    /// `"unknown"` sentinel, which parses back to `Other(-1)`.
+    #[test]
+    fn inventory_type_name_round_trips() {
+        let named = [
+            InventoryType::Texture,
+            InventoryType::Sound,
+            InventoryType::CallingCard,
+            InventoryType::Landmark,
+            InventoryType::Object,
+            InventoryType::Notecard,
+            InventoryType::Category,
+            InventoryType::Script,
+            InventoryType::Snapshot,
+            InventoryType::Attachment,
+            InventoryType::Wearable,
+            InventoryType::Animation,
+            InventoryType::Gesture,
+            InventoryType::Mesh,
+            InventoryType::Settings,
+            InventoryType::Material,
+        ];
+        for variant in named {
+            assert_eq!(
+                InventoryType::from_type_name(variant.to_type_name()),
+                variant
+            );
+        }
+        assert_eq!(
+            InventoryType::from_type_name(InventoryType::Other(99).to_type_name()),
+            InventoryType::Other(-1)
+        );
     }
 
     /// A [`TextureKey`] is a transparent wrapper over the wire `Uuid`: wrapping a

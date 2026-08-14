@@ -127,6 +127,7 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::simulator_features::SimulatorFeaturesCase),
         Box::new(crate::cases::environment::Environment),
         Box::new(crate::cases::open_region_info::OpenRegionInfoCase),
+        Box::new(crate::cases::marketplace_direct_delivery::MarketplaceDirectDelivery),
         Box::new(crate::cases::estate_info::EstateInfoCase),
         Box::new(crate::cases::estate_access::EstateAccess),
         Box::new(crate::cases::map_blocks_items::MapBlocksItems),
@@ -153,6 +154,9 @@ pub fn registry() -> Vec<Box<dyn GridTest>> {
         Box::new(crate::cases::economy_data::EconomyDataCase),
         Box::new(crate::cases::money_balance::MoneyBalanceCase),
         Box::new(crate::cases::money_transfer::MoneyTransfer),
+        Box::new(crate::cases::server_error::ServerErrorCase),
+        Box::new(crate::cases::kick_user::KickUser),
+        Box::new(crate::cases::agent_alert::AgentAlert),
     ]
 }
 

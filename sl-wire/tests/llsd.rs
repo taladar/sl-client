@@ -5,11 +5,94 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_types::key::InventoryFolderKey;
     use sl_wire::{
-        EventQueueEvent, Llsd, build_event_queue_request, build_event_queue_response,
-        build_seed_request, parse_event_queue_response, parse_llsd_xml, parse_seed_response,
+        EventQueueEvent, EventQueueRequest, Llsd, build_event_queue_request,
+        build_event_queue_response, build_seed_request, build_seed_response,
+        parse_event_queue_request, parse_event_queue_response, parse_llsd_xml, parse_seed_request,
+        parse_seed_response,
     };
 
     type TestError = Box<dyn std::error::Error>;
+
+    #[test]
+    fn seed_request_round_trips() -> Result<(), TestError> {
+        let names = ["EventQueueGet", "GetTexture", "A&B"];
+        let xml = build_seed_request(&names);
+        let parsed = parse_seed_request(&xml)?;
+        assert_eq!(parsed, names);
+        Ok(())
+    }
+
+    #[test]
+    fn seed_request_tolerates_non_array_bodies() -> Result<(), TestError> {
+        let parsed = parse_seed_request("<llsd><map /></llsd>")?;
+        assert_eq!(parsed, Vec::<String>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn seed_response_round_trips_deterministically() -> Result<(), TestError> {
+        let capabilities = std::collections::HashMap::from([
+            (
+                "EventQueueGet".to_owned(),
+                "http://127.0.0.1:9001/cap/1".to_owned(),
+            ),
+            (
+                "GetTexture".to_owned(),
+                "http://127.0.0.1:9001/cap/2".to_owned(),
+            ),
+        ]);
+        let xml = build_seed_response(&capabilities);
+        let parsed = parse_seed_response(&xml)?;
+        assert_eq!(parsed, capabilities);
+        // Sorted map keys make equal grants serialize byte-identically — the
+        // property that lets a retried seed POST get an identical reply.
+        assert_eq!(xml, build_seed_response(&parsed));
+        Ok(())
+    }
+
+    #[test]
+    fn event_queue_request_round_trips() -> Result<(), TestError> {
+        let first_poll = parse_event_queue_request(&build_event_queue_request(None, false))?;
+        assert_eq!(
+            first_poll,
+            EventQueueRequest {
+                ack: None,
+                done: false
+            }
+        );
+        let teardown = parse_event_queue_request(&build_event_queue_request(Some(7), true))?;
+        assert_eq!(
+            teardown,
+            EventQueueRequest {
+                ack: Some(7),
+                done: true
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn event_queue_request_defaults_missing_fields() -> Result<(), TestError> {
+        let parsed = parse_event_queue_request(
+            "<llsd><map><key>ack</key><undef /><key>done</key><boolean>0</boolean></map></llsd>",
+        )?;
+        assert_eq!(
+            parsed,
+            EventQueueRequest {
+                ack: None,
+                done: false
+            }
+        );
+        let empty = parse_event_queue_request("<llsd><map /></llsd>")?;
+        assert_eq!(
+            empty,
+            EventQueueRequest {
+                ack: None,
+                done: false
+            }
+        );
+        Ok(())
+    }
 
     #[test]
     fn event_queue_response_round_trips() -> Result<(), TestError> {
@@ -30,6 +113,40 @@ mod test {
         let parsed = parse_event_queue_response(&xml)?;
         assert_eq!(parsed.id, 42);
         assert_eq!(parsed.events, events);
+        Ok(())
+    }
+
+    #[test]
+    fn asset_upload_step_response_round_trips() -> Result<(), TestError> {
+        let step1 = sl_wire::AssetUploadResponse {
+            state: "upload".to_owned(),
+            uploader: Some("http://127.0.0.1:9001/cap/5/screenshot".to_owned()),
+            ..sl_wire::AssetUploadResponse::default()
+        };
+        let xml = sl_wire::build_asset_upload_response(&step1);
+        assert_eq!(sl_wire::parse_asset_upload_response(&xml)?, step1);
+        Ok(())
+    }
+
+    #[test]
+    fn asset_upload_complete_response_round_trips() -> Result<(), TestError> {
+        let complete = sl_wire::AssetUploadResponse {
+            state: "complete".to_owned(),
+            ..sl_wire::AssetUploadResponse::default()
+        };
+        let xml = sl_wire::build_asset_upload_response(&complete);
+        assert_eq!(sl_wire::parse_asset_upload_response(&xml)?, complete);
+
+        let with_ids = sl_wire::AssetUploadResponse {
+            state: "complete".to_owned(),
+            new_asset: Some("11111111-1111-1111-1111-111111111111".parse::<uuid::Uuid>()?),
+            new_inventory_item: Some("22222222-2222-2222-2222-222222222222".parse::<uuid::Uuid>()?),
+            compiled: Some(false),
+            errors: vec!["syntax error".to_owned()],
+            ..sl_wire::AssetUploadResponse::default()
+        };
+        let xml = sl_wire::build_asset_upload_response(&with_ids);
+        assert_eq!(sl_wire::parse_asset_upload_response(&xml)?, with_ids);
         Ok(())
     }
 
