@@ -243,6 +243,51 @@ abuse-report codecs already had their server directions
 (`build_display_names_response`, `build_agent_preferences_response`,
 `parse_send_user_report`); this cluster wired them into the dispatch.
 
+### The asset-delivery handlers
+
+`GetTexture`, `GetMesh`, `GetMesh2` and `ViewerAsset` are different in
+kind from every other cap: they stream **binary asset bytes** over HTTP
+`GET` with byte-range requests, not LLSD, and — crucially — they need no
+`SimSession` state at all. On Second Life they are served by a **content
+delivery network on a different host** from the simulator (the seed grant
+advertises CDN URLs); avatar *baking* is yet another separate service.
+So this family lives on its own session-free surface, `AssetCaps`
+(`sl-proto/src/asset_caps.rs`), which dispatches against an `AssetSource`
+(a byte store keyed by asset UUID) instead of a `SimSession`:
+
+- **The byte source.** `AssetSource` is the read-only
+  UUID→bytes trait the four caps serve from, mirroring OpenSim's
+  `IAssetService.Get(uuid)` — one asset's bytes are served regardless of
+  which cap asked; the cap only picks the `Content-Type`. The pure
+  in-memory `InMemoryAssetSource` is the fixture; a directory-backed
+  source is `sl_client_tokio::load_asset_dir`, an eager loader that reads
+  a flat `<uuid>[.ext]` directory into an `InMemoryAssetSource` at
+  construction so the serving path itself stays sans-I/O.
+- **The request.** A `GET` on the cap URL with a `?<class>_id=<uuid>`
+  selector — `texture_id` for `GetTexture`, `mesh_id` for
+  `GetMesh`/`GetMesh2`, and any `AssetType::from_asset_query_key` key for
+  `ViewerAsset` (the inverse of the client's `get_asset_query_key`
+  fetch-URL builder) — plus an optional `Range: bytes=start-end` header
+  (inclusive `end`). `CapsRequest` grew a `range` field to carry it.
+- **The response.** No `Range` → `200` with the whole asset and its
+  content type (`image/x-j2c`, `application/vnd.ll.mesh`, or
+  `application/octet-stream`). A satisfiable range → `206` with the byte
+  slice and a `Content-Range: bytes start-last/total` header
+  (`CapsResponse` grew a `content_range` field). A start past the end of
+  an **existing** asset → `416` with `Content-Range: bytes */total`; a
+  missing asset → `404`; a non-`GET` → `405`. The `416`-on-overrun is
+  HTTP-correct and the client turns it into an empty chunk and stops;
+  OpenSim instead serves the whole asset there to dodge a reference-viewer
+  416 bug, but our client handles `416` cleanly so we stay spec-correct.
+
+`SimCaps` composes one `AssetCaps` purely so a single seed grant
+advertises the asset caps alongside the sim caps
+(`SimCaps::new` co-locates them, `SimCaps::new_split` mints them under a
+separate CDN base URL); the asset dispatch path is reached through
+`SimCaps::assets()` and stays independent. A CDN process rebuilds the
+surface with `AssetCaps::from_tokens` from the token map the simulator
+advertised — the only value that crosses that boundary.
+
 ---
 
 > **In this codebase**
@@ -288,3 +333,11 @@ abuse-report codecs already had their server directions
 >   entry) is the ledger the `protocol-sim-caps-*` cluster tasks tick off,
 >   and the in-memory loopback tests driving the client's own builders
 >   against `SimCaps::dispatch` are `sl-proto/tests/sim_caps.rs`.
+> - The session-free **asset-delivery** surface is
+>   `sl-proto/src/asset_caps.rs` (`AssetCaps`, `AssetCapHandler`), served
+>   from the `AssetSource` / `InMemoryAssetSource` byte store in
+>   `sl-proto/src/asset_source.rs`; the directory-backed loader
+>   `load_asset_dir` and the real-client round-trip test are in
+>   `sl-client-tokio` (`src/assets.rs`, `tests/asset_caps_roundtrip.rs`).
+>   The coverage table's predicate consults both `SimCaps::handler_for`
+>   and `AssetCaps::handler_for`.
