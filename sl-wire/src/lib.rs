@@ -85,7 +85,9 @@ pub use inventory::{
 pub use llsd::{
     AssetUploadResponse, EventQueueEvent, EventQueueRequest, EventQueueResponse, Llsd, LlsdError,
     MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
-    MediaEntry, ObjectMediaResponse, build_asset_upload_response, build_event_queue_request,
+    MediaEntry, NewFileAgentInventoryRequest, ObjectMediaNavigateRequest, ObjectMediaRequest,
+    ObjectMediaResponse, UpdateScriptAgentRequest, UpdateScriptTaskRequest,
+    UpdateTaskItemAssetRequest, build_asset_upload_response, build_event_queue_request,
     build_event_queue_response, build_fetch_inventory_request, build_group_member_data_request,
     build_group_notice_bucket, build_new_file_agent_inventory_request,
     build_object_media_get_request, build_object_media_navigate_request,
@@ -95,7 +97,11 @@ pub use llsd::{
     build_update_task_item_asset_request, build_upload_baked_texture_request,
     parse_asset_upload_response, parse_event_queue_request, parse_event_queue_response,
     parse_llsd_binary, parse_llsd_binary_prefix, parse_llsd_notation, parse_llsd_xml,
-    parse_seed_request, parse_seed_response,
+    parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
+    parse_object_media_request, parse_seed_request, parse_seed_response,
+    parse_update_avatar_appearance_request, parse_update_item_asset_request,
+    parse_update_script_agent_request, parse_update_script_task_request,
+    parse_update_task_item_asset_request,
 };
 pub use login::{
     BuddyListEntry, Credential, GestureEntry, GlobalTextures, HomeLocation, InitialOutfit,
@@ -114,9 +120,11 @@ pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
 pub use material::{
     FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,
     MaterialOverrideUpdate, RenderMaterialEntry, build_gltf_material_override,
-    build_modify_material_params_request, build_render_materials_put_request,
-    build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
-    parse_modify_material_params_request, parse_render_materials_response,
+    build_modify_material_params_request, build_modify_material_params_response,
+    build_render_materials_put_request, build_render_materials_request,
+    build_render_materials_response, parse_gltf_material_override,
+    parse_modify_material_params_request, parse_render_materials_put_request,
+    parse_render_materials_request, parse_render_materials_response,
 };
 pub use message::{Message, MessageId};
 pub use messages::{AnyMessage, message_name};
@@ -195,13 +203,19 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use super::{
-        MediaEntry, MessageId, ObjectMediaResponse, PacketFlags, Reader, SequenceNumber, WireError,
-        Writer, build_group_notice_bucket, build_new_file_agent_inventory_request,
-        build_object_media_get_request, build_object_media_navigate_request,
-        build_object_media_update_request, build_update_item_asset_request,
+        MediaEntry, MessageId, ObjectMediaRequest, ObjectMediaResponse, PacketFlags, Reader,
+        SequenceNumber, WireError, Writer, build_group_notice_bucket,
+        build_new_file_agent_inventory_request, build_object_media_get_request,
+        build_object_media_navigate_request, build_object_media_update_request,
+        build_update_avatar_appearance_request, build_update_item_asset_request,
         build_update_script_agent_request, build_update_script_task_request,
         build_update_task_item_asset_request, combine_uuids, encode_datagram, message_name,
-        parse_asset_upload_response, parse_datagram, parse_llsd_xml, zero_decode, zero_encode,
+        parse_asset_upload_response, parse_datagram, parse_llsd_xml,
+        parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
+        parse_object_media_request, parse_update_avatar_appearance_request,
+        parse_update_item_asset_request, parse_update_script_agent_request,
+        parse_update_script_task_request, parse_update_task_item_asset_request, zero_decode,
+        zero_encode,
     };
 
     #[test]
@@ -609,6 +623,117 @@ mod test {
         assert_eq!(response.faces.len(), 2);
         assert_eq!(response.faces.first(), Some(&Some(entry)));
         assert_eq!(response.faces.get(1), Some(&None));
+        Ok(())
+    }
+
+    #[test]
+    fn upload_metadata_requests_round_trip() -> Result<(), roxmltree::Error> {
+        let folder = sl_types::key::InventoryFolderKey::from(uuid::Uuid::from_u128(0xf0));
+        let item = sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0x1e));
+        let task = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x7a));
+        let exp = sl_types::key::ExperienceKey::from(uuid::Uuid::from_u128(0xe0));
+
+        let new_file = build_new_file_agent_inventory_request(
+            folder,
+            "animatn",
+            "animation",
+            "Wave",
+            "a wave",
+            0x0008_e000,
+            4,
+            2,
+            15,
+        );
+        let parsed = parse_new_file_agent_inventory_request(&new_file)?;
+        assert_eq!(parsed.folder_id, folder);
+        assert_eq!(parsed.asset_type, "animatn");
+        assert_eq!(parsed.inventory_type, "animation");
+        assert_eq!(parsed.name, "Wave");
+        assert_eq!(parsed.description, "a wave");
+        assert_eq!(parsed.next_owner_mask, 0x0008_e000);
+        assert_eq!(parsed.group_mask, 4);
+        assert_eq!(parsed.everyone_mask, 2);
+        assert_eq!(parsed.expected_upload_cost, 15);
+
+        assert_eq!(
+            parse_update_item_asset_request(&build_update_item_asset_request(item))?,
+            item
+        );
+
+        let task_body = build_update_task_item_asset_request(task, item);
+        let task_parsed = parse_update_task_item_asset_request(&task_body)?;
+        assert_eq!(task_parsed.task_id, task);
+        assert_eq!(task_parsed.item_id, item);
+
+        let script_agent =
+            parse_update_script_agent_request(&build_update_script_agent_request(item, "mono"))?;
+        assert_eq!(script_agent.item_id, item);
+        assert_eq!(script_agent.target, "mono");
+
+        let script_task = parse_update_script_task_request(&build_update_script_task_request(
+            task,
+            item,
+            true,
+            "luau",
+            Some(exp),
+        ))?;
+        assert_eq!(script_task.task_id, task);
+        assert_eq!(script_task.item_id, item);
+        assert!(script_task.is_script_running);
+        assert_eq!(script_task.target, "luau");
+        assert_eq!(script_task.experience, Some(exp));
+
+        assert_eq!(
+            parse_update_avatar_appearance_request(&build_update_avatar_appearance_request(7))?,
+            7
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn object_media_requests_parse_back() -> Result<(), Box<dyn std::error::Error>> {
+        let object = sl_types::key::ObjectKey::from(uuid::Uuid::from_u128(0x000b_1ec7));
+        let entry = MediaEntry {
+            current_url: Some(url::Url::parse("https://example.com/stream")?),
+            ..MediaEntry::default()
+        };
+
+        // GET verb.
+        let get = parse_llsd_xml(&build_object_media_get_request(object))?;
+        assert_eq!(
+            parse_object_media_request(&get),
+            Some(ObjectMediaRequest::Get { object_id: object })
+        );
+
+        // UPDATE verb, two faces.
+        let update = parse_llsd_xml(&build_object_media_update_request(
+            object,
+            &[Some(entry.clone()), None],
+        ))?;
+        match parse_object_media_request(&update) {
+            Some(ObjectMediaRequest::Update { object_id, faces }) => {
+                assert_eq!(object_id, object);
+                assert_eq!(faces, vec![Some(entry), None]);
+            }
+            other => return Err(format!("expected an Update request, got {other:?}").into()),
+        }
+
+        // A verb-less body is unroutable.
+        assert_eq!(
+            parse_object_media_request(&parse_llsd_xml("<llsd><map /></llsd>")?),
+            None
+        );
+
+        // Navigate.
+        let navigate = parse_llsd_xml(&build_object_media_navigate_request(
+            object,
+            5,
+            "https://example.net/",
+        ))?;
+        let parsed = parse_object_media_navigate_request(&navigate).ok_or("expected a navigate")?;
+        assert_eq!(parsed.object_id, object);
+        assert_eq!(parsed.face, 5);
+        assert_eq!(parsed.url, "https://example.net/");
         Ok(())
     }
 }

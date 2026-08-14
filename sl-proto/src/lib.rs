@@ -101,9 +101,9 @@ pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
 };
 pub use sim_session::{
-    AgentPresence, AgentUpdateInfo, FlowMirrorStatus, SESSION_FLOW_COVERAGE, ServerEvent,
-    SimChatSession, SimChatSessionKind, SimSession, SitTransform, TransferRequestSource,
-    UserRightsEntry,
+    AgentPresence, AgentUpdateInfo, CapsUploadMetadata, FlowMirrorStatus, ObjectMediaState,
+    SESSION_FLOW_COVERAGE, ServerEvent, SimChatSession, SimChatSessionKind, SimSession,
+    SitTransform, TransferRequestSource, UserRightsEntry,
 };
 pub use terrain::encode_layer;
 pub use types::{

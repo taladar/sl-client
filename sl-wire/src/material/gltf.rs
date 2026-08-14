@@ -149,6 +149,20 @@ pub fn parse_modify_material_params_request(
         .collect())
 }
 
+/// Builds a `ModifyMaterialParams` capability response body — the
+/// `{ success, message }` status map the client decodes into
+/// `Event::MaterialParamsResult` (`sl-proto`'s inline `handle_caps_event`
+/// parse). The simulator counterpart of that client-side response read.
+#[must_use]
+pub fn build_modify_material_params_response(success: bool, message: &str) -> String {
+    let mut out = String::from("<llsd><map><key>success</key><boolean>");
+    out.push_str(if success { "1" } else { "0" });
+    out.push_str("</boolean><key>message</key><string>");
+    push_escaped(&mut out, message);
+    out.push_str("</string></map></llsd>");
+    out
+}
+
 /// Decodes one `ModifyMaterialParams` array entry into a
 /// [`MaterialOverrideUpdate`], or `None` if it lacks an `object_id`.
 fn modify_material_update(item: &Llsd) -> Result<Option<MaterialOverrideUpdate>, WireError> {

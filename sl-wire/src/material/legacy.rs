@@ -85,6 +85,92 @@ const fn local_id_as_i32(local_id: u32) -> i32 {
     local_id as i32
 }
 
+/// Unzips the `{ "Zipped": <binary> }` envelope both `RenderMaterials` request
+/// bodies share into its inner binary-LLSD value — the inverse of the
+/// `format!("<llsd><map><key>Zipped</key>…")` the builders emit. `None` when the
+/// body is not the expected map, the binary does not inflate, or it is not
+/// well-formed binary-LLSD. An empty body (the "fetch all region materials"
+/// GET) has no `Zipped` and yields `None` too.
+fn parse_zipped_body(xml: &str) -> Option<Llsd> {
+    let root = parse_llsd_xml(xml).ok()?;
+    let zipped = root.get("Zipped").and_then(Llsd::as_binary)?;
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(zipped).ok()?;
+    let mut reader = Reader::new(&raw);
+    read_binary_value(&mut reader)
+}
+
+/// Parses a `RenderMaterials` capability POST **request** — the inverse of
+/// [`build_render_materials_request`]. Unzips the `{ "Zipped": … }` binary-LLSD
+/// array of 16-byte material ids into the queried [`Uuid`]s.
+///
+/// Best-effort: a malformed body (or an empty "fetch all" body with no
+/// `Zipped`) yields an empty vector, which the handler treats as "return every
+/// known material".
+#[must_use]
+pub fn parse_render_materials_request(xml: &str) -> Vec<Uuid> {
+    let Some(Llsd::Array(items)) = parse_zipped_body(xml) else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .filter_map(|item| {
+            item.as_binary()
+                .and_then(|bytes| Uuid::from_slice(bytes).ok())
+        })
+        .collect()
+}
+
+/// Parses a `RenderMaterials` capability **PUT** request — the inverse of
+/// [`build_render_materials_put_request`]. Unzips the
+/// `{ "FullMaterialsPerFace": [ { "Face", "ID", "Material"? } ] }` binary-LLSD
+/// map into the per-face assignments; a face without a `Material` is a clear
+/// (`material: None`).
+///
+/// Best-effort: a malformed body yields an empty vector.
+#[must_use]
+pub fn parse_render_materials_put_request(xml: &str) -> Vec<FaceMaterialPut> {
+    let Some(root) = parse_zipped_body(xml) else {
+        return Vec::new();
+    };
+    let Some(faces) = root.get("FullMaterialsPerFace").and_then(Llsd::as_array) else {
+        return Vec::new();
+    };
+    faces
+        .iter()
+        .filter_map(face_material_put_from_llsd)
+        .collect()
+}
+
+/// Decodes one `{ "Face", "ID", "Material"? }` PUT entry — the inverse of
+/// [`face_material_put_to_llsd`]. A missing `Face`/`ID` drops the entry; an
+/// absent `Material` is a face clear.
+fn face_material_put_from_llsd(item: &Llsd) -> Option<FaceMaterialPut> {
+    let face = item
+        .get("Face")
+        .and_then(Llsd::as_i32)
+        .and_then(|value| u8::try_from(value).ok())?;
+    let local_id = item
+        .get("ID")
+        .and_then(Llsd::as_i32)
+        .map(local_id_from_i32)?;
+    let material = match item.get("Material") {
+        Some(value @ Llsd::Map(_)) => legacy_material_from_llsd(value).ok(),
+        _ => None,
+    };
+    Some(FaceMaterialPut {
+        local_id,
+        face,
+        material,
+    })
+}
+
+/// Widens a signed `LLSD::Integer` object id back to the region-local `u32` —
+/// the inverse of [`local_id_as_i32`], recovering the same bit pattern the
+/// reference stores round-trip.
+const fn local_id_from_i32(id: i32) -> u32 {
+    u32::from_ne_bytes(id.to_ne_bytes())
+}
+
 /// Parses a `RenderMaterials` capability POST response (a
 /// `{ "Zipped": <binary> }` LLSD-XML map whose binary unzips to a binary-LLSD
 /// array of `{ "ID": <binary>, "Material": <map> }`) into the decoded entries.

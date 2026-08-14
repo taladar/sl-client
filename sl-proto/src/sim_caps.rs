@@ -28,10 +28,16 @@ use std::collections::{BTreeMap, HashMap};
 
 use sl_types::key::AgentKey;
 use sl_wire::{
-    AssetUploadResponse, DisplayName, Llsd, build_agent_preferences_response,
-    build_asset_upload_response, build_display_names_response, build_seed_response,
+    AssetUploadResponse, DisplayName, Llsd, ObjectMediaRequest, ObjectMediaResponse,
+    build_agent_preferences_response, build_asset_upload_response, build_display_names_response,
+    build_modify_material_params_response, build_render_materials_response, build_seed_response,
     parse_agent_preferences, parse_display_names_query, parse_event_queue_request, parse_llsd_xml,
-    parse_seed_request, parse_send_user_report,
+    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
+    parse_object_media_navigate_request, parse_object_media_request,
+    parse_render_materials_put_request, parse_render_materials_request, parse_seed_request,
+    parse_send_user_report, parse_update_avatar_appearance_request,
+    parse_update_item_asset_request, parse_update_script_agent_request,
+    parse_update_script_task_request, parse_update_task_item_asset_request,
 };
 use url::Url;
 use uuid::Uuid;
@@ -39,13 +45,20 @@ use uuid::Uuid;
 use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
-    chat_session_request_from_llsd, chat_session_roster_to_llsd, session_history_to_llsd,
+    chat_session_request_from_llsd, chat_session_roster_to_llsd,
+    parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
 };
-use crate::sim_session::SimSession;
+use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
-    CAP_AGENT_PREFERENCES, CAP_CHAT_SESSION_REQUEST, CAP_GET_DISPLAY_NAMES, CAP_READ_OFFLINE_MSGS,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CHAT_SESSION_ACCEPT,
-    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
+    CAP_AGENT_PREFERENCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
+    CAP_GET_DISPLAY_NAMES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event, ServerEvent,
     offline_messages_to_llsd,
 };
 
@@ -65,6 +78,30 @@ const UNDEF_LLSD_BODY: &str = "<llsd><undef /></llsd>";
 /// mints as its uploader URL and step 2 POSTs the screenshot bytes to.
 const SCREENSHOT_SUB_PATH: &str = "screenshot";
 
+/// The sub-path under a two-stage-upload cap URL that step 1 mints as its
+/// uploader URL and step 2 POSTs the raw asset bytes to. The generalisation of
+/// [`SCREENSHOT_SUB_PATH`] across the whole `NewFile*`/`Update*` family.
+const UPLOAD_SUB_PATH: &str = "upload";
+
+/// The two-stage asset-upload capabilities routed to
+/// [`CapHandler::AssetUpload`]: the shared server-side uploader state machine
+/// serves them all, branching on the cap name only to pick the step-1 metadata
+/// parser. `NewFileAgentInventory` creates a new asset + inventory item;
+/// `UploadBakedTexture` a temporary asset with no item; the `Update*` caps
+/// replace an existing item's asset (the two `Update*Script*` caps additionally
+/// compile).
+const UPLOAD_CAPABILITIES: &[&str] = &[
+    CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+];
+
 /// The capability names this simulator can serve — the registry keys.
 ///
 /// [`SimCaps::handler_for`] maps each entry to its [`CapHandler`]; the
@@ -79,6 +116,22 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_AGENT_PREFERENCES,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    // The content upload/update, materials and MOAP cluster.
+    CAP_NEW_FILE_AGENT_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE,
+    CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT,
+    CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_COPY_INVENTORY_FROM_NOTECARD,
+    CAP_RENDER_MATERIALS,
+    CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE,
 ];
 
 /// How the simulator serves one capability name.
@@ -113,6 +166,26 @@ pub enum CapHandler {
     /// answers with an uploader URL (a sub-path of the cap's own URL), the
     /// raw screenshot bytes complete it.
     UserReportScreenshot,
+    /// The shared two-stage asset-upload state machine serving every
+    /// `UPLOAD_CAPABILITIES` entry (`NewFileAgentInventory`,
+    /// `UploadBakedTexture`, and the `Update*{Agent,Task}Inventory` family):
+    /// step 1 parks the parsed metadata and answers an uploader URL, step 2
+    /// (the raw-bytes POST) completes it into
+    /// [`ServerEvent::CapsAssetUploaded`](crate::ServerEvent::CapsAssetUploaded).
+    AssetUpload,
+    /// The single-POST `UpdateAvatarAppearance` server-side-bake trigger.
+    AvatarAppearance,
+    /// The one-way `CopyInventoryFromNotecard` POST (no reply body).
+    CopyInventoryFromNotecard,
+    /// The legacy `RenderMaterials` materials surface (POST query / PUT set /
+    /// GET all), served from the session's material store.
+    RenderMaterials,
+    /// The `ModifyMaterialParams` GLTF-material set POST.
+    ModifyMaterialParams,
+    /// The `ObjectMedia` media-on-a-prim read/write POST (GET / UPDATE verbs).
+    ObjectMedia,
+    /// The `ObjectMediaNavigate` media-navigation POST.
+    ObjectMediaNavigate,
 }
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
@@ -376,6 +449,15 @@ impl SimCaps {
             CAP_AGENT_PREFERENCES => Some(CapHandler::AgentPreferences),
             CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
             CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
+            CAP_UPDATE_AVATAR_APPEARANCE => Some(CapHandler::AvatarAppearance),
+            CAP_COPY_INVENTORY_FROM_NOTECARD => Some(CapHandler::CopyInventoryFromNotecard),
+            CAP_RENDER_MATERIALS => Some(CapHandler::RenderMaterials),
+            CAP_MODIFY_MATERIAL_PARAMS => Some(CapHandler::ModifyMaterialParams),
+            CAP_OBJECT_MEDIA => Some(CapHandler::ObjectMedia),
+            CAP_OBJECT_MEDIA_NAVIGATE => Some(CapHandler::ObjectMediaNavigate),
+            // Every two-stage upload cap shares one handler; the cap name only
+            // picks the step-1 metadata parser inside it.
+            name if UPLOAD_CAPABILITIES.contains(&name) => Some(CapHandler::AssetUpload),
             _ => None,
         }
     }
@@ -460,6 +542,27 @@ impl SimCaps {
                 }
                 Some(CapHandler::UserReportScreenshot) => {
                     CapsDispatch::Response(self.dispatch_user_report_screenshot(sim, request))
+                }
+                Some(CapHandler::AssetUpload) => {
+                    CapsDispatch::Response(self.dispatch_caps_upload(sim, request, name))
+                }
+                Some(CapHandler::AvatarAppearance) => {
+                    CapsDispatch::Response(Self::dispatch_update_avatar_appearance(sim, request))
+                }
+                Some(CapHandler::CopyInventoryFromNotecard) => CapsDispatch::Response(
+                    Self::dispatch_copy_inventory_from_notecard(sim, request),
+                ),
+                Some(CapHandler::RenderMaterials) => {
+                    CapsDispatch::Response(Self::dispatch_render_materials(sim, request))
+                }
+                Some(CapHandler::ModifyMaterialParams) => {
+                    CapsDispatch::Response(Self::dispatch_modify_material_params(sim, request))
+                }
+                Some(CapHandler::ObjectMedia) => {
+                    CapsDispatch::Response(Self::dispatch_object_media(sim, request))
+                }
+                Some(CapHandler::ObjectMediaNavigate) => {
+                    CapsDispatch::Response(Self::dispatch_object_media_navigate(sim, request))
                 }
                 // Tokens are only minted for served capabilities, so a
                 // resolved name always has a handler; answer 404 rather than
@@ -704,6 +807,276 @@ impl SimCaps {
         url
     }
 
+    /// Serves the shared two-stage asset uploader for one of the
+    /// [`UPLOAD_CAPABILITIES`]. Step 1 (a POST to the cap URL) parses the
+    /// cap-specific metadata, parks it under `cap_name`, and answers
+    /// `{ state: "upload", uploader }` with the cap's own `upload` sub-path.
+    /// Step 2 (a POST to that sub-path) takes the parked metadata, has the
+    /// session mint the stored ids and push
+    /// [`ServerEvent::CapsAssetUploaded`](crate::ServerEvent::CapsAssetUploaded),
+    /// and answers `{ state: "complete", new_asset, new_inventory_item? }` —
+    /// plus `{ compiled, errors }` for a script upload. A bytes-POST with no
+    /// parked upload answers `400`; a re-POST of step 1 replaces the parked
+    /// metadata; any other sub-path answers `404`. Wrong method → `405`, an
+    /// unparsable metadata body → `400`.
+    fn dispatch_caps_upload(
+        &self,
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+        cap_name: &'static str,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        match cap_sub_path(request.path) {
+            None => {
+                let Some(metadata) = Self::parse_upload_metadata(cap_name, request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                sim.park_caps_upload(cap_name, metadata);
+                let uploader = self.upload_uploader_url(cap_name);
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "upload".to_owned(),
+                    uploader: Some(uploader.to_string()),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+            Some(UPLOAD_SUB_PATH) => {
+                let Some(metadata) = sim.take_caps_upload(cap_name) else {
+                    return CapsResponse::bad_request();
+                };
+                let is_script = metadata.is_script();
+                let (new_asset, new_inventory_item) =
+                    sim.complete_caps_upload(metadata, request.body.to_vec());
+                CapsResponse::llsd_xml(build_asset_upload_response(&AssetUploadResponse {
+                    state: "complete".to_owned(),
+                    new_asset: Some(new_asset.uuid()),
+                    new_inventory_item: new_inventory_item.map(|item| item.uuid()),
+                    // A script upload reports the compile result; the sim server
+                    // "compiles" cleanly (a real grid would run the compiler).
+                    compiled: is_script.then_some(true),
+                    ..AssetUploadResponse::default()
+                }))
+            }
+            Some(_) => CapsResponse::not_found(),
+        }
+    }
+
+    /// Parses the step-1 metadata of a two-stage upload for `cap_name` into the
+    /// parked [`CapsUploadMetadata`], or `None` (→ `400`) when the body is not
+    /// UTF-8 or not well-formed for the cap. The four agent-inventory `Update*`
+    /// caps (gesture / notecard / settings / material) share the bare
+    /// `{ item_id }` body and fall through to the catch-all arm.
+    fn parse_upload_metadata(cap_name: &str, body: &[u8]) -> Option<CapsUploadMetadata> {
+        let text = std::str::from_utf8(body).ok()?;
+        let metadata = match cap_name {
+            CAP_NEW_FILE_AGENT_INVENTORY => CapsUploadMetadata::NewFileInventory(
+                parse_new_file_agent_inventory_request(text).ok()?,
+            ),
+            CAP_UPLOAD_BAKED_TEXTURE => CapsUploadMetadata::BakedTexture,
+            CAP_UPDATE_SCRIPT_AGENT => {
+                CapsUploadMetadata::UpdateScriptAgent(parse_update_script_agent_request(text).ok()?)
+            }
+            CAP_UPDATE_SCRIPT_TASK => {
+                CapsUploadMetadata::UpdateScriptTask(parse_update_script_task_request(text).ok()?)
+            }
+            CAP_UPDATE_NOTECARD_TASK_INVENTORY => {
+                let request = parse_update_task_item_asset_request(text).ok()?;
+                CapsUploadMetadata::UpdateTaskItem {
+                    cap: cap_name.to_owned(),
+                    task_id: request.task_id,
+                    item_id: request.item_id,
+                }
+            }
+            _ => CapsUploadMetadata::UpdateAgentItem {
+                cap: cap_name.to_owned(),
+                item_id: parse_update_item_asset_request(text).ok()?,
+            },
+        };
+        Some(metadata)
+    }
+
+    /// The uploader URL a two-stage upload's step 1 answers with: the cap's own
+    /// URL plus the shared [`UPLOAD_SUB_PATH`] (routed back to
+    /// [`SimCaps::dispatch_caps_upload`]).
+    fn upload_uploader_url(&self, cap_name: &str) -> Url {
+        let token = self.tokens.get(cap_name).copied().unwrap_or_default();
+        let mut url = self.cap_url(token);
+        if let Ok(mut segments) = url.path_segments_mut() {
+            segments.push(UPLOAD_SUB_PATH);
+        }
+        url
+    }
+
+    /// Serves one `UpdateAvatarAppearance` POST: parses the requested Current
+    /// Outfit Folder version, surfaces it as
+    /// [`ServerEvent::ServerAppearanceRequested`](crate::ServerEvent::ServerAppearanceRequested),
+    /// and answers the accept reply `{ success: true }` (the baked-texture ids
+    /// arrive separately over UDP `AvatarAppearance`). Wrong method → `405`, a
+    /// non-LLSD body → `400`.
+    fn dispatch_update_avatar_appearance(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(text) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(cof_version) = parse_update_avatar_appearance_request(text) else {
+            return CapsResponse::bad_request();
+        };
+        sim.push_content_event(ServerEvent::ServerAppearanceRequested { cof_version });
+        let reply = Event::ServerAppearanceUpdate {
+            success: true,
+            error: None,
+            expected_cof_version: None,
+        };
+        CapsResponse::llsd_xml(server_appearance_update_to_llsd(&reply).to_llsd_xml())
+    }
+
+    /// Serves one `CopyInventoryFromNotecard` POST: surfaces the copy request
+    /// as
+    /// [`ServerEvent::CopyInventoryFromNotecardRequested`](crate::ServerEvent::CopyInventoryFromNotecardRequested)
+    /// and acks with an undefined body (the copied item is delivered over the
+    /// normal inventory-update stream, so there is no reply payload). Wrong
+    /// method → `405`, a non-LLSD body → `400`.
+    fn dispatch_copy_inventory_from_notecard(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let copy = parse_copy_inventory_from_notecard(&body);
+        sim.push_content_event(ServerEvent::CopyInventoryFromNotecardRequested {
+            notecard_id: copy.notecard,
+            object_id: copy.object,
+            item_id: copy.item,
+            folder_id: copy.folder,
+        });
+        CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+    }
+
+    /// Serves the legacy `RenderMaterials` surface, routed on HTTP method:
+    /// `POST` (or `GET`) queries the session's material store — `POST` for the
+    /// zipped id list, `GET` for every region material — and answers the
+    /// matching materials; `PUT` sets legacy materials on object faces,
+    /// surfacing them as
+    /// [`ServerEvent::RenderMaterialsSet`](crate::ServerEvent::RenderMaterialsSet)
+    /// and acking with an undefined body. Any other method → `405`.
+    fn dispatch_render_materials(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        match request.method {
+            "POST" => {
+                let Ok(text) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let ids = parse_render_materials_request(text);
+                CapsResponse::llsd_xml(build_render_materials_response(&sim.region_materials(&ids)))
+            }
+            "GET" => {
+                CapsResponse::llsd_xml(build_render_materials_response(&sim.region_materials(&[])))
+            }
+            "PUT" => {
+                let Ok(text) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let updates = parse_render_materials_put_request(text);
+                sim.push_content_event(ServerEvent::RenderMaterialsSet { updates });
+                CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+            }
+            _ => CapsResponse::method_not_allowed(),
+        }
+    }
+
+    /// Serves one `ModifyMaterialParams` POST: parses the per-face GLTF material
+    /// assignments, surfaces them as
+    /// [`ServerEvent::MaterialParamsModified`](crate::ServerEvent::MaterialParamsModified),
+    /// and answers the `{ success: true, message: "" }` status. Wrong method →
+    /// `405`, a non-LLSD body → `400`.
+    fn dispatch_modify_material_params(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(text) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(updates) = parse_modify_material_params_request(text) else {
+            return CapsResponse::bad_request();
+        };
+        sim.push_content_event(ServerEvent::MaterialParamsModified { updates });
+        CapsResponse::llsd_xml(build_modify_material_params_response(true, ""))
+    }
+
+    /// Serves one `ObjectMedia` POST, routed on the body's `verb`. A `GET`
+    /// answers the object's stored per-face media (an unknown object gets an
+    /// empty media list, tolerant like the other read caps); an `UPDATE`
+    /// records the new media (advancing the media version), surfaces it as
+    /// [`ServerEvent::ObjectMediaSet`](crate::ServerEvent::ObjectMediaSet), and
+    /// acks with an undefined body. Wrong method → `405`; a non-LLSD or
+    /// unroutable body → `400`.
+    fn dispatch_object_media(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Some(media_request) = parse_object_media_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        match media_request {
+            ObjectMediaRequest::Get { object_id } => {
+                let response = sim.object_media(object_id).map_or_else(
+                    || ObjectMediaResponse {
+                        object_id,
+                        version: String::new(),
+                        faces: Vec::new(),
+                    },
+                    |state| ObjectMediaResponse {
+                        object_id,
+                        version: state.version.clone(),
+                        faces: state.faces.clone(),
+                    },
+                );
+                CapsResponse::llsd_xml(response.to_llsd())
+            }
+            ObjectMediaRequest::Update { object_id, faces } => {
+                sim.set_object_media_update(object_id, faces);
+                CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+            }
+        }
+    }
+
+    /// Serves one `ObjectMediaNavigate` POST: advances the object's media
+    /// version and surfaces the navigation as
+    /// [`ServerEvent::ObjectMediaNavigated`](crate::ServerEvent::ObjectMediaNavigated),
+    /// acking with an undefined body (the cap carries no media reply). Wrong
+    /// method → `405`; a non-LLSD or unroutable body → `400`.
+    fn dispatch_object_media_navigate(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Some(navigate) = parse_object_media_navigate_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        sim.navigate_object_media(navigate.object_id, navigate.face, navigate.url);
+        CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+    }
+
     /// Mints the URL for one capability token: `{base}/cap/{token}`.
     ///
     /// Built via `path_segments_mut` rather than `Url::join` (whose
@@ -812,22 +1185,25 @@ mod tests {
             ("GetMesh", CapStatus::Served),
             ("GetMesh2", CapStatus::Served),
             ("ViewerAsset", CapStatus::Served),
-            ("UpdateAvatarAppearance", CapStatus::Pending),
-            ("NewFileAgentInventory", CapStatus::Pending),
-            ("UploadBakedTexture", CapStatus::Pending),
-            ("UpdateGestureAgentInventory", CapStatus::Pending),
-            ("UpdateNotecardAgentInventory", CapStatus::Pending),
-            ("UpdateNotecardTaskInventory", CapStatus::Pending),
-            ("CopyInventoryFromNotecard", CapStatus::Pending),
-            ("UpdateScriptAgent", CapStatus::Pending),
-            ("UpdateScriptTask", CapStatus::Pending),
-            ("UpdateSettingsAgentInventory", CapStatus::Pending),
+            ("UpdateAvatarAppearance", CapStatus::Served),
+            ("NewFileAgentInventory", CapStatus::Served),
+            ("UploadBakedTexture", CapStatus::Served),
+            ("UpdateGestureAgentInventory", CapStatus::Served),
+            ("UpdateNotecardAgentInventory", CapStatus::Served),
+            ("UpdateNotecardTaskInventory", CapStatus::Served),
+            ("CopyInventoryFromNotecard", CapStatus::Served),
+            ("UpdateScriptAgent", CapStatus::Served),
+            ("UpdateScriptTask", CapStatus::Served),
+            ("UpdateSettingsAgentInventory", CapStatus::Served),
+            // `ObjectAnimation` is never POSTed — it opts into the UDP
+            // `ObjectAnimation` stream and has no HTTP handler, so it stays
+            // `Pending` (see `CAP_OBJECT_ANIMATION`).
             ("ObjectAnimation", CapStatus::Pending),
-            ("ObjectMedia", CapStatus::Pending),
-            ("ObjectMediaNavigate", CapStatus::Pending),
-            ("RenderMaterials", CapStatus::Pending),
-            ("ModifyMaterialParams", CapStatus::Pending),
-            ("UpdateMaterialAgentInventory", CapStatus::Pending),
+            ("ObjectMedia", CapStatus::Served),
+            ("ObjectMediaNavigate", CapStatus::Served),
+            ("RenderMaterials", CapStatus::Served),
+            ("ModifyMaterialParams", CapStatus::Served),
+            ("UpdateMaterialAgentInventory", CapStatus::Served),
             ("ProvisionVoiceAccountRequest", CapStatus::Pending),
             ("ParcelVoiceInfoRequest", CapStatus::Pending),
             ("VoiceSignalingRequest", CapStatus::Pending),

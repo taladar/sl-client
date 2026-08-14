@@ -3344,6 +3344,38 @@ pub fn copy_inventory_from_notecard_body(
     .to_llsd_xml()
 }
 
+/// A parsed `CopyInventoryFromNotecard` capability request — the simulator
+/// view of [`copy_inventory_from_notecard_body`]. A nil `object-id` /
+/// `folder-id` is normalised to `None` (an agent-inventory notecard / a
+/// server-picked system folder), mirroring the builder's `Option` inputs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct CopyInventoryFromNotecardRequest {
+    /// The notecard holding the embedded item.
+    pub notecard: InventoryKey,
+    /// The in-world object holding the notecard, or `None` for an
+    /// agent-inventory notecard.
+    pub object: Option<ObjectKey>,
+    /// The embedded item to copy.
+    pub item: InventoryKey,
+    /// The destination folder, or `None` to let the simulator pick the system
+    /// folder for the item's type.
+    pub folder: Option<InventoryFolderKey>,
+}
+
+/// Parses a `CopyInventoryFromNotecard` capability request from its decoded
+/// LLSD body — the inverse of [`copy_inventory_from_notecard_body`]. Lenient:
+/// absent ids default to nil (and nil `object-id`/`folder-id` fold to `None`).
+pub(crate) fn parse_copy_inventory_from_notecard(body: &Llsd) -> CopyInventoryFromNotecardRequest {
+    let uuid = |key: &str| body.get(key).and_then(Llsd::as_uuid).unwrap_or_default();
+    let non_nil = |id: Uuid| (!id.is_nil()).then_some(id);
+    CopyInventoryFromNotecardRequest {
+        notecard: InventoryKey::from(uuid("notecard-id")),
+        object: non_nil(uuid("object-id")).map(ObjectKey::from),
+        item: InventoryKey::from(uuid("item-id")),
+        folder: non_nil(uuid("folder-id")).map(InventoryFolderKey::from),
+    }
+}
+
 /// Decodes the agent roster carried by a `ChatSessionRequest` `"accept
 /// invitation"` reply into the participant agent ids. Handles both the modern
 /// `agent_info` map (whose keys are the agent uuids) and the deprecated `agents`

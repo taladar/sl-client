@@ -201,6 +201,11 @@ use sl_wire::messages::{
 };
 use sl_wire::{AgentPreferences, DisplayName, ObjectPermMasks};
 use sl_wire::{
+    FaceMaterialPut, LegacyMaterial, MaterialOverrideUpdate, MediaEntry,
+    NewFileAgentInventoryRequest, RenderMaterialEntry, UpdateScriptAgentRequest,
+    UpdateScriptTaskRequest,
+};
+use sl_wire::{
     TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM,
     TransferSourceParamsEstate, TransferSourceParamsInvItem,
 };
@@ -1292,6 +1297,80 @@ pub enum ServerEvent {
         /// The raw screenshot bytes from the second upload step.
         screenshot: Vec<u8>,
     },
+    /// A two-stage CAPS asset upload completed: the raw bytes arrived at the
+    /// uploader URL and the simulator minted the stored asset id (plus, for the
+    /// inventory-creating caps, an inventory item id). Covers
+    /// `NewFileAgentInventory`, `UploadBakedTexture`, and every
+    /// `Update{Gesture,Notecard,Script,Settings,Material}{Agent,Task}Inventory`
+    /// cap — the metadata says which. Fire-and-forget for the driver to persist.
+    CapsAssetUploaded {
+        /// The parsed step-1 metadata identifying what was uploaded.
+        metadata: Box<CapsUploadMetadata>,
+        /// The stored asset id the simulator minted and returned to the client.
+        new_asset: AssetKey,
+        /// The created/updated inventory item id (`None` for a temporary
+        /// `UploadBakedTexture` bake).
+        new_inventory_item: Option<InventoryKey>,
+        /// The complete uploaded asset bytes from the second step.
+        data: Vec<u8>,
+    },
+    /// The client asked the grid to server-side bake its appearance
+    /// (`UpdateAvatarAppearance`) at the given Current Outfit Folder version.
+    /// The baked-texture ids arrive separately over UDP `AvatarAppearance`; the
+    /// capability itself answers the client with the accept reply
+    /// (`{ success: true }`).
+    ServerAppearanceRequested {
+        /// The Current Outfit Folder version the client asked the grid to bake.
+        cof_version: i32,
+    },
+    /// The client copied an item embedded in a notecard into inventory
+    /// (`CopyInventoryFromNotecard`). Fire-and-forget: the copied item is
+    /// delivered over the normal inventory-update stream, so there is no reply.
+    CopyInventoryFromNotecardRequested {
+        /// The notecard holding the embedded item.
+        notecard_id: InventoryKey,
+        /// The in-world object holding the notecard, or `None` for an
+        /// agent-inventory notecard.
+        object_id: Option<ObjectKey>,
+        /// The embedded item copied.
+        item_id: InventoryKey,
+        /// The destination folder, or `None` to let the simulator pick the
+        /// system folder for the item's type.
+        folder_id: Option<InventoryFolderKey>,
+    },
+    /// The client set legacy (normal/specular) materials on object faces via
+    /// the `RenderMaterials` PUT. A world mutation — the driver applies it and
+    /// echoes the assigned material ids on the faces' texture entries.
+    RenderMaterialsSet {
+        /// One entry per affected face (a cleared face has `material: None`).
+        updates: Vec<FaceMaterialPut>,
+    },
+    /// The client set GLTF (PBR) material params on object faces
+    /// (`ModifyMaterialParams`). A world mutation for the driver to apply.
+    MaterialParamsModified {
+        /// One entry per affected face.
+        updates: Vec<MaterialOverrideUpdate>,
+    },
+    /// The client set the per-face media on an object (`ObjectMedia` UPDATE
+    /// verb). The simulator has recorded it and advanced the media version.
+    ObjectMediaSet {
+        /// The object whose media was set.
+        object_id: ObjectKey,
+        /// The new per-face media (one slot per prim face; `None` for a face
+        /// without media).
+        faces: Vec<Option<MediaEntry>>,
+    },
+    /// The client navigated the media on one object face
+    /// (`ObjectMediaNavigate`). The simulator has advanced the object's media
+    /// version rather than replying with media data.
+    ObjectMediaNavigated {
+        /// The object whose media face was navigated.
+        object_id: ObjectKey,
+        /// The prim face navigated.
+        face: u8,
+        /// The URL the face was navigated to.
+        url: String,
+    },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
@@ -1988,8 +2067,93 @@ pub struct SimSession {
     /// An abuse report parked by the first `SendUserReportWithScreenshot` step
     /// until the second step delivers the screenshot bytes.
     pending_report_screenshot: Option<Box<AbuseReport>>,
+    /// Two-stage CAPS uploads parked between step 1 (the metadata POST, which
+    /// mints the uploader URL) and step 2 (the raw-bytes POST that completes
+    /// them), keyed by capability name — one in-flight upload per cap, the same
+    /// shape as [`pending_report_screenshot`](Self::pending_report_screenshot)
+    /// generalised across the whole `Update*`/`NewFile*` family.
+    pending_caps_uploads: BTreeMap<&'static str, CapsUploadMetadata>,
+    /// A monotonic source for the ids the two-stage uploader mints on
+    /// completion (`new_asset` / `new_inventory_item`) and the `ObjectMedia`
+    /// version serials — a sim-server simplification. A real grid mints random
+    /// asset ids; the client stores whatever id it is handed, so the value's
+    /// structure is immaterial, and a deterministic counter keeps `SimSession`
+    /// pure (no clock, no RNG).
+    next_sim_serial: u128,
+    /// The GLTF/legacy materials the `RenderMaterials` query serves, keyed by
+    /// material id ([`SimSession::set_region_material`]). Driver-populated: the
+    /// authoritative prim/material database is out of scope, so this is a small
+    /// serving store like [`display_names`](Self::display_names).
+    region_materials: BTreeMap<Uuid, LegacyMaterial>,
+    /// The per-object media the `ObjectMedia` GET serves, keyed by object
+    /// ([`SimSession::set_object_media`]). Driver-populated.
+    object_media: BTreeMap<ObjectKey, ObjectMediaState>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
+}
+
+/// The parsed step-1 metadata of a two-stage CAPS upload, parked in
+/// [`SimSession`] until the raw-bytes step completes it. One variant per upload
+/// family; carries exactly what the completion event needs to describe the
+/// stored asset.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
+pub enum CapsUploadMetadata {
+    /// `NewFileAgentInventory` — store a new asset and create an inventory item.
+    NewFileInventory(NewFileAgentInventoryRequest),
+    /// `UploadBakedTexture` — a temporary avatar bake (no inventory item).
+    BakedTexture,
+    /// An `Update*AgentInventory` asset replacement (gesture / notecard /
+    /// settings / material), carrying the cap name and the item being updated.
+    UpdateAgentItem {
+        /// The capability name (which asset kind is being replaced).
+        cap: String,
+        /// The agent-inventory item whose asset is replaced.
+        item_id: InventoryKey,
+    },
+    /// An `Update*TaskInventory` asset replacement (notecard task), carrying the
+    /// holding object and the item within it.
+    UpdateTaskItem {
+        /// The capability name.
+        cap: String,
+        /// The in-world object holding the task inventory.
+        task_id: ObjectKey,
+        /// The task-inventory item whose asset is replaced.
+        item_id: InventoryKey,
+    },
+    /// `UpdateScriptAgent` — replace and compile an agent-inventory script.
+    UpdateScriptAgent(UpdateScriptAgentRequest),
+    /// `UpdateScriptTask` — replace and compile a task-inventory script.
+    UpdateScriptTask(UpdateScriptTaskRequest),
+}
+
+impl CapsUploadMetadata {
+    /// Whether this upload compiles a script — its completion reply carries the
+    /// `{ compiled, errors }` result the client folds into
+    /// [`Event::ScriptUploaded`](crate::Event::ScriptUploaded).
+    #[must_use]
+    pub(crate) const fn is_script(&self) -> bool {
+        matches!(self, Self::UpdateScriptAgent(_) | Self::UpdateScriptTask(_))
+    }
+
+    /// Whether this upload creates or updates an inventory item (so the
+    /// completion carries a `new_inventory_item`). `UploadBakedTexture` is the
+    /// sole exception — a temporary bake produces no inventory item.
+    const fn creates_inventory_item(&self) -> bool {
+        !matches!(self, Self::BakedTexture)
+    }
+}
+
+/// The per-object media state the `ObjectMedia` GET serves — the media version
+/// string and the per-face media entries.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ObjectMediaState {
+    /// The media version string (`x-mv:<serial>/<uuid>`), advanced on every
+    /// media change.
+    pub version: String,
+    /// Per-face media, one slot per prim face in order; `None` for a face
+    /// without media.
+    pub faces: Vec<Option<MediaEntry>>,
 }
 
 /// The `AgentPreferences` set a fresh session starts from — OpenSim's stored
@@ -2052,6 +2216,10 @@ impl SimSession {
             display_names: BTreeMap::new(),
             agent_preferences: default_agent_preferences(),
             pending_report_screenshot: None,
+            pending_caps_uploads: BTreeMap::new(),
+            next_sim_serial: 0,
+            region_materials: BTreeMap::new(),
+            object_media: BTreeMap::new(),
             events: VecDeque::new(),
         }
     }
@@ -2256,6 +2424,145 @@ impl SimSession {
     ) {
         self.events
             .push_back(ServerEvent::AbuseReportWithScreenshotReceived { report, screenshot });
+    }
+
+    /// Bumps and returns the monotonic sim serial that mints upload asset ids
+    /// and media versions ([`next_sim_serial`](Self::next_sim_serial)).
+    const fn next_serial(&mut self) -> u128 {
+        self.next_sim_serial = self.next_sim_serial.wrapping_add(1);
+        self.next_sim_serial
+    }
+
+    /// Parks the parsed step-1 metadata of a two-stage CAPS upload under its
+    /// capability name until the raw-bytes step completes it. A re-POST of
+    /// step 1 replaces the parked metadata (the same rule as the screenshot
+    /// uploader).
+    pub(crate) fn park_caps_upload(&mut self, cap: &'static str, metadata: CapsUploadMetadata) {
+        self.pending_caps_uploads.insert(cap, metadata);
+    }
+
+    /// Takes the parked step-1 metadata for `cap`, if a first step stored one.
+    pub(crate) fn take_caps_upload(&mut self, cap: &'static str) -> Option<CapsUploadMetadata> {
+        self.pending_caps_uploads.remove(cap)
+    }
+
+    /// Completes a two-stage CAPS upload: mints the stored asset id (and, for
+    /// the inventory-creating caps, an inventory item id), routes the upload to
+    /// the driver as [`ServerEvent::CapsAssetUploaded`], and returns the minted
+    /// ids for the `{ state: "complete", new_asset, new_inventory_item? }`
+    /// reply. The ids come from the deterministic sim serial
+    /// ([`next_sim_serial`](Self::next_sim_serial)).
+    pub(crate) fn complete_caps_upload(
+        &mut self,
+        metadata: CapsUploadMetadata,
+        data: Vec<u8>,
+    ) -> (AssetKey, Option<InventoryKey>) {
+        let new_asset = AssetKey::from(Uuid::from_u128(self.next_serial()));
+        let new_inventory_item = metadata
+            .creates_inventory_item()
+            .then(|| InventoryKey::from(Uuid::from_u128(self.next_serial())));
+        self.events.push_back(ServerEvent::CapsAssetUploaded {
+            metadata: Box::new(metadata),
+            new_asset,
+            new_inventory_item,
+            data,
+        });
+        (new_asset, new_inventory_item)
+    }
+
+    /// Registers (or replaces) a material in the store the `RenderMaterials`
+    /// query serves from, keyed by material id — the driver API for the
+    /// materials service.
+    pub fn set_region_material(&mut self, material_id: Uuid, material: LegacyMaterial) {
+        self.region_materials.insert(material_id, material);
+    }
+
+    /// The materials the `RenderMaterials` query asks for: the subset of the
+    /// store whose ids are in `ids`, or — when `ids` is empty (the "fetch all
+    /// region materials" form) — every stored material. Unknown ids are
+    /// omitted.
+    pub(crate) fn region_materials(&self, ids: &[Uuid]) -> Vec<RenderMaterialEntry> {
+        let entry = |(id, material): (&Uuid, &LegacyMaterial)| RenderMaterialEntry {
+            material_id: *id,
+            material: material.clone(),
+        };
+        if ids.is_empty() {
+            return self.region_materials.iter().map(entry).collect();
+        }
+        ids.iter()
+            .filter_map(|id| {
+                self.region_materials
+                    .get_key_value(id)
+                    .map(|(id, material)| entry((id, material)))
+            })
+            .collect()
+    }
+
+    /// Registers (or replaces) an object's per-face media in the store the
+    /// `ObjectMedia` GET serves from — the driver API for media-on-a-prim.
+    pub fn set_object_media(&mut self, object_id: ObjectKey, state: ObjectMediaState) {
+        self.object_media.insert(object_id, state);
+    }
+
+    /// The stored media for `object_id`, if the `ObjectMedia` store knows it
+    /// ([`SimSession::set_object_media`]).
+    pub(crate) fn object_media(&self, object_id: ObjectKey) -> Option<&ObjectMediaState> {
+        self.object_media.get(&object_id)
+    }
+
+    /// Records an `ObjectMedia` UPDATE: stores the new per-face media under a
+    /// freshly minted media version and routes it to the driver as
+    /// [`ServerEvent::ObjectMediaSet`]. Returns the new version string (for the
+    /// handler's ack, though the reference just acks with an undefined body).
+    pub(crate) fn set_object_media_update(
+        &mut self,
+        object_id: ObjectKey,
+        faces: Vec<Option<MediaEntry>>,
+    ) {
+        let version = self.mint_media_version(object_id);
+        self.object_media.insert(
+            object_id,
+            ObjectMediaState {
+                version,
+                faces: faces.clone(),
+            },
+        );
+        self.events
+            .push_back(ServerEvent::ObjectMediaSet { object_id, faces });
+    }
+
+    /// Records an `ObjectMediaNavigate`: advances the object's media version
+    /// (creating an empty media record if the object is unknown) and routes the
+    /// navigation to the driver as [`ServerEvent::ObjectMediaNavigated`].
+    pub(crate) fn navigate_object_media(&mut self, object_id: ObjectKey, face: u8, url: String) {
+        let version = self.mint_media_version(object_id);
+        self.object_media
+            .entry(object_id)
+            .or_insert_with(|| ObjectMediaState {
+                version: String::new(),
+                faces: Vec::new(),
+            })
+            .version = version;
+        self.events.push_back(ServerEvent::ObjectMediaNavigated {
+            object_id,
+            face,
+            url,
+        });
+    }
+
+    /// Mints the next media version string (`x-mv:<serial>/<object-uuid>`) — the
+    /// `MediaURL`-style token the simulator advances on every media change.
+    fn mint_media_version(&mut self, object_id: ObjectKey) -> String {
+        let serial = self.next_serial();
+        format!("x-mv:{serial:010}/{}", object_id.uuid())
+    }
+
+    /// Routes a fire-and-forget server event to the driver. Used by the CAPS
+    /// content handlers whose only side effect is surfacing a world mutation
+    /// (appearance bake, notecard copy, materials set) the world authority —
+    /// out of scope here — would apply.
+    pub(crate) fn push_content_event(&mut self, event: ServerEvent) {
+        self.events.push_back(event);
     }
 
     /// The agent id once the circuit is open.

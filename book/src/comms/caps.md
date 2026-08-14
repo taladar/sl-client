@@ -288,6 +288,87 @@ separate CDN base URL); the asset dispatch path is reached through
 surface with `AssetCaps::from_tokens` from the token map the simulator
 advertised — the only value that crosses that boundary.
 
+### The content upload & media handlers
+
+The largest cluster is content creation and editing: the asset
+**upload/update** caps, the **materials** caps, and **media-on-a-prim**
+(MOAP). These write world state that a real grid's world authority owns —
+which is out of scope here — so their read side serves from small
+driver-populated stores on `SimSession` (the same pattern as the
+display-name store), and every mutation surfaces to the driver as a
+`ServerEvent` rather than mutating a prim database.
+
+**The two-stage uploader.** `NewFileAgentInventory`, `UploadBakedTexture` and
+the whole
+`Update{Gesture,Notecard,Script,Settings,Material}{Agent,Task}Inventory` family
+share one server-side state machine — the generalisation of the
+`SendUserReportWithScreenshot` uploader. All route to one
+`CapHandler::AssetUpload`; the cap name only picks which step-1 metadata parser
+runs:
+
+- **Step 1** (a `POST` to the cap URL) parses the cap's metadata body into a
+  `CapsUploadMetadata`, parks it under the cap name
+  (`SimSession::park_caps_upload`), and answers `{ state: "upload", uploader }`
+  — the uploader URL is the cap's own `upload` sub-path (path resolution
+  tolerates sub-paths below a token, so step 2 routes back to the same
+  handler, exactly like the screenshot uploader's `screenshot` sub-path).
+- **Step 2** (a `POST` of the raw asset bytes to that sub-path) takes the
+  parked metadata, has the session mint the stored ids and push
+  `ServerEvent::CapsAssetUploaded { metadata, new_asset, new_inventory_item,
+  data }`, and answers `{ state: "complete", new_asset, new_inventory_item? }`
+  — plus `{ compiled: true, errors: [] }` for the two `Update*Script*` caps
+  (their completion carries the compile result). `UploadBakedTexture`
+  produces a temporary asset with **no** inventory item; a bytes-POST with no
+  parked upload is a `400`.
+
+The minted `new_asset` / `new_inventory_item` ids come from a monotonic
+per-session serial (`SimSession::next_sim_serial`) — a deliberate
+simplification: a real grid mints random asset ids, but the client stores
+whatever id it is handed, so the value's structure is immaterial and a
+deterministic counter keeps `SimSession` pure (no clock, no RNG). The same
+serial mints the `x-mv:<serial>/<uuid>` MOAP version strings.
+
+**Single-POST inventory caps.** `UpdateAvatarAppearance` parses the requested
+Current Outfit Folder version, surfaces
+`ServerEvent::ServerAppearanceRequested`, and answers the accept reply
+`{ success: true }` (the baked-texture ids arrive separately over UDP
+`AvatarAppearance`). `CopyInventoryFromNotecard` is a one-way POST — it surfaces
+`ServerEvent::CopyInventoryFromNotecardRequested` and acks with an undefined
+body (the copied item is delivered over the normal inventory-update stream).
+
+**Materials.** `RenderMaterials` routes on HTTP method: a `POST` (the zipped
+id list) or `GET` (all) queries the session's driver-populated
+`region_materials` store and answers the matching legacy materials; a `PUT`
+sets legacy materials on faces, surfacing `ServerEvent::RenderMaterialsSet`.
+`ModifyMaterialParams` parses the per-face GLTF assignments, surfaces
+`ServerEvent::MaterialParamsModified`, and answers `{ success: true,
+message: "" }`. `UpdateMaterialAgentInventory` is just another two-stage
+uploader cap.
+
+**MOAP.** `ObjectMedia` routes on the body's `verb`: a `GET` answers the
+object's stored per-face media as an `ObjectMediaResponse` (an unknown object
+gets an empty, tolerant media list); an `UPDATE` records the new media under a
+freshly advanced version and surfaces `ServerEvent::ObjectMediaSet`.
+`ObjectMediaNavigate` advances the object's media version and surfaces
+`ServerEvent::ObjectMediaNavigated`. `ObjectAnimation` stays unserved: it is
+never POSTed — listing it in the seed only opts a viewer into the UDP
+`ObjectAnimation` stream.
+
+The inverses added for this cluster follow the pairing convention:
+`parse_new_file_agent_inventory_request`, `parse_update_item_asset_request`,
+`parse_update_task_item_asset_request`,
+`parse_update_script_{agent,task}_request`,
+`parse_update_avatar_appearance_request`, the MOAP `parse_object_media_request`
+/ `parse_object_media_navigate_request` / `ObjectMediaResponse::to_llsd`, and
+the materials `parse_render_materials_request` /
+`parse_render_materials_put_request` / `build_modify_material_params_response` —
+beside their client-direction partners in `sl-wire`, plus
+`parse_copy_inventory_from_notecard` next to its builder in `sl-proto`. The
+shared `build_asset_upload_response`, `server_appearance_update_to_llsd`,
+`build_render_materials_response` and `parse_modify_material_params_request`
+already existed; this cluster wired them into the dispatch. Loopback coverage is
+in `sl-proto/tests/sim_caps.rs`.
+
 ---
 
 > **In this codebase**

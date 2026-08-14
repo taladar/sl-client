@@ -12,20 +12,33 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey,
-        CAP_CHAT_SESSION_REQUEST, CAP_GET_TEXTURE, CAP_READ_OFFLINE_MSGS, CAP_VIEWER_ASSET,
-        CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-        CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG, CapsDispatch, CapsRequest,
-        ChatSessionKind, DisplayName, Event, ImDialog, ImSessionId, InMemoryAssetSource,
-        InstantMessage, LLSD_XML_CONTENT_TYPE, LoginParams, REQUESTED_CAPABILITIES,
+        CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_GET_TEXTURE,
+        CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
+        CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
+        CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+        CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
+        CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DisplayName, Event,
+        FaceMaterialPut, ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage,
+        InventoryFolderKey, InventoryKey, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams,
+        MaterialOverrideUpdate, MediaEntry, ObjectKey, ObjectMediaState, REQUESTED_CAPABILITIES,
         RegionCoordinates, RegionHandle, ServerEvent, ServerHistoryMessage, Session, SimCaps,
-        SimChatSessionKind, SimSession, StartLocation, build_event_queue_request,
-        build_seed_request, chat_session_request_body, enable_simulator_to_caps_llsd,
-        parse_event_queue_response, parse_seed_response,
+        SimChatSessionKind, SimSession, StartLocation, TextureKey, build_event_queue_request,
+        build_seed_request, chat_session_request_body, copy_inventory_from_notecard_body,
+        enable_simulator_to_caps_llsd, parse_event_queue_response, parse_seed_response,
     };
     use sl_wire::{
         CircuitCode, Llsd, LoginRequest, LoginResponse, LoginSuccess,
-        build_agent_preferences_request, build_send_user_report, display_names_query,
-        parse_agent_preferences, parse_asset_upload_response, parse_display_names, parse_llsd_xml,
+        build_agent_preferences_request, build_modify_material_params_request,
+        build_new_file_agent_inventory_request, build_object_media_get_request,
+        build_object_media_navigate_request, build_object_media_update_request,
+        build_render_materials_put_request, build_render_materials_request, build_send_user_report,
+        build_update_avatar_appearance_request, build_update_item_asset_request,
+        build_update_script_agent_request, build_update_task_item_asset_request,
+        build_upload_baked_texture_request, display_names_query, parse_agent_preferences,
+        parse_asset_upload_response, parse_display_names, parse_llsd_xml,
+        parse_render_materials_response,
     };
 
     /// A boxed test error.
@@ -100,10 +113,10 @@ mod test {
             .collect();
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
-        // Seven sim caps plus the four asset-delivery caps
-        // (GetTexture/GetMesh/GetMesh2/ViewerAsset) the composed asset surface
-        // advertises.
-        assert_eq!(granted.len(), 11);
+        // Seven agent-comms/framework sim caps, the four asset-delivery caps
+        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), and the fifteen content
+        // upload/materials/MOAP caps.
+        assert_eq!(granted.len(), 26);
         Ok(())
     }
 
@@ -892,6 +905,529 @@ mod test {
             .assets()
             .dispatch(&source, &asset_get(&path, &missing, None));
         assert_eq!(response.status, 404);
+        Ok(())
+    }
+
+    // -- The content upload / materials / MOAP cluster -------------------------
+
+    /// A `POST` request carrying a raw (non-LLSD) body — the second step of a
+    /// two-stage upload POSTs the asset bytes verbatim.
+    fn raw_post<'a>(path: &'a str, body: &'a [u8]) -> CapsRequest<'a> {
+        CapsRequest {
+            method: "POST",
+            path,
+            query: None,
+            range: None,
+            body,
+        }
+    }
+
+    /// Drives both steps of a two-stage upload for `cap` against the client's
+    /// own builders/parsers: POST `metadata`, check the
+    /// `{ state: "upload", uploader }` reply, POST `bytes` to the uploader
+    /// sub-path, and return the parsed completion reply.
+    fn run_two_stage_upload(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        cap: &str,
+        metadata: &str,
+        bytes: &[u8],
+    ) -> Result<sl_wire::AssetUploadResponse, TestError> {
+        let path = granted_cap_path(caps, cap)?;
+        let (status, reply) = respond(caps, sim, &post(&path, metadata))?;
+        assert_eq!(status, 200, "step 1 for {cap}");
+        let step1 = parse_asset_upload_response(&reply)?;
+        assert_eq!(step1.state, "upload", "step 1 state for {cap}");
+        let uploader: url::Url = step1.uploader.ok_or("no uploader url")?.parse()?;
+        assert_eq!(uploader.path(), format!("{path}/upload"));
+        let (status, reply) = respond(caps, sim, &raw_post(uploader.path(), bytes))?;
+        assert_eq!(status, 200, "step 2 for {cap}");
+        Ok(parse_asset_upload_response(&reply)?)
+    }
+
+    /// A `LegacyMaterial` sample whose fixed-point fields round-trip cleanly
+    /// through the `RenderMaterials` codec.
+    fn sample_material() -> LegacyMaterial {
+        LegacyMaterial {
+            normal_map: TextureKey::from(uuid::Uuid::from_u128(0x1234)),
+            normal_offset: (0.5, -0.25),
+            normal_repeat: (2.0, 4.0),
+            normal_rotation: 1.5,
+            specular_map: TextureKey::from(uuid::Uuid::from_u128(0x5678)),
+            specular_offset: (0.1, 0.2),
+            specular_repeat: (1.0, 1.0),
+            specular_rotation: 0.0,
+            specular_color: [10, 20, 30, 255],
+            specular_exponent: 51,
+            environment_intensity: 7,
+            diffuse_alpha_mode: 1,
+            alpha_mask_cutoff: 128,
+        }
+    }
+
+    /// `NewFileAgentInventory`: the two-stage uploader parks the metadata,
+    /// answers an uploader URL, then completes into
+    /// `ServerEvent::CapsAssetUploaded` with a fresh asset and inventory item.
+    /// A premature bytes-POST (no parked upload) is rejected.
+    #[test]
+    fn new_file_agent_inventory_two_stage() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let folder = InventoryFolderKey::from(uuid::Uuid::from_u128(0x0f01_de11));
+        let metadata = build_new_file_agent_inventory_request(
+            folder,
+            "texture",
+            "texture",
+            "My Texture",
+            "a note",
+            0x0008_e000,
+            0,
+            0,
+            10,
+        );
+
+        // A bytes-POST before any step 1 is a bad request.
+        let path = granted_cap_path(&caps, CAP_NEW_FILE_AGENT_INVENTORY)?;
+        let upload_path = format!("{path}/upload");
+        let (status, _) = respond(&mut caps, &mut sim, &raw_post(&upload_path, b"early"))?;
+        assert_eq!(status, 400);
+
+        let bytes = b"j2c-texture-bytes";
+        let completion = run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_NEW_FILE_AGENT_INVENTORY,
+            &metadata,
+            bytes,
+        )?;
+        assert_eq!(completion.state, "complete");
+        let new_asset = completion.new_asset.ok_or("no new_asset")?;
+        assert!(completion.new_inventory_item.is_some());
+
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded {
+                metadata,
+                new_asset: event_asset,
+                new_inventory_item,
+                data,
+            }) => {
+                assert_eq!(event_asset, AssetKey::from(new_asset));
+                assert!(new_inventory_item.is_some());
+                assert_eq!(data, bytes);
+                match *metadata {
+                    CapsUploadMetadata::NewFileInventory(request) => {
+                        assert_eq!(request.name, "My Texture");
+                        assert_eq!(request.folder_id, folder);
+                        assert_eq!(request.asset_type, "texture");
+                    }
+                    other => return Err(format!("expected NewFileInventory, got {other:?}").into()),
+                }
+            }
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `UploadBakedTexture`: a temporary bake completes with **no** inventory
+    /// item, and the metadata is `BakedTexture`.
+    #[test]
+    fn upload_baked_texture_has_no_inventory_item() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let completion = run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_UPLOAD_BAKED_TEXTURE,
+            &build_upload_baked_texture_request(),
+            b"baked-bytes",
+        )?;
+        assert_eq!(completion.state, "complete");
+        assert!(completion.new_asset.is_some());
+        assert_eq!(completion.new_inventory_item, None);
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded {
+                metadata,
+                new_inventory_item,
+                ..
+            }) => {
+                assert_eq!(new_inventory_item, None);
+                assert!(matches!(*metadata, CapsUploadMetadata::BakedTexture));
+            }
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// An `Update*AgentInventory` replacement carries the cap name and the item
+    /// being updated through to the completion event.
+    #[test]
+    fn update_agent_item_replaces_asset() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x7e11));
+        let completion = run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+            &build_update_item_asset_request(item),
+            b"notecard-text",
+        )?;
+        assert!(completion.new_asset.is_some());
+        assert!(completion.new_inventory_item.is_some());
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded { metadata, .. }) => match *metadata {
+                CapsUploadMetadata::UpdateAgentItem { cap, item_id } => {
+                    assert_eq!(cap, CAP_UPDATE_NOTECARD_AGENT_INVENTORY);
+                    assert_eq!(item_id, item);
+                }
+                other => return Err(format!("expected UpdateAgentItem, got {other:?}").into()),
+            },
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `UpdateNotecardTaskInventory` carries the holding object and item.
+    #[test]
+    fn update_task_item_replaces_asset() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let task = ObjectKey::from(uuid::Uuid::from_u128(0x7a5c));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x7e12));
+        run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+            &build_update_task_item_asset_request(task, item),
+            b"task-notecard",
+        )?;
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded { metadata, .. }) => match *metadata {
+                CapsUploadMetadata::UpdateTaskItem {
+                    cap,
+                    task_id,
+                    item_id,
+                } => {
+                    assert_eq!(cap, CAP_UPDATE_NOTECARD_TASK_INVENTORY);
+                    assert_eq!(task_id, task);
+                    assert_eq!(item_id, item);
+                }
+                other => return Err(format!("expected UpdateTaskItem, got {other:?}").into()),
+            },
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `UpdateScriptAgent` completes with a `compiled` result (the script
+    /// family's extra completion field) and the script metadata.
+    #[test]
+    fn update_script_agent_reports_compiled() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x5c11));
+        let completion = run_two_stage_upload(
+            &mut caps,
+            &mut sim,
+            CAP_UPDATE_SCRIPT_AGENT,
+            &build_update_script_agent_request(item, "mono"),
+            b"default { state_entry() {} }",
+        )?;
+        assert_eq!(completion.compiled, Some(true));
+        assert!(completion.errors.is_empty());
+        match sim.poll_event() {
+            Some(ServerEvent::CapsAssetUploaded { metadata, .. }) => match *metadata {
+                CapsUploadMetadata::UpdateScriptAgent(request) => {
+                    assert_eq!(request.item_id, item);
+                    assert_eq!(request.target, "mono");
+                }
+                other => return Err(format!("expected UpdateScriptAgent, got {other:?}").into()),
+            },
+            other => return Err(format!("expected CapsAssetUploaded, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `UpdateAvatarAppearance`: the client's bake trigger is surfaced as
+    /// `ServerAppearanceRequested`, and the accept reply folds into
+    /// `Event::ServerAppearanceUpdate { success: true }`.
+    #[test]
+    fn update_avatar_appearance_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_UPDATE_AVATAR_APPEARANCE)?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &build_update_avatar_appearance_request(42)),
+        )?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(CAP_UPDATE_AVATAR_APPEARANCE, &parse_llsd_xml(&reply)?, now)?;
+        assert!(
+            drain_client(&mut client)
+                .iter()
+                .any(|event| matches!(event, Event::ServerAppearanceUpdate { success: true, .. }))
+        );
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::ServerAppearanceRequested { cof_version: 42 })
+        ));
+        Ok(())
+    }
+
+    /// `CopyInventoryFromNotecard`: the one-way POST acks with an undefined body
+    /// and surfaces the copy request (nil object/folder ids fold to `None`).
+    #[test]
+    fn copy_inventory_from_notecard_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let notecard = InventoryKey::from(uuid::Uuid::from_u128(0x0ca1));
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0x0ca2));
+        let item = InventoryKey::from(uuid::Uuid::from_u128(0x0ca3));
+        let body = copy_inventory_from_notecard_body(notecard, Some(object), item, None);
+        let path = granted_cap_path(&caps, CAP_COPY_INVENTORY_FROM_NOTECARD)?;
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+        match sim.poll_event() {
+            Some(ServerEvent::CopyInventoryFromNotecardRequested {
+                notecard_id,
+                object_id,
+                item_id,
+                folder_id,
+            }) => {
+                assert_eq!(notecard_id, notecard);
+                assert_eq!(object_id, Some(object));
+                assert_eq!(item_id, item);
+                assert_eq!(folder_id, None);
+            }
+            other => {
+                return Err(
+                    format!("expected CopyInventoryFromNotecardRequested, got {other:?}").into(),
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// `RenderMaterials`: a POST query round-trips a stored material through the
+    /// client's response parser; a PUT surfaces the face assignments as
+    /// `ServerEvent::RenderMaterialsSet`.
+    #[test]
+    fn render_materials_query_and_put() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let material_id = uuid::Uuid::from_u128(0x0a1a_0001);
+        let material = sample_material();
+        sim.set_region_material(material_id, material.clone());
+
+        let path = granted_cap_path(&caps, CAP_RENDER_MATERIALS)?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &build_render_materials_request(&[material_id])),
+        )?;
+        assert_eq!(status, 200);
+        let entries = parse_render_materials_response(&reply);
+        assert_eq!(entries.len(), 1);
+        let entry = entries.first().ok_or("no material entry")?;
+        assert_eq!(entry.material_id, material_id);
+        assert_eq!(entry.material, material);
+
+        // A PUT sets legacy materials on faces → RenderMaterialsSet.
+        let updates = vec![FaceMaterialPut {
+            local_id: 0x00ab_cdef,
+            face: 2,
+            material: Some(sample_material()),
+        }];
+        let put_body = build_render_materials_put_request(&updates);
+        let put = CapsRequest {
+            method: "PUT",
+            path: &path,
+            query: None,
+            range: None,
+            body: put_body.as_bytes(),
+        };
+        let (status, _) = respond(&mut caps, &mut sim, &put)?;
+        assert_eq!(status, 200);
+        match sim.poll_event() {
+            Some(ServerEvent::RenderMaterialsSet { updates: set }) => {
+                assert_eq!(set, updates);
+            }
+            other => return Err(format!("expected RenderMaterialsSet, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `ModifyMaterialParams`: the POST folds into
+    /// `Event::MaterialParamsResult { success: true }` and surfaces
+    /// `ServerEvent::MaterialParamsModified`.
+    #[test]
+    fn modify_material_params_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let updates = vec![MaterialOverrideUpdate {
+            object_id: ObjectKey::from(uuid::Uuid::from_u128(0x0b1b)),
+            side: 1,
+            gltf_json: Some("{}".to_owned()),
+            asset_id: None,
+        }];
+        let path = granted_cap_path(&caps, CAP_MODIFY_MATERIAL_PARAMS)?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &build_modify_material_params_request(&updates)),
+        )?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(CAP_MODIFY_MATERIAL_PARAMS, &parse_llsd_xml(&reply)?, now)?;
+        assert!(
+            drain_client(&mut client)
+                .iter()
+                .any(|event| matches!(event, Event::MaterialParamsResult { success: true, .. }))
+        );
+        match sim.poll_event() {
+            Some(ServerEvent::MaterialParamsModified { updates: modified }) => {
+                assert_eq!(modified, updates);
+            }
+            other => return Err(format!("expected MaterialParamsModified, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `ObjectMedia`: a GET round-trips the stored per-face media through the
+    /// client fold; an UPDATE records new media and surfaces
+    /// `ServerEvent::ObjectMediaSet`.
+    #[test]
+    fn object_media_get_and_update() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0xed1a));
+        let entry = MediaEntry {
+            current_url: Some("http://example.com/".parse()?),
+            home_url: Some("http://example.com/".parse()?),
+            ..MediaEntry::default()
+        };
+        sim.set_object_media(
+            object,
+            ObjectMediaState {
+                version: "x-mv:0000000001/init".to_owned(),
+                faces: vec![Some(entry.clone()), None],
+            },
+        );
+
+        let path = granted_cap_path(&caps, CAP_OBJECT_MEDIA)?;
+        let (status, reply) = respond(
+            &mut caps,
+            &mut sim,
+            &post(&path, &build_object_media_get_request(object)),
+        )?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(CAP_OBJECT_MEDIA, &parse_llsd_xml(&reply)?, now)?;
+        let media = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::ObjectMedia {
+                    object_id, faces, ..
+                } if object_id == object => Some(faces),
+                _ => None,
+            })
+            .ok_or("expected an ObjectMedia event")?;
+        assert_eq!(media, vec![Some(entry.clone()), None]);
+
+        // An UPDATE verb records the new media and advances the version.
+        let (status, _) = respond(
+            &mut caps,
+            &mut sim,
+            &post(
+                &path,
+                &build_object_media_update_request(object, &[Some(entry.clone())]),
+            ),
+        )?;
+        assert_eq!(status, 200);
+        match sim.poll_event() {
+            Some(ServerEvent::ObjectMediaSet { object_id, faces }) => {
+                assert_eq!(object_id, object);
+                assert_eq!(faces, vec![Some(entry)]);
+            }
+            other => return Err(format!("expected ObjectMediaSet, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `ObjectMediaNavigate`: the POST surfaces `ServerEvent::ObjectMediaNavigated`.
+    #[test]
+    fn object_media_navigate_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let object = ObjectKey::from(uuid::Uuid::from_u128(0xed2a));
+        let path = granted_cap_path(&caps, CAP_OBJECT_MEDIA_NAVIGATE)?;
+        let (status, _) = respond(
+            &mut caps,
+            &mut sim,
+            &post(
+                &path,
+                &build_object_media_navigate_request(object, 3, "http://example.net/"),
+            ),
+        )?;
+        assert_eq!(status, 200);
+        match sim.poll_event() {
+            Some(ServerEvent::ObjectMediaNavigated {
+                object_id,
+                face,
+                url,
+            }) => {
+                assert_eq!(object_id, object);
+                assert_eq!(face, 3);
+                assert_eq!(url, "http://example.net/");
+            }
+            other => return Err(format!("expected ObjectMediaNavigated, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The content handlers reject wrong methods and malformed bodies with the
+    /// framework's status contract.
+    #[test]
+    fn content_caps_methods_and_bodies_are_validated() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+
+        // POST-only content caps reject a GET.
+        for name in [
+            CAP_NEW_FILE_AGENT_INVENTORY,
+            CAP_UPDATE_AVATAR_APPEARANCE,
+            CAP_COPY_INVENTORY_FROM_NOTECARD,
+            CAP_MODIFY_MATERIAL_PARAMS,
+            CAP_OBJECT_MEDIA,
+            CAP_OBJECT_MEDIA_NAVIGATE,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+            assert_eq!(status, 405, "GET on {name}");
+        }
+
+        // Garbage LLSD on the LLSD-bodied content POST handlers is a bad request.
+        for name in [
+            CAP_UPDATE_AVATAR_APPEARANCE,
+            CAP_COPY_INVENTORY_FROM_NOTECARD,
+            CAP_MODIFY_MATERIAL_PARAMS,
+            CAP_OBJECT_MEDIA,
+            CAP_OBJECT_MEDIA_NAVIGATE,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _) = respond(&mut caps, &mut sim, &post(&path, "not xml <"))?;
+            assert_eq!(status, 400, "garbage body on {name}");
+        }
+
+        // A method-less ObjectMedia body is unroutable → 400.
+        let path = granted_cap_path(&caps, CAP_OBJECT_MEDIA)?;
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
+        assert_eq!(status, 400);
         Ok(())
     }
 }

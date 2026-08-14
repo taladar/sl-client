@@ -31,11 +31,13 @@ mod types;
 
 pub use gltf::{
     build_gltf_material_override, build_modify_material_params_request,
-    parse_gltf_material_override, parse_modify_material_params_request,
+    build_modify_material_params_response, parse_gltf_material_override,
+    parse_modify_material_params_request,
 };
 pub use legacy::{
     build_render_materials_put_request, build_render_materials_request,
-    build_render_materials_response, parse_render_materials_response,
+    build_render_materials_response, parse_render_materials_put_request,
+    parse_render_materials_request, parse_render_materials_response,
 };
 #[cfg(test)]
 pub(crate) use legacy::{read_binary_value, write_binary_value};
