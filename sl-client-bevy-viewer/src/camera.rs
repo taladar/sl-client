@@ -147,6 +147,51 @@ const MOUSELOOK_EYE_HALF_LIFE: f32 = 0.06;
 /// otherwise clip through, so the pulled-in camera sits just short of the wall.
 const COLLISION_PADDING: f32 = 0.2;
 
+/// The user-tunable camera parameters, refreshed every frame from the typed
+/// settings store by the camera & movement preferences tab
+/// (`crate::preferences_camera_move`). The defaults reproduce the module
+/// constants exactly, so a run without a settings store (the gallery, headless
+/// tests) behaves as it always did.
+#[derive(Resource, Debug, Clone, PartialEq)]
+pub(crate) struct CameraTuning {
+    /// Multiplier on the third-person orbit distance — the reference's
+    /// `CameraOffsetScale`, scaling how far the camera sits from the avatar
+    /// without changing the orbit angles.
+    pub(crate) offset_scale: f32,
+    /// The camera-pose smoothing half-life (seconds) [`apply_pose`] eases with;
+    /// `0` snaps. Replaces the fixed [`SMOOTH_HALF_LIFE`].
+    pub(crate) smoothing_half_life: f32,
+    /// The farthest the third-person camera zooms from the avatar (metres) —
+    /// the reference's `MAX_CAMERA_DISTANCE_FROM_AGENT`, replacing the fixed
+    /// [`MAX_DISTANCE`].
+    pub(crate) max_distance: f32,
+    /// When set, the mouse wheel no longer zooms the third-person camera (the
+    /// reference's `FSDisableMouseWheelCameraZoom`); alt-drag zoom still works.
+    pub(crate) wheel_zoom_disabled: bool,
+    /// Radians of mouselook yaw / pitch per pixel of mouse motion — the
+    /// reference's `MouseSensitivity` mapped to our units, replacing the fixed
+    /// [`AIM_SENSITIVITY`] for mouselook (the flycam right-drag keeps the
+    /// constant).
+    pub(crate) mouselook_sensitivity_rad_per_px: f32,
+    /// Invert the mouselook pitch axis (mouse up looks down) — the reference's
+    /// `InvertMouse`. Applies to mouselook only, as the reference does.
+    pub(crate) invert_mouse_y: bool,
+}
+
+impl Default for CameraTuning {
+    /// Today's constants — the out-of-the-box behaviour is unchanged.
+    fn default() -> Self {
+        Self {
+            offset_scale: 1.0,
+            smoothing_half_life: SMOOTH_HALF_LIFE,
+            max_distance: MAX_DISTANCE,
+            wheel_zoom_disabled: false,
+            mouselook_sensitivity_rad_per_px: AIM_SENSITIVITY,
+            invert_mouse_y: false,
+        }
+    }
+}
+
 /// Which of the camera's own axes an [auto-rotation](CameraSpin) spins about.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub(crate) enum SpinAxis {
@@ -285,8 +330,9 @@ pub(crate) struct CameraRig {
     /// Third-person vertical orbit angle, radians (positive looks down onto the
     /// avatar). Seeded from [`CAMERA_OFFSET`]'s elevation.
     elevation: f32,
-    /// Third-person camera distance from the focus, metres, clamped to
-    /// `[MOUSELOOK_CROSS_DISTANCE, MAX_DISTANCE]`.
+    /// Third-person camera distance from the focus, metres, clamped between
+    /// [`MOUSELOOK_CROSS_DISTANCE`] and the tunable maximum
+    /// ([`CameraTuning::max_distance`], default [`MAX_DISTANCE`]).
     distance: f32,
     /// Mouselook / flycam yaw about Bevy up (`+Y`), radians.
     yaw: f32,
@@ -529,6 +575,7 @@ impl Plugin for CameraPlugin {
         app.init_resource::<CameraMode>()
             .init_resource::<FocusTarget>()
             .init_resource::<CameraAim>()
+            .init_resource::<CameraTuning>()
             .init_resource::<FlycamSmoothing>()
             .add_systems(PreUpdate, sync_input_mode)
             .add_systems(
@@ -719,12 +766,13 @@ pub(crate) fn update_camera_cursor(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the mode / focus / \
-              context state, the Alt / Ctrl modifiers, the mouse button and motion, the wheel, and \
-              the camera rig"
+              context state, the user camera tuning, the Alt / Ctrl modifiers, the mouse button \
+              and motion, the wheel, and the camera rig"
 )]
 pub(crate) fn orbit_third_person(
     mut mode: ResMut<CameraMode>,
     focus: Res<FocusTarget>,
+    tuning: Res<CameraTuning>,
     context: Res<InputContext>,
     keyboard: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -738,9 +786,14 @@ pub(crate) fn orbit_third_person(
     // A wheel scroll over a blocking UI panel (a floater's scrolling list) scrolls
     // that panel, not the camera — `InputContext` is focus-based, so hovering a
     // list does not leave the world context, and without this the wheel would
-    // both scroll the list and zoom the camera.
+    // both scroll the list and zoom the camera. The wheel-zoom preference gates
+    // only the wheel: an alt-drag zoom still works with it off.
     let over_ui = crate::hud_pick::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
-    let scroll = if over_ui { 0.0 } else { scroll_notches(&wheel) };
+    let scroll = if over_ui || tuning.wheel_zoom_disabled {
+        0.0
+    } else {
+        scroll_notches(&wheel)
+    };
     if *mode != CameraMode::ThirdPerson || !context.is_world() {
         return;
     }
@@ -782,7 +835,7 @@ pub(crate) fn orbit_third_person(
                     rig.aim_along(forward);
                     *mode = CameraMode::Mouselook;
                 } else {
-                    rig.distance = next.clamp(MOUSELOOK_CROSS_DISTANCE, MAX_DISTANCE);
+                    rig.distance = next.clamp(MOUSELOOK_CROSS_DISTANCE, tuning.max_distance);
                 }
             }
         }
@@ -796,7 +849,8 @@ pub(crate) fn orbit_third_person(
                 let factor = ZOOM_STEP.powf(zoom_in);
                 let length = rig.point_offset.length();
                 if length > 1.0e-4 {
-                    let next = (length * factor).clamp(MOUSELOOK_CROSS_DISTANCE, MAX_DISTANCE);
+                    let next =
+                        (length * factor).clamp(MOUSELOOK_CROSS_DISTANCE, tuning.max_distance);
                     rig.point_offset = vscale(rig.point_offset, next / length);
                 }
             }
@@ -905,6 +959,7 @@ pub(crate) fn focus_on_object(
 pub(crate) fn aim_look(
     mut mode: ResMut<CameraMode>,
     context: Res<InputContext>,
+    tuning: Res<CameraTuning>,
     motion: Res<AccumulatedMouseMotion>,
     wheel: Res<AccumulatedMouseScroll>,
     mut cameras: Query<&mut CameraRig, With<ViewerCamera>>,
@@ -916,13 +971,27 @@ pub(crate) fn aim_look(
     let Ok(mut rig) = cameras.single_mut() else {
         return;
     };
-    let delta = motion.delta;
-    rig.yaw -= delta.x * AIM_SENSITIVITY;
-    rig.pitch = (rig.pitch - delta.y * AIM_SENSITIVITY).clamp(-MAX_PITCH, MAX_PITCH);
+    let (yaw_delta, pitch_delta) = aim_deltas(
+        motion.delta,
+        tuning.mouselook_sensitivity_rad_per_px,
+        tuning.invert_mouse_y,
+    );
+    rig.yaw += yaw_delta;
+    rig.pitch = (rig.pitch + pitch_delta).clamp(-MAX_PITCH, MAX_PITCH);
     // Scroll out of mouselook back into third person, dropping just outside the head.
     if scroll < 0.0 {
         *mode = CameraMode::ThirdPerson;
     }
+}
+
+/// The mouselook yaw / pitch deltas (radians) a mouse motion `delta` produces at
+/// `sensitivity` radians per pixel. Mouse right always yaws right (negative yaw);
+/// `invert_y` flips only the pitch axis, so mouse up looks down — the reference's
+/// `InvertMouse`. Pure, so the sensitivity scaling and the invert are
+/// unit-testable.
+fn aim_deltas(delta: Vec2, sensitivity: f32, invert_y: bool) -> (f32, f32) {
+    let pitch_sign = if invert_y { 1.0 } else { -1.0 };
+    (-delta.x * sensitivity, pitch_sign * delta.y * sensitivity)
 }
 
 /// Drive the flycam's free position and orientation from the movement actions, the
@@ -1114,12 +1183,14 @@ type AvatarTransformQuery<'world, 'state> =
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the mode / focus \
-              / aim state, the identity and avatar tables to find the own avatar, the transform \
-              query, the ray caster for collision, time for the smoothing, and the camera itself"
+              / aim state, the user camera tuning, the identity and avatar tables to find the own \
+              avatar, the transform query, the ray caster for collision, time for the smoothing, \
+              and the camera itself"
 )]
 pub(crate) fn position_camera(
-    mode: Res<CameraMode>,
-    focus_target: Res<FocusTarget>,
+    // Bundled into one tuple param: a Bevy system tops out at 16 parameters and
+    // this one is full — a tuple of `SystemParam`s is itself a `SystemParam`.
+    camera_state: (Res<CameraMode>, Res<FocusTarget>, Res<CameraTuning>),
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
     objects: Res<crate::objects::ObjectState>,
@@ -1138,6 +1209,7 @@ pub(crate) fn position_camera(
     mut aim_out: ResMut<CameraAim>,
     mut cameras: Query<(&mut Transform, &mut CameraRig), With<ViewerCamera>>,
 ) {
+    let (mode, focus_target, tuning) = camera_state;
     let Ok((mut transform, mut rig)) = cameras.single_mut() else {
         return;
     };
@@ -1251,8 +1323,15 @@ pub(crate) fn position_camera(
                     };
                     let head = own_avatar_head(&identity, &avatars, &globals, &transforms);
                     let focus = third_person_focus(head, anchor, facing);
-                    let eye =
-                        third_person_eye(focus, facing, rig.azimuth, rig.elevation, rig.distance);
+                    // The user's `CameraOffsetScale` multiplies the orbit distance
+                    // (not the angles), pushing the whole rear view in or out.
+                    let eye = third_person_eye(
+                        focus,
+                        facing,
+                        rig.azimuth,
+                        rig.elevation,
+                        rig.distance * tuning.offset_scale,
+                    );
                     (eye, focus, true, true)
                 }
             };
@@ -1268,6 +1347,7 @@ pub(crate) fn position_camera(
                 focus,
                 follow_avatar,
                 &time,
+                tuning.smoothing_half_life,
                 false,
             );
         }
@@ -1276,8 +1356,9 @@ pub(crate) fn position_camera(
 
 /// Ease the camera from its smoothed pose toward `(eye, focus)` and write the
 /// transform, seeding (snapping) on the first frame so it does not glide in from
-/// the origin. `snap` bypasses the smoothing (mouselook, where a lag reads as
-/// sluggish aim).
+/// the origin. `half_life` is the exponential easing's half-life in seconds
+/// ([`CameraTuning::smoothing_half_life`]); zero (or less) snaps every frame.
+/// `snap` bypasses the smoothing (mouselook, where a lag reads as sluggish aim).
 ///
 /// `follow_avatar` selects **rigid follow**: the focus is taken from the live
 /// avatar every frame with no world-space easing, and only the eye's **offset from
@@ -1287,6 +1368,12 @@ pub(crate) fn position_camera(
 /// drift relative to each other — a sustained vertical flight has zero follow lag,
 /// as the reference viewer does. `false` (a fixed focus point) smooths the whole
 /// pose in world space as before — a static point has nothing to trail.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the camera pose write needs the transform and rig it writes, the desired eye / \
+              focus pair, the follow mode, the frame time, and the two smoothing controls — \
+              bundling them into a struct for one internal call site would only obscure it"
+)]
 fn apply_pose(
     transform: &mut Transform,
     rig: &mut CameraRig,
@@ -1294,13 +1381,20 @@ fn apply_pose(
     focus: Vec3,
     follow_avatar: bool,
     time: &Time,
+    half_life: f32,
     snap: bool,
 ) {
     let (final_eye, final_focus) = if !rig.seeded || snap {
         (eye, focus)
     } else {
         let dt = time.delta_secs();
-        let t = 1.0 - 0.5_f32.powf(dt / SMOOTH_HALF_LIFE);
+        // A non-positive half-life means "no smoothing": snap the full way. (The
+        // formula would otherwise hit 0/0 = NaN on a zero-dt frame.)
+        let t = if half_life > 0.0 {
+            1.0 - 0.5_f32.powf(dt / half_life)
+        } else {
+            1.0
+        };
         if follow_avatar {
             // Rigid follow: the focus tracks the avatar this frame (no world-space
             // easing, so the camera never trails the body's translation), and only
@@ -1580,7 +1674,7 @@ mod tests {
     /// than the framework.
     #[test]
     fn follow_has_no_steady_state_vertical_lag() {
-        use super::{CameraRig, apply_pose, vadd, vsub};
+        use super::{CameraRig, SMOOTH_HALF_LIFE, apply_pose, vadd, vsub};
         use bevy::math::Vec3;
         use bevy::prelude::{Time, Transform};
         use std::time::Duration;
@@ -1610,6 +1704,7 @@ mod tests {
                 vadd(anchor, focus_off),
                 follow_avatar,
                 &time,
+                SMOOTH_HALF_LIFE,
                 false,
             );
             for _frame in 0..60 {
@@ -1621,6 +1716,7 @@ mod tests {
                     vadd(anchor, focus_off),
                     follow_avatar,
                     &time,
+                    SMOOTH_HALF_LIFE,
                     false,
                 );
             }
@@ -1645,6 +1741,92 @@ mod tests {
         assert!(
             vsub(lagging_eye, desired).length() > 0.1,
             "world-space smoothing lags a sustained climb (the bug)"
+        );
+    }
+
+    /// The mouselook aim deltas scale linearly with the sensitivity, and the
+    /// invert flag flips **only** the pitch axis — yaw is identical either way, so
+    /// inverting can never mirror the horizontal look.
+    #[test]
+    fn aim_deltas_scale_and_invert_pitch_only() {
+        use super::aim_deltas;
+        use bevy::math::Vec2;
+
+        let delta = Vec2::new(10.0, -4.0);
+        let (yaw, pitch) = aim_deltas(delta, 0.003, false);
+        assert!((yaw - (-0.03)).abs() < 1.0e-6, "yaw at 0.003 rad/px: {yaw}");
+        assert!((pitch - 0.012).abs() < 1.0e-6, "pitch mouse-up looks up");
+
+        // Double the sensitivity, double both deltas.
+        let (yaw2, pitch2) = aim_deltas(delta, 0.006, false);
+        assert!((yaw2 - 2.0 * yaw).abs() < 1.0e-6);
+        assert!((pitch2 - 2.0 * pitch).abs() < 1.0e-6);
+
+        // Inverting flips the pitch sign and leaves the yaw untouched.
+        let (yaw_inv, pitch_inv) = aim_deltas(delta, 0.003, true);
+        assert!((yaw_inv - yaw).abs() < 1.0e-6, "invert never touches yaw");
+        assert!((pitch_inv + pitch).abs() < 1.0e-6, "invert flips pitch");
+    }
+
+    /// The offset scale multiplies the third-person eye's distance from the focus
+    /// without changing its direction — the whole rear view slides in / out along
+    /// the same ray.
+    #[test]
+    fn offset_scale_scales_distance_not_direction() {
+        let facing = Vec3::NEG_Z;
+        let rig = CameraRig::default();
+        let near = third_person_eye(Vec3::ZERO, facing, 0.3, rig.elevation, rig.distance);
+        let far = third_person_eye(Vec3::ZERO, facing, 0.3, rig.elevation, rig.distance * 2.0);
+        assert!(
+            (far.length() - 2.0 * near.length()).abs() < 1.0e-4,
+            "doubled distance doubles the offset: {near:?} vs {far:?}"
+        );
+        assert!(
+            near.normalize().abs_diff_eq(far.normalize(), 1.0e-5),
+            "same direction from the focus"
+        );
+    }
+
+    /// A zero smoothing half-life snaps the eased pose straight onto the desired
+    /// pose (no residual glide), which is what the preferences slider's `0` means.
+    #[test]
+    fn zero_half_life_snaps_the_pose() {
+        use super::{CameraRig, apply_pose, vadd, vsub};
+        use bevy::prelude::{Time, Transform};
+        use std::time::Duration;
+
+        let mut time = Time::default();
+        time.advance_by(Duration::from_secs_f32(1.0 / 60.0));
+        let mut rig = CameraRig::default();
+        let mut transform = Transform::default();
+        // Seed far away, then ask for a distant pose with half-life 0: it must
+        // land exactly on it in a single frame.
+        apply_pose(
+            &mut transform,
+            &mut rig,
+            Vec3::ZERO,
+            Vec3::new(0.0, 0.0, -1.0),
+            false,
+            &time,
+            0.0,
+            false,
+        );
+        let eye = Vec3::new(50.0, 10.0, -20.0);
+        let focus = vadd(eye, Vec3::new(0.0, 0.0, -1.0));
+        apply_pose(
+            &mut transform,
+            &mut rig,
+            eye,
+            focus,
+            false,
+            &time,
+            0.0,
+            false,
+        );
+        assert!(
+            vsub(rig.smoothed_eye, eye).length() < 1.0e-5,
+            "half-life 0 snaps: {:?}",
+            rig.smoothed_eye
         );
     }
 

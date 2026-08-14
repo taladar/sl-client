@@ -51,9 +51,11 @@ impl ReqwestAssetFetcher {
     /// for callers that do not already have one to share.
     #[must_use]
     pub fn with_default_client() -> Self {
-        let http = ReqwestClient::builder()
+        let http = crate::http_proxy::client_builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
+            // Proxy-less fallback: the builder only fails on TLS backend
+            // initialization (the proxy value was validated at startup).
             .unwrap_or_else(|_error| ReqwestClient::new());
         Self::new(http)
     }

@@ -26,19 +26,27 @@
 //! in [`ChatMessage::from_name`](sl_client_bevy::ChatMessage).
 
 use bevy::prelude::*;
-use sl_client_bevy::{ChatMessage, ChatType, SlEvent, SlSessionEvent};
+use sl_client_bevy::{
+    AgentKey, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
+};
 
 use crate::bottom_toolbar::BottomArea;
+use crate::preferences_chat::{
+    SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
+};
+use crate::settings::ViewerSettings;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 
-/// The most chat lines the overlay ever shows at once. Fading already bounds each
+/// The most chat lines the overlay ever shows at once when no
+/// [`SETTING_CHAT_MAX_LINES`] value is available. Fading already bounds each
 /// line's lifetime; this is the burst safety valve, evicting the oldest line so a
 /// flood of near-simultaneous chat cannot grow the column without bound.
 const CHAT_MAX_LINES: usize = 12;
 
 /// How long, in seconds, a freshly arrived line stays fully opaque before it
-/// begins to fade. Reference-faithful: Firestorm's `NearbyToastLifeTime` (23 s)
+/// begins to fade, when no [`SETTING_NEARBY_TOAST_LIFETIME`] value is
+/// available. Reference-faithful: Firestorm's `NearbyToastLifeTime` (23 s)
 /// minus its `NearbyToastFadingTime` (3 s).
 const CHAT_HOLD_TIME: f32 = 20.0;
 
@@ -47,8 +55,48 @@ const CHAT_HOLD_TIME: f32 = 20.0;
 /// `NearbyToastFadingTime`.
 const CHAT_FADE_DURATION: f32 = 3.0;
 
-/// The overlay font size, in logical pixels.
+/// The overlay font size, in logical pixels, at the medium
+/// [`SETTING_CHAT_FONT_SIZE`] step (and when no settings are available).
 const CHAT_FONT_SIZE: f32 = 15.0;
+
+/// The overlay font size for the stored [`SETTING_CHAT_FONT_SIZE`] step:
+/// `0` small, `1` medium, `2` large (an unknown step reads as medium).
+const fn overlay_font_size(step: u32) -> f32 {
+    match step {
+        0 => 13.0,
+        2 => 17.0,
+        _medium => CHAT_FONT_SIZE,
+    }
+}
+
+/// The stored [`SETTING_CHAT_FONT_SIZE`] step (medium when no settings are
+/// available, e.g. a bare headless test world).
+fn font_step(settings: Option<&ViewerSettings>) -> u32 {
+    settings
+        .and_then(|settings| settings.store().get_u32(SETTING_CHAT_FONT_SIZE).ok())
+        .unwrap_or(1)
+}
+
+/// The stored hold time: [`SETTING_NEARBY_TOAST_LIFETIME`] (the full on-screen
+/// lifetime) minus the fade, floored at zero; [`CHAT_HOLD_TIME`] when no
+/// settings are available.
+fn hold_time(settings: Option<&ViewerSettings>) -> f32 {
+    settings
+        .and_then(|settings| settings.store().get_u32(SETTING_NEARBY_TOAST_LIFETIME).ok())
+        .and_then(|seconds| u16::try_from(seconds).ok())
+        .map_or(CHAT_HOLD_TIME, |seconds| {
+            (f32::from(seconds) - CHAT_FADE_DURATION).max(0.0)
+        })
+}
+
+/// The stored overlay line cap ([`SETTING_CHAT_MAX_LINES`], floored at one);
+/// [`CHAT_MAX_LINES`] when no settings are available.
+fn max_lines(settings: Option<&ViewerSettings>) -> usize {
+    settings
+        .and_then(|settings| settings.store().get_u32(SETTING_CHAT_MAX_LINES).ok())
+        .and_then(|lines| usize::try_from(lines).ok())
+        .map_or(CHAT_MAX_LINES, |lines| lines.max(1))
+}
 
 /// The inset, in logical pixels, of the overlay from the left edge.
 const CHAT_INSET: f32 = 10.0;
@@ -86,6 +134,22 @@ impl LocalChatNotice {
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct ChatOverlayContainer;
 
+/// Which palette colour an overlay line renders in, classified once at
+/// arrival — the user-tunable chat colours of the preferences colors & skins
+/// tab ([`crate::skin_colors`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChatLineSource {
+    /// The own avatar spoke ([`crate::skin_colors::SETTING_CHAT_SELF`]).
+    Own,
+    /// Another avatar spoke ([`crate::skin_colors::SETTING_CHAT_OTHERS`]).
+    Others,
+    /// An in-world object spoke ([`crate::skin_colors::SETTING_CHAT_OBJECTS`]).
+    Objects,
+    /// The system / region, an unknown source, or a viewer-generated notice
+    /// ([`crate::skin_colors::SETTING_CHAT_SYSTEM`]).
+    System,
+}
+
 /// One transient chat line in the overlay: a text node under the
 /// [`ChatOverlayContainer`] that ages, fades, and despawns on its own.
 #[derive(Component, Debug, Clone, Copy)]
@@ -98,6 +162,9 @@ pub(crate) struct ChatOverlayLine {
     /// [`CHAT_MAX_LINES`] evicts the oldest line deterministically even when
     /// several lines share the same age.
     seq: u64,
+    /// The line's colour classification, fixed at arrival; the per-frame tick
+    /// re-resolves the palette so a live picker drag recolours floating lines.
+    source: ChatLineSource,
 }
 
 /// The overlay's only mutable state: the next arrival sequence number to stamp on
@@ -120,20 +187,44 @@ fn format_chat_line(message: &ChatMessage) -> String {
     }
 }
 
-/// A line's alpha from its age: fully opaque through [`CHAT_HOLD_TIME`], then a
+/// Classify a received message's speaker for the line colour: the own avatar,
+/// another avatar, an object, or the system (unknown sources read as system,
+/// the defensive default).
+fn classify_source(message: &ChatMessage, own_agent: Option<AgentKey>) -> ChatLineSource {
+    match &message.source {
+        ChatSource::Agent(agent) if Some(*agent) == own_agent => ChatLineSource::Own,
+        ChatSource::Agent(_) => ChatLineSource::Others,
+        ChatSource::Object(_) => ChatLineSource::Objects,
+        ChatSource::System | ChatSource::Unknown { .. } => ChatLineSource::System,
+    }
+}
+
+/// A line's palette colour (opaque; the fade owns the alpha), re-resolved from
+/// the store so an edit on the colors & skins tab applies live.
+fn line_color(source: ChatLineSource, settings: Option<&ViewerSettings>) -> Color {
+    let name = match source {
+        ChatLineSource::Own => crate::skin_colors::SETTING_CHAT_SELF,
+        ChatLineSource::Others => crate::skin_colors::SETTING_CHAT_OTHERS,
+        ChatLineSource::Objects => crate::skin_colors::SETTING_CHAT_OBJECTS,
+        ChatLineSource::System => crate::skin_colors::SETTING_CHAT_SYSTEM,
+    };
+    crate::skin_colors::setting_color(settings, name)
+}
+
+/// A line's alpha from its age: fully opaque through `hold` seconds, then a
 /// linear ramp down to `0.0` over [`CHAT_FADE_DURATION`], clamped to `[0, 1]`.
-fn line_alpha(age: f32) -> f32 {
-    if age <= CHAT_HOLD_TIME {
+fn line_alpha(age: f32, hold: f32) -> f32 {
+    if age <= hold {
         1.0
     } else {
-        let faded = (age - CHAT_HOLD_TIME) / CHAT_FADE_DURATION;
+        let faded = (age - hold) / CHAT_FADE_DURATION;
         (1.0 - faded).clamp(0.0, 1.0)
     }
 }
 
 /// Whether a line has fully faded and should be despawned.
-fn is_faded(age: f32) -> bool {
-    age >= CHAT_HOLD_TIME + CHAT_FADE_DURATION
+fn is_faded(age: f32, hold: f32) -> bool {
+    age >= hold + CHAT_FADE_DURATION
 }
 
 /// Whether a received chat message should appear in the overlay: only messages
@@ -221,22 +312,33 @@ pub(crate) fn update_chat_overlay(
     mut notices: MessageReader<LocalChatNotice>,
     mut overlay: ResMut<ChatOverlay>,
     container: Query<Entity, With<ChatOverlayContainer>>,
+    settings: Option<Res<ViewerSettings>>,
+    identity: Option<Res<SlIdentity>>,
 ) {
     let Ok(container) = container.single() else {
         return;
     };
-    let spawn_line = |line: String, overlay: &mut ChatOverlay, commands: &mut Commands| {
+    let font_size = overlay_font_size(font_step(settings.as_deref()));
+    let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
+    let spawn_line = |line: String,
+                      source: ChatLineSource,
+                      overlay: &mut ChatOverlay,
+                      commands: &mut Commands| {
         debug!("chat overlay: {line}");
         let seq = overlay.next_seq;
         overlay.next_seq = overlay.next_seq.wrapping_add(1);
         commands.spawn((
             Text::new(line),
-            UiFont::Sans.at(CHAT_FONT_SIZE),
-            TextColor(Color::WHITE),
+            UiFont::Sans.at(font_size),
+            TextColor(line_color(source, settings.as_deref())),
             // Transparent to picks, like its container: a fading chat line must
             // not block a world click that happens to land on it.
             Pickable::IGNORE,
-            ChatOverlayLine { age: 0.0, seq },
+            ChatOverlayLine {
+                age: 0.0,
+                seq,
+                source,
+            },
             ChildOf(container),
         ));
     };
@@ -244,42 +346,85 @@ pub(crate) fn update_chat_overlay(
         if let SlSessionEvent::ChatReceived(message) = &event.0
             && is_displayable(message)
         {
-            spawn_line(format_chat_line(message), &mut overlay, &mut commands);
+            spawn_line(
+                format_chat_line(message),
+                classify_source(message, own_agent),
+                &mut overlay,
+                &mut commands,
+            );
         }
     }
     // Client-generated notices (build-tool alerts, etc.) render as overlay lines
     // too, so viewer feedback shares the on-screen local-chat surface.
     for notice in notices.read() {
-        spawn_line(notice.text.clone(), &mut overlay, &mut commands);
+        spawn_line(
+            notice.text.clone(),
+            ChatLineSource::System,
+            &mut overlay,
+            &mut commands,
+        );
     }
 }
 
-/// Advance every line's age by this frame's delta, drive each line's alpha from
-/// its own age, despawn lines that have fully faded, and evict the oldest lines
-/// beyond [`CHAT_MAX_LINES`] so a burst cannot grow the column without bound.
+/// Advance every line's age by this frame's delta, drive each line's colour
+/// (its palette colour at the age's alpha) from its own age, despawn lines
+/// that have fully faded, and evict the oldest lines beyond the stored line
+/// cap so a burst cannot grow the column without bound. The hold time, cap
+/// and palette re-resolve from the settings every frame, so a preference
+/// change — including a live colour-picker drag — governs the
+/// already-floating lines too.
 pub(crate) fn tick_chat_overlay(
     mut commands: Commands,
     time: Res<Time>,
     mut lines: Query<(Entity, &mut ChatOverlayLine, &mut TextColor)>,
+    settings: Option<Res<ViewerSettings>>,
 ) {
     let dt = time.delta_secs();
+    let hold = hold_time(settings.as_deref());
+    let cap = max_lines(settings.as_deref());
     // Surviving (not-yet-faded) lines with their arrival order, for the overflow
     // pass below.
     let mut survivors: Vec<(Entity, u64)> = Vec::new();
     for (entity, mut line, mut color) in &mut lines {
         line.age += dt;
-        if is_faded(line.age) {
+        if is_faded(line.age, hold) {
             commands.entity(entity).despawn();
             continue;
         }
-        color.0 = color.0.with_alpha(line_alpha(line.age));
+        let wanted =
+            line_color(line.source, settings.as_deref()).with_alpha(line_alpha(line.age, hold));
+        if color.0 != wanted {
+            color.0 = wanted;
+        }
         survivors.push((entity, line.seq));
     }
-    if survivors.len() > CHAT_MAX_LINES {
+    if survivors.len() > cap {
         survivors.sort_unstable_by_key(|&(_, seq)| seq);
-        let overflow = survivors.len().saturating_sub(CHAT_MAX_LINES);
+        let overflow = survivors.len().saturating_sub(cap);
         for &(entity, _) in survivors.iter().take(overflow) {
             commands.entity(entity).despawn();
+        }
+    }
+}
+
+/// Restyle the already-floating overlay lines when the stored font-size step
+/// changes (the combo applies live through the store), so a size change does
+/// not leave a mixed-size column. Guarded on the *step* changing — the
+/// settings resource dirties on every unrelated write too.
+pub(crate) fn restyle_chat_overlay(
+    settings: Option<Res<ViewerSettings>>,
+    mut last_step: Local<Option<u32>>,
+    mut lines: Query<&mut TextFont, With<ChatOverlayLine>>,
+) {
+    let step = font_step(settings.as_deref());
+    if *last_step == Some(step) {
+        return;
+    }
+    *last_step = Some(step);
+    let size = bevy::text::FontSize::Px(overlay_font_size(step));
+    for mut font in &mut lines {
+        if font.font_size != size {
+            font.font_size = size;
         }
     }
 }
@@ -328,6 +473,35 @@ mod tests {
         );
     }
 
+    /// Speaker classification: the own agent is `Own`, another agent
+    /// `Others`, an object `Objects`, and system / unknown sources `System` —
+    /// with no identity every agent reads as `Others`.
+    #[test]
+    fn source_classification_by_speaker() {
+        use sl_client_bevy::{AgentKey, ObjectKey, Uuid};
+
+        use super::{ChatLineSource, classify_source};
+
+        let own = AgentKey::from(Uuid::from_u128(1));
+        let other = AgentKey::from(Uuid::from_u128(2));
+        let mut chat = message("A", ChatType::Normal, "hi");
+
+        chat.source = ChatSource::Agent(own);
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::Own);
+        assert_eq!(classify_source(&chat, None), ChatLineSource::Others);
+        chat.source = ChatSource::Agent(other);
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::Others);
+        chat.source = ChatSource::Object(ObjectKey::from(Uuid::from_u128(3)));
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::Objects);
+        chat.source = ChatSource::System;
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::System);
+        chat.source = ChatSource::Unknown {
+            source_type: 9,
+            source_id: Uuid::from_u128(4),
+        };
+        assert_eq!(classify_source(&chat, Some(own)), ChatLineSource::System);
+    }
+
     /// Typing triggers and empty-text messages are not displayed.
     #[test]
     fn typing_and_empty_are_not_displayable() {
@@ -344,19 +518,53 @@ mod tests {
         // Tolerance for the `f32` comparisons — the restriction lints forbid
         // strict float equality, and these ramps are exact only up to rounding.
         let close = |actual: f32, expected: f32| (actual - expected).abs() < 1e-6;
-        assert!(close(line_alpha(0.0), 1.0));
-        assert!(close(line_alpha(CHAT_HOLD_TIME), 1.0));
+        assert!(close(line_alpha(0.0, CHAT_HOLD_TIME), 1.0));
+        assert!(close(line_alpha(CHAT_HOLD_TIME, CHAT_HOLD_TIME), 1.0));
         // Halfway through the fade → half alpha, and not yet faded.
         let mid = CHAT_HOLD_TIME + CHAT_FADE_DURATION / 2.0;
-        assert!(close(line_alpha(mid), 0.5));
-        assert!(!is_faded(mid));
+        assert!(close(line_alpha(mid, CHAT_HOLD_TIME), 0.5));
+        assert!(!is_faded(mid, CHAT_HOLD_TIME));
         // At and past the end → fully transparent and marked for despawn.
         let end = CHAT_HOLD_TIME + CHAT_FADE_DURATION;
-        assert!(close(line_alpha(end), 0.0));
-        assert!(is_faded(end));
-        assert!(close(line_alpha(end + 100.0), 0.0));
+        assert!(close(line_alpha(end, CHAT_HOLD_TIME), 0.0));
+        assert!(is_faded(end, CHAT_HOLD_TIME));
+        assert!(close(line_alpha(end + 100.0, CHAT_HOLD_TIME), 0.0));
         // Still holding right at the hold boundary — not fading yet.
-        assert!(!is_faded(CHAT_HOLD_TIME));
+        assert!(!is_faded(CHAT_HOLD_TIME, CHAT_HOLD_TIME));
+        // A shorter stored hold fades (and finishes) earlier.
+        assert!(close(line_alpha(3.5, 2.0), 0.5));
+        assert!(is_faded(5.0, 2.0));
+    }
+
+    /// The settings-facing resolvers: the font-size steps map to their sizes,
+    /// the toast lifetime converts to a hold (lifetime minus the fade, floored
+    /// at zero), and a bare world falls back to the reference constants.
+    #[test]
+    fn display_settings_resolve_with_fallbacks() {
+        let close = |actual: f32, expected: f32| (actual - expected).abs() < 1e-6;
+        assert!(close(super::overlay_font_size(0), 13.0));
+        assert!(close(super::overlay_font_size(1), 15.0));
+        assert!(close(super::overlay_font_size(2), 17.0));
+        assert!(close(super::overlay_font_size(99), 15.0));
+        assert_eq!(super::font_step(None), 1);
+        assert!(close(super::hold_time(None), CHAT_HOLD_TIME));
+        assert_eq!(super::max_lines(None), 12);
+
+        let store = sl_settings::SettingsStore::new();
+        let mut settings = crate::settings::ViewerSettings::from_store_for_test(store);
+        crate::preferences_chat::register_settings(&mut settings);
+        settings.set(
+            sl_settings::Scope::Global,
+            crate::preferences_chat::SETTING_NEARBY_TOAST_LIFETIME,
+            sl_settings::SettingValue::U32(10),
+        );
+        settings.set(
+            sl_settings::Scope::Global,
+            crate::preferences_chat::SETTING_CHAT_MAX_LINES,
+            sl_settings::SettingValue::U32(3),
+        );
+        assert!(close(super::hold_time(Some(&settings)), 7.0));
+        assert_eq!(super::max_lines(Some(&settings)), 3);
     }
 
     /// The overlay container must spawn as a descendant of [`UiRoot`], not as a

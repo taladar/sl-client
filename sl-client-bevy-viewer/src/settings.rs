@@ -86,6 +86,23 @@ impl ViewerSettings {
         self.declare(section, name, value, comment);
     }
 
+    /// Register a persisted setting grouped under a `[section]` that the raw
+    /// debug-settings editor **skips** — mechanical UI state (window geometry,
+    /// tab splits, table sort orders) that is saved and restored but is not a
+    /// knob anyone debugs by hand. The floater / table persistence layers call
+    /// this instead of [`register_in`](Self::register_in).
+    pub(crate) fn register_hidden_in(
+        &mut self,
+        section: &[&str],
+        name: &str,
+        value: SettingValue,
+        comment: &str,
+    ) {
+        if let Err(error) = self.store.register_hidden_in(section, name, value, comment) {
+            warn!("settings: could not register {name}: {error}");
+        }
+    }
+
     /// Register a runtime-only setting whose overrides are never persisted (the
     /// reference viewer's transient debug settings). The two-way binding demo
     /// ([`crate::settings_binding`]) uses this so its scratch values write no junk
@@ -93,6 +110,17 @@ impl ViewerSettings {
     pub(crate) fn register_transient(&mut self, name: &str, value: SettingValue, comment: &str) {
         if let Err(error) = self.store.register_transient(name, value, comment) {
             warn!("settings: could not register {name}: {error}");
+        }
+    }
+
+    /// Replace a registered setting's declared default (see
+    /// [`SettingsStore::set_default`](sl_settings::SettingsStore::set_default)),
+    /// logging and swallowing a (wrong-type or unregistered) error so a bad
+    /// dynamic default can never abort a frame. The skin-colour bridge
+    /// ([`crate::skin_colors`]) feeds the active skin's palette in here.
+    pub(crate) fn set_default(&mut self, name: &str, value: SettingValue) {
+        if let Err(error) = self.store.set_default(name, value) {
+            warn!("settings: could not set default for {name}: {error}");
         }
     }
 
@@ -257,10 +285,19 @@ impl ViewerSettings {
         crate::avatars::register_settings(&mut settings);
         crate::hover_text::register_settings(&mut settings);
         crate::hover_tooltip::register_settings(&mut settings);
+        crate::preferences_camera_move::register_settings(&mut settings);
+        crate::preferences_chat::register_settings(&mut settings);
+        crate::preferences_colors_skins::register_settings(&mut settings);
         crate::preferences_general::register_settings(&mut settings);
+        crate::preferences_graphics::register_settings(&mut settings);
+        crate::preferences_network_cache::register_settings(&mut settings);
+        crate::skin_colors::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);
+        crate::render_priority::register_settings(&mut settings);
         crate::particles::register_settings(&mut settings);
         crate::ui_sounds::register_settings(&mut settings);
+        crate::audio::register_settings(&mut settings);
+        crate::debug_settings::register_settings(&mut settings);
         settings.load_global();
         settings
     }

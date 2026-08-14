@@ -633,7 +633,14 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn TextureFetcher> = concrete;
     if let Some(dir) = disk_dir {
-        match TextureStore::new(Arc::clone(&fetcher), Some(dir), CacheLimits::default()) {
+        match TextureStore::new(
+            Arc::clone(&fetcher),
+            Some(dir),
+            CacheLimits {
+                max_bytes: crate::paths::texture_cache_max_bytes(),
+                ..CacheLimits::default()
+            },
+        ) {
             Ok(store) => return store,
             Err(error) => warn!("texture disk cache unavailable ({error}); running in-memory only"),
         }
@@ -641,7 +648,14 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
     // The disk-less store opens no files and so cannot fail; the loop extracts it
     // without an `unwrap`/`expect` (which the lints forbid) and runs exactly once.
     loop {
-        match TextureStore::new(Arc::clone(&fetcher), None, CacheLimits::default()) {
+        match TextureStore::new(
+            Arc::clone(&fetcher),
+            None,
+            CacheLimits {
+                max_bytes: crate::paths::texture_cache_max_bytes(),
+                ..CacheLimits::default()
+            },
+        ) {
             Ok(store) => return store,
             Err(error) => warn!("in-memory texture store failed to open ({error}); retrying"),
         }

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 62 |
-| ready | 255 |
-| blocked | 78 |
+| ideas | 63 |
+| ready | 247 |
+| blocked | 76 |
 | in-progress | 15 |
-| bugs | 26 |
-| done | 782 |
-| deferred | 23 |
+| bugs | 27 |
+| done | 793 |
+| deferred | 24 |
 | wont-do | 10 |
-| **total** | **1251** |
+| **total** | **1255** |
 
-## ideas (62)
+## ideas (63)
 
 ### viewer
 
@@ -104,6 +104,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
+- [`viewer-settings-file-resilience`](ideas/viewer-settings-file-resilience.md)
+  — Settings store — survive a broken settings file without data loss
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
   Linearize the star field like the sky / clouds
 - [`viewer-straddling-transparency-oit`](ideas/viewer-straddling-transparency-oit.md)
@@ -155,7 +157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (255)
+## ready (247)
 
 ### protocol
 
@@ -178,11 +180,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
-- [`viewer-about-floater`](ready/viewer-about-floater.md) — About floater —
-  version, system info, credits, licenses (blocked by
-  `viewer-ui-widget-scaffold` (done))
-- [`viewer-about-landmark-floater`](ready/viewer-about-landmark-floater.md) —
-  About Landmark floater — full detail view
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
   — Ingest the account hover height (AgentPreferences) into the plant
 - [`viewer-ambient-wind-sound`](ready/viewer-ambient-wind-sound.md) — Ambient
@@ -218,8 +215,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
-- [`viewer-avatar-radar`](ready/viewer-avatar-radar.md) — Avatar radar
-  (nearby-avatar list)
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -342,6 +337,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-channel-and-commands` (done))
 - [`viewer-god-tools`](ready/viewer-god-tools.md) — God tools floater (blocked
   by `viewer-ui-widget-scaffold` (done))
+- [`viewer-graphics-presets`](ready/viewer-graphics-presets.md) — Graphics
+  presets — save / load / pulldown (blocked by `viewer-preferences-graphics-tab`
+  (done))
 - [`viewer-grid-status-feed`](ready/viewer-grid-status-feed.md) — Grid status
   feed notifications (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-group-chat-snooze`](ready/viewer-group-chat-snooze.md) — Per-group
@@ -412,9 +410,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
-- [`viewer-mesh-lod-factor-preference`](ready/viewer-mesh-lod-factor-preference.md)
-  — Expose the mesh/prim LOD factor as a preference (the reference "Mesh Detail"
-  slider)
+- [`viewer-minimap-click-radar-select`](ready/viewer-minimap-click-radar-select.md)
+  — Minimap single-click selects the avatar in the radar (blocked by
+  `viewer-avatar-radar` (done))
 - [`viewer-minimap-menu-cam-face`](ready/viewer-minimap-menu-cam-face.md) —
   Minimap context menu — Cam / Face towards avatar
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
@@ -543,24 +541,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-pose-stand`](ready/viewer-pose-stand.md) — Pose Stand floater
 - [`viewer-poser`](ready/viewer-poser.md) — Poser — manual joint posing (incl.
   pose stand) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-preferences-audio-tab`](ready/viewer-preferences-audio-tab.md) —
-  Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
-- [`viewer-preferences-camera-move-tab`](ready/viewer-preferences-camera-move-tab.md)
-  — Preferences — camera + move-and-view tab (blocked by
-  `viewer-preferences-floater` (done))
-- [`viewer-preferences-chat-privacy-tab`](ready/viewer-preferences-chat-privacy-tab.md)
-  — Preferences — chat / IM + privacy tab (blocked by
-  `viewer-preferences-floater` (done))
-- [`viewer-preferences-colors-skins-tab`](ready/viewer-preferences-colors-skins-tab.md)
-  — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`
-  (done), `viewer-ui-color-picker` (done))
-- [`viewer-preferences-debug-settings-editor`](ready/viewer-preferences-debug-settings-editor.md)
-  — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
-- [`viewer-preferences-graphics-tab`](ready/viewer-preferences-graphics-tab.md)
-  — Preferences — graphics tab (blocked by `viewer-preferences-floater` (done))
-- [`viewer-preferences-network-cache-tab`](ready/viewer-preferences-network-cache-tab.md)
-  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
-  (done))
 - [`viewer-profile-image-editing`](ready/viewer-profile-image-editing.md) —
   Profile floater — set the profile / pick / classified images (blocked by
   `viewer-ui-texture-picker` (done))
@@ -645,6 +625,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-stop-all-animations`](ready/viewer-stop-all-animations.md) — Stop all
   avatar animations (+ revoke variant)
+- [`viewer-support-group-version-tags`](ready/viewer-support-group-version-tags.md)
+  — Support-group chat version tags (send + display) (blocked by
+  `viewer-about-floater` (done))
 - [`viewer-table-widget-remaining`](ready/viewer-table-widget-remaining.md) —
   Remaining table-widget migrations (inventory columns, full friends rights)
 - [`viewer-terrain-edit-brushes`](ready/viewer-terrain-edit-brushes.md) —
@@ -765,7 +748,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`repl-e3`](ready/repl-e3-live-aditi-run.md) — Live aditi run
 
-## blocked (78)
+## blocked (76)
 
 ### protocol
 
@@ -824,9 +807,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Pixel-level reaction spot checks (GPU, serial) (blocked by
   `viewer-edit-gizmo-interaction-tests`,
   `viewer-edit-selection-interaction-tests`)
-- [`viewer-graphics-presets`](blocked/viewer-graphics-presets.md) — Graphics
-  presets — save / load / pulldown (blocked by
-  `viewer-preferences-graphics-tab`)
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -863,9 +843,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done))
 - [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
-- [`viewer-minimap-click-radar-select`](blocked/viewer-minimap-click-radar-select.md)
-  — Minimap single-click selects the avatar in the radar (blocked by
-  `viewer-avatar-radar`)
 - [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
   `viewer-block-list`, `viewer-report-abuse`, `viewer-derender-blacklist`)
@@ -1032,7 +1009,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (26)
+## bugs (27)
 
 ### protocol
 
@@ -1047,6 +1024,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-arrival-orientation-snap`](bugs/viewer-arrival-orientation-snap.md) —
   Avatar arrives facing the wrong way then snaps to the correct orientation
   (rotates the whole minimap)
+- [`viewer-asset-retry-counter-stuck`](bugs/viewer-asset-retry-counter-stuck.md)
+  — Asset fetch retry counter stuck at 1/6 — permanent failures retry forever
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1099,7 +1078,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (782)
+## done (793)
 
 ### protocol
 
@@ -1231,8 +1210,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
+  version, system info, credits, licenses (blocked by
+  `viewer-ui-widget-scaffold` (done))
 - [`viewer-about-land-options-tab`](done/viewer-about-land-options-tab.md) —
   About Land floater — Options tab
+- [`viewer-about-landmark-floater`](done/viewer-about-landmark-floater.md) —
+  About Landmark floater — full detail view
 - [`viewer-ais3-inventory-mutations-and-cof-reconverge`](done/viewer-ais3-inventory-mutations-and-cof-reconverge.md)
   — Route inventory mutations through AIS3 on SL + reconverge the COF on wear
 - [`viewer-appearance-editor-bodyparts`](done/viewer-appearance-editor-bodyparts.md)
@@ -1265,6 +1249,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
+- [`viewer-avatar-radar`](done/viewer-avatar-radar.md) — Avatar radar
+  (nearby-avatar list)
 - [`viewer-avatar-state-dump-replay`](done/viewer-avatar-state-dump-replay.md) —
   Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —
@@ -1518,6 +1504,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
   — Render a material-on-a-sphere preview for the PBR material swatch
+- [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)
+  — Expose the mesh/prim LOD factor as a preference (the reference "Mesh Detail"
+  slider)
 - [`viewer-mesh-stuck-low-lod-warm-cache`](done/viewer-mesh-stuck-low-lod-warm-cache.md)
   — Shared / warm-cache meshes stuck at a coarse LOD, never refining on approach
 - [`viewer-minimap`](done/viewer-minimap.md) — Minimap (net map) — floater,
@@ -1942,11 +1931,29 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —
   Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
   (done))
+- [`viewer-preferences-audio-tab`](done/viewer-preferences-audio-tab.md) —
+  Preferences — audio tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-camera-move-tab`](done/viewer-preferences-camera-move-tab.md)
+  — Preferences — camera + move-and-view tab (blocked by
+  `viewer-preferences-floater` (done))
+- [`viewer-preferences-chat-privacy-tab`](done/viewer-preferences-chat-privacy-tab.md)
+  — Preferences — chat / IM + privacy tab (blocked by
+  `viewer-preferences-floater` (done))
+- [`viewer-preferences-colors-skins-tab`](done/viewer-preferences-colors-skins-tab.md)
+  — Preferences — colors & skins tab (blocked by `viewer-preferences-floater`
+  (done), `viewer-ui-color-picker` (done))
+- [`viewer-preferences-debug-settings-editor`](done/viewer-preferences-debug-settings-editor.md)
+  — Raw debug-settings editor (blocked by `viewer-preferences-floater` (done))
 - [`viewer-preferences-floater`](done/viewer-preferences-floater.md) —
   Preferences floater shell + settings store binding (blocked by
   `viewer-ui-settings-binding` (done))
 - [`viewer-preferences-general-tab`](done/viewer-preferences-general-tab.md) —
   Preferences — general tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-graphics-tab`](done/viewer-preferences-graphics-tab.md) —
+  Preferences — graphics tab (blocked by `viewer-preferences-floater` (done))
+- [`viewer-preferences-network-cache-tab`](done/viewer-preferences-network-cache-tab.md)
+  — Preferences — network & cache tab (blocked by `viewer-preferences-floater`
+  (done))
 - [`viewer-prim-creation`](done/viewer-prim-creation.md) — Prim / Linden tree /
   grass creation (the Create tool) (blocked by
   `viewer-object-edit-floater-shell` (done))
@@ -2770,7 +2777,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (23)
+## deferred (24)
 
 ### protocol
 
@@ -2826,6 +2833,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU compute particle simulation (+ raising the particle cap)
 - [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
   — Per-frame byte budget for media-surface uploads
+- [`viewer-socks5-udp-proxy`](deferred/viewer-socks5-udp-proxy.md) — SOCKS5
+  proxy for the UDP circuit
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)
   — Verify IME preedit & candidate placement on an IME-capable host
 

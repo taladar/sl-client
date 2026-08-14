@@ -462,9 +462,7 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         // Landmark.
         MenuItemDef::Command(MenuCommand::new("Teleport", "teleport").visible_when(IS_LANDMARK)),
         MenuItemDef::Command(
-            MenuCommand::new("About Landmark", "about-landmark")
-                .visible_when(IS_LANDMARK)
-                .enabled_when(UNIMPLEMENTED),
+            MenuCommand::new("About Landmark", "about-landmark").visible_when(IS_LANDMARK),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Show on Map", "show-on-map")
@@ -1650,6 +1648,7 @@ fn handle_inventory_menu_actions(
         MessageWriter<SlCommand>,
         MessageWriter<crate::edit_wearable::OpenWearableEditor>,
         MessageWriter<crate::edit_material_asset::OpenMaterialEditor>,
+        MessageWriter<crate::about_landmark::OpenAboutLandmark>,
     ),
 ) {
     let (
@@ -1670,6 +1669,7 @@ fn handle_inventory_menu_actions(
         mut commands,
         mut wearable_editor,
         mut material_editor,
+        mut landmark_opens,
     ) = outputs;
     for action in actions.read() {
         if action.element != INVENTORY_MENU_ELEMENT {
@@ -1701,6 +1701,14 @@ fn handle_inventory_menu_actions(
                     properties.write(crate::inventory_properties::OpenItemProperties {
                         item: item.clone(),
                     });
+                }
+            }
+            "about-landmark" => {
+                if let MenuTarget::Item(item) = &menu_target
+                    && item.inv_type == InventoryType::Landmark
+                {
+                    landmark_opens
+                        .write(crate::about_landmark::OpenAboutLandmark { item: item.clone() });
                 }
             }
             "show-in-main" => {

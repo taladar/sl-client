@@ -58,6 +58,7 @@ use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{ComboBindingValues, SettingBinding, bound_checkbox, bound_slider};
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui_color_picker::spawn_color_swatch;
 use crate::ui_combo::{ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
@@ -162,6 +163,36 @@ pub(crate) const PREF_TABS: &[PreferencesTabDef] = &[
         id: "general",
         label_key: "preferences-tab-general",
         build: crate::preferences_general::build_general_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_graphics::TAB_ID,
+        label_key: "preferences-tab-graphics",
+        build: crate::preferences_graphics::build_graphics_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_audio::TAB_ID,
+        label_key: "preferences-tab-audio",
+        build: crate::preferences_audio::build_audio_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_chat::TAB_ID,
+        label_key: "preferences-tab-chat",
+        build: crate::preferences_chat::build_chat_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_camera_move::TAB_ID,
+        label_key: "preferences-tab-camera-move",
+        build: crate::preferences_camera_move::build_camera_move_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_colors_skins::TAB_ID,
+        label_key: "preferences-tab-colors-skins",
+        build: crate::preferences_colors_skins::build_colors_skins_tab,
+    },
+    PreferencesTabDef {
+        id: crate::preferences_network_cache::TAB_ID,
+        label_key: "preferences-tab-network-cache",
+        build: crate::preferences_network_cache::build_network_cache_tab,
     },
     PreferencesTabDef {
         id: "world-ui",
@@ -420,6 +451,22 @@ pub(crate) fn spawn_pref_combo(
     binding: SettingBinding,
     options: &[(&str, SettingValue)],
 ) -> Entity {
+    let (row, _anchor) =
+        spawn_pref_combo_with_anchor(commands, parent, label_key, binding, options);
+    row
+}
+
+/// [`spawn_pref_combo`], also returning the combo **anchor** entity (the one
+/// carrying the [`SettingBinding`] and emitting `ComboChanged`), for a tab that
+/// must mark the anchor with its own component — e.g. the graphics tab's
+/// quality-tier driver.
+pub(crate) fn spawn_pref_combo_with_anchor(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+    options: &[(&str, SettingValue)],
+) -> (Entity, Entity) {
     let row = commands
         .spawn((
             pref_row_node(),
@@ -446,7 +493,7 @@ pub(crate) fn spawn_pref_combo(
         ComboBindingValues(options.iter().map(|(_, value)| value.clone()).collect()),
     ));
     commands.entity(row).insert(PrefSearchRow { label });
-    row
+    (row, anchor)
 }
 
 /// Spawn a searchable **text-field** row: a translated label above a
@@ -484,6 +531,56 @@ pub(crate) fn spawn_pref_text(
     commands.entity(field).insert(binding);
     commands.entity(row).insert(PrefSearchRow { label });
     row
+}
+
+/// Spawn a searchable row holding a translated label and a settings-bound
+/// **colour swatch** (a [`SettingValue::Color3`] setting): clicking the swatch
+/// opens the shared colour picker, every pick writes through the binding, and
+/// the swatch follows the store (see the colour-swatch binding in
+/// [`crate::settings_binding`]). Returns the row node (see
+/// [`spawn_pref_checkbox`]).
+pub(crate) fn spawn_pref_color(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    binding: SettingBinding,
+) -> Entity {
+    let row = commands
+        .spawn((
+            pref_row_node(),
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    // Seeded black; the swatch sync pass paints the stored colour on the next
+    // frame (the slider idiom — the initial value is a placeholder).
+    let swatch = spawn_color_swatch(commands, row, label_key, 0, Color::BLACK);
+    commands.entity(swatch).insert(binding);
+    let label = spawn_row_label(commands, row, label_key);
+    commands.entity(row).insert(PrefSearchRow { label });
+    row
+}
+
+/// Spawn a searchable **action** row: a translated label plus a button the
+/// caller attaches behaviour to (`.observe(On<Activate>)`). Returns the
+/// button entity; the row is the button's parent.
+pub(crate) fn spawn_pref_action(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    button_key: &'static str,
+) -> Entity {
+    let row = commands
+        .spawn((
+            pref_row_node(),
+            Name::new(format!("preferences:row:{label_key}")),
+            ChildOf(parent),
+        ))
+        .id();
+    let label = spawn_row_label(commands, row, label_key);
+    let button = spawn_footer_button(commands, row, button_key, 0);
+    commands.entity(row).insert(PrefSearchRow { label });
+    button
 }
 
 /// Spawn a (non-searchable) section heading over a group of rows.

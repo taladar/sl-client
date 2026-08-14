@@ -88,6 +88,9 @@ pub enum Error {
     /// The interactive line editor could not be initialized.
     #[error("could not initialize the interactive line editor")]
     LineEditor,
+    /// The `--http-proxy` value could not be turned into a proxy URL.
+    #[error("invalid --http-proxy value: {0}")]
+    HttpProxy(String),
     /// The man page could not be generated.
     #[error("error generating man page: {0}")]
     GenerateManpage(#[source] std::io::Error),
@@ -137,6 +140,10 @@ pub struct RunArgs {
     /// The optional local chat-log toggles (all off by default).
     #[clap(flatten)]
     chat_log: sl_repl::ChatLogArgs,
+    /// An HTTP proxy (`host:port`) for all HTTP traffic (login, caps,
+    /// asset fetches). The UDP circuit is never proxied.
+    #[clap(long, env = "SL_REPL_HTTP_PROXY")]
+    http_proxy: Option<String>,
 }
 
 /// The packaging sub-commands (the absence of a sub-command runs a session).
@@ -561,6 +568,10 @@ async fn handle_input(raw: &str, ctx: &mut SessionContext, command_tx: &mpsc::Se
 /// Returns an [`enum@Error`] if credentials cannot be loaded, login fails, the
 /// log cannot be initialized, or the client task errors.
 async fn run_repl(args: RunArgs) -> Result<(), Error> {
+    if let Some(proxy) = args.http_proxy.as_deref() {
+        sl_client_tokio::http_proxy::set_proxy(proxy)
+            .map_err(|error| Error::HttpProxy(format!("{proxy}: {error}")))?;
+    }
     let credentials = Credentials::load(&args.credentials)?;
     let avatar = credentials.select(args.avatar.as_deref())?;
     let login_uri = resolve_login_uri(&args, avatar)?;

@@ -141,7 +141,7 @@ fn diagnose_stream_url(url: &str) -> Option<String> {
     }
 
     // 2-4. TCP connect / TLS / HTTP status, via a short blocking request.
-    let client = reqwest::blocking::Client::builder()
+    let client = sl_client_bevy::http_proxy::blocking_client_builder()
         .timeout(Duration::from_secs(PROBE_TIMEOUT_SECS))
         .user_agent(PROBE_USER_AGENT)
         .build()

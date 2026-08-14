@@ -21,7 +21,7 @@ Currently implemented:
 - [`species`] — the 21-entry `LLVOTree` species table
   ([`TreeSpecies`] / [`TREE_SPECIES`]), ported verbatim from `trees.xml`, with
   a [`tree_species`] lookup by species byte. Each entry carries the species
-  diffuse [`TextureKey`](sl_types::key::TextureKey) plus the `LLVOTree`
+  diffuse `TextureKey` (`sl_types::key::TextureKey`) plus the `LLVOTree`
   geometry parameters.
 - [`geometry`] — the procedural `LLVOTree` branch / leaf geometry generation
   ([`tree_geometry`] / [`billboard_geometry`]) ported from

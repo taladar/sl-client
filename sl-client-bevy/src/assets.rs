@@ -49,9 +49,11 @@ impl BevyAssetFetcher {
     /// A fetcher with a freshly built blocking client and no capability URL yet.
     #[must_use]
     pub fn new() -> Self {
-        let http = ReqwestBlockingClient::builder()
+        let http = crate::http_proxy::blocking_client_builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()
+            // Proxy-less fallback: the builder only fails on TLS backend
+            // initialization (the proxy value was validated at startup).
             .unwrap_or_else(|_error| ReqwestBlockingClient::new());
         Self {
             http,

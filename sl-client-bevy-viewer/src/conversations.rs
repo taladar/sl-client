@@ -107,8 +107,33 @@ const MIN_SIZE: Vec2 = Vec2::new(360.0, 210.0);
 /// The chrome / label font size, in logical pixels.
 const CHROME_FONT_SIZE: f32 = 13.0;
 
-/// The transcript font size, in logical pixels.
+/// The transcript font size, in logical pixels, at the medium
+/// [`crate::preferences_chat::SETTING_CHAT_FONT_SIZE`] step (and when no
+/// settings are available).
 const TRANSCRIPT_FONT_SIZE: f32 = 13.0;
+
+/// The transcript font size for the stored font-size step: `0` small, `1`
+/// medium, `2` large (an unknown step reads as medium). Two points below the
+/// overlay's sizes, as the medium pair always was.
+const fn transcript_font_size_for_step(step: u32) -> f32 {
+    match step {
+        0 => 11.0,
+        2 => 15.0,
+        _medium => TRANSCRIPT_FONT_SIZE,
+    }
+}
+
+/// The stored font-size step (medium when no settings are available).
+fn transcript_font_step(settings: Option<&crate::settings::ViewerSettings>) -> u32 {
+    settings
+        .and_then(|settings| {
+            settings
+                .store()
+                .get_u32(crate::preferences_chat::SETTING_CHAT_FONT_SIZE)
+                .ok()
+        })
+        .unwrap_or(1)
+}
 
 /// One wheel notch's scroll distance, in logical pixels — matched to the gallery
 /// and the virtual list so every scroll surface feels the same.
@@ -157,8 +182,27 @@ const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
 /// the scrollback reads as a sunken well.
 const TRANSCRIPT_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 
-/// A transcript line's colour.
-const TRANSCRIPT_COLOR: Color = Color::srgb(0.88, 0.90, 0.95);
+/// A transcript line's palette colour — the user-tunable chat colours of the
+/// preferences colors & skins tab ([`crate::skin_colors`]): on the Nearby tab
+/// by speaker (own / other avatar / object / system), on the IM tabs (direct,
+/// group, conference) our own lines keep the self colour and everything else
+/// takes the IM colour.
+fn transcript_line_color(
+    key: ConversationKey,
+    link: SpeakerLink,
+    settings: Option<&crate::settings::ViewerSettings>,
+) -> Color {
+    let name = match (key, link) {
+        (_, SpeakerLink::Own) => crate::skin_colors::SETTING_CHAT_SELF,
+        (ConversationKey::Nearby, SpeakerLink::Agent(_)) => crate::skin_colors::SETTING_CHAT_OTHERS,
+        (ConversationKey::Nearby, SpeakerLink::Object(_)) => {
+            crate::skin_colors::SETTING_CHAT_OBJECTS
+        }
+        (ConversationKey::Nearby, SpeakerLink::None) => crate::skin_colors::SETTING_CHAT_SYSTEM,
+        _im_tab => crate::skin_colors::SETTING_CHAT_IM,
+    };
+    crate::skin_colors::setting_color(settings, name)
+}
 
 /// The "X is typing…" line's colour — dim, so it reads as ephemeral status.
 const TYPING_COLOR: Color = Color::srgb(0.62, 0.68, 0.78);
@@ -822,6 +866,22 @@ pub(crate) struct OpenConversation {
     pub(crate) key: ConversationKey,
 }
 
+/// A viewer-generated system line for the **Nearby Chat transcript** — e.g. a
+/// radar enter / leave report ([`crate::radar`]). This is deliberately a
+/// separate channel from the transient overlay
+/// ([`crate::chat::LocalChatNotice`]); a producer that wants the line in both
+/// places writes both messages.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct NearbyChatNotice {
+    /// The speaker label shown before the body (empty for a bare notice).
+    pub(crate) speaker: String,
+    /// The agent the speaker label links to, if any (a clickable name, like
+    /// the reference's radar chat lines).
+    pub(crate) speaker_agent: Option<AgentKey>,
+    /// The line body.
+    pub(crate) body: String,
+}
+
 /// Which surface currently owns the conversations floater's shared strip and
 /// panel area: a **conversation** pane, or an **external** pane hosted in the
 /// same strip (the People / Contacts tab, [`crate::people`]). The two are
@@ -859,6 +919,33 @@ struct NearbyRecallState {
     requested: bool,
 }
 
+/// Force every transcript to rebuild on the next refresh when the stored
+/// font-size step changes (the preferences combo applies live through the
+/// store), by resetting each view's rendered revision to the always-rebuild
+/// sentinel. Guarded on the *step* changing — the settings resource dirties
+/// on every unrelated write too — and inert on its first observation, when
+/// nothing was rendered under a different step yet.
+fn restyle_transcripts_on_font_change(
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    mut ui: Option<ResMut<ConversationsUi>>,
+    mut last_step: Local<Option<u32>>,
+) {
+    let step = transcript_font_step(settings.as_deref());
+    if *last_step == Some(step) {
+        return;
+    }
+    let first_observation = last_step.is_none();
+    *last_step = Some(step);
+    if first_observation {
+        return;
+    }
+    if let Some(ui) = ui.as_deref_mut() {
+        for view in ui.views.values_mut() {
+            view.rendered_revision = u64::MAX;
+        }
+    }
+}
+
 /// The plugin: the model + UI resources, the floater spawn, and the systems that
 /// ingest events, spawn / close tabs, refresh the view and route input.
 #[derive(Debug, Clone, Copy, Default)]
@@ -873,6 +960,7 @@ impl Plugin for ConversationsPlugin {
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
             .add_message::<OpenConversation>()
+            .add_message::<NearbyChatNotice>()
             .add_systems(
                 Startup,
                 spawn_conversations_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -881,11 +969,13 @@ impl Plugin for ConversationsPlugin {
                 Update,
                 (
                     ingest_conversation_events,
+                    ingest_nearby_notices,
                     open_conversations,
                     apply_conversation_selection,
                     respond_to_invites,
                     close_conversations,
                     spawn_conversation_tabs,
+                    restyle_transcripts_on_font_change,
                     refresh_conversations
                         .run_if(crate::floater::floater_shown(CONVERSATIONS_FLOATER_ID)),
                 )
@@ -1414,6 +1504,28 @@ fn spawn_invite_button(
 // Ingest
 // ---------------------------------------------------------------------------
 
+/// Fold viewer-generated [`NearbyChatNotice`] lines into the Nearby
+/// transcript as system lines (with a clickable speaker when an agent is
+/// attached).
+fn ingest_nearby_notices(
+    mut notices: MessageReader<NearbyChatNotice>,
+    mut model: ResMut<ConversationModel>,
+) {
+    for notice in notices.read() {
+        model.push_line(
+            ConversationKey::Nearby,
+            TranscriptLine {
+                own: false,
+                speaker: notice.speaker.clone(),
+                speaker_link: notice
+                    .speaker_agent
+                    .map_or(SpeakerLink::None, SpeakerLink::Agent),
+                body: notice.body.clone(),
+            },
+        );
+    }
+}
+
 /// Fold every relevant inbound event into the model: chat / IM / group /
 /// conference lines, typing notifications, invites, and the name caches behind
 /// the tab titles.
@@ -1706,10 +1818,50 @@ fn refresh_conversations(
     mut borders: Query<&mut BorderColor>,
     mut nodes: Query<&mut Node>,
     mut scrolls: Query<&mut ScrollPosition>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    mut last_palette: Local<Option<[Color; 5]>>,
 ) {
     let Some(ui) = ui.as_deref_mut() else {
         return;
     };
+    // Force every transcript to rebuild when the chat palette changes (a live
+    // colour-picker drag, a skin switch), so a recolour does not wait for the
+    // next arriving line. `u64::MAX` is the established force-rebuild marker.
+    let palette = [
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::Own,
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::Agent(AgentKey::from(sl_client_bevy::Uuid::nil())),
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::Object(ObjectKey::from(sl_client_bevy::Uuid::nil())),
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Nearby,
+            SpeakerLink::None,
+            settings.as_deref(),
+        ),
+        transcript_line_color(
+            ConversationKey::Conference(ImSessionId::from(sl_client_bevy::Uuid::nil())),
+            SpeakerLink::None,
+            settings.as_deref(),
+        ),
+    ];
+    if *last_palette != Some(palette) {
+        if last_palette.is_some() {
+            for view in ui.views.values_mut() {
+                view.rendered_revision = u64::MAX;
+            }
+        }
+        *last_palette = Some(palette);
+    }
     let active_key = model.active_key();
     let you = translator.get(YOU_LABEL_KEY);
     let nearby_title = translator.get(NEARBY_TITLE_KEY);
@@ -1774,8 +1926,11 @@ fn refresh_conversations(
                 .entity(view.transcript_column)
                 .despawn_related::<Children>();
             for line in entry.recall.iter().chain(entry.lines.iter()) {
-                let mut style = LinkTextStyle::at(TRANSCRIPT_FONT_SIZE);
-                style.plain_color = TRANSCRIPT_COLOR;
+                let mut style = LinkTextStyle::at(transcript_font_size_for_step(
+                    transcript_font_step(settings.as_deref()),
+                ));
+                style.plain_color =
+                    transcript_line_color(entry.key, line.speaker_link, settings.as_deref());
                 spawn_linkified_text(
                     &mut commands,
                     view.transcript_column,
@@ -1968,10 +2123,56 @@ fn position_conversations_dock_host(
 mod tests {
     use super::{
         Command, ConversationKey, ConversationModel, ConversationTitle, SpeakerLink,
-        TranscriptLine, command_for, invite_command, line_text, tab_label,
+        TranscriptLine, command_for, invite_command, line_text, tab_label, transcript_line_color,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, ChatSource, GroupKey, ImSessionId, ObjectKey, Uuid};
+
+    /// The transcript colour chooser: the Nearby tab colours by speaker, every
+    /// IM-flavoured tab colours own lines self and everything else IM.
+    #[test]
+    fn transcript_colors_choose_by_tab_and_speaker() {
+        let palette = |name: &str| crate::skin_colors::setting_color(None, name);
+        let agent = SpeakerLink::Agent(AgentKey::from(Uuid::from_u128(1)));
+        let object = SpeakerLink::Object(ObjectKey::from(Uuid::from_u128(2)));
+        let nearby = ConversationKey::Nearby;
+        assert_eq!(
+            transcript_line_color(nearby, SpeakerLink::Own, None),
+            palette(crate::skin_colors::SETTING_CHAT_SELF)
+        );
+        assert_eq!(
+            transcript_line_color(nearby, agent, None),
+            palette(crate::skin_colors::SETTING_CHAT_OTHERS)
+        );
+        assert_eq!(
+            transcript_line_color(nearby, object, None),
+            palette(crate::skin_colors::SETTING_CHAT_OBJECTS)
+        );
+        assert_eq!(
+            transcript_line_color(nearby, SpeakerLink::None, None),
+            palette(crate::skin_colors::SETTING_CHAT_SYSTEM)
+        );
+
+        let direct = ConversationKey::Direct(AgentKey::from(Uuid::from_u128(3)));
+        assert_eq!(
+            transcript_line_color(direct, SpeakerLink::Own, None),
+            palette(crate::skin_colors::SETTING_CHAT_SELF)
+        );
+        assert_eq!(
+            transcript_line_color(direct, agent, None),
+            palette(crate::skin_colors::SETTING_CHAT_IM)
+        );
+        let group = ConversationKey::Group(GroupKey::from(Uuid::from_u128(4)));
+        assert_eq!(
+            transcript_line_color(group, agent, None),
+            palette(crate::skin_colors::SETTING_CHAT_IM)
+        );
+        let conference = ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(5)));
+        assert_eq!(
+            transcript_line_color(conference, SpeakerLink::None, None),
+            palette(crate::skin_colors::SETTING_CHAT_IM)
+        );
+    }
 
     /// A shared reference to `key`'s conversation in `model`, if it exists — the
     /// test-side lookup (the model has no non-test accessor for it).

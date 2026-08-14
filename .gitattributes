@@ -23,3 +23,14 @@ sl-client-bevy-viewer/assets/fonts/OFL.txt -whitespace
 # Their validity is judged by the differential oracle, so skip the pre-commit
 # LSL linter for the whole corpus tree.
 sl-lsl/tests/corpus/**/*.lsl skipchecks=lsl:::lslint;;;deliberately[[space]]invalid[[space]]differential-oracle[[space]]fixtures
+
+# The cargo-about license template is a whitespace-significant plain-text
+# template (its output format is machine-parsed by the About floater), not an
+# HTML/glimmer document: prettier's glimmer formatter reflows and breaks the
+# marker-line format, and precompilation does not apply.
+scripts/third-party-licenses.hbs skipchecks=handlebars;;;whitespace-significant[[space]]plain-text[[space]]template
+
+# Verbatim third-party license texts keep their original trailing whitespace;
+# exempt the generated file from git's whitespace checking (diff-index --check,
+# the common:::whitespace hook) via the native whitespace attribute.
+sl-client-bevy-viewer/assets/licenses/third-party-licenses.txt -whitespace

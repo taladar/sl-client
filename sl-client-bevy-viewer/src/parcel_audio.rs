@@ -66,8 +66,9 @@ pub(crate) const PARCEL_AUDIO_ELEMENT: &str = "parcel-audio";
 const AUDIO_SECTION: &[&str] = &["audio"];
 
 /// Whether the parcel music stream starts automatically (the reference's
-/// streaming-music preference).
-const MUSIC_ENABLED_SETTING: &str = "MusicStreamEnabled";
+/// streaming-music preference). Public so the preferences audio tab can bind
+/// its streaming row to the same setting.
+pub(crate) const MUSIC_ENABLED_SETTING: &str = "MusicStreamEnabled";
 
 /// The control cluster's font size, in logical pixels.
 const BAR_FONT_SIZE: f32 = 12.0;

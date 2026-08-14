@@ -58,6 +58,9 @@ pub enum Error {
     #[cfg(target_os = "linux")]
     #[error("error constructing tracing-journald layer: {0}")]
     TracingJournaldError(#[source] std::io::Error),
+    /// the `--http-proxy` value could not be turned into a proxy URL
+    #[error("invalid --http-proxy value: {0}")]
+    HttpProxy(String),
     /// error generating man pages
     #[error("error generating man pages: {0}")]
     GenerateManpageError(#[source] std::io::Error),
@@ -141,6 +144,10 @@ pub struct SurveyParameters {
     /// The output file for JSON-lines records (`-` for standard output).
     #[clap(long, default_value = "-")]
     output: String,
+    /// An HTTP proxy (`host:port`) for all HTTP traffic (login, caps,
+    /// asset fetches). The UDP circuit is never proxied.
+    #[clap(long, env = "SL_SURVEY_HTTP_PROXY")]
+    http_proxy: Option<String>,
 }
 
 /// Which subcommand to call.
@@ -793,6 +800,7 @@ impl Survey {
             | Event::LandStatReply { .. }
             | Event::SimStats(_)
             | Event::SimulatorTime(_)
+            | Event::SimulatorVersion(_)
             | Event::GenericMessage(_)
             | Event::LargeGenericMessage(_)
             | Event::GenericStreamingMessage(_)
@@ -1005,6 +1013,10 @@ impl Survey {
 /// Fails if login, the survey run, or output writing fails.
 #[instrument(skip(parameters))]
 async fn survey_command(parameters: SurveyParameters) -> Result<(), Error> {
+    if let Some(proxy) = parameters.http_proxy.as_deref() {
+        sl_client_tokio::http_proxy::set_proxy(proxy)
+            .map_err(|error| Error::HttpProxy(format!("{proxy}: {error}")))?;
+    }
     let bounds = Bounds {
         min_x: parameters.min_x,
         min_y: parameters.min_y,

@@ -107,7 +107,7 @@ impl Caps {
 /// streaming that region's scene to the child circuit.
 pub(crate) fn post_neighbour_seed(seed_url: url::Url) {
     std::thread::spawn(move || {
-        let Ok(http) = ReqwestBlockingClient::builder()
+        let Ok(http) = crate::http_proxy::blocking_client_builder()
             .timeout(EVENT_QUEUE_TIMEOUT)
             .build()
         else {
@@ -221,7 +221,7 @@ impl EventQueueWorker {
         seed: url::Url,
         map_tx: &Sender<Result<HashMap<String, String>, String>>,
     ) -> Option<Self> {
-        let http = match ReqwestBlockingClient::builder()
+        let http = match crate::http_proxy::blocking_client_builder()
             .timeout(EVENT_QUEUE_TIMEOUT)
             .build()
         {

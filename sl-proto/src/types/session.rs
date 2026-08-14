@@ -209,9 +209,12 @@ pub enum ThrottleError {
 /// The values are interpreted as a total bandwidth split: the sum across all
 /// seven categories is the requested aggregate rate, which the simulator may
 /// cap to its own configured maximum. Use [`Throttle::total`] to read the sum
-/// and the [`Throttle::preset_300`] / [`Throttle::preset_500`] /
-/// [`Throttle::preset_1000`] presets (named for their total kbps) as starting
-/// points; they mirror the reference viewer's bandwidth tables.
+/// and the [`Throttle::preset_50`] / [`Throttle::preset_300`] /
+/// [`Throttle::preset_500`] / [`Throttle::preset_1000`] presets (named for
+/// their total kbps) as starting points; they mirror the reference viewer's
+/// bandwidth tables. [`Throttle::from_total`] splits an arbitrary total the
+/// way the reference viewer's bandwidth slider does, by interpolating between
+/// those presets.
 ///
 /// The seven fields are private and validated on construction, so a throttle
 /// can never hold a NaN, infinite, or negative rate. Build a custom split with
@@ -347,6 +350,12 @@ impl Throttle {
         self.asset
     }
 
+    /// The reference viewer's preset for a 50 kbps total bandwidth.
+    #[must_use]
+    pub const fn preset_50() -> Self {
+        Self::new_unchecked(5.0, 10.0, 3.0, 3.0, 10.0, 10.0, 9.0)
+    }
+
     /// The reference viewer's preset for a 300 kbps total bandwidth.
     #[must_use]
     pub const fn preset_300() -> Self {
@@ -363,6 +372,56 @@ impl Throttle {
     #[must_use]
     pub const fn preset_1000() -> Self {
         Self::new_unchecked(100.0, 100.0, 20.0, 20.0, 310.0, 310.0, 140.0)
+    }
+
+    /// Splits a total bandwidth across the seven categories the way the
+    /// reference viewer does (`LLViewerThrottle::getThrottleGroup`): the total
+    /// is clamped to the reference's [50, 6000] kbps range, then the
+    /// per-category rates are linearly interpolated between the bracketing
+    /// bandwidth presets ([`Throttle::preset_50`] / [`Throttle::preset_300`] /
+    /// [`Throttle::preset_500`] / [`Throttle::preset_1000`]). Above the top
+    /// preset the reference extrapolates from the last two presets — the
+    /// affine continuation of the 500→1000 segment — so some categories (wind,
+    /// cloud) keep growing slowly while the bulk streams take most of the
+    /// extra bandwidth.
+    ///
+    /// A total of exactly 1000 kbps reproduces [`Throttle::preset_1000`]
+    /// bit-for-bit.
+    #[must_use]
+    pub fn from_total(total: Kilobits) -> Self {
+        /// The reference viewer's minimum settable total bandwidth, in kbps.
+        const MIN_TOTAL: f32 = 50.0;
+        /// The reference viewer's maximum settable total bandwidth, in kbps.
+        const MAX_TOTAL: f32 = 6000.0;
+        let clamped = total.get().clamp(MIN_TOTAL, MAX_TOTAL);
+        // Pick the segment whose endpoint totals bracket the requested total;
+        // the last segment also serves totals above 1000 (the reference's
+        // extrapolation from the top two presets is exactly the affine
+        // continuation of that segment).
+        let (lower, upper) = if clamped <= Self::preset_300().total() {
+            (Self::preset_50(), Self::preset_300())
+        } else if clamped <= Self::preset_500().total() {
+            (Self::preset_300(), Self::preset_500())
+        } else {
+            (Self::preset_500(), Self::preset_1000())
+        };
+        let lower_total = lower.total();
+        let frac = (clamped - lower_total) / (upper.total() - lower_total);
+        // Every category rate is non-decreasing across the preset tables and
+        // `frac` is bounded (clamped total ≤ 6000), so each blended rate stays
+        // finite and non-negative — the `Kilobits` invariant holds.
+        let blend = |low: Kilobits, high: Kilobits| {
+            Kilobits::new_unchecked(low.get() + (high.get() - low.get()) * frac)
+        };
+        Self {
+            resend: blend(lower.resend, upper.resend),
+            land: blend(lower.land, upper.land),
+            wind: blend(lower.wind, upper.wind),
+            cloud: blend(lower.cloud, upper.cloud),
+            task: blend(lower.task, upper.task),
+            texture: blend(lower.texture, upper.texture),
+            asset: blend(lower.asset, upper.asset),
+        }
     }
 
     /// The total requested bandwidth (kilobits per second), the sum of all seven
@@ -1091,6 +1150,65 @@ mod tests {
         assert_eq!(
             Throttle::new(1.0, 2.0, 3.0, -4.0, 5.0, 6.0, 7.0),
             Err(ThrottleError::Negative)
+        );
+    }
+
+    #[test]
+    fn from_total_reproduces_presets_at_their_exact_totals() {
+        // At a preset's own total the interpolation fraction is 0 or 1, so the
+        // preset table comes back bit-for-bit — in particular 1000 kbps (the
+        // previous hardcoded viewer throttle) is exactly preset_1000.
+        for (total, preset) in [
+            (50.0, Throttle::preset_50()),
+            (300.0, Throttle::preset_300()),
+            (500.0, Throttle::preset_500()),
+            (1000.0, Throttle::preset_1000()),
+        ] {
+            assert_eq!(Throttle::from_total(Kilobits::new_unchecked(total)), preset);
+        }
+    }
+
+    #[test]
+    fn from_total_interpolates_between_presets() {
+        // 400 kbps is the midpoint of the 300 and 500 presets, so every
+        // category is the componentwise midpoint of the two tables.
+        let throttle = Throttle::from_total(Kilobits::new_unchecked(400.0));
+        assert_eq!(throttle.resend(), Kilobits::new_unchecked(40.0));
+        assert_eq!(throttle.land(), Kilobits::new_unchecked(55.0));
+        assert_eq!(throttle.wind(), Kilobits::new_unchecked(11.5));
+        assert_eq!(throttle.cloud(), Kilobits::new_unchecked(11.5));
+        assert_eq!(throttle.task(), Kilobits::new_unchecked(111.0));
+        assert_eq!(throttle.texture(), Kilobits::new_unchecked(111.0));
+        assert_eq!(throttle.asset(), Kilobits::new_unchecked(60.0));
+        assert!((throttle.total() - 400.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn from_total_extrapolates_above_the_top_preset() {
+        // Above 1000 kbps the reference extrapolates from the 500 and 1000
+        // presets: 2000 kbps is preset_1000 plus twice the 500→1000 delta.
+        let throttle = Throttle::from_total(Kilobits::new_unchecked(2000.0));
+        assert_eq!(throttle.resend(), Kilobits::new_unchecked(200.0));
+        assert_eq!(throttle.land(), Kilobits::new_unchecked(160.0));
+        assert_eq!(throttle.wind(), Kilobits::new_unchecked(32.0));
+        assert_eq!(throttle.cloud(), Kilobits::new_unchecked(32.0));
+        assert_eq!(throttle.task(), Kilobits::new_unchecked(658.0));
+        assert_eq!(throttle.texture(), Kilobits::new_unchecked(658.0));
+        assert_eq!(throttle.asset(), Kilobits::new_unchecked(260.0));
+        assert!((throttle.total() - 2000.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn from_total_clamps_to_the_reference_range() {
+        // Below the reference minimum the smallest preset is returned; above
+        // the reference maximum the split saturates at the 6000 kbps one.
+        assert_eq!(
+            Throttle::from_total(Kilobits::new_unchecked(10.0)),
+            Throttle::preset_50()
+        );
+        assert_eq!(
+            Throttle::from_total(Kilobits::new_unchecked(9000.0)),
+            Throttle::from_total(Kilobits::new_unchecked(6000.0))
         );
     }
 

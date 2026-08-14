@@ -25,10 +25,10 @@ use sl_proto::{
     CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
     CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT,
-    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING,
-    CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
+    CAP_UPDATE_SCRIPT_TASK, CAP_UPLOAD_BAKED_TEXTURE, CAP_USER_INFO, CAP_VIEWER_ASSET,
+    CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
     INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, RECV_BUFFER_SIZE, SelectedCostKind, Session,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
+    UserInfoUpdate, ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
     build_ais_rename_category_body, build_ais_update_item_body,
@@ -41,10 +41,10 @@ use sl_proto::{
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_update_task_item_asset_request,
-    build_upload_baked_texture_request, build_voice_signaling_request, chat_session_request_body,
-    copy_inventory_from_notecard_body, display_names_query, experience_id_query,
-    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
-    group_invite_response_body, parse_login_response,
+    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
+    chat_session_request_body, copy_inventory_from_notecard_body, display_names_query,
+    experience_id_query, experience_info_query, find_experience_query, forget_experience_query,
+    group_experiences_query, group_invite_response_body, parse_login_response,
 };
 
 // Re-export the core types a consumer needs so they can depend on this crate
@@ -58,53 +58,53 @@ pub use sl_proto::{
     Child, CircuitCode, CircuitId, ClassifiedCategory, ClassifiedInfo, ClassifiedKey,
     ClassifiedUpdate, ClickAction, ClientDirectories, ClockStyle, Color, ColorAlpha, Command,
     ControlFlags, ConversationKind, CreateGroupParams, DayCycle, DayCycleFrame, DeRezDestination,
-    DetachOrder, Diagnostic, DirFindFlags, Direction, DiscardLevel, DisconnectReason, DisplayName,
-    DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings, EstateAccessDelta,
-    EstateAccessKind, EstateCovenant, EstateInfo, Event, ExperienceInfo, ExperienceKey,
-    ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh, FlexibleData,
-    FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence, FriendRights,
-    GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupKey,
-    GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeKey, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, ImageCodec, InstantMessage, InterestsUpdate, InventoryCacheConfig,
-    InventoryCallbackId, InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem,
-    InventoryItemOrFolderKey, InventoryKey, InventoryOffer, InventoryOwner, InventoryType,
-    InviteChannel, ItemInfo, Key, Kilobits, LandArea, LandBrushAction, LandBrushSize, LandEdit,
-    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LindenBalance, LoadUrlRequest, LoggedChatType, LoginAccount, LoginParams, LoginRejectKind,
-    LoginRequest, LoginResponse, LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE,
-    MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo,
-    Material, MaterialOverrideUpdate, Maturity, MediaEntry, MeshKey, MessageCursor, MfaChallenge,
-    MoneyBalance, MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags,
-    MuteType, NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem,
-    NewInventoryLink, Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-    ObjectMediaResponse, ObjectMotion, ObjectPermMasks, ObjectPhysicsData, ObjectProperties,
-    ObjectPropertiesFamily, ObjectTransform, OpenRegionInfo, OpenSimExtras, OwnerKey,
-    ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelDetails,
-    ParcelFlags, ParcelInfo, ParcelKey, ParcelMediaCommand, ParcelMediaUpdateInfo,
-    ParcelObjectOwner, ParcelOverlayCell, ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership,
-    ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate, ParcelVoiceInfo,
-    ParticleSystem, PermissionField, Permissions, Permissions5, PhysicsShapeType,
-    PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId, PlayingAnimation, PrimShape,
-    PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId, ProposalVoteId, QueryId,
-    ReflectionProbe, ReflectionProbeFlags, RegionChatSettings, RegionCombatSettings,
-    RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity, RegionInfoUpdate, RegionLimits,
-    RegionLocalObjectId, RegionLocalParcelId, RegionName, RegionTerrainComposition, Reliability,
-    RenderMaterialEntry, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptCompileError,
-    ScriptControl, ScriptControlAction, ScriptDialog, ScriptLanguage, ScriptPermissionRequest,
-    ScriptPermissions, ScriptTarget, ScriptTeleportRequest, ScriptUploadLocation, SculptData,
-    SculptOrMeshKey, SequenceNumber, SessionMessage, SetDisplayNameReply, SimulatorFeatures,
-    SkySettings, SoundFlags, SoundPreload, StartLocation, StartLocationParseError,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TerraformArea, TerrainLayerType,
-    TerrainPatch, Texture, TextureAnimation, TextureEntry, TextureFace, TextureKey, Throttle,
-    ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, TransferStatus,
-    Transmit, UpdatableAssetType, UpdateGroupInfoParams, Uuid, Vector, VoiceAccountInfo,
-    VoiceProvisionRequest, WaterSettings, Wearable, WearableType, XferId, avatar_texture,
-    decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
-    grid_to_handle, group_powers, handle_to_global, handle_to_grid, j2c, particle_pattern, pcode,
-    sim_access, texture_anim_mode,
+    DetachOrder, Diagnostic, DirFindFlags, Direction, DirectoryVisibility, DiscardLevel,
+    DisconnectReason, DisplayName, DisplayNameUpdate, Distance, EconomyData, EnvironmentSettings,
+    EstateAccessDelta, EstateAccessKind, EstateCovenant, EstateInfo, Event, ExperienceInfo,
+    ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
+    FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey, FriendPresence,
+    FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
+    GridCoordinates, GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment,
+    GroupNoticeKey, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit,
+    GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle,
+    HomeLocation, IceCandidate, ImDialog, ImSessionId, ImageCodec, InstantMessage, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, InviteChannel, ItemInfo, Key, Kilobits, LandArea,
+    LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandSearchType, LandingType,
+    LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, LoadUrlRequest,
+    LoggedChatType, LoginAccount, LoginParams, LoginRejectKind, LoginRequest, LoginResponse,
+    LureId, MAX_FACES, MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE,
+    MEDIA_PERM_OWNER, MapItem, MapItemType, MapRegionInfo, Material, MaterialOverrideUpdate,
+    Maturity, MediaEntry, MeshKey, MessageCursor, MfaChallenge, MoneyBalance, MoneyTransaction,
+    MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType, NearbyHistoryLine,
+    NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink, Object,
+    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
+    ObjectPermMasks, ObjectPhysicsData, ObjectProperties, ObjectPropertiesFamily, ObjectTransform,
+    OpenRegionInfo, OpenSimExtras, OwnerKey, ParcelAccessEntry, ParcelAccessFlags,
+    ParcelAccessScope, ParcelCategory, ParcelDetails, ParcelFlags, ParcelInfo, ParcelKey,
+    ParcelMediaCommand, ParcelMediaUpdateInfo, ParcelObjectOwner, ParcelOverlayCell,
+    ParcelOverlayGrid, ParcelOverlayInfo, ParcelOwnership, ParcelRequestResult, ParcelReturnType,
+    ParcelStatus, ParcelUpdate, ParcelVoiceInfo, ParticleSystem, PermissionField, Permissions,
+    Permissions5, PhysicsShapeType, PhysicsShapeTypes, PickInfo, PickKey, PickUpdate, PingId,
+    PlayingAnimation, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, ProposalCandidateId,
+    ProposalVoteId, QueryId, ReflectionProbe, ReflectionProbeFlags, RegionChatSettings,
+    RegionCombatSettings, RegionCoordinates, RegionFlags, RegionHandle, RegionIdentity,
+    RegionInfoUpdate, RegionLimits, RegionLocalObjectId, RegionLocalParcelId, RegionName,
+    RegionTerrainComposition, Reliability, RenderMaterialEntry, RenderMaterialRef, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
+    ScopedParcelId, ScriptCompileError, ScriptControl, ScriptControlAction, ScriptDialog,
+    ScriptLanguage, ScriptPermissionRequest, ScriptPermissions, ScriptTarget,
+    ScriptTeleportRequest, ScriptUploadLocation, SculptData, SculptOrMeshKey, SequenceNumber,
+    SessionMessage, SetDisplayNameReply, SimulatorFeatures, SkySettings, SoundFlags, SoundPreload,
+    StartLocation, StartLocationParseError, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TerraformArea, TerrainLayerType, TerrainPatch, Texture, TextureAnimation,
+    TextureEntry, TextureFace, TextureKey, Throttle, ThrottleBuilder, ThrottleError,
+    TimestampFormat, TransactionId, TransferId, TransferStatus, Transmit, UpdatableAssetType,
+    UpdateGroupInfoParams, UserInfo, Uuid, Vector, VoiceAccountInfo, VoiceProvisionRequest,
+    WaterSettings, Wearable, WearableType, XferId, avatar_texture, decode_particle_system,
+    decode_texture_anim, decode_texture_entry, encode_texture_entry, grid_to_handle, group_powers,
+    handle_to_global, handle_to_grid, j2c, particle_pattern, pcode, sim_access, texture_anim_mode,
 };
 // `sl_texture::TextureEntry` (the store's LOD-aware texture object) and
 // `TextureReadLease` are reachable as `sl_texture::…`; they are not re-exported
@@ -160,6 +160,7 @@ mod chat_log;
 mod experiences;
 mod fetch;
 mod http;
+pub mod http_proxy;
 mod inventory;
 mod inventory_cache;
 mod lsl_syntax_cache;
@@ -346,7 +347,7 @@ impl Client {
         let mut session = Session::new(params);
         let request = session.login_http_request().ok_or(Error::NoLoginRequest)?;
 
-        let http = ReqwestClient::new();
+        let http = crate::http_proxy::client_builder().build()?;
         let body = http
             .post(request.url)
             .header("Content-Type", "text/xml")
@@ -514,7 +515,7 @@ impl Client {
         // here: the event-queue long-poll runs off `EventQueueGet`, and inventory
         // fetches POST to `FetchInventoryDescendents2`. Both deliver their decoded
         // payloads back over `caps_rx` to `handle_caps_event`.
-        let http = ReqwestClient::builder()
+        let http = crate::http_proxy::client_builder()
             .timeout(Duration::from_secs(60))
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
@@ -2272,11 +2273,32 @@ impl Client {
                         Some(Command::SetVelocityInterpolation { enabled }) => {
                             self.session.set_velocity_interpolation(enabled, Instant::now())?;
                         }
+                        // Cap-preferred (the modern `UserInfo` GET/POST), falling back to the
+                        // legacy `UserInfoRequest`/`UpdateUserInfo` UDP messages where the
+                        // region does not serve the capability (OpenSim).
                         Some(Command::RequestUserInfo) => {
-                            self.session.request_user_info(Instant::now())?;
+                            if let Some(url) = caps.get(CAP_USER_INFO).cloned() {
+                                tokio::spawn(get_caps_llsd(url, CAP_USER_INFO, http.clone(), caps_tx.clone()));
+                            } else {
+                                self.session.request_user_info(Instant::now())?;
+                            }
                         }
                         Some(Command::UpdateUserInfo { im_via_email, directory_visibility }) => {
-                            self.session.update_user_info(im_via_email, directory_visibility, Instant::now())?;
+                            if let Some(url) = caps.get(CAP_USER_INFO).cloned() {
+                                // `im_via_email` is always included: OpenSim needs it and
+                                // Second Life ignores unknown keys (it manages the forwarding
+                                // preference on the account website).
+                                let body = build_user_info_update(&UserInfoUpdate {
+                                    im_via_email: Some(im_via_email),
+                                    dir_visibility: directory_visibility.to_wire().to_owned(),
+                                });
+                                tokio::spawn(post_voice_cap(url, body, CAP_USER_INFO, http.clone(), caps_tx.clone()));
+                            } else {
+                                self.session.update_user_info(im_via_email, directory_visibility, Instant::now())?;
+                            }
+                        }
+                        Some(Command::SetChatLogConfig(config)) => {
+                            chat_log.set_config(*config);
                         }
                         Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
                             self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;

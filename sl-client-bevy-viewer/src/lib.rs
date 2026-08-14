@@ -28,7 +28,9 @@
 //! [`gallery::run`]) are `pub`; the module tree stays `pub(crate)` exactly as it
 //! was.
 
+mod about_floater;
 mod about_land;
+mod about_landmark;
 mod about_region;
 mod animations;
 mod animesh;
@@ -49,6 +51,7 @@ mod beacons;
 mod body_physics;
 mod bottom_toolbar;
 mod browser_widget;
+mod build_info;
 mod bump;
 mod camera;
 mod chat;
@@ -56,6 +59,7 @@ mod chat_input;
 mod clipboard;
 mod conversations;
 mod coords;
+mod debug_settings;
 mod diagnostics;
 mod double_click_teleport;
 mod edit_contents;
@@ -159,11 +163,19 @@ mod physics;
 mod pie_menu;
 mod preferences;
 mod preferences_alerts;
+mod preferences_audio;
+mod preferences_camera_move;
+mod preferences_chat;
+mod preferences_colors_skins;
 mod preferences_general;
+mod preferences_graphics;
+mod preferences_network_cache;
 mod probe_layers;
 mod probes;
 mod procedural;
 mod quick_preferences;
+mod radar;
+mod radar_model;
 mod reach;
 pub mod render_gallery;
 mod render_priority;
@@ -185,6 +197,7 @@ mod shadow_visibility;
 mod sit_camera;
 mod sit_offset;
 mod skin;
+mod skin_colors;
 mod sky;
 mod sky_presets;
 mod slurl_dispatch;
@@ -268,7 +281,9 @@ use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt as _, util::SubscriberInitExt as _};
 
+use crate::about_floater::AboutFloaterPlugin;
 use crate::about_land::AboutLandPlugin;
+use crate::about_landmark::AboutLandmarkPlugin;
 use crate::about_region::AboutRegionPlugin;
 use crate::animations::{
     AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
@@ -304,7 +319,8 @@ use crate::camera::{
     dump_camera_pose, position_camera,
 };
 use crate::chat::{
-    ChatOverlay, position_chat_overlay, setup_chat_overlay, tick_chat_overlay, update_chat_overlay,
+    ChatOverlay, position_chat_overlay, restyle_chat_overlay, setup_chat_overlay,
+    tick_chat_overlay, update_chat_overlay,
 };
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
@@ -497,10 +513,12 @@ struct Options {
     #[clap(long)]
     start: Option<StartLocation>,
     /// The viewer channel reported to the grid.
-    #[clap(long, default_value = "sl-client-bevy-viewer")]
+    #[clap(long, default_value = build_info::VIEWER_NAME)]
     channel: String,
-    /// The viewer version reported to the grid.
-    #[clap(long, default_value = clap::crate_version!())]
+    /// The viewer version reported to the grid. Defaults to the crate version
+    /// extended with the build-time `git describe` metadata (e.g.
+    /// `0.1.0+ed81459`), so grid-side logs identify the exact build.
+    #[clap(long, default_value_t = build_info::full_version())]
     version: String,
     /// Directory holding the standard Linden `character/` assets
     /// (`avatar_skeleton.xml`, `avatar_lad.xml`, the base-body `.llm` meshes) —
@@ -550,11 +568,14 @@ struct Options {
     camera_spin_axis: SpinAxis,
     /// The UI skin to wear — a directory under `assets/skins/` (`graphite`,
     /// `azure`). Skins are colour / texture / font tokens only, never layout.
+    /// Overrides the persisted preferences choice (the colors & skins tab) for
+    /// this run, without rewriting it.
     #[clap(long)]
     skin: Option<String>,
     /// A theme overlay for the skin — a file under
     /// `assets/skins/<skin>/themes/` (e.g. `dark`), which redefines a subset of
-    /// the skin's tokens. Omit for the skin's own base.
+    /// the skin's tokens. Omit for the skin's own base. Overrides the persisted
+    /// preferences choice for this run, without rewriting it.
     #[clap(long)]
     theme: Option<String>,
     /// Watch the skin `.css` files and re-apply them live as they are edited —
@@ -929,6 +950,14 @@ fn run_session(
 
     let mut app = App::new();
     app.insert_resource(local_time_zone);
+    // The About floater's login-derived facts (grid, login URI, reported
+    // channel/version) — captured here where they are all still at hand.
+    app.insert_resource(crate::about_floater::AboutSessionInfo {
+        grid: grid.clone(),
+        login_uri: params.login_uri.to_string(),
+        channel: params.request.channel.clone(),
+        version: params.request.version.clone(),
+    });
     app.add_plugins(
         DefaultPlugins
             .set(WindowPlugin {
@@ -962,7 +991,10 @@ fn run_session(
     .add_plugins(SlClientPlugin {
         params: params.clone(),
         diagnostics: true,
-        // Log every text-chat type to the per-avatar chat directory.
+        // Log every text-chat type to the per-avatar chat directory — the
+        // pre-login default; once the account settings load,
+        // `preferences_chat` pushes the avatar's stored logging preferences
+        // over this via `Command::SetChatLogConfig`.
         chat_log_config: ChatLogConfig {
             enabled: BTreeSet::from([
                 LoggedChatType::Nearby,
@@ -994,6 +1026,7 @@ fn run_session(
     // `UiRoot` in the selected skin's hot-reloadable `.css` tokens. After
     // `ViewerUiPlugin` so the `UiRoot` it styles already exists.
     .add_plugins(crate::skin::ViewerSkinPlugin)
+    .add_plugins(crate::skin_colors::SkinColorsPlugin)
     // The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
     // bundles behind Bevy assets with runtime locale switching, the `Translator`
     // string-lookup API (typed named arguments → per-locale plural / gender), and
@@ -1197,6 +1230,7 @@ fn run_session(
     .add_plugins(InventoryFiltersPlugin)
     .add_plugins(InventoryGalleryPlugin)
     .add_plugins(InventoryPropertiesPlugin)
+    .add_plugins(AboutLandmarkPlugin)
     .add_plugins(AvatarPickerPlugin)
     // The avatar profile floater (viewer-social-profiles): 2nd Life / Web /
     // Picks / Classifieds / 1st Life / Notes, opened from the avatar pie's
@@ -1319,6 +1353,7 @@ fn run_session(
     // list hosted as a pinned tab inside the Conversations floater. After
     // ConversationsPlugin, whose strip / panel area it adds its tab and pane into.
     .add_plugins(PeoplePlugin)
+    .add_plugins(crate::radar::RadarPlugin)
     // The Groups list (viewer-social-groups): the member's own groups, built into
     // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
     // content slot it fills.
@@ -1381,6 +1416,7 @@ fn run_session(
     // The Region / Estate floater (viewer-region-options-debug / -general /
     // -terrain / -estate): the region-and-estate info surface. Bound to the
     // current region, persistence-exempt; opened from the World menu.
+    .add_plugins(AboutFloaterPlugin)
     .add_plugins(AboutRegionPlugin)
     // The snapshot floater (viewer-snapshot-floater): a framed live world preview
     // (a second off-screen camera into an image) with resolution / format
@@ -1393,6 +1429,12 @@ fn run_session(
     // per-tab tasks plug their panels into its registry. After FloaterPlugin,
     // whose spawn_floater and deferred-content build it rides.
     .add_plugins(crate::preferences::PreferencesPlugin)
+    // The raw debug-settings editor (viewer-preferences-debug-settings-editor):
+    // a separate floater over *every* registered setting — searchable list,
+    // per-kind detail editor, per-scope override editing. Live edits, no
+    // OK / Cancel snapshot. After FloaterPlugin, whose spawn_floater and
+    // deferred-content build it rides.
+    .add_plugins(crate::debug_settings::DebugSettingsPlugin)
     // The Quick Preferences panel (viewer-quick-preferences): the small
     // bottom-right floater of the settings reached-for hourly (draw distance,
     // particle cap, environment preset + time of day), a curated view over the
@@ -1408,6 +1450,23 @@ fn run_session(
     // UI-scale write and the maturity-preference server conversation behind
     // the panel build_general_tab plugs into the shell's registry.
     .add_plugins(crate::preferences_general::PreferencesGeneralPlugin)
+    .add_plugins(crate::preferences_graphics::PreferencesGraphicsPlugin)
+    // The audio tab's live output-device re-enumeration
+    // (viewer-preferences-audio-tab); the tab content itself plugs into the
+    // shell's registry.
+    .add_plugins(crate::preferences_audio::PreferencesAudioPlugin)
+    // The chat / IM + privacy tab's runtime side
+    // (viewer-preferences-chat-privacy-tab): the login-time chat-log
+    // configuration push, the `UserInfo` request / seed pair, and the per-OK
+    // apply hook; the tab content itself plugs into the shell's registry.
+    .add_plugins(crate::preferences_chat::PreferencesChatPlugin)
+    // The camera & movement tab's runtime side
+    // (viewer-preferences-camera-move-tab): the per-frame CameraTuning /
+    // MovementTuning refreshes and the field-of-view / mouselook-avatar
+    // appliers; the tab content itself plugs into the shell's registry.
+    .add_plugins(crate::preferences_camera_move::PreferencesCameraMovePlugin)
+    .add_plugins(crate::preferences_colors_skins::PreferencesColorsSkinsPlugin)
+    .add_plugins(crate::preferences_network_cache::PreferencesNetworkCachePlugin)
     // Per-user floater geometry (viewer-ui-floater-persist-geometry): remember
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
@@ -1636,6 +1695,7 @@ fn run_session(
         .init_resource::<locomotion_ik::LocomotionAdjust>()
         .init_resource::<ground::AvatarGround>()
         .init_resource::<AvatarControls>()
+        .init_resource::<movement::MovementTuning>()
         .init_resource::<TypingState>()
         .init_resource::<ControlAvatarState>()
         .init_resource::<ChatOverlay>()
@@ -1986,6 +2046,7 @@ fn run_session(
                 (
                     update_chat_overlay,
                     tick_chat_overlay,
+                    restyle_chat_overlay,
                     position_chat_overlay,
                 ),
                 // Quit handling: request a clean logout on the quit key, then force the
@@ -2407,14 +2468,27 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     // The persisted start-location preference (the preferences General tab) is
     // read from a throwaway store load: the Bevy app — and with it the
     // `ViewerSettings` resource — does not exist yet at login-request time.
-    let start = {
+    let (start, stored_skin, stored_theme) = {
         let settings = crate::settings::ViewerSettings::load();
+        // The network & cache tab's restart-scoped knobs (cache root and
+        // size ceilings, chat-log root, HTTP proxy, a pending clear-cache
+        // request) are consumed from this same pre-app load, before any
+        // store or HTTP client exists.
+        crate::preferences_network_cache::apply_startup_settings(&settings);
         let stored = settings
             .store()
             .get_str(crate::preferences_general::SETTING_LOGIN_START_LOCATION)
             .ok()
             .map(str::to_owned);
-        crate::preferences_general::resolve_start_location(options.start.clone(), stored.as_deref())
+        let start = crate::preferences_general::resolve_start_location(
+            options.start.clone(),
+            stored.as_deref(),
+        );
+        // The persisted skin choice (the colors & skins tab) seeds the initial
+        // dress; the CLI / env values override it inside `resolve`.
+        let (stored_skin, stored_theme) =
+            crate::preferences_colors_skins::stored_skin_choice(&settings);
+        (start, stored_skin, stored_theme)
     };
     let mut request = LoginRequest::new(
         avatar.first().to_owned(),
@@ -2465,6 +2539,8 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
                 selection: crate::skin::SkinSelection::resolve(
                     options.skin.clone(),
                     options.theme.clone(),
+                    stored_skin.clone(),
+                    stored_theme.clone(),
                 ),
                 watch: options.watch_skins,
             },
@@ -2581,10 +2657,19 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             spin: camera_spin,
         },
         SkinRuntime {
-            selection: crate::skin::SkinSelection::resolve(
-                options.skin.clone(),
-                options.theme.clone(),
-            ),
+            selection: {
+                // The persisted skin choice dresses the replay UI too; the
+                // throwaway pre-app load is the `run_viewer` idiom.
+                let settings = crate::settings::ViewerSettings::load();
+                let (stored_skin, stored_theme) =
+                    crate::preferences_colors_skins::stored_skin_choice(&settings);
+                crate::skin::SkinSelection::resolve(
+                    options.skin.clone(),
+                    options.theme.clone(),
+                    stored_skin,
+                    stored_theme,
+                )
+            },
             watch: options.watch_skins,
         },
         // No network surfaces offline: keep the media engines and web auth off.

@@ -2,7 +2,7 @@
 id: viewer-mesh-lod-factor-preference
 title: Expose the mesh/prim LOD factor as a preference (the reference "Mesh Detail" slider)
 topic: viewer
-status: ready
+status: done
 origin: user noted full-LOD range feels short vs a dialed-up reference viewer (2026-08-11)
 ---
 
@@ -34,3 +34,19 @@ this factor per preset. Changing it must re-drive the LOD pass so on-screen
 geometry re-ranks immediately. The recently-fixed warm/shared-mesh LOD path
 ([[viewer-mesh-stuck-low-lod-warm-cache]]) means every instance will now track
 the new factor, not just cold-built ones.
+
+## Done
+
+`RenderVolumeLODFactor` is a persisted `[render]` setting (default 1.0
+= the old hardcoded behaviour, range 1–4), registered and consumed in
+`render_priority.rs`: `drive_render_priority` reads it each 0.25 s
+pass and feeds it to the three `for_distance` tier selections (mesh,
+prim, tree — `tree_tier_for_size` gained the parameter), so a change
+re-ranks all on-screen geometry within a quarter second in both
+directions (the warm/shared-mesh path tracks it too). Surfaced as the
+"Mesh detail (LOD factor)" slider in the preferences graphics tab
+([[viewer-preferences-graphics-tab]], whose quality tiers also set it)
+and in the Quick Preferences panel. Verified live on the local grid
+with a fixed-camera A/B: a small ball prim at ~50 m renders as a
+coarse hexagon at factor 1 and a smooth sphere at factor 4, fresh
+builds in both directions.

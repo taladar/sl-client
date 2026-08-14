@@ -54,8 +54,9 @@ use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport
 const INPUT_SECTION: &[&str] = &["input"];
 
 /// The in-world double-click action setting name (mirrors the reference's
-/// `DoubleClickAction`).
-const SETTING_DOUBLE_CLICK_ACTION: &str = "DoubleClickAction";
+/// `DoubleClickAction`). Bound by the preferences camera & movement tab
+/// ([`crate::preferences_camera_move`]).
+pub(crate) const SETTING_DOUBLE_CLICK_ACTION: &str = "DoubleClickAction";
 
 /// The maximum interval (seconds) between the two clicks of a double-click, and
 /// the maximum cursor travel (pixels) between them — matched to the minimap's.

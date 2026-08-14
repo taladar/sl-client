@@ -186,6 +186,8 @@ enum ToolbarTarget {
     Conversations,
     /// The minimap floater ([`crate::minimap`]).
     Minimap,
+    /// The avatar radar floater ([`crate::radar`]).
+    Radar,
     /// The world-map floater ([`crate::world_map`]).
     WorldMap,
     /// The Search floater ([`crate::search`]) — the directory search.
@@ -222,6 +224,7 @@ impl ToolbarTarget {
             Self::Inventory => Some(INVENTORY_FLOATER_ID),
             Self::Conversations => Some(CONVERSATIONS_FLOATER_ID),
             Self::Minimap => Some(MINIMAP_FLOATER_ID),
+            Self::Radar => Some(crate::radar::RADAR_FLOATER_ID),
             Self::WorldMap => Some(WORLD_MAP_FLOATER_ID),
             Self::Search => Some(SEARCH_FLOATER_ID),
             Self::BuildTools => Some(BUILD_TOOLS_FLOATER_ID),
@@ -284,6 +287,13 @@ static TOOLBAR_BUTTONS: &[ToolbarButtonDef] = &[
         action: "toggle-minimap",
         label_key: "bottom-toolbar-minimap",
         target: ToolbarTarget::Minimap,
+    },
+    // The nearby-avatar radar (viewer-avatar-radar) sits beside the maps: the
+    // "who is around me" surface next to the "where am I" pair.
+    ToolbarButtonDef {
+        action: "toggle-radar",
+        label_key: "bottom-toolbar-radar",
+        target: ToolbarTarget::Radar,
     },
     ToolbarButtonDef {
         action: "toggle-search",
@@ -871,6 +881,7 @@ mod tests {
                 "toggle-inventory",
                 "toggle-map",
                 "toggle-minimap",
+                "toggle-radar",
                 "toggle-search",
                 "toggle-build-tools",
                 "toggle-snapshot"

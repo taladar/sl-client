@@ -40,4 +40,31 @@
   /* Meaning-bearing */
   --gain: #2fbf71;
   --loss: #e05252;
+
+  /* User-tunable palette (see graphite/skin.css for the token contract) —
+   * cooler variants, so a skin switch visibly moves the swatches. */
+
+  /* Chat text by source */
+  --chat-self: #eaf3ff;
+  --chat-others: #d5e6f8;
+  --chat-objects: #b9d4ee;
+  --chat-im: #8fd0ff;
+  --chat-system: #eaf3ff;
+
+  /* Keyword-alert highlight */
+  --keyword-alert: #ffd166;
+
+  /* Name-tag colours */
+  --name-tag-default: #eaf3ff;
+  --name-tag-self: #eaf3ff;
+  --name-tag-friend: #8fe0b0;
+  --name-tag-muted: #6f89a4;
+  --name-tag-linden: #38bdf8;
+  --name-tag-mismatch: #cfe0f0;
+
+  /* Name-tag distance bands */
+  --name-tag-distance-whisper: #2fbf71;
+  --name-tag-distance-chat: #2fbf71;
+  --name-tag-distance-shout: #ffd166;
+  --name-tag-distance-beyond: #e05252;
 }

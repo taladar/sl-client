@@ -125,13 +125,35 @@ impl Default for SkinSelection {
 }
 
 impl SkinSelection {
-    /// The initial selection, from the CLI values if given, else the
-    /// [`SKIN_ENV`] / [`THEME_ENV`] overrides, else the default.
-    pub(crate) fn resolve(skin: Option<String>, theme: Option<String>) -> Self {
-        let skin = skin
-            .or_else(|| std::env::var(SKIN_ENV).ok())
+    /// The initial selection: the CLI / [`SKIN_ENV`]+[`THEME_ENV`] values if
+    /// **either** is given (the pair is taken atomically, so a `--skin` with
+    /// no `--theme` means that skin's base — never a stored theme grafted onto
+    /// a different skin), else the persisted preferences pair (the colors &
+    /// skins tab, validated against the shipped [`SKINS`] / [`THEMES`] since a
+    /// hand-edited file must not dress the UI in a missing stylesheet), else
+    /// the default.
+    pub(crate) fn resolve(
+        skin: Option<String>,
+        theme: Option<String>,
+        stored_skin: Option<String>,
+        stored_theme: Option<String>,
+    ) -> Self {
+        let cli_skin = skin.or_else(|| std::env::var(SKIN_ENV).ok());
+        let cli_theme = theme.or_else(|| std::env::var(THEME_ENV).ok());
+        if cli_skin.is_some() || cli_theme.is_some() {
+            return Self {
+                skin: cli_skin.unwrap_or_else(|| DEFAULT_SKIN.to_owned()),
+                theme: cli_theme,
+            };
+        }
+        let skin = stored_skin
+            .filter(|stored| SKINS.contains(&stored.as_str()))
             .unwrap_or_else(|| DEFAULT_SKIN.to_owned());
-        let theme = theme.or_else(|| std::env::var(THEME_ENV).ok());
+        let theme = stored_theme.filter(|stored| {
+            THEMES
+                .iter()
+                .any(|(theme_skin, theme)| *theme_skin == skin && *theme == *stored)
+        });
         Self { skin, theme }
     }
 
@@ -960,9 +982,9 @@ fn scan_banned_properties(css: &str) -> Vec<BannedProperty> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BANNED_PHYSICAL_PROPERTIES, FOCUSABLE_CLASS, SKINS, SkinMargin, SkinRadius, SkinSelection,
-        THEMES, UiDirection, invalidate_skin_boxes, logical_replacement, resolve_skin_boxes,
-        scan_banned_properties, stamp_focus_ring_class,
+        BANNED_PHYSICAL_PROPERTIES, DEFAULT_SKIN, FOCUSABLE_CLASS, SKINS, SkinMargin, SkinRadius,
+        SkinSelection, THEMES, UiDirection, invalidate_skin_boxes, logical_replacement,
+        resolve_skin_boxes, scan_banned_properties, stamp_focus_ring_class,
     };
     use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::prelude::*;
@@ -1169,6 +1191,48 @@ mod tests {
             "a non-focusable entity (no TabIndex) must not be tagged"
         );
         Ok(())
+    }
+
+    /// `resolve` prefers the CLI pair atomically, falls back to a validated
+    /// stored pair, and defaults last. (Runs without the `SL_VIEWER_SKIN` /
+    /// `SL_VIEWER_THEME` env overrides set, as the test environment does not
+    /// set them.)
+    #[test]
+    fn resolve_prefers_cli_then_validated_stored_pair() {
+        // A stored pair passes through.
+        let stored = SkinSelection::resolve(
+            None,
+            None,
+            Some("graphite".to_owned()),
+            Some("dark".to_owned()),
+        );
+        assert_eq!(stored.skin, "graphite");
+        assert_eq!(stored.theme.as_deref(), Some("dark"));
+
+        // A stored theme the stored skin does not ship is dropped, and an
+        // unknown stored skin falls back to the default.
+        let invalid_theme = SkinSelection::resolve(
+            None,
+            None,
+            Some("azure".to_owned()),
+            Some("dark".to_owned()),
+        );
+        assert_eq!(invalid_theme.skin, "azure");
+        assert_eq!(invalid_theme.theme, None);
+        let unknown_skin =
+            SkinSelection::resolve(None, None, Some("no-such-skin".to_owned()), None);
+        assert_eq!(unknown_skin.skin, DEFAULT_SKIN);
+
+        // A CLI skin takes the whole pair: the stored theme must not ride
+        // along onto a different skin.
+        let cli = SkinSelection::resolve(
+            Some("azure".to_owned()),
+            None,
+            Some("graphite".to_owned()),
+            Some("dark".to_owned()),
+        );
+        assert_eq!(cli.skin, "azure");
+        assert_eq!(cli.theme, None);
     }
 
     /// The selection resolves an asset path: a theme overlay when set, else the

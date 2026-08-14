@@ -2,7 +2,6 @@
 
 use crate::{Caps, EVENT_QUEUE_TIMEOUT};
 use bevy::prelude::*;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
     AssetType, AssetUploadResponse, CAP_NEW_FILE_AGENT_INVENTORY, InventoryFolderKey,
@@ -202,7 +201,7 @@ pub(crate) fn caps_upload_step(
     content_type: &str,
     body: Vec<u8>,
 ) -> Result<AssetUploadResponse, String> {
-    let http = ReqwestBlockingClient::builder()
+    let http = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
         .map_err(|error| format!("HTTP client build failed: {error}"))?;

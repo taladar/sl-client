@@ -61,7 +61,17 @@ use sl_client_bevy::{
 use crate::coords::{bevy_to_sl_vec, region_offset_bevy, sl_to_bevy_vec};
 use crate::mutes::MuteModel;
 use crate::objects::{ObjectState, SceneObject};
+use crate::settings::ViewerSettings;
 use crate::sound_cache::SoundCache;
+
+/// The persisted-settings section [`SETTING_COLLISION_SOUNDS`] lives under.
+const AUDIO_SECTION: &[&str] = &["audio"];
+
+/// The reference `EnableCollisionSounds` setting name: whether the
+/// viewer-synthesized material collision sounds ([`ingest_collisions`]) play.
+/// On by default, like the reference. Scripted `llCollisionSound`s arrive as
+/// ordinary `SoundTrigger`s and are deliberately not gated by this.
+pub(crate) const SETTING_COLLISION_SOUNDS: &str = "EnableCollisionSounds";
 
 /// The parcel-local (`SOUND_LOCAL`) audibility check, grouped so the sound
 /// systems take one param rather than three. Mirrors the reference viewer's
@@ -488,7 +498,7 @@ const fn pair_key(a: Entity, b: Entity) -> (u64, u64) {
     clippy::too_many_arguments,
     reason = "a Bevy system's params are its dependencies; the collision-sound driver needs the \
               events, the contact geometry, the scene-object map, time, the sound cache + state, \
-              the mute list and the parcel-audibility check"
+              the mute list, the parcel-audibility check and the enable setting"
 )]
 pub(crate) fn ingest_collisions(
     mut events: MessageReader<CollisionStart>,
@@ -500,7 +510,14 @@ pub(crate) fn ingest_collisions(
     state: Res<ObjectState>,
     mutes: Res<MuteModel>,
     parcel: ParcelAudibility,
+    settings: Option<Res<ViewerSettings>>,
 ) {
+    if !collision_sounds_enabled(settings.as_deref()) {
+        // Drain the backlog while disabled, so re-enabling does not fire a
+        // burst of stale impacts.
+        events.clear();
+        return;
+    }
     let now = time.elapsed_secs();
     for event in events.read() {
         let (entity1, entity2) = (event.collider1, event.collider2);
@@ -569,16 +586,48 @@ pub(crate) struct WorldSoundsPlugin;
 
 impl Plugin for WorldSoundsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<WorldSounds>().add_systems(
-            Update,
-            (
-                ingest_world_sound_events,
-                ingest_collisions,
-                drive_world_sounds,
-            )
-                .chain(),
-        );
+        app.init_resource::<WorldSounds>()
+            .add_systems(Startup, register_world_sound_settings)
+            .add_systems(
+                Update,
+                (
+                    ingest_world_sound_events,
+                    ingest_collisions,
+                    drive_world_sounds,
+                )
+                    .chain(),
+            );
     }
+}
+
+/// Startup: declare this module's persisted settings.
+fn register_world_sound_settings(settings: Option<ResMut<ViewerSettings>>) {
+    let Some(mut settings) = settings else {
+        return;
+    };
+    register_settings(&mut settings);
+}
+
+/// Declare this module's persisted settings (split from the Startup system so
+/// tests can register on a bare store).
+fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        AUDIO_SECTION,
+        SETTING_COLLISION_SOUNDS,
+        sl_settings::SettingValue::Bool(true),
+        "Play the viewer-synthesized material sound when physical objects collide",
+    );
+}
+
+/// Whether the synthesized collision sounds are enabled (a missing settings
+/// resource or entry reads as the on default).
+fn collision_sounds_enabled(settings: Option<&ViewerSettings>) -> bool {
+    settings.is_none_or(|settings| {
+        settings
+            .store()
+            .get_bool(SETTING_COLLISION_SOUNDS)
+            .unwrap_or(true)
+    })
 }
 
 #[cfg(test)]
@@ -586,6 +635,23 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use sl_audio::MixerConfig;
+
+    /// The collision-sound gate: on by default (including with no settings
+    /// resource at all), off only when the stored setting says so.
+    #[test]
+    fn collision_gate_predicate() {
+        assert!(collision_sounds_enabled(None), "no settings resource: on");
+        let mut settings =
+            crate::settings::ViewerSettings::from_store_for_test(sl_settings::SettingsStore::new());
+        register_settings(&mut settings);
+        assert!(collision_sounds_enabled(Some(&settings)), "default: on");
+        settings.set(
+            sl_settings::Scope::Global,
+            SETTING_COLLISION_SOUNDS,
+            sl_settings::SettingValue::Bool(false),
+        );
+        assert!(!collision_sounds_enabled(Some(&settings)), "stored off");
+    }
 
     /// A sound is muted when its owner or its object is on the mute list.
     #[test]

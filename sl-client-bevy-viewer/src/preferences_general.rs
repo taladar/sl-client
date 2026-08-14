@@ -2,8 +2,8 @@
 //!
 //! The first tab of the preferences floater ([`crate::preferences`]): interface
 //! language, the maturity-rating preference, the login start-location default,
-//! UI scale, the headline name-tag toggles, the away timeout, and the
-//! busy-response texts. Everything binds through the two-way settings binding
+//! UI scale, the headline name-tag toggles, and the away timeout. Everything
+//! binds through the two-way settings binding
 //! ([`crate::settings_binding`]), so the shell's snapshot / Cancel-revert / OK
 //! semantics cover every control for free; the systems here are the *appliers*
 //! — the pieces that make a stored value do something.
@@ -31,9 +31,10 @@
 //!   (the toggles today's renderer honours, applied in
 //!   [`crate::avatars::position_name_tags`]); the full reference set is the
 //!   separate `viewer-name-tags-preferences` task.
-//! - **Away timeout & busy-response texts** are registered and edited here but
-//!   *consumed* by the away / do-not-disturb mode machinery
-//!   (`viewer-do-not-disturb-away`), which is not built yet.
+//! - The **away timeout** is registered and edited here but *consumed* by the
+//!   away / do-not-disturb mode machinery (`viewer-do-not-disturb-away`),
+//!   which is not built yet. The busy / autorespond reply texts moved to the
+//!   chat tab ([`crate::preferences_chat`]), where the reference keeps them.
 //! - **Skipped deliberately**: `ShowStartLocation` (no login screen exists),
 //!   the 12/24-hour clock override (the [`crate::i18n`] ICU formatters follow
 //!   the locale's own hour cycle), and the Firestorm-only name-tag extras.
@@ -51,12 +52,9 @@ use sl_settings::{Scope, SettingValue};
 
 use crate::i18n::Translator;
 use crate::notifications::ShowNotification;
-use crate::preferences::{
-    spawn_pref_combo, spawn_pref_section, spawn_pref_slider, spawn_pref_text,
-};
+use crate::preferences::{spawn_pref_combo, spawn_pref_section, spawn_pref_slider};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
-use crate::ui_text_input::TextInputKind;
 
 /// The settings section the general tab's own keys live in.
 const GENERAL_SECTION: &[&str] = &["general"];
@@ -84,28 +82,6 @@ pub(crate) const SETTING_UI_SCALE: &str = "UiScale";
 /// (`viewer-do-not-disturb-away`).
 pub(crate) const SETTING_AFK_TIMEOUT: &str = "AfkTimeoutSeconds";
 
-/// The auto-reply sent to an IM sender while in Do Not Disturb (busy) mode.
-/// Account-scoped; consumed by `viewer-do-not-disturb-away`.
-pub(crate) const SETTING_BUSY_RESPONSE: &str = "BusyResponse";
-
-/// The auto-reply sent while in autorespond mode (the Firestorm extension).
-/// Account-scoped; consumed by `viewer-do-not-disturb-away`.
-pub(crate) const SETTING_AUTORESPOND_RESPONSE: &str = "AutorespondResponse";
-
-/// The auto-reply sent to non-friends while in autorespond-to-non-friends
-/// mode. Account-scoped; consumed by `viewer-do-not-disturb-away`.
-pub(crate) const SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE: &str = "AutorespondNonFriendsResponse";
-
-/// The default Do Not Disturb auto-reply (the reference
-/// `DoNotDisturbModeResponseDefault`).
-const BUSY_RESPONSE_DEFAULT: &str = "This resident has turned on 'Do Not Disturb' mode and will \
-                                     see your message later.";
-
-/// The default autorespond auto-reply (the reference `AutoResponseModeDefault`,
-/// without its `[APP_NAME]` interpolation).
-const AUTORESPOND_RESPONSE_DEFAULT: &str = "The Resident you messaged has 'autorespond mode' enabled, which means they have requested \
-     not to be disturbed. Your message will still be shown in their IM panel for later viewing.";
-
 /// The UI-scale slider's bounds and step (the reference `UIScaleFactor` range).
 const UI_SCALE_MIN: f32 = 0.75;
 /// See [`UI_SCALE_MIN`].
@@ -120,9 +96,6 @@ const MATURITY_MAX_ATTEMPTS: u8 = 3;
 /// Seconds after which an unanswered maturity send counts as failed — the path
 /// a grid without the `AgentPreferences` capability (local OpenSim) takes.
 const MATURITY_TIMEOUT_SECONDS: f64 = 10.0;
-
-/// The multiline reply fields' visible height, in text lines.
-const REPLY_FIELD_LINES: f32 = 3.0;
 
 /// Register the general tab's settings (the language key lives in
 /// [`crate::i18n`], the name-tag keys in [`crate::avatars`]).
@@ -150,24 +123,6 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
         SETTING_AFK_TIMEOUT,
         SettingValue::U32(300),
         "Seconds of inactivity before going away automatically (0 = never)",
-    );
-    settings.register_in(
-        GENERAL_SECTION,
-        SETTING_BUSY_RESPONSE,
-        SettingValue::String(BUSY_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to IMs while in Do Not Disturb mode",
-    );
-    settings.register_in(
-        GENERAL_SECTION,
-        SETTING_AUTORESPOND_RESPONSE,
-        SettingValue::String(AUTORESPOND_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to IMs while in autorespond mode",
-    );
-    settings.register_in(
-        GENERAL_SECTION,
-        SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE,
-        SettingValue::String(AUTORESPOND_RESPONSE_DEFAULT.to_owned()),
-        "The automatic reply sent to non-friends' IMs while in autorespond-to-non-friends mode",
     );
 }
 
@@ -342,32 +297,6 @@ pub(crate) fn build_general_tab(commands: &mut Commands, panel: Entity) {
             ("preferences-afk-30-min", SettingValue::U32(1_800)),
             ("preferences-afk-60-min", SettingValue::U32(3_600)),
         ],
-    );
-
-    spawn_pref_section(commands, panel, "preferences-section-busy-response");
-    spawn_pref_text(
-        commands,
-        panel,
-        "preferences-row-busy-response",
-        SettingBinding::account(SETTING_BUSY_RESPONSE),
-        TextInputKind::Multiline,
-        REPLY_FIELD_LINES,
-    );
-    spawn_pref_text(
-        commands,
-        panel,
-        "preferences-row-autorespond-response",
-        SettingBinding::account(SETTING_AUTORESPOND_RESPONSE),
-        TextInputKind::Multiline,
-        REPLY_FIELD_LINES,
-    );
-    spawn_pref_text(
-        commands,
-        panel,
-        "preferences-row-autorespond-non-friends-response",
-        SettingBinding::account(SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE),
-        TextInputKind::Multiline,
-        REPLY_FIELD_LINES,
     );
 }
 

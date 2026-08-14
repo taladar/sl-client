@@ -33,6 +33,7 @@ mod resource_report;
 mod sequence_number;
 mod sim_features;
 mod url;
+mod user_info;
 mod voice;
 mod zerocode;
 
@@ -152,6 +153,10 @@ pub use sl_lsl::{
     SymbolKind,
 };
 pub use url::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};
+pub use user_info::{
+    UserInfoCapReply, UserInfoUpdate, build_user_info_ack, build_user_info_reply,
+    build_user_info_update, parse_user_info_reply, parse_user_info_update,
+};
 pub use voice::{
     IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
     VoiceAccountInfo, VoiceProvisionRequest, build_parcel_voice_info_request,

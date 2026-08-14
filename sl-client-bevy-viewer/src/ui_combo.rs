@@ -143,6 +143,24 @@ struct ComboOption {
     index: usize,
 }
 
+/// Ask a combo to replace its option labels in place — for a list that
+/// re-enumerates while visible (the preferences audio tab's output-device
+/// list). Applied by [`apply_set_combo_options`]: an equal list is a no-op,
+/// the closed value text re-resolves, an out-of-range selection clamps, and
+/// the update is **skipped while that combo's popover is open** so the rows
+/// are never yanked out from under the pointer — the sender's next refresh
+/// lands after it closes. The anchor itself is never respawned (the
+/// build-once rule); the popover always rebuilds from [`ComboOptions`] on
+/// open, so the next open shows the new list.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct SetComboOptions {
+    /// The anchor combo entity.
+    pub(crate) combo: Entity,
+    /// The new option labels, in order (Fluent keys where the combo
+    /// translates; a key no bundle defines renders as itself).
+    pub(crate) labels: Vec<String>,
+}
+
 /// Emitted when the **user** picks a different option (not on a programmatic
 /// [`ComboSelection`] write) — the consumer's signal that a choice was made.
 #[derive(Message, Debug, Clone, Copy)]
@@ -165,9 +183,18 @@ impl Plugin for ComboWidgetPlugin {
     /// dismiss observer.
     fn build(&self, app: &mut App) {
         app.add_message::<ComboChanged>()
+            .add_message::<SetComboOptions>()
             .init_resource::<crate::hud_pick::UiPointerClaim>()
             .add_systems(First, crate::hud_pick::reset_ui_pointer_claim)
-            .add_systems(Update, (apply_combo_selection, reflect_combo_disabled))
+            .add_systems(
+                Update,
+                (
+                    apply_set_combo_options,
+                    apply_combo_selection,
+                    reflect_combo_disabled,
+                )
+                    .chain(),
+            )
             .add_systems(
                 Startup,
                 attach_combo_dismiss.after(UiScaffoldSystems::SpawnRoot),
@@ -430,6 +457,33 @@ fn select_combo_option(
     }
 }
 
+/// Apply [`SetComboOptions`]: replace the anchor's [`ComboOptions`] labels in
+/// place (see the message doc for the skip rules), clamping the selection and
+/// touching it so [`apply_combo_selection`] re-resolves the closed value text
+/// against the new labels the same frame.
+fn apply_set_combo_options(
+    mut events: MessageReader<SetComboOptions>,
+    mut anchors: Query<(&mut ComboOptions, &mut ComboSelection)>,
+    popovers: Query<&ComboPopover>,
+) {
+    for event in events.read() {
+        if event.labels.is_empty() || popovers.iter().any(|popover| popover.combo == event.combo) {
+            continue;
+        }
+        let Ok((mut options, mut selection)) = anchors.get_mut(event.combo) else {
+            continue;
+        };
+        if options.labels == event.labels {
+            continue;
+        }
+        options.labels.clone_from(&event.labels);
+        // An unconditional write: the deref marks the selection changed even
+        // when the clamped index is equal, which is exactly what re-resolves
+        // the closed text after the label under the index changed.
+        selection.active = selection.active.min(options.labels.len().saturating_sub(1));
+    }
+}
+
 /// Reconcile each combo's closed value text to its [`ComboSelection`] whenever it
 /// changes — from a user pick or an external write. The sole writer of the
 /// derived value text.
@@ -612,6 +666,68 @@ mod tests {
     fn out_of_range_active_is_clamped() -> Result<(), TestError> {
         let app = app(9);
         assert_eq!(selection(&app), 2);
+        Ok(())
+    }
+
+    /// An app with the in-place options-update system wired.
+    fn options_app(active: usize) -> App {
+        let mut app = app(active);
+        app.add_message::<super::SetComboOptions>()
+            .add_systems(Update, super::apply_set_combo_options);
+        app
+    }
+
+    /// The combo's current option labels.
+    fn labels(app: &App) -> Vec<String> {
+        let combo = app.world().resource::<TestCombo>().0;
+        app.world()
+            .entity(combo)
+            .get::<super::ComboOptions>()
+            .map(|options| options.labels.clone())
+            .unwrap_or_default()
+    }
+
+    /// Send a [`super::SetComboOptions`] for the test combo.
+    fn set_options(app: &mut App, new_labels: &[&str]) {
+        let combo = app.world().resource::<TestCombo>().0;
+        app.world_mut()
+            .resource_mut::<Messages<super::SetComboOptions>>()
+            .write(super::SetComboOptions {
+                combo,
+                labels: new_labels.iter().map(|label| (*label).to_owned()).collect(),
+            });
+    }
+
+    /// [`super::SetComboOptions`] replaces the labels in place and clamps a
+    /// selection the shorter list left dangling.
+    #[test]
+    fn set_options_replaces_labels_and_clamps_selection() -> Result<(), TestError> {
+        let mut app = options_app(2);
+        set_options(&mut app, &["Only", "Two"]);
+        app.update();
+        assert_eq!(labels(&app), vec!["Only".to_owned(), "Two".to_owned()]);
+        assert_eq!(selection(&app), 1, "selection clamped to the new tail");
+        // An empty list is ignored — a combo never loses all its options.
+        set_options(&mut app, &[]);
+        app.update();
+        assert_eq!(labels(&app).len(), 2);
+        Ok(())
+    }
+
+    /// The update is skipped while the combo's popover is open, so the rows
+    /// are never replaced under the pointer.
+    #[test]
+    fn set_options_skipped_while_popover_open() -> Result<(), TestError> {
+        let mut app = options_app(0);
+        let combo = app.world().resource::<TestCombo>().0;
+        app.world_mut().spawn(super::ComboPopover { combo });
+        set_options(&mut app, &["Other"]);
+        app.update();
+        assert_eq!(
+            labels(&app),
+            vec!["Low".to_owned(), "Medium".to_owned(), "High".to_owned()],
+            "an open popover defers the update"
+        );
         Ok(())
     }
 }

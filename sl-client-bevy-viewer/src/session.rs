@@ -20,7 +20,6 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowCloseRequested};
 use sl_client_bevy::{
     AnimationKey, Camera, Command, Distance, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    Throttle,
 };
 use sl_settings::SettingValue;
 
@@ -453,19 +452,11 @@ pub(crate) fn drive_session(
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::RegionHandshakeComplete => {
-                info!("region handshake complete; requesting throttle");
-                // The draw distance is announced by `apply_draw_distance`, which
-                // re-sends the (user-tunable) setting on every handshake.
-                // Advertise a generous bandwidth throttle (R22b). Without an
-                // `AgentThrottle` the simulator streams objects at conservative
-                // defaults, so it spends the tiny budget on the highest-priority
-                // (nearest) objects and never reaches lower-priority ones — a
-                // same-region avatar 150 m off stays a coarse "blue sphere" for the
-                // whole session however close the camera flies, because interest-list
-                // sends are bandwidth-priority-ordered. The reference viewer always
-                // advertises its throttle; the 1000 kbps preset matches its generous
-                // end and is ample to stream the full scene.
-                commands.write(SlCommand(Command::SetThrottle(Throttle::preset_1000())));
+                info!("region handshake complete");
+                // The draw distance is announced by `apply_draw_distance`, and
+                // the bandwidth throttle by the network & cache tab's
+                // `apply_throttle` (`crate::preferences_network_cache`) — both
+                // re-send their (user-tunable) setting on every handshake.
                 // Drain the agent's stored offline instant messages, once — the
                 // reference `LLIMProcessing::requestOfflineMessages`, which the
                 // simulator otherwise holds and re-delivers on every login until

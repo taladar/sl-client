@@ -64,6 +64,37 @@ use crate::textures::TextureManager;
 /// behind the gate) and keeps the per-frame cost off the render thread.
 const REPRIORITIZE_INTERVAL_SECS: f32 = 0.25;
 
+/// The persisted-settings section the LOD-factor setting lives under.
+const RENDER_SECTION: &[&str] = &["render"];
+
+/// The object LOD-factor setting key (the reference `RenderVolumeLODFactor`,
+/// its "Mesh Detail: Objects" slider): a detail multiplier — a larger value
+/// keeps finer mesh / prim / tree geometry to a greater distance. Read by
+/// [`drive_render_priority`] each pass, so a change re-ranks on-screen
+/// geometry within [`REPRIORITIZE_INTERVAL_SECS`]; surfaced in the
+/// preferences graphics tab and the quick-preferences panel.
+pub(crate) const SETTING_LOD_FACTOR: &str = "RenderVolumeLODFactor";
+
+/// The smallest accepted LOD factor (the stock default — the reference slider
+/// also starts at 1).
+pub(crate) const LOD_FACTOR_MIN: f32 = 1.0;
+
+/// The largest accepted LOD factor (the reference slider's maximum; its
+/// graphics presets push to ~4× on Ultra).
+pub(crate) const LOD_FACTOR_MAX: f32 = 4.0;
+
+/// Declare the persisted LOD-factor setting (default: the stock
+/// [`DEFAULT_LOD_FACTOR`], i.e. the behaviour before the setting existed).
+pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+    settings.register_in(
+        RENDER_SECTION,
+        SETTING_LOD_FACTOR,
+        sl_settings::SettingValue::F32(DEFAULT_LOD_FACTOR),
+        "Object mesh / prim detail multiplier (RenderVolumeLODFactor): a \
+         larger value keeps finer geometry to a greater distance",
+    );
+}
+
 /// The top of the pixel-area priority range: [`Priority::from_pixel_area`]
 /// saturates here (`FULL_RESOLUTION_PIXEL_AREA` = `2048 * 2048`). Boost
 /// priorities sit *strictly above* this, so a boosted asset always outranks even
@@ -160,12 +191,22 @@ pub(crate) fn drive_render_priority(
     mut meshes: ResMut<MeshManager>,
     mut prim_targets: ResMut<PrimLodTargets>,
     mut tree_targets: ResMut<TreeLodTargets>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
 ) {
     *since_last += time.delta_secs();
     if *since_last < REPRIORITIZE_INTERVAL_SECS {
         return;
     }
     *since_last = 0.0;
+
+    // The user's LOD factor ([`SETTING_LOD_FACTOR`]); the whole target set is
+    // re-derived below, so a changed factor re-ranks everything this pass.
+    let lod_factor = settings
+        .as_ref()
+        .and_then(|settings| settings.store().get_f32(SETTING_LOD_FACTOR).ok())
+        .map_or(DEFAULT_LOD_FACTOR, |factor| {
+            factor.clamp(LOD_FACTOR_MIN, LOD_FACTOR_MAX)
+        });
 
     let Ok((camera_transform, Projection::Perspective(perspective))) = camera.single() else {
         return;
@@ -234,7 +275,7 @@ pub(crate) fn drive_render_priority(
                 let desired = if hud {
                     PrimLod::FINEST
                 } else {
-                    PrimLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR)
+                    PrimLod::for_distance(scale_length, distance, lod_factor)
                 };
                 prim_targets.0.insert(scene.scoped_id, desired);
             } else if scene.category == ObjectCategory::Tree && !hud {
@@ -243,7 +284,7 @@ pub(crate) fn drive_render_priority(
                 // imposter once it is tiny on screen (P26.2). A tree cannot be worn,
                 // so a HUD one is left at the tier it was built with.
                 let area = metrics.pixel_area(0.5 * scale_length, distance);
-                let desired = tree_tier_for_size(scale_length, distance, area);
+                let desired = tree_tier_for_size(scale_length, distance, area, lod_factor);
                 tree_targets.0.insert(scene.scoped_id, desired);
             }
             continue;
@@ -263,7 +304,7 @@ pub(crate) fn drive_render_priority(
         let desired = if hud {
             MeshLod::FINEST
         } else {
-            MeshLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR)
+            MeshLod::for_distance(scale_length, distance, lod_factor)
         };
         let lod_slot = mesh_lod.entry(mesh_key).or_insert(MeshLod::COARSEST);
         *lod_slot = lod_slot.finer_of(desired);
@@ -312,13 +353,13 @@ const TREE_BILLBOARD_MAX_PIXEL_AREA: f32 = 576.0;
 /// [`TreeTier::Billboard`] imposter once its pixel `area` is tiny, else the
 /// branching [`TreeLod`] its distance warrants (the reference viewer's
 /// `LLVOTree::mTrunkLOD` selection, reusing the shared `LLVOVolume::calcLOD` tier).
-fn tree_tier_for_size(scale_length: f32, distance: f32, area: f32) -> TreeTier {
+fn tree_tier_for_size(scale_length: f32, distance: f32, area: f32, lod_factor: f32) -> TreeTier {
     if area < TREE_BILLBOARD_MAX_PIXEL_AREA {
         return TreeTier::Billboard;
     }
     // `MeshLod` indexes 0 (coarsest) ..= 3 (finest); `TreeLod` indexes 0 (finest,
     // `Highest`) ..= 3 (coarsest, `Low`), so the mesh tier maps by mirroring.
-    let tier = MeshLod::for_distance(scale_length, distance, DEFAULT_LOD_FACTOR);
+    let tier = MeshLod::for_distance(scale_length, distance, lod_factor);
     TreeTier::Lod(TreeLod::from_index(
         3usize.saturating_sub(usize::from(tier.index())),
     ))
@@ -337,4 +378,26 @@ fn face_pixel_area(
     let radius = 0.5 * scale.length();
     let distance = camera_position.distance(translation);
     metrics.pixel_area(radius, distance)
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_settings::SettingsStore;
+
+    use super::{DEFAULT_LOD_FACTOR, SETTING_LOD_FACTOR};
+    use crate::settings::ViewerSettings;
+
+    /// The registered LOD factor defaults to the stock constant, so declaring
+    /// the setting alone changes no behaviour.
+    #[test]
+    fn lod_factor_registers_at_stock_default() {
+        let store = SettingsStore::new();
+        let mut settings = ViewerSettings::from_store_for_test(store);
+        super::register_settings(&mut settings);
+        assert_eq!(
+            settings.store().get_f32(SETTING_LOD_FACTOR).ok(),
+            Some(DEFAULT_LOD_FACTOR)
+        );
+    }
 }

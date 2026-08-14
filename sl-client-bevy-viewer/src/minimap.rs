@@ -876,8 +876,9 @@ pub(crate) const fn narrow(value: f64) -> f32 {
     out
 }
 
-/// The scene origin's global coordinates in metres, as `f64`.
-fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
+/// The scene origin's global coordinates in metres, as `f64`. Shared with
+/// the avatar radar, which samples the same global positions.
+pub(crate) fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
     let Some(origin) = origin else {
         return (0.0, 0.0);
     };
@@ -885,8 +886,9 @@ fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
     (f64::from(east), f64::from(north))
 }
 
-/// A Bevy world translation as global metres (east, north, up).
-fn global_from_bevy(origin: (f64, f64), translation: Vec3) -> (f64, f64, f32) {
+/// A Bevy world translation as global metres (east, north, up). Shared with
+/// the avatar radar.
+pub(crate) fn global_from_bevy(origin: (f64, f64), translation: Vec3) -> (f64, f64, f32) {
     let sl = bevy_to_sl_vec(translation);
     (origin.0 + f64::from(sl.x), origin.1 + f64::from(sl.y), sl.z)
 }

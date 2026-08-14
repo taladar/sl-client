@@ -212,7 +212,7 @@ fn fetch_openid_cookies(url: &url::Url, token: &str) -> Result<Vec<SharedCookie>
     // No redirect following: the session cookie rides the immediate response,
     // exactly as the reference reads it (it never sets follow-redirects on the
     // OpenID POST).
-    let client = reqwest::blocking::Client::builder()
+    let client = sl_client_bevy::http_proxy::blocking_client_builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|error| format!("building the HTTP client: {error}"))?;

@@ -469,7 +469,14 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
     let concrete = Arc::clone(fetcher);
     let fetcher: Arc<dyn MeshFetcher> = concrete;
     if let Some(dir) = disk_dir {
-        match MeshStore::new(Arc::clone(&fetcher), Some(dir), MeshCacheLimits::default()) {
+        match MeshStore::new(
+            Arc::clone(&fetcher),
+            Some(dir),
+            MeshCacheLimits {
+                max_bytes: crate::paths::asset_cache_max_bytes(),
+                ..MeshCacheLimits::default()
+            },
+        ) {
             Ok(store) => return store,
             Err(error) => warn!("mesh disk cache unavailable ({error}); running in-memory only"),
         }
@@ -477,7 +484,14 @@ fn build_store(fetcher: &Arc<BevyMeshFetcher>, disk_dir: Option<PathBuf>) -> Mes
     // The disk-less store opens no files and so cannot fail; the loop extracts it
     // without an `unwrap`/`expect` (which the lints forbid) and runs exactly once.
     loop {
-        match MeshStore::new(Arc::clone(&fetcher), None, MeshCacheLimits::default()) {
+        match MeshStore::new(
+            Arc::clone(&fetcher),
+            None,
+            MeshCacheLimits {
+                max_bytes: crate::paths::asset_cache_max_bytes(),
+                ..MeshCacheLimits::default()
+            },
+        ) {
             Ok(store) => return store,
             Err(error) => warn!("in-memory mesh store failed to open ({error}); retrying"),
         }

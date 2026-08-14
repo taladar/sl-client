@@ -241,7 +241,8 @@ fn px_to_f32(value: i32) -> f32 {
 /// Runs the frame a floater is added — well before login — so the account file
 /// loaded at login is coerced against these declarations. Idempotent per floater
 /// (the `Added` filter fires once); a duplicate id is logged and swallowed by
-/// [`ViewerSettings::register_in`].
+/// [`ViewerSettings::register_hidden_in`] — hidden, because window geometry is
+/// mechanical UI state the raw debug-settings editor deliberately skips.
 fn register_floater_settings(
     settings: Option<ResMut<ViewerSettings>>,
     floaters: Query<(&Floater, &UiPanelShown), AddedPersistedFloater>,
@@ -252,26 +253,26 @@ fn register_floater_settings(
     for (floater, shown) in &floaters {
         let id = floater.id;
         let geometry = floater.geometry();
-        settings.register_in(
+        settings.register_hidden_in(
             FLOATER_SECTION,
             &rect_key(id),
             SettingValue::Rect(encode_rect(geometry)),
             "Window rectangle (logical px [left, top, right, bottom]); a zero-width rect is a \
              content-sized window",
         );
-        settings.register_in(
+        settings.register_hidden_in(
             FLOATER_SECTION,
             &visible_key(id),
             SettingValue::Bool(shown.0),
             "Whether the window is open",
         );
-        settings.register_in(
+        settings.register_hidden_in(
             FLOATER_SECTION,
             &minimized_key(id),
             SettingValue::Bool(geometry.minimized),
             "Whether the window is collapsed to its title bar",
         );
-        settings.register_in(
+        settings.register_hidden_in(
             FLOATER_SECTION,
             &docked_key(id),
             SettingValue::Bool(geometry.docked),
@@ -453,7 +454,7 @@ fn register_tab_split_settings(
         let Some(floater_id) = host_floater_id(entity, &parents, &floaters) else {
             continue;
         };
-        settings.register_in(
+        settings.register_hidden_in(
             FLOATER_SECTION,
             &tab_split_key(floater_id, strip.element),
             SettingValue::F32(width.0),

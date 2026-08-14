@@ -11349,17 +11349,26 @@ mod test {
             },
         });
         session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
-        let changed = drain_events(&mut session)
-            .into_iter()
+        let events = drain_events(&mut session);
+        let changed = events
+            .iter()
             .find_map(|e| match e {
                 Event::RegionChanged {
                     region_handle, sim, ..
-                } => Some((region_handle, sim)),
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
         assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
+        // The confirmed handover also surfaces the new root simulator's
+        // version/channel string.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::SimulatorVersion(v) if v == "x")),
+            "expected a SimulatorVersion event, got {events:?}"
+        );
         Ok(())
     }
 
@@ -11475,17 +11484,26 @@ mod test {
             },
         });
         session.handle_datagram(sim_b(), &server_message(&amc, 1, true)?, now)?;
-        let changed = drain_events(&mut session)
-            .into_iter()
+        let events = drain_events(&mut session);
+        let changed = events
+            .iter()
             .find_map(|e| match e {
                 Event::RegionChanged {
                     region_handle, sim, ..
-                } => Some((region_handle, sim)),
+                } => Some((*region_handle, *sim)),
                 _ => None,
             })
             .ok_or("expected a RegionChanged event")?;
         assert_eq!(changed.0, RegionHandle(handle));
         assert_eq!(changed.1, sim_b());
+        // The confirmed handover also surfaces the new root simulator's
+        // version/channel string.
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::SimulatorVersion(v) if v == "x")),
+            "expected a SimulatorVersion event, got {events:?}"
+        );
         Ok(())
     }
 
@@ -14892,6 +14910,42 @@ mod test {
     }
 
     #[test]
+    fn agent_movement_complete_surfaces_simulator_version() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The root region's `AgentMovementComplete` carries the simulator's
+        // version/channel string in `SimData.ChannelVersion`; the session
+        // surfaces it (trimmed of the trailing NUL) for e.g. an About window.
+        let amc = AnyMessage::AgentMovementComplete(AgentMovementComplete {
+            agent_data: AgentMovementCompleteAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+            data: AgentMovementCompleteDataBlock {
+                position: vec3(10.0, 128.0, 30.0),
+                look_at: vec3(1.0, 0.0, 0.0),
+                region_handle: OBJ_REGION,
+                timestamp: 0,
+            },
+            sim_data: AgentMovementCompleteSimDataBlock {
+                channel_version: b"OpenSim 0.9.3 Yeti Dev\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&amc, 5, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, Event::SimulatorVersion(v) if v == "OpenSim 0.9.3 Yeti Dev")),
+            "expected a SimulatorVersion event, got {events:?}"
+        );
+        Ok(())
+    }
+
+    #[test]
     fn answer_records_grant_and_empty_denies() -> Result<(), TestError> {
         let now = Instant::now();
         let mut session = established(now)?;
@@ -17016,6 +17070,47 @@ mod test {
         assert_eq!(decoded.max_access_pref.as_deref(), Some("M"));
         assert_eq!(decoded.language.as_deref(), Some("en-us"));
         assert_eq!(decoded.language_is_public, Some(true));
+        Ok(())
+    }
+
+    /// A `UserInfo` GET reply surfaces the account's stored contact
+    /// preferences as [`Event::UserInfo`] — the same event the legacy
+    /// `UserInfoReply` UDP message feeds — while a bare POST acknowledgement
+    /// (`success` only) surfaces nothing.
+    #[test]
+    fn user_info_cap_surfaces_stored_set_and_ack_is_silent() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let xml = sl_proto::build_user_info_reply(true, "hidden", "someone@example.com");
+        let body = sl_proto::parse_llsd_xml(&xml)?;
+        session.handle_caps_event(sl_proto::CAP_USER_INFO, &body, now)?;
+
+        let event = drain_events(&mut session)
+            .into_iter()
+            .find(|event| matches!(event, Event::UserInfo(_)))
+            .ok_or("expected a UserInfo event")?;
+        let Event::UserInfo(info) = event else {
+            return Err("expected UserInfo".into());
+        };
+        assert!(info.im_via_email);
+        assert_eq!(
+            info.directory_visibility,
+            sl_proto::DirectoryVisibility::Hidden
+        );
+        assert_eq!(info.email, "someone@example.com");
+
+        // The POST acknowledgement carries no contact fields: no event.
+        let ack = sl_proto::build_user_info_ack(true, None);
+        let body = sl_proto::parse_llsd_xml(&ack)?;
+        session.handle_caps_event(sl_proto::CAP_USER_INFO, &body, now)?;
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::UserInfo(_)))
+        );
         Ok(())
     }
 

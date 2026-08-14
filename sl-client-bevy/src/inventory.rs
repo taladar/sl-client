@@ -3,7 +3,6 @@
 use crate::{Caps, EVENT_QUEUE_TIMEOUT};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE,
     GroupKey, InventoryFolderKey, InventoryOwner, Llsd, Session, Uuid,
@@ -74,7 +73,7 @@ pub(crate) fn run_inventory_fetch(
     response_cap: &'static str,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -105,7 +104,7 @@ pub(crate) fn run_group_members_fetch(
     group_id: GroupKey,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -138,7 +137,7 @@ pub(crate) fn run_server_appearance_update(
     cof_version: i32,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {

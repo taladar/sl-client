@@ -93,11 +93,14 @@ pub(crate) enum UiSound {
     InventoryOffer,
     /// A teleport offer arrived (`UISndTeleportOffer`).
     TeleportOffer,
+    /// A radar enter / leave / age alert (the reference's seven
+    /// `UISndRadar*` settings, which all default to the same asset).
+    RadarAlert,
 }
 
 impl UiSound {
     /// Every UI sound, for registering settings and prefetching clips.
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 15] = [
         Self::Click,
         Self::Typing,
         Self::Alert,
@@ -112,6 +115,7 @@ impl UiSound {
         Self::NearbyChat,
         Self::InventoryOffer,
         Self::TeleportOffer,
+        Self::RadarAlert,
     ];
 
     /// A short stable identifier used for the setting keys and logs.
@@ -131,6 +135,7 @@ impl UiSound {
             Self::NearbyChat => "nearby_chat",
             Self::InventoryOffer => "inventory_offer",
             Self::TeleportOffer => "teleport_offer",
+            Self::RadarAlert => "radar_alert",
         }
     }
 
@@ -152,16 +157,24 @@ impl UiSound {
             Self::IncomingIm | Self::InventoryOffer | Self::TeleportOffer => {
                 "67cc2844-00f3-2b3c-b991-6418d01e1bb7"
             }
-            Self::NearbyChat => "a3f48b85-c29f-1f97-ebb6-644b7c053512",
+            Self::NearbyChat | Self::RadarAlert => "a3f48b85-c29f-1f97-ebb6-644b7c053512",
         }
     }
 
     /// Whether this sound plays by default. The auto-emitted feedback sounds are
     /// on; the rest are registered but default-off until a surface raises them.
+    /// The radar alert is on because its alerts already have their own opt-in
+    /// report settings (enabling an alert should be audible, as the reference's
+    /// `PlayModeUISndRadar*` defaults are).
     const fn default_enabled(self) -> bool {
         matches!(
             self,
-            Self::Typing | Self::MoneyUp | Self::MoneyDown | Self::TeleportOut | Self::Snapshot
+            Self::Typing
+                | Self::MoneyUp
+                | Self::MoneyDown
+                | Self::TeleportOut
+                | Self::Snapshot
+                | Self::RadarAlert
         )
     }
 
@@ -465,6 +478,8 @@ pub(crate) struct SkinUiSounds {
     inventory_offer: SkinUiSound,
     /// `-sk-uisnd-teleport-offer`.
     teleport_offer: SkinUiSound,
+    /// `-sk-uisnd-radar-alert`.
+    radar_alert: SkinUiSound,
 }
 
 impl SkinUiSounds {
@@ -485,6 +500,7 @@ impl SkinUiSounds {
             UiSound::NearbyChat => &self.nearby_chat,
             UiSound::InventoryOffer => &self.inventory_offer,
             UiSound::TeleportOffer => &self.teleport_offer,
+            UiSound::RadarAlert => &self.radar_alert,
         }
     }
 }
@@ -500,7 +516,7 @@ pub(crate) struct SkinSoundClips {
 }
 
 /// The `-sk-uisnd-<key>` CSS property name for each [`SkinUiSounds`] field.
-const UI_SOUND_CSS_PROPERTIES: [(&str, &str); 14] = [
+const UI_SOUND_CSS_PROPERTIES: [(&str, &str); 15] = [
     ("-sk-uisnd-click", "click"),
     ("-sk-uisnd-typing", "typing"),
     ("-sk-uisnd-alert", "alert"),
@@ -515,6 +531,7 @@ const UI_SOUND_CSS_PROPERTIES: [(&str, &str); 14] = [
     ("-sk-uisnd-nearby-chat", "nearby_chat"),
     ("-sk-uisnd-inventory-offer", "inventory_offer"),
     ("-sk-uisnd-teleport-offer", "teleport_offer"),
+    ("-sk-uisnd-radar-alert", "radar_alert"),
 ];
 
 /// Parse a `-sk-uisnd-*` value: a valid UUID string is a grid asset; anything
@@ -609,6 +626,7 @@ mod tests {
                 UiSound::MoneyDown,
                 UiSound::TeleportOut,
                 UiSound::Snapshot,
+                UiSound::RadarAlert,
             ]
         );
     }

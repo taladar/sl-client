@@ -3,7 +3,6 @@
 use crate::EVENT_QUEUE_TIMEOUT;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
     CAP_MODIFY_MATERIAL_PARAMS, Llsd, Uuid, build_render_materials_request, parse_llsd_xml,
@@ -19,7 +18,7 @@ pub(crate) fn run_render_materials_fetch(
     material_ids: Vec<Uuid>,
     asset_tx: &Sender<SessionEvent>,
 ) {
-    let materials = ReqwestBlockingClient::builder()
+    let materials = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
         .ok()
@@ -46,7 +45,7 @@ pub(crate) fn run_render_materials_fetch(
 /// or a cap that rejected the body) is otherwise silent and is exactly what makes an
 /// edit look like it "did nothing", so it is surfaced at `warn`.
 pub(crate) fn run_set_render_materials(cap_url: &str, body: String) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -90,7 +89,7 @@ pub(crate) fn run_modify_material_params(
     body: String,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {

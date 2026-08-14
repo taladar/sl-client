@@ -43,6 +43,11 @@ pub struct SettingDecl {
     /// Whether overrides of this setting are persisted to disk. A transient
     /// (runtime-only) setting sets this `false`.
     persist: bool,
+    /// Whether a raw settings editor should skip this setting — mechanical UI
+    /// state (window geometry, table sort orders) that is persisted but is not
+    /// a knob anyone debugs by hand. The reference viewer's equivalent is
+    /// `LLControlVariable::isHiddenFromSettingsEditor`.
+    editor_hidden: bool,
 }
 
 impl SettingDecl {
@@ -74,6 +79,13 @@ impl SettingDecl {
     #[must_use]
     pub const fn persist(&self) -> bool {
         self.persist
+    }
+
+    /// Whether a raw settings editor should skip this setting (see the field
+    /// doc: persisted mechanical UI state, not a debuggable knob).
+    #[must_use]
+    pub const fn editor_hidden(&self) -> bool {
+        self.editor_hidden
     }
 }
 
@@ -124,7 +136,14 @@ impl SettingsStore {
         default: SettingValue,
         comment: impl Into<String>,
     ) -> Result<(), SettingError> {
-        self.declare(name.into(), default, comment.into(), Vec::new(), true)
+        self.declare(
+            name.into(),
+            default,
+            comment.into(),
+            Vec::new(),
+            true,
+            false,
+        )
     }
 
     /// Register a persisted setting grouped under a section of the persisted
@@ -148,6 +167,34 @@ impl SettingsStore {
             comment.into(),
             section_path(section),
             true,
+            false,
+        )
+    }
+
+    /// Register a persisted setting that a raw settings editor should skip —
+    /// mechanical UI state (window geometry, table sort orders) that is saved
+    /// and restored but is not a knob anyone debugs by hand (the reference
+    /// viewer's `hide_from_settings_editor`).
+    ///
+    /// Otherwise identical to [`register_in`](SettingsStore::register_in).
+    ///
+    /// # Errors
+    ///
+    /// [`SettingError::AlreadyRegistered`] if `name` is already registered.
+    pub fn register_hidden_in(
+        &mut self,
+        section: &[&str],
+        name: impl Into<String>,
+        default: SettingValue,
+        comment: impl Into<String>,
+    ) -> Result<(), SettingError> {
+        self.declare(
+            name.into(),
+            default,
+            comment.into(),
+            section_path(section),
+            true,
+            true,
         )
     }
 
@@ -166,7 +213,14 @@ impl SettingsStore {
         default: SettingValue,
         comment: impl Into<String>,
     ) -> Result<(), SettingError> {
-        self.declare(name.into(), default, comment.into(), Vec::new(), false)
+        self.declare(
+            name.into(),
+            default,
+            comment.into(),
+            Vec::new(),
+            false,
+            false,
+        )
     }
 
     /// Shared body of the `register*` methods.
@@ -177,6 +231,7 @@ impl SettingsStore {
         comment: String,
         section: Vec<String>,
         persist: bool,
+        editor_hidden: bool,
     ) -> Result<(), SettingError> {
         if self.decls.contains_key(&name) {
             return Err(SettingError::AlreadyRegistered(name));
@@ -186,6 +241,7 @@ impl SettingsStore {
             comment,
             section,
             persist,
+            editor_hidden,
         };
         let _prev = self.decls.insert(name, decl);
         Ok(())
@@ -268,6 +324,37 @@ impl SettingsStore {
             });
         }
         let _prev = self.scope_map_mut(scope).insert(name.to_owned(), value);
+        Ok(())
+    }
+
+    /// Replace a registered setting's declared default.
+    ///
+    /// The override layers are untouched, so only settings currently resolving
+    /// to their default change their effective value, and persistence is
+    /// unaffected (defaults are never written to disk). This is how a dynamic
+    /// default source — the viewer's active UI skin supplying its colour
+    /// palette — feeds the store; the reference viewer's analogue is the
+    /// per-skin `colors.xml` layer under the user's `colors.xml` overrides.
+    ///
+    /// # Errors
+    ///
+    /// [`SettingError::UnknownSetting`] if the setting is not registered, or
+    /// [`SettingError::TypeMismatch`] if `value` does not have the declared
+    /// type (a default swap must never retype a setting).
+    pub fn set_default(&mut self, name: &str, value: SettingValue) -> Result<(), SettingError> {
+        let Some(decl) = self.decls.get_mut(name) else {
+            return Err(SettingError::UnknownSetting(name.to_owned()));
+        };
+        let expected = decl.kind();
+        let found = value.kind();
+        if expected != found {
+            return Err(SettingError::TypeMismatch {
+                name: name.to_owned(),
+                expected,
+                found,
+            });
+        }
+        decl.default = value;
         Ok(())
     }
 

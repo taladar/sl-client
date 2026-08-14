@@ -40,7 +40,7 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(60);
 /// back to their own blocking client). Built lazily on first fetch.
 static FETCH_CLIENT: std::sync::LazyLock<Option<reqwest::Client>> =
     std::sync::LazyLock::new(|| {
-        reqwest::Client::builder()
+        crate::http_proxy::async_client_builder()
             .timeout(FETCH_TIMEOUT)
             .build()
             .ok()

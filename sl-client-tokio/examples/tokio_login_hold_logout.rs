@@ -601,6 +601,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             | Event::LandResourceDetail(_)
             | Event::SimStats(_)
             | Event::SimulatorTime(_)
+            | Event::SimulatorVersion(_)
             | Event::GenericMessage(_)
             | Event::LargeGenericMessage(_)
             | Event::GenericStreamingMessage(_)

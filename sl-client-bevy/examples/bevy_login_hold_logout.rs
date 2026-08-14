@@ -392,6 +392,7 @@ fn on_events(
             | SlSessionEvent::LandResourceDetail(_)
             | SlSessionEvent::SimStats(_)
             | SlSessionEvent::SimulatorTime(_)
+            | SlSessionEvent::SimulatorVersion(_)
             | SlSessionEvent::GenericMessage(_)
             | SlSessionEvent::LargeGenericMessage(_)
             | SlSessionEvent::GenericStreamingMessage(_)

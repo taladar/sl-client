@@ -2568,6 +2568,14 @@ pub enum Command {
     /// Request the agent's own account contact preferences (`UserInfoRequest`);
     /// the reply arrives as [`Event::UserInfo`](crate::Event::UserInfo).
     RequestUserInfo,
+    /// Reconfigure the runtime's chat/IM disk logging
+    /// ([`ChatLogConfig`](crate::chat_log::ChatLogConfig)) — which chat kinds
+    /// are written, the transcript filename and timestamp format, and the
+    /// `conversation.log` index. Consumed by the runtime shell's `ChatLog`
+    /// (nothing goes on the wire): the live logger is switched over and the
+    /// stored configuration a later re-login builds its logger from is
+    /// replaced.
+    SetChatLogConfig(Box<crate::chat_log::ChatLogConfig>),
     /// Update the agent's account contact preferences (`UpdateUserInfo`).
     UpdateUserInfo {
         /// Whether offline instant messages are forwarded to the agent's email.

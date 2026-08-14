@@ -555,6 +555,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
         spawn: crate::preferences::spawn_preferences_specimen,
     },
     UiElement {
+        id: "debug-settings",
+        summary: "The raw debug-settings editor: a search box over a changed-marker settings \
+                  list beside the detail column — per-layer value read-outs, a scope combo, a \
+                  numeric editor and the copy / reset buttons. Static — the live floater \
+                  (`crate::debug_settings`) adds the store, the table and the commit paths.",
+        spawn: crate::debug_settings::spawn_debug_settings_specimen,
+    },
+    UiElement {
         id: "quick-preferences",
         summary: "The Quick Preferences panel: the environment preset / time-of-day combos over \
                   a divider and the curated setting slider rows (draw distance, particle cap). \
@@ -733,6 +741,14 @@ pub(crate) const ELEMENTS: &[UiElement] = &[
                   avatar dots and the compass labels. The live floater composites a CPU image \
                   from the world mirror; here it is static so its layout is swept.",
         spawn: crate::minimap::spawn_minimap_specimen,
+    },
+    UiElement {
+        id: "radar",
+        summary: "The avatar radar's content (`crate::radar`): the counts line, the nearby-avatar \
+                  table with its status glyphs and band-coloured ranges, and the action buttons. \
+                  The live floater binds a virtualized table off the radar model; here it is \
+                  static so its layout is swept.",
+        spawn: crate::radar::spawn_radar_specimen,
     },
     UiElement {
         id: "worldmap",

@@ -201,7 +201,45 @@ impl Plugin for FloaterPlugin {
                     highlight_active_floater,
                 )
                     .chain(),
-            );
+            )
+            .add_systems(Update, open_floaters_from_env);
+    }
+}
+
+/// Debug affordance: open the floaters named in `SL_VIEWER_OPEN_FLOATER`
+/// (comma-separated stable [`Floater::id`]s) once, as soon as their chrome
+/// exists — how a headless screenshot run (`--screenshot-dir`) exercises
+/// floater content without any live input.
+fn open_floaters_from_env(
+    mut done: Local<bool>,
+    floaters: Query<(Entity, &Floater)>,
+    mut panels: Query<&mut UiPanelShown>,
+) {
+    if *done {
+        return;
+    }
+    let Some(ids) = std::env::var_os("SL_VIEWER_OPEN_FLOATER") else {
+        *done = true;
+        return;
+    };
+    if floaters.is_empty() {
+        // Floaters spawn at startup; wait for them rather than racing.
+        return;
+    }
+    *done = true;
+    for id in ids
+        .to_string_lossy()
+        .split(',')
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+    {
+        if let Some(panel) = floater_panel(&floaters, id)
+            && let Ok(mut shown) = panels.get_mut(panel)
+        {
+            shown.0 = true;
+        } else {
+            warn!("SL_VIEWER_OPEN_FLOATER: no floater with id {id:?}");
+        }
     }
 }
 

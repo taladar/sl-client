@@ -3,7 +3,6 @@
 use crate::EVENT_QUEUE_TIMEOUT;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
-use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::{CAP_OBJECT_MEDIA, Llsd, ObjectKey, build_object_media_get_request, parse_llsd_xml};
 
 /// POSTs an `ObjectMedia` GET for `object_id` and forwards the decoded LLSD
@@ -14,7 +13,7 @@ pub(crate) fn run_object_media_fetch(
     object_id: ObjectKey,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {
@@ -45,7 +44,7 @@ pub(crate) fn run_object_media_fetch(
 /// `CopyInventoryFromNotecard` copy arrives over the normal inventory-update
 /// stream.
 pub(crate) fn post_caps_llsd_oneway(cap_url: &str, body: String) {
-    let Ok(http) = ReqwestBlockingClient::builder()
+    let Ok(http) = crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
     else {

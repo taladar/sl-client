@@ -544,6 +544,7 @@ bottom-toolbar-inventory = Inventory
 bottom-toolbar-appearance = Appearance
 bottom-toolbar-map = Map
 bottom-toolbar-minimap = Mini-map
+bottom-toolbar-radar = Radar
 bottom-toolbar-people = People
 # The chat *window* toggle (distinct from the always-visible nearby-chat input
 # bar that will sit above the button row).
@@ -629,6 +630,30 @@ item-properties-sale-contents = Contents
 landmark-teleport = Teleport
 animation-play-inworld = Play in world
 animation-stop = Stop
+
+## The About Landmark floater (viewer-about-landmark-floater).
+
+about-landmark-title = About Landmark
+about-landmark-name = Title:
+about-landmark-notes = Notes:
+about-landmark-region = Region:
+about-landmark-parcel = Parcel:
+about-landmark-maturity = Rating:
+about-landmark-maturity-pg = General
+about-landmark-maturity-mature = Moderate
+about-landmark-maturity-adult = Adult
+about-landmark-owner = Owner:
+about-landmark-traffic = Traffic:
+about-landmark-area = Area:
+about-landmark-creator = Creator:
+about-landmark-acquired = Acquired:
+about-landmark-slurl = SLURL:
+about-landmark-copy-slurl = Copy SLURL
+about-landmark-loading = (loading)
+about-landmark-no-image = (no image)
+about-landmark-unavailable = (parcel details unavailable)
+about-landmark-unreadable = (unreadable landmark)
+about-landmark-parcel-unnamed = (no name)
 
 ## The notecard viewer & editor floater (viewer-notecard-editor).
 
@@ -786,6 +811,42 @@ minimap-tooltip-owner = Owner: { $name }
 minimap-tooltip-sale = For sale: L$ { $price } ({ $area } m²)
 minimap-tooltip-hint-teleport = Double-click to teleport
 minimap-tooltip-hint-map = Double-click to open the world map
+
+## The avatar radar floater (radar.rs, viewer-avatar-radar): the nearby-avatar
+## table, its enter / leave reports, and the row actions.
+
+radar-title = Radar
+radar-filter-placeholder = Filter by name
+# The label beside the range-limit checkbox and its metres field.
+radar-limit-range = Limit range (m)
+# The counts line above the table.
+radar-counts = { $total } nearby — { $region } in region, { $chat } in chat range
+# Column headers. Region and status are glyph columns: the region dot is
+# filled for a fully-streamed avatar and hollow for a coarse-only one, and the
+# status column shows T (typing), S (sitting) and A (away) letter glyphs.
+radar-col-name = Name
+radar-col-region = ●
+radar-col-status = TSA
+radar-col-title = Title
+radar-col-payment = $
+radar-col-age = Age
+radar-col-seen = Seen
+radar-col-range = Range
+# The trailing action buttons, acting on the selected row.
+radar-action-profile = Profile
+radar-action-im = IM
+# Alert lines; each is prefixed with the avatar's name by the reporter. The
+# -unknown variants are used when the distance is unknown (coarse altitude).
+radar-alert-chat-enter = entered chat range ({ $distance } m).
+radar-alert-chat-enter-unknown = entered chat range.
+radar-alert-chat-leave = left chat range.
+radar-alert-draw-enter = entered draw distance ({ $distance } m).
+radar-alert-draw-enter-unknown = entered draw distance.
+radar-alert-draw-leave = left draw distance.
+radar-alert-sim-enter = entered the region ({ $distance } m).
+radar-alert-sim-enter-unknown = entered the region.
+radar-alert-sim-leave = left the region.
+radar-alert-age = triggered the age alert. Age: { $days } day(s).
 
 ## The world-map floater (world_map.rs).
 
@@ -2062,7 +2123,7 @@ notification-maturity-change-error = We were unable to change your preferences t
 notification-confirm-restore-toybox = This action will restore your default buttons and toolbars. You cannot undo this action.
 notification-confirm-clear-all-toybox = This action will return all buttons to the toolbox and your toolbars will be empty. You cannot undo this action.
 notification-confirm-clear-browser-cache = Are you sure you want to delete your travel, web, and search history?
-notification-confirm-clear-cache = Are you sure you want to clear your viewer cache?
+notification-confirm-clear-cache = Are you sure you want to clear your viewer cache? It will be emptied the next time you start the viewer.
 notification-confirm-clear-inventory-cache = Are you sure you want to clear your inventory cache?
 notification-confirm-clear-web-browser-cache = Are you sure you want to clear your web browser cache (Requires Restart)?
 notification-confirm-clear-cookies = Are you sure you want to clear your cookies?
@@ -3091,10 +3152,16 @@ preferences-ok = OK
 preferences-cancel = Cancel
 # The tab strip.
 preferences-tab-general = General
+preferences-tab-graphics = Graphics
+preferences-tab-audio = Sound & media
+preferences-tab-chat = Chat & privacy
+preferences-tab-camera-move = Camera & movement
+preferences-tab-colors-skins = Colors & skins
+preferences-tab-network-cache = Network & cache
 preferences-tab-world-ui = UI & world display
 preferences-tab-alerts = Alerts
 # The general tab (viewer-preferences-general-tab): language, maturity, start
-# location, UI scale, name-tag basics, away timeout, busy responses.
+# location, UI scale, name-tag basics, away timeout.
 preferences-section-language = Language
 preferences-row-language = Interface language
 preferences-locale-default = System default
@@ -3136,10 +3203,32 @@ preferences-afk-5-min = 5 minutes
 preferences-afk-10-min = 10 minutes
 preferences-afk-30-min = 30 minutes
 preferences-afk-60-min = 60 minutes
+# The chat / IM + privacy tab (viewer-preferences-chat-privacy-tab): display,
+# disk logging, automatic replies (moved from the general tab), privacy.
+preferences-section-chat-display = Chat display
+preferences-row-chat-font-size = Chat text size
+preferences-chat-font-small = Small
+preferences-chat-font-medium = Medium
+preferences-chat-font-large = Large
+preferences-row-nearby-toast-lifetime = Nearby chat stays on screen for (s)
+preferences-row-chat-max-lines = Most nearby chat lines shown at once
+preferences-section-chat-logging = Chat & IM logging
+preferences-row-log-nearby-chat = Save nearby chat on my computer
+preferences-row-log-instant-messages = Save IMs and group chat on my computer
+preferences-row-log-timestamp = Add a timestamp to each log line
+preferences-row-log-timestamp-date = Include the date in log timestamps
+preferences-row-log-timestamp-seconds = Include seconds in log timestamps
+preferences-row-log-filename-date = Add a date to transcript file names
+preferences-row-log-legacy-names = Use legacy transcript file names
+preferences-row-conversation-log = Keep a log of past conversations
+preferences-row-conversation-log-retention = Forget inactive conversations after (days)
 preferences-section-busy-response = Automatic replies
 preferences-row-busy-response = Do Not Disturb reply
 preferences-row-autorespond-response = Autorespond reply
 preferences-row-autorespond-non-friends-response = Autorespond reply to non-friends
+preferences-section-privacy = Privacy
+preferences-row-online-status-hidden = Only friends and groups know I'm online
+preferences-row-im-via-email = Email me IMs that arrive while I'm offline
 # The UI & world display tab's section headings and rows.
 preferences-section-world = In-world display
 preferences-section-maps = Mini-map & world map
@@ -3159,15 +3248,182 @@ preferences-row-worldmap-infohubs = Show infohubs on the world map
 preferences-row-worldmap-land-sale = Show land for sale on the world map
 preferences-row-worldmap-events = Show events on the world map
 preferences-row-worldmap-region-names = Show region names on the world map
+# The graphics tab (viewer-preferences-graphics-tab): quality tier, draw
+# distance, LOD factor, shadows, reflections / mirrors, glow, tone mapping
+# and the vsync / frame-rate cap.
+preferences-section-render-quality = Quality & speed
+preferences-row-render-quality = Quality preset
+preferences-quality-low = Low
+preferences-quality-medium-low = Medium-Low
+preferences-quality-medium = Medium
+preferences-quality-medium-high = Medium-High
+preferences-quality-high = High
+preferences-quality-high-ultra = High-Ultra
+preferences-quality-ultra = Ultra
+preferences-row-draw-distance = Draw distance (m)
+preferences-row-lod-factor = Mesh detail (LOD factor)
+preferences-row-max-particles = Maximum particle count
+preferences-section-shadows = Shadows
+preferences-row-shadow-detail = Shadows
+preferences-shadows-none = None
+preferences-shadows-sun-moon = Sun and moon
+preferences-row-shadow-map-size = Shadow map resolution
+preferences-shadow-map-1024 = 1024 (fastest)
+preferences-shadow-map-2048 = 2048
+preferences-shadow-map-4096 = 4096 (default)
+preferences-shadow-map-8192 = 8192 (sharpest)
+preferences-row-shadow-cascades = Shadow cascades
+preferences-section-reflections = Reflections & mirrors
+preferences-row-probe-dynamic = Show avatars in reflections
+preferences-row-mirrors = Realtime mirrors
+preferences-row-mirror-resolution = Mirror resolution (takes effect after restart)
+preferences-mirror-res-256 = 256
+preferences-mirror-res-512 = 512 (default)
+preferences-mirror-res-1024 = 1024
+preferences-mirror-res-2048 = 2048
+preferences-row-mirror-update-rate = Mirror update rate
+preferences-mirror-rate-1 = Every frame
+preferences-mirror-rate-2 = Every 2nd frame
+preferences-mirror-rate-4 = Every 4th frame
+preferences-mirror-rate-8 = Every 8th frame
+preferences-section-glow = Glow
+preferences-row-glow = Render glow
+preferences-row-glow-strength = Glow strength
+preferences-row-glow-width = Glow width
+preferences-row-glow-iterations = Glow quality (blur iterations)
+preferences-section-tonemap = Tone mapping & exposure
+preferences-row-tonemap-type = Tone curve
+preferences-tonemap-khronos = Khronos PBR Neutral
+preferences-tonemap-aces = ACES
+preferences-tonemap-none = None
+preferences-row-tonemap-mix = Tone curve mix
+preferences-row-exposure = Exposure
+preferences-row-dynamic-exposure = Dynamic exposure (eye adaptation)
+preferences-row-auto-adjust-legacy = Auto-adjust legacy skies
+preferences-section-display = Display & frame rate
+preferences-row-vsync = Vertical sync (VSync)
+preferences-row-limit-framerate = Limit frame rate
+preferences-row-fps-limit = Maximum frames per second
+# The audio tab (viewer-preferences-audio-tab): bus volumes and mutes, the
+# behaviour toggles (focus mute, ear position, collision sounds), streaming
+# autoplay and the output device. Device names are their own option "keys"
+# (the Fluent key-fallback renders an undefined key as itself).
+preferences-section-volumes = Volumes
+preferences-row-volume-master = Master volume
+preferences-row-mute-master = Mute all audio
+preferences-row-volume-sfx = Sound effects
+preferences-row-mute-sfx = Mute sound effects
+preferences-row-volume-ambient = Ambient sounds
+preferences-row-mute-ambient = Mute ambient sounds
+preferences-row-volume-ui = UI sounds
+preferences-row-mute-ui = Mute UI sounds
+preferences-row-volume-music = Music stream
+preferences-row-mute-music = Mute the music stream
+preferences-row-volume-media = Media
+preferences-row-mute-media = Mute media
+preferences-row-volume-voice = Voice
+preferences-row-mute-voice = Mute voice
+preferences-section-audio-behaviour = Behaviour
+preferences-row-mute-when-unfocused = Mute audio when the window is minimised or unfocused
+preferences-row-ear-mode = Hear sounds from
+preferences-ear-camera = Camera position
+preferences-ear-avatar = Avatar position
+preferences-row-collision-sounds = Play collision sounds
+preferences-section-streaming = Streaming
+preferences-row-music-autoplay = Play the parcel's music stream automatically
+preferences-row-media-autoplay = Auto-play media on objects
+preferences-section-audio-device = Output device
+preferences-row-output-device = Output device
+preferences-audio-device-default = System default
 # The alerts tab (viewer-preferences-alerts-tab): headline toggles, then the
 # per-notification popup list.
 preferences-section-alert-headlines = Notices
 preferences-row-friend-online-toasts = Notify me when my friends log in or out
 preferences-row-group-notice-toasts = Show a toast when a group notice arrives
 preferences-row-auto-accept-inventory = Automatically accept incoming inventory offers
+# The radar's enter / leave reports (viewer-avatar-radar): opt-in per-avatar
+# toggles, the output channel, and the young-account alert.
+preferences-section-radar-alerts = Radar reports
+preferences-row-radar-chat-enter = Report avatars entering chat range
+preferences-row-radar-chat-leave = Report avatars leaving chat range
+preferences-row-radar-draw-enter = Report avatars entering draw distance
+preferences-row-radar-draw-leave = Report avatars leaving draw distance
+preferences-row-radar-sim-enter = Report avatars entering the region
+preferences-row-radar-sim-leave = Report avatars leaving the region
+preferences-row-radar-age-alert = Alert me about new accounts on the radar
+preferences-row-radar-output = Radar reports go to
+preferences-radar-output-chat = Nearby chat
+preferences-radar-output-toast = Notification toasts
+preferences-row-radar-age-days = Age alert threshold (days)
 preferences-section-alert-popups = Viewer alerts that can be shown or hidden
 preferences-alerts-col-show = Show
 preferences-alerts-col-label = Alert
+# The camera & movement tab (viewer-preferences-camera-move-tab): third-person
+# camera geometry / feel, mouselook feel, and the movement options.
+preferences-section-camera-view = Camera
+preferences-row-camera-angle = Field of view (radians)
+preferences-row-camera-offset-scale = Camera distance scale
+preferences-row-camera-smoothing = Camera smoothing (seconds)
+preferences-row-camera-max-distance = Maximum camera distance (m)
+preferences-row-camera-no-wheel-zoom = Don't let the mouse wheel zoom the camera
+preferences-section-mouselook = Mouselook
+preferences-row-mouse-sensitivity = Mouselook mouse sensitivity
+preferences-row-invert-mouse = Invert the vertical mouse look
+preferences-row-first-person-avatar = Show my avatar in mouselook
+preferences-section-movement = Movement
+preferences-row-tap-tap-hold-run = Double-tap and hold a walk key to run
+preferences-row-automatic-fly = Fly by holding the jump key
+preferences-row-avatar-turn-rate = Turn speed (radians per second)
+preferences-row-double-click-action = Double-click on the ground
+preferences-double-click-none = No action
+preferences-double-click-teleport = Teleport to the clicked point
+preferences-reset-default = Reset
+
+# The network & cache tab (viewer-preferences-network-cache-tab): bandwidth
+# throttle, HTTP proxy, cache sizes / locations and the clear-cache actions.
+preferences-section-network = Network
+preferences-row-max-bandwidth = Maximum bandwidth (kbps)
+preferences-section-proxy = HTTP proxy
+preferences-row-http-proxy-enabled = Route HTTP traffic through a proxy (restart required)
+preferences-row-http-proxy = HTTP proxy (host:port, restart required)
+preferences-section-cache = Cache
+preferences-row-texture-cache-size = Texture cache size (MB, restart required)
+preferences-row-asset-cache-size = Asset cache size per cache (MB, restart required)
+preferences-row-cache-location = Cache location (empty = default, restart required)
+preferences-row-chat-log-location = Chat log location (empty = default, restart required)
+preferences-row-clear-cache = Empty the texture, mesh and asset caches
+preferences-clear-cache = Clear cache
+preferences-row-clear-inventory-cache = Delete the saved inventory snapshots
+preferences-clear-inventory-cache = Clear inventory cache
+
+# The colors & skins tab (viewer-preferences-colors-skins-tab): the UI skin /
+# theme choice and the user-tunable colour palette (chat, name tags).
+preferences-section-skin = Skin & theme
+preferences-row-skin = UI skin
+preferences-row-theme = Color scheme
+preferences-skin-graphite = Graphite
+preferences-skin-azure = Azure
+preferences-theme-base = Skin default
+preferences-theme-dark = Dark
+preferences-section-chat-colors = Chat colors
+preferences-row-chat-color-self = My chat
+preferences-row-chat-color-others = Other avatars
+preferences-row-chat-color-objects = Objects
+preferences-row-chat-color-im = Instant messages
+preferences-row-chat-color-system = System messages
+preferences-row-keyword-alert-color = Keyword alerts
+preferences-section-name-tag-colors = Name tag colors
+preferences-row-name-tag-color-default = Default
+preferences-row-name-tag-color-self = My tag
+preferences-row-name-tag-color-friend = Friends
+preferences-row-name-tag-color-muted = Blocked
+preferences-row-name-tag-color-linden = Grid staff (Lindens)
+preferences-row-name-tag-color-mismatch = Custom display names
+preferences-section-name-tag-distance-colors = Name tag distance colors
+preferences-row-name-tag-distance-whisper = Whisper range
+preferences-row-name-tag-distance-chat = Chat range
+preferences-row-name-tag-distance-shout = Shout range
+preferences-row-name-tag-distance-beyond = Beyond shout range
 
 ## The Quick Preferences panel (viewer-quick-preferences): the small
 ## bottom-right floater of the settings reached-for hourly.
@@ -3189,6 +3445,8 @@ quick-prefs-time-midnight = Midnight
 # The curated default setting rows.
 quick-prefs-draw-distance = Draw distance
 quick-prefs-max-particles = Max particles
+quick-prefs-lod-factor = Mesh detail
+quick-prefs-quality = Quality preset
 quick-prefs-master-volume = Master volume
 quick-prefs-probe-dynamic = Avatars in reflections
 
@@ -3207,3 +3465,36 @@ hovertip-prims = Prims:
 hovertip-land-impact = , Land Impact:
 hovertip-position = Position:
 hovertip-distance = Distance:
+
+# The raw debug-settings editor (viewer-preferences-debug-settings-editor):
+# the floater chrome, the list columns, and the detail pane's labels.
+debug-settings-title = Debug settings
+debug-settings-search-placeholder = Search settings
+debug-settings-col-changed = *
+debug-settings-col-name = Setting
+debug-settings-changed-only = Changed settings only
+debug-settings-copy-name = Copy name
+debug-settings-type = Type
+debug-settings-default = Default
+debug-settings-global = Global
+debug-settings-account = Account
+debug-settings-effective = Effective
+debug-settings-scope = Edit scope
+debug-settings-scope-global = Global
+debug-settings-scope-account = Account
+debug-settings-reset = Reset to default
+debug-settings-none-selected = Select a setting to inspect and edit it
+
+# The About floater (Help ▸ About): viewer version, system info, credits and
+# third-party licenses. The support block itself is deliberately English-only
+# (grep-able for support staff), so only the chrome has keys here.
+about-title = About
+about-tab-info = Info
+about-tab-credits = Credits
+about-tab-licenses = Licenses
+about-intro = Support information about this viewer, the connected grid and the host system. Use Copy to Clipboard when reporting a problem.
+about-copy = Copy to Clipboard
+about-credits-intro = sl-client-bevy-viewer is an independent open-source viewer for Second Life and OpenSimulator grids, built from scratch in Rust.
+about-credits-protocol = Second Life and the Second Life protocol are by Linden Research, Inc. (Linden Lab). This viewer speaks the same protocols but shares no code with the official viewer.
+about-credits-reference = The Firestorm viewer project and the OpenSimulator project served as read-only behavioural references; their source made faithful reimplementation possible.
+about-credits-engine = Rendering and UI are built on the Bevy engine and the wider Rust ecosystem — see the Licenses tab for every crate this viewer ships with.
