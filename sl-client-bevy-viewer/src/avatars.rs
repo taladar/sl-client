@@ -35,7 +35,6 @@
 use std::collections::{HashMap, HashSet};
 
 use bevy::app::Propagate;
-use bevy::camera::visibility::NoFrustumCulling;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::mesh::morph::MeshMorphWeights;
@@ -1419,11 +1418,13 @@ fn spawn_body_part(
                     inverse_bindposes: inverse_bindposes.clone(),
                     joints: part_joints,
                 },
-                // A skinned mesh's frustum bounds are computed once from its bind
-                // pose, which does not track the posed/animated vertices; without
-                // this the whole avatar is wrongly culled when the camera zooms in
-                // close (the narrow near frustum misses the stale bounds).
-                NoFrustumCulling,
+                // Frustum culling is driven by the GPU-computed posed AABB
+                // (`crate::gpu_avatars::stage::apply_gpu_avatar_bounds`): a
+                // skinned mesh's bind-pose bounds do not track the posed/animated
+                // vertices — and after Phase 4 every skin binds to a single dummy
+                // joint, so Bevy's computed skin AABB is meaningless — so the
+                // real posed bound is read back from the compute pass and set on
+                // this entity's `Aabb` instead of opting culling out.
                 ChildOf(root),
                 marker,
                 // Reusable avatar identity: a ray hitting this part resolves to
@@ -1456,10 +1457,10 @@ fn spawn_body_part(
                 MeshMaterial3d(material.clone()),
                 rest_transform,
                 initial,
-                // Match the skinned parts: never frustum-cull an avatar part, so a
-                // close camera can pass through the body the way it does in Second
-                // Life instead of the part popping out of view.
-                NoFrustumCulling,
+                // A rigid part (eyeballs) is a plain mesh placed at its socket
+                // joint each frame, so Bevy's own `CalculateBounds` gives it a
+                // correct posed AABB at that transform — no cull opt-out needed
+                // (Phase 5 retired the skinned parts' `NoFrustumCulling` too).
                 ChildOf(root),
                 marker,
                 // Reusable avatar identity: a ray hitting this part resolves to

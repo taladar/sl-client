@@ -21,6 +21,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+use bevy::camera::primitives::Aabb;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
@@ -28,6 +29,7 @@ use sl_client_bevy::{AgentKey, AssetKey, ObjectKey, SkeletalDeformations, Volume
 
 use super::GpuAvatarsMode;
 use super::crowd::{CrowdCopy, GpuCrowd};
+use super::render::{GpuAvatarBounds, bounds_at};
 use super::types::{
     ClipArena, GpuAvatarFrame, GpuClipHeader, GpuCorrection, GpuJointTrack, GpuLocalPose,
     GpuPlayState, GpuRestJoint, GpuSampleJob, JOINT_NONE, MAX_ACTIVE_CLIPS, MAX_GPU_JOINTS,
@@ -213,6 +215,22 @@ pub(crate) struct GpuAvatarRegistry {
 }
 
 impl GpuAvatarRegistry {
+    /// The dense slot index a rigged pose slot currently holds, if allocated —
+    /// the key the Phase 5 bounds readback is indexed by, so
+    /// [`apply_gpu_avatar_bounds`] can look up each skinned submesh's posed
+    /// world AABB.
+    pub(crate) fn slot_index(&self, key: PoseSlotKey) -> Option<u32> {
+        self.slots.get(&key).copied()
+    }
+
+    /// Pin a pose slot's dense index directly, for the headless bounds-culling
+    /// test (which drives [`apply_gpu_avatar_bounds`] without running the full
+    /// stage that would otherwise allocate the slot).
+    #[cfg(test)]
+    pub(crate) fn set_slot_for_test(&mut self, key: PoseSlotKey, slot: u32) {
+        let _prev = self.slots.insert(key, slot);
+    }
+
     /// Allocate a dense avatar slot (reusing a freed one when available).
     /// `None` only on `u32` overflow, which a real scene never reaches.
     fn alloc_slot(&mut self) -> Option<u32> {
@@ -1055,4 +1073,189 @@ fn real_readback_expected(
         joint_count: instance.joint_count,
         expected,
     })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5: GPU-computed posed bounds → per-avatar `Aabb` (retires
+// `NoFrustumCulling`), so off-screen avatars frustum-cull from the draw.
+// ---------------------------------------------------------------------------
+
+/// Metres the posed joint-span AABB is grown by to cover the skinned flesh
+/// (hands, feet, hair, close-fitting rigged attachments) that renders past the
+/// bones the GPU bound is reduced from. A conservative constant: under-
+/// inclusive wrongly culls a visible avatar, while over-inclusive only draws
+/// one just off-screen — so the bound is deliberately generous.
+const BOUND_FLESH_MARGIN_METRES: f32 = 0.75;
+
+/// Extra metres covering the 1–2 frame bounds-readback latency: a fast-moving
+/// avatar (or, for a crowd copy, a fast-moving *template* avatar) is a couple
+/// frames ahead of its last read-back world box, so the box is grown by roughly
+/// its per-latency travel and is never culled a frame early.
+const BOUND_MOTION_MARGIN_METRES: f32 = 0.5;
+
+/// The half-extent (metres) of the generous default AABB an avatar carries
+/// until its first bounds readback lands — large enough to always intersect the
+/// frustum (never culled), so nothing pops before the real bound arrives. It is
+/// the frustum-cull equivalent of the retired `NoFrustumCulling`.
+const BOUND_DEFAULT_HALF_EXTENT_METRES: f32 = 1.0e4;
+
+/// The generous default AABB (centred on the entity origin) — see
+/// [`BOUND_DEFAULT_HALF_EXTENT_METRES`].
+const fn generous_default_aabb() -> Aabb {
+    Aabb {
+        center: Vec3A::ZERO,
+        half_extents: Vec3A::splat(BOUND_DEFAULT_HALF_EXTENT_METRES),
+    }
+}
+
+/// Convert a read-back world-space AABB into the entity-local AABB the frustum
+/// test wants, grown by `margin` metres on every side: expand the world box,
+/// transform its 8 corners through the inverse of the entity's
+/// `GlobalTransform`, and re-bound them. The cull re-applies that same
+/// transform, so this round-trips the world box **regardless** of what the
+/// transform is — a real avatar submesh's transform is its body root (equal to
+/// the GPU root the bound was posed under), a synthetic crowd copy's is its
+/// static grid cell (the base-root translation the copy actually renders at
+/// lives only in the GPU root); either way the re-application reproduces the
+/// world box. Axis-aligning the inverse-rotated box is over-inclusive, which is
+/// safe. Component f32 arithmetic throughout — the restriction lints forbid
+/// glam's `Vec3` operator overloads.
+fn world_aabb_to_local(min: Vec3, max: Vec3, margin: f32, global: &GlobalTransform) -> Aabb {
+    let inv = global.affine().inverse();
+    let lo_x = min.x - margin;
+    let lo_y = min.y - margin;
+    let lo_z = min.z - margin;
+    let hi_x = max.x + margin;
+    let hi_y = max.y + margin;
+    let hi_z = max.z + margin;
+    let corners = [
+        Vec3::new(lo_x, lo_y, lo_z),
+        Vec3::new(hi_x, lo_y, lo_z),
+        Vec3::new(lo_x, hi_y, lo_z),
+        Vec3::new(lo_x, lo_y, hi_z),
+        Vec3::new(hi_x, hi_y, lo_z),
+        Vec3::new(hi_x, lo_y, hi_z),
+        Vec3::new(lo_x, hi_y, hi_z),
+        Vec3::new(hi_x, hi_y, hi_z),
+    ];
+    let seed = inv.transform_point3(Vec3::new(lo_x, lo_y, lo_z));
+    let (lo, hi) = corners.iter().fold((seed, seed), |(lo, hi), &corner| {
+        let point = inv.transform_point3(corner);
+        (lo.min(point), hi.max(point))
+    });
+    Aabb::from_min_max(lo, hi)
+}
+
+/// Set each GPU-posed skinned submesh's `Aabb` from its pose slot's read-back
+/// world bound, so off-screen avatars frustum-cull now that the avatar parts no
+/// longer carry `NoFrustumCulling` (Phase 5).
+///
+/// One per-slot bound is applied to **all** that avatar's submeshes
+/// (conservative but correct — they share a skeleton). Until a slot's first
+/// bound lands — or on any device where the GPU path is inactive (the readback
+/// stays all-zeros) — the submesh keeps a [`generous_default_aabb`] so nothing
+/// pops. Ordered before Bevy's `CalculateBounds` so its `Without<Aabb>` pass
+/// never installs the meaningless single-dummy-joint bind-pose AABB on these
+/// entities.
+pub(crate) fn apply_gpu_avatar_bounds(
+    bounds: Res<GpuAvatarBounds>,
+    registry: Res<GpuAvatarRegistry>,
+    mut targets: Query<(Entity, &GpuSkinBinding, &GlobalTransform, Option<&mut Aabb>)>,
+    mut commands: Commands,
+) {
+    let margin = BOUND_FLESH_MARGIN_METRES + BOUND_MOTION_MARGIN_METRES;
+    for (entity, binding, global, existing) in &mut targets {
+        let world = registry
+            .slot_index(binding.slot)
+            .and_then(|slot| bounds_at(&bounds.bytes, slot));
+        let aabb = match world {
+            Some((min, max)) => world_aabb_to_local(min, max, margin, global),
+            None => generous_default_aabb(),
+        };
+        match existing {
+            Some(mut existing) => *existing = aabb,
+            None => {
+                commands.entity(entity).insert(aabb);
+            }
+        }
+    }
+}
+
+/// The env flag turning the once-per-second applied-bounds census on
+/// (`SL_VIEWER_LOG_AVATAR_BOUNDS=1`): a diagnostic for the Phase 5 frustum
+/// culling — it reports, over the avatar/crowd skinned submeshes, how many
+/// carry a **real** read-back `Aabb` (posed half-extent ~1–2 m) vs the
+/// **generous default** ([`BOUND_DEFAULT_HALF_EXTENT_METRES`], never culled),
+/// plus the real half-extent spread. A run where every entity shows the default
+/// means the readback never landed / the slot never resolved (culling can't
+/// engage); real ~2 m half-extents with no observed cull point instead at the
+/// view/visibility side.
+const ENV_LOG_BOUNDS: &str = "SL_VIEWER_LOG_AVATAR_BOUNDS";
+
+/// Log a once-per-second census of the applied avatar `Aabb`s when
+/// [`ENV_LOG_BOUNDS`] is set — see its docs. Cheap and inert otherwise (the env
+/// is read once into a `Local`).
+pub(crate) fn log_avatar_bounds(
+    bounds: Res<GpuAvatarBounds>,
+    registry: Res<GpuAvatarRegistry>,
+    targets: Query<(
+        &GpuSkinBinding,
+        &Aabb,
+        &bevy::camera::visibility::ViewVisibility,
+    )>,
+    time: Res<Time>,
+    mut enabled: Local<Option<bool>>,
+    mut next_log: Local<f32>,
+) {
+    let on = *enabled.get_or_insert_with(|| std::env::var(ENV_LOG_BOUNDS).as_deref() == Ok("1"));
+    if !on {
+        return;
+    }
+    let now = time.elapsed_secs();
+    if now < *next_log {
+        return;
+    }
+    *next_log = now + 1.0;
+
+    let default_threshold = BOUND_DEFAULT_HALF_EXTENT_METRES * 0.5;
+    let mut real: u32 = 0;
+    let mut default: u32 = 0;
+    let mut resolved_slots: u32 = 0;
+    let mut visible: u32 = 0;
+    let mut real_extents: Vec<f32> = Vec::new();
+    for (binding, aabb, view_visibility) in &targets {
+        if registry.slot_index(binding.slot).is_some() {
+            resolved_slots = resolved_slots.saturating_add(1);
+        }
+        if view_visibility.get() {
+            visible = visible.saturating_add(1);
+        }
+        let half = aabb.half_extents.max_element();
+        if half >= default_threshold {
+            default = default.saturating_add(1);
+        } else {
+            real = real.saturating_add(1);
+            real_extents.push(half);
+        }
+    }
+    real_extents.sort_by(f32::total_cmp);
+    let smallest = real_extents.first().copied().unwrap_or(0.0);
+    let largest = real_extents.last().copied().unwrap_or(0.0);
+    let median = real_extents
+        .get(real_extents.len() / 2)
+        .copied()
+        .unwrap_or(0.0);
+    info!(
+        "avatar bounds census: {visible} ViewVisible / {} total; {real} real / {default} \
+         default AABBs; {resolved_slots} have a resolved slot; readback {} ({} bytes); real \
+         half-extents min {smallest:.2} m median {median:.2} m max {largest:.2} m (default is \
+         {BOUND_DEFAULT_HALF_EXTENT_METRES:e} m)",
+        real.saturating_add(default),
+        if bounds.bytes.is_empty() {
+            "EMPTY (never landed)"
+        } else {
+            "present"
+        },
+        bounds.bytes.len(),
+    );
 }

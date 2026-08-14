@@ -84,6 +84,13 @@ pub(super) struct GpuAvatarPipelines {
     readback_layout: BindGroupLayoutDescriptor,
     /// The debug readback pipeline, entry point `readback_palette`.
     readback_pipeline: CachedComputePipelineId,
+    /// The posed-bounds layout (Phase 5 frustum culling): params + frames +
+    /// joint world + the world-space bounds destination, at the module's
+    /// binding indices `{0, 1, 4, 21}` (3 storage buffers — well under the
+    /// per-stage floor).
+    bounds_layout: BindGroupLayoutDescriptor,
+    /// The posed-bounds pipeline, entry point `bounds`.
+    bounds_pipeline: CachedComputePipelineId,
 }
 
 /// Create the bind-group layouts and queue the compute pipelines.
@@ -211,6 +218,29 @@ pub(super) fn init_gpu_avatar_pipelines(
         entry_point: Some("readback_palette".into()),
         ..default()
     });
+    let bounds_layout = BindGroupLayoutDescriptor::new(
+        "gpu_avatar_bounds_layout",
+        &BindGroupLayoutEntries::with_indices(
+            ShaderStages::COMPUTE,
+            (
+                (0, uniform_buffer::<GpuComputeParams>(false)),
+                // frames (slot lookup)
+                (1, storage_buffer_read_only_sized(false, None)),
+                // joint world (pass C output; read here, so the module's
+                // read_write declaration keeps this binding read-write).
+                (4, storage_buffer_sized(false, None)),
+                // world-space bounds destination
+                (21, storage_buffer_sized(false, None)),
+            ),
+        ),
+    );
+    let bounds_pipeline = pipeline_cache.queue_compute_pipeline(ComputePipelineDescriptor {
+        label: Some("gpu_avatar_bounds_pipeline".into()),
+        layout: vec![bounds_layout.clone()],
+        shader: POSE_SHADER_HANDLE,
+        entry_point: Some("bounds".into()),
+        ..default()
+    });
     commands.insert_resource(GpuAvatarPipelines {
         layout,
         fk_pipeline,
@@ -221,6 +251,8 @@ pub(super) fn init_gpu_avatar_pipelines(
         blend_pipeline,
         readback_layout,
         readback_pipeline,
+        bounds_layout,
+        bounds_pipeline,
     });
 }
 
@@ -358,6 +390,9 @@ struct PreparedData {
     blend: Option<(BindGroup, (u32, u32))>,
     /// The debug readback bind group and its workgroup count, when staged.
     readback: Option<(BindGroup, u32)>,
+    /// The posed-bounds bind group (Phase 5) and its workgroup count over the
+    /// avatar frames, when the bounds destination has prepared.
+    bounds: Option<(BindGroup, u32)>,
 }
 
 /// Upload the extracted staging into the GPU buffers, resolve each ghost's
@@ -369,7 +404,8 @@ struct PreparedData {
     clippy::too_many_arguments,
     reason = "a Bevy render-world system's inputs are its parameters: the extracted \
               staging, the pipeline's own buffer/prepared/pipeline resources, Bevy's \
-              skin uniforms, the device/queue pair, and the two readback lookups"
+              skin uniforms, the device/queue pair, the readback + bounds targets, and \
+              the shader-buffer lookup"
 )]
 pub(super) fn prepare_gpu_avatars(
     staging: Res<GpuAvatarStaging>,
@@ -381,6 +417,7 @@ pub(super) fn prepare_gpu_avatars(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     readback_target: Option<Res<GpuAvatarReadbackTarget>>,
+    bounds_target: Option<Res<GpuAvatarBoundsTarget>>,
     shader_buffers: Res<RenderAssets<GpuShaderBuffer>>,
 ) {
     prepared.0 = None;
@@ -661,6 +698,28 @@ pub(super) fn prepare_gpu_avatars(
         )),
     );
 
+    // The posed-bounds bind group (Phase 5): pass `bounds` reduces pass C's
+    // joint world positions into a per-slot world-space AABB written straight
+    // into the readback destination asset. Built only when that asset has
+    // prepared; skipped otherwise (the avatars keep the CPU's generous default
+    // AABB that frame — no cull until the first real bound lands).
+    let bounds = bounds_target
+        .as_ref()
+        .and_then(|target| shader_buffers.get(&target.buffer))
+        .map(|destination| {
+            let bind_group = render_device.create_bind_group(
+                "gpu_avatar_bounds_bind_group",
+                &pipeline_cache.get_bind_group_layout(&pipelines.bounds_layout),
+                &BindGroupEntries::with_indices((
+                    (0, params_binding.clone()),
+                    (1, frames_binding.clone()),
+                    (4, joint_world.as_entire_binding()),
+                    (21, destination.buffer.as_entire_binding()),
+                )),
+            );
+            (bind_group, avatar_count.div_ceil(WORKGROUP_SIZE))
+        });
+
     // The Phase 2 pass A/B bind groups (real placement): pass A over the
     // clip arena + jobs + pose cache; pass B over the playback / corrections
     // and the same local-pose buffer pass C reads.
@@ -785,6 +844,7 @@ pub(super) fn prepare_gpu_avatars(
         sample,
         blend,
         readback,
+        bounds,
     });
 }
 
@@ -855,9 +915,29 @@ pub(super) fn run_gpu_avatar_compute(
         pass.set_pipeline(fk);
         pass.set_bind_group(0, &*prepared.bind_group, &[]);
         pass.dispatch_workgroups(prepared.fk_workgroups, 1, 1);
-        // Storage writes are visible between dispatches of one pass: pass D
-        // reads the joint worlds pass C just wrote.
+        // The posed-bounds reduction (Phase 5): reads the joint worlds pass C
+        // just wrote (visible between dispatches) into a per-slot world AABB.
+        // It binds its OWN layout (the pose layout is pinned at the
+        // 8-storage-buffer downlevel floor, so it cannot carry the extra bounds
+        // output), leaving that incompatible bind group at slot 0 — pass D
+        // below re-binds the pose bind group before it runs. Its pipeline may
+        // still be compiling — skip it that frame (avatars stay unculled until
+        // it lands); it never gates the pose.
+        if let Some((bounds_bind_group, workgroups)) = prepared.bounds.as_ref()
+            && let Some(bounds) = pipeline_cache.get_compute_pipeline(pipelines.bounds_pipeline)
+        {
+            pass.set_pipeline(bounds);
+            pass.set_bind_group(0, bounds_bind_group, &[]);
+            pass.dispatch_workgroups(*workgroups, 1, 1);
+        }
+        // Pass D — skin palettes. Re-bind the pose bind group: the bounds
+        // dispatch above may have left its own (incompatible) bounds-layout
+        // bind group at slot 0, and pass D's pipeline expects the pose layout —
+        // binding the wrong layout is the wgpu validation error. Storage writes
+        // are visible between dispatches of one pass: pass D reads the joint
+        // worlds pass C just wrote.
         pass.set_pipeline(palettes);
+        pass.set_bind_group(0, &*prepared.bind_group, &[]);
         let (x, y) = prepared.palette_workgroups;
         pass.dispatch_workgroups(x, y, 1);
     }
@@ -1017,4 +1097,99 @@ fn gpu_avatar_readback_verdict(
             request.label
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// The posed-bounds readback channel (Phase 5 frustum culling): the `bounds`
+// pass writes a per-slot world-space AABB every frame; the CPU reads it back
+// and sets each avatar's `Aabb` so off-screen avatars frustum-cull.
+// ---------------------------------------------------------------------------
+
+/// The fixed per-slot capacity of the bounds buffer (mirrors `pose.wgsl`'s
+/// `BOUND_SLOT_CAP`): a slot at or beyond this is not written, so its avatar
+/// keeps the generous default AABB (unculled). Sized well past any real region
+/// avatar count or `SL_VIEWER_CROWD` harness.
+pub(super) const BOUND_SLOT_CAP: u32 = 4096;
+
+/// The byte stride of one slot's bounds entry: two `vec4<f32>` (min `xyz` +
+/// pad, max `xyz` + pad) in std430.
+const BOUND_ENTRY_BYTES: usize = 32;
+
+/// The destination the `bounds` pass writes each posed slot's world-space AABB
+/// into, so `Readback::buffer` can lift the whole slot-indexed block off the
+/// GPU — the per-frame frustum-cull input consumed by
+/// [`apply_gpu_avatar_bounds`](super::stage::apply_gpu_avatar_bounds).
+#[derive(Resource, Clone)]
+pub(super) struct GpuAvatarBoundsTarget {
+    /// The destination buffer asset, sized for [`BOUND_SLOT_CAP`] slots.
+    pub(super) buffer: Handle<ShaderBuffer>,
+}
+
+impl ExtractResource for GpuAvatarBoundsTarget {
+    type Source = Self;
+
+    fn extract_resource(source: &Self) -> Self {
+        source.clone()
+    }
+}
+
+/// The raw bytes of the last completed bounds readback: [`BOUND_SLOT_CAP`]
+/// slot-indexed `(min, max)` world-space AABBs. Empty until the first
+/// completes (before which every avatar keeps the generous default AABB).
+#[derive(Resource, Default)]
+pub(crate) struct GpuAvatarBounds {
+    /// The last completed readback's bytes.
+    pub(super) bytes: Vec<u8>,
+}
+
+/// Create the bounds destination buffer and its `Readback` driver.
+pub(super) fn init_gpu_avatar_bounds(
+    mut commands: Commands,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
+) {
+    let slots = usize::try_from(BOUND_SLOT_CAP).unwrap_or(4096);
+    let bytes = slots.saturating_mul(BOUND_ENTRY_BYTES);
+    let buffer = buffers.add(ShaderBuffer::with_size(bytes, RenderAssetUsages::default()));
+    commands
+        .spawn(Readback::buffer(buffer.clone()))
+        .observe(receive_gpu_avatar_bounds);
+    commands.insert_resource(GpuAvatarBoundsTarget { buffer });
+}
+
+/// Stash each completed bounds readback's bytes for the main-world apply system
+/// to consume next frame (a 1–2 frame latency the flesh + motion margin covers).
+fn receive_gpu_avatar_bounds(readback: On<ReadbackComplete>, mut data: ResMut<GpuAvatarBounds>) {
+    data.bytes.clone_from(&readback.data);
+}
+
+/// The three `f32` at byte `offset` of a bounds buffer as a [`Vec3`], if
+/// present.
+fn vec3_at(bytes: &[u8], offset: usize) -> Option<Vec3> {
+    let slice = bytes.get(offset..offset.checked_add(12)?)?;
+    let mut out = [0.0_f32; 3];
+    for (component, chunk) in out.iter_mut().zip(slice.chunks_exact(4)) {
+        *component = f32::from_ne_bytes(chunk.try_into().ok()?);
+    }
+    let [x, y, z] = out;
+    Some(Vec3::new(x, y, z))
+}
+
+/// The world-space `(min, max)` AABB of pose slot `slot` in a completed bounds
+/// readback, or `None` when the slot is past the buffer or was never written
+/// this run. An unwritten slot reads back all-zeros — a degenerate zero-extent
+/// box a real posed skeleton never produces (its joints always span), so a
+/// zero-extent read means "no bound yet" and the caller keeps the avatar
+/// unculled rather than culling by a point at the origin.
+pub(super) fn bounds_at(bytes: &[u8], slot: u32) -> Option<(Vec3, Vec3)> {
+    let start = usize::try_from(slot).ok()?.checked_mul(BOUND_ENTRY_BYTES)?;
+    let min = vec3_at(bytes, start)?;
+    let max = vec3_at(bytes, start.checked_add(16)?)?;
+    // The widest axis span (component f32 arithmetic — the restriction lints
+    // forbid glam's `Vec3` operator overloads): a zero span is an unwritten
+    // slot, which a real posed skeleton never produces.
+    let span = (max.x - min.x).max(max.y - min.y).max(max.z - min.z);
+    if span <= f32::EPSILON {
+        return None;
+    }
+    Some((min, max))
 }

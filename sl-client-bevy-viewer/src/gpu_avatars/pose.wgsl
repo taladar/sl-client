@@ -212,6 +212,18 @@ const TAU: f32 = 6.283185307179586;
 /// The slot-indexed local pose as pass B **writes** it (the same buffer
 /// binding 3 reads in pass C, bound read-write under pass B's layout).
 @group(0) @binding(20) var<storage, read_write> local_pose_out: array<LocalPose>;
+/// The per-slot posed **world-space** AABB (Phase 5 frustum culling): two
+/// `vec4` per slot — `bounds_out[2*slot]` the min `xyz`, `bounds_out[2*slot+1]`
+/// the max `xyz` (the `w` lanes are padding). Pass `bounds` reduces pass C's
+/// posed joint world positions into this; the CPU reads it back and sets each
+/// avatar's `Aabb` so off-screen avatars frustum-cull (the `bounds` layout
+/// only).
+@group(0) @binding(21) var<storage, read_write> bounds_out: array<vec4<f32>>;
+
+// The fixed per-slot capacity of `bounds_out` (mirrors `render.rs`
+// `BOUND_SLOT_CAP`): a slot at or beyond this is not written, so its avatar
+// keeps the CPU's generous default AABB (unculled) — over-inclusive is safe.
+const BOUND_SLOT_CAP: u32 = 4096u;
 
 /// Hamilton product `a * b`, glam `Quat::mul_quat`'s component formula.
 fn quat_mul(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
@@ -312,6 +324,37 @@ fn fk(@builtin(global_invocation_id) gid: vec3<u32>) {
         // root affine.
         joint_world[base + j] = frame.root * compose_trs(rest.local_scale, rot, pos);
     }
+}
+
+/// Pass — posed world-space bounds (Phase 5): one thread per posed avatar
+/// frame, reducing that slot's `joint_count` posed joint world **positions**
+/// (pass C's output, read here) into an axis-aligned min/max box in Bevy world
+/// space. The CPU reads it back, expands it by a flesh + motion margin, and
+/// sets the avatar's `Aabb`, so an off-screen avatar frustum-culls instead of
+/// carrying `NoFrustumCulling`. Runs after `fk` in the same compute pass
+/// (storage writes are visible between dispatches). A joint span is a
+/// conservative under-bound of the skinned flesh — the CPU margin covers the
+/// difference.
+@compute @workgroup_size(64)
+fn bounds(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if (gid.x >= params.avatar_count) {
+        return;
+    }
+    let frame = frames[gid.x];
+    if (frame.slot >= BOUND_SLOT_CAP) {
+        return;
+    }
+    let base = frame.slot * params.joint_count;
+    // The 4th column of each joint world matrix is its Bevy-world translation.
+    var lo = joint_world[base][3].xyz;
+    var hi = lo;
+    for (var j = 1u; j < params.joint_count; j++) {
+        let p = joint_world[base + j][3].xyz;
+        lo = min(lo, p);
+        hi = max(hi, p);
+    }
+    bounds_out[2u * frame.slot] = vec4<f32>(lo, 0.0);
+    bounds_out[2u * frame.slot + 1u] = vec4<f32>(hi, 0.0);
 }
 
 /// Pass D — skin palettes: one thread per (palette entry, instance), writing

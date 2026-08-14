@@ -50,3 +50,27 @@ help (they're all visible) → separate **mesh-LOD** task filed
 ([[viewer-avatar-impostors-billboard]]) stay the extreme fallback. Also noted:
 `collect_pick_warm_set` scales with the crowd (~4 ms at 100) — the pick pre-warm
 touching un-pickable copies, a bug to fix.
+
+**Step 2 — GPU-bounds frustum culling landed + verified (2026-08-14).** Pass D
+emits a per-instance world AABB (reduction over posed joint positions +
+conservative 1.25 m margin); an async readback feeds it back as each
+avatar/crowd submesh's `Aabb` (before Bevy's `CalculateBounds`), and
+`NoFrustumCulling` is removed on the avatar path only (bind-pose/dummy-joint
+bounds were meaningless — so this is "compute correct posed bounds, then cull",
+not a bare delete). Verified: `ViewVisibility` census 0/506 with the crowd
+off-screen, `render_system` drops 27 ms → 6 ms off-screen, a headless cull test,
+zoom-in-no-vanish. Crash fixed along the way (a bounds/palettes
+bind-group-layout mismatch; separate bounds layout stays at 3 buffers — the
+shared pose layout is pinned at the 8- storage-buffer downlevel floor — and the
+pose bind group is re-bound before the palettes dispatch).
+
+**Key measured re-prioritization:** culling is correct + necessary but does
+**not** improve crowd FPS yet, because the 100-avatar frame is
+**CPU/Main bound** (Main 71.7 ms > Render 48.7 ms) — culling only cuts the
+already-smaller Render. The visible crowd-FPS win now lives in the CPU
+follow-ups: [[viewer-perf-gpu-avatar-crowd-cpu-bound]] (decompose Main),
+[[viewer-perf-gpu-avatar-extract-skins-floor]] (the non-cullable `extract_skins`
+iterate-all floor), [[viewer-perf-pick-warm-set-scales-with-crowd]], and the
+pose-LOD [[viewer-perf-gpu-avatar-pose-lod]] (trims `stage_gpu_avatars` in Main
+— now more relevant than first thought). Harness cosmetic:
+[[viewer-crowd-harness-copies-render-grey]].

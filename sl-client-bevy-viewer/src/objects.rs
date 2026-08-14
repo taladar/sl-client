@@ -39,7 +39,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;
 
-use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -5114,12 +5113,12 @@ fn build_rigged_submeshes(
                 inverse_bindposes: inverse_bindposes.clone(),
                 joints: joint_entities.to_vec(),
             },
-            // A skinned mesh's frustum bounds are its static bind-pose AABB placed
-            // at the mesh *entity's* transform, while the vertices actually render
-            // wherever the joint matrices put them — so the bounds need not match
-            // the drawn mesh even at rest, and a close camera can wrongly cull the
-            // whole worn body. Never frustum-cull it.
-            NoFrustumCulling,
+            // Frustum culling is driven by the GPU-computed posed AABB
+            // (`crate::gpu_avatars::stage::apply_gpu_avatar_bounds`) via this
+            // submesh's `GpuSkinBinding` slot: its drawn vertices live wherever
+            // the GPU palettes put them, not at this entity's transform, so the
+            // real posed bound is read back and set on its `Aabb` rather than
+            // opting culling out (Phase 5, retiring `NoFrustumCulling`).
             Transform::default(),
             Visibility::default(),
             PrimFaceEntity { face_id },

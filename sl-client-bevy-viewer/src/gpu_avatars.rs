@@ -182,32 +182,50 @@ impl Plugin for GpuAvatarsPlugin {
             // incapable device to the legacy CPU path via `mode.active`.
             .add_systems(PreStartup, select_gpu_avatar_path);
         if mode.live {
-            app.add_systems(
-                // The synthetic-crowd debug spawner (`SL_VIEWER_CROWD`): a no-op
-                // unless the env selected a crowd. Runs in `Update` so its spawn
-                // commands flush before `PostUpdate` stages the copies.
-                Update,
-                crowd::spawn_crowd,
-            )
-            .add_systems(
-                PostUpdate,
-                (
-                    // After the pose driver, so the feed holds this frame's final
-                    // blended poses and (in ghost mode) the joint globals are
-                    // posed.
-                    // After both pose feeds: avatars publish in `pose_avatar_skeletons`,
-                    // animesh in `publish_control_avatars`.
-                    // The crowd publisher runs between: after the template
-                    // avatar published, before the stage reads the feed.
-                    crowd::publish_crowd
-                        .after(crate::animations::pose_avatar_skeletons)
-                        .after(crate::animesh::publish_control_avatars),
-                    stage::stage_gpu_avatars
-                        .after(crate::animations::pose_avatar_skeletons)
-                        .after(crate::animesh::publish_control_avatars)
-                        .after(crowd::publish_crowd),
-                ),
-            );
+            app.init_resource::<render::GpuAvatarBounds>()
+                .add_plugins(ExtractResourcePlugin::<render::GpuAvatarBoundsTarget>::default())
+                // The Phase 5 posed-bounds destination + its `Readback` driver.
+                .add_systems(Startup, render::init_gpu_avatar_bounds)
+                .add_systems(
+                    // The synthetic-crowd debug spawner (`SL_VIEWER_CROWD`): a no-op
+                    // unless the env selected a crowd. Runs in `Update` so its spawn
+                    // commands flush before `PostUpdate` stages the copies.
+                    Update,
+                    crowd::spawn_crowd,
+                )
+                .add_systems(
+                    PostUpdate,
+                    (
+                        // After the pose driver, so the feed holds this frame's final
+                        // blended poses and (in ghost mode) the joint globals are
+                        // posed.
+                        // After both pose feeds: avatars publish in `pose_avatar_skeletons`,
+                        // animesh in `publish_control_avatars`.
+                        // The crowd publisher runs between: after the template
+                        // avatar published, before the stage reads the feed.
+                        crowd::publish_crowd
+                            .after(crate::animations::pose_avatar_skeletons)
+                            .after(crate::animesh::publish_control_avatars),
+                        stage::stage_gpu_avatars
+                            .after(crate::animations::pose_avatar_skeletons)
+                            .after(crate::animesh::publish_control_avatars)
+                            .after(crowd::publish_crowd),
+                        // Phase 5: set each avatar's `Aabb` from its read-back
+                        // world bound (so off-screen avatars frustum-cull), after
+                        // the stage refreshed the slot map and before Bevy's
+                        // `CalculateBounds` would otherwise install the meaningless
+                        // dummy-joint bind-pose AABB.
+                        stage::apply_gpu_avatar_bounds
+                            .after(stage::stage_gpu_avatars)
+                            .before(bevy::camera::visibility::VisibilitySystems::CalculateBounds),
+                        // The `SL_VIEWER_LOG_AVATAR_BOUNDS` census (inert unless
+                        // the env is set), after `CheckVisibility` so it reads
+                        // the culled `ViewVisibility` `extract_skins` sees, not
+                        // the pre-cull reset value.
+                        stage::log_avatar_bounds
+                            .after(bevy::camera::visibility::VisibilitySystems::CheckVisibility),
+                    ),
+                );
         }
         if mode.readback {
             app.init_resource::<render::GpuAvatarReadbackData>()

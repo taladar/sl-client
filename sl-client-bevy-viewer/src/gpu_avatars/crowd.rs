@@ -27,7 +27,6 @@
 
 use std::sync::Arc;
 
-use bevy::camera::visibility::NoFrustumCulling;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, SlIdentity};
@@ -243,8 +242,11 @@ type CrowdSourceQuery<'w, 's> = Query<
 /// sets them `Visibility::Hidden`), and its BOM mesh body/head stay hidden
 /// until their bake resolves asynchronously — the crowd copies are not
 /// `AvatarBodyPart` entities, so neither hide reaches them, so the visible set
-/// is filtered here. The avatar parts carry `NoFrustumCulling`, so
-/// `InheritedVisibility` reflects only the Hidden/Inherited chain, not culling.
+/// is filtered here. This reads `InheritedVisibility` (the propagated
+/// Hidden/Inherited chain), which is independent of frustum culling — so the
+/// captured template set does not depend on where the local avatar's parts
+/// happen to sit in the camera frustum (Phase 5 gave those parts a real posed
+/// `Aabb`; `ViewVisibility`, not `InheritedVisibility`, carries that cull).
 /// The signature is `(count, XOR of entity bits)` — order-independent, changing
 /// whenever any submesh flips visibility, so [`resolve_template`] can tell when
 /// the set has settled.
@@ -389,10 +391,10 @@ pub(crate) fn spawn_crowd(
                     inverse_bindposes: submesh.inverse_bindposes.clone(),
                     joints: vec![dummy; submesh.joint_count],
                 },
-                // A skinned mesh's bind-pose bounds do not track its posed
-                // vertices, and the palette is GPU-written after culling — so,
-                // like a real avatar submesh, never frustum-cull it.
-                NoFrustumCulling,
+                // Frustum culling is driven by the GPU-computed posed AABB
+                // (`crate::gpu_avatars::stage::apply_gpu_avatar_bounds`) via this
+                // copy's `GpuSkinBinding` slot, exactly like a real avatar
+                // submesh — so, like it, no `NoFrustumCulling` opt-out (Phase 5).
                 GpuSkinBinding {
                     slot: PoseSlotKey::Crowd(index),
                     canonical: Arc::clone(&submesh.canonical),

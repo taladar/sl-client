@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 62 |
-| ready | 251 |
+| ready | 255 |
 | blocked | 78 |
 | in-progress | 15 |
-| bugs | 25 |
+| bugs | 26 |
 | done | 782 |
 | deferred | 23 |
 | wont-do | 10 |
-| **total** | **1246** |
+| **total** | **1251** |
 
 ## ideas (62)
 
@@ -155,7 +155,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (251)
+## ready (255)
 
 ### protocol
 
@@ -290,6 +290,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-crowd-harness-copies-render-grey`](ready/viewer-crowd-harness-copies-render-grey.md)
+  — Crowd harness copies render grey (snapshot the template before its bake)
 - [`viewer-debug-consoles`](ready/viewer-debug-consoles.md) — Debug consoles —
   texture, debug text, scene stats
 - [`viewer-debug-render-beacons`](ready/viewer-debug-render-beacons.md) — Debug
@@ -490,8 +492,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Reduce avian3d collider-tree churn during bulk rez
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
+- [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
+  — 100-avatar crowd frame is CPU/Main-schedule bound
+- [`viewer-perf-gpu-avatar-extract-skins-floor`](ready/viewer-perf-gpu-avatar-extract-skins-floor.md)
+  — Eliminate CPU extract_skins for GPU-posed avatars (iterate-all floor)
 - [`viewer-perf-gpu-avatar-phase5-lod-polish`](ready/viewer-perf-gpu-avatar-phase5-lod-polish.md)
   — GPU avatars Phase 5 — LOD, scalability hooks, polish
+- [`viewer-perf-gpu-avatar-pose-lod`](ready/viewer-perf-gpu-avatar-pose-lod.md)
+  — GPU-avatar pose LOD — phase-bucket temporal + bone-count LOD
 - [`viewer-perf-map-hover-tooltip-node-writes`](ready/viewer-perf-map-hover-tooltip-node-writes.md)
   — Minimap / world-map hover tooltips write Node + Visibility unconditionally
 - [`viewer-perf-minimap-compass-visibility-writes`](ready/viewer-perf-minimap-compass-visibility-writes.md)
@@ -1024,7 +1032,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
 
-## bugs (25)
+## bugs (26)
 
 ### protocol
 
@@ -1069,6 +1077,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
+- [`viewer-perf-pick-warm-set-scales-with-crowd`](bugs/viewer-perf-pick-warm-set-scales-with-crowd.md)
+  — collect_pick_warm_set scales with the crowd (touches un-pickable copies)
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)

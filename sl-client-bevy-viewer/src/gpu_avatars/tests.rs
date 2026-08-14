@@ -674,6 +674,19 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
         },
     });
 
+    // Phase 5: turn the posed-bounds pass on for this fixture (the live app
+    // gates its infra on `mode.live`, off here) so the test runs the exact
+    // fk → bounds → palettes dispatch sequence a live run does. The `bounds`
+    // pass binds its own (bounds) layout at slot 0 and pass D re-binds the pose
+    // layout after it; if that re-bind were missing the compute pass would hit
+    // the wgpu bind-group-layout validation error and the palette readback
+    // below would not match.
+    app.init_resource::<super::render::GpuAvatarBounds>()
+        .add_plugins(bevy::render::extract_resource::ExtractResourcePlugin::<
+            super::render::GpuAvatarBoundsTarget,
+        >::default())
+        .add_systems(Startup, super::render::init_gpu_avatar_bounds);
+
     // Keep the skinned mesh's transform dirty every frame (same-value write):
     // a static instance can extract before its skin registers and would keep
     // a stale `current_skin_index` forever — the spike's staleness finding.
@@ -826,6 +839,155 @@ fn the_gpu_palette_matches_the_cpu_reference() -> Result<(), TestError> {
          {worst:e}) — the WGSL FK does not reproduce deformed_world_matrices; the avatar \
          ghost would NOT match the CPU-posed original"
     );
+
+    // Phase 5: the palette match above already proves fk → bounds → palettes ran
+    // without a bind-group-layout validation error (a mismatch fails the whole
+    // compute pass). Additionally confirm the `bounds` pass wrote slot 0 a
+    // plausible, non-degenerate world AABB when its readback has landed (it
+    // rides the same `Readback` mechanism as the palette, but its own timing).
+    let bounds_bytes = app
+        .world()
+        .get_resource::<super::render::GpuAvatarBounds>()
+        .map(|data| data.bytes.clone())
+        .unwrap_or_default();
+    match super::render::bounds_at(&bounds_bytes, 0) {
+        Some((min, max)) => assert!(
+            max.y - min.y > 0.0,
+            "the posed-bounds pass wrote a degenerate slot-0 AABB (min {min:?} max {max:?})"
+        ),
+        None => warn!(
+            "the bounds readback has not landed this run (timing); the palette path already \
+             confirmed the fk → bounds → palettes sequence is validation-clean"
+        ),
+    }
+    Ok(())
+}
+
+/// Build a slot-indexed bounds-readback byte buffer (the layout `bounds_at`
+/// parses: 32 B per slot — min `xyz` + pad, max `xyz` + pad, native-endian)
+/// covering slots `0..=max(slot)`, each listed slot filled with its `(min,
+/// max)` and every other left zero (an unwritten slot).
+fn encode_bounds(entries: &[(u32, Vec3, Vec3)]) -> Vec<u8> {
+    let max_slot = entries.iter().map(|(slot, _, _)| *slot).max().unwrap_or(0);
+    let count = usize::try_from(max_slot).unwrap_or(0).saturating_add(1);
+    let mut bytes: Vec<u8> = Vec::new();
+    for slot in 0..count {
+        match entries
+            .iter()
+            .find(|(candidate, _, _)| usize::try_from(*candidate).ok() == Some(slot))
+        {
+            Some((_, min, max)) => {
+                for component in [min.x, min.y, min.z, 0.0, max.x, max.y, max.z, 0.0] {
+                    bytes.extend_from_slice(&component.to_ne_bytes());
+                }
+            }
+            None => bytes.extend(std::iter::repeat_n(0_u8, 32)),
+        }
+    }
+    bytes
+}
+
+/// Phase 5 culling: the `Aabb` [`apply_gpu_avatar_bounds`] derives from a
+/// read-back world bound must actually **cull** a skinned avatar/crowd submesh
+/// when the camera frustum excludes it — the live symptom was a flat
+/// `extract_skins` that never dropped when the crowd was off-screen, i.e. an
+/// effectively always-visible AABB. This drives the real apply system
+/// (GPU-free) and tests the applied AABB against a real [`Frustum`] the way
+/// Bevy's `check_visibility` does, for **both** a real avatar (whose entity
+/// transform equals its GPU pose root) and a crowd copy (whose entity transform
+/// is a static grid cell offset from where the GPU bound sits).
+#[test]
+fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
+    use bevy::camera::primitives::Aabb;
+    use bevy::camera::{CameraProjection, PerspectiveProjection};
+
+    use super::render::GpuAvatarBounds;
+    use super::stage::{GpuAvatarRegistry, apply_gpu_avatar_bounds};
+    use super::{GpuSkinBinding, PoseSlotKey};
+
+    // Slot 0 — a "real avatar": the entity transform equals the GPU pose root,
+    // so its world bound sits right at the entity (10 m ahead of the origin).
+    // Slot 1 — a "crowd copy": the entity transform is a static grid cell 2 m
+    // aside, but the GPU bound is 10 m ahead and 3 m up (as if the shared
+    // base-root placed it there); the world→local round-trip must still put the
+    // cull box at the GPU bound, not at the grid cell.
+    let bytes = encode_bounds(&[
+        (0, Vec3::new(-1.0, -1.0, -11.0), Vec3::new(1.0, 1.0, -9.0)),
+        (1, Vec3::new(-1.0, 2.0, -11.0), Vec3::new(1.0, 4.0, -9.0)),
+    ]);
+
+    let mut world = World::new();
+    let mut registry = GpuAvatarRegistry::default();
+    registry.set_slot_for_test(PoseSlotKey::Crowd(0), 0);
+    registry.set_slot_for_test(PoseSlotKey::Crowd(1), 1);
+    world.insert_resource(registry);
+    world.insert_resource(GpuAvatarBounds { bytes });
+
+    let real = world
+        .spawn((
+            GpuSkinBinding {
+                slot: PoseSlotKey::Crowd(0),
+                canonical: Arc::from(Vec::<u32>::new()),
+            },
+            GlobalTransform::from(Transform::from_xyz(0.0, 0.0, -10.0)),
+        ))
+        .id();
+    let crowd = world
+        .spawn((
+            GpuSkinBinding {
+                slot: PoseSlotKey::Crowd(1),
+                canonical: Arc::from(Vec::<u32>::new()),
+            },
+            GlobalTransform::from(Transform::from_xyz(2.0, 0.0, 0.0)),
+        ))
+        .id();
+
+    let mut schedule = Schedule::default();
+    schedule.add_systems(apply_gpu_avatar_bounds);
+    schedule.run(&mut world);
+
+    // A camera at the origin, looking toward the bounds (`-Z`) and away (`+Z`).
+    let projection = PerspectiveProjection::default();
+    let toward = CameraProjection::compute_frustum(
+        &projection,
+        &GlobalTransform::from(
+            Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
+        ),
+    );
+    let away = CameraProjection::compute_frustum(
+        &projection,
+        &GlobalTransform::from(
+            Transform::from_xyz(0.0, 0.0, 0.0).looking_at(Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
+        ),
+    );
+
+    for (label, entity) in [("real avatar", real), ("crowd copy", crowd)] {
+        let aabb = world
+            .get::<Aabb>(entity)
+            .copied()
+            .ok_or("apply_gpu_avatar_bounds left the entity with no Aabb")?;
+        let global = world
+            .get::<GlobalTransform>(entity)
+            .copied()
+            .ok_or("the entity lost its GlobalTransform")?;
+        // A posed bound is ~1–2 m + margin; the never-cull default is 1e4 m.
+        assert!(
+            aabb.half_extents.max_element() < 10.0,
+            "{label}: expected a posed-sized AABB, got half-extents {:?} (the generous \
+             1e4 default → never culled)",
+            aabb.half_extents
+        );
+        let affine = global.affine();
+        assert!(
+            toward.intersects_obb(&aabb, &affine, true, false),
+            "{label}: in front of the camera, it must be visible"
+        );
+        assert!(
+            !away.intersects_obb(&aabb, &affine, true, false),
+            "{label}: behind the camera, the applied AABB must frustum-cull it — a flat \
+             always-visible AABB is the live bug"
+        );
+    }
     Ok(())
 }
 
