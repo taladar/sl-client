@@ -23,6 +23,7 @@ use std::sync::Arc;
 
 use bevy::camera::primitives::Aabb;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
+use bevy::pbr::ExternallyPosedSkin;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
 use sl_client_bevy::{AgentKey, AssetKey, ObjectKey, SkeletalDeformations, VolumeDeformations};
@@ -70,7 +71,15 @@ pub(crate) enum PoseSlotKey {
 ///
 /// Present on every avatar base part, worn rigged mesh, and animesh control-
 /// avatar submesh; absent on non-avatar scene skins, which the resolver skips.
+///
+/// Requires [`bevy::pbr::ExternallyPosedSkin`]: because pass D overwrites this
+/// submesh's palette in `SkinUniforms` every frame, Bevy's `extract_skins` must
+/// **not** also gather its (dummy) joint transforms — the marker excludes it
+/// from that iterate-every-skin per-joint floor while leaving its palette
+/// allocation / `current_skin_index` intact. Attaching it here guarantees every
+/// GPU-posed skin (and only those) carries the marker.
 #[derive(Component, Clone)]
+#[require(ExternallyPosedSkin)]
 pub(crate) struct GpuSkinBinding {
     /// The pose slot whose posed joint worlds pass D reads for this submesh.
     pub(crate) slot: PoseSlotKey,

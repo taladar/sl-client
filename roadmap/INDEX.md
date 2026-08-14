@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 63 |
-| ready | 223 |
+| ready | 222 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 28 |
-| done | 825 |
+| done | 826 |
 | deferred | 24 |
 | wont-do | 12 |
 | **total** | **1258** |
@@ -157,7 +157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (223)
+## ready (222)
 
 ### protocol
 
@@ -500,8 +500,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
   — 100-avatar crowd frame is CPU/Main-schedule bound
-- [`viewer-perf-gpu-avatar-extract-skins-floor`](ready/viewer-perf-gpu-avatar-extract-skins-floor.md)
-  — Eliminate CPU extract_skins for GPU-posed avatars (iterate-all floor)
 - [`viewer-perf-gpu-avatar-phase5-lod-polish`](ready/viewer-perf-gpu-avatar-phase5-lod-polish.md)
   — GPU avatars Phase 5 — LOD, scalability hooks, polish
 - [`viewer-perf-gpu-avatar-pose-lod`](ready/viewer-perf-gpu-avatar-pose-lod.md)
@@ -1010,7 +1008,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (825)
+## done (826)
 
 ### protocol
 
@@ -1806,6 +1804,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
   — Flexi prims — settle detection (stop per-frame re-tessellation / re-upload)
+- [`viewer-perf-gpu-avatar-extract-skins-floor`](done/viewer-perf-gpu-avatar-extract-skins-floor.md)
+  — Eliminate CPU extract_skins for GPU-posed avatars (iterate-all floor)
 - [`viewer-perf-gpu-avatar-keystone-skinuniforms-spike`](done/viewer-perf-gpu-avatar-keystone-skinuniforms-spike.md)
   — GPU avatars keystone spike — validate the SkinUniforms write-in
 - [`viewer-perf-gpu-avatar-phase0-mesh-dedup`](done/viewer-perf-gpu-avatar-phase0-mesh-dedup.md)

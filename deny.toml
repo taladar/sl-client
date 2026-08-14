@@ -339,6 +339,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
   "https://github.com/taladar/parley.git",
   "https://github.com/taladar/bevy_flair.git",
+  "https://github.com/taladar/bevy.git",
 ]
 
 [sources.allow-org]

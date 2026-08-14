@@ -991,6 +991,36 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
     Ok(())
 }
 
+/// The `extract_skins` iterate-every-skin floor
+/// ([[viewer-perf-gpu-avatar-extract-skins-floor]]) is removed by excluding
+/// GPU-posed skins from Bevy's per-frame joint gather via
+/// [`bevy::pbr::ExternallyPosedSkin`]. That exclusion only works if **every**
+/// GPU-posed skin actually carries the marker — which we guarantee by making it
+/// a required component of [`GpuSkinBinding`]. This pins that wiring: inserting
+/// the binding must pull the marker in, so no GPU-posed submesh is ever left
+/// paying the floor (nor, conversely, could a non-GPU scene skin acquire it,
+/// since those never get a `GpuSkinBinding`).
+#[test]
+fn gpu_skin_binding_requires_externally_posed_marker() {
+    use bevy::pbr::ExternallyPosedSkin;
+
+    use super::{GpuSkinBinding, PoseSlotKey};
+
+    let mut world = World::new();
+    let entity = world
+        .spawn(GpuSkinBinding {
+            slot: PoseSlotKey::Crowd(0),
+            canonical: Arc::from(Vec::<u32>::new()),
+        })
+        .id();
+
+    assert!(
+        world.entity(entity).contains::<ExternallyPosedSkin>(),
+        "GpuSkinBinding must require ExternallyPosedSkin so extract_skins skips its \
+         compute-overwritten palette's dummy-joint gather (the crowd-scale floor)"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Phase 2 golden tests (§9.2): the pass A/B Rust mirrors against `sl_anim`
 // itself — sample (loop wrap, binary-search edges, quat nlerp/slerp), blend
