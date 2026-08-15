@@ -1471,12 +1471,12 @@ fn apply_pose(
 /// the ray is bounded to the short head→eye segment (`max_distance = distance`),
 /// so the broad phase only tests the few colliders near it, not every mesh in
 /// the scene (which at crowd scale cost tens of milliseconds — the third-person
-/// `position_camera` spike). Two behaviours fall out of using prim colliders:
-/// avatars carry **no** collider, so the camera never pulls in for another
-/// avatar walking behind you (the reference behaviour); and a prim set to
-/// physics-shape *None* has no collider, so the camera does not collide with it
-/// (a deliberate trade for the broad phase —
-/// [[viewer-perf-camera-collision-broad-phase]]).
+/// `position_camera` spike, [[viewer-perf-camera-collision-broad-phase]]). The
+/// index holds a collider for *every* prim (`build_static_colliders`), so the
+/// camera occludes on all of them — phantom and physics-shape-`None` prims
+/// included (they are visually solid); the query uses all collision layers. The
+/// one thing with no collider is an **avatar**, so the camera never pulls in for
+/// another avatar walking behind you (the reference behaviour).
 fn collide_camera(
     spatial: &SpatialQuery,
     focus: Vec3,
@@ -1495,11 +1495,21 @@ fn collide_camera(
     // too). Only the own avatar is excluded (its worn rigid attachments can carry
     // colliders; the focus sits at the head, so a nearby own-attachment collider
     // would otherwise pull the camera in). Other avatars carry no collider, so they
-    // are excluded for free — the reference does not pull in for them. `solid` so a
-    // ray starting outside a collider hits its surface; bounded to `distance` so
-    // only the head→eye segment is tested.
+    // are excluded for free — the reference does not pull in for them.
+    //
+    // `solid = false` (treat colliders as **hollow**): the prim colliders are solid
+    // volumes (cuboids, mesh convex hulls, a prim's transient bounding-box
+    // placeholder), and when the head focus sits *inside* one — the avatar standing
+    // in a building, or a large prim's placeholder cuboid enveloping it — a solid
+    // cast returns the ray origin itself (`distance == 0`) and slams the eye into
+    // the head. Hollow casting reports the collider's boundary instead: from
+    // *outside* a wall it still hits the near surface (so wall pushback is
+    // unchanged — the whole point), and from *inside* a volume it reports the far
+    // exit rather than the origin, so the camera is not yanked in. This matches the
+    // old visual-mesh cast, whose surfaces had no solid interior. Bounded to
+    // `distance` so only the head→eye segment is tested.
     let filter = SpatialQueryFilter::from_excluded_entities(ignore.iter().copied());
-    let Some(hit) = spatial.cast_ray(focus, direction, distance, true, &filter) else {
+    let Some(hit) = spatial.cast_ray(focus, direction, distance, false, &filter) else {
         return eye;
     };
     let pulled = (hit.distance - COLLISION_PADDING).max(0.0);

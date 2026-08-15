@@ -1868,7 +1868,19 @@ fn run_session(
                     // terrain events, so patches are placed on the current origin;
                     // then drain a few of the queued seam / whole-region patch
                     // rebuilds (`PendingPatchRebuilds`).
-                    (recenter_terrain, update_terrain, drain_patch_rebuilds).chain(),
+                    //
+                    // Terrain **wins** the shared per-frame `MeshUploadBudget`:
+                    // ordered before the object mesh/sculpt spenders (`update_objects`
+                    // inline warm-cache builds, `apply_object_meshes` and its chained
+                    // `apply_object_sculpts` / `apply_rigged_attachments`) so a region
+                    // hand-off builds the ground first — a missing ground plane is far
+                    // more visible than a few deferred prims, and terrain is a small,
+                    // bursty set (a region's 16×16 patches) that at most defers objects
+                    // for a few frames per region connect.
+                    (recenter_terrain, update_terrain, drain_patch_rebuilds)
+                        .chain()
+                        .before(update_objects)
+                        .before(apply_object_meshes),
                     // Re-base world-root objects onto the new origin (a crossing or
                     // a teleport to an already-connected region) before folding
                     // object events, so a static object stays put and a new object

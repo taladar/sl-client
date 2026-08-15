@@ -11,23 +11,25 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 64 |
+| ideas | 65 |
 | ready | 223 |
 | blocked | 67 |
 | in-progress | 16 |
-| bugs | 27 |
+| bugs | 28 |
 | done | 830 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1263** |
+| **total** | **1265** |
 
-## ideas (64)
+## ideas (65)
 
 ### viewer
 
 - [`viewer-a11y-screen-reader`](ideas/viewer-a11y-screen-reader.md) —
   Screen-reader / assistive-technology support (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-avatar-client-collision-capsule`](ideas/viewer-avatar-client-collision-capsule.md)
+  — Client-side avatar collision capsule (if client physics ever needs avatars)
 - [`viewer-avatar-welcome-pack`](ideas/viewer-avatar-welcome-pack.md) — Avatar
   Welcome Pack picker
 - [`viewer-beam-customization`](ideas/viewer-beam-customization.md) —
@@ -941,7 +943,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (27)
+## bugs (28)
 
 ### protocol
 
@@ -984,6 +986,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
+- [`viewer-object-face-entity-respawn-churn`](bugs/viewer-object-face-entity-respawn-churn.md)
+  — Object face entities are despawned + respawned same-frame (despawn-race
+  churn)
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)

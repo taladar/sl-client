@@ -81,17 +81,17 @@ use std::sync::Arc;
 use avian3d::physics_transform::PhysicsTransformConfig;
 use avian3d::prelude::{
     Collider, CollisionEventsEnabled, CollisionLayers, Gravity, LayerMask, Physics, PhysicsLayer,
-    PhysicsPlugins, PhysicsTime as _, RigidBody,
+    PhysicsPlugins, PhysicsTime as _, RigidBody, SubstepCount,
 };
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     Command, MeshKey, MeshPhysics, Object, ObjectKey, ObjectPhysicsData, PhysicsShapeType,
-    RegionHandle, Rotation, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector,
+    RegionHandle, Rotation, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector, pcode,
 };
 
-use crate::avatars::update_avatar_objects;
+use crate::avatars::{AvatarState, update_avatar_objects};
 use crate::camera::ViewerCamera;
 use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::meshes::MeshManager;
@@ -154,7 +154,22 @@ pub(crate) struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
+        // Pin avian's **substep count to 1** to gut the idle dynamics solver.
+        // This viewer has no dynamic rigid bodies — physical prims are kinematic
+        // movers we snap to the server each frame, static-index prims and avatars
+        // carry only static/inert colliders, and the one client-side soft
+        // simulation (flexi prims, Phase 32) runs its own bespoke chain solver, not
+        // avian. So avian is used purely as the shared **spatial index**
+        // ([`avian3d::prelude::SpatialQuery`], populated by [`build_static_colliders`])
+        // and a **collision-event** source (physical-prim contact sounds) — neither
+        // needs the constraint solver. Default substeps (6) run the integrate +
+        // constraint-solve loop 6× per physics step over *zero* dynamic bodies — a
+        // measured ~2.4 ms/frame of pure idle work; one substep keeps the cost
+        // negligible. (Disabling the solver *plugins* outright is not viable: they
+        // supply ordering constraints avian's `PhysicsSchedule` needs, and removing
+        // them trips avian's ambiguous-order panic.)
         app.add_plugins(PhysicsPlugins::default())
+            .insert_resource(SubstepCount(1))
             // Second Life gravity, bridged into Bevy's Y-up frame.
             .insert_resource(Gravity(sl_gravity()))
             // Do NOT let avian re-run Bevy's *general* transform propagation before it
@@ -247,6 +262,9 @@ impl Plugin for PhysicsPlugin {
                         .after(detach_static_colliders)
                         .after(apply_static_colliders)
                         .after(ingest_object_physics_data),
+                    // Diagnostic (SL_VIEWER_LOG_CAMERA_COLLISION=1): list colliders
+                    // near the avatar to hunt a stray one the camera pulls in on.
+                    log_colliders_near_avatar,
                 ),
             );
     }
@@ -351,13 +369,26 @@ const OBJECT_SNAP_DISTANCE_M: f32 = 32.0;
 
 /// Whether `object` is a server-flagged **physical root prim** the viewer drives
 /// kinematically: it carries [`FLAGS_USE_PHYSICS`], is a linkset root (its
-/// children ride along via the Bevy hierarchy), and is not a worn attachment (the
+/// children ride along via the Bevy hierarchy), is not a worn attachment (the
 /// reference viewer skips linear interpolation for attachments — they follow
-/// their wearer's skeleton joint instead).
+/// their wearer's skeleton joint instead), and is **not an avatar**.
+///
+/// The avatar guard matters: the simulator can flag avatars (`pcode` 47)
+/// `FLAGS_USE_PHYSICS` — they have a (server-simulated) physical presence — so
+/// without this check an avatar object would become a kinematic "physical prim"
+/// with a cuboid collider at head height, which the third-person camera then
+/// collides with, yanking the eye into the avatar's head. Avatars are driven by
+/// [`drive_avatar_motion`] (the `avatars.rs` path), never this prim path, and carry
+/// **no** collider by design (so the camera does not pull in for them). Whether an
+/// avatar update carries the flag appears to be region / parcel dependent (it
+/// surfaced on one test grid and not another), so the guard keys on the `pcode`,
+/// not on the flag — the viewer never fabricates a client-side collider for an
+/// avatar regardless of what drives the flag (the sim owns avatar bump physics).
 const fn is_physical_root(object: &Object) -> bool {
     object.update_flags & FLAGS_USE_PHYSICS != 0
         && object.parent_id.get() == 0
         && object.attachment_point_id().is_none()
+        && object.pcode != pcode::AVATAR
 }
 
 /// The authoritative kinematic state of a server-flagged physical root prim as of
@@ -2310,7 +2341,12 @@ fn prim_geometry_collider(
 /// missing for a frame or two is invisible; a stall is not. The budgeted prims are
 /// chosen nearest-camera-first so the geometry the viewer is most likely to collide
 /// with gets its collider soonest.
-const STATIC_COLLIDER_BUDGET: usize = 32;
+///
+/// Kept modest (16) because a batch of collider builds landing at once still spikes
+/// avian's broad-phase BVH insertion (a ~12 ms physics-step max was seen on
+/// streaming frames at 32/frame); spreading the inserts thinner trades a slightly
+/// longer collider-stream-in for a flatter frame.
+const STATIC_COLLIDER_BUDGET: usize = 16;
 
 /// Records what static-index [`Collider`] a non-physical prim currently carries, so
 /// [`build_static_colliders`] rebuilds it only on a real change (a resize, a
@@ -2489,18 +2525,36 @@ pub(crate) fn build_static_colliders(
     // build is already in flight is skipped (it is not re-queued until it lands).
     let mut work: Vec<ColliderWork> = Vec::new();
     for (entity, scene, sl_motion, global, existing) in &prims {
-        if !category_gets_collider(scene.category)
+        let facts = object_state.static_collider_facts(&scene.scoped_id);
+        // Whether this prim should carry a static-index collider at all: a plain
+        // prim / sculpt / mesh, not worn, not flexi, and tracked.
+        let disqualified = !category_gets_collider(scene.category)
             || sl_motion.attachment
-            || builds.tasks.contains_key(&entity)
-        {
+            || facts.as_ref().is_none_or(|facts| facts.flexi);
+        if disqualified {
+            // Remove any collider it acquired **earlier**, then move on. A worn mesh
+            // (a BoM body, rigged clothing) can stream in as a plain object *before*
+            // its attachment point is known — so it briefly looks like an in-world
+            // prim and gets a collider near the avatar. Once it is recognised as an
+            // attachment the scanner would otherwise just skip it, leaving that stale
+            // collider parked on the avatar to yank the third-person camera into the
+            // head. Removing it (and cancelling any in-flight build) is the fix.
+            if existing.is_some() {
+                commands
+                    .entity(entity)
+                    .remove::<(Collider, CollisionLayers, StaticCollider)>();
+            }
+            let _cancelled = builds.tasks.remove(&entity);
             continue;
         }
-        let Some(facts) = object_state.static_collider_facts(&scene.scoped_id) else {
+        if builds.tasks.contains_key(&entity) {
+            // Build already in flight: not re-queued until it lands.
+            continue;
+        }
+        let Some(facts) = facts else {
+            // Unreachable: `disqualified` is true when facts is `None`.
             continue;
         };
-        if facts.flexi {
-            continue;
-        }
         let scale = collider_extents(&sl_motion.scale);
         let shape = shapes
             .data
@@ -2707,6 +2761,116 @@ pub(crate) fn detach_static_colliders(
         commands
             .entity(entity)
             .remove::<(Collider, CollisionLayers, StaticCollider)>();
+    }
+}
+
+/// Whether `SL_VIEWER_LOG_CAMERA_COLLISION=1` is set — the diagnostic that hunts a
+/// stray collider the third-person camera pulls in on (a collider sitting on / near
+/// the avatar). Read once.
+fn log_camera_collision_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SL_VIEWER_LOG_CAMERA_COLLISION")
+            .is_ok_and(|value| value == "1" || value == "true")
+    })
+}
+
+/// `SL_VIEWER_LOG_CAMERA_COLLISION=1`: once a second, log every avian [`Collider`]
+/// within 6 m of the own avatar's body-root focus — its distance and identity
+/// (object category, attachment flag, and which path owns the collider: the static
+/// index, the physical-prim path, or an avatar) — so a collider the camera wrongly
+/// pulls in on (the "eye stuck in the head" report) can be identified. Silent by
+/// default; a pure read (no mutation).
+#[expect(
+    clippy::type_complexity,
+    reason = "an ECS system's arguments are its injected queries / resources"
+)]
+pub(crate) fn log_colliders_near_avatar(
+    time: Res<Time>,
+    identity: Res<SlIdentity>,
+    avatars: Res<AvatarState>,
+    object_state: Res<ObjectState>,
+    transforms: Query<&GlobalTransform>,
+    colliders: Query<
+        (
+            Entity,
+            &GlobalTransform,
+            Option<&SceneObject>,
+            Option<&ObjectSlMotion>,
+            Has<StaticCollider>,
+            Has<PhysicalObject>,
+            Has<AvatarMotion>,
+        ),
+        With<Collider>,
+    >,
+    mut last: Local<f64>,
+) {
+    if !log_camera_collision_enabled() {
+        return;
+    }
+    let now = time.elapsed_secs_f64();
+    if now - *last < 1.0 {
+        return;
+    }
+    let Some(agent) = identity.agent_id else {
+        return;
+    };
+    let Some(anchor) = avatars.body_root_of(agent) else {
+        return;
+    };
+    let Ok(anchor_transform) = transforms.get(anchor) else {
+        return;
+    };
+    *last = now;
+    let focus = anchor_transform.translation();
+    let mut near: Vec<(
+        Entity,
+        f32,
+        Vec3,
+        Option<&SceneObject>,
+        Option<&ObjectSlMotion>,
+        bool,
+        bool,
+        bool,
+    )> = colliders
+        .iter()
+        .map(
+            |(entity, global, scene, sl_motion, is_static, is_physical, is_avatar)| {
+                let pos = global.translation();
+                (
+                    entity,
+                    focus.distance(pos),
+                    pos,
+                    scene,
+                    sl_motion,
+                    is_static,
+                    is_physical,
+                    is_avatar,
+                )
+            },
+        )
+        .filter(|entry| entry.1 < 6.0)
+        .collect();
+    near.sort_by(|a, b| a.1.total_cmp(&b.1));
+    info!(
+        "camera-collision: {} colliders within 6m of avatar focus {focus:?}",
+        near.len()
+    );
+    for (entity, dist, pos, scene, sl_motion, is_static, is_physical, is_avatar) in
+        near.into_iter().take(24)
+    {
+        let category = scene.map(|scene| scene.category);
+        let attachment = sl_motion.is_some_and(|motion| motion.attachment);
+        let mesh = scene.and_then(|scene| {
+            object_state
+                .static_collider_facts(&scene.scoped_id)
+                .and_then(|facts| facts.mesh)
+        });
+        info!(
+            "  collider {entity} d={dist:.2}m pos={pos:?} category={category:?} \
+             attachment={attachment} static={is_static} physical={is_physical} \
+             avatar={is_avatar} mesh={mesh:?}"
+        );
     }
 }
 

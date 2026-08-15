@@ -401,7 +401,13 @@ pub(crate) fn assign_avatar_pick_tags(
             warn!("gpu-pick: avatar slot space exhausted; entity stays unpickable");
             continue;
         };
-        commands.entity(entity).insert((PickId(tag), MeshTag(tag)));
+        // `try_insert`, not `insert`: another system may despawn this queried entity
+        // (a re-tessellation / LOD swap despawns face entities) before this deferred
+        // command applies, which an `insert` would panic on; the replacement is
+        // tagged next frame (still `Without<PickId>`).
+        commands
+            .entity(entity)
+            .try_insert((PickId(tag), MeshTag(tag)));
     }
 }
 
@@ -444,7 +450,13 @@ pub(crate) fn assign_object_face_pick_tags(
             warn!("gpu-pick: object-face slot space exhausted; face stays unpickable");
             continue;
         };
-        commands.entity(entity).insert((PickId(tag), MeshTag(tag)));
+        // `try_insert`, not `insert`: another system may despawn this queried entity
+        // (a re-tessellation / LOD swap despawns face entities) before this deferred
+        // command applies, which an `insert` would panic on; the replacement is
+        // tagged next frame (still `Without<PickId>`).
+        commands
+            .entity(entity)
+            .try_insert((PickId(tag), MeshTag(tag)));
     }
 }
 
@@ -464,7 +476,13 @@ pub(crate) fn assign_terrain_pick_tags(
     };
     for entity in &untagged {
         registry.note_fixed(entity, tag);
-        commands.entity(entity).insert((PickId(tag), MeshTag(tag)));
+        // `try_insert`, not `insert`: another system may despawn this queried entity
+        // (a re-tessellation / LOD swap despawns face entities) before this deferred
+        // command applies, which an `insert` would panic on; the replacement is
+        // tagged next frame (still `Without<PickId>`).
+        commands
+            .entity(entity)
+            .try_insert((PickId(tag), MeshTag(tag)));
     }
 }
 
@@ -492,7 +510,13 @@ pub(crate) fn assign_water_pick_tags(
     };
     for entity in &untagged {
         registry.note_fixed(entity, tag);
-        commands.entity(entity).insert((PickId(tag), MeshTag(tag)));
+        // `try_insert`, not `insert`: another system may despawn this queried entity
+        // (a re-tessellation / LOD swap despawns face entities) before this deferred
+        // command applies, which an `insert` would panic on; the replacement is
+        // tagged next frame (still `Without<PickId>`).
+        commands
+            .entity(entity)
+            .try_insert((PickId(tag), MeshTag(tag)));
     }
 }
 

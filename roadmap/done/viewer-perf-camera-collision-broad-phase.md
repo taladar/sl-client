@@ -86,6 +86,28 @@ casts over **all** collision layers (excluding only the own avatar); the
 filter. Other avatars carry no collider, so they are excluded for free — the
 camera does not pull in for them, the correct reference behaviour.
 
-The aditi `CROWD=100` `position_camera` p90 number was not re-measured (the
-whole-scene `MeshRayCast` is gone, replaced by the BVH `cast_ray`, so the crowd
-cost is structurally removed); a Tracy re-measure is a nice-to-have follow-up.
+Tracy re-measured on aditi with `SL_VIEWER_CROWD=100` (1373 `position_camera`
+samples): **p90 0.059 ms and max 0.180 ms** (was p90 ~78 ms / max ~102 ms),
+p50 0.036 ms, p99 0.119 ms — **zero** frames over 5 ms. The whole-scene
+`MeshRayCast` cost is gone (avatars carry no collider, so the crowd is invisible
+to the BVH `cast_ray`) and populating the static index reintroduced no spike.
+
+Two avatar-specific fixes were needed for the live camera to actually behave
+(the camera was slamming into the avatar head on the SL grids):
+
+- `is_physical_root` now excludes avatars (`pcode` 47). The simulator can flag
+  an avatar `FLAGS_USE_PHYSICS` (region/parcel dependent), which made the avatar
+  *object* a kinematic "physical prim" with a cuboid collider at head height
+  that the camera then collided with. Avatars are driven by the `avatars.rs`
+  motion path and carry no collider by design. (Pre-existing since the P31.2
+  physical path; only exposed once camera collision went live.)
+- `collide_camera` casts with `solid = false` (hollow colliders): a solid cast
+  returns the ray origin itself when the head is *inside* a collider volume (a
+  large prim's placeholder cuboid, a mesh convex hull), slamming the eye in;
+  hollow reports the boundary, so wall pushback from outside is unchanged.
+
+A collider-hunt diagnostic (`SL_VIEWER_LOG_CAMERA_COLLISION=1`, in `physics.rs`)
+was added and used to pin the culprit; kept as a debugging aid. A `gpu_pick`
+despawn-race panic surfaced during the aditi rez under the shifted schedule and
+was fixed (`try_insert`); the underlying entity-churn smell is filed as
+[[viewer-object-face-entity-respawn-churn]].
