@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 63 |
-| ready | 224 |
+| ideas | 64 |
+| ready | 223 |
 | blocked | 67 |
-| in-progress | 17 |
+| in-progress | 16 |
 | bugs | 27 |
-| done | 828 |
+| done | 830 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1262** |
+| **total** | **1263** |
 
-## ideas (63)
+## ideas (64)
 
 ### viewer
 
@@ -32,6 +32,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Welcome Pack picker
 - [`viewer-beam-customization`](ideas/viewer-beam-customization.md) —
   Selection-beam customization
+- [`viewer-camera-no-pull-in-transparent-prims`](ideas/viewer-camera-no-pull-in-transparent-prims.md)
+  — Camera collision skips fully-transparent prims
 - [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
   — Rethink the flycam mode's key bindings
 - [`viewer-hdri-environment`](ideas/viewer-hdri-environment.md) — HDRI
@@ -157,7 +159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (224)
+## ready (223)
 
 ### protocol
 
@@ -543,8 +545,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-physics-static-prim-colliders`](ready/viewer-physics-static-prim-colliders.md)
-  — Colliders for all non-phantom prims — a shared avian spatial index
 - [`viewer-places-landmarks`](ready/viewer-places-landmarks.md) — Places floater
   — landmarks, create landmark, teleport history (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-inventory-folder-tree` (done))
@@ -897,7 +897,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (17)
+## in-progress (16)
 
 ### viewer
 
@@ -913,8 +913,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
-- [`viewer-perf-camera-collision-broad-phase`](in-progress/viewer-perf-camera-collision-broad-phase.md)
-  — Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
@@ -1012,7 +1010,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (828)
+## done (830)
 
 ### protocol
 
@@ -1806,6 +1804,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Batch / defer avatar bake + skeleton application to smooth per-frame spikes
 - [`viewer-perf-bake-alpha-classify-offthread`](done/viewer-perf-bake-alpha-classify-offthread.md)
   — Precompute alpha classification in the decode task
+- [`viewer-perf-camera-collision-broad-phase`](done/viewer-perf-camera-collision-broad-phase.md)
+  — Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
 - [`viewer-perf-decoded-geometry-budget`](done/viewer-perf-decoded-geometry-budget.md)
   — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)
@@ -1885,6 +1885,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-physical-object-motion-not-smooth`](done/viewer-physical-object-motion-not-smooth.md)
   — Physical object (vehicle) motion is not as smooth as it should be between
   updates
+- [`viewer-physics-static-prim-colliders`](done/viewer-physics-static-prim-colliders.md)
+  — Colliders for all prims — a shared avian spatial index
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
 - [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —

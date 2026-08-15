@@ -31,8 +31,8 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyMeshFetcher, CAP_GET_MESH, CAP_GET_MESH2, DecodedMesh, GateStats, MeshCacheLimits,
-    MeshFetcher, MeshKey, MeshLod, MeshRequest, MeshSkin, MeshStore, Priority, SlCapabilities,
-    StoreStats,
+    MeshFetcher, MeshKey, MeshLod, MeshPhysics, MeshRequest, MeshSkin, MeshStore, Priority,
+    SlCapabilities, StoreStats,
 };
 
 use crate::asset_retry::RetryState;
@@ -134,6 +134,19 @@ pub(crate) struct MeshManager {
     /// (nothing re-requests it), invisible to the F3 overlay. Drained by
     /// [`poll_meshes`] once each entry is due.
     retry: HashMap<MeshKey, (Priority, RetryState)>,
+    /// The decoded **physics** shape blocks of each mesh whose physics has been
+    /// fetched (the convex-hull decomposition and/or the physics triangle mesh),
+    /// requested on demand by the collider index ([`request_physics`](Self::request_physics)).
+    /// A present key is terminal: `Some` when the mesh carried physics blocks,
+    /// `None` when it carried none (or the physics fetch failed) — either way the
+    /// collider builder stops re-requesting and falls back to the visual geometry.
+    /// Kept separate from [`decoded`](Self::decoded) because a mesh's physics shape
+    /// is decoded only when something needs a collider for it, not on the render
+    /// fetch (most meshes are never in the camera's collision path at once).
+    physics: HashMap<MeshKey, Option<Arc<MeshPhysics>>>,
+    /// The in-flight background physics-block fetch per mesh id, polled by
+    /// [`poll_meshes`]; presence means "already being fetched".
+    physics_inflight: HashMap<MeshKey, Task<Option<Arc<MeshPhysics>>>>,
 }
 
 impl FromWorld for MeshManager {
@@ -156,6 +169,8 @@ impl FromWorld for MeshManager {
             pending: HashMap::new(),
             in_flight_priority: HashMap::new(),
             retry: HashMap::new(),
+            physics: HashMap::new(),
+            physics_inflight: HashMap::new(),
         }
     }
 }
@@ -393,6 +408,48 @@ impl MeshManager {
     /// no skin block, is still in flight, or the fetch failed (P17.2).
     pub(crate) fn skin(&self, id: MeshKey) -> Option<&Arc<MeshSkin>> {
         self.skins.get(&id)
+    }
+
+    /// Ensure `id`'s **physics** shape blocks are being fetched, so the static
+    /// collider index ([`crate::physics::build_static_colliders`]) can build a
+    /// mesh object's collider from its uploaded physics shape (the convex-hull
+    /// decomposition / physics triangle mesh) rather than its far heavier visual
+    /// geometry. Idempotent: a no-op once the physics is cached, already in flight,
+    /// or the id is nil. Parked (retried on the next call) while the mesh capability
+    /// is not yet known — a physics fetch needs the same `GetMesh2` / `GetMesh` cap
+    /// the geometry fetch does, and the collider index re-requests each frame until
+    /// the shape is in hand.
+    pub(crate) fn request_physics(&mut self, id: MeshKey) {
+        if id.uuid().is_nil()
+            || self.physics.contains_key(&id)
+            || self.physics_inflight.contains_key(&id)
+            || !self.fetcher.has_cap_url()
+        {
+            return;
+        }
+        let store = self.store.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            // A mesh with no physics blocks resolves `Ok` with `physics()` still
+            // `None`; a fetch failure resolves `Err`. Both map to `None` here — the
+            // collider builder then falls back to the visual geometry — and are
+            // cached terminally so a mesh is not physics-fetched every frame.
+            match store.get_physics(id).await {
+                Ok(entry) => entry.physics(),
+                Err(error) => {
+                    warn!("mesh {id} physics fetch/decode failed: {error}");
+                    None
+                }
+            }
+        });
+        self.physics_inflight.insert(id, task);
+    }
+
+    /// The decoded physics shape blocks for `id`, once fetched via
+    /// [`request_physics`](Self::request_physics): `Some` when the mesh carried a
+    /// physics block, `None` while the fetch is still in flight, the id was never
+    /// requested, or the mesh carried no physics block.
+    pub(crate) fn physics(&self, id: MeshKey) -> Option<&Arc<MeshPhysics>> {
+        self.physics.get(&id).and_then(Option::as_ref)
     }
 
     /// Whether a level-of-detail change for `id` is still in flight — chiefly the
@@ -633,5 +690,19 @@ pub(crate) fn poll_meshes(
             let _previous = manager.decoded.insert(id, mesh);
             decoded.write(MeshDecoded(id));
         }
+    }
+
+    // Fold in completed physics-block fetches (the static collider index): cache
+    // the decoded physics shape (or `None` — no block / a failed fetch) terminally,
+    // so the collider builder stops re-requesting it and picks it up next frame.
+    let mut physics_finished: Vec<(MeshKey, Option<Arc<MeshPhysics>>)> = Vec::new();
+    for (&id, task) in &mut manager.physics_inflight {
+        if let Some(result) = block_on(poll_once(task)) {
+            physics_finished.push((id, result));
+        }
+    }
+    for (id, result) in physics_finished {
+        let _removed = manager.physics_inflight.remove(&id);
+        let _previous = manager.physics.insert(id, result);
     }
 }

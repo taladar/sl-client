@@ -2,7 +2,7 @@
 id: viewer-perf-camera-collision-broad-phase
 title: Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
 topic: viewer
-status: in-progress
+status: done
 origin: GPU-avatar crowd critical-path analysis (2026-08-14)
 refs: [viewer-perf-media-hover-gpu-pick, viewer-perf-gpu-avatar-extract-skins-floor, viewer-physics-static-prim-colliders]
 ---
@@ -69,3 +69,23 @@ with them; they also have no colliders today).
 `CROWD=100` aditi, third person: `position_camera` p90 drops from ~78 ms to
 sub-millisecond; the camera still pulls in at a real wall / prim and no longer
 pulls in for avatars; no clipping regression on the occluder classes chosen.
+
+## Done
+
+`collide_camera` was already casting `SpatialQuery::cast_ray` over the head→eye
+segment; the missing piece — the populated scene index — landed in
+[[viewer-physics-static-prim-colliders]], so this needed no further camera code
+beyond a one-line filter choice. Live-confirmed on the local opensim grid:
+walking backwards toward a wall pulls the third-person camera in.
+
+Resolved the recorded open question ("should the camera pull in for phantom
+prims?"): **yes**. A phantom prim is visually opaque, so the camera occludes on
+it exactly as the old whole-scene `MeshRayCast` did. `collide_camera` therefore
+casts over **all** collision layers (excluding only the own avatar); the
+`Solid`/`NonSolid` layer split is the *physics*-collidability flag, not a camera
+filter. Other avatars carry no collider, so they are excluded for free — the
+camera does not pull in for them, the correct reference behaviour.
+
+The aditi `CROWD=100` `position_camera` p90 number was not re-measured (the
+whole-scene `MeshRayCast` is gone, replaced by the BVH `cast_ray`, so the crowd
+cost is structurally removed); a Tracy re-measure is a nice-to-have follow-up.

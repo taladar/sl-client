@@ -76,21 +76,28 @@
 //! rule does not apply.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use avian3d::physics_transform::PhysicsTransformConfig;
 use avian3d::prelude::{
-    Collider, CollisionEventsEnabled, Gravity, Physics, PhysicsPlugins, PhysicsTime as _, RigidBody,
+    Collider, CollisionEventsEnabled, CollisionLayers, Gravity, LayerMask, Physics, PhysicsLayer,
+    PhysicsPlugins, PhysicsTime as _, RigidBody,
 };
 use bevy::mesh::{Indices, VertexAttributeValues};
 use bevy::prelude::*;
+use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
-    Command, Object, ObjectKey, ObjectPhysicsData, PhysicsShapeType, RegionHandle, Rotation,
-    SlCommand, SlEvent, SlIdentity, SlSessionEvent, Vector,
+    Command, MeshKey, MeshPhysics, Object, ObjectKey, ObjectPhysicsData, PhysicsShapeType,
+    RegionHandle, Rotation, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector,
 };
 
 use crate::avatars::update_avatar_objects;
+use crate::camera::ViewerCamera;
 use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
-use crate::objects::{GeometryHolder, ObjectState, update_objects};
+use crate::meshes::MeshManager;
+use crate::objects::{
+    GeometryHolder, ObjectCategory, ObjectSlMotion, ObjectState, SceneObject, update_objects,
+};
 use crate::terrain::TerrainState;
 
 /// Second Life's world gravity along its Z (up) axis, in metres per second
@@ -180,6 +187,7 @@ impl Plugin for PhysicsPlugin {
             .init_resource::<RegionTimeDilation>()
             .init_resource::<CircuitLiveness>()
             .init_resource::<ObjectPhysicsShapes>()
+            .init_resource::<StaticColliderBuilds>()
             .add_systems(
                 Update,
                 (
@@ -215,6 +223,29 @@ impl Plugin for PhysicsPlugin {
                     refine_physical_colliders
                         .after(update_objects)
                         .after(drive_physical_objects)
+                        .after(ingest_object_physics_data),
+                    // Strip a stale static collider from a prim that just became a
+                    // physical root (the physical path now owns its collider). Runs
+                    // before the physical drivers install the kinematic collider, so a
+                    // static→physical transition in one frame does not have this remove
+                    // the collider the physical path just added.
+                    detach_static_colliders
+                        .after(update_objects)
+                        .before(drive_physical_objects)
+                        .before(refine_physical_colliders),
+                    // Insert finished off-thread collider builds before the scanner
+                    // re-scans (so a completed build clears its in-flight slot first).
+                    apply_static_colliders.after(update_objects),
+                    // Populate the shared avian scene index: give every non-physical,
+                    // non-avatar prim a static collider (budgeted, nearest-first), so
+                    // `SpatialQuery` finds walls / floors for camera collision and the
+                    // "objects near X" broad phase (viewer-physics-static-prim-colliders).
+                    // Collider construction runs off-thread (`apply_static_colliders`
+                    // installs the result).
+                    build_static_colliders
+                        .after(update_objects)
+                        .after(detach_static_colliders)
+                        .after(apply_static_colliders)
                         .after(ingest_object_physics_data),
                 ),
             );
@@ -1995,16 +2026,30 @@ fn gather_object_geometry(
 /// real change (new shape data, a resize, or geometry finally arriving). These
 /// colliders are inert on the kinematic movers themselves — they matter once Phases
 /// 32 / 34 add dynamic bodies that collide against them.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "an ECS system's arguments are its injected queries / resources"
+)]
 pub(crate) fn refine_physical_colliders(
     shapes: Res<ObjectPhysicsShapes>,
-    objects: Query<(Entity, &PhysicalObject, Option<&RefinedCollider>), With<PhysicsInterp>>,
+    object_state: Res<ObjectState>,
+    mut mesh_manager: ResMut<MeshManager>,
+    objects: Query<
+        (
+            Entity,
+            &SceneObject,
+            &PhysicalObject,
+            Option<&RefinedCollider>,
+        ),
+        With<PhysicsInterp>,
+    >,
     children_q: Query<&Children>,
     holders: Query<(), With<GeometryHolder>>,
     mesh_handles: Query<&Mesh3d>,
     meshes: Res<Assets<Mesh>>,
     mut commands: Commands,
 ) {
-    for (entity, phys, existing) in &objects {
+    for (entity, scene, phys, existing) in &objects {
         let desired = shapes
             .data
             .get(&phys.full_key)
@@ -2012,8 +2057,9 @@ pub(crate) fn refine_physical_colliders(
         let scale = collider_extents(&phys.scale);
         let scale_changed = existing.is_none_or(|state| extents_differ(state.scale, scale));
         let shape_changed = existing.is_none_or(|state| state.shape != desired);
-        // A geometry-needing shape whose collider is still the placeholder cuboid:
-        // retry the geometry gather each frame until the meshes are uploaded.
+        // A geometry-needing shape whose collider is still the placeholder cuboid /
+        // visual-geometry fallback: retry each frame until the meshes are uploaded
+        // (or, for a mesh object, until its lighter physics shape is decoded).
         let geometry_pending = existing.is_some_and(|state| !state.from_geometry)
             && desired.is_some_and(shape_wants_geometry);
         if !(scale_changed || shape_changed || geometry_pending) {
@@ -2044,9 +2090,36 @@ pub(crate) fn refine_physical_colliders(
                     scale,
                 });
             }
-            // Convex hull / exact prim / an unrecognised type: build from the
-            // object's own tessellated geometry.
+            // Convex hull / exact prim / an unrecognised type.
             Some(shape) => {
+                // A mesh object: prefer its uploaded physics shape — the analysed
+                // collision hull the simulator uses, accurate and far lighter than the
+                // visual mesh (the switch [[viewer-physics-static-prim-colliders]]
+                // called for). Request it on demand and fall back to the visual
+                // geometry until it decodes.
+                let mesh_key = object_state
+                    .static_collider_facts(&scene.scoped_id)
+                    .and_then(|facts| facts.mesh);
+                if let Some(mesh_key) = mesh_key {
+                    mesh_manager.request_physics(mesh_key);
+                    if let Some(collider) = mesh_manager
+                        .physics(mesh_key)
+                        .and_then(|physics| mesh_physics_collider(physics, scale))
+                    {
+                        debug!("physical object {entity} → {shape:?} collider from mesh physics");
+                        commands.entity(entity).insert((
+                            collider,
+                            RefinedCollider {
+                                shape: desired,
+                                from_geometry: true,
+                                scale,
+                            },
+                        ));
+                        continue;
+                    }
+                }
+                // Non-mesh (or a mesh whose physics is still fetching): build from the
+                // object's own tessellated geometry.
                 let (points, indices) = gather_object_geometry(
                     entity,
                     scale,
@@ -2070,18 +2143,16 @@ pub(crate) fn refine_physical_colliders(
                     continue;
                 }
                 let point_count = points.len();
-                let collider = match shape {
-                    PhysicsShapeType::ConvexHull => Collider::convex_hull(points)
-                        .unwrap_or_else(|| Collider::cuboid(ex, ey, ez)),
-                    // Prim (and any unrecognised type) uses the exact geometry.
-                    _ => Collider::trimesh(points, indices),
-                };
+                let collider = prim_geometry_collider(Some(shape), points, indices, scale);
                 debug!("physical object {entity} → {shape:?} collider from {point_count} vertices");
+                // A mesh on the visual fallback keeps `from_geometry: false` so it
+                // retries for the lighter physics shape; a plain prim's tessellated
+                // geometry is final (`true`).
                 commands.entity(entity).insert((
                     collider,
                     RefinedCollider {
                         shape: desired,
-                        from_geometry: true,
+                        from_geometry: mesh_key.is_none(),
                         scale,
                     },
                 ));
@@ -2090,24 +2161,579 @@ pub(crate) fn refine_physical_colliders(
     }
 }
 
+/// The collision-layer split that lets a **single** avian spatial index serve every
+/// consumer, so the viewer needs no second "all objects" index:
+///
+/// - **Camera collision** and the scene **"objects near X"** broad phase are visual
+///   / spatial: *every* prim carries a collider, and they query **all** layers — a
+///   phantom prim is still visually solid, so the camera pulls in at it (matching
+///   the whole-scene `MeshRayCast` this replaced).
+/// - **Physics collidability** — a falling prim coming to rest, in-world collision
+///   sounds, the Phase 32 / 34 dynamics — is what the layer split is *for*: those
+///   query masked to [`Solid`](ObjectLayer::Solid) so a dynamic body does not rest
+///   on / sound against a phantom or physics-shape-`None` prim.
+///
+/// So the two prims that are indexed but not *physically* collidable — phantom prims
+/// and prims whose build-menu physics shape is `None` — go in
+/// [`NonSolid`](ObjectLayer::NonSolid); everything else in `Solid`.
+#[derive(PhysicsLayer, Default, Clone, Copy, Debug)]
+pub(crate) enum ObjectLayer {
+    /// Physically collidable world geometry: every non-phantom prim whose physics
+    /// shape is not `None`. The **default** layer (bit 0), so a collider with no
+    /// explicit [`CollisionLayers`] — the physical-prim kinematic movers — is
+    /// `Solid` too.
+    #[default]
+    Solid,
+    /// Indexed but not physically collidable: phantom prims and prims whose physics
+    /// shape is `None`. In the BVH (so the camera and proximity queries, which use
+    /// all layers, still see them), but masked out of physics-collision queries
+    /// (which filter to [`Solid`](ObjectLayer::Solid)).
+    NonSolid,
+}
+
+/// The [`CollisionLayers`] a static-index collider is filed under: `NonSolid`
+/// (indexed but not physically collidable) for a phantom / physics-shape-`None`
+/// prim, else `Solid`. Filters are left `ALL` so a future dynamic body (Phase 32 /
+/// 34) can still collide against a `Solid` surface.
+fn object_collision_layers(non_solid: bool) -> CollisionLayers {
+    let membership = if non_solid {
+        ObjectLayer::NonSolid
+    } else {
+        ObjectLayer::Solid
+    };
+    CollisionLayers::new(membership, LayerMask::ALL)
+}
+
+/// Scale a point cloud (mesh-local `[f32; 3]`) into an object entity's local frame
+/// by the object scale — the frame its avian [`Collider`] lives in (the entity
+/// carries no scale; that rides the geometry holder). Mirrors how
+/// [`gather_object_geometry`] scales the visual vertices.
+fn scaled_points(points: impl Iterator<Item = [f32; 3]>, scale: [f32; 3]) -> Vec<Vec3> {
+    let [sx, sy, sz] = scale;
+    points
+        .map(|[x, y, z]| Vec3::new(x * sx, y * sy, z * sz))
+        .collect()
+}
+
+/// Assemble a mesh's physics **triangle** submeshes into one scaled point cloud +
+/// triangle index buffer (the exact-collision fallback when a mesh carries no
+/// convex decomposition).
+fn submesh_trimesh(submeshes: &[Submesh], scale: [f32; 3]) -> (Vec<Vec3>, Vec<[u32; 3]>) {
+    let [sx, sy, sz] = scale;
+    let mut points = Vec::new();
+    let mut indices = Vec::new();
+    for submesh in submeshes {
+        let base = u32::try_from(points.len()).unwrap_or(u32::MAX);
+        for &[x, y, z] in &submesh.positions {
+            points.push(Vec3::new(x * sx, y * sy, z * sz));
+        }
+        for tri in submesh.indices.chunks_exact(3) {
+            if let [a, b, c] = tri {
+                indices.push([
+                    base.saturating_add(*a),
+                    base.saturating_add(*b),
+                    base.saturating_add(*c),
+                ]);
+            }
+        }
+    }
+    (points, indices)
+}
+
+/// Build an avian [`Collider`] for a mesh object from its uploaded physics shape
+/// ([`MeshPhysics`]), scaled by the object scale into the object entity's local
+/// frame. Prefers the **convex-hull decomposition** (a compound of one
+/// `convex_hull` per decomposed piece — the analysed collision shape the simulator
+/// itself uses, concave-accurate yet far cheaper than the visual mesh); falls back
+/// to the single low-detail **bounding hull**, then to the exact **physics triangle
+/// mesh**. Returns `None` if the physics blocks held no usable geometry (the caller
+/// then falls back to the visual geometry).
+fn mesh_physics_collider(physics: &MeshPhysics, scale: [f32; 3]) -> Option<Collider> {
+    if let Some(convex) = physics.convex.as_ref() {
+        let hulls: Vec<(Vec3, Quat, Collider)> = convex
+            .hulls
+            .iter()
+            .filter_map(|hull| {
+                Collider::convex_hull(scaled_points(hull.iter().copied(), scale))
+                    .map(|collider| (Vec3::ZERO, Quat::IDENTITY, collider))
+            })
+            .collect();
+        if !hulls.is_empty() {
+            return Some(Collider::compound(hulls));
+        }
+        // No per-piece hulls decoded: the single low-detail bounding hull is the
+        // cheap broad-phase shape.
+        if !convex.bounding_verts.is_empty()
+            && let Some(collider) =
+                Collider::convex_hull(scaled_points(convex.bounding_verts.iter().copied(), scale))
+        {
+            return Some(collider);
+        }
+    }
+    // No convex block: the exact physics triangle mesh.
+    if let Some(submeshes) = physics.mesh.as_ref() {
+        let (points, indices) = submesh_trimesh(submeshes, scale);
+        if !points.is_empty() && !indices.is_empty() {
+            return Some(Collider::trimesh(points, indices));
+        }
+    }
+    None
+}
+
+/// Build a prim's avian [`Collider`] from its own tessellated geometry (`points`
+/// already scaled into object-local space, `indices` its triangles): a
+/// `convex_hull` when the physics shape is explicitly **convex hull**, else the
+/// exact **trimesh** (the reference default for a legacy prim, and what a concave
+/// prim — a hollow / an archway — needs so the camera passes through the gap).
+/// A degenerate convex hull falls back to a cuboid of `extents`.
+fn prim_geometry_collider(
+    shape: Option<PhysicsShapeType>,
+    points: Vec<Vec3>,
+    indices: Vec<[u32; 3]>,
+    extents: [f32; 3],
+) -> Collider {
+    let [ex, ey, ez] = extents;
+    match shape {
+        Some(PhysicsShapeType::ConvexHull) => {
+            Collider::convex_hull(points).unwrap_or_else(|| Collider::cuboid(ex, ey, ez))
+        }
+        _prim_none_or_unknown => Collider::trimesh(points, indices),
+    }
+}
+
+/// The most static-index collider builds *gathered + spawned* in one frame. The
+/// heavy collider construction runs off-thread ([`apply_static_colliders`]), but the
+/// main-thread work this bounds — gathering each prim's vertices (copying them out of
+/// the mesh assets) and spawning its task — still costs, and a region hand-off can
+/// deliver hundreds of prims at once, so the work is drained a budget at a time over
+/// subsequent frames (the crowd-spawn / asset-upload budget pattern). Colliders
+/// missing for a frame or two is invisible; a stall is not. The budgeted prims are
+/// chosen nearest-camera-first so the geometry the viewer is most likely to collide
+/// with gets its collider soonest.
+const STATIC_COLLIDER_BUDGET: usize = 32;
+
+/// Records what static-index [`Collider`] a non-physical prim currently carries, so
+/// [`build_static_colliders`] rebuilds it only on a real change (a resize, a
+/// phantom / physics-shape toggle, or the intended shape finally becoming available
+/// after a placeholder). Its presence marks a prim already handled this session.
+#[derive(Component)]
+pub(crate) struct StaticCollider {
+    /// The object scale (floored extents, metres) the collider was built for.
+    scale: [f32; 3],
+    /// Whether the prim is in the non-collidable ([`ObjectLayer::NonSolid`]) layer,
+    /// so a phantom / physics-`None` toggle re-files it.
+    non_solid: bool,
+    /// The physics-shape type the collider was built for (`None` = unknown, the
+    /// default), so a later `ObjectPhysicsProperties` push that changes it rebuilds.
+    shape: Option<PhysicsShapeType>,
+    /// `true` once the collider is the intended final shape (mesh physics for a mesh,
+    /// tessellated geometry for a prim); `false` for a transient placeholder cuboid
+    /// (a mesh awaiting its physics blocks, or geometry not yet uploaded), which is
+    /// retried under the budget each frame until the real shape is in hand.
+    settled: bool,
+}
+
+/// Whether a prim category gets a static-index collider. Plain prims, sculpts, and
+/// meshes do; avatars are dynamic (and carry no collider by design — see
+/// [`crate::camera::collide_camera`]); trees and grass are billboard / impostor
+/// geometry whose holder is unscaled, so a collider from it would be wrong.
+const fn category_gets_collider(category: ObjectCategory) -> bool {
+    matches!(
+        category,
+        ObjectCategory::Prim | ObjectCategory::Sculpt | ObjectCategory::Mesh
+    )
+}
+
+/// The shape source for one off-thread collider build, gathered on the main thread
+/// (it needs ECS / asset access) and moved into an [`AsyncComputeTaskPool`] task
+/// that turns it into a [`Collider`] — the expensive part (parry trimesh / convex
+/// hull + its internal BVH) off the frame thread.
+enum ColliderBuildJob {
+    /// A mesh object's uploaded physics shape, scaled by the object scale.
+    MeshPhysics(Arc<MeshPhysics>, [f32; 3]),
+    /// A prim's tessellated geometry (points already scaled into object-local
+    /// space), built as a `convex_hull` / `trimesh` per its physics shape.
+    Geometry {
+        /// The scaled vertex point cloud.
+        points: Vec<Vec3>,
+        /// The triangle index buffer.
+        indices: Vec<[u32; 3]>,
+        /// The physics shape (convex vs trimesh).
+        shape: Option<PhysicsShapeType>,
+        /// The cuboid extents used if a convex hull comes out degenerate.
+        extents: [f32; 3],
+    },
+}
+
+/// Construct the [`Collider`] for a [`ColliderBuildJob`] — the CPU-heavy work run on
+/// an [`AsyncComputeTaskPool`] thread. A mesh whose physics blocks turn out to hold
+/// no usable geometry falls back to a cuboid of its scale.
+fn run_collider_build(job: ColliderBuildJob) -> Collider {
+    match job {
+        ColliderBuildJob::MeshPhysics(physics, scale) => mesh_physics_collider(&physics, scale)
+            .unwrap_or_else(|| {
+                let [x, y, z] = scale;
+                Collider::cuboid(x, y, z)
+            }),
+        ColliderBuildJob::Geometry {
+            points,
+            indices,
+            shape,
+            extents,
+        } => prim_geometry_collider(shape, points, indices, extents),
+    }
+}
+
+/// The static-index collider record to attach once its off-thread build finishes,
+/// paired with the running [`Task`] in [`StaticColliderBuilds`].
+struct StaticBuildTask {
+    /// The running collider construction.
+    task: Task<Collider>,
+    /// The object scale the collider is being built for.
+    scale: [f32; 3],
+    /// Whether the prim is in the non-collidable ([`ObjectLayer::NonSolid`]) layer.
+    non_solid: bool,
+    /// The physics shape the collider is being built for.
+    shape: Option<PhysicsShapeType>,
+    /// Whether this is the intended final shape (vs a mesh's visual-geometry fallback
+    /// awaiting its lighter physics shape, which is retried).
+    settled: bool,
+    /// The collision layers to file the collider under.
+    layers: CollisionLayers,
+}
+
+/// The in-flight off-thread static-collider builds, keyed by prim entity, so the
+/// scanner ([`build_static_colliders`]) does not re-queue a prim whose collider is
+/// already building and [`apply_static_colliders`] can install each finished one.
+#[derive(Resource, Default)]
+pub(crate) struct StaticColliderBuilds {
+    /// One running build per prim entity.
+    tasks: HashMap<Entity, StaticBuildTask>,
+}
+
+/// One prim needing a static-index collider built this frame, with the world
+/// position used to rank it by camera proximity.
+struct ColliderWork {
+    /// The prim entity to attach the collider to.
+    entity: Entity,
+    /// The prim's world position (Bevy), for the nearest-camera-first ordering.
+    world_pos: Vec3,
+    /// The mesh asset key when the prim is a mesh (its collider comes from the mesh
+    /// physics shape), else `None` (built from tessellated geometry).
+    mesh: Option<MeshKey>,
+    /// The floored collider extents (object scale) — the placeholder cuboid size and
+    /// the geometry scale.
+    scale: [f32; 3],
+    /// The physics-shape type, if known (drives convex vs trimesh; `Some(None)` files
+    /// the prim in the non-collidable layer).
+    shape: Option<PhysicsShapeType>,
+    /// Whether the prim is in the non-collidable ([`ObjectLayer::NonSolid`]) layer.
+    non_solid: bool,
+    /// Whether the prim already carries a collider (a placeholder or a stale shape),
+    /// so a still-pending prim is not re-inserted with an identical placeholder each
+    /// frame (which would dirty its transform subtree).
+    has_collider: bool,
+}
+
+/// Give **every** non-physical, non-avatar, non-attachment prim a static avian
+/// [`Collider`], so [`avian3d::prelude::SpatialQuery`] becomes the shared scene
+/// index (the follow-up that makes [`crate::camera::collide_camera`] functional —
+/// [[viewer-perf-camera-collision-broad-phase]]). Physical roots keep their
+/// kinematic collider ([`drive_physical_objects`] / [`refine_physical_colliders`]);
+/// this handles all the other solid world geometry — walls, floors, buildings,
+/// linkset children.
+///
+/// A mesh prim's collider comes from its uploaded physics shape ([`MeshPhysics`],
+/// requested on demand); a plain prim / sculpt from its tessellated geometry. A
+/// phantom prim or a physics-shape-`None` prim still gets a collider (so it is in
+/// the index) but is filed in [`ObjectLayer::NonSolid`], which *physics*-collision
+/// queries skip (the camera, visual occlusion, uses all layers).
+///
+/// Colliders are built lazily once the geometry (or mesh physics) is available and
+/// **budgeted** ([`STATIC_COLLIDER_BUDGET`] gathers per frame, nearest-camera-first)
+/// so a region hand-off streams them in over several frames instead of spiking one.
+/// The CPU-heavy collider construction itself runs **off the frame thread** on an
+/// [`AsyncComputeTaskPool`]; this system only gathers the shape source (which needs
+/// asset access) and spawns the task, and [`apply_static_colliders`] installs the
+/// finished collider. A prim with no geometry yet gets a cheap placeholder cuboid
+/// (built inline — O(1)) and is retried.
+#[expect(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    reason = "an ECS system's arguments are its injected queries / resources"
+)]
+pub(crate) fn build_static_colliders(
+    object_state: Res<ObjectState>,
+    shapes: Res<ObjectPhysicsShapes>,
+    mut mesh_manager: ResMut<MeshManager>,
+    meshes: Res<Assets<Mesh>>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    prims: Query<
+        (
+            Entity,
+            &SceneObject,
+            &ObjectSlMotion,
+            &GlobalTransform,
+            Option<&StaticCollider>,
+        ),
+        Without<PhysicalObject>,
+    >,
+    children_q: Query<&Children>,
+    holders: Query<(), With<GeometryHolder>>,
+    mesh_handles: Query<&Mesh3d>,
+    mut builds: ResMut<StaticColliderBuilds>,
+    mut commands: Commands,
+) {
+    // Gather the prims whose static collider is missing / stale, each tagged with
+    // the facts and the world position its proximity ranking needs. A prim whose
+    // build is already in flight is skipped (it is not re-queued until it lands).
+    let mut work: Vec<ColliderWork> = Vec::new();
+    for (entity, scene, sl_motion, global, existing) in &prims {
+        if !category_gets_collider(scene.category)
+            || sl_motion.attachment
+            || builds.tasks.contains_key(&entity)
+        {
+            continue;
+        }
+        let Some(facts) = object_state.static_collider_facts(&scene.scoped_id) else {
+            continue;
+        };
+        if facts.flexi {
+            continue;
+        }
+        let scale = collider_extents(&sl_motion.scale);
+        let shape = shapes
+            .data
+            .get(&facts.full_key)
+            .map(|data| data.physics_shape_type);
+        let non_solid = facts.phantom || shape == Some(PhysicsShapeType::None);
+        // Skip prims whose collider is already the intended shape at the current
+        // scale / layer / shape — the steady-state majority.
+        let needs_build = existing.is_none_or(|state| {
+            !state.settled
+                || extents_differ(state.scale, scale)
+                || state.non_solid != non_solid
+                || state.shape != shape
+        });
+        if !needs_build {
+            continue;
+        }
+        work.push(ColliderWork {
+            entity,
+            world_pos: global.translation(),
+            mesh: facts.mesh,
+            scale,
+            shape,
+            non_solid,
+            has_collider: existing.is_some(),
+        });
+    }
+    if work.is_empty() {
+        return;
+    }
+    // Nearest-camera-first, so the geometry the viewer is most likely to collide
+    // with gets its collider soonest. A missing camera leaves the (arbitrary) query
+    // order.
+    if let Ok(camera) = camera.single() {
+        let eye = camera.translation();
+        work.sort_by(|a, b| {
+            a.world_pos
+                .distance_squared(eye)
+                .total_cmp(&b.world_pos.distance_squared(eye))
+        });
+    }
+
+    for item in work.into_iter().take(STATIC_COLLIDER_BUDGET) {
+        let layers = object_collision_layers(item.non_solid);
+        // Gather the shape source on the main thread (asset access), deciding the
+        // intended shape vs a not-ready placeholder; `None` job = geometry / physics
+        // not available yet.
+        let (job, settled): (Option<ColliderBuildJob>, bool) = match item.mesh {
+            Some(mesh_key) => {
+                // Trigger the on-demand physics-block fetch for this (near-camera)
+                // mesh; use it once decoded, else fall back to the visual geometry.
+                mesh_manager.request_physics(mesh_key);
+                if let Some(physics) = mesh_manager.physics(mesh_key) {
+                    (
+                        Some(ColliderBuildJob::MeshPhysics(
+                            Arc::clone(physics),
+                            item.scale,
+                        )),
+                        true,
+                    )
+                } else {
+                    let (points, indices) = gather_object_geometry(
+                        item.entity,
+                        item.scale,
+                        &children_q,
+                        &holders,
+                        &mesh_handles,
+                        &meshes,
+                    );
+                    if points.is_empty() {
+                        (None, false)
+                    } else {
+                        // A valid (heavier) fallback while the physics fetches; keep
+                        // `settled = false` so it retries for the lighter shape.
+                        (
+                            Some(ColliderBuildJob::Geometry {
+                                points,
+                                indices,
+                                shape: item.shape,
+                                extents: item.scale,
+                            }),
+                            false,
+                        )
+                    }
+                }
+            }
+            None => {
+                let (points, indices) = gather_object_geometry(
+                    item.entity,
+                    item.scale,
+                    &children_q,
+                    &holders,
+                    &mesh_handles,
+                    &meshes,
+                );
+                if points.is_empty() {
+                    (None, false)
+                } else {
+                    (
+                        Some(ColliderBuildJob::Geometry {
+                            points,
+                            indices,
+                            shape: item.shape,
+                            extents: item.scale,
+                        }),
+                        true,
+                    )
+                }
+            }
+        };
+
+        match job {
+            // Neither geometry nor mesh physics ready: install a cheap placeholder
+            // cuboid (only the first time, to avoid re-dirtying it every retry) and
+            // try again next frame.
+            None => {
+                if !item.has_collider {
+                    let [ex, ey, ez] = item.scale;
+                    commands.entity(item.entity).insert((
+                        Collider::cuboid(ex, ey, ez),
+                        layers,
+                        StaticCollider {
+                            scale: item.scale,
+                            non_solid: item.non_solid,
+                            shape: item.shape,
+                            settled: false,
+                        },
+                    ));
+                }
+            }
+            // Build the real shape off-thread; `apply_static_colliders` installs it.
+            Some(job) => {
+                let task =
+                    AsyncComputeTaskPool::get().spawn(async move { run_collider_build(job) });
+                builds.tasks.insert(
+                    item.entity,
+                    StaticBuildTask {
+                        task,
+                        scale: item.scale,
+                        non_solid: item.non_solid,
+                        shape: item.shape,
+                        settled,
+                        layers,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Install each finished off-thread static-collider build ([`build_static_colliders`]):
+/// poll the in-flight tasks, and for each that completed attach its [`Collider`],
+/// [`CollisionLayers`], and [`StaticCollider`] record — unless the prim has since
+/// been despawned or become a physical root (the physical path owns its collider
+/// then), in which case the built collider is simply dropped.
+pub(crate) fn apply_static_colliders(
+    mut builds: ResMut<StaticColliderBuilds>,
+    physical: Query<(), With<PhysicalObject>>,
+    mut commands: Commands,
+) {
+    let mut finished: Vec<(Entity, Collider)> = Vec::new();
+    for (&entity, build) in &mut builds.tasks {
+        if let Some(collider) = block_on(poll_once(&mut build.task)) {
+            finished.push((entity, collider));
+        }
+    }
+    for (entity, collider) in finished {
+        let Some(build) = builds.tasks.remove(&entity) else {
+            continue;
+        };
+        // The prim became physical while its build ran: drop the collider (the
+        // physical path owns it now).
+        if physical.get(entity).is_ok() {
+            continue;
+        }
+        // The prim may have been despawned; only install onto a live entity.
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.insert((
+                collider,
+                build.layers,
+                StaticCollider {
+                    scale: build.scale,
+                    non_solid: build.non_solid,
+                    shape: build.shape,
+                    settled: build.settled,
+                },
+            ));
+        }
+    }
+}
+
+/// Strip the static-index collider from a prim that has become a **physical** root
+/// (it gained a [`PhysicalObject`] marker): the physical path
+/// ([`drive_physical_objects`] / [`refine_physical_colliders`]) now owns its
+/// collider, and a leftover [`StaticCollider`] would both fight it and — once the
+/// prim went non-physical again — wrongly mark it "already handled". Clearing the
+/// marker lets [`build_static_colliders`] rebuild a static collider if it does. Any
+/// in-flight off-thread build is dropped by [`apply_static_colliders`] when it lands.
+pub(crate) fn detach_static_colliders(
+    now_physical: Query<Entity, (With<StaticCollider>, With<PhysicalObject>)>,
+    mut commands: Commands,
+) {
+    for entity in &now_physical {
+        commands
+            .entity(entity)
+            .remove::<(Collider, CollisionLayers, StaticCollider)>();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        ClampInput, MAX_INTERP_SECS, MotionState, OBJECT_SMOOTHING_TAU_SECS, PHASE_OUT_START_SECS,
-        PhysicsInterp, REGION_MAX_HEIGHT_M, REGION_WIDTH_M, ROTATION_SMOOTHING_TAU_SECS,
-        SL_GRAVITY_Z, TRANSLATION_SNAP_DISTANCE_M, advance_motion, angular_step, append_triangles,
-        avatar_collision_floor, avatar_ground_floor, bevy_position_of, bevy_rotation_of,
-        clamp_dilation, clamp_prediction, dead_reckon, eased_translation, extents_differ,
-        ground_floor, neighbours_known, phase_out_factor, place_smoothed, reaim_residual,
-        rotation_smoothing_alpha, shape_wants_geometry, sl_gravity, smoothing_alpha,
+        ClampInput, MAX_INTERP_SECS, MotionState, OBJECT_SMOOTHING_TAU_SECS, ObjectLayer,
+        PHASE_OUT_START_SECS, PhysicsInterp, REGION_MAX_HEIGHT_M, REGION_WIDTH_M,
+        ROTATION_SMOOTHING_TAU_SECS, SL_GRAVITY_Z, TRANSLATION_SNAP_DISTANCE_M, advance_motion,
+        angular_step, append_triangles, avatar_collision_floor, avatar_ground_floor,
+        bevy_position_of, bevy_rotation_of, category_gets_collider, clamp_dilation,
+        clamp_prediction, dead_reckon, eased_translation, extents_differ, ground_floor,
+        mesh_physics_collider, neighbours_known, object_collision_layers, phase_out_factor,
+        place_smoothed, prim_geometry_collider, reaim_residual, rotation_smoothing_alpha,
+        shape_wants_geometry, sl_gravity, smoothing_alpha, submesh_trimesh,
     };
+    use crate::objects::ObjectCategory;
     use crate::physics::RegionTimeDilation;
-    use avian3d::prelude::{Collider, SimpleCollider as _};
+    use avian3d::prelude::{Collider, SimpleCollider as _, SpatialQueryFilter};
+    use bevy::ecs::entity::Entity;
     use bevy::math::{Quat, Vec3};
     use bevy::mesh::Indices;
     use bevy::transform::components::Transform;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{PhysicsShapeType, RegionHandle, Rotation, Vector};
+    use sl_client_bevy::{
+        MeshPhysics, PhysicsConvex, PhysicsShapeType, RegionHandle, Rotation, Submesh, Vector,
+    };
 
     /// Assert two `f32` are equal within a tight tolerance (the workspace lints
     /// forbid a strict `float_cmp`, and the clamp results are exact anyway).
@@ -2404,6 +3030,187 @@ mod tests {
             (aabb.max.x - 2.0).abs() < 1.0e-4 && (aabb.max.y - 2.0).abs() < 1.0e-4,
             "trimesh aabb should span the 2x2 quad, got {aabb:?}"
         );
+    }
+
+    /// The eight corners of a unit cube, centred on the origin.
+    fn cube_corners() -> Vec<[f32; 3]> {
+        vec![
+            [-0.5, -0.5, -0.5],
+            [0.5, -0.5, -0.5],
+            [-0.5, 0.5, -0.5],
+            [0.5, 0.5, -0.5],
+            [-0.5, -0.5, 0.5],
+            [0.5, -0.5, 0.5],
+            [-0.5, 0.5, 0.5],
+            [0.5, 0.5, 0.5],
+        ]
+    }
+
+    /// A `Solid` collider is filed in the default layer (bit 0) and a `NonSolid`
+    /// one is not, so a `Solid`-masked query (the future physics-collidability
+    /// consumers — a falling prim, Phase 32 / 34 dynamics) includes the collidable
+    /// prims and excludes the phantom / physics-`None` ones, while a whole-index
+    /// query (camera collision's visual occlusion) still sees both.
+    #[test]
+    fn solid_mask_filter_admits_solid_and_rejects_non_solid() {
+        let solid = object_collision_layers(false);
+        let non_solid = object_collision_layers(true);
+        let solid_filter = SpatialQueryFilter::from_mask(ObjectLayer::Solid);
+        assert!(
+            solid_filter.test(Entity::PLACEHOLDER, solid),
+            "a Solid collider is on the physics-collidability mask"
+        );
+        assert!(
+            !solid_filter.test(Entity::PLACEHOLDER, non_solid),
+            "a NonSolid (phantom / physics-None) collider is masked out of physics collision"
+        );
+        // The camera's whole-index query (all layers) still sees both — a phantom
+        // prim is visually solid, so the camera pulls in at it.
+        let all = SpatialQueryFilter::default();
+        assert!(all.test(Entity::PLACEHOLDER, solid));
+        assert!(all.test(Entity::PLACEHOLDER, non_solid));
+    }
+
+    /// A mesh's convex-hull decomposition builds a compound collider, and its points
+    /// are scaled by the object scale into the object-local frame (a unit cube at
+    /// scale `[2, 4, 6]` spans that box).
+    #[test]
+    fn mesh_physics_collider_uses_scaled_convex_decomposition() {
+        let physics = MeshPhysics {
+            convex: Some(PhysicsConvex {
+                hulls: vec![cube_corners()],
+                ..PhysicsConvex::default()
+            }),
+            mesh: None,
+        };
+        let built = mesh_physics_collider(&physics, [2.0, 4.0, 6.0]);
+        assert!(
+            built.is_some_and(|collider| {
+                let aabb = collider.aabb(Vec3::ZERO, Quat::IDENTITY);
+                (aabb.max.x - 1.0).abs() < 1.0e-4
+                    && (aabb.max.y - 2.0).abs() < 1.0e-4
+                    && (aabb.max.z - 3.0).abs() < 1.0e-4
+            }),
+            "a scaled unit cube's convex hull spans half-extents [1, 2, 3]"
+        );
+    }
+
+    /// With no per-piece hulls, the single low-detail bounding hull is used.
+    #[test]
+    fn mesh_physics_collider_falls_back_to_bounding_hull() {
+        let physics = MeshPhysics {
+            convex: Some(PhysicsConvex {
+                hulls: Vec::new(),
+                bounding_verts: cube_corners(),
+                ..PhysicsConvex::default()
+            }),
+            mesh: None,
+        };
+        assert!(
+            mesh_physics_collider(&physics, [1.0, 1.0, 1.0]).is_some(),
+            "the bounding hull should build a collider when no decomposition is present"
+        );
+    }
+
+    /// With no convex block at all, the exact physics triangle mesh is used.
+    #[test]
+    fn mesh_physics_collider_uses_physics_trimesh() {
+        let submesh = Submesh {
+            positions: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 1.0, 0.0]],
+            indices: vec![0, 1, 2],
+            ..Submesh::default()
+        };
+        let physics = MeshPhysics {
+            convex: None,
+            mesh: Some(vec![submesh]),
+        };
+        assert!(
+            mesh_physics_collider(&physics, [1.0, 1.0, 1.0]).is_some(),
+            "the physics triangle mesh should build a collider"
+        );
+    }
+
+    /// A mesh with no physics blocks yields no collider (the caller then falls back
+    /// to the visual geometry).
+    #[test]
+    fn mesh_physics_collider_none_when_empty() {
+        assert!(
+            mesh_physics_collider(&MeshPhysics::default(), [1.0, 1.0, 1.0]).is_none(),
+            "no physics blocks means no physics collider"
+        );
+    }
+
+    /// Two physics submeshes combine into one trimesh: the second's indices are
+    /// offset past the first's vertices, and every point is scaled by the object
+    /// scale.
+    #[test]
+    fn submesh_trimesh_offsets_indices_and_scales() {
+        let a = Submesh {
+            positions: vec![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            indices: vec![0, 1, 2],
+            ..Submesh::default()
+        };
+        let b = Submesh {
+            positions: vec![[1.0, 1.0, 1.0], [2.0, 2.0, 2.0], [3.0, 3.0, 3.0]],
+            indices: vec![0, 1, 2],
+            ..Submesh::default()
+        };
+        let (points, indices) = submesh_trimesh(&[a, b], [2.0, 2.0, 2.0]);
+        assert_eq!(points.len(), 6);
+        // First point scaled by 2.
+        assert!(
+            points
+                .first()
+                .is_some_and(|p| p.abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1.0e-6))
+        );
+        // The second submesh's triangle references vertices 3/4/5.
+        assert_eq!(indices, vec![[0, 1, 2], [3, 4, 5]]);
+    }
+
+    /// The convex-hull physics shape builds a convex collider; anything else (the
+    /// exact prim, an unknown type) builds the trimesh, so a concave prim keeps its
+    /// hole.
+    #[test]
+    fn prim_geometry_collider_picks_convex_or_trimesh() {
+        let points = cube_corners().into_iter().map(Vec3::from).collect();
+        let convex = prim_geometry_collider(
+            Some(PhysicsShapeType::ConvexHull),
+            points,
+            Vec::new(),
+            [1.0, 1.0, 1.0],
+        );
+        assert!(
+            convex.aabb(Vec3::ZERO, Quat::IDENTITY).max.x > 0.0,
+            "the convex hull collider has a positive extent"
+        );
+        let quad = vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(2.0, 0.0, 0.0),
+            Vec3::new(2.0, 2.0, 0.0),
+        ];
+        let trimesh = prim_geometry_collider(
+            Some(PhysicsShapeType::Prim),
+            quad,
+            vec![[0, 1, 2]],
+            [1.0, 1.0, 1.0],
+        );
+        let aabb = trimesh.aabb(Vec3::ZERO, Quat::IDENTITY);
+        assert!(
+            (aabb.max.x - 2.0).abs() < 1.0e-4,
+            "the exact-prim trimesh spans its geometry, got {aabb:?}"
+        );
+    }
+
+    /// Only plain prims, sculpts, and meshes get a static-index collider; avatars,
+    /// trees, and grass do not.
+    #[test]
+    fn category_gets_collider_selects_solid_prim_kinds() {
+        assert!(category_gets_collider(ObjectCategory::Prim));
+        assert!(category_gets_collider(ObjectCategory::Sculpt));
+        assert!(category_gets_collider(ObjectCategory::Mesh));
+        assert!(!category_gets_collider(ObjectCategory::Avatar));
+        assert!(!category_gets_collider(ObjectCategory::Tree));
+        assert!(!category_gets_collider(ObjectCategory::Grass));
     }
 
     /// The avatar ground floor is the land height plus half the avatar's height —

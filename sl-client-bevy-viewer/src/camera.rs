@@ -1488,11 +1488,16 @@ fn collide_camera(
     let Some(direction) = Dir3::new(offset).ok() else {
         return eye;
     };
-    // Ignore the agent's own avatar (its worn rigid attachments can carry
-    // colliders): the focus sits at the head, so a nearby own-attachment collider
-    // would otherwise pull the camera in. Everything else (walls, other objects)
-    // still occludes. `solid` so a ray starting outside a collider hits its
-    // surface; bounded to `distance` so only the head→eye segment is tested.
+    // Camera collision is *visual* occlusion: the camera pulls in at any opaque
+    // surface, so the ray tests **all** layers of the shared index — including
+    // phantom / physics-shape-`None` prims (in the `NonSolid` layer), which are
+    // still visually solid (the whole-scene `MeshRayCast` this replaced hit them
+    // too). Only the own avatar is excluded (its worn rigid attachments can carry
+    // colliders; the focus sits at the head, so a nearby own-attachment collider
+    // would otherwise pull the camera in). Other avatars carry no collider, so they
+    // are excluded for free — the reference does not pull in for them. `solid` so a
+    // ray starting outside a collider hits its surface; bounded to `distance` so
+    // only the head→eye segment is tested.
     let filter = SpatialQueryFilter::from_excluded_entities(ignore.iter().copied());
     let Some(hit) = spatial.cast_ray(focus, direction, distance, true, &filter) else {
         return eye;

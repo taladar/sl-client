@@ -504,6 +504,13 @@ pub(crate) const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
 /// exception to needing modify on the object to drop an item into it.
 pub(crate) const FLAGS_ALLOW_INVENTORY_DROP: u32 = 1 << 16;
 
+/// The `FLAGS_PHANTOM` bit of `PrimFlags` (`object_flags.h`): the object is
+/// non-solid — nothing collides with it. The static collider index
+/// ([`crate::physics::build_static_colliders`]) still gives a phantom prim a
+/// collider (so it is in the shared spatial index for proximity queries) but
+/// files it in the non-collidable layer.
+pub(crate) const FLAGS_PHANTOM: u32 = 1 << 10;
+
 /// Whether the tracked object `scoped` belongs to a **HUD attachment**: it is
 /// itself worn on a HUD point, or it is a linkset child of an object that is (the
 /// reference viewer's `getRootEdit()`-based `LLVOVolume::isHUDAttachment`).
@@ -1144,6 +1151,49 @@ impl ObjectState {
         }
         out
     }
+
+    /// The facts the static collider index ([`crate::physics::build_static_colliders`])
+    /// needs about one tracked prim, keyed by its scoped id, or `None` if the prim
+    /// is not tracked. Reads the wire-side state the resource already holds so the
+    /// collider builder does not need its own per-entity component mirror.
+    pub(crate) fn static_collider_facts(
+        &self,
+        scoped: &ScopedObjectId,
+    ) -> Option<StaticColliderFacts> {
+        let tracked = self.objects.get(scoped)?;
+        Some(StaticColliderFacts {
+            full_key: tracked.full_key,
+            phantom: tracked.update_flags & FLAGS_PHANTOM != 0,
+            // A mesh prim's collider comes from its uploaded physics shape; a plain
+            // prim / sculpt from its tessellated geometry (mesh key `None`).
+            mesh: match tracked.extra.sculpt.map(|sculpt| sculpt.texture) {
+                Some(SculptOrMeshKey::Mesh(key)) => Some(key),
+                _other => None,
+            },
+            // A flexi prim's geometry is baked in absolute metres (its holder
+            // applies no scale — see [`holder_transform`]), so scaling it by the
+            // object scale would be wrong; the collider builder skips it (it is also
+            // phantom, so nothing collides with it anyway).
+            flexi: tracked.extra.flexible.is_some(),
+        })
+    }
+}
+
+/// The wire-side facts [`ObjectState::static_collider_facts`] surfaces for the
+/// static collider index: enough to pick a prim's collision layer and shape source
+/// without a dedicated per-entity component.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct StaticColliderFacts {
+    /// The object's full (grid-wide) key — how its physics-shape data is keyed in
+    /// [`ObjectPhysicsShapes`](crate::physics::ObjectPhysicsShapes).
+    pub(crate) full_key: ObjectKey,
+    /// Whether the prim is phantom (`FLAGS_PHANTOM`): indexed but not collidable.
+    pub(crate) phantom: bool,
+    /// The mesh asset key when the prim is a mesh, else `None` (a plain prim or
+    /// sculpt whose collider comes from its tessellated geometry).
+    pub(crate) mesh: Option<MeshKey>,
+    /// Whether the prim is a flexi prim (skip — its geometry is not holder-scaled).
+    pub(crate) flexi: bool,
 }
 
 /// What [`ObjectState::edit_data`] reports for one tracked object — the
