@@ -50,6 +50,7 @@
 //! `indra/newview/lltoolfocus.cpp` (alt-zoom), `indra/newview/llviewerjoystick`
 //! (the flycam).
 
+use avian3d::prelude::{SpatialQuery, SpatialQueryFilter};
 use bevy::diagnostic::{Diagnostic, DiagnosticsStore, FrameTimeDiagnosticsPlugin};
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
@@ -1208,7 +1209,10 @@ pub(crate) fn position_camera(
     // Tracks whether the scripted-sit-camera path was active last frame, so the
     // diagnostic below logs only on the transition.
     mut sit_camera_active: Local<bool>,
-    mut ray_cast: MeshRayCast,
+    // The avian spatial query for camera collision: a BVH broad phase over the
+    // prim colliders, so [`collide_camera`] tests only colliders near the short
+    // head→eye segment instead of every mesh in the scene.
+    spatial: SpatialQuery,
     mut aim_out: ResMut<CameraAim>,
     mut cameras: Query<(&mut Transform, &mut CameraRig), With<ViewerCamera>>,
 ) {
@@ -1358,7 +1362,7 @@ pub(crate) fn position_camera(
             // Camera collision: pull the eye in toward the focus if the line of
             // sight is obstructed, so the camera does not clip through a wall.
             if collide {
-                eye = collide_camera(&mut ray_cast, focus, eye, &own_avatar_entities);
+                eye = collide_camera(&spatial, focus, eye, &own_avatar_entities);
             }
             apply_pose(
                 &mut transform,
@@ -1460,10 +1464,21 @@ fn apply_pose(
 
 /// Pull the camera `eye` in toward `focus` if a world surface obstructs the line
 /// of sight, leaving [`COLLISION_PADDING`] of clearance — the reference's
-/// occlusion pushback. Casts from the focus outward (so the near surface, not a far
-/// one, is what limits the camera).
+/// occlusion pushback. Casts from the focus outward (so the near surface, not a
+/// far one, is what limits the camera).
+///
+/// Uses the avian [`SpatialQuery`] BVH rather than a whole-scene `MeshRayCast`:
+/// the ray is bounded to the short head→eye segment (`max_distance = distance`),
+/// so the broad phase only tests the few colliders near it, not every mesh in
+/// the scene (which at crowd scale cost tens of milliseconds — the third-person
+/// `position_camera` spike). Two behaviours fall out of using prim colliders:
+/// avatars carry **no** collider, so the camera never pulls in for another
+/// avatar walking behind you (the reference behaviour); and a prim set to
+/// physics-shape *None* has no collider, so the camera does not collide with it
+/// (a deliberate trade for the broad phase —
+/// [[viewer-perf-camera-collision-broad-phase]]).
 fn collide_camera(
-    ray_cast: &mut MeshRayCast,
+    spatial: &SpatialQuery,
     focus: Vec3,
     eye: Vec3,
     ignore: &std::collections::HashSet<Entity>,
@@ -1473,21 +1488,17 @@ fn collide_camera(
     let Some(direction) = Dir3::new(offset).ok() else {
         return eye;
     };
-    let ray = Ray3d::new(focus, direction);
-    // Ignore the agent's own avatar: the focus sits inside the head, so the ray
-    // would otherwise hit the back of the skull / hair immediately and pull the
-    // camera into the head. Everything else (walls, other objects) still occludes.
-    let filter = |entity: Entity| !ignore.contains(&entity);
-    let settings = MeshRayCastSettings::default().with_filter(&filter);
-    let Some((_entity, hit)) = ray_cast.cast_ray(ray, &settings).first() else {
+    // Ignore the agent's own avatar (its worn rigid attachments can carry
+    // colliders): the focus sits at the head, so a nearby own-attachment collider
+    // would otherwise pull the camera in. Everything else (walls, other objects)
+    // still occludes. `solid` so a ray starting outside a collider hits its
+    // surface; bounded to `distance` so only the head→eye segment is tested.
+    let filter = SpatialQueryFilter::from_excluded_entities(ignore.iter().copied());
+    let Some(hit) = spatial.cast_ray(focus, direction, distance, true, &filter) else {
         return eye;
     };
-    if hit.distance < distance {
-        let pulled = (hit.distance - COLLISION_PADDING).max(0.0);
-        vadd(focus, vscale(direction.as_vec3(), pulled))
-    } else {
-        eye
-    }
+    let pulled = (hit.distance - COLLISION_PADDING).max(0.0);
+    vadd(focus, vscale(direction.as_vec3(), pulled))
 }
 
 /// The own avatar's Bevy world position (its body-root anchor) and **stable**

@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 63 |
 | ready | 224 |
 | blocked | 67 |
-| in-progress | 16 |
+| in-progress | 17 |
 | bugs | 27 |
 | done | 828 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1261** |
+| **total** | **1262** |
 
 ## ideas (63)
 
@@ -498,8 +498,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screen-size mesh LOD for rigged avatar meshes (on-screen crowd draw)
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
-- [`viewer-perf-camera-collision-broad-phase`](ready/viewer-perf-camera-collision-broad-phase.md)
-  — Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
@@ -545,6 +543,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-physics-static-prim-colliders`](ready/viewer-physics-static-prim-colliders.md)
+  — Colliders for all non-phantom prims — a shared avian spatial index
 - [`viewer-places-landmarks`](ready/viewer-places-landmarks.md) — Places floater
   — landmarks, create landmark, teleport history (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-inventory-folder-tree` (done))
@@ -897,7 +897,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (16)
+## in-progress (17)
 
 ### viewer
 
@@ -913,6 +913,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
+- [`viewer-perf-camera-collision-broad-phase`](in-progress/viewer-perf-camera-collision-broad-phase.md)
+  — Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
   — Tune main-view shadow specialization + clustered lighting during rez
 - [`viewer-realtime-mirrors`](in-progress/viewer-realtime-mirrors.md) —
