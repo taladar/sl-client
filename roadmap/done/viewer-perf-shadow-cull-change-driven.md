@@ -66,3 +66,22 @@ transform untouched once the smoothed pose is within a sub-perceptible epsilon,
 so a settled camera stops re-writing (and `Changed`-marking) its transform every
 frame — a general frame-churn reduction ([[viewer-perf-frame-churn-cleanups]]),
 verified visually smooth.
+
+## Follow-up 2026-08-16 — dropped the off-thread sorts
+
+A `perf` sample of the off-thread pass (dense aditi region) showed its two
+`Vec<Entity>` `sort_unstable`s — the per-cascade `cascade.entities.sort` (the
+near cascade holds ~every caster) and the `visible` `sort` + `dedup` — at
+~6.9 % of total CPU, roughly **half** of `run_shadow_cull`. Neither result needs
+ordering: Bevy's own `check_dir_light_mesh_visibility` pushes cascade contents
+and its visible set unordered too, and the shadow phase re-sorts / batches
+downstream. Removed both — visibility is now tracked in a bool vec parallel to
+the caster snapshot (each caster yielded at most once, so
+`mark_shadow_caster_visibility`'s `iter_many_mut` still sees a unique set
+without a dedup), and the visible set is collected in one O(casters) scan.
+Behaviour-preserving (unit tests unchanged); a pure off-thread CPU/power win, so
+it does not move frame time (the pass is off the gating leg). The residual
+`run_shadow_cull` cost is the tight per-caster `intersects_obb` loop; a
+BVH-accelerated cull (parry's dynamic BVH, like the static raycast index) was
+considered and deferred — sun cascades cover most of the visible scene, so a BVH
+prunes mainly far casters, a partial win for a non-gating path.

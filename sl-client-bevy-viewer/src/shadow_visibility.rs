@@ -180,12 +180,22 @@ struct CullOutput {
 fn run_shadow_cull(job: CullJob) -> CullOutput {
     let started = Instant::now();
     let mut by_light: HashMap<Entity, EntityHashMap<Vec<VisibleMeshEntities>>> = HashMap::new();
-    let mut visible: Vec<Entity> = Vec::new();
+    // A caster is `ViewVisibility`-visible if it lands in any cascade of any
+    // view. Track that per snapshot position in a bool vec (parallel to
+    // `job.casters`) rather than pushing to a Vec and sort+dedup-ing at the end.
+    // On a dense region the two sorts below — the per-cascade sort and this
+    // visible-set sort+dedup — were ~half of this pass's CPU, and neither result
+    // needs ordering: Bevy's own `check_dir_light_mesh_visibility` pushes both
+    // cascade contents and its visible set unordered, and the shadow phase
+    // re-sorts / batches downstream. The bool scan also yields each caster at
+    // most once, so [`mark_shadow_caster_visibility`]'s `iter_many_mut` still
+    // sees a unique set without a dedup.
+    let mut seen = vec![false; job.casters.len()];
 
     for view in &job.views {
         let mut cascades: Vec<VisibleMeshEntities> =
             vec![VisibleMeshEntities::default(); view.frusta.len()];
-        for caster in job.casters.iter() {
+        for (is_visible, caster) in seen.iter_mut().zip(job.casters.iter()) {
             if !view.view_mask.intersects(&caster.layers) {
                 continue;
             }
@@ -198,7 +208,7 @@ fn run_shadow_cull(job: CullJob) -> CullOutput {
                         caster.no_frustum_culling,
                     );
                     if mask != 0 {
-                        visible.push(caster.entity);
+                        *is_visible = true;
                     }
                     for (index, cascade) in cascades.iter_mut().enumerate() {
                         if mask & cascade_bit(index) != 0 {
@@ -207,15 +217,16 @@ fn run_shadow_cull(job: CullJob) -> CullOutput {
                     }
                 }
                 None => {
-                    visible.push(caster.entity);
+                    *is_visible = true;
                     for cascade in &mut cascades {
                         cascade.entities.push(caster.entity);
                     }
                 }
             }
         }
+        // No per-cascade sort (see the `seen` comment above); just release the
+        // spare capacity the pushes over-reserved.
         for cascade in &mut cascades {
-            cascade.entities.sort_unstable();
             cascade.shrink();
         }
         by_light
@@ -224,8 +235,13 @@ fn run_shadow_cull(job: CullJob) -> CullOutput {
             .insert(view.view, cascades);
     }
 
-    visible.sort_unstable();
-    visible.dedup();
+    // Collect the visible set in one O(casters) scan — already unique, no sort.
+    let visible: Vec<Entity> = job
+        .casters
+        .iter()
+        .zip(&seen)
+        .filter_map(|(caster, &is_visible)| is_visible.then_some(caster.entity))
+        .collect();
     CullOutput {
         lights: by_light.into_iter().collect(),
         visible,
