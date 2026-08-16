@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 65 |
-| ready | 223 |
+| ready | 224 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 27 |
 | done | 833 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1267** |
+| **total** | **1268** |
 
 ## ideas (65)
 
@@ -161,7 +161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (223)
+## ready (224)
 
 ### protocol
 
@@ -502,6 +502,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screen-size mesh LOD for rigged avatar meshes (on-screen crowd draw)
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
+- [`viewer-perf-cached-static-shadow-map`](ready/viewer-perf-cached-static-shadow-map.md)
+  — Cache the static sun-shadow map; re-render only dynamic casters
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
