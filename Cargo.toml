@@ -370,3 +370,30 @@ bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "ae
 bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
 bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
 bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+
+# Fork of wgpu 29.0.4 (github.com/taladar/wgpu, branch
+# sl-client-texture-init-fastpath) carrying ONE change vs the v29.0.4 tag: a
+# fast path in `wgpu-core`'s texture memory-init registration
+# (`register_init_action`) that short-circuits when a texture is fully
+# initialized and no discards are outstanding, skipping the per-mip
+# `check_action` walk + allocation. That bookkeeping runs once per texture use
+# per draw per view and profiling (perf, aditi dense scene) put it at ~18% of
+# the render thread inside `submit_pending_command_buffers`, all redundant for
+# our once-uploaded, never-uninitialized textures. Behaviour is identical to the
+# unpatched slow path; only the redundant work is skipped.
+#
+# Every wgpu-monorepo crate at 29.0.4 is pinned to the same fork rev (not just
+# wgpu-core): the crates are workspace members that depend on each other by path,
+# so leaving siblings on crates.io would give the graph two non-unifying copies
+# (same reason the bevy fork pins every bevy_* crate). `naga_oil` is a separate
+# crate and stays on crates.io (it uses the forked `naga` transitively). Pinned
+# to a rev for reproducibility. NOT for upstream submission.
+wgpu = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-core = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-core-deps-apple = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-core-deps-wasm = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-core-deps-windows-linux-android = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-hal = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-naga-bridge = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+wgpu-types = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+naga = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }

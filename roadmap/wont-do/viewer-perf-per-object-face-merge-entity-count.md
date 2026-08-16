@@ -2,7 +2,7 @@
 id: viewer-perf-per-object-face-merge-entity-count
 title: Cut per-frame CPU by reducing world-object entity count (face merge / per-object cull unit)
 topic: viewer
-status: ready
+status: wont-do
 origin: wall-clock profiling that shelved the octree cull
   (viewer-perf-world-frustum-culling-octree, 2026-08-01); revived 2026-08-16
 refs:
@@ -13,6 +13,71 @@ refs:
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Re-shelved 2026-08-16 — Step 0 measured, the gate was not met
+
+The revival below (kept in full) gated the refactor on **Step 0: measure the
+per-entity serial ceiling first, proceed only if it justifies the risk.** That
+measurement is now done and the gate **fails** — so the task is re-closed as
+won't-do with fresh numbers, not shelved on the old assumptions.
+
+**Measurement:** a 61.6 s `profile-tracy` release capture on aditi (primary
+avatar), steady-state window `t > 25 s` where the scene had plateaued, n=703
+frames. Method per `book/src/tools/profiling.md` (per-instance wall-clock via
+`-u`, never summed self-time). The new `entity_diagnostics` plots gave the exact
+population: **16 877 faces / 4 014 objects** (≈4.2 faces/object, so the
+best-imaginable merge ratio is ~4×), 17 251 `Mesh3d`, 5 avatars.
+
+**Critical path (steady, median per frame):**
+
+| leg | ms | note |
+| --- | --- | --- |
+| `schedule{Render}` (thread 2) | **46.8** | the gating leg — CPU-bound, GPU ~4 ms idle |
+| `schedule{Main}` (thread 1) | 25.2 | runs concurrently, **not** gating |
+| Frame plot | p50 36.3 / p90 45.3 / p99 74.6 | |
+
+So render **is** the gating CPU leg — the one thing the revival got right and
+the old won't-do had wrong. But the merge only attacks the per-entity *tail* of
+it, and the tail is small:
+
+**Render-leg composition (per frame, steady):**
+
+| bucket | ms | merge effect |
+| --- | --- | --- |
+| `submit_pending_command_buffers` | 7.76 | immovable (per view×pass; ~18 views) |
+| `main_transparent_pass_3d` | 6.09 | immovable (per user item, unbatchable) |
+| `main_opaque_pass_3d` | 2.59 | partly reducible **but instancing-risk** |
+| gpu_preprocess (unpack/build/clear/early) | ~1.7 | per-batch — merge can **raise** it |
+| queue+collect+specialize+extract+prepare (mesh) | ~4.0 | **merge-targetable, serial** |
+| queue_shadows + specialize_shadows | ~2.3 | merge-targetable (cheaper via cascades) |
+
+**The ceiling:** merge-targetable serial per-mesh work is
+**~6.3 ms of the 46.8 ms gating leg (~13 %)**. A *perfect* 4× reduction saves
+~4–5 ms → render leg ~42 ms, frame p50 ~33 ms (**~8 % best case**). That best
+case is unreachable — the `internable()` exclusion set (PBR / legacy / bump /
+media / texture-anim faces) cannot merge, and those dominate exactly on the
+material-rich aditi regions where P27.2/27.3/27.4 found dozens–hundreds of them,
+so the mergeable fraction (and the win) is smallest where the frame is worst.
+Meanwhile merging per-(object, material) makes each mesh unique per object,
+defeating the cross-object mesh+material batching interning enables, so
+opaque-pass / gpu_preprocess / submit can **regress**. The Main leg is not
+gating, so cutting its per-entity `PostUpdate` work buys nothing until it would
+exceed Render.
+
+**Where the frame time actually is:** the two biggest render-CPU costs — submit
+(7.76 ms, per view×pass) and the transparent pass (6.09 ms, per user item) — are
+both entity-count-**immovable**. The data points *away* from face-merge and
+*toward* **fewer views / fewer shadow cascades**
+([[viewer-perf-probe-occlusion-skip]] and cascade tuning) as the real render-CPU
+levers — the same conclusion the 2026-08-01 won't-do reached, now confirmed with
+render as the gating leg.
+
+**Verdict:** a ≤~8 % best-case win that shrinks on the regions that matter, with
+a real instancing regression risk, does not justify the ~15-module
+cross-cutting, submesh-range-map refactor the "Why it would be hard" section
+below still accurately describes. Re-closed. Re-open only if the immovable head
+(submit + transparent + view count) is cut first and the per-entity tail becomes
+the new gating cost.
 
 ## Revived 2026-08-16 — the won't-do escape clause tripped
 
