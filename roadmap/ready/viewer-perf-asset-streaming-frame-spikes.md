@@ -38,6 +38,32 @@ Keep the ingestion **rate** high enough that the world still rezzes promptly —
 budget the per-frame batch, do not slow the fetch (cf. the probe-cadence
 lesson: throttle the per-frame work, never the acquisition cadence).
 
+## Re-capture 2026-08-15 (aditi) — outlier anatomy confirmed + physics co-spiker
+
+Full-session trace `tracy-captures/aditi-2026-08-15.tracy` (release,
+`profile-tracy`, 1890 frames / 2:18, clean disconnect). 28 frames were
+compositor-throttled (~954 ms `present`, all in the first ~30 s while the window
+was unfocused during login) and are excluded. Of the visible frames, the
+non-occluded outliers fall in the rez / camera-move window and split into:
+
+- **Rez / scene-mutation storm** (t≈51–54 s, frames to 380 ms):
+  `ExtractSchedule` 157 ms, `Update` 202 ms, `allocate_and_free_meshes` 15–36 ms
+  — a batch of prims landing, GPU mesh buffers rebuilding, and render entities
+  extracted in one frame. Same class as the 2026-08-13 finding above.
+- **Physics collider churn co-spikes with it** — `build_static_colliders` 30 ms
+  in the same storm, and `RunFixedMainLoop` 40–95 ms (t≈53–54 s) as avian
+  re-optimizes its collider-tree over the churning static set. This is **not**
+  the dynamics solver (idle); it is avian's spatial-index maintenance on the hot
+  path, root-caused in [[viewer-perf-custom-static-raycast-index]], which
+  retires it. Tracked there, not here.
+- **Render-only specialization spikes** (t≈28–33 s, `render_system` 130–283 ms)
+  right after the window became visible — first-draw pipeline specialization
+  ([[viewer-perf-pipeline-specialization-stalls]] / pre-warm).
+
+So the asset-streaming budgeting this task proposes still stands for the texture
+/ mesh landing spikes; the physics collider co-spiker and the fixed-timestep
+catch-up multiplication are handled by the custom-index task.
+
 ## Verify
 
 Tracy capture flying into un-streamed areas: the 100–200 ms

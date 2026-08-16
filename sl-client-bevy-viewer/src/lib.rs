@@ -178,6 +178,7 @@ mod procedural;
 mod quick_preferences;
 mod radar;
 mod radar_model;
+mod raycast_index;
 mod reach;
 pub mod render_gallery;
 mod render_priority;
@@ -1566,11 +1567,15 @@ fn run_session(
     // ray cast — pixel-perfect against exactly what is drawn, GPU-posed
     // avatars included.
     .add_plugins(crate::gpu_pick::GpuPickPlugin)
-    // The client-side physics foundation (P31.1): an avian3d physics world with
-    // Second Life gravity, a fixed timestep at the sim's target rate, and
-    // region-time-dilation scaling — reused by Phase 32 (flexi) and Phase 34
-    // (avatar physics).
+    // The client-side physics foundation (P31.1): server-authoritative prim /
+    // avatar dead-reckoning and collision-geometry building (no physics engine —
+    // the viewer simulates nothing). Feeds the custom raycast index below.
     .add_plugins(PhysicsPlugin)
+    // The custom off-thread static raycast index (viewer-perf-custom-static-raycast-index):
+    // a parry BVH over the prim colliders, maintained on a background task and
+    // queried lock-free for camera collision — the replacement for avian's
+    // per-fixed-step `SpatialQuery` maintenance.
+    .add_plugins(crate::raycast_index::RaycastIndexPlugin)
     // The reflection-probe pipeline (P33): captures a scene environment cubemap and
     // binds it as image-based lighting — a default (global) probe on the main view,
     // the scene-render half Bevy's env-map filter / consumer expect but never

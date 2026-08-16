@@ -71,13 +71,24 @@ profile-chrome = ["dep:tracing-chrome", "bevy/trace", "bevy/trace_chrome"]
 arboard = { version = "3.6.1", default-features = false, features = [
     "wayland-data-control",
 ] }
-avian3d = { version = "0.7.0" }
+# Lock-free published snapshot for the custom static raycast index
+# (viewer-perf-custom-static-raycast-index): the query thread reads the current
+# BVH snapshot without blocking the background rebuild.
+arc-swap = "1.7"
 # `system_font_discovery` turns on parley/fontique OS font enumeration and
 # fallback, so CJK / Cyrillic / Arabic / emoji text resolves to the host's fonts
 # instead of rendering as tofu (viewer-ui-text-foundation). The colour-emoji
 # fallback is bundled separately (see `assets/fonts/`), because the system emoji
 # font is usually COLRv1, which swash cannot rasterise.
-bevy = { version = "0.19.0", features = ["system_font_discovery", "track_location"] }
+# `multi_threaded` was previously pulled in transitively by avian's `parallel`
+# feature; it is required for async pipeline compilation
+# (viewer-perf-pipeline-specialization-stalls), so declare it explicitly now that
+# avian is gone.
+bevy = { version = "0.19.0", features = [
+    "multi_threaded",
+    "system_font_discovery",
+    "track_location",
+] }
 # The UI skin / design-token system (viewer-ui-skin-tokens): real CSS
 # (selectors, pseudo-classes, `var()` custom-property tokens, `@import` overlay
 # merge, hot-reloaded `.css`) as the skin language. `src/skin.rs` registers the
@@ -132,6 +143,11 @@ jiff = { version = "0.2.35" }
 # on one parley build (a second copy would mean a second, unrelated font
 # collection).
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
+# parry3d is the collision-geometry / query backend for the custom raycast index
+# (viewer-perf-custom-static-raycast-index): `Bvh`, `SharedShape`, ray + contact
+# queries. The viewer simulates no physics, so it uses parry directly instead of a
+# whole physics engine — this replaced the avian3d dependency entirely.
+parry3d = "0.27.0"
 # The URL-linkification matcher (viewer-url-linkification) scans chat / notice /
 # profile text for `http(s)` URLs, SLURLs and `secondlife:///app/...` links,
 # faithfully mirroring the reference `llurlregistry` / `llurlentry` regex set.

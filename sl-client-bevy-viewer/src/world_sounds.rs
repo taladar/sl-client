@@ -35,11 +35,11 @@
 //! **Collision sounds** ([`ingest_collisions`]): a scripted `llCollisionSound`
 //! already arrives as an ordinary [`SoundTrigger`](SlSessionEvent::SoundTrigger)
 //! and needs nothing extra, so this module adds the viewer-*synthesized* layer —
-//! a material-default sound when two physical prims meet, hung off the avian3d
-//! `CollisionStart` events the physics module now enables on every physical prim.
-//! Coverage is prim–prim only (avatars and terrain carry no collider in our
-//! kinematic physics world); impact-scaled gain is not attempted because
-//! server-driven kinematic bodies give avian no reliable contact velocity.
+//! a material-default sound when two physical prims meet, detected each frame by
+//! parry-narrowphase contact tests over the moving-collider set
+//! ([`DynamicColliders`], fired on the contact *edge*). Coverage is prim–prim only
+//! (avatars and terrain carry no collider); impact-scaled gain is not attempted
+//! because server-driven kinematic movers give no reliable contact velocity.
 //!
 //! Not yet done here, tracked on the roadmap task: sample-accurate **sync master
 //! / slave** and **queue** semantics (looped attached sounds play, but not
@@ -47,9 +47,8 @@
 //! one-shot / attached sound plays pan + distance + rolloff today, which is the
 //! reference's floor.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use avian3d::prelude::{CollisionStart, Collisions};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sl_audio::{AudioMixer as _, Bus, Importance, Mixer, SpatialParams, VoiceId};
@@ -61,6 +60,7 @@ use sl_client_bevy::{
 use crate::coords::{bevy_to_sl_vec, region_offset_bevy, sl_to_bevy_vec};
 use crate::mutes::MuteModel;
 use crate::objects::{ObjectState, SceneObject};
+use crate::raycast_index::DynamicColliders;
 use crate::settings::ViewerSettings;
 use crate::sound_cache::SoundCache;
 
@@ -184,6 +184,10 @@ pub(crate) struct WorldSounds {
     /// collider entities (keyed by their sorted bit ids), so a jittering resting
     /// contact does not machine-gun. Pruned each pass to stay bounded.
     collision_cooldowns: HashMap<(u64, u64), f32>,
+    /// The unordered prim pairs that were touching last frame, so a sound fires
+    /// only on the *start* of a contact (the edge), matching avian's
+    /// `CollisionStart` — a continuously-resting pair stays silent.
+    touching_pairs: HashSet<(u64, u64)>,
 }
 
 /// Ingest the four sound events into [`WorldSounds`] and prefetch their clips.
@@ -458,7 +462,7 @@ const COLLISION_COOLDOWN_SECONDS: f32 = 0.15;
 
 /// The gain a synthesized collision sound plays at (the Sfx bus volume applies on
 /// top). Impact-scaled gain is not attempted: our physical prims are kinematic
-/// (server-driven), so avian has no reliable contact velocity to scale by.
+/// (server-driven), so there is no reliable contact velocity to scale by.
 const COLLISION_GAIN: f32 = 1.0;
 
 /// The reference viewer's default **same-material** collision sound for a prim of
@@ -488,21 +492,22 @@ const fn pair_key(a: Entity, b: Entity) -> (u64, u64) {
 }
 
 /// Play a material-default collision sound when two physical prims begin
-/// touching (`viewer-in-world-sounds`): map each collider entity back to its
-/// object, pick the primary object's material default, and enqueue a one-shot at
-/// the contact point — honouring mute, the parcel-local clamp and a per-pair
-/// cooldown. Only prim–prim collisions fire (avatars and terrain carry no
+/// touching (`viewer-in-world-sounds`): each frame, [`DynamicColliders`] reports
+/// the prim pairs currently in contact (parry narrowphase); for each pair that
+/// was *not* touching last frame — the contact edge — map the colliders back to
+/// their objects, pick the primary object's material default, and enqueue a
+/// one-shot at the contact point, honouring mute, the parcel-local clamp and a
+/// per-pair cooldown. Only prim–prim collisions fire (avatars and terrain carry no
 /// collider), and scripted `llCollisionSound`s already arrive separately as
-/// `SoundTrigger`s, so this is purely the viewer-synthesized default layer.
+/// `SoundTrigger`s, so this is purely the viewer-synthesised default layer.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's params are its dependencies; the collision-sound driver needs the \
-              events, the contact geometry, the scene-object map, time, the sound cache + state, \
-              the mute list, the parcel-audibility check and the enable setting"
+              moving colliders, the scene-object map, time, the sound cache + state, the mute \
+              list, the parcel-audibility check and the enable setting"
 )]
 pub(crate) fn ingest_collisions(
-    mut events: MessageReader<CollisionStart>,
-    collisions: Collisions,
+    dynamic: Res<DynamicColliders>,
     scene_objects: Query<&SceneObject>,
     time: Res<Time>,
     mut cache: ResMut<SoundCache>,
@@ -513,28 +518,31 @@ pub(crate) fn ingest_collisions(
     settings: Option<Res<ViewerSettings>>,
 ) {
     if !collision_sounds_enabled(settings.as_deref()) {
-        // Drain the backlog while disabled, so re-enabling does not fire a
-        // burst of stale impacts.
-        events.clear();
+        // Forget any tracked contacts while disabled, so re-enabling does not fire
+        // a burst of stale impacts (every still-touching pair reads as a new edge).
+        sounds.touching_pairs.clear();
         return;
     }
     let now = time.elapsed_secs();
-    for event in events.read() {
-        let (entity1, entity2) = (event.collider1, event.collider2);
+    let mut touching_now = HashSet::new();
+    for (entity1, entity2, point) in dynamic.contact_pairs() {
+        let key = pair_key(entity1, entity2);
+        touching_now.insert(key);
+        // Only fire on the *start* of a contact (the edge), and honour the per-pair
+        // cooldown so a bouncing / re-touching pair does not machine-gun.
+        if sounds.touching_pairs.contains(&key)
+            || sounds
+                .collision_cooldowns
+                .get(&key)
+                .is_some_and(|&last| now - last < COLLISION_COOLDOWN_SECONDS)
+        {
+            continue;
+        }
         // Only prim–prim collisions: both colliders must map to scene objects.
         let (Ok(object1), Ok(object2)) = (scene_objects.get(entity1), scene_objects.get(entity2))
         else {
             continue;
         };
-        // Per-pair cooldown.
-        let key = pair_key(entity1, entity2);
-        if sounds
-            .collision_cooldowns
-            .get(&key)
-            .is_some_and(|&last| now - last < COLLISION_COOLDOWN_SECONDS)
-        {
-            continue;
-        }
         // Mute: skip if either object is on the mute list.
         let muted_pair = [object1, object2].iter().any(|object| {
             state
@@ -544,15 +552,6 @@ pub(crate) fn ingest_collisions(
         if muted_pair {
             continue;
         }
-        // The world-space contact point (avian's `Vector` is a Bevy `Vec3`).
-        let Some(point) = collisions
-            .get(entity1, entity2)
-            .and_then(|pair| pair.manifolds.first())
-            .and_then(|manifold| manifold.points.first())
-            .map(|contact| contact.point)
-        else {
-            continue;
-        };
         // Parcel-local clamp at the contact point.
         if !scene_audible(&parcel, &state, point) {
             continue;
@@ -573,6 +572,7 @@ pub(crate) fn ingest_collisions(
             enqueued: now,
         });
     }
+    sounds.touching_pairs = touching_now;
     // Prune stale cooldown entries so the map cannot grow without bound.
     sounds
         .collision_cooldowns

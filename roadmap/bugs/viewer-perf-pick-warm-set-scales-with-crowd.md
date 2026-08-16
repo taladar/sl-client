@@ -31,7 +31,29 @@ instances). The pipelines are cache-keyed by layout anyway, so re-collecting per
 instance is pure waste. Contributes to the crowd Main cost
 ([[viewer-perf-gpu-avatar-crowd-cpu-bound]]).
 
+## 2026-08-15 aditi capture — it also scales with prim-face count, every frame
+
+On the full-session aditi trace (`tracy-captures/aditi-2026-08-15.tracy`,
+dense region, **only the primary avatar** — no synthetic crowd),
+`collect_pick_warm_set` is **3.77 ms/frame** — the single largest steady
+`Update` system. The dedup-by-`(skinned, mesh_id)` fix from this bug is already
+in code (`gpu_pick.rs:546-553`), so the *output* set is small; the cost is that
+it still **re-iterates every `With<PickId>` entity every frame**, and on a dense
+region that is all ~14 k tessellated prim faces (each face is pickable). So the
+system is O(pickable entities)/frame regardless of crowd — the warm set barely
+changes frame to frame, yet it is fully rebuilt each frame.
+
+The deeper fix is to make it **change-driven**: rebuild the warm set only when a
+new pickable `(skinned, layout)` appears (a `PickId`/mesh-layout arrival),
+carrying the deduped set across frames, instead of a per-frame full scan of
+every pick-tagged entity. That fixes both the crowd case and this prim-face
+case. (If [[viewer-perf-custom-static-raycast-index]] later absorbs pick
+raycasts, revisit whether the render-world pick pre-warm is still needed at
+all.)
+
 ## Verify
 
 `CROWD=100`: `collect_pick_warm_set` stays flat (~its 1-avatar cost) instead of
 scaling with copy count; first pick after login still lands (pre-warm intact).
+On a dense-prim region with no crowd it should also stay flat frame-to-frame
+(near-0 in steady state), not track the pickable-entity count.

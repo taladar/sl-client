@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 28 |
-| done | 830 |
+| done | 831 |
 | deferred | 24 |
 | wont-do | 12 |
-| **total** | **1265** |
+| **total** | **1266** |
 
 ## ideas (65)
 
@@ -1015,7 +1015,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (830)
+## done (831)
 
 ### protocol
 
@@ -1811,6 +1811,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Precompute alpha classification in the decode task
 - [`viewer-perf-camera-collision-broad-phase`](done/viewer-perf-camera-collision-broad-phase.md)
   — Camera-collision raycast off whole-scene MeshRayCast onto a broad phase
+- [`viewer-perf-custom-static-raycast-index`](done/viewer-perf-custom-static-raycast-index.md)
+  — Replace avian with a custom off-thread static raycast index
 - [`viewer-perf-decoded-geometry-budget`](done/viewer-perf-decoded-geometry-budget.md)
   — Budget decode-result geometry application (mesh / sculpt / rigged)
 - [`viewer-perf-flexi-settle-detection`](done/viewer-perf-flexi-settle-detection.md)

@@ -40,6 +40,44 @@ execution + GPU draw + render-side prepare/queue.
   leg): physics (`run_fixed_main_schedule` 7.7 ms, avian substeps),
   `PostUpdate` propagation.
 
+## Re-capture 2026-08-15 (aditi, denser scene) — render-bound confirmed, heavier
+
+A fresh full-session `tracy-capture` (release, `profile-tracy`,
+`RUST_LOG=warn,bevy_ecs=info,bevy_render=info`, 1890 frames / 2:18, 13.7 M
+zones, clean disconnect; trace `tracy-captures/aditi-2026-08-15.tracy`)
+re-measures the average frame on a **denser aditi spot** than the 2026-08-13
+27-fps capture. 28 frames were compositor-throttled (~954 ms `present`, all in
+the first ~30 s while the window was unfocused during login/rez) and are
+excluded; all numbers are the visible steady state (finished-frame deltas):
+
+- frame: mean **57.1 ms (17.5 fps)**, p50 **53.4 ms**, p95 84.1, p99 127.5,
+  max 379.9.
+- `schedule{name=Render}` (thread 2, concurrent) mean **52.6 ms**,
+  corr(frame) **0.92**, present only 0.13 ms — **this is the gate.**
+- `schedule{name=Main}` (thread 1) mean **34.1 ms** — runs concurrently and
+  fits under Render, so the frame is squarely **render-app bound** (unlike the
+  2026-08-12 co-limited local/aditi captures).
+
+Render splits into render-side prepare/queue (~22 ms) + **`render_system`
+(render graph) 30.9 ms** (p95 45.7). That render_system is **up from 18.1 ms**
+on the 2026-08-13 baseline — the render graph / draw is the dominant lever, and
+the scene renders **~8.76 `Core3d` passes per frame** (main view + the GPU-pick
+view + atmosphere env-map + reflection/light-probe cubemap faces), each a full
+deferred prepass + opaque + transparent + OIT + AA + tonemapping. Attribute
+`camera_driver` to specific nodes next (many-views × many-passes is the
+multiplier). Caveat: this spot is denser / has more reflective content than the
+2026-08-13 run, so part of the 18→31 ms rise is scene conditions — the
+qualitative finding (render-bound, render_system dominant, probe/env multi-pass)
+is what holds.
+
+Main (34 ms, non-gating here) = PostUpdate 14.4 + Update 11.4 + FixedLoop 5.0 +
+Extract 3.5 + PreUpdate 2.2. On the "render-side CPU prepare/queue" lever above:
+**`collect_pick_warm_set` is now 3.77 ms/frame** (the top steady `Update`
+system, with only the primary avatar) — it *is* over-collecting, but on a dense
+**prim** region rather than a crowd; see
+[[viewer-perf-pick-warm-set-scales-with-crowd]]. `build_static_colliders`
+(1.16 ms/frame, full O(all prims) scan) is the next viewer-side steady cost.
+
 ## Verify
 
 Tracy on a representative + a crowd scene; attribute `camera_driver` time to
