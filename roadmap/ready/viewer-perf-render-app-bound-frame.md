@@ -78,10 +78,60 @@ system, with only the primary avatar) — it *is* over-collecting, but on a dens
 [[viewer-perf-pick-warm-set-scales-with-crowd]]. `build_static_colliders`
 (1.16 ms/frame, full O(all prims) scan) is the next viewer-side steady cost.
 
+## Re-capture 2026-08-16 — the render leg is CPU-bound, not GPU
+
+Fresh captures after avian removal ([[viewer-perf-custom-static-raycast-index]])
+and the change-driven pick warm
+([[viewer-perf-pick-warm-set-scales-with-crowd]]) —
+`tracy-captures/aditi-2026-08-16-postpickwarm.tracy`, GPU-zone track included.
+Two corrections to the earlier framing:
+
+**1. Both legs are over budget — "render-bound so Main doesn't matter" was
+wrong.** Main is down to **~25.7 ms** (First→Last), Render ~**50 ms**; the
+median frame is still ~53 ms. Render is the *longer* leg, but Main is itself
+~1.5× the 16.6 ms/60 fps budget, so reaching 60 fps needs both to come down —
+`frame ≈ extract + max(Main, Render)`, and cutting only the longer floors at
+`extract + the other`.
+
+**2. The render leg is ~90 % CPU, not GPU.** Summing the Tracy GPU-zone track:
+**total GPU execution is only ~4.3 ms/frame** (opaque 2.2, clustering 0.6,
+transparent **0.5**, msaa_writeback 0.4, upscaling 0.3, …) against a ~50 ms
+render leg — the RX 7900 XTX is ~92 % idle. So the cost is **CPU command
+encoding + submission**, and no shader/GPU optimization moves it. CPU render-
+thread costs (self-time/frame):
+
+| zone | CPU/frame | GPU/frame | nature |
+| --- | --- | --- | --- |
+| `submit_pending_command_buffers` | **6.0 ms** | — | per **view × pass** command-buffer finalize + `vkQueueSubmit`; not per-entity |
+| `main_transparent_pass_3d` (×~15 views) | **4.1 ms** | 0.5 ms | **8× CPU-bound** — per-item draw encode; transparent can't batch (depth-sorted) |
+| `main_opaque_pass_3d` (×~15) | 1.9 ms | 2.2 ms | the one GPU/CPU-balanced pass |
+| render-world prepare/queue | ~21 ms | — | per-object / per-view: clustering 2.0, queue/collect/specialize ~1 each, `gpu_preprocess`/culling heavily parallel |
+
+Draw batching already works (meshes deduped via `GeometryCache` + `MeshStore`,
+materials interned — [[viewer-perf-material-intern]]) — which is *why* GPU draw
+time is tiny. Batching cuts **draw calls**, but the render-thread cost is
+**command-buffer count (per view×pass)** + **per-entity prepare/queue** + the
+**un-batchable transparent** path, none of which asset dedup touches.
+
+### Which levers are viable
+
+- **NOT viable — transparent item count**: user-generated SL content; we cannot
+  reduce how many transparent faces a region has, and Bevy can't batch them.
+- **NOT viable — fewer views / probe cadence**: must stay SL-faithful, and
+  throttling probe capture caused large spikes (Bevy discards unused
+  pipeline/mesh caches — the probe-cadence lesson). `submit` (6 ms) is bound to
+  view×pass, so it is effectively fixed.
+- **The remaining lever — entity-count reduction**: collapse a prim's per-face
+  entities into one per-object mesh, cutting the per-entity *serial* render work
+  (queue/collect/phase-item build) and the main-thread PostUpdate visibility
+  ~4×. Ceiling is the per-entity serial cost (order ~5–10 ms, partly on the
+  non-gating Main leg), not the submit/transparent head — measure first. Tracked
+  in [[viewer-perf-per-object-face-merge-entity-count]] (revived 2026-08-16).
+
 ## Verify
 
-Tracy on a representative + a crowd scene; attribute `camera_driver` time to
-render-graph nodes (RenderDoc for pass-level GPU cost); pick the biggest lever
-and re-measure the frame period. Separate task tracks the outlier spikes
+Tracy on a representative + a crowd scene; the render leg is CPU-bound (confirm
+via the GPU-zone track staying ~4 ms), so measure CPU submit/encode + per-entity
+prepare/queue, not GPU pass time. Separate task tracks the outlier spikes
 ([[viewer-perf-asset-streaming-frame-spikes]]); this one is the steady-state
 average frame.

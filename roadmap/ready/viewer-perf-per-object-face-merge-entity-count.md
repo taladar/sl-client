@@ -2,14 +2,81 @@
 id: viewer-perf-per-object-face-merge-entity-count
 title: Cut per-frame CPU by reducing world-object entity count (face merge / per-object cull unit)
 topic: viewer
-status: wont-do
+status: ready
 origin: wall-clock profiling that shelved the octree cull
-  (viewer-perf-world-frustum-culling-octree, 2026-08-01)
+  (viewer-perf-world-frustum-culling-octree, 2026-08-01); revived 2026-08-16
 refs:
-  [viewer-perf-world-frustum-culling-octree, viewer-perf-probe-occlusion-skip]
+  - viewer-perf-world-frustum-culling-octree
+  - viewer-perf-probe-occlusion-skip
+  - viewer-perf-render-app-bound-frame
+  - viewer-perf-pipeline-specialization-stalls
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## Revived 2026-08-16 — the won't-do escape clause tripped
+
+The 2026-08-01 won't-do (kept in full below) closed with: *"Revisit only if a
+Tracy capture pins a specific per-frame cost squarely on the raw face-entity
+count."* Post-avian / post-pick-warm captures partly do, and change the picture
+the original decision rested on — but **not entirely**, so this is revived with
+eyes open, and gated on a measurement before the big refactor.
+
+**What changed since 2026-08-01:**
+
+- **The render thread is now the gating leg, and it is CPU-bound.** Main is down
+  to ~25.7 ms (avian removed, pick-warm change-driven) while the render app is
+  ~50 ms with **GPU only ~4.3 ms/frame** — the RX 7900 XTX is ~92 % idle. The
+  2026-08-01 note assumed render "runs concurrently behind the main thread, so
+  merge only helps when it is the gating stage." It **is** the gating stage now.
+- **Per-entity serial work sits on the render critical path.**
+  `queue_material_ meshes` (~1 ms), `collect_meshes_for_gpu_building` (~0.8 ms),
+  the transparent phase-item build, and per-entity bind-group prep are serial
+  render-thread work that scales with drawn-entity count; the main-thread
+  `check_visibility_cpu_ culling` (~1.2 ms serial) + `calculate_bounds` are
+  per-entity too. Collapsing a prim's ~faces into one entity is ~4× fewer
+  entities through all of them.
+
+**What the won't-do got right and still holds (do not re-learn the hard way):**
+
+- **The two biggest render-thread zones are NOT entity-count.**
+  `submit_pending_command_buffers` (~6 ms) is per **view × pass** (one command
+  buffer per view), and `main_transparent_pass_3d` (~4 ms CPU) is per
+  transparent *item*. Merge does not reduce the command-buffer count, and
+  transparent-item count is user-generated SL content we cannot reduce; Bevy
+  also can't batch transparent (depth-sorted, only adjacent-after-sort items
+  merge). Fewer views is off the table too — probe cadence must stay
+  SL-faithful, and running probes less often caused **huge spikes** because Bevy
+  discards pipeline/mesh caches that go unused (the probe-cadence lesson). So
+  merge attacks the per-entity *tail* of the render leg, not its head.
+- **Much per-entity work is parallel / change-gated.** `gpu_preprocess` and
+  `check_visibility` are `par_iter` across ~11 workers (small wall-clock);
+  extraction is `Changed`-gated. Merge shrinks their *summed* work but only the
+  *serial* portion is on the critical path.
+- **Merge defeats cross-object instancing.** Per-(object, material) merged
+  meshes are unique per object, so the content-interned cross-object draw
+  batching (`viewer-perf-material-intern`) stops firing for them. GPU is idle so
+  more draws is fine on the GPU, but more *distinct* draws can mean more CPU
+  encode / submit — the very costs we are trying to cut. This must be measured,
+  not assumed away.
+
+**So the honest expectation:** entity-count reduction is the best *remaining*
+lever (transparent-item count and view count are both immovable), but its
+ceiling is the per-entity **serial** render + main work (order ~5–10 ms, much of
+it on the non-gating Main leg), **not** the ~10 ms of submit + transparent that
+dominate the render head. It is unlikely to move the ~53 ms median dramatically
+on its own; treat it as removing a scaling factor (so the frame degrades more
+gracefully as regions get denser / more views activate) rather than a median
+win.
+
+**Step 0 (gate the refactor): measure the ceiling first.** Before the
+cross-cutting rewrite, bound the actual serial, on-critical-path per-entity
+cost: from a Tracy `-u` unwrap, sum the render-thread serial systems that scale
+with entity count (`queue_material_meshes`, `collect_meshes_for_gpu_building`,
+per-entity phase-item build, bind-group prep) at the current ~14 k faces, and
+estimate the ~4× reduction — and separately confirm merge does not inflate
+submit/encode via lost instancing (a quick A/B on a merged vs unmerged subset).
+Proceed with the full refactor only if that ceiling justifies the risk below.
 
 The octree frustum-culling idea
 ([[viewer-perf-world-frustum-culling-octree]]) was shelved once wall-clock
@@ -55,7 +122,12 @@ note plus `book/src/tools/profiling.md`): **steady-state frame time and the
 main-thread schedule durations (extract / PostUpdate) plus the render-thread
 Render schedule**, on the same aditi spot — never summed self-time.
 
-## Won't-do — entity-count premise undercut; cost/risk too high (2026-08-01)
+## Historical won't-do (2026-08-01) — superseded by the revival above
+
+Kept verbatim as the record of why this was shelved and which hazards remain
+real. The "why it would barely help" bullets are the ones the 2026-08-16 data
+partially overturned (render is now the gating CPU-bound leg); the "why it would
+be hard" bullets are all still true and are the risk this task must manage.
 
 Investigated during the same aditi profiling push that shelved the octree cull
 ([[viewer-perf-world-frustum-culling-octree]]), reading the Bevy 0.19 extract /

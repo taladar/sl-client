@@ -69,8 +69,15 @@ is covered for free (synthetic `Crowd` copies are never pick-tagged, so they
 never enter the query). Unit-tested
 (`warm_set_is_change_driven_not_a_full_rescan`): a newly-tagged mesh is emitted,
 an unchanged set collects nothing, a mesh-handle swap re-emits.
-`clippy --all-targets` clean; live-verify the ~3.6 ms Update drop on a dense
-aditi region in the next Tracy pass.
+`clippy --all-targets` clean.
+
+**Measured (2026-08-16 re-capture,
+`tracy-captures/aditi-2026-08-16-postpickwarm.tracy`):** `collect_pick_warm_set`
+mean **3.64 → 0.166 ms/frame**, max 25.2 → 1.47 ms (~22×; the 0.166 residual is
+the rez-heavy early frames where `Added<PickId>` legitimately fires — ~0 once
+the scene settles). `Main` schedule total dropped **29.2 → 25.7 ms** in step.
+Main-thread win only — the ~53 ms median is gated by the render leg
+([[viewer-perf-render-app-bound-frame]]).
 
 ## Original report / Verify
 

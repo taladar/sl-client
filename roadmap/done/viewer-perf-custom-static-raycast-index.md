@@ -157,7 +157,15 @@ per-leaf `primitive_check` closure and returns the nearest `(leaf, distance)`.
   logic) but not live-verified — needs two colliding server-physical prims,
   which a random aditi spot does not provide. Exercise when a physical-prim
   scene is available.
-- **Not yet measured:** a Tracy re-capture confirming the 117 ms
-  `RunFixedMainLoop` class and the `build_static_colliders` main-thread scan are
-  gone (they are removed by construction — no `FixedMain`/`PhysicsSchedule` runs
-  and the scan is change-driven — but the frame-time win is unmeasured).
+- **Measured (2026-08-16 re-capture,
+  `tracy-captures/aditi-2026-08-16-postavian.tracy`):** avian's
+  `PhysicsSchedule` / `SubstepSchedule` / `collider_tree` /
+  `transform_to_position` are **gone**; `RunFixedMainLoop` dropped
+  **max 117.6 → 12.5 ms**, mean 5.35 → 0.89 ms (the residual is Bevy's now-empty
+  fixed schedules). Main-thread total fell **34.1 → 29.2 ms**. The steady-state
+  median frame is unchanged (~53 ms) — expected, since the frame is render-app
+  bound ([[viewer-perf-render-app-bound-frame]]); the win is the eliminated 117
+  ms spike class + ~5 ms of Main headroom, not median fps. Correction to an
+  earlier draft of this note: `build_static_colliders` still runs its per-frame
+  scan (~1 ms) — that scan was never avian and is a separate lever, not removed
+  here.
