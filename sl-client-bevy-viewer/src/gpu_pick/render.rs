@@ -10,6 +10,7 @@
 use bevy::core_pipeline::schedule::{Core3d, Core3dSystems};
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::SkinUniforms;
+use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy::render::mesh::allocator::MeshAllocator;
 use bevy::render::mesh::{RenderMesh, RenderMeshBufferInfo};
@@ -203,20 +204,32 @@ struct PreparedPickData {
     skinned_bind: Option<BindGroup>,
 }
 
-/// Kick off compilation of both pick pipeline variants for every currently
-/// pickable mesh layout, independent of whether a pick is pending — so
-/// `PipelineCache` starts compiling a mesh's pick pipeline the moment it
-/// rezzes (avatar submeshes, prim faces, terrain, water) rather than only on
-/// the first pick over it, eliminating the "first pick may miss while the
-/// pick pipeline compiles" latency. Uses the *same* [`GpuPickKey`] and the
-/// mesh's *real* [`MeshVertexBufferLayoutRef`] (via `RenderAssets<RenderMesh>`)
-/// that [`prepare_gpu_pick`] specializes against, so the warmed pipeline is
-/// the one an actual pick draws with — never a synthetic layout that would
-/// warm nothing. `specialize` is a cheap cache lookup once a layout is
-/// compiled (or compiling), so calling it again every frame for an
-/// already-warm layout is harmless; no separate warmed-set tracking is kept.
+/// Pick-tagged meshes awaiting pipeline warming: freshly-rezzed candidates
+/// (from [`super::collect_pick_warm_set`], folded in via the extracted
+/// [`GpuPickWarmSet`]) whose render asset has not uploaded yet, retried each
+/// frame until it lands. Render-world only; drains to empty once every pending
+/// mesh is uploaded and its pipeline queued, so steady-state cost is ~0.
+#[derive(Resource, Default)]
+struct PendingPickWarm(HashSet<(bool, AssetId<Mesh>)>);
+
+/// Kick off compilation of a mesh's pick pipeline the moment it becomes pickable
+/// — so `PipelineCache` is already compiling by the time any pick reaches it,
+/// eliminating the "first pick may miss while the pick pipeline compiles"
+/// latency (warming is tied to **rez**, never deferred to the first pick).
+///
+/// The main world emits only *newly* pickable / re-meshed candidates
+/// ([`super::collect_pick_warm_set`]); this folds them into [`PendingPickWarm`]
+/// and, each frame, warms every pending candidate whose mesh has finished
+/// uploading — retrying the rest until it does. Uses the *same* [`GpuPickKey`]
+/// and the mesh's *real* [`MeshVertexBufferLayoutRef`] (via
+/// `RenderAssets<RenderMesh>`) that [`prepare_gpu_pick`] specializes against, so
+/// the warmed pipeline is the one an actual pick draws with. `specialize` is a
+/// cheap cache lookup once a layout is compiling, so distinct meshes sharing a
+/// layout coalesce there; a candidate is dropped from the pending set once its
+/// mesh is up and specialized (whether newly compiled or already warm).
 fn warm_gpu_pick_pipelines(
     warm_set: Res<GpuPickWarmSet>,
+    mut pending: ResMut<PendingPickWarm>,
     pipeline: Option<Res<GpuPickPipeline>>,
     mut specialized: ResMut<SpecializedMeshPipelines<GpuPickPipeline>>,
     pipeline_cache: Res<PipelineCache>,
@@ -225,21 +238,27 @@ fn warm_gpu_pick_pipelines(
     let Some(pipeline) = pipeline else {
         return;
     };
-    for &(skinned, mesh_id) in &warm_set.0 {
+    // Fold this frame's freshly-rezzed candidates into the persistent retry set.
+    for &candidate in &warm_set.0 {
+        let _inserted = pending.0.insert(candidate);
+    }
+    if pending.0.is_empty() {
+        return;
+    }
+    // Warm each candidate whose mesh has uploaded; keep the rest to retry.
+    pending.0.retain(|&(skinned, mesh_id)| {
         let Some(mesh) = meshes.get(mesh_id) else {
-            // Not yet uploaded to the render world; the next frame's warm
-            // set (or the pick that eventually targets it) retries.
-            continue;
+            // Not uploaded to the render world yet — retry next frame.
+            return true;
         };
         let key = GpuPickKey { skinned };
-        let Ok(_pipeline_id) =
-            specialized.specialize(&pipeline_cache, &pipeline, key, &mesh.layout)
-        else {
-            // A mesh without the variant's attributes cannot be picked
-            // through this variant; nothing to warm.
-            continue;
-        };
-    }
+        // Kicks off the async compile (a cache lookup if the layout is already
+        // warm). A mesh without the variant's attributes returns `Err` — nothing
+        // to warm. Either way this candidate is handled once its mesh is up, so
+        // drop it from the retry set.
+        let _result = specialized.specialize(&pipeline_cache, &pipeline, key, &mesh.layout);
+        false
+    });
 }
 
 /// Prepare this frame's pick pass from the extracted submission: specialize
@@ -497,6 +516,7 @@ pub(crate) fn build_render_app(render_app: &mut bevy::app::SubApp) {
     render_app
         .init_resource::<GpuPickSubmission>()
         .init_resource::<GpuPickWarmSet>()
+        .init_resource::<PendingPickWarm>()
         .init_resource::<GpuPickBuffers>()
         .init_resource::<PreparedGpuPick>()
         .init_resource::<SpecializedMeshPipelines<GpuPickPipeline>>()

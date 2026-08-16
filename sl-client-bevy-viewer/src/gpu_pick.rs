@@ -531,18 +531,36 @@ pub(crate) fn free_pick_tags(
     }
 }
 
-/// Collect the distinct `(skinned, mesh)` combinations among this frame's
-/// pick-tagged entities into [`GpuPickWarmSet`], so the render world can kick
-/// off pipeline compilation for a mesh layout as soon as it becomes pickable
-/// — during world-rez / login — instead of only on the first pick over it
-/// (`render::warm_gpu_pick_pipelines`). Runs every frame independent of
-/// whether a pick is pending; `SpecializedMeshPipelines::specialize` is a
-/// cheap cache lookup once compiled, so re-warming an already-warm layout
-/// costs nothing.
+/// Emit each pick-tagged mesh into [`GpuPickWarmSet`] **once, when it rezzes**,
+/// so the render world can kick off its pick-pipeline compilation the moment the
+/// mesh becomes pickable — during world-rez / login — instead of only on the
+/// first pick over it (`render::warm_gpu_pick_pipelines`).
+///
+/// **Change-driven, not a per-frame rescan.** The query is filtered to entities
+/// that just became pickable ([`Added<PickId>`]) or whose mesh handle just
+/// changed ([`Changed<Mesh3d>`], e.g. a placeholder swapped for the decoded
+/// mesh); in steady state it matches nothing, so this costs ~0. It used to scan
+/// **every** `With<PickId>` entity every frame — ~3.6 ms/frame on a dense region
+/// (every tessellated prim face is pick-tagged), rebuilding a near-constant set
+/// ([[viewer-perf-pick-warm-set-scales-with-crowd]]). The render world keys the
+/// actual pipeline by mesh layout and retries a not-yet-uploaded mesh until it
+/// lands (see `render::warm_gpu_pick_pipelines`), so warming stays tied to
+/// **rez** — a mesh is warm well before any pick reaches it, never lazily on the
+/// first pick.
+#[expect(
+    clippy::type_complexity,
+    reason = "an ECS system's arguments are its injected queries; the change-detection filter is inherently a nested tuple"
+)]
 pub(crate) fn collect_pick_warm_set(
     mut warm: ResMut<GpuPickWarmSet>,
-    candidates: Query<(&Mesh3d, Has<SkinnedMesh>), With<PickId>>,
+    candidates: Query<
+        (&Mesh3d, Has<SkinnedMesh>),
+        (With<PickId>, Or<(Added<PickId>, Changed<Mesh3d>)>),
+    >,
 ) {
+    // Only this frame's newly-pickable / re-meshed entities. The render world
+    // folds these into its persistent retry set, so nothing is dropped by
+    // clearing here (a mesh not yet uploaded is retried render-side).
     warm.0.clear();
     let mut seen = HashSet::new();
     for (mesh3d, skinned) in &candidates {
@@ -1071,9 +1089,10 @@ mod tests {
     };
 
     use super::{
-        CLASS_AVATAR, CLASS_OBJECT_FACE, CLASS_TERRAIN, CLASS_WATER, CROP_PIXELS, PICK_INDEX_MASK,
-        PickRegistry, PickResolution, crop_clip_from_world, decode_pick_tag, encode_pick_tag,
-        parse_centre_pixel, unproject_centre,
+        CLASS_AVATAR, CLASS_OBJECT_FACE, CLASS_TERRAIN, CLASS_WATER, CROP_PIXELS, GpuPickWarmSet,
+        PICK_INDEX_MASK, PickId, PickRegistry, PickResolution, collect_pick_warm_set,
+        crop_clip_from_world, decode_pick_tag, encode_pick_tag, parse_centre_pixel,
+        unproject_centre,
     };
 
     /// A boxed error so tests can use `?` instead of the disallowed
@@ -1096,6 +1115,50 @@ mod tests {
             "an index beyond 28 bits must be rejected"
         );
         Ok(())
+    }
+
+    /// The pipeline pre-warm collection is **change-driven**: a mesh is emitted
+    /// the frame it becomes pickable (or its mesh handle changes), and an
+    /// unchanged pickable set collects nothing — it never re-scans every
+    /// pick-tagged entity per frame ([[viewer-perf-pick-warm-set-scales-with-crowd]]).
+    #[test]
+    fn warm_set_is_change_driven_not_a_full_rescan() {
+        let mut app = App::new();
+        app.init_resource::<GpuPickWarmSet>();
+        app.add_systems(Update, collect_pick_warm_set);
+
+        // A freshly pick-tagged mesh is emitted on the frame it rezzes.
+        let entity = app
+            .world_mut()
+            .spawn((Mesh3d(Handle::default()), PickId(1)))
+            .id();
+        app.update();
+        assert_eq!(
+            app.world().resource::<GpuPickWarmSet>().0.len(),
+            1,
+            "a newly pick-tagged mesh must be warmed at rez"
+        );
+
+        // Steady state: nothing changed, so nothing is collected — the previous
+        // implementation rescanned every `With<PickId>` entity here.
+        app.update();
+        assert_eq!(
+            app.world().resource::<GpuPickWarmSet>().0.len(),
+            0,
+            "an unchanged pickable set must not be re-collected every frame"
+        );
+
+        // A mesh-handle swap on an already-pickable entity (placeholder →
+        // decoded mesh) re-emits it, so its new layout still warms at rez.
+        if let Some(mut mesh) = app.world_mut().get_mut::<Mesh3d>(entity) {
+            mesh.0 = Handle::default();
+        }
+        app.update();
+        assert_eq!(
+            app.world().resource::<GpuPickWarmSet>().0.len(),
+            1,
+            "a changed mesh handle must re-warm at rez, not defer to first pick"
+        );
     }
 
     /// A convenience scoped id for the registry tests.

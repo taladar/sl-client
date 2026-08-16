@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 223 |
 | blocked | 67 |
 | in-progress | 16 |
-| bugs | 28 |
-| done | 831 |
+| bugs | 27 |
+| done | 832 |
 | deferred | 24 |
 | wont-do | 12 |
 | **total** | **1266** |
@@ -943,7 +943,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (28)
+## bugs (27)
 
 ### protocol
 
@@ -993,8 +993,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
   — Own avatar forward direction drifts every few seconds while idle
-- [`viewer-perf-pick-warm-set-scales-with-crowd`](bugs/viewer-perf-pick-warm-set-scales-with-crowd.md)
-  — collect_pick_warm_set scales with the crowd (touches un-pickable copies)
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
@@ -1015,7 +1013,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (831)
+## done (832)
 
 ### protocol
 
@@ -1856,6 +1854,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Coalesce repeated object updates in the pending queue
 - [`viewer-perf-parcel-borders-rebuild-spread`](done/viewer-perf-parcel-borders-rebuild-spread.md)
   — Parcel borders — rebuild only the changed region, spread new regions
+- [`viewer-perf-pick-warm-set-scales-with-crowd`](done/viewer-perf-pick-warm-set-scales-with-crowd.md)
+  — collect_pick_warm_set scales with the crowd (touches un-pickable copies)
 - [`viewer-perf-pipeline-specialization-stalls`](done/viewer-perf-pipeline-specialization-stalls.md)
   — Reflection-probe capture drives periodic shadow re-specialization stalls
 - [`viewer-perf-prim-tessellation-cache`](done/viewer-perf-prim-tessellation-cache.md)

@@ -2,7 +2,7 @@
 id: viewer-perf-pick-warm-set-scales-with-crowd
 title: collect_pick_warm_set scales with the crowd (touches un-pickable copies)
 topic: viewer
-status: bugs
+status: done
 origin: GPU-avatar Phase 5 crowd measurement (2026-08-14)
 refs: [viewer-perf-gpu-avatar-phase3-gpu-picking, viewer-perf-gpu-avatar-crowd-cpu-bound]
 ---
@@ -51,7 +51,28 @@ case. (If [[viewer-perf-custom-static-raycast-index]] later absorbs pick
 raycasts, revisit whether the render-world pick pre-warm is still needed at
 all.)
 
-## Verify
+## Fixed (2026-08-16) — made change-driven
+
+`collect_pick_warm_set` no longer scans every `With<PickId>` entity per frame.
+Its query is now filtered to `Or<(Added<PickId>, Changed<Mesh3d>)>` — a mesh is
+emitted only the frame it becomes pickable or its handle swaps (placeholder →
+decoded), so in steady state it matches nothing and costs ~0 (down from ~3.6
+ms/frame on a dense region). The render world (`warm_gpu_pick_pipelines`) folds
+each emitted candidate into a persistent `PendingPickWarm` retry set and warms
+it as soon as its mesh uploads, dropping it once specialized; a not-yet-uploaded
+mesh is retried there instead of being re-collected main-side.
+
+Warming stays tied to **rez**, never deferred to the first pick: `Added<PickId>`
+fires at rez, and the render-side retry guarantees the pipeline is queued as
+soon as the mesh is on the GPU — well before any pick reaches it. The crowd case
+is covered for free (synthetic `Crowd` copies are never pick-tagged, so they
+never enter the query). Unit-tested
+(`warm_set_is_change_driven_not_a_full_rescan`): a newly-tagged mesh is emitted,
+an unchanged set collects nothing, a mesh-handle swap re-emits.
+`clippy --all-targets` clean; live-verify the ~3.6 ms Update drop on a dense
+aditi region in the next Tracy pass.
+
+## Original report / Verify
 
 `CROWD=100`: `collect_pick_warm_set` stays flat (~its 1-avatar cost) instead of
 scaling with copy count; first pick after login still lands (pre-warm intact).
