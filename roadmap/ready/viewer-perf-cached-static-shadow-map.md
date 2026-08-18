@@ -249,9 +249,36 @@ objects keep their shadows as the camera pans. Fork unit tests cover
 `calculate_static_cascade` reuse-vs-rebuild; the viewer's classification split
 tests are updated for the static frusta.
 
+### Perf measurement + tuning (Tracy, aditi 2026-08-18)
+
+A Tracy capture on a dense aditi region (feature active, parked) showed the
+first cut **regressed** frame time, from two costs the initial implementation
+introduced:
+
+1. **The caster cull ran on every camera, not just the sun view.** The fork
+   builds sun cascades for *every* `Camera3d` (main + 6 probe-capture faces +
+   gizmo / HUD / water-exclusion masks) but only renders shadows for views whose
+   layers intersect the sun's. The viewer cull was frustum-testing all casters
+   for all ~10 views, and — because the same-frame ordering fix makes `apply`
+   `block_on` the cull — that ~11 ms landed on the main-thread critical path
+   every frame. **Fix:** the cull now skips views whose render layers don't
+   intersect the light's (matching `prepare_lights`). `apply_shadow_cull` p50
+   **11.25 ms → 1.70 ms**; steady-state shadow subsystem ~15 ms → ~6 ms/frame.
+2. **Every static bake force-requeues the whole set.** `specialize_shadows` /
+   `queue_shadows` spike to ~45 ms on bake frames (the `StaticShadowBakes`
+   force-wipe re-specializes all static casters), and a rezzing region bakes
+   almost every frame as casters settle in. **Partial fix:** a bake debounce
+   (`BAKE_DEBOUNCE_FRAMES`) coalesces the rez churn into an occasional bake
+   (queue p90 47 → 33 ms). The per-bake cost is unchanged and remains a
+   follow-up.
+
 ### Follow-up
 
-- Measure the shadow-pass CPU drop (Tracy) while parked in a busy sim to
-  quantify the win (the correctness goal is met; the perf number is not yet
-  recorded).
+- **Cut the per-bake cost:** re-specialize only the *changed* static casters on
+  a bake instead of force-wiping the whole view (the
+  `check_views_lights_need_specialization` path). The debounce reduces bake
+  frequency but each bake is still ~45 ms.
+- Re-measure with the viewer window **focused** — both aditi captures were
+  present-throttled (occluded → ~2 fps), so per-system CPU is trustworthy but
+  frame time is not.
 - Scope 3 (virtual shadow maps) remains an explicit follow-up.

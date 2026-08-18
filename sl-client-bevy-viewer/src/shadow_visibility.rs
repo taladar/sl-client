@@ -404,6 +404,15 @@ struct ShadowCullPipeline {
     /// The static-set hash of the last applied pass; a change means a caster
     /// settled into, or moved out of, the retained bake, so re-bake once.
     last_static_hash: Option<u64>,
+    /// A static-set change is awaiting a bake but has been deferred by the
+    /// debounce (see [`BAKE_DEBOUNCE_FRAMES`]). Batches the per-frame churn of a
+    /// rezzing region — where casters settle into the static set a few at a time
+    /// every frame — into an occasional bake, since each bake force-requeues the
+    /// whole static set (an expensive `specialize_shadows` / `queue_shadows`
+    /// pass). Sparse changes (a single settle while parked) still bake promptly.
+    static_bake_pending: bool,
+    /// The dispatch frame of the last static bake, for the debounce window.
+    last_bake_frame: u64,
     /// Whether the retained static shadow map must be (re-)baked this frame.
     /// Computed by [`apply_shadow_cull`] and consumed by
     /// [`drive_cached_shadow_config`] into the render-world [`CachedStaticShadows`]
@@ -490,7 +499,23 @@ fn apply_shadow_cull(
         // coverage — so it is deliberately *not* folded in here.
         let static_set_changed = pipeline.last_static_hash != Some(static_hash);
         pipeline.last_static_hash = Some(static_hash);
-        pipeline.bake_static = static_set_changed;
+        if static_set_changed {
+            pipeline.static_bake_pending = true;
+        }
+        // Debounce: coalesce rapid static-set churn (a rezzing region settles a
+        // few casters into the bake every frame) into one bake per window, since
+        // each bake force-requeues the *whole* static set. A change that has been
+        // pending at least `BAKE_DEBOUNCE_FRAMES` bakes now; a lone change while
+        // parked (its window already elapsed) still bakes immediately. The fork's
+        // own projection invalidation (camera / sun motion) is independent and
+        // not debounced.
+        let debounced =
+            pipeline.frame.saturating_sub(pipeline.last_bake_frame) >= BAKE_DEBOUNCE_FRAMES;
+        pipeline.bake_static = pipeline.static_bake_pending && debounced;
+        if pipeline.bake_static {
+            pipeline.static_bake_pending = false;
+            pipeline.last_bake_frame = pipeline.frame;
+        }
 
         pipeline.diag.applied = pipeline.diag.applied.saturating_add(1);
         pipeline.diag.cull_us_sum = pipeline.diag.cull_us_sum.saturating_add(cull_us);
@@ -665,6 +690,12 @@ fn dispatch_shadow_cull(
         ),
         Without<SpotLight>,
     >,
+    // Each shadow view's camera render layers, to skip views the sun does not
+    // illuminate (probe-capture / gizmo / HUD / water-exclusion cameras): the
+    // fork builds sun cascades for *every* camera but only renders shadows for
+    // the ones whose layers intersect the sun's, so culling casters for the rest
+    // is pure waste (it dominated the caster-cull cost on dense regions).
+    view_render_layers: Query<Option<&RenderLayers>>,
 ) {
     flush_shadow_cull_diag(&mut pipeline);
 
@@ -749,6 +780,22 @@ fn dispatch_shadow_cull(
         }
         let view_mask = maybe_mask.cloned().unwrap_or_default();
         for (view, view_frusta) in &frusta.frusta {
+            // Skip views the sun does not illuminate: the fork builds cascade
+            // frusta for every camera, but `prepare_lights` only renders sun
+            // shadows for views whose render layers intersect the light's, so
+            // culling casters for the others (probe faces, gizmo/HUD/water masks)
+            // produces lists nothing samples. Matching that filter here is the
+            // single biggest cull-cost cut on a dense region (≈one view instead
+            // of ~ten).
+            let view_layers = view_render_layers
+                .get(*view)
+                .ok()
+                .flatten()
+                .cloned()
+                .unwrap_or_default();
+            if !view_mask.intersects(&view_layers) {
+                continue;
+            }
             // The static frusta come from the fork's retained `StaticCascades`
             // (margin-expanded, stable). Fall back to the dynamic frusta when the
             // fork has not built them for this view yet (e.g. the first frame).
@@ -828,6 +875,16 @@ fn flush_shadow_cull_diag(pipeline: &mut ShadowCullPipeline) {
 /// between the static and dynamic sets (each transition costs one re-bake), short
 /// enough that a settled edit rejoins the cache promptly.
 const DEFAULT_SETTLE_FRAMES: u64 = 30;
+
+/// The static-bake debounce window, in dispatch frames (~0.2 s at 60 fps). While
+/// a region rezzes, casters settle into the static set a few at a time every
+/// frame; without a debounce each settle would force a full — expensive — static
+/// re-queue. Coalescing those into one bake per window cuts the
+/// `specialize_shadows` / `queue_shadows` spikes to an occasional cost, at the
+/// price of a settled caster's shadow appearing up to this many frames late (only
+/// while the region is actively rezzing — a sparse change while parked still
+/// bakes on the next frame, since its window has long since elapsed).
+const BAKE_DEBOUNCE_FRAMES: u64 = 12;
 
 /// Push whether to re-bake the static shadow map this frame into the render world
 /// (via the [`CachedStaticShadows`] extract-resource), so `bevy_pbr`'s forked
