@@ -2,7 +2,7 @@
 id: viewer-perf-cached-static-shadow-map
 title: Cache the static sun-shadow map; re-render only dynamic casters
 topic: viewer
-status: ready
+status: wont-do
 origin: off-CPU/critical-path profiling design discussion (2026-08-16/17) — what
   can we retain instead of recomputing per frame
 refs:
@@ -15,6 +15,61 @@ refs:
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+## ⛔ Wont-do — reverted (2026-08-18): incompatible with SL texture LOD
+
+Built and reverted. The cached-static split (retained static cascade + per-frame
+dynamic pass, forked into `bevy_pbr`) is **fundamentally at odds with Second
+Life's progressive texture LOD**, and no fix landed after six attempts. Reverted
+to stock Bevy shadows behind the (retained, working) off-thread caster cull.
+
+**Root cause.** SL streams textures coarse-first and then
+*refines the discard level as the pixel area changes* (`textures.rs`, P21.1).
+Each refine builds a new `Image` and
+**swaps the face material's `base_color_texture` handle**, which fires
+`AssetChanged<MeshMaterial3d>` — so the fork's
+`check_entities_needing_specialization` re-specializes the prim. That
+despecializes it from the shadow pipeline cache **and** dequeues it from the
+retained static bins, and while the new LOD texture is still decoding the
+material's `PreparedMaterial` is transiently absent, so `specialize_shadows`
+bails and the caster spec-misses. The retained static phase has
+**no tolerance for a one-frame specialization gap and no dynamic fallback** (the
+caster is, by design, not in the per-frame pass), so its shadow vanishes for a
+whole bake period and re-appears when it settles — while others drop. Because
+LOD refines as the camera moves, it is camera-motion-correlated, per-prim, and
+rotating; on prims that never move. The pure-dynamic path is immune because it
+re-renders every caster every frame, so a one-frame spec gap is invisible.
+
+Confirmed live on aditi: a pure-dynamic A/B (`SL_VIEWER_SHADOW_ALL_DYNAMIC`)
+removed the disappearing + seams (the black-shadow symptom is separate — a
+lighting/ambient issue present without the feature, filed elsewhere). A headless
+reproduction (a static caster platform under a panning camera) stayed clean —
+the bug needs real FaceMaterial LOD churn, which the minimal scene lacks.
+
+**Six fix attempts (all failed; preserved in the fork WIP commit `e1583d0f2`):**
+(1) a `mix64` avalanche on the static-set change hash — a real bug (an aligned
+run of freshly-spawned entity ids XOR-cancelled to zero so a populated set
+hashed like the empty set and never re-baked), but not the cause; (2) removed
+the per-bake force-requeue (the retained bins are in fact complete for loadable
+casters); (3) synchronized all four cascade re-bakes; (4) route a queue-time
+spec-miss to `pending`; (5) retained-phase tolerance (`add` upsert +
+`iter_to_dequeue_retained` so a still-visible caster is not dropped on a pure
+material change); (6) an `Arc<MaterialProperties>` cache in `specialize_shadows`
+to survive the transient `PreparedMaterial` gap. Each addressed a plausible
+layer and the visual symptom survived every one; the log-vs-visual correlation
+was never conclusively confirmed.
+
+**If revisited:** first *prove* which mechanism produces the visual drop (tag
+one known-disappearing prim and correlate its shadow to the trace) before
+writing any fix; and it likely cannot work as a retained phase without either
+decoupling shadow specialization from texture-content material changes, or
+giving a recently-despecialized static caster a dynamic-pass fallback until its
+static representation is guaranteed. Scope 3 (virtual shadow maps) would
+sidestep the per-cascade-projection coupling but is a large graphics feature.
+The off-thread caster cull ([[viewer-perf-shadow-cull-change-driven]]) is
+unaffected and stays.
+
+The original design and analysis below are retained for a future attempt.
 
 ## Motivation
 

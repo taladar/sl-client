@@ -12,13 +12,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 65 |
-| ready | 224 |
+| ready | 223 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 27 |
 | done | 833 |
 | deferred | 24 |
-| wont-do | 12 |
+| wont-do | 13 |
 | **total** | **1268** |
 
 ## ideas (65)
@@ -161,7 +161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (224)
+## ready (223)
 
 ### protocol
 
@@ -502,8 +502,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Screen-size mesh LOD for rigged avatar meshes (on-screen crowd draw)
 - [`viewer-perf-avian-collider-tree-rez`](ready/viewer-perf-avian-collider-tree-rez.md)
   — Reduce avian3d collider-tree churn during bulk rez
-- [`viewer-perf-cached-static-shadow-map`](ready/viewer-perf-cached-static-shadow-map.md)
-  — Cache the static sun-shadow map; re-render only dynamic casters
 - [`viewer-perf-editable-text-per-frame-churn`](ready/viewer-perf-editable-text-per-frame-churn.md)
   — bevy_ui editable text re-measures every field every frame (upstream)
 - [`viewer-perf-gpu-avatar-crowd-cpu-bound`](ready/viewer-perf-gpu-avatar-crowd-cpu-bound.md)
@@ -2864,7 +2862,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (12)
+## wont-do (13)
 
 ### protocol
 
@@ -2879,6 +2877,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Discord rich-presence integration
 - [`viewer-perf-avatar-ground-probe`](wont-do/viewer-perf-avatar-ground-probe.md)
   — Avatar ground probe — stop per-frame full-scene raycasts
+- [`viewer-perf-cached-static-shadow-map`](wont-do/viewer-perf-cached-static-shadow-map.md)
+  — Cache the static sun-shadow map; re-render only dynamic casters
 - [`viewer-perf-per-object-face-merge-entity-count`](wont-do/viewer-perf-per-object-face-merge-entity-count.md)
   — Cut per-frame CPU by reducing world-object entity count (face merge /
   per-object cull unit)
