@@ -93,6 +93,26 @@ fn cascade_bit(index: usize) -> u32 {
         .unwrap_or(0)
 }
 
+/// A SplitMix64 finalizer: avalanche a `u64` so structured, low-entropy inputs
+/// (like sequential [`Entity`] bit patterns) become well-mixed pseudo-random
+/// outputs.
+///
+/// The static-set change signal folds each static caster's `entity.to_bits()`
+/// together order-independently (see [`run_shadow_cull`]). Folding the *raw*
+/// bits with XOR is unsafe: freshly-spawned entities get consecutive indices
+/// with a shared generation, and an aligned run of four —
+/// `{4k, 4k+1, 4k+2, 4k+3}` — XORs to exactly zero (`n ^ n+1 ^ n+2 ^ n+3 == 0`,
+/// and equal generations cancel), so a populated static set would hash
+/// identically to the empty set and the re-bake would never fire. Mixing each
+/// id through this finalizer first destroys that structure, making a
+/// non-empty-set-hashes-to-zero collision ~2^-64 instead of routine.
+const fn mix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
+}
+
 /// A bitmask with the low `count` cascade bits set (all cascades visible).
 fn all_cascades(count: usize) -> u32 {
     let mut mask = 0u32;
@@ -250,16 +270,18 @@ fn run_shadow_cull(job: CullJob) -> CullOutput {
         })
         .collect();
     // Count the static casters and fold their entities into an order-independent
-    // XOR hash. A change in the hash means the static *set* changed — a caster
+    // hash. A change in the hash means the static *set* changed — a caster
     // settled into, or moved out of, the retained bake — so the main thread must
     // re-bake exactly once. XOR is order-independent (the snapshot order is not
-    // stable) and cheap; collisions are astronomically unlikely for this use.
+    // stable) and cheap, but each id is first avalanched through `mix64`:
+    // XOR-ing the *raw* entity bits lets a run of freshly-spawned entities cancel
+    // to zero (see `mix64`), which would silently hide a populated static set.
     let mut static_count = 0usize;
     let mut static_hash = 0u64;
     for (caster, &dynamic) in job.casters.iter().zip(&is_dynamic) {
         if !dynamic {
             static_count = static_count.saturating_add(1);
-            static_hash ^= caster.entity.to_bits();
+            static_hash ^= mix64(caster.entity.to_bits());
         }
     }
 
@@ -920,15 +942,27 @@ impl Plugin for ShadowVisibilityPlugin {
             return;
         }
 
+        // A/B diagnostic: `SL_VIEWER_SHADOW_ALL_DYNAMIC` keeps the off-thread cull
+        // (so the static structure is still reconciled — no panic) but never lets a
+        // caster settle into the static bake, so the retained static layer stays
+        // empty and every shadow comes from the per-frame dynamic pass. This is the
+        // pure-dynamic baseline (equivalent to stock's every-frame shadows) used to
+        // decide whether an artifact belongs to the cached-static path.
+        let settle_frames = if std::env::var_os("SL_VIEWER_SHADOW_ALL_DYNAMIC").is_some() {
+            u64::MAX
+        } else {
+            DEFAULT_SETTLE_FRAMES
+        };
+
         info!(
             target: "shadow_cull",
             "cached-static shadow split active (settle={} frames)",
-            DEFAULT_SETTLE_FRAMES,
+            settle_frames,
         );
 
         app.insert_resource(ShadowCullPipeline {
             log_diag: std::env::var_os("SL_VIEWER_LOG_SHADOW_CULL").is_some(),
-            settle_frames: DEFAULT_SETTLE_FRAMES,
+            settle_frames,
             ..ShadowCullPipeline::default()
         });
 
@@ -980,7 +1014,7 @@ mod tests {
         reason = "a failed expectation is the intended failure signal in a unit test"
     )]
 
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
 
     use super::*;
 
@@ -1178,8 +1212,8 @@ mod tests {
         assert_eq!(output.static_count, 1, "one static caster");
         assert_eq!(
             output.static_hash,
-            settled.to_bits(),
-            "the static hash folds exactly the static set"
+            mix64(settled.to_bits()),
+            "the static hash folds exactly the static set (each id avalanched)"
         );
     }
 
@@ -1220,5 +1254,47 @@ mod tests {
         assert_eq!(dynamic, expected, "all casters are dynamic when split off");
         assert_eq!(output.static_count, 0, "no static casters when split off");
         assert_eq!(output.static_hash, 0, "empty static set hashes to zero");
+    }
+
+    #[test]
+    fn static_hash_of_a_run_of_entities_is_not_zero() {
+        // Regression: four freshly-spawned entities get consecutive indices with
+        // a shared generation, and an aligned run of four XORs to *exactly* zero
+        // when the raw bits are folded (`n ^ n+1 ^ n+2 ^ n+3 == 0`). That made a
+        // fully-populated static set hash identically to the empty set, so the
+        // re-bake never fired and the static shadow layer stayed empty. `mix64`
+        // must break that structure.
+        let light = Entity::from_raw_u32(1).expect("valid entity");
+        let view = Entity::from_raw_u32(2).expect("valid entity");
+        // An aligned run of four raw entity ids whose XOR is zero...
+        let run: Vec<Entity> = (4..8)
+            .map(|raw| Entity::from_raw_u32(raw).expect("valid entity"))
+            .collect();
+        let raw_xor = run.iter().fold(0u64, |acc, entity| acc ^ entity.to_bits());
+        assert_eq!(
+            raw_xor, 0,
+            "the chosen run must XOR-cancel to zero (raw bits)"
+        );
+
+        let job = CullJob {
+            current_frame: 100,
+            // All four last moved long ago → all static.
+            settle_frames: 10,
+            views: vec![ViewInput {
+                light,
+                view,
+                frusta: vec![test_frustum()],
+                static_frusta: vec![test_frustum()],
+                view_mask: RenderLayers::default(),
+            }],
+            casters: Arc::new(run.iter().map(|&e| in_frustum_caster(e, 5)).collect()),
+        };
+        let output = run_shadow_cull(job);
+
+        assert_eq!(output.static_count, 4, "all four casters are static");
+        assert_ne!(
+            output.static_hash, 0,
+            "a populated static set must not hash to the empty-set sentinel"
+        );
     }
 }

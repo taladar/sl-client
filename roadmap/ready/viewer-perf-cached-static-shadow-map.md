@@ -190,8 +190,10 @@ so the retained depths stay aligned with the sample as the camera moves.
 **Invalidation (two independent triggers).** A cascade's static layer re-bakes
 when (a) its retained projection was just rebuilt (`StaticCascade::dirty`, the
 fork's camera-left-margin / sun-rotated test) **or** (b) the viewer's static
-caster *set* changed (order-independent XOR hash of the static entities → the
-`CachedStaticShadows.bake_static` extract-resource). Projection invalidation and
+caster *set* changed (order-independent hash of the static entities — each id
+avalanched through `mix64` before folding so structured entity ids can't cancel,
+see the perf note below → the `CachedStaticShadows.bake_static`
+extract-resource). Projection invalidation and
 set invalidation are deliberately split across the fork and the viewer — the
 viewer no longer hashes frusta.
 
@@ -264,20 +266,44 @@ introduced:
    every frame. **Fix:** the cull now skips views whose render layers don't
    intersect the light's (matching `prepare_lights`). `apply_shadow_cull` p50
    **11.25 ms → 1.70 ms**; steady-state shadow subsystem ~15 ms → ~6 ms/frame.
-2. **Every static bake force-requeues the whole set.** `specialize_shadows` /
-   `queue_shadows` spike to ~45 ms on bake frames (the `StaticShadowBakes`
-   force-wipe re-specializes all static casters), and a rezzing region bakes
-   almost every frame as casters settle in. **Partial fix:** a bake debounce
-   (`BAKE_DEBOUNCE_FRAMES`) coalesces the rez churn into an occasional bake
-   (queue p90 47 → 33 ms). The per-bake cost is unchanged and remains a
-   follow-up.
+2. **The force-requeue on every bake masked the real bug.**
+   The first cut re-specialized/re-queued all static casters on each bake (the
+   `StaticShadowBakes` force-wipe / a `requeue_views` fallback), spiking
+   `specialize_shadows` / `queue_shadows` to ~45 ms. That force-requeue was a
+   **workaround** for shadows that intermittently failed to bake — and it hid
+   the actual cause.
+
+   **Root cause (found via a headless render-world phase-count test).** The
+   retained static bins do **not** decay: once a caster settles into the static
+   set it is queued into the static subview's bins once (`added`) and stays
+   there (`cpu=N, added=0, removed=0`) every frame after, even under the
+   transform-repropagation flood. What actually broke was the **re-bake
+   trigger**. The static-set change signal folded each static caster's
+   `entity.to_bits()` with **raw XOR**, and freshly-spawned entities get
+   consecutive indices with a shared generation — an aligned run of four,
+   `{4k, 4k+1, 4k+2, 4k+3}`, XORs to **exactly zero** (`n^n+1^n+2^n+3 == 0`).
+   So a populated static set hashed identically to the empty set, the
+   change went undetected, and the static pass never baked the casters (the
+   static layer stayed empty / a stale partial). The force-requeue "fixed" it
+   only by baking unconditionally.
+
+   **Fix:** avalanche each id through a SplitMix64 finalizer (`mix64`) before
+   folding, so structured entity ids can't cancel (collision → ~2⁻⁶⁴). The
+   re-bake now fires on genuine set changes, the incremental bins are complete,
+   and the whole force-requeue path was **removed** (`requeue_views` /
+   `must_requeue_for_view` in `bevy_render::camera`, and the
+   `SL_VIEWER_SHADOW_FORCE_REQUEUE` gate in
+   `check_views_lights_need_specialization`).
+   A bake now costs only the render pass (like stock's per-frame shadow), not a
+   cold re-specialize. The `BAKE_DEBOUNCE_FRAMES` debounce is kept to coalesce
+   rez-time set churn. Covered by unit + headless GPU-readback tests
+   (`static_hash_of_a_run_of_entities_is_not_zero`,
+   `static_casters_stay_shadowed_across_a_rebake`).
 
 ### Follow-up
 
-- **Cut the per-bake cost:** re-specialize only the *changed* static casters on
-  a bake instead of force-wiping the whole view (the
-  `check_views_lights_need_specialization` path). The debounce reduces bake
-  frequency but each bake is still ~45 ms.
+- Re-measure the per-bake cost on aditi now that a bake is render-pass-only (no
+  force re-specialize) — the previous ~45 ms figure was the workaround's cost.
 - Re-measure with the viewer window **focused** — both aditi captures were
   present-throttled (occluded → ~2 fps), so per-system CPU is trustworthy but
   frame time is not.
