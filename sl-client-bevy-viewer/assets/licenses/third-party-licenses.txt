@@ -5508,7 +5508,7 @@ IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 DEALINGS IN THE SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: h2 0.4.15
+used-by: h2 0.4.16
 
 Copyright (c) 2017 h2 authors
 
