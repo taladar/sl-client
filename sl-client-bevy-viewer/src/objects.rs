@@ -870,6 +870,47 @@ impl ObjectState {
         self.linkset_members(root).len()
     }
 
+    /// The region-scoped ids of every tracked object whose persistent id is `id`
+    /// — normally one, but an object streamed by two connected regions has one
+    /// per circuit. The derender path (`viewer-derender-blacklist`) uses it to
+    /// despawn what a fresh blacklist entry names: it knows the target's full
+    /// id, not its (transient) region-scoped one.
+    ///
+    /// A scan, like [`entity_of`](Self::entity_of), and run only per derender —
+    /// never per frame.
+    pub(crate) fn scoped_by_full_id(&self, id: Uuid) -> Vec<ScopedObjectId> {
+        self.objects
+            .iter()
+            .filter(|(_scoped, tracked)| tracked.full_key.uuid() == id)
+            .map(|(scoped, _tracked)| *scoped)
+            .collect()
+    }
+
+    /// Despawn the tracked object `scoped` and its tracked descendants — the
+    /// derender path's way in to the same removal a `KillObject` drives, so a
+    /// derendered linkset root takes its child prims (and a derendered avatar
+    /// its attachments) with it.
+    ///
+    /// Returns every region-scoped id it removed (the root first, then its
+    /// descendants), which the caller records as suppressed: those ids are the
+    /// only handle left on objects the simulator has already streamed and will
+    /// not send again, so they are what a later un-derender re-fetches
+    /// ([`crate::derender`]). Empty when `scoped` was not tracked.
+    pub(crate) fn derender_remove(
+        &mut self,
+        scoped: ScopedObjectId,
+        commands: &mut Commands,
+    ) -> Vec<ScopedObjectId> {
+        if !self.objects.contains_key(&scoped) {
+            return Vec::new();
+        }
+        // Collected before the removal, which drops the parent links it walks.
+        let mut removed = vec![scoped];
+        removed.extend(tracked_descendants(self, scoped));
+        remove_object(self, scoped, commands);
+        removed
+    }
+
     /// The entity of the object with grid-wide key `key`, or [`None`] if this viewer does
     /// not have it. The reverse of [`full_key`](Self::full_key), used by the point-at
     /// receive path (P31.15) to resolve another avatar's point-at effect — whose target is
@@ -1647,6 +1688,7 @@ fn drain_budgeted<T>(
 pub(crate) fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
+    derender: Res<crate::derender::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
     mut commands: Commands,
@@ -1677,6 +1719,11 @@ pub(crate) fn update_objects(
                     warn!("queued upsert for {scoped:?} had no snapshot (coalescing bug)");
                     return false;
                 };
+                // The object may have been derendered while it sat in the
+                // backlog; drop it here too, not just at the new-event gate.
+                if derender.is_suppressed(scoped) {
+                    return false;
+                }
                 apply_object(
                     &mut state,
                     &object,
@@ -1709,6 +1756,17 @@ pub(crate) fn update_objects(
     //    Strict FIFO holds because the moment one event is buffered, `queue.is_empty()`
     //    is false and every later event is buffered too.
     for event in events.read() {
+        // A derendered object (`viewer-derender-blacklist`) — and anything
+        // hanging off one, which the suppression index folds in — is dropped
+        // here, before it is applied or even buffered: no mesh is tessellated,
+        // no texture requested, no material built. The reference refuses at the
+        // same point (`LLViewerObjectList::createObject`).
+        if let SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) =
+            &event.0
+            && derender.is_suppressed(object.scoped_id())
+        {
+            continue;
+        }
         if pending.queue.is_empty() && budget > 0 {
             let built = match &event.0 {
                 SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {

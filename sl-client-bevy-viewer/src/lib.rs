@@ -35,6 +35,7 @@ mod about_region;
 mod animations;
 mod animesh;
 mod appearance;
+mod asset_blacklist;
 mod asset_budget;
 mod asset_retry;
 mod attachment_menu;
@@ -63,6 +64,7 @@ mod conversations;
 mod coords;
 mod crowd_debug_button;
 mod debug_settings;
+mod derender;
 mod diagnostics;
 mod double_click_teleport;
 mod edit_contents;
@@ -297,6 +299,7 @@ use crate::animesh::{
     ControlAvatarState, drive_control_avatars, ingest_object_animations, publish_control_avatars,
 };
 use crate::appearance::{ServerBakeState, drive_server_bake};
+use crate::asset_blacklist::AssetBlacklistPlugin;
 use crate::asset_budget::{MeshUploadBudget, reset_mesh_upload_budget};
 use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_assets::AvatarAssetLibrary;
@@ -330,6 +333,7 @@ use crate::chat::{
 };
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
+use crate::derender::DerenderPlugin;
 use crate::diagnostics::{
     PipelineOverlayVisible, pipeline_overlay_active, setup_pipeline_overlay,
     toggle_pipeline_overlay, update_pipeline_overlay,
@@ -424,7 +428,7 @@ use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
     DeferredFaceTextures, PrimTextures, TextureApplyBudget, TextureDecoded, TextureManager,
     apply_prim_textures, drain_deferred_face_textures, drain_lod_reuploads, poll_textures,
-    reset_texture_apply_budget, update_texture_caps,
+    reset_texture_apply_budget, sync_texture_blacklist, update_texture_caps,
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
@@ -1379,6 +1383,15 @@ fn run_session(
     // built into the Blocked sub-tab of the People pane, plus the by-name block
     // floater. After PeoplePlugin, whose Blocked content slot it fills.
     .add_plugins(BlockedPlugin)
+    // Derender + asset blacklist (viewer-derender-blacklist): the client-side
+    // suppression of an object / avatar the user does not want to see, its
+    // per-avatar persisted blacklist, and the scene purge. Its systems bracket
+    // the scene mirror (before the ingest, after the fold) via explicit edges.
+    .add_plugins(DerenderPlugin)
+    // The Asset Blacklist floater (viewer-derender-blacklist): the list of what
+    // this avatar has derendered, with Re-render / Clear temporary. After
+    // DerenderPlugin, whose list it presents.
+    .add_plugins(AssetBlacklistPlugin)
     .add_plugins(GroupProfilePlugin)
     // The group-notice toast host (viewer-group-notice-display): pops a card —
     // group image, subject, body and any attached item — when a group posts a
@@ -1847,8 +1860,11 @@ fn run_session(
                 // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
                 drive_server_bake,
                 // Keep the texture store's `GetTexture` cap current, then poll
-                // finished fetches before the consumers that apply them.
+                // finished fetches before the consumers that apply them. The
+                // blacklist mirror rides along, so a blacklisted texture asset
+                // (viewer-derender-blacklist) is refused before any fetch.
                 update_texture_caps,
+                sync_texture_blacklist,
                 poll_textures,
                 // The same for the mesh store's `GetMesh2` / `GetMesh` cap, plus the
                 // client-side bake inputs (P15.2): keep the wearable-asset store's

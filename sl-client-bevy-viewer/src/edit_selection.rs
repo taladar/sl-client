@@ -298,6 +298,15 @@ impl SelectionSet {
         self.selected.retain(|node| node.scoped != scoped);
     }
 
+    /// Remove every selected object with the persistent id `id` (a no-op if
+    /// absent) — the derender path (`viewer-derender-blacklist`), which knows a
+    /// full id rather than a region-scoped one, dropping an object it is about
+    /// to despawn out of the selection first (the reference's `stopEditing` on
+    /// a derendered edit target).
+    pub(crate) fn remove_by_full_id(&mut self, id: Uuid) {
+        self.selected.retain(|node| node.full.uuid() != id);
+    }
+
     /// Promote every selected linked part to its linkset **root** — whole-linkset
     /// mode's invariant, the reference's `promoteSelectionToRoot`, run when
     /// *Edit Linked Parts* is switched off. Each node is resolved to its root

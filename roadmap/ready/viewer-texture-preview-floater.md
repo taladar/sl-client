@@ -22,6 +22,16 @@ the gear menu's "Save Texture As".
 Reference (Firestorm, read-only): `llpreviewtexture.cpp`,
 `floater_preview_texture.xml`.
 
+Note (2026-08-19): this is the natural home for a **Blacklist this texture**
+action. [[viewer-derender-blacklist]] already carries `DerenderKind::Texture`
+and honours it at the fetch gate (`TextureManager::request_from` refuses a
+blacklisted id outright, as the reference's `LLTextureFetch` does), but
+*nothing produces such an entry* — and the reference has no in-viewer producer
+either, feeding textures only through its distributed blacklist data
+(`fsdata`). A texture surface that already exposes the asset id (Copy UUID
+here) is where the action belongs; until then an entry can only be hand-written
+into the per-account `derender_blacklist.json`.
+
 Note (2026-07-22): this floater is **subject-bound** — it opens on a
 particular subject rather than persistent app state — so exempt it from
 floater persistence (`floater_persist::FloaterPersistExempt` on the root,

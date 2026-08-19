@@ -24,7 +24,7 @@
 //! one that fails to fetch) keeps its flat tint. No normal / specular / PBR /
 //! glow / bump — those are deferred (see the roadmap non-goals).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -172,6 +172,18 @@ pub(crate) struct TextureManager {
     /// avatar bake) for the whole session, invisible to the F3 overlay. Drained by
     /// [`poll_textures`] once each entry is due.
     retry: HashMap<TextureKey, (DeferredRequest, RetryState)>,
+    /// The blacklisted **texture** asset ids
+    /// (`viewer-derender-blacklist`), mirrored from the derender list by
+    /// [`sync_texture_blacklist`] whenever it changes. A blacklisted id is never
+    /// fetched, so a face using it stays untextured — the reference refuses at
+    /// the same chokepoint (`LLTextureFetch::createRequest`). Mirrored rather
+    /// than consulted directly because the gate is inside
+    /// [`request_from`](Self::request_from), which is called from deep inside
+    /// non-system code that has no access to a Bevy resource.
+    blacklist: HashSet<Uuid>,
+    /// The derender-list revision [`blacklist`](Self::blacklist) was mirrored at,
+    /// so the copy happens only when the list actually moves.
+    blacklist_revision: u64,
 }
 
 /// A default-source texture request deferred until the `GetTexture` capability is
@@ -220,6 +232,8 @@ impl FromWorld for TextureManager {
             pending_default: HashMap::new(),
             in_flight_params: HashMap::new(),
             retry: HashMap::new(),
+            blacklist: HashSet::new(),
+            blacklist_revision: 0,
         }
     }
 }
@@ -333,7 +347,7 @@ impl TextureManager {
         initial_lod: DiscardLevel,
         managed: bool,
     ) {
-        if is_absent_texture(id) {
+        if is_absent_texture(id) || self.blacklist.contains(&id.uuid()) {
             return;
         }
         // A boosted (full-resolution) consumer — an avatar body part, an
@@ -667,6 +681,22 @@ fn build_store(fetcher: &Arc<BevyTextureFetcher>, disk_dir: Option<PathBuf>) -> 
 /// set (the store then runs in-memory only).
 fn texture_cache_dir() -> Option<PathBuf> {
     crate::paths::asset_cache_dir("texturecache")
+}
+
+/// Mirror the blacklisted **texture** ids into the manager whenever the derender
+/// list changes (`viewer-derender-blacklist`), so
+/// [`TextureManager::request_from`] can refuse a fetch without reaching for a
+/// Bevy resource. Cheap: a revision compare per frame, a rebuild only on a real
+/// change.
+pub(crate) fn sync_texture_blacklist(
+    derender: Res<crate::derender::DerenderList>,
+    mut manager: ResMut<TextureManager>,
+) {
+    if manager.blacklist_revision == derender.revision() {
+        return;
+    }
+    manager.blacklist_revision = derender.revision();
+    manager.blacklist = derender.ids_of_kind(crate::derender::DerenderKind::Texture);
 }
 
 /// Refresh the store fetcher's `GetTexture` capability URL each time the region's

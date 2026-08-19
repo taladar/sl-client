@@ -159,6 +159,35 @@ block-by-name-note = * Only blocks object text, not sounds
 block-by-name-ok = OK
 block-by-name-cancel = Cancel
 
+## The Asset Blacklist floater (viewer-derender-blacklist) — everything this
+## avatar has derendered (dropped from its own view), and the way back.
+
+blacklist-title = Asset Blacklist
+# The blacklist table's column headers.
+blacklist-col-name = Name
+blacklist-col-region = Region
+blacklist-col-type = Type
+blacklist-col-date = Date
+# Ticked for an entry that survives a teleport and a relog.
+blacklist-col-permanent = Permanent
+# The prompt in the empty filter box above the list.
+blacklist-filter-placeholder = Filter by name or region
+# The count line under the list: how many entries the filter shows out of how
+# many are blacklisted in total.
+blacklist-count = { $shown } of { $total } blacklisted
+# Stand-ins for an entry recorded before its name / region was known.
+blacklist-unnamed = (unnamed object)
+blacklist-unknown-region = (unknown region)
+# The action buttons beside the list.
+blacklist-action-rerender = Re-render
+blacklist-action-clear-temporary = Clear temporary
+# The Type column's values, one per kind of derendered thing.
+derender-type-object = Object
+derender-type-resident = Resident
+derender-type-sound = Sound
+derender-type-animation = Animation
+derender-type-texture = Texture
+
 ## The group profile floater (viewer-social-group-profile) — reached from the
 ## Groups list's Info button: General / Members & Roles / Notices.
 

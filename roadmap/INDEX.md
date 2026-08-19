@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 27 |
-| done | 834 |
+| done | 835 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1268** |
+| **total** | **1269** |
 
 ## ideas (65)
 
@@ -298,8 +298,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-default-creation-permissions`](ready/viewer-default-creation-permissions.md)
   — Default creation permissions (blocked by `viewer-ui-settings-store` (done))
 - [`viewer-depth-of-field`](ready/viewer-depth-of-field.md) — Depth of field
-- [`viewer-derender-blacklist`](ready/viewer-derender-blacklist.md) — Derender +
-  asset blacklist (blocked by `viewer-object-context-menu` (done))
 - [`viewer-disconnect-screen`](ready/viewer-disconnect-screen.md) — Disconnect
   screen (greyscale + error dialog) instead of closing the window
 - [`viewer-display-name-set`](ready/viewer-display-name-set.md) — Set own
@@ -587,6 +585,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
   — CPU-skinning cross-check — make the R13 debug affordance a standing test
   (blocked by `viewer-render-test-harness` (done))
+- [`viewer-render-friends-only`](ready/viewer-render-friends-only.md) — Show
+  friends only (hide non-friend avatars)
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
@@ -771,8 +771,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
 - [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
-  `viewer-block-list` (done), `viewer-report-abuse`,
-  `viewer-derender-blacklist`)
+  `viewer-block-list` (done), `viewer-report-abuse`, `viewer-derender-blacklist`
+  (done))
 - [`viewer-minimap-menu-multi-avatar`](blocked/viewer-minimap-menu-multi-avatar.md)
   — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
   `viewer-contact-sets`)
@@ -1011,7 +1011,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (834)
+## done (835)
 
 ### protocol
 
@@ -1281,6 +1281,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Cut-prim path caps drop a triangle (filed as "prim LOD not reacting")
 - [`viewer-debug-screenshot-offthread-save`](done/viewer-debug-screenshot-offthread-save.md)
   — Offload the debug screenshot PNG encode off the main thread
+- [`viewer-derender-blacklist`](done/viewer-derender-blacklist.md) — Derender +
+  asset blacklist (blocked by `viewer-object-context-menu` (done))
 - [`viewer-dialog-lldialog`](done/viewer-dialog-lldialog.md) — llDialog script
   dialogs + textbox prompts (blocked by `viewer-ui-notification-host` (done))
 - [`viewer-dialog-offers-invites`](done/viewer-dialog-offers-invites.md) —

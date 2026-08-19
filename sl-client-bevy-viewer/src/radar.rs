@@ -44,6 +44,7 @@ use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED, OpenAvatarProfile}
 use crate::avatars::AvatarState;
 use crate::chat::LocalChatNotice;
 use crate::conversations::{ConversationKey, NearbyChatNotice, OpenConversation};
+use crate::derender::{DerenderKind, RequestDerender};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
@@ -311,6 +312,15 @@ static RADAR_MENU: MenuDef = MenuDef {
         ),
         MenuItemDef::Command(MenuCommand::new("Block", "block").visible_when(COND_NOT_MUTED)),
         MenuItemDef::Command(MenuCommand::new("Unblock", "unblock").visible_when(COND_MUTED)),
+        MenuItemDef::Separator,
+        // Client-side derender (`viewer-derender-blacklist`), the reference
+        // radar's own Derender / Derender + blacklist pair: the radar is where
+        // a griefer is spotted, so it is where they are unrendered from.
+        MenuItemDef::Command(MenuCommand::new("Derender", "derender")),
+        MenuItemDef::Command(MenuCommand::new(
+            "Derender + Blacklist",
+            "derender-blacklist",
+        )),
     ],
 };
 
@@ -1536,7 +1546,7 @@ fn on_radar_row_press(
 }
 
 /// Dispatch the radar context menu's picks onto the shared avatar-action
-/// channels (profile, IM, tracking, teleports, friendship, mutes).
+/// channels (profile, IM, tracking, teleports, friendship, mutes, derender).
 #[expect(
     clippy::too_many_arguments,
     reason = "the action dispatch fans out to the tracking resource and the shared \
@@ -1550,6 +1560,7 @@ fn handle_radar_actions(
     mut tracking: ResMut<MapTracking>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut derenders: MessageWriter<RequestDerender>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
 ) {
@@ -1623,6 +1634,18 @@ fn handle_radar_actions(
                     id: agent.uuid(),
                     name,
                 }));
+            }
+            action @ ("derender" | "derender-blacklist") => {
+                let name = avatars
+                    .name_of(agent)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default();
+                derenders.write(RequestDerender::new(
+                    agent.uuid(),
+                    name,
+                    DerenderKind::Resident,
+                    action == "derender-blacklist",
+                ));
             }
             _other => {}
         }

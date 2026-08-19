@@ -95,6 +95,10 @@ const WORLD_MAP_OPEN: &str = "world-map-open";
 /// drives the check mark on the World ▸ Radar entry.
 const RADAR_OPEN: &str = "radar-open";
 
+/// The condition key that holds while the Asset Blacklist floater is open —
+/// drives the check mark on the World ▸ Asset Blacklist entry.
+const BLACKLIST_OPEN: &str = "asset-blacklist-open";
+
 /// The condition key that holds while the in-world property lines are shown —
 /// drives the check mark on the World ▸ Property Lines entry.
 const PROPERTY_LINES_ON: &str = "property-lines-on";
@@ -309,6 +313,13 @@ static WORLD_MENU: MenuDef = MenuDef {
         // current region.
         MenuItemDef::Command(MenuCommand::new("Region / Estate…", "about-region")),
         MenuItemDef::Separator,
+        // The derender / asset blacklist (viewer-derender-blacklist), where the
+        // reference keeps it: World ▸ Asset Blacklist.
+        MenuItemDef::Command(
+            MenuCommand::new("Asset Blacklist…", "toggle-asset-blacklist")
+                .checked_when(BLACKLIST_OPEN),
+        ),
+        MenuItemDef::Separator,
         MenuItemDef::Submenu(&ENVIRONMENT_MENU),
     ],
 };
@@ -497,6 +508,7 @@ fn update_top_menu_conditions(
     let search_open = open(crate::search::SEARCH_FLOATER_ID);
     let build_tools_open = open(crate::edit_tool::BUILD_TOOLS_FLOATER_ID);
     let experiences_open = open(crate::experiences_floater::EXPERIENCES_FLOATER_ID);
+    let blacklist_open = open(crate::asset_blacklist::BLACKLIST_FLOATER_ID);
     let mut wanted: Vec<&'static str> = Vec::new();
     if preferences_open {
         wanted.push(PREFERENCES_OPEN);
@@ -533,6 +545,9 @@ fn update_top_menu_conditions(
     }
     if experiences_open {
         wanted.push(EXPERIENCES_OPEN);
+    }
+    if blacklist_open {
+        wanted.push(BLACKLIST_OPEN);
     }
     // The World ▸ Property Lines check mark, from the in-world property-lines
     // setting (default on).
@@ -721,6 +736,13 @@ fn handle_top_menu_actions(
                     &floaters,
                     &mut panels,
                     crate::edit_tool::BUILD_TOOLS_FLOATER_ID,
+                );
+            }
+            "toggle-asset-blacklist" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::asset_blacklist::BLACKLIST_FLOATER_ID,
                 );
             }
             "toggle-experiences" => {

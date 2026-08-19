@@ -42,6 +42,13 @@
 //!   ([`PieContent::Chain`]) at one position, dispatching the avatar pie's own
 //!   ground-sit / stand actions (`Self.SitDown` in the reference is the ground
 //!   sit).
+//! - **Derender ▸ Blacklist / Temporary** (both pies) → a guarded
+//!   [`crate::derender::RequestDerender`] for the worn object's **root**, not
+//!   for its wearer: the reference's `Object.Derender` acts on the picked
+//!   object, so these two action names are dispatched here even though every
+//!   other avatar-derived slice of the *other* pie goes to the shared handler.
+//!   The object's name is not known to this pie, so the entry is recorded
+//!   unnamed (the blacklist shows a placeholder).
 //!
 //! On the **other** pie the avatar-derived slices — **IM**, **Mute >**, **Add
 //! as Friend** — act on the *wearer* and reuse the avatar pie's dispatch
@@ -94,6 +101,7 @@ use crate::avatar_menu::{
     TARGET_NOT_FRIEND, UNIMPLEMENTED,
 };
 use crate::avatars::AvatarState;
+use crate::derender::{DerenderKind, RequestDerender};
 use crate::object_menu::TARGET_TOUCHABLE;
 use crate::objects::ObjectPickSummary;
 use crate::people::FriendsModel;
@@ -132,7 +140,7 @@ static SELF_DERENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Temporary",
                 action: "derender",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -140,7 +148,7 @@ static SELF_DERENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Blacklist",
                 action: "derender-blacklist",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
     ],
@@ -523,7 +531,7 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Blacklist",
                 action: "derender-blacklist",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -531,7 +539,7 @@ static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Temporary",
                 action: "derender",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
     ],
@@ -811,6 +819,7 @@ fn handle_attachment_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<AttachmentMenuTarget>,
     mut commands: MessageWriter<SlCommand>,
+    mut derenders: MessageWriter<RequestDerender>,
 ) {
     for action in actions.read() {
         if action.element != ATTACHMENT_MENU_ELEMENT {
@@ -819,6 +828,19 @@ fn handle_attachment_menu_actions(
         let Some(summary) = target.summary else {
             continue;
         };
+        // Derender acts on the worn object as a whole (its root), not on the
+        // wearer — the reference's `Object.Derender` on an attachment pick.
+        // The avatar-derived slices of these pies go to the shared avatar
+        // handler, which deliberately leaves these two action names to us.
+        if matches!(action.action, "derender" | "derender-blacklist") {
+            derenders.write(RequestDerender::new(
+                summary.root_full.uuid(),
+                String::new(),
+                DerenderKind::Object,
+                action.action == "derender-blacklist",
+            ));
+            continue;
+        }
         let command = match action.action {
             // Detach / Drop act on the attachment root: the worn object as a
             // whole goes back to inventory / onto the ground.

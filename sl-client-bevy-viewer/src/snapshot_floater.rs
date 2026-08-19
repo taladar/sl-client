@@ -388,6 +388,14 @@ impl LocalTimeZone {
     pub(crate) fn capture() -> Self {
         Self(jiff::tz::TimeZone::system())
     }
+
+    /// The captured zone, for another surface rendering a stored timestamp in
+    /// local time (the derender blacklist's Date column,
+    /// [`crate::asset_blacklist`]).
+    #[must_use]
+    pub(crate) const fn zone(&self) -> &jiff::tz::TimeZone {
+        &self.0
+    }
 }
 
 /// The floater's live entity handles.

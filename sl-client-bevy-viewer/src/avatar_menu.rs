@@ -36,6 +36,10 @@
 //!   reference's `on_enable`.
 //! - **Profile** (self and other) → opens the avatar profile floater
 //!   ([`crate::avatar_profile::OpenAvatarProfile`]).
+//! - **More ▸ Derender ▸ Blacklist / Temporary** (other) → a guarded
+//!   [`crate::derender::RequestDerender`] for the picked agent: this viewer
+//!   stops drawing them (and, through the scene mirror's suppression index,
+//!   their attachments), permanently or for the session.
 //!
 //! # Where we depart from the reference, on purpose
 //!
@@ -89,6 +93,7 @@ use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::{AvatarState, RefetchAvatarTextures};
 use crate::conversations::{ConversationKey, OpenConversation};
+use crate::derender::{DerenderKind, RequestDerender};
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
@@ -292,6 +297,37 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
         PieEntry {
             at: Compass::SouthWest,
             content: PieContent::SubPie(&OTHER_MORE_MORE_PIE),
+        },
+        PieEntry {
+            at: Compass::SouthEast,
+            content: PieContent::SubPie(&OTHER_DERENDER_PIE),
+        },
+    ],
+};
+
+/// The "Derender >" sub-pie of the other-avatar `More >`
+/// (`viewer-derender-blacklist`): stop drawing this avatar — and, with it, its
+/// attachments — in *this* viewer, permanently (the persisted blacklist) or for
+/// the session. The reference addresses both slices at the pie's southern
+/// slots, leaving the first six empty, and so do we.
+static OTHER_DERENDER_PIE: PieMenuDef = PieMenuDef {
+    label: "Derender",
+    entries: &[
+        PieEntry {
+            at: Compass::South,
+            content: PieContent::Action(PieAction {
+                label: "Blacklist",
+                action: "derender-blacklist",
+                when: None,
+            }),
+        },
+        PieEntry {
+            at: Compass::SouthEast,
+            content: PieContent::Action(PieAction {
+                label: "Temporary",
+                action: "derender",
+                when: None,
+            }),
         },
     ],
 };
@@ -1142,6 +1178,7 @@ fn handle_avatar_menu_actions(
     mut ground_sit: ResMut<SelfGroundSit>,
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut derenders: MessageWriter<RequestDerender>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
@@ -1153,6 +1190,24 @@ fn handle_avatar_menu_actions(
         let Some(agent) = target.agent else {
             continue;
         };
+        // Derender (`viewer-derender-blacklist`) is dispatched here only for the
+        // **avatar** pies: the attachment pies carry the same action names but
+        // target the worn object, and `crate::attachment_menu` dispatches those.
+        if matches!(action.action, "derender" | "derender-blacklist") {
+            if action.element == AVATAR_MENU_ELEMENT {
+                let name = avatars
+                    .name_of(agent)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default();
+                derenders.write(RequestDerender::new(
+                    agent.uuid(),
+                    name,
+                    DerenderKind::Resident,
+                    action.action == "derender-blacklist",
+                ));
+            }
+            continue;
+        }
         match action.action {
             "stand" => {
                 ground_sit.sitting = false;
@@ -1296,6 +1351,14 @@ mod tests {
             (
                 "tex-refresh",
                 vec![Compass::South, Compass::SouthWest, Compass::West],
+            ),
+            (
+                "derender-blacklist",
+                vec![Compass::South, Compass::SouthEast, Compass::South],
+            ),
+            (
+                "derender",
+                vec![Compass::South, Compass::SouthEast, Compass::SouthEast],
             ),
             ("im", vec![Compass::SouthEast]),
         ];

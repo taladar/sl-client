@@ -13,8 +13,8 @@
 //! # What is wired, and what is a disabled placeholder
 //!
 //! Most of the reference's object actions belong to features this viewer does
-//! not have yet (buy / pay, the edit tools, object inventory, wear / attach,
-//! derender, the script and pathfinding tools). Those sit **in their reference
+//! not have yet (buy / pay, wear / attach, the script and pathfinding tools).
+//! Those sit **in their reference
 //! compass positions but disabled**, gated on the never-supplied
 //! [`UNIMPLEMENTED`] sentinel, so the menu's shape (the muscle memory) is laid
 //! down now and each slice lights up when its feature lands — one `when` edit,
@@ -44,6 +44,12 @@
 //!   [`Command::RequestObjectPropertiesFamily`] and the reply's name is held on
 //!   the open target; a mute picked before the reply lands mutes by id with an
 //!   empty name.
+//! - **Derender ▸ Blacklist / Temporary** → a guarded
+//!   [`crate::derender::RequestDerender`] for the picked **linkset root**:
+//!   nothing goes on the wire, this viewer simply stops mirroring the object
+//!   (permanently, through the per-avatar blacklist, or for the session). The
+//!   object's name rides the same properties-family reply the Mute slice waits
+//!   for.
 //!
 //! # Where we depart from the reference, on purpose
 //!
@@ -102,6 +108,7 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit, UNIMPLEMENTED};
+use crate::derender::{DerenderKind, RequestDerender};
 use crate::hud_pick::surface_info_from_hit;
 use crate::inventory::InventoryModel;
 use crate::mutes::RequestBlock;
@@ -400,7 +407,9 @@ static RESET_PIE: PieMenuDef = PieMenuDef {
     ],
 };
 
-/// The "Derender >" sub-pie of the second More level.
+/// The "Derender >" sub-pie of the second More level
+/// (`viewer-derender-blacklist`): drop the picked linkset from *this* viewer's
+/// scene, permanently (the persisted blacklist) or for the session.
 static DERENDER_PIE: PieMenuDef = PieMenuDef {
     label: "Derender",
     entries: &[
@@ -409,7 +418,7 @@ static DERENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Blacklist",
                 action: "derender-blacklist",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
         PieEntry {
@@ -417,7 +426,7 @@ static DERENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Temporary",
                 action: "derender",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
     ],
@@ -1039,6 +1048,7 @@ fn handle_object_menu_actions(
     seat_cameras: Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
+    mut derenders: MessageWriter<RequestDerender>,
     mut open_contents: MessageWriter<crate::edit_contents::OpenObjectContents>,
 ) {
     for action in actions.read() {
@@ -1127,6 +1137,19 @@ fn handle_object_menu_actions(
                     hit.summary.root_full.uuid(),
                     target.name.clone().unwrap_or_default(),
                     MuteType::Object,
+                ));
+                None
+            }
+            // Derender the whole picked linkset (its root, which takes the
+            // child prims with it), permanently or for the session. Nothing
+            // goes on the wire — the simulator keeps streaming it, this viewer
+            // just stops mirroring it (see `crate::derender`).
+            action @ ("derender" | "derender-blacklist") => {
+                derenders.write(RequestDerender::new(
+                    hit.summary.root_full.uuid(),
+                    target.name.clone().unwrap_or_default(),
+                    DerenderKind::Object,
+                    action == "derender-blacklist",
                 ));
                 None
             }

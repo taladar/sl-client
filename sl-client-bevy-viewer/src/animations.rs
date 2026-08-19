@@ -53,6 +53,7 @@ use sl_client_bevy::{
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs, AvatarState};
 use crate::body_physics::{BodyPhysicsInput, BodyPhysicsMotion};
+use crate::derender::DerenderKind;
 use crate::ground::AvatarGround;
 use crate::locomotion_ik::{AdjustInput, AdjusterAnims, LegJoints, LocomotionAdjust};
 use crate::look_at::{
@@ -333,6 +334,7 @@ pub(crate) fn update_animation_caps(
 pub(crate) fn ingest_avatar_animations(
     mut events: MessageReader<SlEvent>,
     mut manager: ResMut<AnimationManager>,
+    derender: Res<crate::derender::DerenderList>,
 ) {
     let log = std::env::var("SL_VIEWER_LOG_LOCOMOTION").as_deref() == Ok("1");
     for event in events.read() {
@@ -343,6 +345,11 @@ pub(crate) fn ingest_avatar_animations(
         } = &event.0
         {
             for animation in animations {
+                // A blacklisted animation is never run (`viewer-derender-blacklist`),
+                // so there is nothing to fetch either.
+                if derender.blacklists(animation.anim_id, DerenderKind::Animation) {
+                    continue;
+                }
                 manager.request(AssetKey::from(animation.anim_id));
             }
             // Wire-truth diagnostic (env `SL_VIEWER_LOG_LOCOMOTION=1`): the exact
@@ -1033,6 +1040,7 @@ pub(crate) fn drive_avatar_skeletons(
     mut playback: ResMut<AnimationPlayback>,
     adjust: Res<LocomotionAdjust>,
     state: Res<AvatarState>,
+    derender: Res<crate::derender::DerenderList>,
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,
     gpu: GpuAvatarHooks<'_, '_>,
@@ -1048,8 +1056,15 @@ pub(crate) fn drive_avatar_skeletons(
             ..
         } = &event.0
         {
+            // A blacklisted animation is dropped from the authoritative set, so
+            // it never starts — the reference refuses it at the same point
+            // (`isBlacklisted(animation_id, AT_ANIMATION)` while processing an
+            // `AvatarAnimation`).
             let pairs: Vec<(Uuid, i32)> = animations
                 .iter()
+                .filter(|animation| {
+                    !derender.blacklists(animation.anim_id, DerenderKind::Animation)
+                })
                 .map(|animation| (animation.anim_id, animation.sequence_id))
                 .collect();
             let entry = playback.playing.entry(*avatar_id).or_default();

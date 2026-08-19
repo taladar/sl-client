@@ -24,5 +24,14 @@ and for creators (see priorities fight in real time).
 Reference (Firestorm, read-only): `fsfloateranimationexplorer` /
 `floater_animation_explorer.xml`.
 
+Note (2026-08-19): as with the sound explorer, the **blacklist** half is
+already built — [[viewer-derender-blacklist]] shipped `DerenderKind::Animation`
+and the refusal (`animations.rs` drops a blacklisted animation from the
+authoritative `AvatarAnimation` set, so it never starts and its asset is never
+fetched). Add the reference's **Blacklist** action here (its
+`animationexplorer.cpp` writes an `AT_ANIMATION` entry) — a `RequestDerender`
+with that kind — which makes "stop this animation for good" work across
+relogs, next to the one-shot stop and the permission revoke.
+
 Builds on: the animation registry + `protocol-40` decode + the permission
 revoke command.

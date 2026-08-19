@@ -58,6 +58,7 @@ use sl_client_bevy::{
 };
 
 use crate::coords::{bevy_to_sl_vec, region_offset_bevy, sl_to_bevy_vec};
+use crate::derender::DerenderKind;
 use crate::mutes::MuteModel;
 use crate::objects::{ObjectState, SceneObject};
 use crate::raycast_index::DynamicColliders;
@@ -195,6 +196,12 @@ pub(crate) struct WorldSounds {
 /// This has no access to the [`Mixer`] (an ingest system, not the audio pump);
 /// it only records intent and requests decodes. [`drive_world_sounds`] turns that
 /// into actual voices once the clips are ready and the mixer is in hand.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
+              clock, the clip cache, the sound state, the object mirror a position needs, and \
+              the three gates a sound passes (mute list, asset blacklist, parcel audibility)"
+)]
 pub(crate) fn ingest_world_sound_events(
     mut events: MessageReader<SlEvent>,
     time: Res<Time>,
@@ -202,6 +209,7 @@ pub(crate) fn ingest_world_sound_events(
     mut sounds: ResMut<WorldSounds>,
     state: Res<ObjectState>,
     mutes: Res<MuteModel>,
+    derender: Res<crate::derender::DerenderList>,
     parcel: ParcelAudibility,
 ) {
     let now = time.elapsed_secs();
@@ -217,6 +225,12 @@ pub(crate) fn ingest_world_sound_events(
                 ..
             } => {
                 if muted(&mutes, *owner_id, object_id.uuid()) {
+                    continue;
+                }
+                // A blacklisted sound asset is never played, whoever triggers it
+                // (`viewer-derender-blacklist`, the reference's
+                // `isBlacklisted(sound_id, AT_SOUND)` in `process_sound_trigger`).
+                if derender.blacklists(*sound_id, DerenderKind::Sound) {
                     continue;
                 }
                 // Parcel-local (`SOUND_LOCAL`) clamp: a one-shot the agent cannot
@@ -256,7 +270,9 @@ pub(crate) fn ingest_world_sound_events(
                     }
                     continue;
                 }
-                if muted(&mutes, *owner_id, object_id.uuid()) {
+                if muted(&mutes, *owner_id, object_id.uuid())
+                    || derender.blacklists(*sound_id, DerenderKind::Sound)
+                {
                     continue;
                 }
                 let sound = AssetKey::from(*sound_id);
@@ -294,6 +310,10 @@ pub(crate) fn ingest_world_sound_events(
             }
             SlSessionEvent::PreloadSound { sounds: preloads } => {
                 for preload in preloads {
+                    // No point warming a clip that will never be played.
+                    if derender.blacklists(preload.sound_id, DerenderKind::Sound) {
+                        continue;
+                    }
                     cache.request(AssetKey::from(preload.sound_id));
                 }
             }

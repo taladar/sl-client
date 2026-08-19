@@ -2101,6 +2101,35 @@ impl AvatarState {
         );
     }
 
+    /// Despawn everything this viewer draws for `agent` — its full-object body
+    /// and its coarse dot alike — because the agent was **derendered**
+    /// (`viewer-derender-blacklist`). The per-agent name / appearance
+    /// bookkeeping is deliberately kept: it costs nothing, is not visible, and
+    /// makes a later un-derender (which re-streams the body) cheap.
+    pub(crate) fn derender_agent(&mut self, agent: AgentKey, commands: &mut Commands) {
+        let scoped = self
+            .by_scoped
+            .iter()
+            .find(|(_scoped, tracked)| **tracked == agent)
+            .map(|(scoped, _tracked)| *scoped);
+        if let Some(scoped) = scoped {
+            self.remove_object(scoped, commands);
+        }
+        if let Some(entities) = self.coarse.remove(&agent) {
+            despawn_avatar(entities, commands);
+        }
+        let _dropped_region = self.coarse_region.remove(&agent);
+        let _dropped_position = self.coarse_pos.remove(&agent);
+    }
+
+    /// Despawn the full-object avatar tracked under `scoped` because it was
+    /// derendered — the scoped-id counterpart of [`derender_agent`](Self::derender_agent),
+    /// for the suppression index (which works in region-scoped ids). A no-op
+    /// when `scoped` is not an avatar.
+    pub(crate) fn derender_scoped(&mut self, scoped: ScopedObjectId, commands: &mut Commands) {
+        self.remove_object(scoped, commands);
+    }
+
     /// Despawn the placeholder of the full-object avatar that left the scene under
     /// `scoped`, if one is tracked.
     fn remove_object(&mut self, scoped: ScopedObjectId, commands: &mut Commands) {
@@ -2400,6 +2429,7 @@ impl AvatarState {
         own: Option<AgentKey>,
         locations: &[CoarseLocation],
         you: Option<usize>,
+        derender: &crate::derender::DerenderList,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<FaceMaterial>,
@@ -2424,6 +2454,11 @@ impl AvatarState {
             }
             // A full-object avatar renders from its precise object position.
             if self.objects.contains_key(&agent) {
+                continue;
+            }
+            // A derendered avatar gets no dot either — otherwise every coarse
+            // update would respawn the placeholder the derender just despawned.
+            if derender.hides_in_world(agent.uuid()) {
                 continue;
             }
             present.insert(agent);
@@ -2833,10 +2868,17 @@ pub(crate) fn recenter_avatars(
 /// Spawn / move / despawn the placeholder of every avatar the simulator streams
 /// as a full in-world object (`pcode` 47), requesting each avatar's legacy name
 /// once.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
+              session identity, the avatar mirror, the derender list it is gated on, the \
+              loaded body, and the three ECS sinks a spawn writes to"
+)]
 pub(crate) fn update_avatar_objects(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
+    derender: Res<crate::derender::DerenderList>,
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -2850,7 +2892,13 @@ pub(crate) fn update_avatar_objects(
                 // hides base-body regions via `IMG_USE_BAKED_*` faces), then render
                 // the avatars themselves.
                 state.track_object(object);
-                if object.pcode == pcode::AVATAR {
+                // A derendered avatar (`viewer-derender-blacklist`) is not
+                // rendered at all: no body, no skeleton, no bake fetches. Its
+                // attachment bookkeeping above is kept (it is free, and the
+                // attachments themselves are suppressed by the object mirror's
+                // own index).
+                if object.pcode == pcode::AVATAR && !derender.hides_in_world(object.full_id.uuid())
+                {
                     // R22b diagnostic: record that the simulator streamed a full
                     // object for this agent, and log its arrival, so a live census
                     // can tell "never streamed" apart from "streamed but unrendered".
@@ -3004,6 +3052,7 @@ pub(crate) fn update_coarse_avatars(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
+    derender: Res<crate::derender::DerenderList>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -3024,6 +3073,7 @@ pub(crate) fn update_coarse_avatars(
                 own,
                 locations,
                 *you,
+                &derender,
                 &mut commands,
                 &mut meshes,
                 &mut materials,
