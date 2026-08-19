@@ -29,3 +29,15 @@ A group picker is also reusable elsewhere (e.g. parcel group assignment).
 
 Reference (Firestorm, read-only): `llfloatergrouppicker`,
 `panel_region_access.xml` (the allowed-groups sub-tab Add button).
+
+## Parity-audit addendum (2026-08-19)
+
+The group picker this task builds (`floater_choose_group.xml` in the
+reference) is a **generic reusable picker**, not an estate-only widget:
+the same surface serves group notices, avatar-profile group selection,
+and About Land General's group assignment. In particular, wire About
+Land's "Set…" (change parcel group) through it — the write path already
+exists as `ParcelUpdate.group_id` (`sl-proto/src/types/parcel.rs`), and
+`AboutLandAction` in `sl-client-bevy-viewer/src/about_land.rs` has no
+group-set action today. Build it group-picker-shaped like
+`avatar_picker.rs`, then reuse everywhere.

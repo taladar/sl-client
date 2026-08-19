@@ -38,3 +38,14 @@ The faithful version, per the reference:
 Reference (Firestorm, read-only): `indra/newview/llhudeffectlookat.cpp/h`,
 `indra/newview/llagentcamera.cpp` (`setLookAt` / `setFocusGlobal`),
 `indra/newview/app_settings/settings.xml` (the `LookAt*` settings).
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extensions: the explicit *don't-send* privacy toggles —
+suppress broadcasting the own look-at target (`PrivateLookAtTarget`),
+local look-at (`PrivateLocalLookAtTarget`) and point-at
+(`PrivatePointAtTarget`); the head-follows-mouse ranges
+(`PitchFromMousePosition` / `YawFromMousePosition` — how far the
+avatar's head tracks the pointer); and the static-eyes option
+(`FSStaticEyes` + UUID — a priority animation suppressing idle eye
+motion; our `LLEyeMotion` port is done but has no suppression toggle).

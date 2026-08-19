@@ -32,3 +32,11 @@ Reference (Firestorm, read-only): `menu_viewer.xml` Build ▸ Options
 Builds on: the selection-set core (blocked task); overlay rendering
 shares machinery with [[viewer-render-type-toggles]] and
 [[viewer-highlight-transparent]].
+
+## Parity-audit addendum (2026-08-19)
+
+Phototools/build mode also has `SelectReflectionProbes`: beyond *showing*
+reflection-probe volumes (already in this task's body), it makes probe
+volumes *selectable* in edit mode so a builder can click and edit an
+invisible probe prim directly. Add the selectable-probes half to the
+display toggle.

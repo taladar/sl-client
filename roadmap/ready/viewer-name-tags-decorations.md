@@ -37,3 +37,15 @@ The complexity (ARC) lines are split out to
 
 Reference (Firestorm, read-only): `llhudnametag`,
 `llvoavatar::idleUpdateNameTag`, `llavatarnamecache`.
+
+## Parity-audit addendum (2026-08-19)
+
+Additional tag knobs from the parity audit: the third name-tag display
+mode — "show briefly" (the `AvatarNameTagMode` radio's timed state,
+duration `RenderNameShowTime`; our `ShowNameTags` in `avatars.rs` is a
+plain bool), suppressing the group title on the *own* tag only
+(`RenderHideGroupTitle`), tag background opacity (`ChatBubbleOpacity`
+doubles as the name-tag alpha in the reference), a user Z-offset
+correction to nudge tag height (`FSNameTagZOffsetCorrection`), and the
+legacy fixed-at-avatar-position tag mode (`FSLegacyNametagPosition`,
+tag pinned to the avatar instead of floating above by height).

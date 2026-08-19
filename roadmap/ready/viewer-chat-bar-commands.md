@@ -40,3 +40,16 @@ Reference (Firestorm, read-only): `fscommon.cpp` /
 Builds on: the slash-command registry and chat input bar (both done);
 individual commands lean on teleport, map, and media systems as they
 land.
+
+## Parity-audit addendum (2026-08-19)
+
+Missing Firestorm commands not yet in the body (all from
+`indra/newview/chatbar_as_cmdline.cpp`): **bw** (set max bandwidth,
+FSCmdLineBandwidth); **AO on/off** (toggle the client-side animation
+overrider, FSCmdLineAO); **/touch \<key\>** (touch an object by UUID);
+**/siton \<key\>** and **/standup**; the **/zoffset_up /
+/zoffset_down / /zoffset_reset** avatar Z-offset (hover) nudges; the
+bulk-inventory "packager" suite **zdrop / ztake / ktake / kcopy /
+mtake / lpackage / cpackage / kpackage / kpackagerstart /
+kpackagerstop** (the JCZtake/Ztake bulk inventory drop/take commands);
+and **invrepair** (inventory repair).

@@ -15,3 +15,13 @@ view, front view, group-photo) the user can store and recall, persisted in
 
 Reference (Firestorm, read-only): the camera presets in `llfloatercamera` /
 `llpresetsmanager`.
+
+## Parity-audit addendum (2026-08-19)
+
+Include the **advanced camera-position editor**
+(`floater_preferences_view_advanced.xml`, FS "prefs_view_advanced"): raw
+XYZ vector fields for `CameraOffset` and `FocusOffset` — the values
+camera presets are built from. Our
+`sl-client-bevy-viewer/src/preferences_camera_move.rs` only exposes the
+scalar CameraOffsetScale today; the full offset/focus vector editor
+belongs with the presets work.

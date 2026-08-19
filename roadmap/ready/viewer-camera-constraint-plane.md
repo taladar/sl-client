@@ -35,3 +35,10 @@ Reference (Firestorm, read-only): `process_camera_constraint`
 Builds on: the third-person orbit camera (done) and the session event
 stream. The follow-cam half of scripted cameras is separate:
 [[viewer-camera-script-control]].
+
+## Parity-audit addendum (2026-08-19)
+
+Firestorm layers a user override on top of the constraint machinery:
+`FSIgnoreSimulatorCameraConstraints` — a toggle to ignore script/sim
+camera constraints entirely (the constraint plane is still received, just
+not applied). Add the user toggle to this task's scope.

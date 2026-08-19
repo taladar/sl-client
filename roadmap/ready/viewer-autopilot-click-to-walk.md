@@ -35,3 +35,19 @@ both tasks).
 
 Builds on: the picking path (`avatar_pick.rs` / object picking) and the
 movement control bits (`movement.rs`).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit found the context-menu entry points unwired: the land
+pie's **Go Here** slice (`go-here` in
+`sl-client-bevy-viewer/src/land_menu.rs`) and the avatar-other /
+attachment-other **Go To** slices (`go-to`, reference `GoToObject`) are
+UNIMPLEMENTED placeholders that must dispatch onto the autopilot core
+this task builds. Also in scope: the land pie's **Sit Here** upgrade —
+today it ground-sits in place (a documented simplification in
+`land_menu.rs`); with autopilot available it should walk the avatar to
+the clicked point first and then sit, matching the reference.
+
+Also register `teleport_to` and `walk_to` as bindable action targets in
+the input action map — the reference exposes both in the rebind UI's
+click bindings — not only as click gestures.

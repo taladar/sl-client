@@ -35,3 +35,13 @@ Scope:
   only when an owner id is known.
 - Muting the owner should also stop *rendering* their particles (the point of
   the feature); tie into the mute list the session already tracks.
+
+## Parity-audit addendum (2026-08-19)
+
+Minor scope addition from the parity audit: the task enumerates the
+object pie, the avatar-other pie and the one-slice 7th pie, but not
+the **land pie's** `mute-particles` slice (menu_pie_land.xml /
+`land_menu.rs`) nor the flat menus' Block Particle Owner entries
+(menu_land.xml, menu_avatar_self.xml, menu_avatar_other.xml,
+menu_object.xml). Same wiring — list all of them so no placeholder is
+left behind.

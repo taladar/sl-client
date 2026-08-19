@@ -200,3 +200,26 @@ landed 2026-07-22: the `MediaBackend` / `MediaSurface` traits moved to the
 shared `sl-media` crate (re-exported by `sl-cef`), `sl-gst` implements the
 playback side, and `media_prim` dispatches each entry's URL by
 `classify_url` — see [[viewer-video-playback]].
+
+## Parity-audit addendum (2026-08-19)
+
+Add the per-face **MOAP media-settings editor** — the write UI for
+media-on-a-prim (`floater_media_settings.xml` plus
+`floater_whitelist_entry.xml` for adding whitelist entries): home URL,
+autoplay/auto-scale/auto-zoom, size, security whitelist, and
+permissions per face. The `SetObjectMedia` command already exists in
+sl-proto and our MOAP rendering side lives in
+`sl-client-bevy-viewer/src/media_prim.rs` / `media_controls.rs`; what is
+missing is the editor surface itself.
+
+The build floater's Texture tab also carries the per-face media
+*editing* UI, which this task's body (rendering + browser) does not yet
+cover: the `combobox matmedia` **Media** channel option (our combo
+implements Materials and PBR only, `build-tex-matmedia-material/-pbr`
+in `sl-client-bevy-viewer/src/edit_texture.rs`), the **add_media /
+delete_media** buttons per face, the media-settings floater the add
+button opens (that floater itself is also covered by another writer's
+addendum to this same task — the two should land as one surface), and
+the **align media to face** button. The protocol side is already done
+(`SetObjectMedia` etc., protocol-24). Reference:
+`panel_tools_texture.xml` L167-179 and L671-692.

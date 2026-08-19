@@ -35,3 +35,13 @@ editable:
 
 Reference (Firestorm, read-only): `llpanellandmedia`, `llpanellandaudio`,
 `panel_region_experiences.xml`, `panel_region_environment.xml`.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit addition: the Options tab's **SeeAvatarsCheck** ("Avatars
+on other parcels can see and chat with avatars on this parcel"). We
+have no such control at all in `sl-client-bevy-viewer/src/about_land.rs`;
+the read exists (`ParcelInfo.see_avs`, `sl-proto/src/types/parcel.rs`)
+but `ParcelUpdate` lacks the field — the same caps-side
+ParcelPropertiesUpdate class as the avatar-sound toggles this task
+already lists, so it belongs here.

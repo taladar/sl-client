@@ -70,3 +70,18 @@ seated-vehicle crossing (seamless placement, no permission churn) can only be
 exercised on aditi — to be done after the rest of the teleport/crossing work is
 solid. (A separate walk-crossing movement lockup surfaced live —
 [[viewer-crossing-movement-locks-up]].)
+
+## Parity-audit addendum (2026-08-19)
+
+Addition from the audit of `fsregioncross.cpp`: the FS/Animats adaptive
+extrapolation-time limit for ridden vehicles. We implement the LL
+behaviour — a fixed 1 s crossing cap with zeroed acceleration
+(`sl-client-bevy-viewer/src/physics.rs:948-1005`,
+`REGION_CROSSING_CAP_SECS`). The reference low-pass filters the ridden
+object's object-frame velocity/angular velocity and sets the
+extrapolation limit to error-budget / current-deviation (settings
+FSRegionCrossingSmoothingTime, FSRegionCrossingPositionErrorLimit,
+FSRegionCrossingAngleErrorLimit), applied only to sat-upon objects that
+have moved and are outside the 0..256 m region bounds — so smooth
+vehicles extrapolate longer through a crossing and erratic ones stop
+sooner.

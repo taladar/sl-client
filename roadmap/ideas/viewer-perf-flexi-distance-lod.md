@@ -53,3 +53,12 @@ minority — so it is bundled here rather than pursued on its own.
 [[viewer-profiling]] — `simulate_flexi` zone self-time and allocation counts
 (Tracy memory mode) on a flexi-heavy scene with a **moving** flexi majority
 (wind / motion), where the settle latch does not already zero the cost.
+
+## Parity-audit addendum (2026-08-19)
+
+The reference also scales flexi *update rate*, not just tessellation:
+`RenderFlexTimeFactor` is a sim-time / update-rate knob that lets distant
+or numerous flexi prims simulate at a reduced rate. Our flexi sim runs
+per-frame with settle detection (`sl-client-bevy-viewer/src/flexi.rs`)
+and has no rate scaling; add the update-rate factor to this task's scope
+alongside the distance/pixel-area LOD.

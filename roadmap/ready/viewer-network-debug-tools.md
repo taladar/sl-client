@@ -29,3 +29,15 @@ Reference (Firestorm, read-only): `menu_viewer.xml` (Develop → Network /
 World / Cache), `llviewermessage`, `llworld`.
 
 Builds on: the session command surface and `sl-asset` caches.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds five cache/dump affordances to this task's
+checklist: **Clear Group Cache** (drop cached group data — the current
+cache checklist covers assets only), **Flush Names Caches** (the
+display-name cache exists via the name-tag work but has no flush
+affordance), **Dump Region Object Cache**, **Record Stats to File**
+(CSV stat logging; could alternatively live in
+viewer-statistics-floater), and **Dump Scripted Camera** (print the
+active follow-cam parameters; refs
+viewer-scripted-followcam-llsetcameraparams).

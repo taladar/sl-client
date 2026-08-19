@@ -40,3 +40,12 @@ Several of these need data the update stream does not carry (land ownership,
 group roles, god state, script sit flags); pull each from the session state
 that owns it as those surfaces land, and light the predicates up one deliberate
 edit at a time — addresses never move.
+
+## Parity-audit addendum (2026-08-19)
+
+One more enable predicate from the parity audit: the attachment-self
+Drop enable's per-item **no-drop** permission refinement
+(`Attachment.EnableDrop` in the reference). Our `attachment_menu.rs`
+gates Drop on TARGET_DROPPABLE (HUD excluded) but defers the per-item
+no-drop inventory-permission check — same enable-fidelity family as the
+rest of this task.

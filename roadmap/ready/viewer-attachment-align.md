@@ -23,3 +23,13 @@ Builds on: attachment transforms (P16) and the object edit path.
 
 Deps: [[viewer-object-edit-floater-shell]] (an attachment selection to
 act on).
+
+## Parity-audit addendum (2026-08-19)
+
+CORRECTION: this task's Firestorm reference points at
+`floater_avatar_align.xml`, but that file is the own-avatar *rotation*
+nudge floater (±1/±10/±45/±90°, face-nearest-avatar) — i.e. the
+reference for [[viewer-avatar-alignment-tools]], not for attachment
+alignment. Fix the reference to the actual worn-attachment editing
+paths instead (attachment nudge editing while worn; see also
+viewer-edit-attachment-behavior).

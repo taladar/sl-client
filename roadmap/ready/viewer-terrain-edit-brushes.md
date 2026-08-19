@@ -23,3 +23,17 @@ Builds on: `terrain.rs` and `sl-terrain`.
 
 Deps: [[viewer-input-action-map]] (brush drag),
 [[viewer-region-options-debug]] (terrain textures / heights overlap).
+
+## Parity-audit addendum (2026-08-19)
+
+The build floater's Land panel integration goes beyond the brush
+radios already in the body: the **Select Land** rectangle mode (`radio
+select land` — drag a land rectangle as the operand), the **Apply to
+selection** button (run the chosen brush over the selected land rect
+instead of under the cursor), and the **ShowParcelOwners** checkbox
+(the ownership-colour ground overlay toggled from the Land panel — the
+overlay itself is [[viewer-parcel-owners-terrain-overlay]]).
+References: `floater_tools.xml` L682-816 and 3427. The panel's parcel
+buttons row (About Land / Subdivide / Join / Buy / Abandon) is covered
+elsewhere (about-land done, viewer-parcel-join-split,
+viewer-money-economy-ui).

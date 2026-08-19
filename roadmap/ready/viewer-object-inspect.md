@@ -21,3 +21,11 @@ Reference (Firestorm, read-only): `llfloaterinspect`,
 `floater_inspect.xml`.
 
 Deps: [[viewer-object-selection-core]] (selection + per-prim addressing).
+
+## Parity-audit addendum (2026-08-19)
+
+Optional Firestorm extension: beyond the LL columns (name, owner,
+creator, creation date), FS's inspect floater adds per-prim columns
+for **description**, **faces / vertices / triangles**, and
+**texture-memory (TMem) / VRAM** usage (`floater_inspect.xml`
+L78-116). Worth folding in while building the table.

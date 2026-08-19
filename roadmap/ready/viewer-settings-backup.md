@@ -22,3 +22,11 @@ Reference (Firestorm, read-only): `panel_preferences_backup.xml`,
 `fsfloaterbackup`.
 
 Deps: [[viewer-preferences-floater]] (it is a prefs tab).
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: a "Reset All Settings" factory-reset action
+(Firestorm's advanced-preferences button) — wipe the settings store
+back to defaults (global and per-account), with a confirm; the natural
+inverse of backup/restore and the same code path as a restore of an
+empty snapshot.

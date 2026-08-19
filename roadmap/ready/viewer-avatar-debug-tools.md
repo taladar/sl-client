@@ -31,3 +31,14 @@ Reference (Firestorm, read-only): `menu_viewer.xml` (Develop → Avatar),
 `llvoavatarself` (rebake), `llfloateravatartextures`.
 
 Builds on: the avatar appearance/bake pipeline and the animation registry.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds four Develop ▸ Avatar entries not yet in the
+body: **Toggle Character Geometry**, **Allow Select Avatar** (permit
+selecting avatars with the build tool), avatar **Disable LOD**, and
+the **Dump Local Textures** dump. (Debug Joint Updates / Character
+Vis / Rez
+State / Debug Rotation are implemented differently via our
+SL_VIEWER_LOG_AVATAR_* env toggles and the avatar dump harness; Dump
+Attachments exists as `avatar_dump.rs`.)

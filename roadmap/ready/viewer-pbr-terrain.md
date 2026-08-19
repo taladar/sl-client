@@ -32,3 +32,11 @@ Reference (Firestorm, read-only): the PBR-terrain shader path, the
 
 Builds on: P2 terrain (the heightfield, patches and blend weights) and P27 GLTF
 PBR materials (the lighting model and material fetch).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds the Develop ▸ Terrain dev tools
+(menu_viewer.xml L5165–5194): **Create Local Paintmap / Delete Local
+Paintmap** — the local dev preview of PBR terrain painting, which this
+task does not mention — and **Rebuild Terrain** (a trivial
+re-tessellate that folds into the same surface).

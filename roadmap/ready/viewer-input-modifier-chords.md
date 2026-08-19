@@ -42,3 +42,19 @@ Reference (Firestorm, read-only): `indra/newview/llviewerinput.cpp` and
 
 Builds on: [[viewer-input-action-map]] (the single-key map this widens);
 unblocks the chords in [[viewer-input-rebinding-ui]].
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit found that several already-implemented floaters and
+features lack their reference default chord entirely (no accelerator
+drawn, no handler). Once chords exist in the action map, add these
+defaults: Ctrl+Shift+M Mini-Map, Ctrl+Shift+A Nearby people /
+Ctrl+Shift+F Friends / Ctrl+Shift+G Groups (people-panel tabs),
+Ctrl+Shift+S Snapshot floater (only Ctrl+` snapshot-to-disk exists
+today), Ctrl+Shift+W Close All Windows and Ctrl+Alt+W Close Window
+Group (the floater manager has only Ctrl+W close-one), and Ctrl+. /
+Ctrl+, select-next/previous part-or-face (edit-face selection is done;
+its cycling keys can join the chord migration). The dead drawn
+accelerators (Ctrl+P/T/F/U) are the separate bug
+[[viewer-menu-accelerators-inert]], whose generic accel→command
+dispatch this map-level consolidation should compose with.

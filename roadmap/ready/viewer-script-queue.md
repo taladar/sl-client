@@ -24,3 +24,10 @@ Reference (Firestorm, read-only): `llfloaterscriptqueue`,
 `floater_script_queue.xml`.
 
 Builds on: task inventory + script-control protocol (`api-g9`).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds the **Remove Scripts From Selection** operation
+(`Tools.SelectedScriptAction` with parameter `delete`) to the batch
+floater's operation set — the body covers reset / run-state /
+recompile but not script deletion.

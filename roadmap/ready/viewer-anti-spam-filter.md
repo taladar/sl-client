@@ -38,3 +38,12 @@ Reference (Firestorm, read-only): `NACLantispam.cpp`/`.h`, the
 
 Builds on: chat/IM ingest (done); dialog, sound, and offer delivery hook
 in as those systems land ([[viewer-dialog-offers-invites]]).
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: the render-side texture-area protection
+(`RenderVolumeSAProtection` with `RenderVolumeSAFrameMax`) — a guard
+against griefing objects with pathologically large surface areas /
+texture area per frame, auto-limiting their rendering. Render-side
+rather than message-side, but it is FS's anti-griefing family and the
+audit found no other home.

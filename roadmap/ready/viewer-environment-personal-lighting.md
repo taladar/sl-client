@@ -38,3 +38,13 @@ it keeps the `shared` (grid) environment beside the rendered `settings`,
 re-applies the pin across region changes and late EEP replies, and exposes
 `set_fixed_sky` / `fixed_sky` (the menu check marks). The floater's slider
 surface and the water section remain this task's scope.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extensions — override lifecycle knobs: a manual
+transition time when applying a personal environment
+(`FSEnvironmentManualTransitionTime`), persist the personal environment
+across logout/login (`EnvironmentPersistAcrossLogin`), and the
+repeated-keybind behaviour where pressing the same environment toggle
+again reverts to the shared/region environment
+(`FSRepeatedEnvTogglesShared`).

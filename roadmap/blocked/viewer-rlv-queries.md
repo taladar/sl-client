@@ -30,3 +30,17 @@ the rest read the relevant viewer/session snapshot.
 
 Reference (Firestorm, read-only): `rlvhandler.cpp` (query dispatch),
 `rlvcommon.cpp` (`RlvUtil::sendChatReply`).
+
+## Parity-audit addendum (2026-08-19)
+
+Missing scope found by the audit: `@getstatusall`; `@getcommand`
+(dictionary introspection, including filtering on the EXPERIMENTAL /
+EXTENDED / DEPRECATED behaviour flags kept by
+[[viewer-rlv-restriction-state]]); the names-variant queries
+`@getoutfitnames`, `@getattachnames`, `@getaddattachnames`,
+`@getremattachnames`, `@getaddoutfitnames`, `@getremoutfitnames`;
+`@findfolder` / `@findfolders`; `@getpath` / `@getpathnew` (worn item →
+`#RLV` folder path); `@getgroup`; `@getheightoffset`; the `@getcam_*`
+family (avdist, avdistmin, avdistmax, fov, fovmin, fovmax, textures);
+RLVaEnableIMQuery (answer `@version` handshakes sent via IM); and
+multi-line reply splitting via `RlvUtil::sendChatReply`.

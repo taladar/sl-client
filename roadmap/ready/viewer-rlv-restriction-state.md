@@ -33,3 +33,32 @@ it explicitly here rather than in each consumer.
 
 Reference (Firestorm, read-only): `rlvhandler.cpp` (per-object restriction map,
 reference counting, clear-on-detach), `rlvdefines.h`.
+
+## Parity-audit addendum (2026-08-19)
+
+The full-parity audit of `rlvhelper.cpp` / `rlvdefines.h` /
+`rlvmodifiers.h` adds cross-cutting machinery this task owns beyond
+per-object refcounting and clear-on-detach:
+
+- The behaviour-modifier value system: 21 `ERlvBehaviourModifier` slots
+  with typed values (float / vector / UUID), a per-slot default,
+  primary-object tracking, and most-restrictive-wins comparators
+  (`RlvBehaviourModifierCompMin` / `CompMax`; the `addModifier` rows in
+  the rlvhelper.cpp dictionary constructor). The owning enforcement
+  families consume the slots (e.g. FARTOUCHDIST, RECVIMDISTMIN/MAX,
+  the SETCAM_* group, SHOWNAMETAGSDIST, SITTPDIST, TPLOCALDIST), but the
+  typed storage and selection logic live here.
+- The 13 `ERlvLocalBhvrModifier` per-object local modifiers addressed
+  through the command option (`@setsphere:mode;1=n` style) — used by the
+  @setsphere/@setoverlay effect families.
+- `@permissive` plus the `_sec` strict-command semantics: a `_sec`
+  command (and everything, under @permissive) ignores exceptions issued
+  by *other* objects; only the restricting object's own exceptions
+  apply.
+- Synonym canonicalisation (the BHVR_SYNONYM dictionary rows):
+  touchfar→fartouch; camavdist/camdistmin/camdistmax/camtextures/
+  camunlock (and camzoommin/camzoommax)→setcam_*; addoutfit*=force→
+  attach*; attach*overorreplace→attach*.
+- Behaviour-flag metadata (BHVR_EXPERIMENTAL / BHVR_EXTENDED /
+  BHVR_DEPRECATED) carried per dictionary entry — `@getcommand` filters
+  on these flags, so the state machine must retain them.

@@ -2,7 +2,7 @@
 id: viewer-build-ui-firestorm-audit
 title: Systematic side-by-side audit of the whole build UI vs Firestorm
 topic: viewer
-status: deferred
+status: done
 origin: user request (2026-07-24) after the build-tool texture / face-selection
   work — many small behaviours only surfaced by direct comparison
 refs: [viewer-object-edit-floater-shell, viewer-prim-parameter-editing,
@@ -44,3 +44,23 @@ same way? File the gaps.
 
 Reference (Firestorm, read-only): `floater_tools.xml` and the `llpanel*` /
 `lltool*` sources it wires in.
+
+## Discharged — Firestorm full-parity audit (2026-08-19)
+
+The control-by-control source-level walk of `floater_tools.xml`,
+`panel_tools_texture.xml`, `floater_build_options.xml` and the
+edit-adjacent floaters was executed as part of the Firestorm full-parity
+audit. Every gap became its own item: [[viewer-build-tool-row-parity]],
+[[viewer-build-align-tool]], [[viewer-build-create-tool-options]],
+[[viewer-build-general-sale-clickaction]], [[viewer-build-sculpt-controls]],
+[[viewer-build-physics-params]], [[viewer-build-probe-animesh-controls]],
+[[viewer-build-widget-parity-upgrades]], [[viewer-build-copy-paste-params]],
+[[viewer-build-stretch-textures]], [[viewer-build-texture-tab-fs-extras]],
+[[viewer-build-creation-defaults]], plus addenda on the open
+grid-options / bulk-permissions / terrain-brush / media-prim tasks. The
+remaining live behavioural side-by-side (previews, clamps,
+revert-on-close under a real pointer) is exactly the scope of the
+blocked interaction-test tasks [[viewer-build-floater-interaction-tests]],
+[[viewer-edit-gizmo-interaction-tests]] and
+[[viewer-edit-selection-interaction-tests]], so nothing of this
+umbrella's scope remains untracked.

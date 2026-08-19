@@ -32,3 +32,13 @@ than special-casing per widget.
 
 Reference (Firestorm, read-only): `rlvhandler.cpp`, `rlvcommon.cpp`
 (`RlvUtil::filterNames`), `rlvactions.h`.
+
+## Parity-audit addendum (2026-08-19)
+
+Missing scope found by the audit (the body names only the show* core;
+`rlvui.cpp` is the reference filter): `@shownearby`, `@showinv`;
+`@viewnote` / `@viewscript` / `@viewtexture` (block opening those
+inventory item types); `@viewtransparent` / `@viewwireframe` (block
+those render debug modes); the SHOWNAMETAGSDIST distance modifier on
+`@shownametags`; and the RLVaEnableLegacyNaming setting's effect on the
+anonymisation naming rules.

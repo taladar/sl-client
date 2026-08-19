@@ -30,3 +30,20 @@ Reference (Firestorm, read-only): `llconsole`, `lltextureview`
 (Develop → Consoles).
 
 Builds on: `diagnostics.rs` overlay + the pipeline-status API.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds the smaller Develop-menu console/readout
+surfaces: the **Notifications console**, the **Camera / Wind / FOV
+mini-consoles** (Develop ▸ Consoles, menu_viewer.xml L3880–4047), and
+the Show Info corner readouts (L4050–4152): **Show Time, Show Render
+Info, Show Matrices, Show Color Under Cursor, Show Memory, Show
+Texture Info, Show Upload Transaction** — small on-screen overlay
+readouts toggled per item. (Show Updates to Objects is already covered
+by the render-metadata task; VRAM-per-object totals fold into
+viewer-statistics-floater.)
+
+Add the **notifications console** (`floater_notifications_console.xml`)
+— the dev floater that lists the notification catalogue and lets you
+browse/fire individual notification entries for testing, a natural fit
+next to the other debug consoles this task builds.

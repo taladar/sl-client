@@ -29,3 +29,13 @@ Reference (Firestorm, read-only): `Avatar.FaceNearest`,
 alignment floater implementation.
 
 Builds on: avatar movement controls ([[viewer-p31-5]], done).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds the context-menu **Face Towards** verb: the
+reference's `Avatar.FaceTowards` turns the agent to face the *picked*
+avatar, offered on the avatar-other and attachment-other menus. Our
+`face-towards` slices in `avatar_menu.rs` / `attachment_menu.rs` are
+UNIMPLEMENTED placeholders; the task as written only covers the Face
+nearest-avatar action. Wire both slices onto the same turn-to-face
+core.

@@ -11,33 +11,47 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 65 |
-| ready | 222 |
-| blocked | 65 |
+| ideas | 92 |
+| ready | 267 |
+| blocked | 68 |
 | in-progress | 16 |
-| bugs | 27 |
-| done | 837 |
-| deferred | 24 |
+| bugs | 28 |
+| done | 838 |
+| deferred | 23 |
 | wont-do | 13 |
-| **total** | **1269** |
+| **total** | **1345** |
 
-## ideas (65)
+## ideas (92)
 
 ### viewer
 
 - [`viewer-a11y-screen-reader`](ideas/viewer-a11y-screen-reader.md) —
   Screen-reader / assistive-technology support (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-alpha-auto-mask`](ideas/viewer-alpha-auto-mask.md) — Automatic
+  alpha-mask promotion (RenderAutoMaskAlphaDeferred)
 - [`viewer-avatar-client-collision-capsule`](ideas/viewer-avatar-client-collision-capsule.md)
   — Client-side avatar collision capsule (if client physics ever needs avatars)
 - [`viewer-avatar-welcome-pack`](ideas/viewer-avatar-welcome-pack.md) — Avatar
   Welcome Pack picker
 - [`viewer-beam-customization`](ideas/viewer-beam-customization.md) —
   Selection-beam customization
+- [`viewer-camera-behavior-options`](ideas/viewer-camera-behavior-options.md) —
+  Camera-feel behaviour toggles
 - [`viewer-camera-no-pull-in-transparent-prims`](ideas/viewer-camera-no-pull-in-transparent-prims.md)
   — Camera collision skips fully-transparent prims
+- [`viewer-chat-range-spheres`](ideas/viewer-chat-range-spheres.md) — In-world
+  whisper/say/shout chat-range spheres
+- [`viewer-conversations-session-restore`](ideas/viewer-conversations-session-restore.md)
+  — Restore IM sessions at login + IM↔nearby routing options
+- [`viewer-crash-reporter`](ideas/viewer-crash-reporter.md) — Crash capture &
+  opt-in reporting
+- [`viewer-derender-all-animesh`](ideas/viewer-derender-all-animesh.md) —
+  One-click derender of all animated objects
 - [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
   — Rethink the flycam mode's key bindings
+- [`viewer-gltf-scene-editor`](ideas/viewer-gltf-scene-editor.md) — GLTF scene /
+  asset editor floater (LL experimental)
 - [`viewer-hdri-environment`](ideas/viewer-hdri-environment.md) — HDRI
   environment override
 - [`viewer-help-onboarding-misc`](ideas/viewer-help-onboarding-misc.md) —
@@ -50,6 +64,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-i18n-target-languages`](ideas/viewer-i18n-target-languages.md) —
   Which UI translations to ship — target-language tiers
+- [`viewer-inventory-maintenance-verbs`](ideas/viewer-inventory-maintenance-verbs.md)
+  — Firestorm inventory power / maintenance verbs
+- [`viewer-inventory-qol-toggles`](ideas/viewer-inventory-qol-toggles.md) —
+  Inventory quality-of-life toggles
+- [`viewer-land-access-list-export-import`](ideas/viewer-land-access-list-export-import.md)
+  — Access-list export / import / copy for parcel & estate lists
 - [`viewer-local-mesh`](ideas/viewer-local-mesh.md) — Local mesh — live-reload
   mesh from disk
 - [`viewer-lsl-preprocessor`](ideas/viewer-lsl-preprocessor.md) — LSL
@@ -60,14 +80,26 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Minimap collision-parcel ("banned from here") fill
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
   combat conveniences
+- [`viewer-mouselook-ui-options`](ideas/viewer-mouselook-ui-options.md) —
+  Mouselook UI & behaviour options
+- [`viewer-notification-toast-tuning`](ideas/viewer-notification-toast-tuning.md)
+  — Notification toast layout & lifetime tuning
 - [`viewer-object-export-import`](ideas/viewer-object-export-import.md) — Object
   backup export / import (glTF-based)
 - [`viewer-object-mark-copy-key`](ideas/viewer-object-mark-copy-key.md) — Object
   marking + copy object keys
+- [`viewer-offer-accept-behavior-options`](ideas/viewer-offer-accept-behavior-options.md)
+  — Post-accept inventory-offer behaviours
 - [`viewer-onboarding-tutorial`](ideas/viewer-onboarding-tutorial.md) —
   In-viewer tutorial for new and returning Second Life users
+- [`viewer-opensim-region-extras-limits`](ideas/viewer-opensim-region-extras-limits.md)
+  — Consume the remaining OpenSimExtras region features
+- [`viewer-opensim-region-settings-panel`](ideas/viewer-opensim-region-settings-panel.md)
+  — OpenSim OpenRegionSettings tab in the Region / Estate floater
 - [`viewer-parcel-ban-line-display`](ideas/viewer-parcel-ban-line-display.md) —
   Region-wide parcel ban-line / access display
+- [`viewer-people-groups-list-options`](ideas/viewer-people-groups-list-options.md)
+  — Contacts & groups list display options
 - [`viewer-perf-animation-lod-pose-cache`](ideas/viewer-perf-animation-lod-pose-cache.md)
   — Animation pose cache + temporal/budget pose LOD (no-GPU crowd stopgaps)
 - [`viewer-perf-avatar-pose-extract-skins`](ideas/viewer-perf-avatar-pose-extract-skins.md)
@@ -108,14 +140,36 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
+- [`viewer-radar-avatar-marks`](ideas/viewer-radar-avatar-marks.md) — Radar
+  avatar marks — colour-tag nearby avatars
+- [`viewer-render-scalability-knobs`](ideas/viewer-render-scalability-knobs.md)
+  — Leftover per-family render scalability knobs
+- [`viewer-script-dialog-options`](ideas/viewer-script-dialog-options.md) —
+  Script-dialog stacking, position & safety options
 - [`viewer-settings-file-resilience`](ideas/viewer-settings-file-resilience.md)
   — Settings store — survive a broken settings file without data loss
+- [`viewer-settings-sanity-checks`](ideas/viewer-settings-sanity-checks.md) —
+  Settings sanity-check warnings
+- [`viewer-shadow-tuning-knobs`](ideas/viewer-shadow-tuning-knobs.md) — Advanced
+  shadow tuning (bias / blur / softness)
 - [`viewer-stars-srgb-linearize`](ideas/viewer-stars-srgb-linearize.md) —
   Linearize the star field like the sky / clouds
+- [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
+  — Status/menu-bar display toggles
 - [`viewer-straddling-transparency-oit`](ideas/viewer-straddling-transparency-oit.md)
   — Per-pixel ordering for translucent objects straddling the waterline
 - [`viewer-terrain-ambient-probe-classic-fidelity`](ideas/viewer-terrain-ambient-probe-classic-fidelity.md)
   — Terrain lighting — add the reference probe term + classic-mode blend
+- [`viewer-udp-connection-port`](ideas/viewer-udp-connection-port.md) — Fixed
+  local UDP port option
+- [`viewer-ui-color-customization-extras`](ideas/viewer-ui-color-customization-extras.md)
+  — Colour customization beyond the shipped colors tab
+- [`viewer-ui-font-preference`](ideas/viewer-ui-font-preference.md) — User font
+  scheme & size adjustment
+- [`viewer-ui-sound-customization`](ideas/viewer-ui-sound-customization.md) —
+  User-customizable UI event sounds
+- [`viewer-window-attention-flash`](ideas/viewer-window-attention-flash.md) —
+  Window urgency flash + in-UI unread-flash cues
 
 ### server
 
@@ -161,7 +215,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (267)
 
 ### protocol
 
@@ -187,6 +241,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
+- [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
+  — About Land — object return, editable autoreturn & small option gaps
 - [`viewer-agent-hover-height-ingest`](ready/viewer-agent-hover-height-ingest.md)
   — Ingest the account hover height (AgentPreferences) into the plant
 - [`viewer-ambient-wind-sound`](ready/viewer-ambient-wind-sound.md) — Ambient
@@ -230,17 +286,41 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](ready/viewer-beacons-control.md) — Tracking beacon
   — set / clear from the UI (blocked by `viewer-beacons-beam-render` (done),
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-build-align-tool`](ready/viewer-build-align-tool.md) — Object align
+  tool (QToolAlign) — bbox align / pack
+- [`viewer-build-copy-paste-params`](ready/viewer-build-copy-paste-params.md) —
+  Build floater — per-tab parameter copy / paste
+- [`viewer-build-create-tool-options`](ready/viewer-build-create-tool-options.md)
+  — Create tool — remaining shape presets + copy options
+- [`viewer-build-creation-defaults`](ready/viewer-build-creation-defaults.md) —
+  Default parameters for newly created prims
 - [`viewer-build-display-options`](ready/viewer-build-display-options.md) —
   Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`
   (done))
+- [`viewer-build-general-sale-clickaction`](ready/viewer-build-general-sale-clickaction.md)
+  — General tab — for-sale, click action, show in search, locked
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
   Grid-options floater + snap-XY / selection-grid (blocked by
   `viewer-transform-gizmos` (done))
 - [`viewer-build-numeric-field-spinners`](ready/viewer-build-numeric-field-spinners.md)
   — Build-window numeric fields — up/down arrow spinners
+- [`viewer-build-physics-params`](ready/viewer-build-physics-params.md) —
+  Features tab — physics shape type & material params
+- [`viewer-build-probe-animesh-controls`](ready/viewer-build-probe-animesh-controls.md)
+  — Features tab — reflection-probe & animated-mesh controls
+- [`viewer-build-sculpt-controls`](ready/viewer-build-sculpt-controls.md) —
+  Object tab — sculpt editing controls
 - [`viewer-build-selection-filters`](ready/viewer-build-selection-filters.md) —
   Build-tool selection filters (blocked by `viewer-object-selection-core`
   (done))
+- [`viewer-build-stretch-textures`](ready/viewer-build-stretch-textures.md) —
+  Stretch tool — Stretch Textures toggle
+- [`viewer-build-texture-tab-fs-extras`](ready/viewer-build-texture-tab-fs-extras.md)
+  — Texture tab — Firestorm-extended conveniences
+- [`viewer-build-tool-row-parity`](ready/viewer-build-tool-row-parity.md) —
+  Build floater tool row — Focus & grab tools, row parity
+- [`viewer-build-widget-parity-upgrades`](ready/viewer-build-widget-parity-upgrades.md)
+  — Build tabs — retire the stale widget deviations
 - [`viewer-bumps-floater`](ready/viewer-bumps-floater.md) — Bumps, pushes & hits
   floater (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-camera-constraint-plane`](ready/viewer-camera-constraint-plane.md) —
@@ -251,6 +331,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-flycam-floater`](ready/viewer-camera-flycam-floater.md) —
   Flycam control floater (blocked by `viewer-camera-flycam` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-camera-keyboard-controls`](ready/viewer-camera-keyboard-controls.md)
+  — Keyboard camera controls — orbit / pan / zoom / roll actions
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
   presets (blocked by `viewer-camera-third-person-orbit` (done),
   `viewer-ui-settings-store` (done))
@@ -265,6 +347,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-chat-bubbles`](ready/viewer-chat-bubbles.md) — Chat bubbles
 - [`viewer-chat-clickable-sender-names`](ready/viewer-chat-clickable-sender-names.md)
   — Clickable sender names in the chat / conversations transcript
+- [`viewer-chat-input-behavior-options`](ready/viewer-chat-input-behavior-options.md)
+  — Chat-input behaviour options — send modifiers, OOC, bar toggles
 - [`viewer-chat-input-world-autostart`](ready/viewer-chat-input-world-autostart.md)
   — World keypress auto-starts nearby chat (blocked by `viewer-chat-input-bar`
   (done), `viewer-ui-settings-store` (done))
@@ -279,10 +363,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   text inputs (blocked by `viewer-ui-text-input-widget` (done))
 - [`viewer-chat-timestamps`](ready/viewer-chat-timestamps.md) — Timestamps in
   the chat display windows
+- [`viewer-chat-transcript-style-options`](ready/viewer-chat-transcript-style-options.md)
+  — Chat / IM transcript display and style options
 - [`viewer-collision-messages-chat`](ready/viewer-collision-messages-chat.md) —
   Collision events to nearby chat
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
   Combat health meter (HealthMessage)
+- [`viewer-conference-start-ui`](ready/viewer-conference-start-ui.md) — Start an
+  ad-hoc conference from a multi-selection
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
   — Consolidate the per-widget double-click interval constants
 - [`viewer-contact-sets`](ready/viewer-contact-sets.md) — Contact sets — named,
@@ -337,11 +425,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar movement keys do nothing in flycam mode
 - [`viewer-fs-bridge-lifecycle`](ready/viewer-fs-bridge-lifecycle.md) —
   Firestorm LSL bridge — create, attach, version and repair it
+- [`viewer-fullscreen-mode`](ready/viewer-fullscreen-mode.md) — Fullscreen /
+  borderless window mode
 - [`viewer-generated-chat-notices`](ready/viewer-generated-chat-notices.md) —
   Viewer-originated nearby-chat notices (settings-gated)
 - [`viewer-gesture-runtime`](ready/viewer-gesture-runtime.md) — Gesture runtime
   — step sequencing + /-command triggers (blocked by
   `viewer-chat-channel-and-commands` (done))
+- [`viewer-give-calling-card`](ready/viewer-give-calling-card.md) — Give Calling
+  Card from the avatar menus
 - [`viewer-god-tools`](ready/viewer-god-tools.md) — God tools floater (blocked
   by `viewer-ui-widget-scaffold` (done))
 - [`viewer-graphics-presets`](ready/viewer-graphics-presets.md) — Graphics
@@ -355,6 +447,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Group profile — set the group insignia
 - [`viewer-group-notice-attachments`](ready/viewer-group-notice-attachments.md)
   — Group notices — attach on send, open on receive
+- [`viewer-group-session-moderation`](ready/viewer-group-session-moderation.md)
+  — Group-chat moderator options
+- [`viewer-group-titles-quick-switch`](ready/viewer-group-titles-quick-switch.md)
+  — Group titles & favourite groups quick-switch
 - [`viewer-highlight-transparent`](ready/viewer-highlight-transparent.md) —
   Highlight Transparent view mode (blocked by `viewer-input-action-map` (done))
 - [`viewer-hover-height`](ready/viewer-hover-height.md) — Avatar hover-height
@@ -370,15 +466,21 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-input-keyboard-layout-bindings`](ready/viewer-input-keyboard-layout-bindings.md)
   — Keyboard bindings stable across physical keyboard layouts (blocked by
   `viewer-input-action-map` (done))
+- [`viewer-input-locomotion-actions`](ready/viewer-input-locomotion-actions.md)
+  — Missing locomotion / utility bindable actions (stop, run, strafe, look)
 - [`viewer-input-modifier-chords`](ready/viewer-input-modifier-chords.md) —
   Modifier-chord bindings in the input action map (blocked by
   `viewer-input-action-map` (done))
+- [`viewer-input-mouse-button-bindings`](ready/viewer-input-mouse-button-bindings.md)
+  — Mouse buttons as binding sources in the input action map
 - [`viewer-input-rebinding-persistence`](ready/viewer-input-rebinding-persistence.md)
   — Persist per-context key-binding overrides (blocked by
   `viewer-input-action-map` (done), `viewer-ui-settings-store` (done))
 - [`viewer-input-script-control-capture`](ready/viewer-input-script-control-capture.md)
   — Script control capture (llTakeControls) (blocked by
   `viewer-input-action-map` (done), `viewer-permission-request-dialog` (done))
+- [`viewer-input-sitting-edit-avatar-modes`](ready/viewer-input-sitting-edit-avatar-modes.md)
+  — Sitting & edit-avatar input modes with their binding profiles
 - [`viewer-input-spacenav-settings-ui`](ready/viewer-input-spacenav-settings-ui.md)
   — SpaceNavigator settings panel (blocked by
   `viewer-input-spacenav-camera-mapping` (done), `viewer-ui-settings-binding`
@@ -386,14 +488,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-inventory-bulk-permissions`](ready/viewer-inventory-bulk-permissions.md)
   — Bulk next-owner permissions editor (blocked by `viewer-ui-widget-scaffold`
   (done))
+- [`viewer-inventory-favorites`](ready/viewer-inventory-favorites.md) —
+  Inventory favorites — star items, folders and outfits (AISv3)
 - [`viewer-inventory-link-replace`](ready/viewer-inventory-link-replace.md) —
   Inventory link-replace tool (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-inventory-link-tools`](ready/viewer-inventory-link-tools.md) —
+  Inventory link tools — find original, find all links, visibility
 - [`viewer-inventory-marketplace-operations`](ready/viewer-inventory-marketplace-operations.md)
   — Inventory marketplace operations (blocked by `protocol-slm-directdelivery`
   (done))
 - [`viewer-inventory-protected-folders`](ready/viewer-inventory-protected-folders.md)
   — Protected inventory folders (blocked by `viewer-inventory-folder-tree`
   (done))
+- [`viewer-inventory-search-scope-filters`](ready/viewer-inventory-search-scope-filters.md)
+  — Inventory search scope and permission filters
 - [`viewer-inventory-secondary-window`](ready/viewer-inventory-secondary-window.md)
   — Secondary inventory windows
 - [`viewer-inventory-sound-anim-preview`](ready/viewer-inventory-sound-anim-preview.md)
@@ -404,8 +512,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-land-holdings`](ready/viewer-land-holdings.md) — My land holdings
   floater (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-land-transactions`](ready/viewer-land-transactions.md) — Land sale &
+  transfer actions — sell, deed, abandon, reclaim, buy pass
 - [`viewer-linden-home`](ready/viewer-linden-home.md) — Linden Home management
   menu entry
+- [`viewer-local-light-count-setting`](ready/viewer-local-light-count-setting.md)
+  — Local-light budget & lighting-detail settings
 - [`viewer-local-textures`](ready/viewer-local-textures.md) — Local textures —
   file-backed textures with live reload (blocked by `viewer-ui-texture-picker`
   (done))
@@ -416,6 +528,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-widget`](ready/viewer-lsl-editor-widget.md) — LSL editor
   widget — a parley PlainEditor fork with coloured ranges (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-input-widget` (done))
+- [`viewer-media-playback-policies`](ready/viewer-media-playback-policies.md) —
+  Media playback policies — URL filter, perms, first-click, rolloff
+- [`viewer-menu-bar-fill-implemented-entries`](ready/viewer-menu-bar-fill-implemented-entries.md)
+  — Top menu bar — add entries for already-implemented features
 - [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
   (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
@@ -467,6 +583,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-inventory-context-actions` (done))
 - [`viewer-object-target-omega-spin`](ready/viewer-object-target-omega-spin.md)
   — Client-side llTargetOmega spin for non-physical prims
+- [`viewer-object-texture-refresh`](ready/viewer-object-texture-refresh.md) —
+  Object / attachment texture refresh (Object.TexRefresh)
+- [`viewer-object-wear-attach`](ready/viewer-object-wear-attach.md) — Wear / Add
+  / Attach To an in-world object from the object menu
 - [`viewer-object-weights`](ready/viewer-object-weights.md) — Object weights /
   land impact floater (blocked by `viewer-object-selection-core` (done))
 - [`viewer-occlusion-culling`](ready/viewer-occlusion-culling.md) — Occlusion
@@ -479,6 +599,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-outfit-editor`](ready/viewer-outfit-editor.md) — Outfit editor — edit
   the current outfit, save to My Outfits
+- [`viewer-parcel-ban-duration`](ready/viewer-parcel-ban-duration.md) — Parcel
+  ban duration picker
 - [`viewer-parcel-grid-flood-fill`](ready/viewer-parcel-grid-flood-fill.md) —
   Flood-fill the parcel-overlay grid into per-parcel footprints
 - [`viewer-parcel-icon-hover-tips`](ready/viewer-parcel-icon-hover-tips.md) —
@@ -486,6 +608,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-parcel-join-split`](ready/viewer-parcel-join-split.md) — Parcel join
   / split (blocked by `viewer-input-action-map` (done),
   `viewer-parcel-overlay-decode` (done))
+- [`viewer-parcel-owners-terrain-overlay`](ready/viewer-parcel-owners-terrain-overlay.md)
+  — Land Owners — in-world terrain ownership colour fill
 - [`viewer-particle-editor`](ready/viewer-particle-editor.md) — Particle-system
   editor (blocked by `viewer-ui-texture-picker` (done), `viewer-ui-color-picker`
   (done))
@@ -537,6 +661,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — update_objects 124 ms spike — identify cause, then budget moves/removes
 - [`viewer-perf-worldmap-label-node-writes`](ready/viewer-perf-worldmap-label-node-writes.md)
   — World-map region labels write Node unconditionally every frame
+- [`viewer-performance-floater`](ready/viewer-performance-floater.md) —
+  Performance floater — "Improve graphics speed…" + auto-FPS tuner
 - [`viewer-permission-active-grants`](ready/viewer-permission-active-grants.md)
   — Active permission grants (review / revoke) (blocked by
   `viewer-permission-request-dialog` (done))
@@ -546,6 +672,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-phototools`](ready/viewer-phototools.md) — Phototools — a
   photographer's environment & graphics control panel (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-pie-wire-ready-placeholders`](ready/viewer-pie-wire-ready-placeholders.md)
+  — Wire the pie placeholder slices whose features already exist
 - [`viewer-places-landmarks`](ready/viewer-places-landmarks.md) — Places floater
   — landmarks, create landmark, teleport history (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-inventory-folder-tree` (done))
@@ -569,17 +697,25 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
   — Group picker for the Region/Estate Access → Allowed Groups list
+- [`viewer-region-estate-object-return`](ready/viewer-region-estate-object-return.md)
+  — Region Debug tab — estate-wide object return by resident
+- [`viewer-region-experiences-panel`](ready/viewer-region-experiences-panel.md)
+  — Region / Estate floater — Experiences tab
 - [`viewer-region-restart-schedule`](ready/viewer-region-restart-schedule.md) —
   Region restart schedule + restart countdown (blocked by
   `viewer-region-options-general` (done))
 - [`viewer-region-script-count-monitor`](ready/viewer-region-script-count-monitor.md)
   — Announce region script-count changes to chat
+- [`viewer-region-telehub`](ready/viewer-region-telehub.md) — Telehub management
+  floater
 - [`viewer-region-top-objects`](ready/viewer-region-top-objects.md) — Top
   objects — top scripts / top colliders (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-region-tracker`](ready/viewer-region-tracker.md) — Region tracker —
   watch regions, notify on status (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-notification-host` (done))
+- [`viewer-remove-all-attachments`](ready/viewer-remove-all-attachments.md) —
+  Detach All + per-attachment-point detach submenus
 - [`viewer-render-animation-coverage`](ready/viewer-render-animation-coverage.md)
   — Render-scene coverage — the animated avatar paths, which need their decode
   split from their transport (blocked by `viewer-render-scene-coverage` (done))
@@ -624,6 +760,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — export / import (blocked by `viewer-preferences-floater` (done))
 - [`viewer-sit-stand-actions`](ready/viewer-sit-stand-actions.md) — Sit / stand
   actions (blocked by `viewer-object-selection-core` (done))
+- [`viewer-snapshot-composition-guides`](ready/viewer-snapshot-composition-guides.md)
+  — Snapshot composition guides, capture frame & filename patterns
+- [`viewer-snapshot-highres-quiet`](ready/viewer-snapshot-highres-quiet.md) —
+  High-resolution snapshot capture + quiet-snapshot mode
 - [`viewer-snapshot-postcard`](ready/viewer-snapshot-postcard.md) — Snapshot
   destination — postcard / e-mail (blocked by `viewer-snapshot-floater` (done))
 - [`viewer-social-group-extras`](ready/viewer-social-group-extras.md) — Group
@@ -646,6 +786,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-region-options-debug` (done))
 - [`viewer-terrain-land-cache-on-disk`](ready/viewer-terrain-land-cache-on-disk.md)
   — Persist the land-height cache to disk (ground floor available at login)
+- [`viewer-text-field-context-menu`](ready/viewer-text-field-context-menu.md) —
+  Text-field edit context menu (cut / copy / paste / select all)
 - [`viewer-texture-drag-drop`](ready/viewer-texture-drag-drop.md) — Drag & drop
   a texture onto the build Texture tab / an object face (blocked by
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
@@ -672,6 +814,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
+- [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
+  context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
   route display on the minimap & world map (blocked by `viewer-minimap` (done),
   `viewer-world-map-floater` (done))
@@ -702,7 +846,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (65)
+## blocked (68)
 
 ### viewer
 
@@ -798,6 +942,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-render-test-harness` (done),
   `viewer-ui-baseline-regressions`)
+- [`viewer-rlv-debug-settings-commands`](blocked/viewer-rlv-debug-settings-commands.md)
+  — RLV — @setdebug_*/@getdebug_* allowlist and @setrot (blocked by
+  `viewer-rlv-restriction-state`)
 - [`viewer-rlv-enforce-camera`](blocked/viewer-rlv-enforce-camera.md) — RLV —
   camera restrictions and vision overlay (blocked by
   `viewer-rlv-restriction-state`, `viewer-camera-third-person-orbit` (done))
@@ -815,6 +962,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-enforce-send-side`](blocked/viewer-rlv-enforce-send-side.md) —
   RLV — enforce send-side blocks at the Session boundary (blocked by
   `viewer-rlv-restriction-state`)
+- [`viewer-rlv-environment-commands`](blocked/viewer-rlv-environment-commands.md)
+  — RLV — @setenv_*/@getenv_* environment control (blocked by
+  `viewer-rlv-restriction-state`)
+- [`viewer-rlv-locks`](blocked/viewer-rlv-locks.md) — RLV — attachment, wearable
+  and folder locks (blocked by `viewer-rlv-restriction-state`)
 - [`viewer-rlv-notify`](blocked/viewer-rlv-notify.md) — RLV — @notify broadcast
   on restriction changes (blocked by `viewer-rlv-restriction-state`)
 - [`viewer-rlv-queries`](blocked/viewer-rlv-queries.md) — RLV — answer @get*
@@ -937,7 +1089,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (27)
+## bugs (28)
 
 ### protocol
 
@@ -970,6 +1122,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
+- [`viewer-menu-accelerators-inert`](bugs/viewer-menu-accelerators-inert.md) —
+  Menu accelerators are drawn but dead (Ctrl+P / Ctrl+T / Ctrl+F / Ctrl+U)
 - [`viewer-mesh-hair-not-rendering`](bugs/viewer-mesh-hair-not-rendering.md) —
   Some worn mesh hair does not render (visible in Firestorm)
 - [`viewer-minimap-avatar-dot-color`](bugs/viewer-minimap-avatar-dot-color.md) —
@@ -1007,7 +1161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (837)
+## done (838)
 
 ### protocol
 
@@ -1219,6 +1373,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Performance — gate all build-tool systems on build mode being active
 - [`viewer-build-tool-modify-permission-gate`](done/viewer-build-tool-modify-permission-gate.md)
   — Build tools — gate modifications on modify/move permission + grey the
+- [`viewer-build-ui-firestorm-audit`](done/viewer-build-ui-firestorm-audit.md) —
+  Systematic side-by-side audit of the whole build UI vs Firestorm
 - [`viewer-build-undo-redo`](done/viewer-build-undo-redo.md) — Object-edit
   undo/redo stack (blocked by `viewer-transform-gizmos` (done),
   `viewer-prim-parameter-editing` (done))
@@ -2797,7 +2953,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (24)
+## deferred (23)
 
 ### viewer
 
@@ -2813,8 +2969,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar shows mesh hair and a legacy hairbase at the same time
 - [`viewer-bevy-material-inplace-reprepare`](deferred/viewer-bevy-material-inplace-reprepare.md)
   — Bevy material in-place re-prepare (fast path for buffer-only changes)
-- [`viewer-build-ui-firestorm-audit`](deferred/viewer-build-ui-firestorm-audit.md)
-  — Systematic side-by-side audit of the whole build UI vs Firestorm
 - [`viewer-destination-guide`](deferred/viewer-destination-guide.md) —
   Destination guide floater (blocked by `viewer-media-prim-browser`)
 - [`viewer-hud-menu-reorder-when-implemented`](deferred/viewer-hud-menu-reorder-when-implemented.md)

@@ -27,3 +27,27 @@ Reference (Firestorm, read-only): `llviewertexture`
 (`sDesiredDiscardBias`, `RenderMaxVRAMBudget`), `lltexturefetch`.
 
 Builds on: P21 texture discard selection and the texture cache.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds three Develop ▸ Rendering texture-budget
+toggles: **Disable Textures** (drop textures to lowest discard for
+budget triage), **Full Res Textures** (force full-resolution, the
+opposite override), and **Reduce Draw Distance when VRAM is full**
+(automatic draw-distance stepping under VRAM pressure) — dev-facing
+knobs over the same budget machinery this task builds.
+
+Beyond the pressure-driven budget/bias already in scope, the reference
+graphics tab adds three related behaviours to fold in:
+
+- `FSDrawDistanceVRAMOptimization`: under sustained VRAM pressure,
+  temporarily reduce the draw distance as a second relief valve (and
+  restore it when pressure clears), not just texture discard.
+- A *user-set* ceiling independent of pressure:
+  `RenderMaxTextureResolution` (cap the resolution any fetched texture
+  decodes to) and `TextureDiscardLevel` (a fixed global discard floor).
+  The task body currently has only the pressure-driven bias; these are
+  explicit user knobs on top of it.
+- `TextureDiscardBackgroundedTime` / `TextureDiscardMinimizedTime`: shed
+  texture memory after the window has been backgrounded or minimized for
+  N seconds, re-sharpening on refocus.

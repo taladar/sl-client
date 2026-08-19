@@ -37,3 +37,13 @@ Develop-menu section listing them, and a shared "debug overlay" gizmo layer
 
 Reference (Firestorm, read-only): `pipeline.h` `RENDER_DEBUG_*`,
 `menu_viewer.xml` (Render Metadata).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit found these Develop ▸ Render Metadata / Rendering
+overlays missing from the checklist: **Shadow Frusta, Occlusion,
+Render Batches, Face Area, Sculpt, Texture Size, Texture Density
+modes (None / Current / Desired / Full), GLTF Nodes,
+particles-metadata**, plus from the Rendering cluster: **Axes,
+Tangent Basis, Selected Texture Info Basis / Selected Material Info**
+(menu_viewer.xml L4414–4726 and L4728–4947).

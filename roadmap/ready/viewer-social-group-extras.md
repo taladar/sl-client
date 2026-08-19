@@ -32,3 +32,10 @@ Reference (Firestorm, read-only): `llpanelgrouplandmoney`,
 `panel_group_creation_sidetray.xml`.
 
 Deps: [[viewer-social-group-profile]] (the tabbed floater these extend).
+
+## Parity-audit addendum (2026-08-19)
+
+Scope additions from the parity audit: the groups-list row extras from
+menu_people_groups.xml — **Pin/Unpin group** (Firestorm's list pinning,
+keeping chosen groups at the top) and **Copy group SLurl to clipboard**.
+Activate / Info / Chat / Leave are already done (viewer-social-groups).

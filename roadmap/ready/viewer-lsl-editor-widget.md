@@ -52,3 +52,9 @@ top in [[viewer-lsl-editor-highlight]].
 
 Reference (Firestorm, read-only): `llscripteditor`, `llpreviewscript`,
 `llviewertexteditor`.
+
+## Parity-audit addendum (2026-08-19)
+
+Add the script editor's **find/replace** floater
+(`floater_search_replace.xml`): find next/previous, replace one/all,
+case-sensitivity toggle, operating on the editor buffer.

@@ -21,3 +21,13 @@ Reference (Firestorm, read-only): `llfloaterscriptlimits`,
 `floater_script_limits.xml`.
 
 Builds on: [[api-g15]] resource-cost caps.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds the context/pie entry points: wire the **Script
+Info** slices (`script-info` placeholders on the object pie, the
+avatar-self pie, and both attachment pies) to open the script-info
+surface for the picked target. The avatar-target variant additionally
+depends on the FS bridge (viewer-fs-bridge-protocol, blocked) — the
+reference fetches avatar script info via the bridge; the object variants
+do not need it.

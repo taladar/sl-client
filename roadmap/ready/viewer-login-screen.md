@@ -75,3 +75,22 @@ Builds on: [[viewer-p1-1]] (the `credentials.toml` login path and
 Deps: [[viewer-ui-widget-scaffold]] (the panel), [[viewer-ui-settings-binding]]
 (non-secret preferences), [[viewer-photo-hosting-upload]] (the `keyring`
 secret-store pattern reused for the saved password).
+
+## Parity-audit addendum (2026-08-19)
+
+Scope addition from the parity audit: the pre-login menu bar
+(menu_login.xml) — Viewer ▸ Preferences… / Show Grid Picker / Close
+Window / Exit, and Help ▸ About — so preferences, grid selection and
+About are reachable before login, plus the typing-to-login field
+conveniences. The Firestorm web-link block (Wiki, JIRA, forums, …) and
+the XUI/dev-test entries stay out (FS self-reference / dev tooling).
+
+Addition from the audit of `fsgridhandler.cpp` (496-627): the grid
+manager auto-populates a new OpenSim grid from its `get_grid_info`
+endpoint — append `get_grid_info` to the entered login URI, parse
+gridname / loginuri / helperuri (plus economy, website, register and
+password URLs), with a retry / legacy-fallback state machine, a
+`hop://` SLURL base for the grid, and protection of built-in system
+grids from removal. The body today covers only manual add/edit/remove
+(login_uri, display name). Our server side of the same endpoint is
+tracked in [[protocol-sim-http-misc]].
