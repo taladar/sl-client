@@ -31,16 +31,17 @@ use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyMeshFetcher, CAP_GET_MESH, CAP_GET_MESH2, DecodedMesh, GateStats, MeshCacheLimits,
-    MeshFetcher, MeshKey, MeshLod, MeshPhysics, MeshRequest, MeshSkin, MeshStore, Priority,
-    SlCapabilities, StoreStats,
+    MeshFetcher, MeshHeader, MeshKey, MeshLod, MeshPhysics, MeshRequest, MeshSkin, MeshStore,
+    Priority, SlCapabilities, StoreStats,
 };
 
 use crate::asset_retry::RetryState;
 
-/// The outcome of one background mesh fetch: the decoded geometry paired with the
-/// decoded rig skin (`None` when the mesh carries no skin block), or `None` for
-/// the whole fetch if the geometry could not be fetched or decoded.
-type FetchResult = Option<(Arc<DecodedMesh>, Option<Arc<MeshSkin>>)>;
+/// The outcome of one background mesh fetch: the decoded geometry, the decoded
+/// rig skin (`None` when the mesh carries no skin block) and the parsed asset
+/// header, or `None` for the whole fetch if the geometry could not be fetched or
+/// decoded.
+type FetchResult = Option<(Arc<DecodedMesh>, Option<Arc<MeshSkin>>, Option<MeshHeader>)>;
 
 /// The outcome of one background mesh level-of-detail change (P21.2): the newly
 /// decoded geometry block, or `None` if the swap could not be fetched or decoded
@@ -117,6 +118,13 @@ pub(crate) struct MeshManager {
     /// The decoded rig skin of each mesh that carries one (P17.2), shared like
     /// [`decoded`](Self::decoded); absent for a mesh with no skin block.
     skins: HashMap<MeshKey, Arc<MeshSkin>>,
+    /// The parsed asset header of each fetched mesh, kept for the **cost**
+    /// models: the per-level block byte sizes are what the streaming (land
+    /// impact) and avatar render-complexity formulas estimate a mesh's triangle
+    /// count from, at *every* level — including the levels this viewer never
+    /// decodes ([`crate::avatar_complexity`]). Sixty-odd bytes per mesh, and the
+    /// only place the header survives the fetch.
+    headers: HashMap<MeshKey, MeshHeader>,
     /// Requests made before the region's mesh capability was known, held here (at
     /// their base priority) instead of failed. A fetch issued before the seed caps
     /// arrive would fail permanently ("mesh capability not available"); these are
@@ -166,6 +174,7 @@ impl FromWorld for MeshManager {
             lod_inflight: HashMap::new(),
             decoded: HashMap::new(),
             skins: HashMap::new(),
+            headers: HashMap::new(),
             pending: HashMap::new(),
             in_flight_priority: HashMap::new(),
             retry: HashMap::new(),
@@ -247,16 +256,20 @@ impl MeshManager {
             // request is admitted through the gate (in priority order); the decode
             // is dispatched onto the store's own CPU pool, so the render thread
             // never decodes.
-            let geometry = match task_request.resolved().await {
-                Ok(entry) => entry.mesh(),
+            // The header is read off the same resolved entry as the geometry —
+            // the store parses it to find the block ranges, and this is the only
+            // point it is still in hand (see `MeshManager::header`).
+            let (geometry, header) = match task_request.resolved().await {
+                Ok(entry) => (entry.mesh(), entry.header()),
                 Err(error) => {
                     // Logged (the texture path already logs its failures) so a
                     // transient GetMesh 503 is not silent — `poll_meshes` then
                     // schedules the retry.
                     warn!("mesh {id} fetch/decode failed: {error}");
-                    None
+                    (None, None)
                 }
-            }?;
+            };
+            let geometry = geometry?;
             // Also decode the rig skin so a worn rigged mesh can be bound to the
             // avatar skeleton (P17.2); a mesh with no skin block yields `None`
             // here without failing the geometry fetch.
@@ -264,7 +277,7 @@ impl MeshManager {
                 Ok(entry) => entry.skin(),
                 Err(_error) => None,
             };
-            Some((geometry, skin))
+            Some((geometry, skin, header))
         });
         let _previous = self.requests.insert(id, (request, priority));
         if managed {
@@ -408,6 +421,14 @@ impl MeshManager {
     /// no skin block, is still in flight, or the fetch failed (P17.2).
     pub(crate) fn skin(&self, id: MeshKey) -> Option<&Arc<MeshSkin>> {
         self.skins.get(&id)
+    }
+
+    /// The parsed asset header of `id` once its fetch resolved, or `None` while
+    /// it is in flight (or if it failed). Its per-level block sizes are the
+    /// input the cost models estimate a mesh's triangle count from — see
+    /// [`crate::avatar_complexity`].
+    pub(crate) fn header(&self, id: MeshKey) -> Option<&MeshHeader> {
+        self.headers.get(&id)
     }
 
     /// Ensure `id`'s **physics** shape blocks are being fetched, so the static
@@ -607,7 +628,7 @@ pub(crate) fn poll_meshes(
             let _request = manager.requests.remove(&id);
         }
         match result {
-            Some((mesh, skin)) => {
+            Some((mesh, skin, header)) => {
                 let _cleared = manager.retry.remove(&id);
                 // Record the level actually decoded (the store may have fallen back
                 // to a coarser available block than requested), so the driver ranks
@@ -618,6 +639,9 @@ pub(crate) fn poll_meshes(
                 let _previous = manager.decoded.insert(id, mesh);
                 if let Some(skin) = skin {
                     let _prev_skin = manager.skins.insert(id, skin);
+                }
+                if let Some(header) = header {
+                    let _prev_header = manager.headers.insert(id, header);
                 }
                 decoded.write(MeshDecoded(id));
             }

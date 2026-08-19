@@ -186,6 +186,8 @@ const COL_AGE: usize = 5;
 const COL_SEEN: usize = 6;
 /// Column index of the range cell.
 const COL_RANGE: usize = 7;
+/// Column index of the render-cost (ARC) cell.
+const COL_COMPLEXITY: usize = 8;
 
 /// The radar table: a flexible name over the status / info columns, default
 /// sort range-ascending (the reference default). Selection is radar-owned
@@ -253,6 +255,18 @@ static RADAR_TABLE: TableSpec = TableSpec {
         TableColumn {
             header_key: "radar-col-range",
             token: "range",
+            kind: TableColumnKind::Text,
+            width: TableColumnWidth::Fixed { default: 64.0 },
+            align: TableAlign::End,
+            sortable: true,
+        },
+        // The render cost (ARC) each avatar is drawn at
+        // (viewer-avatar-complexity-limit) — the reference radar's Complexity
+        // column. Sortable, because "who is making this region unusable" is the
+        // question it exists to answer.
+        TableColumn {
+            header_key: "radar-col-complexity",
+            token: "complexity",
             kind: TableColumnKind::Text,
             width: TableColumnWidth::Fixed { default: 64.0 },
             align: TableAlign::End,
@@ -373,6 +387,9 @@ struct RadarView {
     built_filter: String,
     /// The range limit the rows were filtered by (`None` = unlimited).
     built_limit: Option<f32>,
+    /// The avatar render-cost revision the rows were built at, so a re-scored
+    /// (or newly jellied) avatar refreshes its Complexity cell.
+    built_complexity_revision: u64,
 }
 
 /// The radar's own row selection, keyed by agent (not row index) so it
@@ -1092,6 +1109,7 @@ fn rebuild_radar_view(
     playback: Res<AnimationPlayback>,
     friends: Option<Res<FriendsModel>>,
     mutes: Res<MuteModel>,
+    complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
     identity: Res<SlIdentity>,
     time: Res<Time>,
     translator: Translator,
@@ -1119,6 +1137,7 @@ fn rebuild_radar_view(
         && view.built_sort_revision == sort_revision
         && view.built_filter == state.filter
         && view.built_limit == limit
+        && view.built_complexity_revision == complexity.revision()
     {
         return;
     }
@@ -1126,6 +1145,7 @@ fn rebuild_radar_view(
     view.built_sort_revision = sort_revision;
     view.built_filter.clone_from(&state.filter);
     view.built_limit = limit;
+    view.built_complexity_revision = complexity.revision();
 
     let own_region = identity.region_handle;
     let now = time.elapsed_secs_f64();
@@ -1155,6 +1175,8 @@ fn rebuild_radar_view(
                     .as_deref()
                     .is_some_and(|friends| friends.is_friend(*agent)),
                 muted: mutes.is_muted(agent.uuid()),
+                complexity: complexity.complexity(*agent).map(|cost| cost.score),
+                jellied: complexity.jelly_reason_for(*agent).is_some(),
             }
         })
         .collect();
@@ -1298,7 +1320,14 @@ fn bind_radar_rows(
         } else {
             DIM_LABEL_COLOR
         };
-        let cell_values: [(usize, String, Color); 8] = [
+        // A jellied avatar's cost is the one the viewer refused to pay, so it is
+        // dimmed rather than shown as an ordinary measurement.
+        let complexity_color = if data.jellied {
+            MUTED_COLOR
+        } else {
+            LABEL_COLOR
+        };
+        let cell_values: [(usize, String, Color); 9] = [
             (COL_NAME, name_cell_text(data), name_color),
             (
                 COL_REGION,
@@ -1322,6 +1351,13 @@ fn bind_radar_rows(
                 COL_RANGE,
                 format_range(data.distance, state.draw_distance),
                 range_color,
+            ),
+            (
+                COL_COMPLEXITY,
+                data.complexity
+                    .map(|score| score.to_string())
+                    .unwrap_or_default(),
+                complexity_color,
             ),
         ];
         for (column, value, color) in cell_values {

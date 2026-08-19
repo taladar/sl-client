@@ -443,6 +443,13 @@ pub(crate) struct RadarRow {
     pub(crate) friend: bool,
     /// On the own avatar's mute list.
     pub(crate) muted: bool,
+    /// The avatar's render cost (ARC), once it has been measured
+    /// ([`crate::avatar_complexity`]); `None` while it has not.
+    pub(crate) complexity: Option<u32>,
+    /// Whether the viewer is currently drawing this avatar as a jellydoll — the
+    /// column's whole point is telling "expensive" from "expensive enough that I
+    /// stopped drawing them".
+    pub(crate) jellied: bool,
 }
 
 /// The distance band a row falls in, colouring its range cell.
@@ -561,6 +568,8 @@ pub(crate) enum SortColumn {
     Seen,
     /// The distance column.
     Range,
+    /// The render-cost (ARC) column.
+    Complexity,
 }
 
 impl SortColumn {
@@ -573,6 +582,7 @@ impl SortColumn {
             "age" => Some(Self::Age),
             "seen" => Some(Self::Seen),
             "range" => Some(Self::Range),
+            "complexity" => Some(Self::Complexity),
             _ => None,
         }
     }
@@ -598,6 +608,12 @@ fn compare_rows(column: SortColumn, a: &RadarRow, b: &RadarRow) -> Ordering {
             .distance
             .unwrap_or(f32::INFINITY)
             .total_cmp(&b.distance.unwrap_or(f32::INFINITY)),
+        // An unmeasured avatar sorts last, like an unknown age or distance —
+        // "not scored yet" is not "cheap".
+        SortColumn::Complexity => a
+            .complexity
+            .unwrap_or(u32::MAX)
+            .cmp(&b.complexity.unwrap_or(u32::MAX)),
     }
 }
 
@@ -689,6 +705,8 @@ mod tests {
             away: false,
             friend: false,
             muted: false,
+            complexity: None,
+            jellied: false,
         }
     }
 

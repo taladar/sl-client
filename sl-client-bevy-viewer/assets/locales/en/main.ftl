@@ -895,6 +895,9 @@ radar-col-payment = $
 radar-col-age = Age
 radar-col-seen = Seen
 radar-col-range = Range
+# The avatar's render cost (ARC), dimmed while the viewer is drawing them as a
+# flat jellydoll instead (viewer-avatar-complexity-limit).
+radar-col-complexity = Cost
 # The trailing action buttons, acting on the selected row.
 radar-action-profile = Profile
 radar-action-im = IM
@@ -3326,6 +3329,14 @@ preferences-quality-ultra = Ultra
 preferences-row-draw-distance = Draw distance (m)
 preferences-row-lod-factor = Mesh detail (LOD factor)
 preferences-row-max-particles = Maximum particle count
+# Avatar complexity limiting (viewer-avatar-complexity-limit).
+preferences-section-avatar-complexity = Avatar complexity
+preferences-row-avatar-max-complexity = Maximum avatar complexity (0 = no limit)
+preferences-row-avatar-complexity-mode = Apply the limit to
+preferences-complexity-mode-everyone = Everyone
+preferences-complexity-mode-spare-friends = Everyone except friends
+preferences-complexity-mode-only-friends = Only draw friends fully
+preferences-row-avatar-surface-area = Maximum attachment area (m2, 0 = no limit)
 preferences-section-shadows = Shadows
 preferences-row-shadow-detail = Shadows
 preferences-shadows-none = None
@@ -3512,6 +3523,7 @@ quick-prefs-lod-factor = Mesh detail
 quick-prefs-quality = Quality preset
 quick-prefs-master-volume = Master volume
 quick-prefs-friends-only = Show friends only
+quick-prefs-avatar-complexity = Max avatar complexity
 quick-prefs-probe-dynamic = Avatars in reflections
 
 # In-world hover tooltips (viewer-hover-tooltips): the static labels the tip

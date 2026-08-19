@@ -220,6 +220,19 @@ fn default_entries() -> Vec<QuickPrefEntry> {
             max: 1.0,
             increment: 0.05,
         },
+        // The avatar complexity budget (viewer-avatar-complexity-limit) — the
+        // reached-for-hourly knob at a crowded event: slide it down until the
+        // frame rate comes back and the heaviest avatars turn into silhouettes.
+        QuickPrefEntry {
+            control_name: crate::avatar_complexity::SETTING_MAX_COMPLEXITY.to_owned(),
+            label: QuickPrefLabel::Key("quick-prefs-avatar-complexity".to_owned()),
+            scope: Scope::Global,
+            kind: QuickPrefKind::Slider,
+            integer: true,
+            min: 0.0,
+            max: crate::avatar_complexity::MAX_COMPLEXITY_SLIDER_MAX,
+            increment: crate::avatar_complexity::MAX_COMPLEXITY_SLIDER_STEP,
+        },
         // Draw only friends' avatars (viewer-render-friends-only) — the
         // crowded-event escape hatch, reached for exactly when the machine is
         // already struggling, so it belongs on the panel you can open mid-lag.

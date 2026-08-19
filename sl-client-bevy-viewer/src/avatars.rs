@@ -1631,6 +1631,34 @@ impl AvatarState {
         self.titles.get(&agent).map(String::as_str)
     }
 
+    /// The agent whose avatar object carries the region-scoped id `scoped`, if
+    /// this viewer tracks one — the reverse of the object stream's view of an
+    /// avatar. An attachment names its wearer only by that scoped id, so this is
+    /// how a worn linkset is attributed to the avatar it is worn on
+    /// ([`crate::avatar_complexity`]).
+    pub(crate) fn agent_of_scoped(&self, scoped: ScopedObjectId) -> Option<AgentKey> {
+        self.by_scoped.get(&scoped).copied()
+    }
+
+    /// Mark this avatar's body-region materials for (re)assignment by
+    /// [`assign_avatar_bake_materials`] — how a pass that borrowed those
+    /// materials hands them back. The jellydoll render
+    /// ([`crate::avatar_complexity`]) paints a limited avatar's body flat and
+    /// calls this when it stops, so the real bakes are draped again.
+    pub(crate) fn mark_bake_dirty(&mut self, agent: AgentKey) {
+        let _fresh = self.bake_dirty.insert(agent);
+    }
+
+    /// How many base-body regions this avatar has a **visible** bake in, from its
+    /// latest appearance — the count the render-cost model charges its per-region
+    /// body cost for. Zero before an appearance arrives (or for a sphere-only
+    /// avatar); a region baked invisible by a worn system alpha layer was already
+    /// filtered out when the appearance was ingested, exactly as the reference
+    /// skips an `IMG_INVISIBLE` slot.
+    pub(crate) fn visible_bake_count(&self, agent: AgentKey) -> usize {
+        self.baked_textures.get(&agent).map_or(0, HashMap::len)
+    }
+
     /// Every avatar this viewer currently knows in-world, with the anchor
     /// entity whose transform places it — full objects first, then the
     /// coarse-only dots. The avatar picker's Near Me tab reads this.
@@ -3611,6 +3639,7 @@ pub(crate) fn assign_avatar_bake_materials(
     body: Option<Res<AvatarBody>>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     manager: Res<TextureManager>,
+    complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     added: Query<&AvatarBodyPart, Added<AvatarBodyPart>>,
@@ -3633,6 +3662,12 @@ pub(crate) fn assign_avatar_bake_materials(
     let mut draped = 0_usize;
     for (part, mut material) in &mut parts {
         if !state.bake_dirty.contains(&part.agent) {
+            continue;
+        }
+        // A jellydoll's body wears the flat silhouette material
+        // ([`crate::avatar_complexity`]); it hands the region materials back —
+        // by marking the avatar bake-dirty again — when it stops.
+        if complexity.is_jellied(part.agent) {
             continue;
         }
         let slot = part.region.baked_slot();
@@ -4766,11 +4801,28 @@ fn part_clothing_mask(
 pub(crate) fn apply_avatar_part_visibility(
     state: Res<AvatarState>,
     bake_mats: Res<AvatarBakeMaterials>,
+    complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
     mut parts: Query<(&AvatarBodyPart, &mut Visibility)>,
 ) {
     let hidden = state.hidden_slots_per_agent();
     let mut changed = 0_usize;
     for (part, mut visibility) in &mut parts {
+        // A jellydoll shows every region it has and no hair, whatever its worn
+        // items say — its attachments are hidden, so honouring their region
+        // hides would leave a mesh-body wearer with no silhouette at all
+        // (the reference's `updateMeshVisibility` jellydoll branch).
+        if complexity.is_jellied(part.agent) {
+            let desired = if crate::avatar_complexity::jellied_region_visible(part.region) {
+                Visibility::Inherited
+            } else {
+                Visibility::Hidden
+            };
+            if *visibility != desired {
+                *visibility = desired;
+                changed = changed.saturating_add(1);
+            }
+            continue;
+        }
         let slot = part.region.baked_slot();
         // Hidden either by a worn mesh's `IMG_USE_BAKED_*` sentinel (P13.5) or by
         // the region's own bake being wholly carved away by alpha (P14.3).

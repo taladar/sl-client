@@ -2,7 +2,7 @@
 id: viewer-name-tags-complexity-distance
 title: Name tags — complexity (ARC) lines
 topic: viewer
-status: blocked
+status: ready
 origin: Vintage-parity coverage audit (2026-07-22); nametag feature survey
 blocked_by: [viewer-avatar-complexity-limit]
 refs: [viewer-name-tags-decorations, viewer-name-tags-billboard-render]

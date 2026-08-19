@@ -37,4 +37,4 @@ pub use lod::{MIN_DETAIL_FACES, PRIM_LOD_COUNT, PrimLod};
 pub use path::{Path, PathPoint};
 pub use profile::{Profile, ProfileFace, ProfileFaceId, ProfilePoint};
 pub use shape::{HoleType, PathCurve, PrimShape, ProfileCurve};
-pub use volume::{tessellate, tessellate_with_path};
+pub use volume::{lod_triangle_counts, tessellate, tessellate_with_path};

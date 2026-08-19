@@ -583,6 +583,33 @@ impl TextureManager {
         })
     }
 
+    /// A texture's **full-resolution** (discard-0) pixel dimensions once it has
+    /// decoded, or `None` while it has not. The cost models want the asset's real
+    /// size, not the level this viewer happens to be showing: the reference's
+    /// render-complexity charge per texture is `256 + 16·(h/128 + w/128)` over
+    /// `getFullHeight` / `getFullWidth` ([`crate::avatar_complexity`]).
+    ///
+    /// Read from the store entry's parsed J2C header where available (the
+    /// authoritative size), falling back to the decoded-size-scaled-by-discard
+    /// back-calculation — the same order [`record_decoded`](Self::record_decoded)
+    /// uses, and the only route for a boosted texture, which retains no request
+    /// handle to reach the header through.
+    pub(crate) fn native_dimensions(&self, id: TextureKey) -> Option<(u32, u32)> {
+        if let Some(native) = self
+            .requests
+            .get(&id)
+            .and_then(|(request, _base)| request.entry().native_dimensions())
+        {
+            return Some(native);
+        }
+        let image = self.decoded.get(&id)?;
+        let scale = u32::from(image.discard_level.get());
+        Some((
+            image.width.checked_shl(scale).unwrap_or(image.width),
+            image.height.checked_shl(scale).unwrap_or(image.height),
+        ))
+    }
+
     /// Point the store's fetcher at the region's current `GetTexture` capability
     /// URL (or clear it when absent).
     fn set_cap_url(&self, url: Option<String>) {

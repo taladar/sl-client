@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 65 |
-| ready | 221 |
-| blocked | 67 |
+| ready | 222 |
+| blocked | 65 |
 | in-progress | 16 |
 | bugs | 27 |
-| done | 836 |
+| done | 837 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1269** |
@@ -161,7 +161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (221)
+## ready (222)
 
 ### protocol
 
@@ -218,10 +218,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
   Face-nearest and avatar fine-alignment tools
-- [`viewer-avatar-complexity-limit`](ready/viewer-avatar-complexity-limit.md) —
-  Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
+- [`viewer-avatar-render-settings-manager`](ready/viewer-avatar-render-settings-manager.md)
+  — Per-avatar render-settings manager (blocked by
+  `viewer-avatar-complexity-limit` (done))
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -432,6 +433,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
+- [`viewer-name-tags-complexity-distance`](ready/viewer-name-tags-complexity-distance.md)
+  — Name tags — complexity (ARC) lines (blocked by
+  `viewer-avatar-complexity-limit` (done))
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
   tags — remaining decorations
 - [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
@@ -698,13 +702,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (67)
+## blocked (65)
 
 ### viewer
 
-- [`viewer-avatar-render-settings-manager`](blocked/viewer-avatar-render-settings-manager.md)
-  — Per-avatar render-settings manager (blocked by
-  `viewer-avatar-complexity-limit`)
 - [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
@@ -783,9 +784,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-movement-quickjump-movelock`](blocked/viewer-movement-quickjump-movelock.md)
   — Movelock and Quickjump movement toggles (blocked by
   `viewer-fs-bridge-protocol`)
-- [`viewer-name-tags-complexity-distance`](blocked/viewer-name-tags-complexity-distance.md)
-  — Name tags — complexity (ARC) lines (blocked by
-  `viewer-avatar-complexity-limit`)
 - [`viewer-outfit-layer-reorder`](blocked/viewer-outfit-layer-reorder.md) —
   Clothing layer re-ordering UI (and token read-back) (blocked by
   `viewer-outfit-editor`)
@@ -1009,7 +1007,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (836)
+## done (837)
 
 ### protocol
 
@@ -1186,6 +1184,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-avatar-complexity-limit`](done/viewer-avatar-complexity-limit.md) —
+  Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar
   context / pie menu entries (self + others) (blocked by `viewer-ui-radial-menu`
   (done))

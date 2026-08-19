@@ -408,6 +408,13 @@ struct TrackedObject {
     /// `ObjectImage` send so a texture edit does not clear it (the wire message
     /// carries the whole media-URL field, so omitting it would blank it).
     media_url: Option<String>,
+    /// The object's size along each axis, in Second Life metres, exactly as sent
+    /// ([`Object::scale`]). The rendered scale rides the geometry holder's
+    /// transform (in the Bevy frame), so the wire value is kept here for the
+    /// consumers that reason in Second Life units — the avatar render-cost model
+    /// ([`crate::avatar_complexity`]), whose triangle estimate is weighted by the
+    /// prim's radius and whose surface-area trigger is in square metres.
+    scale: Vec3,
 }
 
 impl TrackedObject {
@@ -992,6 +999,22 @@ impl ObjectState {
     /// The per-face child entities of the object with grid-wide key `key`, or
     /// `None` if the object is unknown (or not yet tessellated). Used by the
     /// media-on-a-prim driver ([`crate::media_prim`]) to find the face entity a
+    /// The per-face child entities carrying `scoped`'s geometry, or an empty
+    /// slice if it is untracked or not yet tessellated.
+    ///
+    /// A **rigged** attachment's faces are parented to the wearer's body root
+    /// rather than to the object entity, so hiding the object alone does not hide
+    /// them — the jelly render ([`crate::avatar_complexity`]) needs the faces
+    /// themselves.
+    pub(crate) fn face_entities_of(&self, scoped: &ScopedObjectId) -> &[Entity] {
+        self.objects
+            .get(scoped)
+            .map_or(&[], |tracked| &tracked.face_entities)
+    }
+
+    /// The per-face child entities of the object with grid-wide key `key`, or
+    /// `None` if the object is unknown (or not yet tessellated). Used by the
+    /// media-on-a-prim driver ([`crate::media_prim`]) to find the face entity a
     /// media surface's texture goes onto. A scan like [`entity_of`](Self::entity_of),
     /// run only when media data changes — not per frame.
     pub(crate) fn face_entities_by_key(&self, key: ObjectKey) -> Option<&[Entity]> {
@@ -1218,6 +1241,126 @@ impl ObjectState {
             flexi: tracked.extra.flexible.is_some(),
         })
     }
+
+    /// Every tracked **worn attachment root**, grouped by the scoped id of the
+    /// avatar object wearing it — the index the avatar render-cost model walks
+    /// (`viewer-avatar-complexity-limit`).
+    ///
+    /// Only an attachment *root* carries an attachment point, so this is exactly
+    /// the set of worn linksets; each one's prims come from
+    /// [`linkset_members`](Self::linkset_members). **HUD attachments are
+    /// excluded**: they hang off your own screen, are drawn for nobody else, and
+    /// the reference likewise leaves them out of the wearer's complexity
+    /// (`!attached_object->isHUDAttachment()`).
+    pub(crate) fn attachment_roots_by_wearer(
+        &self,
+    ) -> HashMap<ScopedObjectId, Vec<ScopedObjectId>> {
+        let mut worn: HashMap<ScopedObjectId, Vec<ScopedObjectId>> = HashMap::new();
+        for (scoped, tracked) in &self.objects {
+            let Some(point) = tracked.attachment_point else {
+                continue;
+            };
+            if is_hud_point(point) {
+                continue;
+            }
+            worn.entry(tracked.parent).or_default().push(*scoped);
+        }
+        worn
+    }
+
+    /// The scoped id of the **avatar object** that tracked object `scoped` is
+    /// worn on — walking up the linkset to the attachment root and taking its
+    /// parent — or `None` when it is not (part of) a worn, non-HUD attachment.
+    ///
+    /// The render-cost model marks a wearer's score stale from any object event
+    /// in their attachments, and only the attachment *root* names the avatar, so
+    /// a linked child prim has to be chased up to it. The walk is bounded exactly
+    /// like [`in_hud_attachment`]'s, against a malformed parent cycle.
+    pub(crate) fn wearer_of(&self, scoped: ScopedObjectId) -> Option<ScopedObjectId> {
+        let mut current = scoped;
+        for _ in 0..MAX_PARENT_WALK {
+            let tracked = self.objects.get(&current)?;
+            if let Some(point) = tracked.attachment_point {
+                return (!is_hud_point(point)).then_some(tracked.parent);
+            }
+            if tracked.is_root {
+                return None;
+            }
+            current = tracked.parent;
+        }
+        None
+    }
+
+    /// The wire-side facts the avatar render-cost model needs about one tracked
+    /// prim ([`crate::avatar_complexity`]), or `None` if it is not tracked.
+    ///
+    /// Like [`static_collider_facts`](Self::static_collider_facts) this reads
+    /// state the resource already holds rather than adding a per-entity mirror —
+    /// the cost is evaluated for a handful of avatars at a time, never per frame
+    /// for the whole scene.
+    pub(crate) fn complexity_facts(
+        &self,
+        scoped: &ScopedObjectId,
+    ) -> Option<PrimComplexityFacts<'_>> {
+        let tracked = self.objects.get(scoped)?;
+        let sculpt = tracked.extra.sculpt.map(|sculpt| sculpt.texture);
+        Some(PrimComplexityFacts {
+            entity: tracked.entity,
+            scale: tracked.scale,
+            shape: tracked.shape.shape,
+            mesh: match sculpt {
+                Some(SculptOrMeshKey::Mesh(key)) => Some(key),
+                _other => None,
+            },
+            sculpt_map: match sculpt {
+                Some(SculptOrMeshKey::Sculpt(key)) => Some(key),
+                _other => None,
+            },
+            texture_entry: &tracked.texture_entry,
+            flexi: tracked.extra.flexible.is_some(),
+            light: tracked.extra.light.is_some(),
+            animated: tracked.animated,
+            is_root: tracked.is_root,
+            texture_animated: tracked.texture_animation.is_some(),
+        })
+    }
+}
+
+/// The wire-side facts [`ObjectState::complexity_facts`] surfaces for the avatar
+/// render-cost model: everything the reference's `LLVOVolume::getRenderCost`
+/// reads off one prim, without exposing the tracked object itself.
+#[derive(Debug, Clone, Copy)]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "one flag per input the reference's render-cost formula reads off a prim"
+)]
+pub(crate) struct PrimComplexityFacts<'state> {
+    /// The prim's scene entity — the handle the jelly render uses to hide it (and
+    /// the key its particle-system component is queried by).
+    pub(crate) entity: Entity,
+    /// The prim's size along each axis, in Second Life metres.
+    pub(crate) scale: Vec3,
+    /// The prim's path / profile shape parameters, from which a non-mesh prim's
+    /// per-level triangle counts are estimated.
+    pub(crate) shape: PrimShapeParams,
+    /// The mesh asset key when the prim is a mesh, else `None`.
+    pub(crate) mesh: Option<MeshKey>,
+    /// The sculpt-map texture when the prim is a legacy sculpt, else `None` (it
+    /// counts as one of the prim's textures, as in the reference).
+    pub(crate) sculpt_map: Option<TextureKey>,
+    /// The prim's raw `TextureEntry` bytes (per-face texture, tint, glow, bump,
+    /// shiny, tex-gen and media flags).
+    pub(crate) texture_entry: &'state [u8],
+    /// Whether the prim is flexible (the reference's heaviest multiplier).
+    pub(crate) flexi: bool,
+    /// Whether the prim emits light.
+    pub(crate) light: bool,
+    /// Whether the prim is an animated object (animesh).
+    pub(crate) animated: bool,
+    /// Whether the prim is a linkset root.
+    pub(crate) is_root: bool,
+    /// Whether the prim carries a texture animation (`llSetTextureAnim`).
+    pub(crate) texture_animated: bool,
 }
 
 /// The wire-side facts [`ObjectState::static_collider_facts`] surfaces for the
@@ -3723,6 +3866,7 @@ fn apply_object(
         existing.texture_animation = object.texture_animation;
         existing.text.clone_from(&object.text);
         existing.text_color = object.text_color;
+        existing.scale = Vec3::new(object.scale.x, object.scale.y, object.scale.z);
         // Retain the current texture entry / media URL for the Texture-tab editor.
         // A terse (motion-only) update carries neither, so both are refreshed only
         // when a full update brings a texture entry — keeping the last known media
@@ -3860,6 +4004,7 @@ fn apply_object(
             texture_animation: object.texture_animation,
             text: object.text.clone(),
             text_color: object.text_color,
+            scale: Vec3::new(object.scale.x, object.scale.y, object.scale.z),
         },
     );
     debug!(
@@ -5840,6 +5985,7 @@ mod tests {
             animated: false,
             texture_entry: Vec::new(),
             media_url: None,
+            scale: bevy::prelude::Vec3::ONE,
         }
     }
 

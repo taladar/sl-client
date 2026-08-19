@@ -2,7 +2,7 @@
 id: viewer-avatar-render-settings-manager
 title: Per-avatar render-settings manager
 topic: viewer
-status: blocked
+status: ready
 origin: main-menu survey (2026-07-23)
 blocked_by: [viewer-avatar-complexity-limit]
 refs: [viewer-derender-blacklist]

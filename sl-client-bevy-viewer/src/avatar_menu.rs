@@ -302,8 +302,63 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
             at: Compass::SouthEast,
             content: PieContent::SubPie(&OTHER_DERENDER_PIE),
         },
+        PieEntry {
+            at: Compass::South,
+            content: PieContent::SubPie(&OTHER_RENDER_PIE),
+        },
     ],
 };
+
+/// The "Render >" sub-pie of the other-avatar `More >`
+/// (`viewer-avatar-complexity-limit`): this avatar's standing exception to the
+/// automatic complexity limit — always draw them in full whatever they cost,
+/// never draw them in full, or go back to letting the limit decide.
+///
+/// The reference offers the same three as check items in the avatar context
+/// menu (`AlwaysRenderFully` / `DoNotRender` / `RenderNormally`). The exceptions
+/// are this session's; persisting them, and the floater that manages the whole
+/// list, are `viewer-avatar-render-settings-manager`.
+static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
+    label: "Render",
+    entries: &[
+        PieEntry {
+            at: Compass::East,
+            content: PieContent::Action(PieAction {
+                label: "Fully",
+                action: "render-fully",
+                when: None,
+            }),
+        },
+        PieEntry {
+            at: Compass::North,
+            content: PieContent::Action(PieAction {
+                label: "Normally",
+                action: "render-normally",
+                when: None,
+            }),
+        },
+        PieEntry {
+            at: Compass::West,
+            content: PieContent::Action(PieAction {
+                label: "Never",
+                action: "render-never",
+                when: None,
+            }),
+        },
+    ],
+};
+
+/// The per-avatar render exception a pie action sets, or `None` if the action is
+/// not one of [`OTHER_RENDER_PIE`]'s three.
+const fn render_override_for(action: &str) -> Option<crate::avatar_complexity::RenderOverride> {
+    use crate::avatar_complexity::RenderOverride;
+    match action.as_bytes() {
+        b"render-fully" => Some(RenderOverride::AlwaysFull),
+        b"render-normally" => Some(RenderOverride::Normal),
+        b"render-never" => Some(RenderOverride::Never),
+        _other => None,
+    }
+}
 
 /// The "Derender >" sub-pie of the other-avatar `More >`
 /// (`viewer-derender-blacklist`): stop drawing this avatar — and, with it, its
@@ -1179,6 +1234,7 @@ fn handle_avatar_menu_actions(
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut derenders: MessageWriter<RequestDerender>,
+    mut complexity: ResMut<crate::avatar_complexity::AvatarComplexityModel>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
@@ -1205,6 +1261,16 @@ fn handle_avatar_menu_actions(
                     DerenderKind::Resident,
                     action.action == "derender-blacklist",
                 ));
+            }
+            continue;
+        }
+        // The per-avatar render exception (`viewer-avatar-complexity-limit`),
+        // likewise only from the avatar pies — an attachment's pie addresses the
+        // worn object, not its wearer.
+        if let Some(over) = render_override_for(action.action) {
+            if action.element == AVATAR_MENU_ELEMENT {
+                complexity.set_override(agent, over);
+                info!(%agent, ?over, "per-avatar render exception set");
             }
             continue;
         }
@@ -1351,6 +1417,18 @@ mod tests {
             (
                 "tex-refresh",
                 vec![Compass::South, Compass::SouthWest, Compass::West],
+            ),
+            (
+                "render-fully",
+                vec![Compass::South, Compass::South, Compass::East],
+            ),
+            (
+                "render-normally",
+                vec![Compass::South, Compass::South, Compass::North],
+            ),
+            (
+                "render-never",
+                vec![Compass::South, Compass::South, Compass::West],
             ),
             (
                 "derender-blacklist",

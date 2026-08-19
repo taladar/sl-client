@@ -124,6 +124,37 @@ pub fn tessellate_with_path(shape: &PrimShape, lod: PrimLod, path: &Path) -> Pri
     mesh
 }
 
+/// The **approximate** triangle count this prim would tessellate to at each
+/// [`PrimLod`], indexed by [`PrimLod::index`] (coarsest first) — without
+/// tessellating it.
+///
+/// This is the reference viewer's `LLVolume::getLoDTriangleCounts`, which
+/// deliberately trades accuracy for cost: it generates only the profile ring and
+/// the extrusion path (whose point counts alone decide the geometry's size) and
+/// multiplies out the swept grid — `(profile − 1) · 2 · (path − 1)` side
+/// triangles plus `profile · 2` for the two caps — rather than building the
+/// mesh. Like the reference it asks for the **un-split**, closed-path forms
+/// (`split = 0`, `path_open = false`), so the numbers are comparable across
+/// viewers.
+///
+/// Its consumers are **cost** models, not renderers: the streaming (land-impact)
+/// cost and the per-avatar render cost that drives complexity limiting both need
+/// a prim's size at *every* level, including levels this viewer has not
+/// tessellated (and never will, for a prim it draws at one level). For the real
+/// geometry, tessellate and count.
+#[must_use]
+pub fn lod_triangle_counts(shape: &PrimShape) -> [u32; crate::PRIM_LOD_COUNT] {
+    PrimLod::ALL.map(|lod| {
+        let path_points = Path::generate(shape, lod, 0).point_count();
+        let profile_points = Profile::generate(shape, lod, false, 0).point_count();
+        let sides = profile_points
+            .saturating_sub(1)
+            .saturating_mul(2)
+            .saturating_mul(path_points.saturating_sub(1));
+        u32_from_usize(sides.saturating_add(profile_points.saturating_mul(2)))
+    })
+}
+
 /// The per-edge split count for `shape` at `lod` (Firestorm `LLVolume::generate`):
 /// `floor(detail * 0.66)`, except a straight-sided profile on a scaled line path
 /// takes no split (its flat sides gain nothing from edge subdivision).
@@ -991,7 +1022,7 @@ fn floor_to_u32(value: f32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::tessellate;
+    use super::{lod_triangle_counts, tessellate};
     use crate::PrimLod;
     use crate::geometry::{PrimFace, PrimMesh};
     use crate::shape::PrimShape;
@@ -1405,5 +1436,54 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The cost model's cheap per-level triangle estimate rises with detail, is
+    /// larger for a round profile than a square one, and — being an estimate of
+    /// the *whole* swept grid rather than of what the tessellator emits — never
+    /// undercounts the real mesh by more than the caps it approximates.
+    #[test]
+    fn lod_triangle_counts_rank_by_detail_and_shape() {
+        let box_counts = lod_triangle_counts(&PrimShape::from_params(&default_box_params()));
+        for pair in box_counts.windows(2) {
+            let (coarser, finer) = (pair.first().copied(), pair.last().copied());
+            assert!(
+                finer >= coarser,
+                "counts rise with detail, got {box_counts:?}"
+            );
+        }
+        // A box is flat-sided on a two-frame line path, so no level of detail
+        // adds a single triangle to it — the reference's estimate is likewise
+        // constant across levels for a box (it asks for the un-split forms).
+        assert_eq!(
+            box_counts,
+            [18; crate::PRIM_LOD_COUNT],
+            "a box costs the same at every level"
+        );
+
+        let mut round = default_box_params();
+        round.profile_curve = 0x00;
+        let cylinder_counts = lod_triangle_counts(&PrimShape::from_params(&round));
+        assert!(
+            cylinder_counts.first().copied().unwrap_or(0)
+                > box_counts.first().copied().unwrap_or(0),
+            "a circular profile costs more than a square one: {cylinder_counts:?} vs {box_counts:?}"
+        );
+        assert!(
+            cylinder_counts.last().copied().unwrap_or(0)
+                > cylinder_counts.first().copied().unwrap_or(0),
+            "a round profile does get finer with detail: {cylinder_counts:?}"
+        );
+
+        // The estimate is in the same league as the real tessellation (the
+        // reference calls it "inaccurate, but close enough"), so a cost built on
+        // it ranks content the way the drawn geometry does.
+        let shape = PrimShape::from_params(&default_box_params());
+        let real = u32::try_from(tessellate(&shape, PrimLod::Lowest).triangle_count()).unwrap_or(0);
+        let estimate = box_counts.first().copied().unwrap_or(0);
+        assert!(
+            estimate >= real && estimate <= real.saturating_mul(4),
+            "estimate {estimate} is within a small factor of the real {real} triangles"
+        );
     }
 }

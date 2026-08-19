@@ -380,6 +380,52 @@ pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
         SliderStep(256.0),
     );
 
+    // Avatar complexity limiting (viewer-avatar-complexity-limit): the budget
+    // past which an avatar is drawn as a flat jellydoll, how friends are
+    // treated, and the attachment surface-area trigger. Owned by
+    // `crate::avatar_complexity`, which registers and applies these.
+    spawn_pref_section(commands, panel, "preferences-section-avatar-complexity");
+    spawn_pref_slider(
+        commands,
+        panel,
+        "preferences-row-avatar-max-complexity",
+        SettingBinding::global(crate::avatar_complexity::SETTING_MAX_COMPLEXITY),
+        SliderRange::new(0.0, crate::avatar_complexity::MAX_COMPLEXITY_SLIDER_MAX),
+        SliderStep(crate::avatar_complexity::MAX_COMPLEXITY_SLIDER_STEP),
+    );
+    spawn_pref_combo(
+        commands,
+        panel,
+        "preferences-row-avatar-complexity-mode",
+        SettingBinding::global(crate::avatar_complexity::SETTING_COMPLEXITY_MODE),
+        &[
+            (
+                "preferences-complexity-mode-everyone",
+                SettingValue::U32(crate::avatar_complexity::ComplexityMode::ByComplexity.stored()),
+            ),
+            (
+                "preferences-complexity-mode-spare-friends",
+                SettingValue::U32(
+                    crate::avatar_complexity::ComplexityMode::AlwaysShowFriends.stored(),
+                ),
+            ),
+            (
+                "preferences-complexity-mode-only-friends",
+                SettingValue::U32(
+                    crate::avatar_complexity::ComplexityMode::OnlyShowFriends.stored(),
+                ),
+            ),
+        ],
+    );
+    spawn_pref_slider(
+        commands,
+        panel,
+        "preferences-row-avatar-surface-area",
+        SettingBinding::global(crate::avatar_complexity::SETTING_SURFACE_AREA_LIMIT),
+        SliderRange::new(0.0, crate::avatar_complexity::SURFACE_AREA_SLIDER_MAX),
+        SliderStep(crate::avatar_complexity::SURFACE_AREA_SLIDER_STEP),
+    );
+
     spawn_pref_section(commands, panel, "preferences-section-shadows");
     spawn_pref_combo(
         commands,

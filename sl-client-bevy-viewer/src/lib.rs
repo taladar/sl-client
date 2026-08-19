@@ -41,6 +41,7 @@ mod asset_retry;
 mod attachment_menu;
 mod audio;
 mod avatar_assets;
+mod avatar_complexity;
 mod avatar_dump;
 mod avatar_menu;
 mod avatar_picker;
@@ -1383,6 +1384,11 @@ fn run_session(
     // built into the Blocked sub-tab of the People pane, plus the by-name block
     // floater. After PeoplePlugin, whose Blocked content slot it fills.
     .add_plugins(BlockedPlugin)
+    // Avatar complexity limiting (viewer-avatar-complexity-limit): score what each
+    // nearby avatar costs to draw and, past the budget, draw them as a flat
+    // jellydoll instead of their attachments. Its systems bracket the scene mirror
+    // and the avatar bake / visibility passes through explicit edges.
+    .add_plugins(crate::avatar_complexity::AvatarComplexityPlugin)
     // Derender + asset blacklist (viewer-derender-blacklist): the client-side
     // suppression of an object / avatar the user does not want to see, its
     // per-avatar persisted blacklist, and the scene purge. Its systems bracket
