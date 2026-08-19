@@ -35,3 +35,13 @@ Reference (Firestorm, read-only): `fsfloatervoicecontrols`,
 `floater_sound_devices.xml`, `llspeakers`.
 
 Deps: [[viewer-voice-audio]] (transport, activity data, gain control).
+
+## Parity-audit addendum (2026-08-19)
+
+Additional placement from Firestorm: the **voice level monitor
+embedded in the nearby-chat input bar**
+(`fsnearbychatvoicemonitor.cpp`, a `NearbyVoiceMonitor` meter inside
+the chat input field, auto-shown when voice is enabled and working,
+padding the text field to make room). The body's speaking indicators
+cover conversations lists and name tags but not this chat-input-bar
+placement.

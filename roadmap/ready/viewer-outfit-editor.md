@@ -23,3 +23,13 @@ wearing" summary. Layer re-ordering inside a type is its own task
 Reference (Firestorm, read-only): `llpaneloutfitedit.cpp`,
 `llpaneloutfitsinventory.cpp`, `llappearancemgr.cpp`
 (`makeNewOutfitLinks`).
+
+## Parity-audit addendum (2026-08-19)
+
+Scope additions from the parity audit: **"Copy outfit list to
+clipboard"** (menu_wearing_gear.xml — a textual dump of everything
+currently worn; nothing similar exists in our tree) and the outfit
+gallery/list sort options from menu_outfit_gallery_sort.xml /
+menu_outfit_list_sort.xml ("Sort images to top", "Show entire outfit in
+search"; the "Sort favorites to top" entries belong to
+viewer-inventory-favorites).

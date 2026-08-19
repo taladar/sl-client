@@ -29,3 +29,18 @@ support.
 
 Builds on: the inventory folder tree and floater menus (done); mainly a
 UI-instancing refactor (per-window view state instead of a singleton).
+
+## Parity-audit addendum (2026-08-19)
+
+Include the FS **inventory settings** folder-open-mode toggles
+(`floater_inventory_settings.xml`): single- vs multi-folder double-click
+open modes for inventory windows, and the "find original opens a new
+window" toggle. (The same floater's favorites-star display options are
+separate scope — the new item-favorites idea task.)
+
+Firestorm's secondary windows are **folder-rooted**
+(`fsfloaterpartialinventory.cpp`): the folder context menu's "open
+folder in new window" spawns an inventory floater rooted at that
+starting folder, showing only that subtree — not just a second
+full-tree window. Add the rooted variant and the folder context-menu
+entry to this task's scope.

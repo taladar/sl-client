@@ -32,3 +32,11 @@ Reference (Firestorm, read-only): `llfloaterexperiences`,
 `floater_experience_search.xml`.
 
 Builds on: `protocol-27` / `protocol-62` experience surface.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit status update: the allowed/blocked lists, forget action,
+name resolution, and the top-menu entry are ALREADY IMPLEMENTED
+(`sl-client-bevy-viewer/src/experiences_floater.rs`). The remaining
+scope of this task is the experience **profile panel**, **search**,
+the **contributor / owned lists**, and the **events-log tab**.

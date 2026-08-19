@@ -23,3 +23,10 @@ Reference (Firestorm, read-only): `llfloaterscriptdebug`,
 
 Builds on: the chat pipeline (`protocol-1`, channel handling in
 [[viewer-chat-channel-and-commands]]).
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: an option to route `llOwnerSay` output into the
+script debug window instead of (or in addition to) nearby chat
+(`FSllOwnerSayToScriptDebugWindow`, with its routing variant setting),
+plus clear-window-on-close (`FSScriptDebugWindowClearOnClose`).

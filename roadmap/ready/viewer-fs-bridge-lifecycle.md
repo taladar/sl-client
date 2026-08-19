@@ -60,3 +60,9 @@ protocol task testable.
 
 Reference (Firestorm, read-only): `fslslbridge.cpp` / `fslslbridge.h`
 (`FSLSLBridge`, `cleanUpBridgeFolder`, the version constants and loops).
+
+## Parity-audit addendum (2026-08-19)
+
+Addition from the audit: the user-facing "Recreate LSL Bridge" menu
+entry (menu_viewer.xml:580 → `recreateBridge`). The body covers the
+repair/recreate logic but not the menu affordance that triggers it.

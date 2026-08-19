@@ -34,3 +34,16 @@ Avatar Health).
 
 Builds on: the skeleton driver (done) and the avatar debug actions
 cluster ([[viewer-avatar-debug-tools]]).
+
+## Parity-audit addendum (2026-08-19)
+
+CORRECTION: the task body claims the other-avatar reset action already
+exists — it does not; the other-avatar entries are UNIMPLEMENTED
+placeholders. The reference exposes **Reset Skeleton / Reset Skeleton &
+Animations / Reset Mesh LOD** on OTHER avatars too
+(menu_avatar_other.xml and both attachment menus — our shared
+SELF_RESET_PIE placeholders in `avatar_menu.rs` / `attachment_menu.rs`),
+plus Reset Skeleton on animesh objects (menu_object.xml; our object
+RESET_PIE `reset-skeleton` slice in `object_menu.rs`). Extend the scope
+beyond the own avatar to: other-avatar reset, animesh-object reset,
+and **Reset Mesh LOD** (no coverage anywhere today).

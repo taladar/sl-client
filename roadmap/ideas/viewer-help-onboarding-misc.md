@@ -28,3 +28,17 @@ needing individual scoping before promotion:
 
 Reference (Firestorm, read-only): `menu_viewer.xml` Help/Content
 sections, `menu_login.xml`.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit folds in the external SL web-link menu-entry family
+(~15 entries, all "open URL in embedded/external browser" one-liners
+once a web-launch helper exists — deliberately excluding the
+Firestorm-project self-reference links): Avatar ▸ **Account** plus
+the **[Membership]** entry; Content ▸ **SL Marketplace, L$ Market
+Data, Script
+Library, SL Community**; World ▸ **Events** (the secondlife.com events
+web page); Help ▸ **Second Life Help, Tutorial, Knowledge Base, Wiki,
+Community Forums, Support portal, [SECOND_LIFE] Blogs**; and the
+grid-configurable **[CURRENT_GRID] Help / About [CURRENT_GRID]** pair
+(OpenSim grid-info URLs).

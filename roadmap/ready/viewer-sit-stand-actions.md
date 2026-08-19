@@ -38,3 +38,13 @@ reply.
 
 Builds on: `SitState` (`sl-proto`), the animation playback (`animations.rs`),
 and the camera system.
+
+## Parity-audit addendum (2026-08-19)
+
+When this lands, also register `toggle_sit` as a bindable `Action` in
+the input action map (the reference exposes it in the rebind UI), so a
+key can sit/stand; the reference default chord is Alt+Shift+S.
+
+Parity-audit extension: a block-left-click-sit option
+(`FSBlockClickSit`, Firestorm tab; modes off / on / on-unless-scripted)
+so a stray click on click-to-sit furniture doesn't seat the avatar.

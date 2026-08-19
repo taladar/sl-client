@@ -29,3 +29,23 @@ Reference (Firestorm, read-only): `llfloaterpay`, `llfloaterbuycurrency(html)`,
 
 Deps: [[viewer-ui-widget-scaffold]], [[viewer-media-prim-browser]] (HTML
 currency / marketplace flows).
+
+## Parity-audit addendum (2026-08-19)
+
+The floater-registry audit found three more registered money floaters
+this task should absorb beyond buy-object/buy-land/buy-currency and the
+FS money tracker: **Buy Contents** (`floater_buy_contents.xml` — buy the
+contents of a for-sale object as a folder) and the **add-payment-method**
+web floater (`floater_add_payment_method.xml`). The **Sell Land** flow
+(`floater_sell_land.xml`) registered alongside them is NOT part of this
+task: it moved to [[viewer-land-transactions]] together with the other
+About Land General-tab land-transfer actions; only the Buy Land purchase
+floater itself (currency estimation, covenant agree, group-contribution
+removal) stays here.
+
+Addition from the audit: OpenSim multi-currency support via
+OpenSimExtras (`lfsimfeaturehandler.cpp`) — the `currency` symbol
+replaces the "L$" label and `currency-base-uri` overrides the economy
+helper URI per region, with a change notification when the region
+switches either. Wire decode already exists in
+`sl-wire/src/sim_features.rs`.

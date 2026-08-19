@@ -35,3 +35,18 @@ the choke point.
 
 Reference (Firestorm, read-only): `rlvactions.h` (`RlvActions::canX()` /
 `hasBehaviour()`), `rlvhandler.cpp`.
+
+## Parity-audit addendum (2026-08-19)
+
+The audit's command-by-command mapping puts the following send-side
+dictionary commands in this task's scope beyond the subset the body
+names: the movement family `@jump`, `@alwaysrun`, `@temprun`; economy
+`@buy`, `@pay`, `@share` (with `_sec`); the `@interact` blanket block;
+the full touch granularity `@touchworld`, `@touchthis`, `@touchme`,
+`@touchattach`, `@touchattachself`, `@touchattachother`, `@touchhud`,
+and `@fartouch` (plus its `@touchfar` synonym) with the FARTOUCHDIST
+distance modifier; `@sendgesture`; `@sittp`, `@standtp` and `@tplocal`
+with the SITTPDIST / TPLOCALDIST distance modifiers;
+`@sendchannel_except`; and the sendim / startim distance min/max
+modifiers (SENDIMDISTMIN/MAX, STARTIMDISTMIN/MAX). The typed modifier
+slots themselves come from [[viewer-rlv-restriction-state]].

@@ -28,3 +28,12 @@ Reference (Firestorm, read-only): the `FSMute*`/snooze settings and
 
 Builds on: group chat sessions and the groups UI (done,
 [[viewer-social-groups]]).
+
+## Parity-audit addendum (2026-08-19)
+
+Firestorm also keeps a **persistent per-group chat-mute list**
+(`exogroupmutelist.cpp`): individual groups whose chat is ignored
+permanently via the group-profile "ignore group chat" toggle —
+distinct from the timed snooze / mute-all / mute-when-notices-disabled
+already in the body. Add the per-group persistent mute list and its
+group-profile checkbox.

@@ -16,3 +16,14 @@ the input *device*; it is distinct from [[viewer-camera-flycam-floater]], which
 controls the camera *mode*.
 
 Reference (Firestorm, read-only): `llfloaterjoystick.cpp/h`.
+
+## Parity-audit addendum (2026-08-19)
+
+Three reference joystick behaviours belong in this panel beyond the
+already-committed per-axis settings (`spacenav.rs` has axes 0-5 with
+dead-zone / scale / feathering): the zoom axis itself (`JoystickAxis6` —
+a seventh mappable axis driving camera zoom) with its behaviour pair
+`ZoomDirect` / `ZoomTime` (direct zoom versus time-smoothed), and
+`JoystickBuildEnabled` — enabling 6-DOF device input for object
+manipulation in build/edit mode (move the selected object with the
+device), a third consumer next to avatar motion and flycam.

@@ -30,3 +30,16 @@ settings.
 
 Builds on: the FS bridge protocol (blocked task) for movelock; the
 movement controller ([[viewer-p31-5]], done) for quickjump.
+
+## Parity-audit addendum (2026-08-19)
+
+Additions from the audit: `RelockMoveLockAfterRegionChange` semantics —
+on a region change the movelock either re-locks at the destination or
+auto-disables with a notice (FIRE-11924) depending on the setting; and
+the small on-screen "Movelock is enabled" indicator Firestorm draws
+(llviewerwindow.cpp:879-883). Our movelock notifications are already
+ported (`sl-client-bevy-viewer/src/notifications.rs:3702-3746`).
+
+Parity-audit extension: crouch-as-toggle mode (`FSCrouchToggle`, with
+`FSCrouchToggleStatus` holding the current state) — pressing the crouch
+key once toggles crouching instead of requiring hold.

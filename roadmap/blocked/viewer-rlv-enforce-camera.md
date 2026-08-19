@@ -27,3 +27,15 @@ a post/overlay effect driven by the current restriction set.
 Reference (Firestorm, read-only): `rlveffects.cpp` (vision sphere / blur),
 `rlvhandler.cpp` (`@setcam_*`), `llagentcamera.cpp` (the camera parameters
 being clamped).
+
+## Parity-audit addendum (2026-08-19)
+
+Missing scope found by the audit: the `@setcam` master gate,
+`@setcam_mouselook` (force mouselook), `@setcam_unlock`; the force
+actions `@setcam_focus`, `@setcam_fov`, `@setcam_mode`, and the =force
+forms of `@setcam_eyeoffset` / `@setcam_eyeoffsetscale` /
+`@setcam_focusoffset`; the eye/focus-offset modifier slots
+(SETCAM_EYEOFFSET / EYEOFFSETSCALE / FOCUSOFFSET, plus the origin/
+avatar-distance and FOV min/max slots); and the deprecated synonyms
+`@camzoommin` / `@camzoommax` alongside the other cam*→setcam_*
+synonyms (canonicalised by [[viewer-rlv-restriction-state]]).

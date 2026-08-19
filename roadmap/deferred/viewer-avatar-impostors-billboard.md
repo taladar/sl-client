@@ -51,3 +51,11 @@ Reference (Firestorm, read-only): the `llvoavatar` impostor path,
 
 Builds on: the avatar rendering (P12–P18) and the coarse / interest distance
 tracking already in `avatars.rs`.
+
+## Parity-audit addendum (2026-08-19)
+
+Firestorm adds `FSImpostorAvatarExclude`, an exclusion mode controlling
+which avatars may be impostored — notably excluding animesh / control
+avatars (and optionally friends) from impostor demotion so scripted
+characters do not degrade into billboards. Include the exclusion-mode
+setting when impostors land.

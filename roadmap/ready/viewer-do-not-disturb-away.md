@@ -32,3 +32,18 @@ Reference (Firestorm, read-only): `llagent` (busy/away), `fsautoresponse`
 settings, `llimview` (DND queueing).
 
 Builds on: the IM/chat session layer and the settings store.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit found four away-family options beyond this task's
+current scope. Sit the avatar down when going away (`AvatarSitOnAway`)
+and quit the viewer after N seconds of AFK (`QuitAfterSecondsOfAFK`),
+both on Firestorm's general preferences tab (our `AfkTimeoutSeconds`
+setting is already registered and consumed here). And two autoresponse
+variants alongside the busy/DND response: a distinct away-mode
+autoresponse (`FSSendAwayAvatarResponse` + `FSAwayAvatarResponse` text)
+and an autoresponse sent to *muted* senders
+(`FSSendMutedAvatarResponse` + `FSMutedAvatarResponse` text) — the
+response-text settings are partly registered already
+(`AutorespondResponse`, `BusyResponse`); the mode wiring is what's
+missing.

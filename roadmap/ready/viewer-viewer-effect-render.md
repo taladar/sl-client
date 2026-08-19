@@ -33,3 +33,11 @@ Reference (Firestorm, read-only): `LLHUDManager::processViewerEffect`,
 
 Builds on: the decoded effect events and the beam-drawing machinery
 shared with [[viewer-beacons-beam-render]].
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: emit the script-chat particle effect
+(`EffectScriptChatParticles`) — the small viewer-side particle burst
+above an object when it chats on a script channel (FS also broadcasts
+selection info on channel 9000 under `FSParticleChat`, an old
+inter-viewer convention; the render side belongs here).

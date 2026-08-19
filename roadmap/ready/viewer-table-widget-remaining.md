@@ -31,3 +31,14 @@ higher-risk effort than the widget itself:
   current split already delivers the ellipsis + resizable-column wins with no
   regression to a privacy-sensitive control. Needs live 2-avatar verification
   of the rights toggles either way.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension — the friends-list presentation set on top of
+the planned full-rights columns: per-column visibility
+(`FSFriendListColumnShow*` — username / display name / full name /
+permissions columns), sort order (`FSFriendListSortOrder`,
+`FSContactsSortOrder`), name format (`FSFriendListFullNameFormat`),
+and the contact-list search-filter toggle (`FSContactListShowSearch`).
+Sort/format also appear in [[viewer-people-groups-list-options]];
+the column machinery is this task's half.

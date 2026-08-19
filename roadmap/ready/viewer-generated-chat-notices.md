@@ -47,3 +47,16 @@ Reference (Firestorm, read-only): `reportToNearbyChat` callers across
 
 Builds on: the chat transcript/system-line plumbing (done); each notice
 hooks its owning event source as that system exists.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extensions — five more settings-gated notice lines: a
+notice when the simulator version changes on region change
+(`FSShowServerVersionChangeNotice`), a notice when a nearby avatar's
+display name changes (`FSShowDisplayNameUpdateNotification`), the saved
+snapshot filename logged to local chat (`FSLogSnapshotsToLocal`), a
+clickable back-SLURL to the departure point after teleport
+(`FSShowBackSLURL`), and radar enter/exit alerts emitted on a private
+script channel for scripted consumers (`RadarEnterChannelAlert` /
+`RadarLeaveChannelAlert` — the radar itself is done; only the
+script-channel announce is missing).

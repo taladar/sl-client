@@ -31,3 +31,12 @@ Reference (Firestorm, read-only): `llfloaterregioninfo`, `llpanelregion*`,
 Builds on: `protocol-14` estate / region.
 
 Deps: [[viewer-region-options-debug]].
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit addition: the Covenant tab's **set-covenant** flow (drop a
+notecard onto the covenant panel to set it) and the **Reset** button
+(clear back to no covenant). Ours renders the covenant read-only, and
+sl-proto has no `estatechangecovenantid` EstateOwnerMessage command yet
+— the write path needs adding to sl-proto first (grep ChangeCovenant:
+none in `sl-proto/src/command.rs`).

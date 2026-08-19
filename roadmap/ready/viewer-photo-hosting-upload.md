@@ -92,3 +92,11 @@ as a caution), `llfloatersocial` / the social share panel.
 Deps: [[viewer-snapshot-floater]] (the snapshot it shares, and the floater's
 share
 panel).
+
+## Parity-audit addendum (2026-08-19)
+
+CORRECTION: the task should not target Facebook or Twitter — both
+upload APIs are dead upstream (Firestorm's `FSLastSnapshotToFacebook` /
+`...Twitter` settings are vestigial). Target the destinations that are
+alive: Flickr (`ExodusFlickr*`, `FlickrPhotoRating`) and Primfeed
+(`FSPrimfeed*` — nine settings).

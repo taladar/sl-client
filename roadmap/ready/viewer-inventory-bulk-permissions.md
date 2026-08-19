@@ -21,3 +21,13 @@ Reference (Firestorm, read-only): `llfloaterbulkpermission`,
 
 Builds on: the held inventory model + item mutation (`protocol-30`), the
 `sl-types` permission bitflags (`idiomatic-p1-01`).
+
+## Parity-audit addendum (2026-08-19)
+
+Firestorm's `llfloaterbulkpermission` operates over the *build
+selection's task inventories* — every item inside every selected
+object's contents — not (only) over inventory folders as this task's
+body describes. Support that selection-driven mode, and add its launch
+point: the build floater Content tab's "Permissions…" button
+(`floater_tools.xml` L3321), which opens the bulk-permissions floater
+pre-scoped to the current selection.

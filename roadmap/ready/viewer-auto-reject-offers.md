@@ -37,3 +37,15 @@ settings.
 
 Builds on: the offer/invite dialog dispatch (blocked task) — the
 auto-reject policy is a filter in front of those dialogs.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: an auto-ignore mode for ad-hoc/conference chat
+sessions (`FSIgnoreAdHocSessions` — silently leave/never open incoming
+conference sessions), with a friends exemption
+(`FSDontIgnoreAdHocFromFriends`); the optional nearby-chat report line
+for an ignored session (`FSReportIgnoredAdHocSession`) is already part
+of [[viewer-generated-chat-notices]]. Also from the privacy panel: a
+toggle to still show group invitations for groups the avatar has
+already joined (`FSShowJoinedGroupInvitations`) — post-accept offer
+behaviour otherwise lives in [[viewer-offer-accept-behavior-options]].

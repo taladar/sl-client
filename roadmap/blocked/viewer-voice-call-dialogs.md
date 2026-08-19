@@ -27,3 +27,11 @@ Reference (Firestorm, read-only): `llfloaterincomingcall` /
 
 Deps: [[viewer-voice-audio]] (an actual call to connect; signalling
 alone was already modelled in [[chat-b8]]).
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: the friends-only gate — only friends may start
+voice calls / IM sessions (`VoiceCallsFriendsOnly`, privacy tab) — and
+per-type call auto-reject toggles: reject group calls
+(`VoiceCallsRejectGroup`), ad-hoc/conference calls, and P2P calls
+(the `VoiceCallsReject*` family on the sound tab).

@@ -28,3 +28,9 @@ to the sound bus as a follow-up.
 Reference (Firestorm, read-only): `llgesturemgr`, `llmultigesture`.
 
 Builds on: `animations.rs` / `locomotion.rs` playback.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: a master enable for gesture-triggered sounds
+(`EnableGestureSounds`, sound tab) — play/skip the sound steps when
+executing gestures.

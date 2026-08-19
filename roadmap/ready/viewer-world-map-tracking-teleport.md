@@ -33,3 +33,9 @@ the `MapTracking` beacon + teleport through the shared backend. What remains
 here (still blocked on [[viewer-beacons-beam-render]]): the **in-world tracking
 beam** pointed at the tracked point. This task stays blocked until the beam
 render exists.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: a keep-map-open-on-teleport option
+(`FSDoNotHideMapOnTeleport`) — do not auto-close the world-map floater
+when a map-initiated teleport starts.

@@ -25,3 +25,22 @@ Reference (Firestorm, read-only): `llfloatergodtools`,
 
 Builds on: the god/admin protocol batches; god-level state from login /
 `GrantGodlikePowers`.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds the Admin menu's selection-context actions,
+which the floater-tab scope does not cover (the protocol wire is done
+per missing-out-batch-9/10): Admin ▸ Object — **Take Copy, Force Owner
+To Me, Force Owner Permissive, Delete, Lock, Get Assets IDs**; Admin ▸
+Parcel — **Force Owner To Me, Set to Linden Content, Claim Public
+Land**; Admin ▸ Region — **Dump Temp Asset Data, Save Region State**
+(menu_viewer.xml L5932–6057). Also add the Avatar/Develop menu
+entries **Request Admin Status** (Ctrl+Alt+G) / **Leave Admin Status**
+(and the admin-status-gated Show Admin Menu visibility), matching the
+task's existing admin-status gating scope.
+
+Add the god-only **land auction** floater (`llfloaterauction.cpp`,
+`floater_auction.xml`), reached from About Land General's "Linden
+Sale…" button: snapshot the parcel and put it up for Linden auction.
+God-gated admin surface; the god-tools region tabs already covered by
+this task are its natural home.

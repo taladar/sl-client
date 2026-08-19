@@ -35,3 +35,10 @@ normal move / drag paths.
 
 Reference (Firestorm, read-only): `llmarketplacefunctions`,
 `llpanelmarketplaceinbox`, `llmarketplacenotifications`.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: Received-Items (inbox) folder visibility
+toggles — show the inbox folder in the regular inventory tree
+(`FSShowInboxFolder`) and always show the inbox button/panel even when
+empty (`FSAlwaysShowInboxButton`).

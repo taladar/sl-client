@@ -39,3 +39,47 @@ settings (`FSAlwaysFly`, `LimitSelectDistance`,
 `DisableCameraConstraints`, `ShowCrosshairs`).
 
 Builds on: the input action map, settings store, and each owning system.
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit found five more Advanced/World-menu toggles for this
+task's cluster. **Set Window Size…** (Advanced ▸ UI/window sizing):
+exact window-resolution presets for machinima — we have live UI scale
+(`preferences_general.rs`, `SETTING_UI_SCALE`) but no exact-resolution
+window sizing; this also touches the capture-resolution presets in
+viewer-video-recording. **Mouse Smoothing**: a pointer-smoothing
+setting; no equivalent setting exists in our viewer source. **Cheesy
+Beacon**: the style toggle for the tracking beacon (the beacon beam
+itself is done, `beacons.rs`). **Reset View / Reset Camera Angles /
+Zoom In / Zoom Default / Zoom Out**: the reference exposes these camera
+shortcuts as menu-visible commands with accelerators; ours exist only
+as raw camera input. Finally, World ▸ Show More ▸ **Advanced Menu**
+(`UseDebugMenus`): the reference hides the whole Advanced menu behind
+this toggle, while our Advanced menu is unconditionally visible — add
+the gating toggle.
+
+Add the **Window Size** floater (`floater_window_size.xml`): a small
+floater with an exact-resolution presets combo (1024x768 etc.) plus
+free-form width/height to set the window to a precise size — used for
+machinima and reproducible screenshots.
+
+Parity-audit extensions (merged from the preferences and settings
+audits): remove the fly-height limit (`FSRemoveFlyHeightLimit`),
+keep flying after teleport (`FSFlyAfterTeleport`), skip the pre-jump
+and landing animations (`FSIgnoreFinishAnimation`), don't turn the
+avatar around when walking backwards
+(`FSDisableTurningAroundWhenWalkingBackwards` — note: our camera module
+docs already claim we never turn the avatar; verify before adding a
+toggle), crouch-as-toggle (`FSCrouchToggle` — owned by
+[[viewer-movement-quickjump-movelock]], listed for completeness), block
+left-click sit (`FSBlockClickSit` — owned by
+[[viewer-sit-stand-actions]]), disable the teleport/login/logout
+progress screens (`FSDisableTeleportScreens`, `FSDisableLoginScreens`,
+`FSDisableLogoutScreens`), scroll-wheel exits mouselook
+(`FSScrollWheelExitsMouselook`) and show-UI-in-mouselook
+(`FSShowInterfaceInMouselook`) — both also clustered in
+[[viewer-mouselook-ui-options]], a drag-distance limit twin to the
+existing select-distance pair (`LimitDragDistance` /
+`MaxDragDistance`), and extended tooltip info + delays
+(`FSAdvancedTooltips`, `ToolTipDelay`, per-kind inspector delays) on
+top of the hover-tip toggles this task already carries.

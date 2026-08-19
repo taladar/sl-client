@@ -34,3 +34,12 @@ Reference (Firestorm, read-only):
 
 Deps: [[viewer-volume-panel]] (the audio cluster; AO / quick-prefs slots
 degrade to hidden until their features land).
+
+## Parity-audit addendum (2026-08-19)
+
+The Vintage utility cluster (`utilitybar.cpp`) also hosts two voice
+slots this body does not mention: the **talk button**
+(`utility_talk_button`, press/release mic) and the **PTT-lock button**
+(`utility_push_to_talk_lock_button`). The controls themselves are
+[[viewer-voice-controls]] scope; the vintage cluster should reserve
+and host the two slots, wired when voice-controls lands.

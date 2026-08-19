@@ -29,3 +29,12 @@ Reference (Firestorm, read-only): `llagent` control-flag forwarding for
 
 Builds on: the existing permission-request protocol handshake and `movement.rs`
 control-flag emission.
+
+## Parity-audit addendum (2026-08-19)
+
+Missing explicit scope: the reference also binds
+`script_trigger_lbutton` — in mouselook (and via the per-mode LMB
+binding rows in `key_bindings.xml`) the left mouse button must feed
+ML_LBUTTON_DOWN/UP control bits to a controls-grabbing script instead
+of performing a world click. This needs mouse buttons as binding
+sources, so it pairs with [[viewer-input-mouse-button-bindings]].

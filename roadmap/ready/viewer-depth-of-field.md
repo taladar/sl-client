@@ -37,3 +37,10 @@ Reference (Firestorm, read-only): the deferred DoF post pass,
 `RenderDepthOfField` and the `Camera*` settings.
 
 Builds on: the existing deferred pipeline and depth buffer.
+
+## Parity-audit addendum (2026-08-19)
+
+The graphics tab also carries `RenderDepthOfFieldInEditMode`: a toggle
+that disables depth of field while the build/edit tools are open, so the
+selection you are editing is never blurred out of focus. Include it in
+the DoF setting set alongside the enable and camera parameters.

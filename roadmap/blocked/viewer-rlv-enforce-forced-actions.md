@@ -28,3 +28,21 @@ folder-name matching rules the reference uses.
 Reference (Firestorm, read-only): `rlvinventory.cpp` (the `#RLV` folder tree,
 path addressing, `@getinvworn` / `@findfolder`), `rlvhandler.cpp` (`=force`
 dispatch).
+
+## Parity-audit addendum (2026-08-19)
+
+Missing scope found by the audit: the full force-wear keyword matrix —
+28 strings (`@attach`, `@attachall`, `@attachover`, `@attachallover`,
+`@attachthis`, `@attachallthis`, `@attachthisover`,
+`@attachallthisover`; the 8 `@addoutfit*` synonyms; the 4
+`@*overorreplace` synonyms; `@detach`, `@detachall`, `@detachthis`,
+`@detachallthis`, `@remattach`, `@remoutfit` as force commands) with
+the WEAR_REPLACE vs WEAR_ADD vs WEAR_REMOVE × NODE vs SUBTREE ×
+CONTEXT_NONE vs CONTEXT_OBJECT semantics encoded in the dictionary
+flags (rlvhelper.cpp:256-283 + rlvinventory.cpp). Also `@detachme`,
+`@sitground`, `@adjustheight`, `@setgroup=force`, `@fly=force`; the
+`#RLV` folder-name matching rules (`+` stack prefix, `.` hidden folders,
+the WearAddPrefix / WearReplacePrefix settings); the `@sharedwear` /
+`@sharedunwear` gating restrictions (RLVaEnableSharedWear); the
+ForbidGiveToRlv setting (accept llGiveInventory folders into #RLV); and
+RLVaSharedInvAutoRename.

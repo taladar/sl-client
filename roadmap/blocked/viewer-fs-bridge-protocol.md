@@ -61,3 +61,31 @@ chat tag path.
 
 Reference (Firestorm, read-only): `fslslbridge.cpp` / `fslslbridge.h`
 (`lslToViewer`, `viewerToLSL`, the `bridgeAuth` check, the tag parsing).
+
+## Parity-audit addendum (2026-08-19)
+
+Additions from the audit of `fslslbridge.cpp` and its call sites:
+
+- `getZOffsets|<uuid,csv>` (fsradar.cpp:659-680): batched — at most
+  FSRADAR_MAX_OFFSET_REQUESTS UUIDs per POST — and the only command
+  answered in the HTTP response body (a `uuid:z` CSV, only for
+  avatars above z=1023) rather than over chat.
+- `RelockMoveLockAfterMovement|<0/1>` (llviewercontrol.cpp:873): the
+  script re-locks movement when controls are released.
+- `DetachBridge`: the script supports it (llDetachFromAvatar) but the
+  current Firestorm viewer never sends it.
+- The `bridgeError` code set: `injection` (foreign-script injection
+  detected), `scriptinfonotfound` (bad target), `wrongvm` (LSO VM
+  warning).
+- The `<clientAO state=...>` mapping: on/off toggle AO pause
+  (PauseAO), standon/standoff toggle the stands setting (UseAOStands),
+  each with a nearby-chat notice (FSAOScriptedNotification); the AO
+  being controlled is [[viewer-animation-overrider]] (whose body is
+  silent on scripted control — the handoff lands here).
+- The 27-field extended `getScriptInfo` report (vs the 6-field basic
+  one), selected by the `FSScriptInfoExtended` preference; several
+  fields are base64-encoded, and it includes pathfinding time.
+- Radar-row Z-offset integration: the radar itself is done
+  ([[viewer-avatar-radar]]) and its record documents "no LSL-bridge
+  altitude correction" as a pending divergence — since that task is
+  closed, wiring `getZOffsets` results into radar rows belongs here.

@@ -36,3 +36,16 @@ settings.
 
 Builds on: the restriction-state registry (its data model powers the
 Restrictions floater); the toggles thread into the enforcement tasks.
+
+## Parity-audit addendum (2026-08-19)
+
+Minor addition from the audit: the settings backing is the full
+RlvSettingNames roster (rlvdefines.h:402+) — RestrainedLove (master),
+RestrainedLoveDebug, CanOOC, ShowEllipsis, ForbidGiveToRlv, NoSetEnv,
+WearAddPrefix / WearReplacePrefix, RLVaEnableIMQuery,
+EnableLegacyNaming, EnableSharedWear, EnableTempAttach,
+HideLockedLayers / HideLockedAttachments / HideLockedInventory,
+LoginLastLocation (RLVaLoginLastLocation gates login-to-last-location),
+SharedInvAutoRename, ShowAssertionFailures, ShowRedirectChatTyping,
+SplitRedirectChat, TopLevelMenu, WearReplaceUnlocked. Also note
+RestrainedLoveDebug echoes every processed command into the console.

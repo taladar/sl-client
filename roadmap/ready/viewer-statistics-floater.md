@@ -29,3 +29,12 @@ Reference (Firestorm, read-only): `llfloaterstats`, `llstatgraph`,
 
 Builds on: `SimStats` decode, the pipeline-status API (`render_priority.rs`
 / `diagnostics.rs`), Bevy frame diagnostics.
+
+## Parity-audit addendum (2026-08-19)
+
+Addition from the audit: the OpenSimExtras `SimulatorFPS`,
+`SimulatorFPSFactor`, `SimulatorFPSWarnPercent` and
+`SimulatorFPSCritPercent` values (`lfsimfeaturehandler.cpp`) scale the
+sim-FPS lag-meter thresholds on OpenSim grids whose simulators do not
+run at SL's nominal 45 fps; the body has no OpenSim sim-FPS scaling
+mention. Wire decode already exists in `sl-wire/src/sim_features.rs`.

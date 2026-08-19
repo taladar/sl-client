@@ -34,3 +34,21 @@ Reference (Firestorm, read-only): `llpanelplaces`, `llpanellandmarks`,
 
 Builds on: the inventory model, the teleport command/event surface
 (`protocol-10`), the SLURL dispatcher ([[viewer-slurl-parse-dispatch]]).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds World ▸ **Teleport Home** (`World.TeleportHome`)
+— a menu action teleporting the own avatar home;
+`teleport_via_landmark(nil)` already exists in
+`sl-proto/src/session/methods.rs`, so this is a menu entry over an
+existing protocol call, sitting next to the task's "Set Home to Here"
+scope.
+
+Scope additions from the parity audit: landmark/place **Copy SLurl**
+and **Create Pick** from a place or landmark row (Create Pick jumps
+into the
+picks editor — picks editing itself exists via viewer-social-profiles;
+the from-a-place entry point rides here). Also the teleport-history gear
+details (menu_teleport_history_gear.xml family): **Clear Teleport
+History**, the timezone choice (UTC / SLT / Local) for history entries,
+and the show position / date column toggles.

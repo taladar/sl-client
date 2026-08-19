@@ -24,3 +24,19 @@ Reference (Firestorm, read-only): `llfloaterimagepreview`, `llfloaternamedesc`,
 
 Builds on: `sl-j2c-encode` + the `NewFileAgentInventory` upload path
 (`upload.rs`).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit adds Build ▸ Upload ▸ **Material…**
+(`File.UploadMaterial`): import a `.gltf` file from disk into a
+material inventory item. The material asset encoder already exists
+(viewer-pbr-material-editor, done), so this is a file-picker + parse +
+create-inventory-item flow over the existing encoder.
+
+Scope addition from the parity audit: the reference's per-folder default
+upload destinations — the inventory folder context menu's "Use as
+default for ▸ Image / Sound / Animation / Model / PBR-material uploads"
+entries (menu_inventory.xml, `Inventory.FileUploadLocation`), which set
+where each upload type files its results. Ours has no equivalent; add
+the context entries and the per-type destination settings alongside the
+upload flows.

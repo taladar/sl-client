@@ -19,3 +19,11 @@ through as a set, together with the rebinding UI / persistence tasks that
 will expose it.
 
 Builds on: `input_action.rs` (the per-mode `BindingProfile`s).
+
+## Parity-audit addendum (2026-08-19)
+
+Audit finding: `Action::ToggleFlycam` has no keyboard binding at all in
+any default profile — only the SpaceNavigator button toggles flycam
+(`sl-client-bevy-viewer/src/camera.rs:661`). The reference exposes
+Alt+Shift+F ("Joystick Flycam") in the menu. Fold a default keyboard
+toggle into the rethink.

@@ -46,3 +46,13 @@ Reference (Firestorm, read-only): `menu_viewer.xml` Advanced → Rendering → T
 / Features, `Advanced.ToggleRenderType` / `ToggleFeature` / `ToggleWireframe`.
 
 Builds on: the existing draw systems (each already knows its object class).
+
+## Parity-audit addendum (2026-08-19)
+
+The parity audit found four more entries for the render-type/feature
+masks: **Hide Selected** (don't render the current selection), the
+toggle **Automatic Alpha Masks** (auto alpha-masking on/off), the
+toggle **Animation Textures** (texture-anim on/off), and **Render
+Animated Avatar System
+Cloth** — all Develop ▸ Rendering feature-mask toggles
+(menu_viewer.xml L4728–4947 and L3195–3239).

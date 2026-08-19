@@ -26,3 +26,14 @@ skip it.
 
 Reference (Firestorm, read-only): `rlvhandler.cpp` (receive filters, redirect),
 `rlvactions.h`.
+
+## Parity-audit addendum (2026-08-19)
+
+Missing scope found by the audit: the @recvim distance min/max modifiers
+(RECVIMDISTMIN/MAX); the auto-accept behaviours `@accepttp` (with
+`_sec`), `@accepttprequest` (with `_sec`) and `@acceptpermission`
+(auto-accept the corresponding incoming dialogs); `@allowidle`
+(suppress the away state); and the chat-filter refinements — OOC
+handling (RestrainedLoveCanOOC), the ShowEllipsis "..." placeholder
+text, and the RLVaSplitRedirectChat / RLVaShowRedirectChatTyping
+behaviour of the @redirchat/@rediremote path.

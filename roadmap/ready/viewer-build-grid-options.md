@@ -29,3 +29,17 @@ state.
 
 Builds on: the transform gizmos (blocked task) — grid config and frames
 feed their snapping.
+
+## Parity-audit addendum (2026-08-19)
+
+Parity-audit extension: the rotation snap step (`RotationStep`) — the
+angular increment used when rotating with snapping, alongside the
+task's existing grid-unit/snap options.
+
+The reference grid-options floater (`floater_build_options.xml`) also
+carries two controls not yet in this task's body: the **RotationStep**
+angle-snap spinner (the rotation equivalent of the grid unit — snap
+increment for the rotate gizmo) and the Firestorm **decimal precision**
+setting (`FSBuildToolDecimalPrecision`, the number of decimals shown by
+the build floater's numeric fields). Both live at
+`floater_build_options.xml` L56-72; include them in the floater.
