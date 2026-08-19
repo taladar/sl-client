@@ -472,6 +472,24 @@ pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) 
     );
     settings.register_in(
         NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_COMPLEXITY,
+        sl_settings::SettingValue::Bool(true),
+        "Show the render-cost (complexity) line on name tags",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_OWN_COMPLEXITY,
+        sl_settings::SettingValue::Bool(false),
+        "Show the render-cost line on your own name tag (your only read-out of it)",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY,
+        sl_settings::SettingValue::Bool(true),
+        "Show other avatars' render cost only while the complexity limit is limiting them",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
         crate::name_tag_billboard::SETTING_FADE_START,
         sl_settings::SettingValue::F32(crate::name_tag_billboard::DEFAULT_FADE_START_METRES),
         "Distance in metres at which name tags start to fade",
@@ -3795,6 +3813,21 @@ pub(crate) struct OwnLocalBake {
 type CompositedRegions = Vec<(usize, Image, BakeAlpha)>;
 
 impl OwnLocalBake {
+    /// How many base-body regions the client-side composite actually produced —
+    /// the own avatar's answer to "how many baked regions does this body have".
+    ///
+    /// The render-cost model ([`crate::avatar_complexity`]) charges per visible
+    /// baked region, and reads those from the *published* bakes an
+    /// `AvatarAppearance` carries. Your own avatar has no published bakes on a
+    /// grid that does not central-bake — this client composites them locally
+    /// instead (P15.3) — so without this its own cost would read zero while its
+    /// body plainly renders. The reference has the same split and resolves it
+    /// the same way, counting the own avatar's *local* textures
+    /// (`isIndexLocalTexture` / `isTextureDefined(index, 0)`).
+    pub(crate) fn region_count(&self) -> usize {
+        self.regions.len()
+    }
+
     /// Force the client-side bake to re-composite on the next
     /// [`apply_own_local_bake`] — the appearance editor calls this after a live
     /// texture / tint edit changes the worn bake inputs.

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 65 |
-| ready | 222 |
+| ideas | 66 |
+| ready | 221 |
 | blocked | 65 |
 | in-progress | 16 |
 | bugs | 27 |
-| done | 837 |
+| done | 838 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1269** |
+| **total** | **1270** |
 
-## ideas (65)
+## ideas (66)
 
 ### viewer
 
@@ -105,6 +105,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pause off-view texture animations, resume phase-exact
 - [`viewer-perf-texture-decode-cache`](ideas/viewer-perf-texture-decode-cache.md)
   — Persistent decoded-texture cache (raw / BCn / HTJ2K transcode)
+- [`viewer-preferences-search-synonyms`](ideas/viewer-preferences-search-synonyms.md)
+  — Preferences search — synonyms / alternative search terms
 - [`viewer-probe-auto-placement`](ideas/viewer-probe-auto-placement.md) —
   Automatic reflection-probe placement and sky-only default probe
 - [`viewer-profiling`](ideas/viewer-profiling.md) — Viewer profiling story
@@ -161,7 +163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (221)
 
 ### protocol
 
@@ -433,9 +435,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-name-tags-click-select`](ready/viewer-name-tags-click-select.md) —
   Name tags — click a tag to select the avatar
-- [`viewer-name-tags-complexity-distance`](ready/viewer-name-tags-complexity-distance.md)
-  — Name tags — complexity (ARC) lines (blocked by
-  `viewer-avatar-complexity-limit` (done))
 - [`viewer-name-tags-decorations`](ready/viewer-name-tags-decorations.md) — Name
   tags — remaining decorations
 - [`viewer-neighbor-region-parcels`](ready/viewer-neighbor-region-parcels.md) —
@@ -1007,7 +1006,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (837)
+## done (838)
 
 ### protocol
 
@@ -1484,6 +1483,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-name-tags-billboard-render`](done/viewer-name-tags-billboard-render.md)
   — Name tags — world-space billboard renderer
+- [`viewer-name-tags-complexity-distance`](done/viewer-name-tags-complexity-distance.md)
+  — Name tags — complexity (ARC) lines (blocked by
+  `viewer-avatar-complexity-limit` (done))
 - [`viewer-name-tags-display-names`](done/viewer-name-tags-display-names.md) —
   Name tags — wire GetDisplayNames caps into the tag
 - [`viewer-name-tags-lost-to-probe-cameras`](done/viewer-name-tags-lost-to-probe-cameras.md)

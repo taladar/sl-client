@@ -3258,6 +3258,10 @@ preferences-row-name-tag-typing = Show a Typing line while an avatar types
 preferences-row-name-tag-distance = Show the distance line
 preferences-row-name-tag-friend-color = Colour friends' name tags
 preferences-row-name-tag-color-by-distance = Tint whole tags by chat range
+# The render-cost (ARC) tag lines (viewer-name-tags-complexity-distance).
+preferences-row-name-tag-complexity = Show avatar complexity (ARC)
+preferences-row-name-tag-own-complexity = Show own complexity
+preferences-row-name-tag-complexity-limited-only = Only if too complex
 preferences-row-name-tag-fade-start = Fade name tags starting at (m)
 preferences-row-name-tag-fade-range = Name-tag fade range (m)
 preferences-row-name-tag-bubble-opacity = Name-tag bubble opacity

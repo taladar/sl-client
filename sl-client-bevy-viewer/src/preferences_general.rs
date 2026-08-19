@@ -258,6 +258,27 @@ pub(crate) fn build_general_tab(commands: &mut Commands, panel: Entity) {
         "preferences-row-name-tag-color-by-distance",
         SettingBinding::global(crate::name_tag_content::SETTING_COLOR_BY_DISTANCE),
     );
+    // The render-cost (ARC) lines (viewer-name-tags-complexity-distance): the
+    // master switch, your own tag's opt-in, and whether other avatars show it
+    // always or only while the complexity limit is limiting them.
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-complexity",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_COMPLEXITY),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-own-complexity",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_OWN_COMPLEXITY),
+    );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-name-tag-complexity-limited-only",
+        SettingBinding::global(crate::name_tag_content::SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY),
+    );
     spawn_pref_slider(
         commands,
         panel,

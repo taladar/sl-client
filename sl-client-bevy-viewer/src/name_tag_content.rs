@@ -6,6 +6,30 @@
 //! [`TagContent`] component on each tag entity and rebuilds text layout and
 //! mesh only when the composed value actually changes, so composition here is
 //! deliberately change-driven: assemble, compare, and only then assign.
+//!
+//! # The render-cost lines
+//!
+//! The tag is also where an avatar's render cost (ARC) surfaces
+//! (`viewer-name-tags-complexity-distance`), measured by
+//! [`crate::avatar_complexity`]. Two lines, both the reference's:
+//!
+//! - **`Complexity: N`**, coloured on a green→amber→red ramp of the cost
+//!   against the complexity budget — green at nothing, amber at exactly the
+//!   budget, saturating red at twice it. With no budget set there is nothing to
+//!   judge against, so the number is reported in neutral grey instead; the same
+//!   goes for your own tag, where a red rating would be telling you off for a
+//!   limit that does not apply to you.
+//! - **`Texture Area: N m²`**, in red, only when an avatar's attachments cover
+//!   more than the area limit. It appears alongside the cost rather than
+//!   instead of it: the reference notes that untangling *which* limit fired
+//!   would cost more than it explains, and shows the cost either way.
+//!
+//! Three settings gate them, with the reference's defaults, and they compose to
+//! a quiet default: the cost appears only on avatars the limiter is actually
+//! doing something about ([`SETTING_SHOW_COMPLEXITY`],
+//! [`SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY`]), and your own cost — which
+//! the radar cannot show, since it lists *other* avatars — only once you ask
+//! for it ([`SETTING_SHOW_OWN_COMPLEXITY`]).
 
 use bevy::prelude::*;
 use std::collections::HashSet;
@@ -40,6 +64,24 @@ pub(crate) const SETTING_SHOW_TYPING: &str = "ShowTyping";
 /// Tint the whole tag by chat-range band (Firestorm
 /// `FSTagShowDistanceColors`, default off).
 pub(crate) const SETTING_COLOR_BY_DISTANCE: &str = "ColorByDistance";
+
+/// Show the render-cost (ARC) line at all (Firestorm `FSTagShowARW`, default
+/// on) — the master switch over the two that follow. On its own it shows
+/// nothing: [`SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY`] is also on by
+/// default, so out of the box the number appears only on an avatar the
+/// complexity limit is actually doing something about.
+pub(crate) const SETTING_SHOW_COMPLEXITY: &str = "ShowComplexity";
+
+/// Show the render-cost line on your **own** tag (Firestorm `FSTagShowOwnARW`,
+/// default off). This is the only read-out of your own ARC — the radar lists
+/// nearby avatars and excludes you, exactly as the reference radar does — so
+/// it is what you turn on to find out whether *you* are the expensive one.
+pub(crate) const SETTING_SHOW_OWN_COMPLEXITY: &str = "ShowOwnComplexity";
+
+/// Show other avatars' render cost **only** when the viewer is limiting them
+/// (Firestorm `FSTagShowTooComplexOnlyARW`, default on). Off shows it on every
+/// avatar — informative, and a great deal of text over a crowd.
+pub(crate) const SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY: &str = "ShowComplexityWhenLimitedOnly";
 
 /// The font size, physical px at scale factor 1, of the main name line (the
 /// reference renders the name in `SansSerif`; the tag previously used 16 px).
@@ -159,6 +201,17 @@ const CHAT_RANGE_METRES: f32 = 20.0;
 /// Shout radius, metres.
 const SHOUT_RANGE_METRES: f32 = 100.0;
 
+/// The render-cost line's colour when no budget is set, and on your own tag —
+/// nothing is being judged, so the number is reported rather than rated. The
+/// reference's `grey1`, hardcoded there as here (unlike the distance bands,
+/// these two are not `colors.xml` entries, so they are not skin tokens).
+const COMPLEXITY_UNRATED_COLOR: Color = Color::srgb(0.8, 0.8, 0.8);
+
+/// The attachment-surface-area line's colour (the reference's plain red): it
+/// only ever appears when the area is over the limit, so it is always a
+/// complaint.
+const TEXTURE_AREA_COLOR: Color = Color::srgb(1.0, 0.0, 0.0);
+
 /// The reference desaturates the username line to 83% of the name colour
 /// (`llvoavatar.cpp`).
 const USERNAME_DESATURATE: f32 = 0.83;
@@ -242,6 +295,16 @@ pub(crate) struct TagInputs<'a> {
     /// Own-avatar→avatar distance, metres; `None` suppresses the distance
     /// line (the own tag, or the own avatar not being placed yet).
     pub(crate) distance_m: Option<f32>,
+    /// The avatar's measured render cost (ARC), or `None` while it has not been
+    /// scored — which suppresses the complexity line entirely rather than
+    /// showing a zero that means "not known yet".
+    pub(crate) complexity: Option<u32>,
+    /// The avatar's total attachment surface area, in square metres, feeding
+    /// the texture-area line.
+    pub(crate) attachment_area_m2: f32,
+    /// Whether the viewer is currently limiting this avatar (drawing them as a
+    /// jellydoll) — what the "only when limited" mode keys off.
+    pub(crate) is_limited: bool,
 }
 
 /// The name-tag content toggles, resolved from the settings store once per
@@ -266,6 +329,19 @@ pub(crate) struct TagToggles {
     pub(crate) show_typing: bool,
     /// [`SETTING_COLOR_BY_DISTANCE`].
     pub(crate) color_by_distance: bool,
+    /// [`SETTING_SHOW_COMPLEXITY`].
+    pub(crate) show_complexity: bool,
+    /// [`SETTING_SHOW_OWN_COMPLEXITY`].
+    pub(crate) show_own_complexity: bool,
+    /// [`SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY`].
+    pub(crate) complexity_when_limited_only: bool,
+    /// The complexity budget the render-cost line is rated against
+    /// (`crate::avatar_complexity`'s `RenderAvatarMaxComplexity`); `0` = no
+    /// budget, so the number is reported unrated.
+    pub(crate) complexity_limit: u32,
+    /// The attachment-area limit, in square metres, past which the texture-area
+    /// line appears; `0` = no limit, so it never does.
+    pub(crate) area_limit_m2: f32,
 }
 
 impl Default for TagToggles {
@@ -278,6 +354,11 @@ impl Default for TagToggles {
             show_distance: true,
             show_typing: true,
             color_by_distance: false,
+            show_complexity: true,
+            show_own_complexity: false,
+            complexity_when_limited_only: true,
+            complexity_limit: 0,
+            area_limit_m2: 0.0,
         }
     }
 }
@@ -299,6 +380,17 @@ impl TagToggles {
             show_distance: get(SETTING_SHOW_DISTANCE, true),
             show_typing: get(SETTING_SHOW_TYPING, true),
             color_by_distance: get(SETTING_COLOR_BY_DISTANCE, false),
+            show_complexity: get(SETTING_SHOW_COMPLEXITY, true),
+            show_own_complexity: get(SETTING_SHOW_OWN_COMPLEXITY, false),
+            complexity_when_limited_only: get(SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY, true),
+            // The limits themselves belong to the complexity limiter; the tag
+            // only rates its number against them.
+            complexity_limit: store
+                .get_u32(crate::avatar_complexity::SETTING_MAX_COMPLEXITY)
+                .unwrap_or(0),
+            area_limit_m2: store
+                .get_f32(crate::avatar_complexity::SETTING_SURFACE_AREA_LIMIT)
+                .unwrap_or(0.0),
         }
     }
 }
@@ -383,6 +475,50 @@ fn distance_band_color(distance_m: f32, colors: &TagColors) -> Color {
     } else {
         colors.distance_beyond
     }
+}
+
+/// Whether an avatar's tag carries the render-cost line, under the reference's
+/// three-setting rule: the master switch, then your own tag by its own opt-in,
+/// and everyone else either always or only while the viewer is limiting them.
+pub(crate) const fn shows_complexity(
+    is_self: bool,
+    is_limited: bool,
+    toggles: &TagToggles,
+) -> bool {
+    if !toggles.show_complexity {
+        return false;
+    }
+    if is_self {
+        return toggles.show_own_complexity;
+    }
+    !toggles.complexity_when_limited_only || is_limited
+}
+
+/// The render-cost line's colour: a green→amber→red ramp of the cost against
+/// the budget (green at nothing, amber at exactly the budget, saturating red at
+/// twice it), or the unrated grey when there is no budget to judge against.
+///
+/// The reference's ramp, unchanged: `green = 1 - clamp((c - max)/max, 0, 1)` and
+/// `red = min(c/max, 1)`.
+fn complexity_color(complexity: u32, limit: u32) -> Color {
+    if limit == 0 {
+        return COMPLEXITY_UNRATED_COLOR;
+    }
+    let (cost, limit) = (complexity_as_f32(complexity), complexity_as_f32(limit));
+    let green = 1.0 - ((cost - limit) / limit).clamp(0.0, 1.0);
+    let red = (cost / limit).min(1.0);
+    Color::srgb(red, green, 0.0)
+}
+
+/// A cost or budget as `f32` for the ramp; both are far below the precision
+/// threshold that would matter to a colour.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    reason = "the value only picks a colour on a continuous ramp"
+)]
+const fn complexity_as_f32(value: u32) -> f32 {
+    value as f32
 }
 
 /// Multiply a colour's RGB by a factor, keeping alpha (the reference's
@@ -527,6 +663,34 @@ pub(crate) fn compose_tag(
         });
     }
 
+    // --- Render-cost lines (small): the ARC, rated against the budget, and —
+    // only when the attachment area is what put the avatar over — the area that
+    // did it. The reference shows the cost either way, noting that untangling
+    // which limit fired would cost more than it explains.
+    if shows_complexity(inputs.is_self, inputs.is_limited, toggles)
+        && let Some(complexity) = inputs.complexity
+    {
+        lines.push(TagLine {
+            text: format!("Complexity: {complexity}"),
+            size: TagLineSize::Small,
+            // Your own cost is reported, never rated: the limit does not apply
+            // to you, so a red tag would be telling you off for nothing.
+            color: if inputs.is_self {
+                COMPLEXITY_UNRATED_COLOR
+            } else {
+                complexity_color(complexity, toggles.complexity_limit)
+            },
+        });
+        if toggles.area_limit_m2 > 0.0 && inputs.attachment_area_m2 > toggles.area_limit_m2 {
+            let area = inputs.attachment_area_m2.round();
+            lines.push(TagLine {
+                text: format!("Texture Area: {area:.0} m²"),
+                size: TagLineSize::Small,
+                color: TEXTURE_AREA_COLOR,
+            });
+        }
+    }
+
     TagContent { lines, base_color }
 }
 
@@ -575,6 +739,7 @@ pub(crate) fn compose_name_tags(
     friends: Option<Res<crate::people::FriendsModel>>,
     mutes: Option<Res<crate::mutes::MuteModel>>,
     groups: Option<Res<crate::groups::GroupsModel>>,
+    complexity: Option<Res<crate::avatar_complexity::AvatarComplexityModel>>,
     identity: Option<Res<sl_client_bevy::SlIdentity>>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     anchors: Query<&Transform, With<crate::avatars::AvatarAnchor>>,
@@ -627,6 +792,9 @@ pub(crate) fn compose_name_tags(
         } else {
             avatars.title_of(agent)
         };
+        let measured = complexity
+            .as_ref()
+            .and_then(|complexity| complexity.complexity(agent));
         let inputs = TagInputs {
             is_self,
             record: avatars.name_record(agent),
@@ -647,6 +815,11 @@ pub(crate) fn compose_name_tags(
             } else {
                 distance_cache.get(&agent).copied()
             },
+            complexity: measured.map(|cost| cost.score),
+            attachment_area_m2: measured.map_or(0.0, |cost| cost.surface_area),
+            is_limited: complexity
+                .as_ref()
+                .is_some_and(|complexity| complexity.is_jellied(agent)),
         };
         let composed = compose_tag(&inputs, &toggles, &colors);
         if *content != composed {
@@ -658,9 +831,10 @@ pub(crate) fn compose_name_tags(
 #[cfg(test)]
 mod tests {
     use super::{
-        DISTANCE_BEYOND_COLOR, DISTANCE_CHAT_COLOR, DISTANCE_SHOUT_COLOR, DISTANCE_WHISPER_COLOR,
-        NAME_TAG_FRIEND, NAME_TAG_LINDEN, NAME_TAG_MISMATCH, NAME_TAG_MUTED, TagColors, TagInputs,
-        TagLineSize, TagToggles, compose_tag, distance_band_color,
+        COMPLEXITY_UNRATED_COLOR, DISTANCE_BEYOND_COLOR, DISTANCE_CHAT_COLOR, DISTANCE_SHOUT_COLOR,
+        DISTANCE_WHISPER_COLOR, NAME_TAG_FRIEND, NAME_TAG_LINDEN, NAME_TAG_MISMATCH,
+        NAME_TAG_MUTED, TEXTURE_AREA_COLOR, TagColors, TagInputs, TagLineSize, TagToggles,
+        complexity_color, compose_tag, distance_band_color, shows_complexity,
     };
     use crate::avatars::NameRecord;
     use bevy::prelude::*;
@@ -724,7 +898,188 @@ mod tests {
         assert_eq!(content.base_color, NAME_TAG_MISMATCH);
     }
 
-    /// A default display name shows without a username line; display names
+    /// Toggles with the render-cost line shown for everyone, rated against a
+    /// budget of 100k.
+    fn complexity_toggles() -> TagToggles {
+        TagToggles {
+            complexity_when_limited_only: false,
+            complexity_limit: 100_000,
+            ..TagToggles::default()
+        }
+    }
+
+    /// The reference's three-setting rule: the master switch gates everything,
+    /// your own tag needs its own opt-in, and other avatars show the line
+    /// either always or only while the viewer is limiting them.
+    #[test]
+    fn complexity_line_visibility_rule() {
+        let default = TagToggles::default();
+        // Out of the box: nothing, until an avatar is actually being limited.
+        assert!(!shows_complexity(false, false, &default));
+        assert!(shows_complexity(false, true, &default));
+        assert!(!shows_complexity(true, false, &default), "own tag opts in");
+
+        let own = TagToggles {
+            show_own_complexity: true,
+            ..default
+        };
+        assert!(shows_complexity(true, false, &own));
+
+        let everyone = TagToggles {
+            complexity_when_limited_only: false,
+            ..default
+        };
+        assert!(shows_complexity(false, false, &everyone));
+
+        let off = TagToggles {
+            show_complexity: false,
+            show_own_complexity: true,
+            complexity_when_limited_only: false,
+            ..default
+        };
+        assert!(
+            !shows_complexity(false, true, &off),
+            "the master switch wins"
+        );
+        assert!(!shows_complexity(true, false, &off));
+    }
+
+    /// The cost ramps green → amber → red against the budget, and is reported
+    /// in neutral grey when there is no budget to rate it against.
+    #[test]
+    fn complexity_color_ramps_against_the_budget() {
+        assert_eq!(
+            complexity_color(500_000, 0),
+            COMPLEXITY_UNRATED_COLOR,
+            "no budget means nothing to judge"
+        );
+        let srgb = |color: Color| {
+            let linear = Srgba::from(color);
+            (linear.red, linear.green, linear.blue)
+        };
+        assert_eq!(srgb(complexity_color(0, 100_000)), (0.0, 1.0, 0.0));
+        assert_eq!(srgb(complexity_color(100_000, 100_000)), (1.0, 1.0, 0.0));
+        assert_eq!(srgb(complexity_color(200_000, 100_000)), (1.0, 0.0, 0.0));
+        assert_eq!(
+            srgb(complexity_color(400_000, 100_000)),
+            (1.0, 0.0, 0.0),
+            "the ramp saturates rather than running past red"
+        );
+    }
+
+    /// The cost line follows the distance line, carries the ramp colour, and is
+    /// suppressed entirely for an avatar that has not been scored yet — a
+    /// missing measurement must not read as a cost of zero.
+    #[test]
+    fn complexity_line_follows_the_distance_line() {
+        let record = custom_record();
+        let inputs = TagInputs {
+            record: Some(&record),
+            distance_m: Some(5.0),
+            complexity: Some(250_000),
+            ..TagInputs::default()
+        };
+        let content = compose_tag(&inputs, &complexity_toggles(), &TagColors::default());
+        assert_eq!(
+            texts(&content),
+            vec![
+                "Shiny Name",
+                "avatar.tester",
+                "5.00 m",
+                "Complexity: 250000"
+            ],
+        );
+        assert_eq!(
+            content.lines.last().map(|line| line.color),
+            Some(complexity_color(250_000, 100_000)),
+        );
+
+        let unscored = TagInputs {
+            record: Some(&record),
+            complexity: None,
+            ..TagInputs::default()
+        };
+        let content = compose_tag(&unscored, &complexity_toggles(), &TagColors::default());
+        assert!(
+            !texts(&content)
+                .iter()
+                .any(|line| line.starts_with("Complexity")),
+            "an unscored avatar shows no cost line at all"
+        );
+    }
+
+    /// The texture-area line appears only when the attachment area is over the
+    /// limit, always in red — and never when the area limit is off.
+    #[test]
+    fn texture_area_line_is_the_complaint_it_looks_like() {
+        let toggles = TagToggles {
+            area_limit_m2: 1000.0,
+            ..complexity_toggles()
+        };
+        let under = TagInputs {
+            complexity: Some(10),
+            attachment_area_m2: 999.0,
+            ..TagInputs::default()
+        };
+        assert!(
+            !texts(&compose_tag(&under, &toggles, &TagColors::default()))
+                .iter()
+                .any(|line| line.starts_with("Texture Area")),
+        );
+
+        let over = TagInputs {
+            attachment_area_m2: 2500.4,
+            ..under
+        };
+        let content = compose_tag(&over, &toggles, &TagColors::default());
+        let area = content
+            .lines
+            .iter()
+            .find(|line| line.text.starts_with("Texture Area"));
+        assert_eq!(
+            area.map(|line| (line.text.as_str(), line.color)),
+            Some(("Texture Area: 2500 m²", TEXTURE_AREA_COLOR)),
+            "the area line shows once the limit is passed"
+        );
+
+        // With the area limit off, no amount of area produces the line.
+        let unlimited = TagToggles {
+            area_limit_m2: 0.0,
+            ..toggles
+        };
+        assert!(
+            !texts(&compose_tag(&over, &unlimited, &TagColors::default()))
+                .iter()
+                .any(|line| line.starts_with("Texture Area")),
+        );
+    }
+
+    /// Your own cost is reported in neutral grey, never rated red — the limit
+    /// does not apply to you, so a red tag would be telling you off for nothing.
+    #[test]
+    fn your_own_cost_is_reported_not_rated() {
+        let toggles = TagToggles {
+            show_own_complexity: true,
+            ..complexity_toggles()
+        };
+        let inputs = TagInputs {
+            is_self: true,
+            complexity: Some(500_000),
+            ..TagInputs::default()
+        };
+        let content = compose_tag(&inputs, &toggles, &TagColors::default());
+        let line = content
+            .lines
+            .iter()
+            .find(|line| line.text.starts_with("Complexity"));
+        assert_eq!(
+            line.map(|line| (line.text.as_str(), line.color)),
+            Some(("Complexity: 500000", COMPLEXITY_UNRATED_COLOR)),
+            "the own tag reports its cost, unrated, once opted in"
+        );
+    }
+
+    /// A default display name shows without a username line; display names display names
     /// off falls back to the legacy name.
     #[test]
     fn display_name_fallbacks() {

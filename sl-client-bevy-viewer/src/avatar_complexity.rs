@@ -1094,6 +1094,10 @@ pub(crate) fn sync_complexity_friends(
 ///
 /// Runs **before** the scene mirror folds the frame's events, so a removed
 /// object can still be chased up to the avatar that was wearing it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system: every stream that can stale a score, plus the state to resolve it"
+)]
 pub(crate) fn mark_complexity_dirty(
     mut events: MessageReader<SlEvent>,
     mut meshes: MessageReader<MeshDecoded>,
@@ -1101,7 +1105,23 @@ pub(crate) fn mark_complexity_dirty(
     mut model: ResMut<AvatarComplexityModel>,
     objects: Res<ObjectState>,
     avatars: Res<AvatarState>,
+    own_bake: Option<Res<crate::avatars::OwnLocalBake>>,
+    identity: Res<SlIdentity>,
+    mut own_bake_regions: Local<Option<usize>>,
 ) {
+    // The own avatar's baked regions come from a *background* composite that
+    // finishes well after it is first scored, and nothing else in this system
+    // would notice: no object changed, no appearance arrived. Without this the
+    // own cost is measured once, at zero, and stays there.
+    let regions = own_bake
+        .as_deref()
+        .map(crate::avatars::OwnLocalBake::region_count);
+    if *own_bake_regions != regions {
+        *own_bake_regions = regions;
+        if let Some(own) = identity.agent_id {
+            model.mark_dirty(own);
+        }
+    }
     let mark_scoped = |model: &mut AvatarComplexityModel, wearer: Option<ScopedObjectId>| {
         if let Some(agent) = wearer.and_then(|scoped| avatars.agent_of_scoped(scoped)) {
             model.mark_dirty(agent);
@@ -1183,11 +1203,17 @@ impl CostLookup for SceneLookup<'_> {
 
 /// Re-score the avatars whose cost went stale — at most [`RESCORE_BUDGET`] per
 /// frame, and no more often than [`RESCORE_INTERVAL_SECS`] apiece.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system: the scene and asset state one avatar's cost is measured from"
+)]
 pub(crate) fn recompute_avatar_complexity(
     time: Res<Time>,
     mut model: ResMut<AvatarComplexityModel>,
     objects: Res<ObjectState>,
     avatars: Res<AvatarState>,
+    own_bake: Option<Res<crate::avatars::OwnLocalBake>>,
+    identity: Res<SlIdentity>,
     meshes: Res<MeshManager>,
     textures: Res<TextureManager>,
     particles: Query<(Entity, &ObjectParticleSystem)>,
@@ -1246,7 +1272,7 @@ pub(crate) fn recompute_avatar_complexity(
             })
             .collect();
         let complexity = avatar_complexity(
-            avatars.visible_bake_count(agent),
+            visible_bake_regions(agent, &avatars, own_bake.as_deref(), identity.agent_id),
             &facts,
             &lookup,
             &mut pending,
@@ -1277,6 +1303,28 @@ pub(crate) fn recompute_avatar_complexity(
             );
         }
     }
+}
+
+/// How many baked body regions `agent` is charged for.
+///
+/// Normally the *published* bakes its `AvatarAppearance` carried. Your own
+/// avatar is the exception: on a grid that does not central-bake it publishes
+/// none and this client composites them locally instead, so the local
+/// composite's regions stand in — otherwise your own cost would read zero while
+/// your body plainly renders, and the own-avatar read-out
+/// (`viewer-name-tags-complexity-distance`) would be useless. The reference
+/// splits the same way, counting the own avatar's local textures.
+fn visible_bake_regions(
+    agent: AgentKey,
+    avatars: &AvatarState,
+    own_bake: Option<&crate::avatars::OwnLocalBake>,
+    own_agent: Option<AgentKey>,
+) -> usize {
+    let published = avatars.visible_bake_count(agent);
+    if published > 0 || own_agent != Some(agent) {
+        return published;
+    }
+    own_bake.map_or(0, crate::avatars::OwnLocalBake::region_count)
 }
 
 /// Re-decide who is drawn as a jellydoll, from the current scores, limits,
