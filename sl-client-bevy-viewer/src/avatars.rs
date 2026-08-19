@@ -2101,25 +2101,54 @@ impl AvatarState {
         );
     }
 
-    /// Despawn everything this viewer draws for `agent` — its full-object body
-    /// and its coarse dot alike — because the agent was **derendered**
-    /// (`viewer-derender-blacklist`). The per-agent name / appearance
-    /// bookkeeping is deliberately kept: it costs nothing, is not visible, and
-    /// makes a later un-derender (which re-streams the body) cheap.
-    pub(crate) fn derender_agent(&mut self, agent: AgentKey, commands: &mut Commands) {
+    /// Despawn the **body** this viewer built for `agent`, because the agent is
+    /// no longer to be drawn — derendered (`viewer-derender-blacklist`) or hidden
+    /// by the friends-only filter (`viewer-render-friends-only`) — and put the
+    /// cheap coarse placeholder in its place, hidden, at `at`.
+    ///
+    /// The hand-off is the whole point of the `at` argument. Presence and
+    /// rendering are separate concerns here: the radar and the minimap track an
+    /// avatar through whatever entity represents it, so if the body simply
+    /// vanished the avatar would be **absent** until the next
+    /// `CoarseLocationUpdate` (up to a second later) spawned a dot — and the
+    /// radar, sweeping in between, would report a leave and then an enter, plus
+    /// the range-crossing alerts that go with them. Swapping body for
+    /// placeholder in the same frame keeps the agent continuously present; only
+    /// its visibility changes.
+    ///
+    /// The per-agent name / appearance bookkeeping stays too: it costs nothing,
+    /// is invisible, and makes coming back cheap. A no-op for an avatar that has
+    /// no body (a coarse-only one already has the placeholder).
+    pub(crate) fn derender_agent(
+        &mut self,
+        agent: AgentKey,
+        at: Option<Vec3>,
+        commands: &mut Commands,
+        meshes: &mut Assets<Mesh>,
+        materials: &mut Assets<FaceMaterial>,
+    ) {
         let scoped = self
             .by_scoped
             .iter()
             .find(|(_scoped, tracked)| **tracked == agent)
             .map(|(scoped, _tracked)| *scoped);
-        if let Some(scoped) = scoped {
-            self.remove_object(scoped, commands);
+        let Some(scoped) = scoped else {
+            return;
+        };
+        self.remove_object(scoped, commands);
+        // Hand over to a placeholder, unless a coarse dot already stands in.
+        // Spawned hidden: `hide_suppressed_avatars` would hide it a moment later
+        // anyway, and a frame of a visible sphere where a body just was is
+        // exactly the flicker this feature must not produce. It is cleaned up
+        // like any other dot — `apply_object` despawns it when a full body takes
+        // over again.
+        if let Some(at) = at
+            && !self.coarse.contains_key(&agent)
+        {
+            let entities = self.spawn_sphere(agent, at, commands, meshes, materials);
+            commands.entity(entities.anchor).insert(Visibility::Hidden);
+            self.coarse.insert(agent, entities);
         }
-        if let Some(entities) = self.coarse.remove(&agent) {
-            despawn_avatar(entities, commands);
-        }
-        let _dropped_region = self.coarse_region.remove(&agent);
-        let _dropped_position = self.coarse_pos.remove(&agent);
     }
 
     /// Despawn the full-object avatar tracked under `scoped` because it was
@@ -2429,7 +2458,6 @@ impl AvatarState {
         own: Option<AgentKey>,
         locations: &[CoarseLocation],
         you: Option<usize>,
-        derender: &crate::derender::DerenderList,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<FaceMaterial>,
@@ -2454,11 +2482,6 @@ impl AvatarState {
             }
             // A full-object avatar renders from its precise object position.
             if self.objects.contains_key(&agent) {
-                continue;
-            }
-            // A derendered avatar gets no dot either — otherwise every coarse
-            // update would respawn the placeholder the derender just despawned.
-            if derender.hides_in_world(agent.uuid()) {
                 continue;
             }
             present.insert(agent);
@@ -3052,7 +3075,6 @@ pub(crate) fn update_coarse_avatars(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
-    derender: Res<crate::derender::DerenderList>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -3073,7 +3095,6 @@ pub(crate) fn update_coarse_avatars(
                 own,
                 locations,
                 *you,
-                &derender,
                 &mut commands,
                 &mut meshes,
                 &mut materials,

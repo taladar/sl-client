@@ -3511,6 +3511,7 @@ quick-prefs-max-particles = Max particles
 quick-prefs-lod-factor = Mesh detail
 quick-prefs-quality = Quality preset
 quick-prefs-master-volume = Master volume
+quick-prefs-friends-only = Show friends only
 quick-prefs-probe-dynamic = Avatars in reflections
 
 # In-world hover tooltips (viewer-hover-tooltips): the static labels the tip

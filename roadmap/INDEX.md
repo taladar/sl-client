@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 65 |
-| ready | 222 |
+| ready | 221 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 27 |
-| done | 835 |
+| done | 836 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1269** |
@@ -161,7 +161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (222)
+## ready (221)
 
 ### protocol
 
@@ -585,8 +585,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
   — CPU-skinning cross-check — make the R13 debug affordance a standing test
   (blocked by `viewer-render-test-harness` (done))
-- [`viewer-render-friends-only`](ready/viewer-render-friends-only.md) — Show
-  friends only (hide non-friend avatars)
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
@@ -1011,7 +1009,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (835)
+## done (836)
 
 ### protocol
 
@@ -2020,6 +2018,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-render-friends-only`](done/viewer-render-friends-only.md) — Show
+  friends only (hide non-friend avatars)
 - [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
   Render-scene coverage — a scene per render path the viewer already has
   (blocked by `viewer-render-test-harness` (done))

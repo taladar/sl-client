@@ -469,6 +469,23 @@ impl FriendsModel {
         self.names.get(&id).map(String::as_str)
     }
 
+    /// The model revision — a consumer that mirrors the roster (the friends-only
+    /// render filter, [`crate::derender`]) compares its last-mirrored value to
+    /// skip an unchanged rebuild.
+    pub(crate) const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Every friend's agent id. The friends-only render filter mirrors this by
+    /// revision so its per-avatar gate — which runs for every streamed object at
+    /// a crowded event — stays a single hash lookup.
+    pub(crate) fn friend_ids(&self) -> std::collections::HashSet<Uuid> {
+        self.friends
+            .keys()
+            .map(|id| AgentKey::from(*id).uuid())
+            .collect()
+    }
+
     /// Whether `agent` is already in the buddy cache — a friend.
     ///
     /// The avatar context menu reads this to disable "Add as Friend" for someone

@@ -1,12 +1,29 @@
-//! **Derender + asset blacklist** (`viewer-derender-blacklist`): remove an
-//! object or an avatar from *your* view — temporarily (until the next teleport)
-//! or permanently, through a per-avatar persisted blacklist.
+//! **Client-side render suppression**: the derender / asset blacklist
+//! (`viewer-derender-blacklist`) and the friends-only filter
+//! (`viewer-render-friends-only`) — two ways to say "do not draw this", sharing
+//! one machine.
 //!
-//! This is the everyday tool against visual griefing and against the one laggy
-//! object a parcel owner will not remove. It is purely **client-side** and
-//! strictly distinct from the server-side mute list ([`crate::mutes`]): nothing
-//! here goes on the wire, and the simulator keeps streaming the object — the
-//! viewer simply refuses to mirror it into the scene.
+//! **Derender** removes one object or avatar from *your* view, temporarily
+//! (until the next teleport) or permanently through a per-avatar persisted
+//! blacklist: the everyday tool against visual griefing and against the one
+//! laggy object a parcel owner will not remove. **Friends-only** hides every
+//! avatar that is not a friend for as long as it is on: not a moderation tool
+//! but a performance one — the way to survive a crowded event on a machine that
+//! cannot draw two hundred attachment-laden avatars.
+//!
+//! Both are purely **client-side** and strictly distinct from the server-side
+//! mute list ([`crate::mutes`]): nothing here goes on the wire, and the
+//! simulator keeps streaming everything — the viewer simply refuses to mirror it
+//! into the scene.
+//!
+//! # Suppressed, not forgotten
+//!
+//! Suppression stops the **render**, not the **tracking**. A suppressed avatar's
+//! body is never built — no skeleton, no bakes, no attachment meshes, which is
+//! the whole performance win — but the cheap coarse placeholder the position
+//! path spawns is kept and merely hidden ([`hide_suppressed_avatars`]), so the
+//! radar and the minimap still show who is around. At a crowded event that is
+//! exactly what you want: draw fewer people, not know fewer people.
 //!
 //! # One guarded way in
 //!
@@ -71,14 +88,15 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
-    AgentKey, CircuitId, Command, ScopedObjectId, SlAgentParcel, SlCommand, SlCurrentRegion,
-    SlEvent, SlIdentity, SlRegionIdentity, SlSessionEvent, Uuid,
+    AgentKey, Command, ScopedObjectId, SlAgentParcel, SlCommand, SlCurrentRegion, SlEvent,
+    SlIdentity, SlRegionIdentity, SlSessionEvent, Uuid, pcode,
 };
 use sl_settings::SettingValue;
 use tracing::{debug, info, warn};
 
 use crate::avatars::AvatarState;
 use crate::objects::ObjectState;
+use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
 
 /// The per-account file the permanent blacklist is stored in (a sibling of the
@@ -92,6 +110,18 @@ const DERENDER_SECTION: &[&str] = &["derender"];
 /// Whether a temporary derender lasts until the next teleport (the reference's
 /// `FSTempDerenderUntilTeleport`, default on) or for the whole session.
 pub(crate) const SETTING_UNTIL_TELEPORT: &str = "TempDerenderUntilTeleport";
+
+/// The **friends-only** filter (`viewer-render-friends-only`, the reference's
+/// `FSRenderFriendsOnly`): draw only friends' avatars. Per avatar, because it is
+/// a per-avatar habit — and because the reference keeps it per account too.
+pub(crate) const SETTING_FRIENDS_ONLY: &str = "RenderFriendsOnly";
+
+/// Whether the friends-only filter survives a teleport (the reference's
+/// `FSRenderFriendsOnlyPersistsTP`). Default **off**: the filter is a
+/// "this event is too heavy" tool, so leaving a place is the natural moment to
+/// stop hiding people — and the reference added this setting precisely because
+/// users forgot it was on.
+pub(crate) const SETTING_FRIENDS_ONLY_PERSISTS_TP: &str = "RenderFriendsOnlyPersistsTP";
 
 // ---------------------------------------------------------------------------
 // The model.
@@ -174,7 +204,35 @@ pub(crate) struct DerenderEntry {
     pub(crate) added_epoch_secs: i64,
 }
 
-/// The viewer's derender / blacklist state.
+/// Why a region-scoped id is suppressed — which release frees it again.
+///
+/// Two sources share one suppression index (and therefore one ingest gate, one
+/// transitive parent walk, one purge and one re-fetch): the **blacklist**, keyed
+/// by the entry's id, and the **friends-only filter**, keyed by the non-friend
+/// agent it hides. Keeping the source on each entry is what lets a release be
+/// exact — un-blacklisting one object, or befriending one avatar, frees that
+/// subtree and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HiddenBy {
+    /// The blacklist entry with this id ([`DerenderList::remove`] frees it).
+    Blacklist(Uuid),
+    /// The friends-only filter, hiding this non-friend agent (turning the filter
+    /// off — or befriending them — frees it).
+    FriendsOnly(Uuid),
+}
+
+impl HiddenBy {
+    /// The persistent id at the root of this suppression — a blacklist entry's
+    /// id, or the hidden agent's.
+    const fn id(self) -> Uuid {
+        match self {
+            Self::Blacklist(id) | Self::FriendsOnly(id) => id,
+        }
+    }
+}
+
+/// The viewer's derender / blacklist state, and the friends-only filter that
+/// shares its suppression machinery.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct DerenderList {
     /// The entries, newest last.
@@ -185,14 +243,16 @@ pub(crate) struct DerenderList {
     /// contradiction, and the kind rides along so a sound check never matches an
     /// object entry.
     ids: HashMap<Uuid, DerenderKind>,
-    /// The region-scoped ids currently suppressed, each mapped to the
-    /// **blacklisted id it hangs off**: an entry's own object maps to its own
-    /// id, a linkset child or attachment to its root's. Keeping the root is what
-    /// lets a single un-derender release exactly its own subtree (see
-    /// [`Self::remove`]). Session-derived, never persisted.
-    hidden_scoped: HashMap<ScopedObjectId, Uuid>,
-    /// Full ids whose scene entities still need despawning (a fresh entry).
-    pending_ids: Vec<Uuid>,
+    /// The region-scoped ids currently suppressed, each mapped to **what hides
+    /// it**: an entry's own object maps to its own source, a linkset child or
+    /// attachment to its root's. Keeping the source is what lets a single
+    /// release free exactly its own subtree (see [`Self::release`]).
+    /// Session-derived, never persisted.
+    hidden_scoped: HashMap<ScopedObjectId, HiddenBy>,
+    /// Suppressions whose scene entities still need despawning, by source: a
+    /// fresh blacklist entry, or an avatar the friends-only filter just started
+    /// hiding.
+    pending_ids: Vec<HiddenBy>,
     /// Scoped ids whose scene entities still need despawning (an object that
     /// was already tracked when its parent became hidden).
     pending_scoped: Vec<ScopedObjectId>,
@@ -210,6 +270,17 @@ pub(crate) struct DerenderList {
     loaded: bool,
     /// Whether the **permanent** entries changed since the last flush.
     dirty: bool,
+    /// Whether the **friends-only** filter is on (`viewer-render-friends-only`,
+    /// the reference's `FSRenderFriendsOnly`): while it is, every avatar that is
+    /// not a friend and not the agent itself is suppressed exactly as a
+    /// derendered one is.
+    friends_only: bool,
+    /// The agent's own id, which the filter never hides.
+    own_agent: Option<Uuid>,
+    /// The friends the filter spares, mirrored from
+    /// [`FriendsModel`](crate::people::FriendsModel) so the per-object gate stays
+    /// one hash lookup.
+    friends: HashSet<Uuid>,
 }
 
 impl DerenderList {
@@ -220,10 +291,26 @@ impl DerenderList {
         self.ids.get(&id) == Some(&kind)
     }
 
-    /// Whether `id` names a derendered **in-world** thing (an object or an
-    /// avatar) — the hot-path query the scene mirror runs per streamed object.
+    /// Whether `id` names an in-world thing this viewer must not draw — a
+    /// blacklisted object / avatar, or an avatar the friends-only filter hides.
+    /// The hot-path query the scene mirror runs per streamed object.
     pub(crate) fn hides_in_world(&self, id: Uuid) -> bool {
+        self.blacklists_in_world(id) || self.friends_only_hides(id)
+    }
+
+    /// Whether `id` is on the **blacklist** as an in-world kind (as opposed to
+    /// being hidden by the friends-only filter).
+    fn blacklists_in_world(&self, id: Uuid) -> bool {
         self.ids.get(&id).is_some_and(|kind| kind.is_in_world())
+    }
+
+    /// Whether the friends-only filter hides the avatar `agent`: the filter is
+    /// on, and they are neither the agent itself nor a friend. Animesh
+    /// ("control") avatars are exempt for free — they are ordinary mesh objects
+    /// on the wire, never `pcode` 47, so this gate never sees them, which is the
+    /// reference's `!avatar->isControlAvatar()` by construction.
+    pub(crate) fn friends_only_hides(&self, agent: Uuid) -> bool {
+        self.friends_only && self.own_agent != Some(agent) && !self.friends.contains(&agent)
     }
 
     /// Every blacklisted id of `kind` — how a consumer that cannot consult the
@@ -245,9 +332,9 @@ impl DerenderList {
         self.hidden_scoped.contains_key(&scoped)
     }
 
-    /// The blacklisted id suppressing `scoped`, if it is suppressed — the root
-    /// an inherited suppression is inherited from.
-    fn suppressing_root(&self, scoped: ScopedObjectId) -> Option<Uuid> {
+    /// What suppresses `scoped`, if anything — the source an inherited
+    /// suppression is inherited from.
+    fn suppressing_root(&self, scoped: ScopedObjectId) -> Option<HiddenBy> {
         self.hidden_scoped.get(&scoped).copied()
     }
 
@@ -258,7 +345,7 @@ impl DerenderList {
     /// once, so an object derendered long after it was streamed never produces
     /// another update for [`index_derendered_objects`] to learn from — and
     /// without the record, un-derendering it would have nothing to re-fetch.
-    fn note_hidden(&mut self, removed: impl IntoIterator<Item = ScopedObjectId>, root: Uuid) {
+    fn note_hidden(&mut self, removed: impl IntoIterator<Item = ScopedObjectId>, root: HiddenBy) {
         for scoped in removed {
             let _prior = self.hidden_scoped.insert(scoped, root);
         }
@@ -294,7 +381,7 @@ impl DerenderList {
             return;
         }
         self.dirty |= entry.permanent;
-        self.pending_ids.push(entry.id);
+        self.pending_ids.push(HiddenBy::Blacklist(entry.id));
         self.entries.push(entry);
         self.reindex();
     }
@@ -311,8 +398,9 @@ impl DerenderList {
         self.reindex();
         // Release exactly what this entry was suppressing — its own object and
         // everything that inherited the suppression from it — and nothing else:
-        // another blacklisted root's children must stay hidden.
-        self.release(|root| root == id);
+        // another blacklisted root's children (and anything the friends-only
+        // filter hides) must stay hidden.
+        self.release(|root| root == HiddenBy::Blacklist(id));
     }
 
     /// Drop every temporary entry (a teleport, or the floater's Clear temporary).
@@ -323,10 +411,14 @@ impl DerenderList {
             return;
         }
         self.reindex();
-        // Every suppression whose root just left the list is released; the
-        // permanent entries keep theirs.
+        // Every suppression whose blacklist entry just left the list is
+        // released; the permanent entries — and the friends-only filter — keep
+        // theirs.
         let live: HashSet<Uuid> = self.ids.keys().copied().collect();
-        self.release(|root| !live.contains(&root));
+        self.release(|root| match root {
+            HiddenBy::Blacklist(id) => !live.contains(&id),
+            HiddenBy::FriendsOnly(_agent) => false,
+        });
     }
 
     /// Drop every suppression whose root `released` accepts, and queue the
@@ -339,7 +431,7 @@ impl DerenderList {
     /// all the reference does). Because the index kept the object's *region-local*
     /// id the whole time, we can instead ask for it back right now
     /// (`RequestMultipleObjects`, a full cache miss).
-    fn release(&mut self, released: impl Fn(Uuid) -> bool) {
+    fn release(&mut self, released: impl Fn(HiddenBy) -> bool) {
         let freed: Vec<ScopedObjectId> = self
             .hidden_scoped
             .iter()
@@ -350,6 +442,36 @@ impl DerenderList {
             let _dropped = self.hidden_scoped.remove(scoped);
         }
         self.pending_refetch.extend(freed);
+    }
+
+    /// Re-apply the friends-only filter after its inputs moved (the toggle
+    /// flipped, the friends list changed, or the own agent became known): free
+    /// everyone it no longer hides — queuing their re-fetch, so they come back
+    /// without a relog — and queue a purge for every avatar it now does.
+    ///
+    /// `known` is the agents this viewer currently tracks; only they can have
+    /// anything in the scene to purge, and anyone streaming in later is caught
+    /// by the ingest gate instead.
+    fn resync_friends_only(&mut self, known: &[Uuid]) {
+        let spared: HashSet<Uuid> = self
+            .hidden_scoped
+            .values()
+            .filter_map(|hidden| match hidden {
+                HiddenBy::FriendsOnly(agent) => Some(*agent),
+                HiddenBy::Blacklist(_id) => None,
+            })
+            .filter(|agent| !self.friends_only_hides(*agent))
+            .collect();
+        if !spared.is_empty() {
+            self.release(
+                |root| matches!(root, HiddenBy::FriendsOnly(agent) if spared.contains(&agent)),
+            );
+        }
+        for agent in known {
+            if self.friends_only_hides(*agent) {
+                self.pending_ids.push(HiddenBy::FriendsOnly(*agent));
+            }
+        }
     }
 
     /// Rebuild the derived id index and bump the revision.
@@ -459,6 +581,8 @@ impl Plugin for DerenderPlugin {
                 Update,
                 (
                     load_derender_list,
+                    sync_friends_only_filter,
+                    clear_friends_only_on_teleport,
                     apply_derender_requests,
                     apply_underender_requests,
                     clear_temporary_derenders,
@@ -473,10 +597,18 @@ impl Plugin for DerenderPlugin {
             // was already standing there.
             .add_systems(
                 Update,
-                (enforce_derender, flush_derender_list)
+                // The purge, then the presence/visibility split it leaves behind
+                // (a suppressed avatar keeps a hidden placeholder so the radar
+                // and minimap still see it), then the flush.
+                (
+                    enforce_derender,
+                    hide_suppressed_avatars,
+                    flush_derender_list,
+                )
                     .chain()
                     .after(crate::objects::update_objects)
-                    .after(crate::avatars::update_avatar_objects),
+                    .after(crate::avatars::update_avatar_objects)
+                    .after(crate::avatars::update_coarse_avatars),
             );
     }
 }
@@ -491,6 +623,18 @@ fn register_derender_settings(settings: Option<ResMut<ViewerSettings>>) {
         SETTING_UNTIL_TELEPORT,
         SettingValue::Bool(true),
         "Temporary derenders last until the next teleport (otherwise: the whole session)",
+    );
+    settings.register_in(
+        DERENDER_SECTION,
+        SETTING_FRIENDS_ONLY,
+        SettingValue::Bool(false),
+        "Draw only friends' avatars (a crowded-event performance filter)",
+    );
+    settings.register_in(
+        DERENDER_SECTION,
+        SETTING_FRIENDS_ONLY_PERSISTS_TP,
+        SettingValue::Bool(false),
+        "Keep the friends-only filter on across a teleport",
     );
 }
 
@@ -562,18 +706,22 @@ pub(crate) fn apply_underender_requests(
     }
 }
 
-/// The most objects one re-fetch message names. `RequestMultipleObjects` is a
-/// variable block, so a released linkset of hundreds of prims would otherwise
-/// be one oversized datagram; the remainder rides the next frame's message.
-const REFETCH_BATCH: usize = 64;
-
-/// Ask the simulator to re-send every object a just-removed blacklist entry
-/// released, so an un-derendered object reappears at once instead of waiting
-/// for the region to stream it again (see [`DerenderList::release`]).
+/// Rebuild the scene mirror for everything a release freed, so what was hidden
+/// comes back at once instead of waiting for the region to stream it again (see
+/// [`DerenderList::release`]).
+///
+/// It asks **our own session**, not the simulator. The session caches every
+/// streamed object and keeps it current from the motion updates that arrive
+/// whatever the viewer chose to draw, so re-emitting from there costs no round
+/// trip and — decisively — works for **avatars**: `RequestMultipleObjects` is
+/// resolved against prims (OpenSim's `Scene.RequestPrim` looks up a
+/// `SceneObjectPart`), so a request naming an avatar's local id matches nothing
+/// and the simulator answers with silence. That is exactly what turning the
+/// friends-only filter off used to run into.
 ///
 /// Runs **after** the release, so the suppression is already gone by the time
-/// the re-sent `ObjectUpdate`s arrive and the scene mirror applies them
-/// normally.
+/// the re-emitted `ObjectUpdate`s reach the scene mirror, which applies them
+/// like any other update.
 pub(crate) fn refetch_released_objects(
     mut list: ResMut<DerenderList>,
     mut commands: MessageWriter<SlCommand>,
@@ -581,24 +729,9 @@ pub(crate) fn refetch_released_objects(
     if list.pending_refetch.is_empty() {
         return;
     }
-    let take = list.pending_refetch.len().min(REFETCH_BATCH);
-    let batch: Vec<ScopedObjectId> = list.pending_refetch.drain(..take).collect();
-    // One message per circuit: `RequestMultipleObjects` goes out on a single
-    // circuit, and a released set can span two connected regions (a linkset at a
-    // region edge, an avatar streamed by a neighbour). A mixed batch would be
-    // rejected whole.
-    let mut by_circuit: HashMap<CircuitId, Vec<ScopedObjectId>> = HashMap::new();
-    for scoped in batch {
-        by_circuit.entry(scoped.circuit()).or_default().push(scoped);
-    }
-    for (circuit, local_ids) in by_circuit {
-        debug!(
-            count = local_ids.len(),
-            ?circuit,
-            "re-fetching un-derendered objects"
-        );
-        commands.write(SlCommand(Command::RequestObjects { local_ids }));
-    }
+    let local_ids: Vec<ScopedObjectId> = core::mem::take(&mut list.pending_refetch);
+    debug!(count = local_ids.len(), "re-rendering released objects");
+    commands.write(SlCommand(Command::ResendCachedObjects { local_ids }));
 }
 
 /// The wall clock in Unix epoch seconds, for stamping a new entry.
@@ -627,10 +760,14 @@ pub(crate) fn index_derendered_objects(
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
                 let scoped = object.scoped_id();
                 let own = object.full_id.uuid();
-                // An object's own blacklist entry wins; otherwise it inherits
-                // whatever root suppresses its parent.
-                let root = if list.hides_in_world(own) {
-                    Some(own)
+                // What hides this object in its own right wins; otherwise it
+                // inherits whatever hides its parent — which is how a hidden
+                // avatar takes its attachments (the whole performance win at a
+                // crowded event) and a hidden root takes its linkset.
+                let root = if list.blacklists_in_world(own) {
+                    Some(HiddenBy::Blacklist(own))
+                } else if list.friends_only_hides(own) && object.pcode == pcode::AVATAR {
+                    Some(HiddenBy::FriendsOnly(own))
                 } else if object.parent_id.get() != 0 {
                     list.suppressing_root(object.scoped_parent_id())
                 } else {
@@ -684,17 +821,27 @@ pub(crate) fn enforce_derender(
     mut list: ResMut<DerenderList>,
     mut objects: ResMut<ObjectState>,
     mut avatars: ResMut<AvatarState>,
+    poses: Query<&Transform>,
     mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<crate::face_material::FaceMaterial>>,
 ) {
     if list.pending_ids.is_empty() && list.pending_scoped.is_empty() {
         return;
     }
-    for id in core::mem::take(&mut list.pending_ids) {
-        for scoped in objects.scoped_by_full_id(id) {
+    for source in core::mem::take(&mut list.pending_ids) {
+        for scoped in objects.scoped_by_full_id(source.id()) {
             let removed = objects.derender_remove(scoped, &mut commands);
-            list.note_hidden(removed, id);
+            list.note_hidden(removed, source);
         }
-        avatars.derender_agent(AgentKey::from(id), &mut commands);
+        // Where the body stands right now, so its placeholder can take over in
+        // place and the radar never sees the avatar blink out.
+        let agent = AgentKey::from(source.id());
+        let at = avatars
+            .anchor_of(agent)
+            .and_then(|anchor| poses.get(anchor).ok())
+            .map(|pose| pose.translation);
+        avatars.derender_agent(agent, at, &mut commands, &mut meshes, &mut materials);
     }
     for scoped in core::mem::take(&mut list.pending_scoped) {
         // Descendants of an already-indexed object inherit its root, so the
@@ -705,6 +852,119 @@ pub(crate) fn enforce_derender(
             list.note_hidden(removed, root);
         }
         avatars.derender_scoped(scoped, &mut commands);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The friends-only filter.
+// ---------------------------------------------------------------------------
+
+/// Keep the friends-only filter's mirrored inputs current — the setting, the
+/// agent's own id, and the friends set — and re-apply it whenever any of them
+/// moves.
+///
+/// The mirror exists so the per-object gate ([`DerenderList::friends_only_hides`])
+/// is one hash lookup on a resource the scene mirror already holds: it runs for
+/// every streamed object at a crowded event, which is exactly where this feature
+/// is used.
+pub(crate) fn sync_friends_only_filter(
+    mut list: ResMut<DerenderList>,
+    settings: Option<Res<ViewerSettings>>,
+    identity: Res<SlIdentity>,
+    friends: Option<Res<FriendsModel>>,
+    avatars: Res<AvatarState>,
+    mut mirrored_friends: Local<Option<u64>>,
+) {
+    let wanted = settings
+        .as_deref()
+        .and_then(|settings| settings.store().get_bool(SETTING_FRIENDS_ONLY).ok())
+        .unwrap_or(false);
+    let own = identity.agent_id.map(|agent| agent.uuid());
+    let friends_revision = friends.as_deref().map(FriendsModel::revision);
+    if list.friends_only == wanted && list.own_agent == own && *mirrored_friends == friends_revision
+    {
+        return;
+    }
+    let toggled = list.friends_only != wanted;
+    list.friends_only = wanted;
+    list.own_agent = own;
+    *mirrored_friends = friends_revision;
+    if let Some(friends) = friends.as_deref() {
+        list.friends = friends.friend_ids();
+    }
+    let known: Vec<Uuid> = avatars
+        .known_agents()
+        .into_iter()
+        .map(|(agent, _anchor)| agent.uuid())
+        .collect();
+    list.resync_friends_only(&known);
+    if toggled {
+        info!(on = wanted, "friends-only render filter toggled");
+    }
+}
+
+/// Turn the friends-only filter off on a teleport, unless the user asked it to
+/// stick ([`SETTING_FRIENDS_ONLY_PERSISTS_TP`]).
+///
+/// The filter is a "this event is too heavy for my machine" tool, so leaving is
+/// the natural moment to stop hiding people — and the reference added the same
+/// escape hatch (`FSRenderFriendsOnlyPersistsTP`) because users forgot it was
+/// on and wondered where everyone went.
+pub(crate) fn clear_friends_only_on_teleport(
+    mut events: MessageReader<SlEvent>,
+    mut settings: Option<ResMut<ViewerSettings>>,
+) {
+    let mut teleporting = false;
+    for event in events.read() {
+        if matches!(&event.0, SlSessionEvent::TeleportStarted) {
+            teleporting = true;
+        }
+    }
+    if !teleporting {
+        return;
+    }
+    let Some(settings) = settings.as_mut() else {
+        return;
+    };
+    let store = settings.store();
+    if !store.get_bool(SETTING_FRIENDS_ONLY).unwrap_or(false)
+        || store
+            .get_bool(SETTING_FRIENDS_ONLY_PERSISTS_TP)
+            .unwrap_or(false)
+    {
+        return;
+    }
+    settings.set_account(SETTING_FRIENDS_ONLY, SettingValue::Bool(false));
+    settings.save_async();
+    info!("friends-only render filter cleared on teleport");
+}
+
+/// Hide (rather than despawn) the placeholder of every avatar the viewer is not
+/// drawing, and un-hide the rest.
+///
+/// Presence and rendering are deliberately separate here. A suppressed avatar's
+/// **body** is never built — that is the whole performance win, and it happens at
+/// the ingest gate — but the cheap coarse placeholder the position path spawns is
+/// kept and merely made invisible, so the radar and the minimap still know who is
+/// around. At a crowded event that is the point: you turn the filter on to
+/// survive the draw, not to stop tracking the crowd. The reference does the same
+/// by different means (it kills the object and its radar reads the coarse
+/// positions directly).
+pub(crate) fn hide_suppressed_avatars(
+    list: Res<DerenderList>,
+    avatars: Res<AvatarState>,
+    mut visibilities: Query<&mut Visibility>,
+) {
+    for (agent, anchor) in avatars.known_agents() {
+        let Ok(mut visibility) = visibilities.get_mut(anchor) else {
+            continue;
+        };
+        let wanted = if list.hides_in_world(agent.uuid()) {
+            Visibility::Hidden
+        } else {
+            Visibility::Inherited
+        };
+        visibility.set_if_neq(wanted);
     }
 }
 
@@ -820,7 +1080,8 @@ pub(crate) fn flush_derender_list(mut list: ResMut<DerenderList>) {
 #[cfg(test)]
 mod tests {
     use super::{
-        DerenderEntry, DerenderKind, DerenderList, DerenderRefusal, RequestDerender, check_derender,
+        DerenderEntry, DerenderKind, DerenderList, DerenderRefusal, HiddenBy, RequestDerender,
+        check_derender,
     };
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{CircuitId, RegionLocalObjectId, ScopedObjectId, Uuid};
@@ -848,7 +1109,10 @@ mod tests {
         assert!(list.hides_in_world(Uuid::from_u128(1)));
         assert!(!list.hides_in_world(Uuid::from_u128(2)));
         assert_ne!(list.revision(), before);
-        assert_eq!(list.pending_ids, vec![Uuid::from_u128(1)]);
+        assert_eq!(
+            list.pending_ids,
+            vec![HiddenBy::Blacklist(Uuid::from_u128(1))]
+        );
         assert!(list.dirty, "a permanent entry must be persisted");
     }
 
@@ -905,8 +1169,8 @@ mod tests {
         list.add(entry(2, true));
         // Two roots, each with one inherited child.
         let scoped = |id: u32| ScopedObjectId::new(CircuitId::default(), RegionLocalObjectId(id));
-        list.note_hidden([scoped(10), scoped(11)], first);
-        list.note_hidden([scoped(20)], second);
+        list.note_hidden([scoped(10), scoped(11)], HiddenBy::Blacklist(first));
+        list.note_hidden([scoped(20)], HiddenBy::Blacklist(second));
         list.pending_refetch.clear();
 
         list.remove(first);
@@ -932,7 +1196,7 @@ mod tests {
         let scoped = ScopedObjectId::new(CircuitId::default(), RegionLocalObjectId(42));
         // Nothing on the wire ever mentioned this object; only the purge did.
         assert!(!list.is_suppressed(scoped));
-        list.note_hidden([scoped], id);
+        list.note_hidden([scoped], HiddenBy::Blacklist(id));
         assert!(list.is_suppressed(scoped));
         list.pending_refetch.clear();
         list.remove(id);
@@ -952,8 +1216,8 @@ mod tests {
         list.add(entry(1, true));
         list.add(entry(2, false));
         let scoped = |id: u32| ScopedObjectId::new(CircuitId::default(), RegionLocalObjectId(id));
-        list.note_hidden([scoped(10)], kept);
-        list.note_hidden([scoped(20)], dropped);
+        list.note_hidden([scoped(10)], HiddenBy::Blacklist(kept));
+        list.note_hidden([scoped(20)], HiddenBy::Blacklist(dropped));
         list.pending_refetch.clear();
 
         list.clear_temporary();
@@ -991,6 +1255,72 @@ mod tests {
             "the texture store mirrors exactly the texture entries"
         );
         assert!(list.ids_of_kind(DerenderKind::Animation).is_empty());
+    }
+
+    /// Turn the friends-only filter on for `own`, sparing `friends`.
+    fn filter_on(list: &mut DerenderList, own: u128, friends: &[u128]) {
+        list.friends_only = true;
+        list.own_agent = Some(Uuid::from_u128(own));
+        list.friends = friends.iter().map(|id| Uuid::from_u128(*id)).collect();
+    }
+
+    /// The filter hides every avatar that is neither the agent itself nor a
+    /// friend — and hides nobody at all while it is off.
+    #[test]
+    fn friends_only_spares_friends_and_self() {
+        let mut list = DerenderList::default();
+        let stranger = Uuid::from_u128(0xBEEF);
+        assert!(!list.friends_only_hides(stranger), "off by default");
+
+        filter_on(&mut list, 0xAAA, &[0xF1]);
+        assert!(list.friends_only_hides(stranger));
+        assert!(!list.friends_only_hides(Uuid::from_u128(0xF1)), "a friend");
+        assert!(!list.friends_only_hides(Uuid::from_u128(0xAAA)), "yourself");
+        // The scene mirror's gate is the union of both sources.
+        assert!(list.hides_in_world(stranger));
+        assert!(!list.blacklists_in_world(stranger), "not a blacklist entry");
+    }
+
+    /// Re-applying the filter purges whom it now hides and frees — with a
+    /// re-fetch — whom it no longer does, leaving blacklist suppressions alone.
+    #[test]
+    fn friends_only_resync_purges_and_releases() {
+        let mut list = DerenderList::default();
+        let (stranger, new_friend) = (Uuid::from_u128(0xBEEF), Uuid::from_u128(0xF2));
+        // A blacklisted object, to prove the filter's resync never frees it.
+        list.add(entry(1, true));
+        let scoped = |id: u32| ScopedObjectId::new(CircuitId::default(), RegionLocalObjectId(id));
+        list.note_hidden([scoped(1)], HiddenBy::Blacklist(Uuid::from_u128(1)));
+        // Both avatars are hidden by the filter.
+        filter_on(&mut list, 0xAAA, &[]);
+        list.note_hidden([scoped(10)], HiddenBy::FriendsOnly(stranger));
+        list.note_hidden([scoped(11)], HiddenBy::FriendsOnly(new_friend));
+        list.pending_ids.clear();
+        list.pending_refetch.clear();
+
+        // One of them becomes a friend: only their subtree is released.
+        list.friends = HashSet::from([new_friend]);
+        list.resync_friends_only(&[stranger, new_friend]);
+        assert_eq!(list.pending_refetch, vec![scoped(11)]);
+        assert!(list.is_suppressed(scoped(10)), "the stranger stays hidden");
+        assert!(list.is_suppressed(scoped(1)), "the blacklist is untouched");
+        assert_eq!(
+            list.pending_ids,
+            vec![HiddenBy::FriendsOnly(stranger)],
+            "whoever the filter still hides is queued for the purge"
+        );
+
+        // Turning the filter off frees everyone it hid — and nobody else.
+        list.pending_ids.clear();
+        list.pending_refetch.clear();
+        list.friends_only = false;
+        list.resync_friends_only(&[stranger, new_friend]);
+        assert_eq!(list.pending_refetch, vec![scoped(10)]);
+        assert!(list.pending_ids.is_empty());
+        assert!(
+            list.is_suppressed(scoped(1)),
+            "a blacklisted object must not come back with the filter"
+        );
     }
 
     /// The reference's `derenderObject` guards: never yourself, never a null id.

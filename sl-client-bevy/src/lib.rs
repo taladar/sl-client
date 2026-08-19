@@ -2329,6 +2329,9 @@ fn advance_running(
             Command::RequestObjects { local_ids } => {
                 session.request_objects(local_ids, now).ok();
             }
+            Command::ResendCachedObjects { local_ids } => {
+                session.resend_cached_objects(local_ids);
+            }
             Command::RequestObjectProperties { local_ids } => {
                 session.request_object_properties(local_ids, now).ok();
             }

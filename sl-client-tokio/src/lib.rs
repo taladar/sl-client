@@ -1420,6 +1420,9 @@ impl Client {
                         Some(Command::RequestObjects { local_ids }) => {
                             self.session.request_objects(&local_ids, Instant::now())?;
                         }
+                        Some(Command::ResendCachedObjects { local_ids }) => {
+                            self.session.resend_cached_objects(&local_ids);
+                        }
                         Some(Command::RequestObjectProperties { local_ids }) => {
                             self.session.request_object_properties(&local_ids, Instant::now())?;
                         }

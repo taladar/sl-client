@@ -95,6 +95,10 @@ const WORLD_MAP_OPEN: &str = "world-map-open";
 /// drives the check mark on the World ▸ Radar entry.
 const RADAR_OPEN: &str = "radar-open";
 
+/// The condition key that holds while the friends-only render filter is on —
+/// drives the check mark on the World ▸ Show Friends Only entry.
+const FRIENDS_ONLY_ON: &str = "render-friends-only-on";
+
 /// The condition key that holds while the Asset Blacklist floater is open —
 /// drives the check mark on the World ▸ Asset Blacklist entry.
 const BLACKLIST_OPEN: &str = "asset-blacklist-open";
@@ -318,6 +322,13 @@ static WORLD_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("Asset Blacklist…", "toggle-asset-blacklist")
                 .checked_when(BLACKLIST_OPEN),
+        ),
+        // Draw only friends' avatars (viewer-render-friends-only) — the
+        // crowded-event performance escape hatch, at the reference's own World
+        // ▸ Show Friends only.
+        MenuItemDef::Command(
+            MenuCommand::new("Show Friends Only", "toggle-friends-only")
+                .checked_when(FRIENDS_ONLY_ON),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Submenu(&ENVIRONMENT_MENU),
@@ -549,6 +560,13 @@ fn update_top_menu_conditions(
     if blacklist_open {
         wanted.push(BLACKLIST_OPEN);
     }
+    if settings
+        .store()
+        .get_bool(crate::derender::SETTING_FRIENDS_ONLY)
+        .unwrap_or(false)
+    {
+        wanted.push(FRIENDS_ONLY_ON);
+    }
     // The World ▸ Property Lines check mark, from the in-world property-lines
     // setting (default on).
     if settings
@@ -737,6 +755,12 @@ fn handle_top_menu_actions(
                     &mut panels,
                     crate::edit_tool::BUILD_TOOLS_FLOATER_ID,
                 );
+            }
+            "toggle-friends-only" => {
+                let name = crate::derender::SETTING_FRIENDS_ONLY;
+                let current = settings.store().get_bool(name).unwrap_or(false);
+                settings.set_account(name, sl_settings::SettingValue::Bool(!current));
+                settings.save_async();
             }
             "toggle-asset-blacklist" => {
                 toggle_floater(

@@ -220,6 +220,20 @@ fn default_entries() -> Vec<QuickPrefEntry> {
             max: 1.0,
             increment: 0.05,
         },
+        // Draw only friends' avatars (viewer-render-friends-only) — the
+        // crowded-event escape hatch, reached for exactly when the machine is
+        // already struggling, so it belongs on the panel you can open mid-lag.
+        // Per avatar, like the setting itself.
+        QuickPrefEntry {
+            control_name: crate::derender::SETTING_FRIENDS_ONLY.to_owned(),
+            label: QuickPrefLabel::Key("quick-prefs-friends-only".to_owned()),
+            scope: Scope::Account,
+            kind: QuickPrefKind::Checkbox,
+            integer: false,
+            min: 0.0,
+            max: 1.0,
+            increment: 1.0,
+        },
         // Dynamic content (avatars) in local reflection probes: costlier and it
         // defeats probe change-detection, so it earns a one-click toggle here.
         QuickPrefEntry {

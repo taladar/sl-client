@@ -1260,8 +1260,27 @@ pub enum Command {
     /// Request the full `ObjectUpdate` for the given region-local ids
     /// (`RequestMultipleObjects`); updates arrive as [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
     /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated).
+    ///
+    /// Simulators resolve this against **prims only** (OpenSim's
+    /// `Scene.RequestPrim` looks up a `SceneObjectPart`), so it can never bring
+    /// an **avatar** back — use [`Command::ResendCachedObjects`] for that, and
+    /// in general when the session's own cache is the better source.
     RequestObjects {
         /// The region-local ids to (re)fetch.
+        local_ids: Vec<ScopedObjectId>,
+    },
+    /// Re-emit [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) for each
+    /// **already-cached** object named, with no wire traffic at all.
+    ///
+    /// For a consumer that dropped part of its own scene mirror on purpose — a
+    /// client-side derender or render filter being switched off — this is
+    /// strictly better than asking the simulator again: the session's cached
+    /// [`Object`](crate::Object) is kept current by the motion updates that keep
+    /// arriving regardless, it costs no round trip, and it works for avatars,
+    /// which [`Command::RequestObjects`] cannot restore. An id the session has
+    /// no cached object for is skipped.
+    ResendCachedObjects {
+        /// The region-local ids to re-emit from the cache.
         local_ids: Vec<ScopedObjectId>,
     },
     /// Request objects' extended properties by selecting them (`ObjectSelect`);

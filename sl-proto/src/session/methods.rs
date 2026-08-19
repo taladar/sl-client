@@ -11355,9 +11355,35 @@ impl Session {
         patch.value(x % 16, y % 16)
     }
 
+    /// Re-emits [`Event::ObjectUpdated`] for each cached object named, with no
+    /// wire traffic.
+    ///
+    /// The session keeps every streamed [`Object`] and keeps it current from the
+    /// motion updates that arrive regardless of what a consumer chose to render,
+    /// so a consumer that dropped part of its own scene mirror on purpose — a
+    /// client-side derender or render filter being switched off — can rebuild it
+    /// from here instead of asking the simulator again. That matters beyond the
+    /// saved round trip: `RequestMultipleObjects` is resolved against **prims**,
+    /// so it cannot bring an **avatar** back, while this can.
+    ///
+    /// Ids with no cached object (a circuit that went away, an object the
+    /// simulator killed) are skipped.
+    pub fn resend_cached_objects(&mut self, local_ids: &[ScopedObjectId]) {
+        for id in local_ids {
+            let Some(object) = self.object(*id).cloned() else {
+                continue;
+            };
+            self.events
+                .push_back(Event::ObjectUpdated(Box::new(object)));
+        }
+    }
+
     /// Requests the full `ObjectUpdate` for the given region-local ids via
     /// `RequestMultipleObjects` (a "full" cache miss). Useful to (re)fetch
     /// objects seen only as cached/terse stubs, or to repopulate after a gap.
+    ///
+    /// Simulators resolve this against **prims only**, so it cannot restore an
+    /// avatar — see [`Session::resend_cached_objects`] above.
     ///
     /// # Errors
     ///

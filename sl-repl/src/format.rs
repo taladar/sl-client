@@ -717,6 +717,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::SendAbuseReportViaCaps { .. } => "send_abuse_report_caps",
         Command::SendPostcard(..) => "send_postcard",
         Command::RequestObjects { .. } => "request_objects",
+        Command::ResendCachedObjects { .. } => "resend_cached_objects",
         Command::RequestObjectProperties { .. } => "request_object_properties",
         Command::DeselectObjects { .. } => "deselect_objects",
         Command::TouchObject { .. } => "touch_object",

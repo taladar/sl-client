@@ -97,11 +97,14 @@ Builds on: the object context menu and the scene mirror (`objects.rs`).
   sound asset, which needs that same explorer.
 - **Re-render is better than the reference's.** Firestorm only forgets the
   entry, leaving the object absent until the region streams it again (a
-  teleport away and back). Ours re-fetches: the suppression index kept every
-  hidden object's *region-local* id, so releasing an entry queues those ids
-  for a `RequestMultipleObjects` full cache miss and the object reappears
-  within the round trip. An object the simulator never streamed this session
-  (out of interest range) still has to wait for it, as before.
+  teleport away and back). Ours restores it: the suppression index kept every
+  hidden object's *region-local* id, so releasing an entry re-emits those
+  objects from the session's own cache and they reappear at once.
+  (Superseded detail, from [[viewer-render-friends-only]]: this first used a
+  `RequestMultipleObjects` full cache miss, which works for prims but *never*
+  for avatars — simulators resolve that message against prims only — so it was
+  replaced by `Command::ResendCachedObjects`, which needs no round trip and
+  covers both.)
 - **No RLV guard on own attachments.** The reference refuses to derender
   your own attachment while RLV is enabled; RLV enforcement is a separate
   (blocked) family here, so the guard joins it there.
@@ -135,3 +138,9 @@ the error — so the re-fetch groups by circuit.
 
 Live checks still to do: derendering an avatar with attachments, the blacklist
 surviving a relog, and the temporary entries clearing on teleport.
+
+Follow-up from [[viewer-render-friends-only]]: a derendered avatar now also
+keeps its (hidden) coarse placeholder rather than being dropped from the
+position path, so it stays on the radar and minimap — which is what the
+reference does too (`FSRadarShowMutedAndDerendered`), and what stops the radar
+reporting a derender as a region leave.
