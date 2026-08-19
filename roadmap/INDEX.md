@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 266 |
 | blocked | 68 |
 | in-progress | 16 |
-| bugs | 28 |
+| bugs | 29 |
 | done | 839 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1346** |
+| **total** | **1347** |
 
 ## ideas (93)
 
@@ -1088,7 +1088,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (28)
+## bugs (29)
 
 ### protocol
 
@@ -1107,6 +1107,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (rotates the whole minimap)
 - [`viewer-asset-retry-counter-stuck`](bugs/viewer-asset-retry-counter-stuck.md)
   — Asset fetch retry counter stuck at 1/6 — permanent failures retry forever
+- [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
+  — Unit tests open real audio devices on the developer's machine
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
