@@ -56,12 +56,13 @@ use bevy_flair::style::components::ClassList;
 use std::collections::HashMap;
 
 use sl_client_bevy::{
-    AgentKey, Command, GroupKey, LoadUrlRequest, MuteFlags, MuteType, ObjectKey, OwnerKey,
-    SlCommand, SlEvent, SlSessionEvent,
+    AgentKey, Command, GroupKey, LoadUrlRequest, MuteType, ObjectKey, OwnerKey, SlCommand, SlEvent,
+    SlSessionEvent,
 };
 
 use crate::i18n::{TransArgs, Translator};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
+use crate::mutes::RequestBlock;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
@@ -383,14 +384,13 @@ fn spawn_load_url_card(
     let object_name = request.object_name.clone();
     commands.entity(card.block).observe(
         move |_activate: On<Activate>,
-              mut sl: MessageWriter<SlCommand>,
+              mut blocks: MessageWriter<RequestBlock>,
               mut resolves: MessageWriter<ResolveNotification>| {
-            sl.write(SlCommand(Command::Mute {
-                id: object_id.uuid(),
-                name: object_name.clone(),
-                mute_type: MuteType::Object,
-                flags: MuteFlags::default(),
-            }));
+            blocks.write(RequestBlock::new(
+                object_id.uuid(),
+                object_name.clone(),
+                MuteType::Object,
+            ));
             resolves.write(ResolveNotification {
                 toast: root,
                 button: None,

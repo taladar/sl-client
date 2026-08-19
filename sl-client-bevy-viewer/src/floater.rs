@@ -690,6 +690,23 @@ pub(crate) fn toggle_floater(
     }
 }
 
+/// Show the floater with the given stable id, when its chrome exists — the
+/// open-without-closing primitive for a menu entry that targets something
+/// *inside* a floater (the block list lives in a tab of the conversations
+/// window, so "Block List" must open that window, never close it).
+pub(crate) fn show_floater(
+    floaters: &Query<(Entity, &Floater)>,
+    panels: &mut Query<&mut UiPanelShown>,
+    id: &str,
+) {
+    if let Some(panel) = floater_panel(floaters, id)
+        && let Ok(mut shown) = panels.get_mut(panel)
+        && !shown.0
+    {
+        shown.0 = true;
+    }
+}
+
 /// **Spawn a live floater** under `root`, starting hidden.
 ///
 /// Lays out the shared chrome ([`build_floater_chrome`]), then makes it live: an

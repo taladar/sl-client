@@ -38,7 +38,8 @@
 //!   Trash / return-to-owner). The enable gates are deliberately simpler than
 //!   the reference's full predicates: you-owner for take / delete / return,
 //!   the copy permission bit for take-copy (see the condition constants).
-//! - **Mute** → [`Command::Mute`] of the object (id + name). The name is not in
+//! - **Mute** → a guarded [`crate::mutes::RequestBlock`] for the object (id +
+//!   name). The name is not in
 //!   the object update stream, so opening the menu fires a
 //!   [`Command::RequestObjectPropertiesFamily`] and the reply's name is held on
 //!   the open target; a mute picked before the reply lands mutes by id with an
@@ -96,13 +97,14 @@ use std::collections::HashSet;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, DeRezDestination, FolderType, MuteFlags, MuteType, ScopedObjectId, SlAgentParcel,
-    SlCommand, SlEvent, SlSessionEvent, SurfaceInfo, TransactionId, Uuid, Vector,
+    Command, DeRezDestination, FolderType, MuteType, ScopedObjectId, SlAgentParcel, SlCommand,
+    SlEvent, SlSessionEvent, SurfaceInfo, TransactionId, Uuid, Vector,
 };
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit, UNIMPLEMENTED};
 use crate::hud_pick::surface_info_from_hit;
 use crate::inventory::InventoryModel;
+use crate::mutes::RequestBlock;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectPickSummary, ObjectState, PrimFaceEntity, SceneObject,
 };
@@ -1036,6 +1038,7 @@ fn handle_object_menu_actions(
     seat_poses: Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
     seat_cameras: Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
+    mut blocks: MessageWriter<RequestBlock>,
     mut open_contents: MessageWriter<crate::edit_contents::OpenObjectContents>,
 ) {
     for action in actions.read() {
@@ -1117,12 +1120,16 @@ fn handle_object_menu_actions(
             }
             "delete" => derez(folder(FolderType::Trash).map(DeRezDestination::Trash)),
             "return" => derez(Some(DeRezDestination::ReturnToOwner)),
-            "mute" => Some(Command::Mute {
-                id: hit.summary.root_full.uuid(),
-                name: target.name.clone().unwrap_or_default(),
-                mute_type: MuteType::Object,
-                flags: MuteFlags::default(),
-            }),
+            "mute" => {
+                // Blocks go through the guarded request channel, never straight
+                // onto the wire (see `crate::mutes`).
+                blocks.write(RequestBlock::new(
+                    hit.summary.root_full.uuid(),
+                    target.name.clone().unwrap_or_default(),
+                    MuteType::Object,
+                ));
+                None
+            }
             // Every other slice is a disabled placeholder: no behaviour yet.
             _other => None,
         };

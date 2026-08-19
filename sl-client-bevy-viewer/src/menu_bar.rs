@@ -173,11 +173,21 @@ static AVATAR_MENU: MenuDef = MenuDef {
 /// `Comm > Conversations…`); friends / groups and the rest are future entries.
 static COMM_MENU: MenuDef = MenuDef {
     label: "Comm",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("Conversations", "toggle-conversations")
-            .accel("Ctrl+T")
-            .checked_when(CONVERSATIONS_OPEN),
-    )],
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Conversations", "toggle-conversations")
+                .accel("Ctrl+T")
+                .checked_when(CONVERSATIONS_OPEN),
+        ),
+        MenuItemDef::Separator,
+        // The reference's `Comm > Contacts / Groups / Block List`. All three
+        // lists live in sub-tabs of the People pane inside the conversations
+        // window, so each entry opens that window and fronts its sub-tab rather
+        // than opening a floater of its own.
+        MenuItemDef::Command(MenuCommand::new("Friends", "open-friends-list")),
+        MenuItemDef::Command(MenuCommand::new("Groups", "open-groups-list")),
+        MenuItemDef::Command(MenuCommand::new("Block List", "open-block-list")),
+    ],
 };
 
 /// The World ▸ Environment ▸ **Day Cycle** submenu — the region's / parcel's own
@@ -595,7 +605,8 @@ const fn environment_condition(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the action \
               stream, the by-id floater lookup, the environment state, the parcel, the two \
-              open-request channels, the panel-shown query, and the quit-request writer"
+              open-request channels, the panel-shown query, the People sub-tab request, and \
+              the quit-request writer"
 )]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
@@ -606,6 +617,7 @@ fn handle_top_menu_actions(
     mut about_region: MessageWriter<crate::about_region::OpenAboutRegion>,
     mut settings: ResMut<crate::settings::ViewerSettings>,
     mut panels: Query<&mut UiPanelShown>,
+    mut people_tabs: MessageWriter<crate::people::OpenPeopleSubTab>,
     mut quit: MessageWriter<crate::session::QuitRequested>,
 ) {
     use crate::environment::FixedEnvironment;
@@ -662,6 +674,19 @@ fn handle_top_menu_actions(
                     &mut panels,
                     crate::conversations::CONVERSATIONS_FLOATER_ID,
                 );
+            }
+            "open-friends-list" | "open-groups-list" | "open-block-list" => {
+                let sub_tab = match action.action {
+                    "open-friends-list" => crate::people::PeopleSubTab::Friends,
+                    "open-groups-list" => crate::people::PeopleSubTab::Groups,
+                    _blocked => crate::people::PeopleSubTab::Blocked,
+                };
+                crate::floater::show_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::conversations::CONVERSATIONS_FLOATER_ID,
+                );
+                people_tabs.write(crate::people::OpenPeopleSubTab(sub_tab));
             }
             "toggle-web-browser" => {
                 toggle_floater(&floaters, &mut panels, crate::web_floater::WEB_FLOATER_ID);

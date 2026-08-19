@@ -49,7 +49,7 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{
-    AgentKey, Command, MuteFlags, MuteType, ObjectKey, OwnerKey, SlCommand, SlEvent, SlSessionEvent,
+    AgentKey, Command, MuteType, ObjectKey, OwnerKey, SlCommand, SlEvent, SlSessionEvent,
 };
 
 use crate::avatar_profile::OpenAvatarProfile;
@@ -57,6 +57,7 @@ use crate::avatars::AvatarState;
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::i18n::Translator;
 use crate::linkified_text::LinkActivated;
+use crate::mutes::RequestBlock;
 use crate::slurl_dispatch::DispatchSlurl;
 use crate::ui::{UiRoot, column, row};
 use crate::ui_font::UiFont;
@@ -534,14 +535,13 @@ fn open_object_inspector(
     )
     .observe(
         move |_activate: On<Activate>,
-              mut sl: MessageWriter<SlCommand>,
+              mut blocks: MessageWriter<RequestBlock>,
               mut close: MessageWriter<CloseInspector>| {
-            sl.write(SlCommand(Command::Mute {
-                id: block_id,
-                name: block_name.clone(),
-                mute_type: MuteType::Object,
-                flags: MuteFlags::default(),
-            }));
+            blocks.write(RequestBlock::new(
+                block_id,
+                block_name.clone(),
+                MuteType::Object,
+            ));
             close.write(CloseInspector);
         },
     );

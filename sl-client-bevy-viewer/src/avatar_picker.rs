@@ -82,6 +82,12 @@ pub(crate) struct AvatarPicked {
     pub(crate) requester: &'static str,
     /// The chosen avatar.
     pub(crate) agent: AgentKey,
+    /// The label the picked row carried — the avatar's name as the source that
+    /// produced the row knew it (a search reply's legacy name, the friend's
+    /// name, or the nearby avatar's name). Consumers that must *record* a name
+    /// against the id (the block list writes it into the mute entry) take it
+    /// from here rather than re-resolving.
+    pub(crate) name: String,
 }
 
 /// Which source tab is active.
@@ -405,6 +411,7 @@ fn confirm_pick(
     picked.write(AvatarPicked {
         requester,
         agent: row.agent,
+        name: row.label.clone(),
     });
     state.requester = None;
     if let Ok(mut shown) = panels.get_mut(ui.panel) {

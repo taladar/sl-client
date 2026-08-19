@@ -13,11 +13,12 @@
 //!
 //! # Scope of this task
 //!
-//! Only the **Friends** list is wired here; the **Groups** sub-tab's content slot
-//! is spawned here but filled by [`crate::groups`] (the `viewer-social-groups`
-//! task). The nearby-avatars-with-distances list is the separate **radar**
-//! (`viewer-avatar-radar`), and the reference's Recent / Blocked tabs are not
-//! built in this task.
+//! Only the **Friends** list is wired here; the **Groups** and **Blocked**
+//! sub-tabs' content slots are spawned here but filled by [`crate::groups`]
+//! (the `viewer-social-groups` task) and [`crate::blocked`] (the
+//! `viewer-block-list` task). The nearby-avatars-with-distances list is the
+//! separate **radar** (`viewer-avatar-radar`), and the reference's Recent tab
+//! is not built.
 //!
 //! # Model + ECS mirror
 //!
@@ -53,8 +54,8 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    AgentKey, Command, Friend, FriendKey, FriendPresence, FriendRights, MuteFlags, MuteType,
-    SlCommand, SlEvent, SlSessionEvent, Uuid,
+    AgentKey, Command, Friend, FriendKey, FriendPresence, FriendRights, MuteType, SlCommand,
+    SlEvent, SlSessionEvent, Uuid,
 };
 
 use sl_settings::SettingValue;
@@ -62,6 +63,7 @@ use sl_settings::SettingValue;
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::conversations::{ConversationKey, ConversationsUi, OpenConversation, StripFocus};
 use crate::i18n::{TransArgs, Translated, Translator};
+use crate::mutes::RequestBlock;
 use crate::settings::{ViewerSettings, load_account_settings};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
@@ -173,6 +175,9 @@ const FRIENDS_TAB_KEY: &str = "people-friends-tab";
 /// The Fluent key for the Groups sub-tab's label.
 const GROUPS_TAB_KEY: &str = "people-groups-tab";
 
+/// The Fluent key for the Blocked sub-tab's label.
+const BLOCKED_TAB_KEY: &str = "people-blocked-tab";
+
 /// The Fluent key for the friends-table "Name" column header.
 const HEADER_NAME_KEY: &str = "people-header-name";
 
@@ -237,6 +242,12 @@ const SUB_STRIP_ELEMENT: &str = "people-sub-tabs";
 
 /// The Friends sub-tab's index in the sub-strip.
 const FRIENDS_TAB_INDEX: usize = 0;
+
+/// The Groups sub-tab's index in the sub-strip.
+const GROUPS_TAB_INDEX: usize = 1;
+
+/// The Blocked sub-tab's index in the sub-strip.
+const BLOCKED_TAB_INDEX: usize = 2;
 
 /// The persisted-setting name for the friends-table sort order.
 const FRIENDS_SORT_SETTING: &str = "friends_sort";
@@ -1066,25 +1077,21 @@ impl FriendAction {
     }
 }
 
-/// The wire [`Command`] an action produces for `friend` (named `name` for the
-/// mute entry), or `None` for [`FriendAction::Im`] and
-/// [`FriendAction::Profile`] — which open a conversation tab / the profile
-/// floater rather than sending a command. Pure so the routing is unit-testable.
-fn friend_command(action: FriendAction, friend: FriendKey, name: &str) -> Option<Command> {
+/// The wire [`Command`] an action produces for `friend`, or `None` for the
+/// actions that are not a plain command: [`FriendAction::Im`] and
+/// [`FriendAction::Profile`] open a conversation tab / the profile floater, and
+/// [`FriendAction::Block`] goes out as a guarded
+/// [`RequestBlock`](crate::mutes::RequestBlock) instead of a `Command::Mute`
+/// (see [`crate::mutes`]). Pure so the routing is unit-testable.
+fn friend_command(action: FriendAction, friend: FriendKey) -> Option<Command> {
     let agent = AgentKey::from(friend);
     match action {
-        FriendAction::Im | FriendAction::Profile => None,
+        FriendAction::Im | FriendAction::Profile | FriendAction::Block => None,
         FriendAction::OfferTeleport => Some(Command::OfferTeleport {
             targets: vec![agent],
             message: String::new(),
         }),
         FriendAction::RemoveFriend => Some(Command::TerminateFriendship(friend)),
-        FriendAction::Block => Some(Command::Mute {
-            id: agent.uuid(),
-            name: name.to_owned(),
-            mute_type: MuteType::Agent,
-            flags: MuteFlags::default(),
-        }),
     }
 }
 
@@ -1116,6 +1123,11 @@ pub(crate) struct PeopleUi {
     /// deferred-into-another-plugin arrangement this pane itself uses with the
     /// [`ConversationsUi`] strip.
     groups_content: Entity,
+    /// The Blocked sub-tab content container, shown for the Blocked tab. Like
+    /// [`Self::groups_content`] it is spawned here (so the sub-tab switch owns
+    /// its visibility) but filled by [`crate::blocked`], which owns the mute
+    /// list.
+    blocked_content: Entity,
     /// The Name header's sort-direction arrow node (updated from the primary sort).
     name_arrow: Entity,
     /// The Status header's sort-direction arrow node.
@@ -1136,6 +1148,12 @@ impl PeopleUi {
     /// [`refresh_people`]).
     pub(crate) const fn groups_content(&self) -> Entity {
         self.groups_content
+    }
+
+    /// The Blocked sub-tab content container, so [`crate::blocked`] can build
+    /// the mute list into the same pane (see [`Self::groups_content`]).
+    pub(crate) const fn blocked_content(&self) -> Entity {
+        self.blocked_content
     }
 }
 
@@ -1186,6 +1204,41 @@ struct PendingGrant {
 #[derive(Message, Debug, Clone, Copy)]
 struct SelectPeople;
 
+/// Which of the People pane's sub-tabs a request wants fronted.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeopleSubTab {
+    /// The Friends list.
+    Friends,
+    /// The Groups list ([`crate::groups`]).
+    Groups,
+    /// The Blocked Residents & Objects list ([`crate::blocked`]).
+    Blocked,
+}
+
+impl PeopleSubTab {
+    /// This sub-tab's index in the sub-strip.
+    const fn index(self) -> usize {
+        match self {
+            Self::Friends => FRIENDS_TAB_INDEX,
+            Self::Groups => GROUPS_TAB_INDEX,
+            Self::Blocked => BLOCKED_TAB_INDEX,
+        }
+    }
+}
+
+/// Bring the People pane to the front of the conversations strip with a given
+/// sub-tab selected — how a menu entry reaches a list that lives two levels
+/// inside the conversations floater (the menu bar's Comm ▸ Block List). The
+/// request is **held** until the pane exists, since both it and the floater
+/// hosting it are built by deferred commands.
+#[derive(Message, Debug, Clone, Copy)]
+pub(crate) struct OpenPeopleSubTab(pub(crate) PeopleSubTab);
+
+/// A not-yet-applied [`OpenPeopleSubTab`], kept while the People pane is still
+/// being built.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct PendingPeopleSubTab(Option<PeopleSubTab>);
+
 /// A request to sort the friends table by a column — written by a header click.
 #[derive(Message, Debug, Clone, Copy)]
 struct SortByColumn {
@@ -1235,7 +1288,9 @@ impl Plugin for PeoplePlugin {
             .init_resource::<SelectedFriend>()
             .init_resource::<FriendClickTracker>()
             .init_resource::<PendingGrantConfirm>()
+            .init_resource::<PendingPeopleSubTab>()
             .add_message::<SelectPeople>()
+            .add_message::<OpenPeopleSubTab>()
             .add_message::<SortByColumn>()
             .add_systems(Startup, register_people_settings)
             .add_systems(
@@ -1246,6 +1301,7 @@ impl Plugin for PeoplePlugin {
                     notify_friend_presence,
                     request_friend_names,
                     apply_people_selection,
+                    apply_people_sub_tab,
                     seed_sort_from_settings.after(load_account_settings),
                     apply_sort,
                     rebuild_friends_view.run_if(crate::floater::floater_shown(
@@ -1356,14 +1412,18 @@ fn spawn_people_tab(
         ))
         .id();
 
-    // The horizontal Friends / Groups sub-tab strip.
+    // The horizontal Friends / Groups / Blocked sub-tab strip.
     let sub_strip = spawn_tab_strip(
         &mut commands,
         pane,
         &TabSpec {
             element: SUB_STRIP_ELEMENT,
             placement: TabPlacement::BlockStart,
-            labels: &[FRIENDS_TAB_KEY.to_owned(), GROUPS_TAB_KEY.to_owned()],
+            labels: &[
+                FRIENDS_TAB_KEY.to_owned(),
+                GROUPS_TAB_KEY.to_owned(),
+                BLOCKED_TAB_KEY.to_owned(),
+            ],
             active: FRIENDS_TAB_INDEX,
             tab_index: 1,
             font_size: CHROME_FONT_SIZE,
@@ -1376,6 +1436,7 @@ fn spawn_people_tab(
     let (friends_content, friends_table, friends_viewport, name_arrow, status_arrow) =
         spawn_friends_content(&mut commands, pane, &icons);
     let groups_content = spawn_groups_content(&mut commands, pane);
+    let blocked_content = spawn_blocked_content(&mut commands, pane);
     let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
 
     commands.insert_resource(PeopleUi {
@@ -1386,6 +1447,7 @@ fn spawn_people_tab(
         friends_table,
         friends_viewport,
         groups_content,
+        blocked_content,
         name_arrow,
         status_arrow,
         icons,
@@ -1761,6 +1823,7 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                   selected: Res<SelectedFriend>,
                   model: Res<FriendsModel>,
                   mut sl: MessageWriter<SlCommand>,
+                  mut blocks: MessageWriter<RequestBlock>,
                   mut open: MessageWriter<OpenConversation>,
                   mut profiles: MessageWriter<OpenAvatarProfile>| {
                 press.propagate(false);
@@ -1781,8 +1844,12 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                     profiles.write(OpenAvatarProfile { agent });
                     return;
                 }
-                let name = model.name_of(agent).unwrap_or_default();
-                if let Some(command) = friend_command(action, friend, name) {
+                if action == FriendAction::Block {
+                    let name = model.name_of(agent).unwrap_or_default().to_owned();
+                    blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
+                    return;
+                }
+                if let Some(command) = friend_command(action, friend) {
                     sl.write(SlCommand(command));
                 }
             },
@@ -1805,6 +1872,25 @@ fn spawn_groups_content(commands: &mut Commands, pane: Entity) -> Entity {
                 ..column(Val::ZERO)
             },
             Name::new("people-groups-content"),
+            ChildOf(pane),
+        ))
+        .id()
+}
+
+/// Spawn the Blocked sub-tab content container — the same empty, hidden slot
+/// arrangement as [`spawn_groups_content`]; the block list that fills it is
+/// [`crate::blocked`]'s job (the `viewer-block-list` task).
+fn spawn_blocked_content(commands: &mut Commands, pane: Entity) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                display: Display::None,
+                ..column(Val::ZERO)
+            },
+            Name::new("people-blocked-content"),
             ChildOf(pane),
         ))
         .id()
@@ -1887,6 +1973,36 @@ fn apply_people_selection(
         *seeded = true;
         commands.write(SlCommand(Command::QueryFriends));
     }
+}
+
+/// Front the People pane with the requested sub-tab selected, retrying each
+/// frame until the pane exists ([`PeopleUi`] and the sub-strip are spawned by
+/// deferred commands, so a menu pick can land a frame or two early).
+fn apply_people_sub_tab(
+    mut requests: MessageReader<OpenPeopleSubTab>,
+    mut pending: ResMut<PendingPeopleSubTab>,
+    ui: Option<Res<PeopleUi>>,
+    mut focus: ResMut<StripFocus>,
+    mut strips: Query<&mut TabStrip>,
+) {
+    for request in requests.read() {
+        pending.0 = Some(request.0);
+    }
+    let Some(wanted) = pending.0 else {
+        return;
+    };
+    let Some(ui) = ui else {
+        return;
+    };
+    let Ok(mut strip) = strips.get_mut(ui.sub_strip) else {
+        return;
+    };
+    pending.0 = None;
+    let index = wanted.index();
+    if strip.active != index {
+        strip.active = index;
+    }
+    focus.take_external();
 }
 
 /// Register the persisted friends-sort setting (its declared default is the
@@ -2077,12 +2193,14 @@ fn refresh_people(
 
     set_display(&mut nodes, ui.pane, active);
 
-    // Switch the Friends / Groups content from the sub-strip's active tab.
-    let friends_active = strips
+    // Switch the Friends / Groups / Blocked content from the sub-strip's active
+    // tab (an unreadable strip falls back to Friends, the default tab).
+    let sub_tab = strips
         .get(ui.sub_strip)
-        .map_or(true, |strip| strip.active == FRIENDS_TAB_INDEX);
-    set_display(&mut nodes, ui.friends_content, friends_active);
-    set_display(&mut nodes, ui.groups_content, !friends_active);
+        .map_or(FRIENDS_TAB_INDEX, |strip| strip.active);
+    set_display(&mut nodes, ui.friends_content, sub_tab == FRIENDS_TAB_INDEX);
+    set_display(&mut nodes, ui.groups_content, sub_tab == GROUPS_TAB_INDEX);
+    set_display(&mut nodes, ui.blocked_content, sub_tab == BLOCKED_TAB_INDEX);
 }
 
 /// Set a node's background only on a real change.
@@ -2475,7 +2593,7 @@ fn set_text(text: &mut Text, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, FriendAction, FriendsModel, MuteType, friend_command};
+    use super::{Command, FriendAction, FriendsModel, friend_command};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Friend, FriendKey, FriendPresence, FriendRights, Uuid};
 
@@ -2651,27 +2769,22 @@ mod tests {
         assert_eq!(names, vec!["zoe", "amy", "Bob"]);
     }
 
-    /// Each action maps to its command; IM produces none (it opens a tab), and
-    /// Block carries the agent id + name + Agent type.
+    /// Each action maps to its command; IM and Profile produce none (they open
+    /// a tab / floater), and so does Block — it goes out as a guarded
+    /// `RequestBlock` rather than a `Command`.
     #[test]
     fn action_command_mapping() {
         let friend = FriendKey::from(Uuid::from_u128(7));
-        assert!(friend_command(FriendAction::Im, friend, "x").is_none());
-        assert!(friend_command(FriendAction::Profile, friend, "x").is_none());
+        assert!(friend_command(FriendAction::Im, friend).is_none());
+        assert!(friend_command(FriendAction::Profile, friend).is_none());
+        assert!(friend_command(FriendAction::Block, friend).is_none());
         assert!(matches!(
-            friend_command(FriendAction::OfferTeleport, friend, ""),
+            friend_command(FriendAction::OfferTeleport, friend),
             Some(Command::OfferTeleport { .. })
         ));
         assert!(matches!(
-            friend_command(FriendAction::RemoveFriend, friend, ""),
+            friend_command(FriendAction::RemoveFriend, friend),
             Some(Command::TerminateFriendship(_))
-        ));
-        assert!(matches!(
-            friend_command(FriendAction::Block, friend, "Avatar One"),
-            Some(Command::Mute {
-                mute_type: MuteType::Agent,
-                ..
-            })
         ));
     }
 }

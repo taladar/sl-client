@@ -63,8 +63,8 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use sl_client_bevy::{
-    AgentKey, Command, MuteFlags, MuteType, RegionCoordinates, RegionHandle, SlCommand, SlEvent,
-    SlIdentity, SlSessionEvent, Vector,
+    AgentKey, Command, MuteType, RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, Vector,
 };
 
 use crate::avatar_profile::OpenAvatarProfile;
@@ -72,6 +72,7 @@ use crate::avatars::AvatarState;
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::group_profile::OpenGroupProfile;
 use crate::linkified_text::LinkActivated;
+use crate::mutes::RequestBlock;
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::url_linkify::{LinkTarget, LocationCoords, LocationKind, TextRun, linkify};
@@ -232,9 +233,11 @@ struct DispatchOut<'w> {
     conversations: MessageWriter<'w, OpenConversation>,
     /// Raise a confirmation (the teleport-SLURL guard).
     notifications: MessageWriter<'w, ShowNotification>,
-    /// Send a protocol command (mute, friendship offer, name / map / parcel
+    /// Send a protocol command (unmute, friendship offer, name / map / parcel
     /// requests).
     commands: MessageWriter<'w, SlCommand>,
+    /// Ask for a block — the guarded channel every Block affordance uses.
+    blocks: MessageWriter<'w, RequestBlock>,
     /// Open the embedded web browser (a trusted web SLURL from an external
     /// source).
     browsers: MessageWriter<'w, OpenWebBrowser>,
@@ -334,12 +337,8 @@ fn route_agent(agent: AgentKey, action: &str, out: &mut DispatchOut, avatars: &A
                 .name_of(agent)
                 .map(ToOwned::to_owned)
                 .unwrap_or_default();
-            out.commands.write(SlCommand(Command::Mute {
-                id: agent.uuid(),
-                name,
-                mute_type: MuteType::Agent,
-                flags: MuteFlags::default(),
-            }));
+            out.blocks
+                .write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
         }
         "unmute" => {
             let name = avatars

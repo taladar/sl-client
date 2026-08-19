@@ -34,8 +34,8 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
 use sl_client_bevy::{
-    AgentKey, Command, GlobalCoordinates, MuteFlags, MuteType, SlCommand, SlEvent, SlIdentity,
-    SlSessionEvent, Vector,
+    AgentKey, Command, GlobalCoordinates, MuteType, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    Vector,
 };
 use sl_settings::SettingValue;
 
@@ -50,7 +50,7 @@ use crate::floater::{
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::minimap::{ChatRanges, MapTracking, TrackTarget, global_from_bevy, origin_global};
-use crate::mutes::MuteModel;
+use crate::mutes::{MuteModel, RequestBlock};
 use crate::name_tag_content::{AWAY_ANIM, NameTagStatuses};
 use crate::notifications::ShowNotification;
 use crate::people::FriendsModel;
@@ -1549,6 +1549,7 @@ fn handle_radar_actions(
     avatars: Res<AvatarState>,
     mut tracking: ResMut<MapTracking>,
     mut sl_commands: MessageWriter<SlCommand>,
+    mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
 ) {
@@ -1611,12 +1612,7 @@ fn handle_radar_actions(
                     .name_of(agent)
                     .map(ToOwned::to_owned)
                     .unwrap_or_default();
-                sl_commands.write(SlCommand(Command::Mute {
-                    id: agent.uuid(),
-                    name,
-                    mute_type: MuteType::Agent,
-                    flags: MuteFlags::default(),
-                }));
+                blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
             }
             "unblock" => {
                 let name = avatars

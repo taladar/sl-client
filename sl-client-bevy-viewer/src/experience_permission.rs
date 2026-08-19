@@ -69,12 +69,13 @@ use bevy_flair::style::components::ClassList;
 use std::collections::{HashMap, HashSet};
 
 use sl_client_bevy::{
-    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, InventoryKey, MuteFlags,
-    MuteType, ObjectKey, ScriptPermissions, SlCommand, SlEvent, SlSessionEvent, Uuid,
+    Command, ExperienceInfo, ExperienceKey, ExperiencePermission, InventoryKey, MuteType,
+    ObjectKey, ScriptPermissions, SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 
 use crate::i18n::{TransArgs, Translator};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
+use crate::mutes::RequestBlock;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
@@ -544,6 +545,7 @@ fn spawn_experience_card(
     commands.entity(card.block_object).observe(
         move |_activate: On<Activate>,
               mut sl: MessageWriter<SlCommand>,
+              mut blocks: MessageWriter<RequestBlock>,
               mut resolves: MessageWriter<ResolveNotification>| {
             answer_permissions(
                 &mut sl,
@@ -552,12 +554,11 @@ fn spawn_experience_card(
                 ScriptPermissions::default(),
                 experience_id,
             );
-            sl.write(SlCommand(Command::Mute {
-                id: object_id.uuid(),
-                name: object_name.clone(),
-                mute_type: MuteType::Object,
-                flags: MuteFlags::default(),
-            }));
+            blocks.write(RequestBlock::new(
+                object_id.uuid(),
+                object_name.clone(),
+                MuteType::Object,
+            ));
             resolves.write(ResolveNotification {
                 toast: root,
                 button: None,

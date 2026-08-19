@@ -79,9 +79,10 @@ conversations-invite-decline = Decline
 
 # The pinned People tab in the conversations strip.
 people-tab = People
-# The Friends / Groups sub-tabs inside the People pane.
+# The Friends / Groups / Blocked sub-tabs inside the People pane.
 people-friends-tab = Friends
 people-groups-tab = Groups
+people-blocked-tab = Blocked
 # The friends-table column headers (always shown, even for an empty list).
 people-header-name = Name
 people-header-status = Status
@@ -124,6 +125,39 @@ groups-action-leave = Leave
 groups-leave-confirm-prompt = Leave the group "{ $name }"?
 groups-leave-confirm-yes = Leave
 groups-leave-confirm-no = Cancel
+
+## The Blocked Residents & Objects list (viewer-block-list), hosted in the
+## Blocked sub-tab of the People pane — the agent's mute list, with the
+## per-aspect toggles and the two "add a block" paths.
+
+# The block-table column headers.
+blocked-col-name = Name
+blocked-col-type = Type
+# The prompt in the empty filter box above the list.
+blocked-filter-placeholder = Filter by name
+# The count line under the list: how many entries the filter shows out of how
+# many are blocked in total.
+blocked-count = { $shown } of { $total } blocked
+# The Type column's values, one per mute type.
+blocked-type-resident = Resident
+blocked-type-object = Object
+blocked-type-group = Group
+blocked-type-by-name = By name
+blocked-type-external = External
+blocked-type-unknown = Unknown
+# The action buttons beside the list.
+blocked-action-unblock = Unblock
+blocked-action-block-resident = Block Resident…
+blocked-action-block-object = Block object by name…
+
+## The "Block Object by Name" floater (viewer-block-list) — blocks a spammy
+## object you cannot click, by the name it chats under.
+
+block-by-name-title = Block Object by Name
+block-by-name-prompt = Block an object:
+block-by-name-note = * Only blocks object text, not sounds
+block-by-name-ok = OK
+block-by-name-cancel = Cancel
 
 ## The group profile floater (viewer-social-group-profile) — reached from the
 ## Groups list's Info button: General / Members & Roles / Notices.

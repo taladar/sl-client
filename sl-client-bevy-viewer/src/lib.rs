@@ -49,6 +49,7 @@ mod avatars;
 mod bake_inputs;
 mod bake_publish;
 mod beacons;
+mod blocked;
 mod body_physics;
 mod bottom_toolbar;
 mod browser_widget;
@@ -317,6 +318,7 @@ use crate::bake_inputs::{
     drive_wearable_requests, poll_wearable_assets, update_asset_caps,
 };
 use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
+use crate::blocked::BlockedPlugin;
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
 use crate::camera::{
     CameraMode, CameraPlugin, CameraRig, CameraSpin, CameraStart, SpinAxis, ViewerCamera,
@@ -1373,6 +1375,10 @@ fn run_session(
     // the Groups sub-tab of the People pane. After PeoplePlugin, whose Groups
     // content slot it fills.
     .add_plugins(GroupsPlugin)
+    // The Blocked Residents & Objects list (viewer-block-list): the mute list
+    // built into the Blocked sub-tab of the People pane, plus the by-name block
+    // floater. After PeoplePlugin, whose Blocked content slot it fills.
+    .add_plugins(BlockedPlugin)
     .add_plugins(GroupProfilePlugin)
     // The group-notice toast host (viewer-group-notice-display): pops a card —
     // group image, subject, body and any attached item — when a group posts a
@@ -1701,6 +1707,7 @@ fn run_session(
         .init_resource::<AvatarState>()
         .init_resource::<AppearanceApplyBudget>()
         .init_resource::<mutes::MuteModel>()
+        .add_message::<mutes::RequestBlock>()
         .init_resource::<name_tag_content::NameTagStatuses>()
         .init_resource::<AvatarRuntimeMorphs>()
         .init_resource::<look_at::LookAtTargets>()
@@ -1978,14 +1985,19 @@ fn run_session(
                         avatars::flush_name_requests,
                     )
                         .chain(),
-                    // The mute list (name-tag colouring + future block-list
-                    // UI): request once at session-up, ingest the Xfer'd
-                    // list, and mirror locally-issued mutes.
+                    // The mute list (name-tag colouring + the block-list UI):
+                    // request once at session-up, ingest the Xfer'd list, turn
+                    // each guarded block request into an entry, and mirror
+                    // locally-issued mutes. `apply_block_requests` runs before
+                    // `note_local_mutes` so a just-guarded block is mirrored in
+                    // the same frame it is sent.
                     (
                         mutes::request_mute_list,
                         mutes::ingest_mute_list,
+                        mutes::apply_block_requests,
                         mutes::note_local_mutes,
-                    ),
+                    )
+                        .chain(),
                     // Nearby-chat typing signals for the tag's Typing line,
                     // then the content composer that assembles every tag's
                     // lines from names / title / statuses / colours /

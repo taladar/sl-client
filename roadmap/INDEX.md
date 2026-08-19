@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 65 |
-| ready | 223 |
+| ready | 222 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 27 |
-| done | 833 |
+| done | 834 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1268** |
@@ -161,7 +161,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (223)
+## ready (222)
 
 ### protocol
 
@@ -229,9 +229,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-beacons-control`](ready/viewer-beacons-control.md) — Tracking beacon
   — set / clear from the UI (blocked by `viewer-beacons-beam-render` (done),
   `viewer-ui-widget-scaffold` (done))
-- [`viewer-block-list`](ready/viewer-block-list.md) — Block / mute list UI
-  (blocked by `viewer-social-people-panel` (done), `viewer-ui-virtualized-list`
-  (done))
 - [`viewer-build-display-options`](ready/viewer-build-display-options.md) —
   Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`
   (done))
@@ -774,7 +771,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
 - [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
-  `viewer-block-list`, `viewer-report-abuse`, `viewer-derender-blacklist`)
+  `viewer-block-list` (done), `viewer-report-abuse`,
+  `viewer-derender-blacklist`)
 - [`viewer-minimap-menu-multi-avatar`](blocked/viewer-minimap-menu-multi-avatar.md)
   — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
   `viewer-contact-sets`)
@@ -1013,7 +1011,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (833)
+## done (834)
 
 ### protocol
 
@@ -1211,6 +1209,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Avatar tongue protrudes (rigged mesh + base-system head)
 - [`viewer-beacons-beam-render`](done/viewer-beacons-beam-render.md) — Tracking
   beacon — beam + off-screen direction arrow
+- [`viewer-block-list`](done/viewer-block-list.md) — Block / mute list UI
+  (blocked by `viewer-social-people-panel` (done), `viewer-ui-virtualized-list`
+  (done))
 - [`viewer-bom-mesh-alpha-feet-through-boots`](done/viewer-bom-mesh-alpha-feet-through-boots.md)
   — BoM mesh body feet render through mesh boots (bake alpha ignored on BoM
   faces)

@@ -40,9 +40,9 @@ use bevy::ui_widgets::{ControlOrientation, Scrollbar, ScrollbarThumb};
 use sl_client_bevy::{
     AgentKey, AvatarClassified, AvatarGroupMembership, AvatarPick, AvatarProperties,
     ClassifiedCategory, ClassifiedInfo, ClassifiedKey, ClassifiedUpdate, Command, FriendKey,
-    GlobalCoordinates, GroupKey, LindenAmount, MoneyTransactionType, MuteFlags, MuteType, PickInfo,
-    PickKey, PickUpdate, ProfileUpdate, RegionCoordinates, RegionHandle, SlCommand, SlEvent,
-    SlIdentity, SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
+    GlobalCoordinates, GroupKey, LindenAmount, MoneyTransactionType, MuteType, PickInfo, PickKey,
+    PickUpdate, ProfileUpdate, RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
 };
 
 use crate::avatars::AvatarState;
@@ -56,6 +56,7 @@ use crate::groups::GroupsModel;
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
+use crate::mutes::RequestBlock;
 use crate::people::FriendsModel;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
@@ -2493,6 +2494,7 @@ fn on_profile_action(
     avatars: Res<AvatarState>,
     clipboard: Res<crate::clipboard::ViewerClipboard>,
     mut sl_commands: MessageWriter<SlCommand>,
+    mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
 ) {
     if press.button != PointerButton::Primary {
@@ -2543,12 +2545,7 @@ fn on_profile_action(
                 .name_of(target)
                 .map(ToOwned::to_owned)
                 .unwrap_or_default();
-            sl_commands.write(SlCommand(Command::Mute {
-                id: target.uuid(),
-                name,
-                mute_type: MuteType::Agent,
-                flags: MuteFlags::default(),
-            }));
+            blocks.write(RequestBlock::new(target.uuid(), name, MuteType::Agent));
         }
         ProfileAction::Pay => {
             let Some(amount) = read(ui.pay_amount_field)

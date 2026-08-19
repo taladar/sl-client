@@ -36,9 +36,9 @@ use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bevy::ui::RelativeCursorPosition;
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::{
-    AgentKey, Command, MuteFlags, MuteType, OwnerKey, ParcelOverlayGrid, ParcelOwnership,
-    RegionCoordinates, RegionHandle, SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcel,
-    SlParcelOverlay, SlRegion, SlRegionIdentity, SlSessionEvent, TerrainPatch, Vector,
+    AgentKey, Command, MuteType, OwnerKey, ParcelOverlayGrid, ParcelOwnership, RegionCoordinates,
+    RegionHandle, SlCommand, SlCurrentRegion, SlEvent, SlIdentity, SlParcel, SlParcelOverlay,
+    SlRegion, SlRegionIdentity, SlSessionEvent, TerrainPatch, Vector,
 };
 use sl_settings::{Scope, SettingValue};
 use sl_terrain::TerrainComposition;
@@ -57,6 +57,7 @@ use crate::minimap_math::{
     COLOR_WHISPER_RING, DoubleClickAction, LayerRaster, MapView, ObjectAccents, ParcelCell, Rgba,
     Surface,
 };
+use crate::mutes::RequestBlock;
 use crate::objects::{ObjectDebugInfo, ObjectState};
 use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
@@ -2944,6 +2945,7 @@ fn handle_minimap_actions(
     mut tracking: ResMut<MapTracking>,
     avatars: Res<AvatarState>,
     mut commands: MessageWriter<SlCommand>,
+    mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
 ) {
@@ -2987,12 +2989,7 @@ fn handle_minimap_actions(
                         .name_of(agent)
                         .map(ToOwned::to_owned)
                         .unwrap_or_default();
-                    commands.write(SlCommand(Command::Mute {
-                        id: agent.uuid(),
-                        name,
-                        mute_type: MuteType::Agent,
-                        flags: MuteFlags::default(),
-                    }));
+                    blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
                 }
             }
             "start-tracking" => {

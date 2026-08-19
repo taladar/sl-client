@@ -66,11 +66,12 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
 use sl_client_bevy::{
-    Command, InventoryKey, MuteFlags, MuteType, ObjectKey, ScriptPermissionRequest,
-    ScriptPermissions, SlCommand, SlEvent, SlSessionEvent,
+    Command, InventoryKey, MuteType, ObjectKey, ScriptPermissionRequest, ScriptPermissions,
+    SlCommand, SlEvent, SlSessionEvent,
 };
 
 use crate::i18n::{TransArgs, Translator};
+use crate::mutes::RequestBlock;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
@@ -516,6 +517,7 @@ fn spawn_script_permission_card(
         commands.entity(block).observe(
             move |_activate: On<Activate>,
                   mut sl: MessageWriter<SlCommand>,
+                  mut blocks: MessageWriter<RequestBlock>,
                   mut resolves: MessageWriter<ResolveNotification>| {
                 answer_permissions(
                     &mut sl,
@@ -524,12 +526,11 @@ fn spawn_script_permission_card(
                     ScriptPermissions::default(),
                     experience_id,
                 );
-                sl.write(SlCommand(Command::Mute {
-                    id: object_id.uuid(),
-                    name: object_name.clone(),
-                    mute_type: MuteType::Object,
-                    flags: MuteFlags::default(),
-                }));
+                blocks.write(RequestBlock::new(
+                    object_id.uuid(),
+                    object_name.clone(),
+                    MuteType::Object,
+                ));
                 resolves.write(ResolveNotification {
                     toast: root,
                     button: None,

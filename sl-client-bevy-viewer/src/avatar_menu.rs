@@ -29,7 +29,8 @@
 //! - **Stand Up / Sit Down** (self) → [`Command::Stand`] / [`Command::SitOnGround`],
 //!   each enabled only in the state where it makes sense (you cannot stand up
 //!   unless you are sitting), gated on [`SELF_SITTING`] / [`SELF_STANDING`].
-//! - **Mute** (other) → [`Command::Mute`] the picked agent.
+//! - **Mute** (other) → a guarded [`crate::mutes::RequestBlock`] for the picked
+//!   agent.
 //! - **Add as Friend** (other) → [`Command::OfferFriendship`], disabled via
 //!   [`TARGET_NOT_FRIEND`] when the agent already is a friend, matching the
 //!   reference's `on_enable`.
@@ -82,9 +83,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use sl_client_bevy::{
-    AgentKey, Command, MuteFlags, MuteType, SlAgentParcel, SlCommand, SlIdentity,
-};
+use sl_client_bevy::{AgentKey, Command, MuteType, SlAgentParcel, SlCommand, SlIdentity};
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatar_profile::OpenAvatarProfile;
@@ -95,6 +94,7 @@ use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
 use crate::land_menu::OpenLandMenu;
+use crate::mutes::RequestBlock;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::people::FriendsModel;
@@ -1141,6 +1141,7 @@ fn handle_avatar_menu_actions(
     avatars: Res<AvatarState>,
     mut ground_sit: ResMut<SelfGroundSit>,
     mut commands: MessageWriter<SlCommand>,
+    mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
@@ -1177,12 +1178,7 @@ fn handle_avatar_menu_actions(
                     .name_of(agent)
                     .map(ToOwned::to_owned)
                     .unwrap_or_default();
-                commands.write(SlCommand(Command::Mute {
-                    id: agent.uuid(),
-                    name,
-                    mute_type: MuteType::Agent,
-                    flags: MuteFlags::default(),
-                }));
+                blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
             }
             "add-friend" => {
                 commands.write(SlCommand(Command::OfferFriendship {

@@ -60,12 +60,13 @@ use bevy_flair::style::components::ClassList;
 
 use sl_client_bevy::{
     AssetType, Command, FolderType, FriendKey, ImDialog, InstantMessage, InventoryFolderKey,
-    InventoryOffer, LureId, MuteFlags, MuteType, SlCommand, SlEvent, SlSessionEvent, TransactionId,
+    InventoryOffer, LureId, MuteType, SlCommand, SlEvent, SlSessionEvent, TransactionId,
 };
 
 use crate::i18n::{TransArgs, Translator};
 use crate::inventory::InventoryModel;
 use crate::inventory_actions::default_folder_type;
+use crate::mutes::RequestBlock;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
 use crate::ui::{column, row};
@@ -540,14 +541,14 @@ fn spawn_inventory_offer_card(
             move |_activate: On<Activate>,
                   inventory: Res<InventoryModel>,
                   mut sl: MessageWriter<SlCommand>,
+                  mut blocks: MessageWriter<RequestBlock>,
                   mut resolves: MessageWriter<ResolveNotification>| {
                 decline_inventory(&inventory, &offer, &mut sl);
-                sl.write(SlCommand(Command::Mute {
-                    id: giver.uuid(),
-                    name: giver_name.clone(),
-                    mute_type: MuteType::Agent,
-                    flags: MuteFlags::default(),
-                }));
+                blocks.write(RequestBlock::new(
+                    giver.uuid(),
+                    giver_name.clone(),
+                    MuteType::Agent,
+                ));
                 resolves.write(ResolveNotification {
                     toast: root,
                     button: None,

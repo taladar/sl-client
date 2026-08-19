@@ -53,7 +53,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sl_audio::{AudioMixer as _, Bus, Importance, Mixer, SpatialParams, VoiceId};
 use sl_client_bevy::{
-    AssetKey, ObjectKey, ParcelFlags, RegionHandle, SlAgentParcel, SlEvent, SlIdentity,
+    AssetKey, MuteFlags, ObjectKey, ParcelFlags, RegionHandle, SlAgentParcel, SlEvent, SlIdentity,
     SlParcelOverlay, SlSessionEvent, Uuid,
 };
 
@@ -451,9 +451,13 @@ fn drive_attached(
 }
 
 /// Whether a sound from `owner` on `object` is muted (either the owner or the
-/// object itself is on the agent's mute list).
+/// object itself is on the agent's mute list) — honouring the per-entry
+/// **object-sounds exception**, so a mute whose "Block Object Sounds" toggle
+/// is off still lets that source be heard (the reference's
+/// `LLMute::flagObjectSounds`).
 fn muted(mutes: &MuteModel, owner: Uuid, object: Uuid) -> bool {
-    mutes.is_muted(owner) || mutes.is_muted(object)
+    mutes.is_muted_aspect(owner, MuteFlags::ALLOW_OBJECT_SOUNDS)
+        || mutes.is_muted_aspect(object, MuteFlags::ALLOW_OBJECT_SOUNDS)
 }
 
 /// The minimum time (seconds) between collision sounds for the same pair of
@@ -653,20 +657,38 @@ mod tests {
         assert!(!collision_sounds_enabled(Some(&settings)), "stored off");
     }
 
-    /// A sound is muted when its owner or its object is on the mute list.
+    /// A sound is muted when its owner or its object is on the mute list —
+    /// unless that entry carries the object-sounds exception.
     #[test]
     fn muted_covers_owner_and_object() {
+        /// A blanket mute of `id` (no aspect exceptions).
+        fn blanket(id: Uuid) -> sl_client_bevy::MuteEntry {
+            sl_client_bevy::MuteEntry {
+                id,
+                name: String::new(),
+                mute_type: sl_client_bevy::MuteType::Object,
+                flags: MuteFlags::default(),
+            }
+        }
+
         let mut mutes = MuteModel::default();
         let owner = Uuid::from_u128(1);
         let object = Uuid::from_u128(2);
         let other = Uuid::from_u128(3);
         assert!(!muted(&mutes, owner, object));
-        mutes.note_mute(owner);
+        mutes.note_mute(blanket(owner));
         assert!(muted(&mutes, owner, object), "owner muted");
         assert!(!muted(&mutes, other, object), "unrelated owner not muted");
-        mutes.note_mute(object);
-        mutes.note_unmute(owner);
+        mutes.note_mute(blanket(object));
+        mutes.note_unmute(owner, "");
         assert!(muted(&mutes, owner, object), "object muted");
+
+        // The object-sounds exception un-mutes just the sound.
+        mutes.note_mute(sl_client_bevy::MuteEntry {
+            flags: MuteFlags(MuteFlags::ALLOW_OBJECT_SOUNDS),
+            ..blanket(object)
+        });
+        assert!(!muted(&mutes, owner, object), "object-sounds exception");
     }
 
     /// `realize_oneshots` drops a one-shot older than the cutoff (its moment has
