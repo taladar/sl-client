@@ -117,6 +117,151 @@ pub fn build_fetch_inventory_request(owner_id: Uuid, folder_ids: &[InventoryFold
     out
 }
 
+/// One folder entry of a parsed `FetchInventoryDescendents2` /
+/// `FetchLibDescendents2` request body: which folder to list, for which
+/// owner, and what to include.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FetchInventoryFolderRequest {
+    /// The folder whose descendents are requested.
+    pub folder_id: InventoryFolderKey,
+    /// The inventory owner the client believes the folder belongs to (the
+    /// agent, or the library owner for `FetchLibDescendents2`).
+    pub owner_id: Uuid,
+    /// Whether sub-folders should be listed.
+    pub fetch_folders: bool,
+    /// Whether items should be listed.
+    pub fetch_items: bool,
+    /// The requested sort order (`0` = by name, `1` = by date).
+    pub sort_order: i32,
+}
+
+/// Parses a `FetchInventoryDescendents2` / `FetchLibDescendents2` request —
+/// the inverse of [`build_fetch_inventory_request`]: a `folders` array of
+/// `{ folder_id, owner_id, fetch_folders, fetch_items, sort_order }` maps.
+/// Missing scalars default leniently (nil ids, `true` fetch flags, sort `0`);
+/// non-map array entries are skipped; a body without a `folders` array yields
+/// an empty list.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_fetch_inventory_request(
+    xml: &str,
+) -> Result<Vec<FetchInventoryFolderRequest>, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let mut folders = Vec::new();
+    let Some(entries) = root.get("folders").and_then(Llsd::as_array) else {
+        return Ok(folders);
+    };
+    for entry in entries {
+        if entry.as_map().is_none() {
+            continue;
+        }
+        folders.push(FetchInventoryFolderRequest {
+            folder_id: InventoryFolderKey::from(
+                entry
+                    .get("folder_id")
+                    .and_then(Llsd::as_uuid)
+                    .unwrap_or_else(Uuid::nil),
+            ),
+            owner_id: entry
+                .get("owner_id")
+                .and_then(Llsd::as_uuid)
+                .unwrap_or_else(Uuid::nil),
+            fetch_folders: entry
+                .get("fetch_folders")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(true),
+            fetch_items: entry
+                .get("fetch_items")
+                .and_then(Llsd::as_bool)
+                .unwrap_or(true),
+            sort_order: entry.get("sort_order").and_then(Llsd::as_i32).unwrap_or(0),
+        });
+    }
+    Ok(folders)
+}
+
+/// One item reference of a `FetchInventory2` / `FetchLib2` per-item fetch
+/// request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FetchItemRef {
+    /// The inventory owner the client believes holds the item (ignored by
+    /// OpenSim's handler, but always sent by the reference viewer).
+    pub owner_id: Uuid,
+    /// The item to fetch.
+    pub item_id: InventoryKey,
+}
+
+/// A parsed `FetchInventory2` / `FetchLib2` per-item fetch request body:
+/// `{ agent_id, items: [ { owner_id, item_id } ] }`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FetchInventoryItemsRequest {
+    /// The requesting agent.
+    pub agent_id: Uuid,
+    /// The items to fetch.
+    pub items: Vec<FetchItemRef>,
+}
+
+/// Builds the LLSD-XML body for a `FetchInventory2` / `FetchLib2` per-item
+/// fetch: `{ agent_id, items: [ { owner_id, item_id } ] }` (the reference
+/// viewer's `LLInventoryModel::fetchItemsFromServer` shape; for `FetchLib2`
+/// the `owner_id` entries are the library owner).
+#[must_use]
+pub fn build_fetch_inventory_items_request(agent_id: Uuid, items: &[FetchItemRef]) -> String {
+    let mut out =
+        format!("<llsd><map><key>agent_id</key><uuid>{agent_id}</uuid><key>items</key><array>");
+    for item in items {
+        out.push_str("<map><key>owner_id</key><uuid>");
+        out.push_str(&item.owner_id.to_string());
+        out.push_str("</uuid><key>item_id</key><uuid>");
+        out.push_str(&item.item_id.to_string());
+        out.push_str("</uuid></map>");
+    }
+    out.push_str("</array></map></llsd>");
+    out
+}
+
+/// Parses a `FetchInventory2` / `FetchLib2` per-item fetch request — the
+/// inverse of [`build_fetch_inventory_items_request`]. Missing ids default to
+/// nil (matching OpenSim's tolerance, which ignores `owner_id` entirely);
+/// non-map array entries are skipped; a body without an `items` array yields
+/// an empty list.
+///
+/// # Errors
+///
+/// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
+pub fn parse_fetch_inventory_items_request(
+    xml: &str,
+) -> Result<FetchInventoryItemsRequest, roxmltree::Error> {
+    let root = parse_llsd_xml(xml)?;
+    let agent_id = root
+        .get("agent_id")
+        .and_then(Llsd::as_uuid)
+        .unwrap_or_else(Uuid::nil);
+    let mut items = Vec::new();
+    if let Some(entries) = root.get("items").and_then(Llsd::as_array) {
+        for entry in entries {
+            if entry.as_map().is_none() {
+                continue;
+            }
+            items.push(FetchItemRef {
+                owner_id: entry
+                    .get("owner_id")
+                    .and_then(Llsd::as_uuid)
+                    .unwrap_or_else(Uuid::nil),
+                item_id: InventoryKey::from(
+                    entry
+                        .get("item_id")
+                        .and_then(Llsd::as_uuid)
+                        .unwrap_or_else(Uuid::nil),
+                ),
+            });
+        }
+    }
+    Ok(FetchInventoryItemsRequest { agent_id, items })
+}
+
 /// Builds the LLSD-XML body for a `GroupMemberData` capability request: a map
 /// with the `group_id` to fetch the full member roster for (no paging, so the
 /// simulator returns every member).

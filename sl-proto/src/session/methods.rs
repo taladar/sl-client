@@ -10,8 +10,8 @@ use super::conversions::{
     created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
     economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
-    friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
-    group_account_transactions, group_active_proposal_item, group_member,
+    fetch_inventory_items_from_llsd, friend, grid_coordinates_from_handle, group_account_details,
+    group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
@@ -29,11 +29,12 @@ use super::conversions::{
 use super::{
     AGENT_UPDATE_INTERVAL, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
     CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY,
+    CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO,
+    CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA,
+    CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
     CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
     CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
@@ -499,6 +500,28 @@ impl Session {
                             .mark_folder_loaded(*folder_id, *version, owner);
                     }
                     self.events.push_back(event);
+                }
+            }
+            // A `FetchInventory2` / `FetchLib2` per-item fetch reply
+            // (`{ agent_id, items }`, the same flat item shape as the
+            // descendents caps). Merge into the matching tree and surface the
+            // items as a bulk update (nil transaction id — the per-item fetch
+            // has no correlating transaction).
+            CAP_FETCH_INVENTORY_ITEM | CAP_FETCH_LIBRARY_ITEM => {
+                let owner = if message == CAP_FETCH_LIBRARY_ITEM {
+                    InventoryOwner::Library
+                } else {
+                    InventoryOwner::Agent
+                };
+                let items = fetch_inventory_items_from_llsd(body);
+                if !items.is_empty() {
+                    self.cache_inventory(&[], &items, owner);
+                    self.events.push_back(Event::InventoryBulkUpdate {
+                        transaction_id: Uuid::nil(),
+                        folders: Vec::new(),
+                        items,
+                        item_callbacks: Vec::new(),
+                    });
                 }
             }
             // A `BulkUpdateInventory` the simulator delivers over the CAPS event

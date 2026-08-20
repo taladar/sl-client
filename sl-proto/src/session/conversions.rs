@@ -5088,6 +5088,118 @@ pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
     ])
 }
 
+/// Serializes a `FetchInventory2` / `FetchLib2` per-item fetch reply
+/// (`{ agent_id, items: [ … ] }`, each item in the flat `InventoryItemBase`
+/// shape `inventory_item_to_llsd` emits) — the server counterpart of
+/// `fetch_inventory_items_from_llsd`. The reply never carries an `error`
+/// key: the reference viewer treats any `error` member as a failed fetch, so
+/// unknown items are simply omitted (OpenSim's tolerance).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn fetch_inventory_items_to_llsd(
+    agent_id: Uuid,
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let items_llsd = items
+        .iter()
+        .map(inventory_item_to_llsd)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(llsd_map(vec![
+        ("agent_id", Llsd::Uuid(agent_id)),
+        ("items", Llsd::Array(items_llsd)),
+    ]))
+}
+
+/// Parses a `FetchInventory2` / `FetchLib2` per-item fetch reply
+/// (`{ agent_id, items: [ … ] }`) into its items — the client counterpart of
+/// [`fetch_inventory_items_to_llsd`]. Nil-id placeholders and non-item
+/// entries are skipped, matching the descendents fold.
+pub(crate) fn fetch_inventory_items_from_llsd(body: &Llsd) -> Vec<InventoryItem> {
+    body.get("items")
+        .and_then(Llsd::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(inventory_item_from_llsd)
+        .filter(|item| !item.item_id.uuid().is_nil())
+        .collect()
+}
+
+/// Serializes an AIS3 mutation reply: the [`AisUpdate`](sl_wire::AisUpdate) "meta" change-set
+/// (via [`sl_wire::ais_update_to_llsd`]) merged with the affected objects
+/// embedded under `_embedded` (the [`ais_inventory_update_to_llsd`] shape).
+/// The `_embedded` block is omitted entirely when both slices are empty,
+/// matching the grid's meta-only delete replies.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_mutation_reply_to_llsd(
+    update: &sl_wire::AisUpdate,
+    folders: &[InventoryFolder],
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let mut reply = sl_wire::ais_update_to_llsd(update);
+    if folders.is_empty() && items.is_empty() {
+        return Ok(reply);
+    }
+    let embedded = ais_inventory_update_to_llsd(folders, items)?;
+    if let (Llsd::Map(reply_map), Some(embedded_block)) = (&mut reply, embedded.get("_embedded")) {
+        let _previous = reply_map.insert("_embedded".to_owned(), embedded_block.clone());
+    }
+    Ok(reply)
+}
+
+/// Serializes an AIS3 `GET /category/<id>/children` reply: the fetched
+/// category's own fields at the top level (the `inventory_folder_to_llsd`
+/// shape, which the client's top-level `category_id` probe picks up) plus the
+/// listed descendants under `_embedded`.
+///
+/// The real AIS service nests `_embedded` recursively per depth level; our
+/// client parser gathers only the top-level `_embedded` maps, so the whole
+/// subtree is served **flattened** into them — a deliberate, documented
+/// divergence that is information-equivalent (the maps are uuid-keyed and
+/// every entry carries its `parent_id`).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_category_children_reply_to_llsd(
+    folder: &InventoryFolder,
+    folders: &[InventoryFolder],
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let mut reply = inventory_folder_to_llsd(folder);
+    if folders.is_empty() && items.is_empty() {
+        return Ok(reply);
+    }
+    let embedded = ais_inventory_update_to_llsd(folders, items)?;
+    if let (Llsd::Map(reply_map), Some(embedded_block)) = (&mut reply, embedded.get("_embedded")) {
+        let _previous = reply_map.insert("_embedded".to_owned(), embedded_block.clone());
+    }
+    Ok(reply)
+}
+
+/// Serializes an AIS3 `GET /item/<id>` reply: the item at the top level (the
+/// `inventory_item_to_llsd` shape), which the client's top-level `item_id`
+/// probe in `ais_inventory_update_from_llsd` picks up.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// the item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_item_reply_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
+    inventory_item_to_llsd(item)
+}
+
 /// Serializes an [`InventoryFolder`] as an AIS-shaped `categories` entry (inverse
 /// of [`inventory_folder_from_llsd`]).
 pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {

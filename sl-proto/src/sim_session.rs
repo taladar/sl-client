@@ -150,6 +150,7 @@ use crate::session::{
     required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
     sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
+use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
@@ -159,18 +160,18 @@ use crate::types::{
     FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
     GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
     GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryItemMove, InventoryType, Kick,
-    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
-    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
-    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
-    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
-    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
+    InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize, LandEdit,
+    LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
+    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
+    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
+    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
+    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
+    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -1371,6 +1372,85 @@ pub enum ServerEvent {
         /// The URL the face was navigated to.
         url: String,
     },
+    /// The client created an inventory folder over the `InventoryAPIv3`
+    /// create verb or the `CreateInventoryCategory` capability. The folder is
+    /// already applied to the session's serving tree
+    /// ([`SimSession::agent_inventory`]); fire-and-forget for a driver
+    /// persisting inventory.
+    InventoryCategoryCreated {
+        /// The created folder as stored (version 1, parent set).
+        folder: Box<InventoryFolder>,
+    },
+    /// The client created inventory links (`InventoryAPIv3` create with a
+    /// `links` payload — the Current Outfit Folder wear path). Applied to the
+    /// serving tree; fire-and-forget.
+    InventoryLinksCreated {
+        /// The created link items as stored.
+        links: Vec<InventoryItem>,
+    },
+    /// The client renamed an inventory folder (`InventoryAPIv3`
+    /// `PATCH /category/<id>` with `{ name }`). Applied to the serving tree.
+    InventoryCategoryRenamed {
+        /// The renamed folder.
+        folder_id: InventoryFolderKey,
+        /// Its new name.
+        name: String,
+    },
+    /// The client moved an inventory folder (`InventoryAPIv3`
+    /// `PATCH /category/<id>` with `{ parent_id }`). Applied to the serving
+    /// tree.
+    InventoryCategoryMoved {
+        /// The moved folder.
+        folder_id: InventoryFolderKey,
+        /// Its new parent.
+        parent_id: InventoryFolderKey,
+    },
+    /// The client updated an inventory item's name/description
+    /// (`InventoryAPIv3` `PATCH /item/<id>`). Applied to the serving tree.
+    InventoryItemUpdated {
+        /// The updated item.
+        item_id: InventoryKey,
+        /// Its new name.
+        name: String,
+        /// Its new description.
+        description: String,
+    },
+    /// The client moved an inventory item (`InventoryAPIv3` `PATCH
+    /// /item/<id>` with `{ parent_id }`). Applied to the serving tree.
+    InventoryItemMoved {
+        /// The moved item.
+        item_id: InventoryKey,
+        /// The folder it now sits in.
+        folder_id: InventoryFolderKey,
+    },
+    /// The client deleted an inventory folder (`InventoryAPIv3`
+    /// `DELETE /category/<id>`). The whole subtree is already removed from
+    /// the serving tree.
+    InventoryCategoryRemoved {
+        /// The deleted folder.
+        folder_id: InventoryFolderKey,
+        /// Every folder removed (the subtree, `folder_id` included).
+        removed_folders: Vec<InventoryFolderKey>,
+        /// Every item that was inside the subtree.
+        removed_items: Vec<InventoryKey>,
+    },
+    /// The client emptied an inventory folder (`InventoryAPIv3`
+    /// `DELETE /category/<id>/children`). The children are removed from the
+    /// serving tree; the folder itself remains.
+    InventoryCategoryPurged {
+        /// The emptied folder (still present).
+        folder_id: InventoryFolderKey,
+        /// The removed child-folder subtrees.
+        removed_folders: Vec<InventoryFolderKey>,
+        /// Every removed item (direct and in removed subtrees).
+        removed_items: Vec<InventoryKey>,
+    },
+    /// The client deleted an inventory item (`InventoryAPIv3`
+    /// `DELETE /item/<id>`). Already removed from the serving tree.
+    InventoryItemRemoved {
+        /// The deleted item.
+        item_id: InventoryKey,
+    },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
@@ -2088,6 +2168,19 @@ pub struct SimSession {
     /// The per-object media the `ObjectMedia` GET serves, keyed by object
     /// ([`SimSession::set_object_media`]). Driver-populated.
     object_media: BTreeMap<ObjectKey, ObjectMediaState>,
+    /// The agent's inventory tree the inventory capabilities
+    /// (`FetchInventoryDescendents2`, `FetchInventory2`, `InventoryAPIv3`,
+    /// `CreateInventoryCategory`) serve from. Driver-populated
+    /// ([`SimSession::agent_inventory_mut`]) like
+    /// [`display_names`](Self::display_names), but the AIS3 mutations apply
+    /// to it — fixture state, not world authority — so follow-up fetches
+    /// observe them.
+    agent_inventory: SimInventoryTree,
+    /// The read-only shared-Library tree the `FetchLibDescendents2` /
+    /// `FetchLib2` / `LibraryAPIv3` capabilities serve from.
+    /// Driver-populated ([`SimSession::library_inventory_mut`]); the
+    /// mutation caps never touch it (`LibraryAPIv3` is GET-only).
+    library_inventory: SimInventoryTree,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -2220,6 +2313,8 @@ impl SimSession {
             next_sim_serial: 0,
             region_materials: BTreeMap::new(),
             object_media: BTreeMap::new(),
+            agent_inventory: SimInventoryTree::default(),
+            library_inventory: SimInventoryTree::default(),
             events: VecDeque::new(),
         }
     }
@@ -2563,6 +2658,274 @@ impl SimSession {
     /// out of scope here — would apply.
     pub(crate) fn push_content_event(&mut self, event: ServerEvent) {
         self.events.push_back(event);
+    }
+
+    /// The agent's inventory serving tree — read access for the fetch
+    /// handlers and for tests asserting post-mutation state.
+    #[must_use]
+    pub const fn agent_inventory(&self) -> &SimInventoryTree {
+        &self.agent_inventory
+    }
+
+    /// Mutable access to the agent's inventory serving tree — the driver/test
+    /// population API ([`SimInventoryTree::insert_folder`] /
+    /// [`SimInventoryTree::insert_item`]).
+    pub const fn agent_inventory_mut(&mut self) -> &mut SimInventoryTree {
+        &mut self.agent_inventory
+    }
+
+    /// The read-only shared-Library serving tree.
+    #[must_use]
+    pub const fn library_inventory(&self) -> &SimInventoryTree {
+        &self.library_inventory
+    }
+
+    /// Mutable access to the Library serving tree — the driver/test
+    /// population API (the capabilities themselves never mutate it).
+    pub const fn library_inventory_mut(&mut self) -> &mut SimInventoryTree {
+        &mut self.library_inventory
+    }
+
+    /// Creates an inventory folder for an AIS3 `POST /category/<parent>`:
+    /// mints the folder id from the deterministic sim serial, applies it to
+    /// the agent tree (bumping the parent version), and surfaces
+    /// [`ServerEvent::InventoryCategoryCreated`]. Returns the change-set and
+    /// the stored folder (for the reply's `_embedded` block).
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the parent does not exist.
+    pub(crate) fn ais_create_category(
+        &mut self,
+        parent: InventoryFolderKey,
+        create: &sl_wire::AisCategoryCreate,
+    ) -> Result<(sl_wire::AisUpdate, InventoryFolder), SimInventoryError> {
+        let folder = InventoryFolder {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(self.next_serial())),
+            parent_id: Some(parent),
+            name: create.name.clone(),
+            folder_type: i8::try_from(create.folder_type).unwrap_or(-1),
+            version: 1,
+        };
+        let update = self.agent_inventory.create_category(folder.clone())?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryCreated {
+                folder: Box::new(folder.clone()),
+            });
+        Ok((update, folder))
+    }
+
+    /// Creates inventory links for an AIS3 `POST /category/<parent>` carrying
+    /// a `links` payload: mints the item ids, stores each link (its
+    /// `asset_id` is the linked object's id, per the link convention),
+    /// bumps the parent version, and surfaces
+    /// [`ServerEvent::InventoryLinksCreated`]. Returns the change-set and the
+    /// stored links (for the reply's `_embedded` block).
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the parent does not exist.
+    pub(crate) fn ais_create_links(
+        &mut self,
+        parent: InventoryFolderKey,
+        links: &[sl_wire::AisLinkCreate],
+    ) -> Result<(sl_wire::AisUpdate, Vec<InventoryItem>), SimInventoryError> {
+        let owner_id = self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid());
+        let items: Vec<InventoryItem> = links
+            .iter()
+            .map(|link| InventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(self.next_serial())),
+                folder_id: parent,
+                name: link.name.clone(),
+                description: link.description.clone(),
+                asset_id: link.linked_id,
+                item_type: i8::try_from(link.link_type).unwrap_or(-1),
+                inv_type: i8::try_from(link.inv_type).unwrap_or(-1),
+                flags: 0,
+                sale_type: 0,
+                sale_price: None,
+                creation_date: 0,
+                owner: OwnerKey::Agent(AgentKey::from(owner_id)),
+                last_owner_id: Uuid::nil(),
+                creator_id: AgentKey::from(owner_id),
+                group: None,
+                permissions: Permissions5::default(),
+            })
+            .collect();
+        let update = self.agent_inventory.create_links(parent, items.clone())?;
+        self.events.push_back(ServerEvent::InventoryLinksCreated {
+            links: items.clone(),
+        });
+        Ok((update, items))
+    }
+
+    /// Renames an inventory folder for an AIS3 `PATCH /category/<id>`,
+    /// surfacing [`ServerEvent::InventoryCategoryRenamed`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_rename_category(
+        &mut self,
+        id: InventoryFolderKey,
+        name: String,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.rename_category(id, name.clone())?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryRenamed {
+                folder_id: id,
+                name,
+            });
+        Ok(update)
+    }
+
+    /// Moves an inventory folder for an AIS3 `PATCH /category/<id>` with
+    /// `{ parent_id }`, surfacing [`ServerEvent::InventoryCategoryMoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist;
+    /// [`SimInventoryError::InvalidParent`] on an unknown new parent or a
+    /// cycle-creating move.
+    pub(crate) fn ais_move_category(
+        &mut self,
+        id: InventoryFolderKey,
+        parent: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.move_category(id, parent)?;
+        self.events.push_back(ServerEvent::InventoryCategoryMoved {
+            folder_id: id,
+            parent_id: parent,
+        });
+        Ok(update)
+    }
+
+    /// Moves an inventory item for an AIS3 `PATCH /item/<id>` with
+    /// `{ parent_id }`, surfacing [`ServerEvent::InventoryItemMoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the item does not exist;
+    /// [`SimInventoryError::InvalidParent`] on an unknown destination folder.
+    pub(crate) fn ais_move_item(
+        &mut self,
+        id: InventoryKey,
+        parent: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.move_item(id, parent)?;
+        self.events.push_back(ServerEvent::InventoryItemMoved {
+            item_id: id,
+            folder_id: parent,
+        });
+        Ok(update)
+    }
+
+    /// Updates an inventory item's name/description for an AIS3
+    /// `PATCH /item/<id>`, surfacing [`ServerEvent::InventoryItemUpdated`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the item does not exist.
+    pub(crate) fn ais_update_item(
+        &mut self,
+        id: InventoryKey,
+        update_fields: &sl_wire::AisItemUpdate,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.update_item(
+            id,
+            update_fields.name.clone(),
+            update_fields.description.clone(),
+        )?;
+        self.events.push_back(ServerEvent::InventoryItemUpdated {
+            item_id: id,
+            name: update_fields.name.clone(),
+            description: update_fields.description.clone(),
+        });
+        Ok(update)
+    }
+
+    /// Deletes an inventory folder (and its subtree) for an AIS3
+    /// `DELETE /category/<id>`, surfacing
+    /// [`ServerEvent::InventoryCategoryRemoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_remove_category(
+        &mut self,
+        id: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.remove_category(id)?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryRemoved {
+                folder_id: id,
+                removed_folders: update.categories_removed.clone(),
+                removed_items: update.category_items_removed.clone(),
+            });
+        Ok(update)
+    }
+
+    /// Empties an inventory folder for an AIS3
+    /// `DELETE /category/<id>/children`, surfacing
+    /// [`ServerEvent::InventoryCategoryPurged`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_purge_category(
+        &mut self,
+        id: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.purge_category(id)?;
+        self.events.push_back(ServerEvent::InventoryCategoryPurged {
+            folder_id: id,
+            removed_folders: update.categories_removed.clone(),
+            removed_items: update.category_items_removed.clone(),
+        });
+        Ok(update)
+    }
+
+    /// Deletes an inventory item for an AIS3 `DELETE /item/<id>`, surfacing
+    /// [`ServerEvent::InventoryItemRemoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the item does not exist.
+    pub(crate) fn ais_remove_item(
+        &mut self,
+        id: InventoryKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.remove_item(id)?;
+        self.events
+            .push_back(ServerEvent::InventoryItemRemoved { item_id: id });
+        Ok(update)
+    }
+
+    /// Creates an inventory folder for the plain `CreateInventoryCategory`
+    /// capability (client-chosen folder id, unlike the AIS3 create), applying
+    /// it to the agent tree and surfacing
+    /// [`ServerEvent::InventoryCategoryCreated`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the parent does not exist.
+    pub(crate) fn create_inventory_category(
+        &mut self,
+        request: &sl_wire::CreateInventoryCategoryRequest,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let folder = InventoryFolder {
+            folder_id: request.folder_id,
+            parent_id: Some(request.parent_id),
+            name: request.name.clone(),
+            folder_type: i8::try_from(request.folder_type).unwrap_or(-1),
+            version: 1,
+        };
+        let update = self.agent_inventory.create_category(folder.clone())?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryCreated {
+                folder: Box::new(folder),
+            });
+        Ok(update)
     }
 
     /// The agent id once the circuit is open.

@@ -28,10 +28,16 @@ use std::collections::{BTreeMap, HashMap};
 
 use sl_types::key::AgentKey;
 use sl_wire::{
-    AssetUploadResponse, DisplayName, Llsd, ObjectMediaRequest, ObjectMediaResponse,
-    build_agent_preferences_response, build_asset_upload_response, build_display_names_response,
+    AisUpdate, AssetUploadResponse, DisplayName, Llsd, ObjectMediaRequest, ObjectMediaResponse,
+    build_agent_preferences_response, build_asset_upload_response,
+    build_create_inventory_category_response, build_display_names_response,
     build_modify_material_params_response, build_render_materials_response, build_seed_response,
-    parse_agent_preferences, parse_display_names_query, parse_event_queue_request, parse_llsd_xml,
+    parse_agent_preferences, parse_ais_category_children_fetch_url,
+    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
+    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
+    parse_fetch_inventory_items_request, parse_fetch_inventory_request, parse_llsd_xml,
     parse_modify_material_params_request, parse_new_file_agent_inventory_request,
     parse_object_media_navigate_request, parse_object_media_request,
     parse_render_materials_put_request, parse_render_materials_request, parse_seed_request,
@@ -45,21 +51,26 @@ use uuid::Uuid;
 use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
-    chat_session_request_from_llsd, chat_session_roster_to_llsd,
-    parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
+    ais_category_children_reply_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
+    chat_session_request_from_llsd, chat_session_roster_to_llsd, fetch_inventory_items_to_llsd,
+    inventory_descendents_to_llsd, parse_copy_inventory_from_notecard,
+    server_appearance_update_to_llsd, session_history_to_llsd,
 };
+use crate::sim_inventory::SimInventoryError;
 use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
     CAP_AGENT_PREFERENCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_GET_DISPLAY_NAMES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM,
+    CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_GET_DISPLAY_NAMES, CAP_INVENTORY_API_V3,
+    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_UPDATE_AVATAR_APPEARANCE,
     CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event, ServerEvent,
-    offline_messages_to_llsd,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event, InventoryFolder,
+    InventoryItem, ServerEvent, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -132,6 +143,14 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_MODIFY_MATERIAL_PARAMS,
     CAP_OBJECT_MEDIA,
     CAP_OBJECT_MEDIA_NAVIGATE,
+    // The inventory cluster: AISv3 + the legacy folder/per-item fetch caps.
+    CAP_FETCH_INVENTORY,
+    CAP_FETCH_LIBRARY,
+    CAP_FETCH_INVENTORY_ITEM,
+    CAP_FETCH_LIBRARY_ITEM,
+    CAP_INVENTORY_API_V3,
+    CAP_LIBRARY_API_V3,
+    CAP_CREATE_INVENTORY_CATEGORY,
 ];
 
 /// How the simulator serves one capability name.
@@ -186,6 +205,18 @@ pub enum CapHandler {
     ObjectMedia,
     /// The `ObjectMediaNavigate` media-navigation POST.
     ObjectMediaNavigate,
+    /// The `FetchInventoryDescendents2` / `FetchLibDescendents2` folder-listing
+    /// POST, served from the session's agent / Library inventory tree
+    /// ([`SimSession::agent_inventory`] / [`SimSession::library_inventory`]).
+    FetchDescendents,
+    /// The `FetchInventory2` / `FetchLib2` per-item fetch POST, served from
+    /// the same trees.
+    FetchItems,
+    /// The `InventoryAPIv3` / `LibraryAPIv3` REST surface (verb × sub-path
+    /// routing under the cap URL); `LibraryAPIv3` is GET-only.
+    Ais3,
+    /// The plain `CreateInventoryCategory` POST (client-chosen folder id).
+    CreateInventoryCategory,
 }
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
@@ -269,6 +300,13 @@ impl CapsResponse {
     /// event-queue poll whose hold expired.
     const fn bad_gateway() -> Self {
         Self::empty(502)
+    }
+
+    /// `500 Internal Server Error` — the serving fixture holds a value the
+    /// wire shape cannot carry (an out-of-range L$ sale price). A server-data
+    /// fault, deliberately not disguised as a client error.
+    const fn internal_error() -> Self {
+        Self::empty(500)
     }
 
     /// `200 OK` carrying a whole asset of the given content type — the answer
@@ -455,6 +493,10 @@ impl SimCaps {
             CAP_MODIFY_MATERIAL_PARAMS => Some(CapHandler::ModifyMaterialParams),
             CAP_OBJECT_MEDIA => Some(CapHandler::ObjectMedia),
             CAP_OBJECT_MEDIA_NAVIGATE => Some(CapHandler::ObjectMediaNavigate),
+            CAP_FETCH_INVENTORY | CAP_FETCH_LIBRARY => Some(CapHandler::FetchDescendents),
+            CAP_FETCH_INVENTORY_ITEM | CAP_FETCH_LIBRARY_ITEM => Some(CapHandler::FetchItems),
+            CAP_INVENTORY_API_V3 | CAP_LIBRARY_API_V3 => Some(CapHandler::Ais3),
+            CAP_CREATE_INVENTORY_CATEGORY => Some(CapHandler::CreateInventoryCategory),
             // Every two-stage upload cap shares one handler; the cap name only
             // picks the step-1 metadata parser inside it.
             name if UPLOAD_CAPABILITIES.contains(&name) => Some(CapHandler::AssetUpload),
@@ -563,6 +605,18 @@ impl SimCaps {
                 }
                 Some(CapHandler::ObjectMediaNavigate) => {
                     CapsDispatch::Response(Self::dispatch_object_media_navigate(sim, request))
+                }
+                Some(CapHandler::FetchDescendents) => {
+                    CapsDispatch::Response(Self::dispatch_fetch_descendents(sim, request, name))
+                }
+                Some(CapHandler::FetchItems) => {
+                    CapsDispatch::Response(Self::dispatch_fetch_items(sim, request, name))
+                }
+                Some(CapHandler::Ais3) => {
+                    CapsDispatch::Response(Self::dispatch_ais3(sim, request, name))
+                }
+                Some(CapHandler::CreateInventoryCategory) => {
+                    CapsDispatch::Response(Self::dispatch_create_inventory_category(sim, request))
                 }
                 // Tokens are only minted for served capabilities, so a
                 // resolved name always has a handler; answer 404 rather than
@@ -1077,6 +1131,309 @@ impl SimCaps {
         CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
     }
 
+    /// Serves one `FetchInventoryDescendents2` / `FetchLibDescendents2` POST:
+    /// parses the `folders` request array and answers one folder entry per
+    /// known folder from the matching serving tree (`FetchLibDescendents2`
+    /// reads the Library tree, everything else the agent tree). Unknown
+    /// folders are skipped tolerantly, matching OpenSim's handler. Wrong
+    /// method → `405`; a malformed body → `400`.
+    fn dispatch_fetch_descendents(
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+        name: &str,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(text) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(folders) = parse_fetch_inventory_request(text) else {
+            return CapsResponse::bad_request();
+        };
+        let tree = if name == CAP_FETCH_LIBRARY {
+            sim.library_inventory()
+        } else {
+            sim.agent_inventory()
+        };
+        let events: Vec<Event> = folders
+            .iter()
+            .filter_map(|folder| {
+                tree.descendents(
+                    folder.folder_id,
+                    folder.fetch_folders,
+                    folder.fetch_items,
+                    folder.sort_order,
+                )
+            })
+            .collect();
+        match inventory_descendents_to_llsd(&events) {
+            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+            Err(_) => CapsResponse::internal_error(),
+        }
+    }
+
+    /// Serves one `FetchInventory2` / `FetchLib2` per-item fetch POST:
+    /// looks each requested `item_id` up in the matching serving tree
+    /// (`FetchLib2` reads the Library tree) and answers the found items;
+    /// unknown ids are omitted, exactly as OpenSim's handler tolerates them
+    /// (and the reply never carries an `error` member). Wrong method →
+    /// `405`; a malformed body → `400`.
+    fn dispatch_fetch_items(
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+        name: &str,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(text) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(fetch) = parse_fetch_inventory_items_request(text) else {
+            return CapsResponse::bad_request();
+        };
+        let tree = if name == CAP_FETCH_LIBRARY_ITEM {
+            sim.library_inventory()
+        } else {
+            sim.agent_inventory()
+        };
+        let items: Vec<InventoryItem> = fetch
+            .items
+            .iter()
+            .filter_map(|reference| tree.item(reference.item_id).cloned())
+            .collect();
+        let agent_id = sim.agent_id().map_or(fetch.agent_id, |agent| agent.uuid());
+        match fetch_inventory_items_to_llsd(agent_id, &items) {
+            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+            Err(_) => CapsResponse::internal_error(),
+        }
+    }
+
+    /// Serves one plain `CreateInventoryCategory` POST (client-chosen folder
+    /// id): applies the folder to the agent tree
+    /// ([`SimSession::create_inventory_category`]) and echoes the request
+    /// fields, the capability's synchronous reply shape. Wrong method →
+    /// `405`; a malformed body → `400`; an unknown parent → `404`.
+    fn dispatch_create_inventory_category(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(text) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(create) = parse_create_inventory_category_request(text) else {
+            return CapsResponse::bad_request();
+        };
+        match sim.create_inventory_category(&create) {
+            Ok(_update) => CapsResponse::llsd_xml(build_create_inventory_category_response(
+                create.folder_id,
+                create.parent_id,
+                create.folder_type,
+                &create.name,
+            )),
+            Err(error) => Self::inventory_error(error),
+        }
+    }
+
+    /// Serves one `InventoryAPIv3` / `LibraryAPIv3` REST request, routing on
+    /// HTTP verb × URL sub-path exactly as the client lays its URLs out
+    /// (`llaisapi.cpp`): `POST /category/<parent>?tid=` creates a folder — or
+    /// links, when the body carries a `links` array; `PATCH /category/<id>`
+    /// renames (`{ name }`) or moves (`{ parent_id }`); `DELETE
+    /// /category/<id>` removes a subtree and `DELETE /category/<id>/children`
+    /// empties a folder; `GET /category/<id>/children?depth=` lists a
+    /// subtree; `GET`/`PATCH`/`DELETE /item/<id>` fetch / update-or-move /
+    /// remove an item. `LibraryAPIv3` is read-only: its `GET`s serve the
+    /// Library tree and every mutating verb answers `405`.
+    ///
+    /// Status contract: unknown verb (or a mutation on the Library) → `405`;
+    /// a malformed body or unroutable sub-path → `400`; an unknown target id
+    /// → `404` ([`Self::inventory_error`] — the AIS REST convention, a
+    /// deliberate exception to the tolerant-empty stance the batch fetch caps
+    /// keep); a mutation the tree rejects (unknown / cycle-creating new
+    /// parent) → `400`. Successful mutations answer the change-set meta with
+    /// the affected objects under `_embedded`; deletes answer meta only.
+    fn dispatch_ais3(sim: &mut SimSession, request: &CapsRequest<'_>, name: &str) -> CapsResponse {
+        let suffix = ais_suffix(request);
+        let read_only = name == CAP_LIBRARY_API_V3;
+        match request.method {
+            "GET" => {
+                let tree = if read_only {
+                    sim.library_inventory()
+                } else {
+                    sim.agent_inventory()
+                };
+                // A children URL missing the `?depth=` query lists one level,
+                // the builder's smallest useful fetch.
+                if let Some((folder_id, depth)) = parse_ais_category_children_fetch_url(&suffix)
+                    .or_else(|| parse_ais_category_children_url(&suffix).map(|id| (id, 1)))
+                {
+                    let Some(folder) = tree.folder(folder_id).cloned() else {
+                        return CapsResponse::not_found();
+                    };
+                    let Some((folders, items)) = tree.children_to_depth(folder_id, depth) else {
+                        return CapsResponse::not_found();
+                    };
+                    return match ais_category_children_reply_to_llsd(&folder, &folders, &items) {
+                        Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+                        Err(_) => CapsResponse::internal_error(),
+                    };
+                }
+                if let Some(item_id) = parse_ais_item_url(&suffix) {
+                    let Some(item) = tree.item(item_id) else {
+                        return CapsResponse::not_found();
+                    };
+                    return match ais_item_reply_to_llsd(item) {
+                        Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+                        Err(_) => CapsResponse::internal_error(),
+                    };
+                }
+                CapsResponse::bad_request()
+            }
+            "POST" if !read_only => {
+                let Some((parent, _tid)) = parse_ais_create_category_url(&suffix) else {
+                    return CapsResponse::bad_request();
+                };
+                let Ok(text) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Some(body) = parse_llsd_body(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                if body.get("links").is_some() {
+                    let Ok(links) = parse_ais_create_link_body(text) else {
+                        return CapsResponse::bad_request();
+                    };
+                    return match sim.ais_create_links(parent, &links) {
+                        Ok((update, items)) => Self::ais_reply(&update, &[], &items),
+                        Err(error) => Self::inventory_error(error),
+                    };
+                }
+                let Ok(create) = parse_ais_create_category_body(text) else {
+                    return CapsResponse::bad_request();
+                };
+                match sim.ais_create_category(parent, &create) {
+                    Ok((update, folder)) => Self::ais_reply(&update, &[folder], &[]),
+                    Err(error) => Self::inventory_error(error),
+                }
+            }
+            "PATCH" if !read_only => {
+                let Ok(text) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Some(body) = parse_llsd_body(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let is_move = body.get("parent_id").is_some();
+                if let Some(folder_id) = parse_ais_category_url(&suffix) {
+                    let result = if is_move {
+                        match parse_ais_move_body(text) {
+                            Ok(parent) => sim.ais_move_category(folder_id, parent),
+                            Err(_) => return CapsResponse::bad_request(),
+                        }
+                    } else {
+                        match parse_ais_rename_category_body(text) {
+                            Ok(new_name) => sim.ais_rename_category(folder_id, new_name),
+                            Err(_) => return CapsResponse::bad_request(),
+                        }
+                    };
+                    return match result {
+                        Ok(update) => {
+                            let folders: Vec<InventoryFolder> = sim
+                                .agent_inventory()
+                                .folder(folder_id)
+                                .cloned()
+                                .into_iter()
+                                .collect();
+                            Self::ais_reply(&update, &folders, &[])
+                        }
+                        Err(error) => Self::inventory_error(error),
+                    };
+                }
+                if let Some(item_id) = parse_ais_item_url(&suffix) {
+                    let result = if is_move {
+                        match parse_ais_move_body(text) {
+                            Ok(parent) => sim.ais_move_item(item_id, parent),
+                            Err(_) => return CapsResponse::bad_request(),
+                        }
+                    } else {
+                        match parse_ais_update_item_body(text) {
+                            Ok(update_fields) => sim.ais_update_item(item_id, &update_fields),
+                            Err(_) => return CapsResponse::bad_request(),
+                        }
+                    };
+                    return match result {
+                        Ok(update) => {
+                            let items: Vec<InventoryItem> = sim
+                                .agent_inventory()
+                                .item(item_id)
+                                .cloned()
+                                .into_iter()
+                                .collect();
+                            Self::ais_reply(&update, &[], &items)
+                        }
+                        Err(error) => Self::inventory_error(error),
+                    };
+                }
+                CapsResponse::bad_request()
+            }
+            "DELETE" if !read_only => {
+                if let Some(folder_id) = parse_ais_category_children_url(&suffix) {
+                    let result = sim.ais_purge_category(folder_id);
+                    return Self::ais_mutation_response(result);
+                }
+                if let Some(folder_id) = parse_ais_category_url(&suffix) {
+                    let result = sim.ais_remove_category(folder_id);
+                    return Self::ais_mutation_response(result);
+                }
+                if let Some(item_id) = parse_ais_item_url(&suffix) {
+                    let result = sim.ais_remove_item(item_id);
+                    return Self::ais_mutation_response(result);
+                }
+                CapsResponse::bad_request()
+            }
+            _ => CapsResponse::method_not_allowed(),
+        }
+    }
+
+    /// Serializes an AIS3 mutation outcome that embeds nothing (the delete
+    /// verbs): the change-set meta on success, the mapped error status
+    /// otherwise.
+    fn ais_mutation_response(result: Result<AisUpdate, SimInventoryError>) -> CapsResponse {
+        match result {
+            Ok(update) => Self::ais_reply(&update, &[], &[]),
+            Err(error) => Self::inventory_error(error),
+        }
+    }
+
+    /// Builds a `200` AIS3 reply from a change-set and the affected objects
+    /// (embedded under `_embedded`), or `500` when the fixture holds an
+    /// unserializable item (an out-of-range sale price).
+    fn ais_reply(
+        update: &AisUpdate,
+        folders: &[InventoryFolder],
+        items: &[InventoryItem],
+    ) -> CapsResponse {
+        match ais_mutation_reply_to_llsd(update, folders, items) {
+            Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+            Err(_) => CapsResponse::internal_error(),
+        }
+    }
+
+    /// Maps a serving-tree mutation failure to its HTTP status: an unknown
+    /// target answers `404` (the AIS REST convention), an invalid parent
+    /// (unknown, or a cycle-creating move) `400`.
+    const fn inventory_error(error: SimInventoryError) -> CapsResponse {
+        match error {
+            SimInventoryError::UnknownTarget => CapsResponse::not_found(),
+            SimInventoryError::InvalidParent => CapsResponse::bad_request(),
+        }
+    }
+
     /// Mints the URL for one capability token: `{base}/cap/{token}`.
     ///
     /// Built via `path_segments_mut` rather than `Url::join` (whose
@@ -1135,6 +1492,17 @@ fn cap_sub_path(path: &str) -> Option<&str> {
         .filter(|sub_path| !sub_path.is_empty())
 }
 
+/// Reconstructs the sl-wire AIS3 URL suffix (`/category/<id>…` plus the
+/// original query string) from a dispatched request — the exact form the
+/// client-side URL builders emit and the `parse_ais_*_url` inverses consume.
+fn ais_suffix(request: &CapsRequest<'_>) -> String {
+    let sub_path = cap_sub_path(request.path).unwrap_or_default();
+    match request.query {
+        Some(query) => format!("/{sub_path}?{query}"),
+        None => format!("/{sub_path}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -1178,8 +1546,10 @@ mod tests {
     fn caps_coverage_table_is_pinned() {
         let expected: Vec<(&str, CapStatus)> = vec![
             ("EventQueueGet", CapStatus::Served),
-            ("FetchInventoryDescendents2", CapStatus::Pending),
-            ("FetchLibDescendents2", CapStatus::Pending),
+            ("FetchInventoryDescendents2", CapStatus::Served),
+            ("FetchLibDescendents2", CapStatus::Served),
+            ("FetchInventory2", CapStatus::Served),
+            ("FetchLib2", CapStatus::Served),
             ("GroupMemberData", CapStatus::Pending),
             ("GetTexture", CapStatus::Served),
             ("GetMesh", CapStatus::Served),
@@ -1223,9 +1593,9 @@ mod tests {
             ("ChatSessionRequest", CapStatus::Served),
             ("AcceptGroupInvite", CapStatus::Pending),
             ("DeclineGroupInvite", CapStatus::Pending),
-            ("InventoryAPIv3", CapStatus::Pending),
-            ("LibraryAPIv3", CapStatus::Pending),
-            ("CreateInventoryCategory", CapStatus::Pending),
+            ("InventoryAPIv3", CapStatus::Served),
+            ("LibraryAPIv3", CapStatus::Served),
+            ("CreateInventoryCategory", CapStatus::Served),
             ("ExtEnvironment", CapStatus::Pending),
             ("GetDisplayNames", CapStatus::Served),
             ("RemoteParcelRequest", CapStatus::Pending),

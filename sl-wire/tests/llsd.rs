@@ -3,15 +3,71 @@
 #[cfg(test)]
 mod test {
     use pretty_assertions::assert_eq;
-    use sl_types::key::InventoryFolderKey;
+    use sl_types::key::{InventoryFolderKey, InventoryKey};
     use sl_wire::{
-        EventQueueEvent, EventQueueRequest, Llsd, build_event_queue_request,
-        build_event_queue_response, build_seed_request, build_seed_response,
-        parse_event_queue_request, parse_event_queue_response, parse_llsd_xml, parse_seed_request,
-        parse_seed_response,
+        EventQueueEvent, EventQueueRequest, FetchInventoryFolderRequest,
+        FetchInventoryItemsRequest, FetchItemRef, Llsd, build_event_queue_request,
+        build_event_queue_response, build_fetch_inventory_items_request,
+        build_fetch_inventory_request, build_seed_request, build_seed_response,
+        parse_event_queue_request, parse_event_queue_response, parse_fetch_inventory_items_request,
+        parse_fetch_inventory_request, parse_llsd_xml, parse_seed_request, parse_seed_response,
     };
+    use uuid::uuid;
 
     type TestError = Box<dyn std::error::Error>;
+
+    #[test]
+    fn fetch_inventory_request_round_trips() -> Result<(), TestError> {
+        let owner = uuid!("11111111-1111-1111-1111-111111111111");
+        let folders = [
+            InventoryFolderKey::from(uuid!("22222222-2222-2222-2222-222222222222")),
+            InventoryFolderKey::from(uuid!("33333333-3333-3333-3333-333333333333")),
+        ];
+        let xml = build_fetch_inventory_request(owner, &folders);
+        let parsed = parse_fetch_inventory_request(&xml)?;
+        let expected: Vec<FetchInventoryFolderRequest> = folders
+            .iter()
+            .map(|folder| FetchInventoryFolderRequest {
+                folder_id: *folder,
+                owner_id: owner,
+                fetch_folders: true,
+                fetch_items: true,
+                sort_order: 0,
+            })
+            .collect();
+        assert_eq!(parsed, expected);
+        // A body without a folders array is tolerated as an empty request.
+        assert_eq!(parse_fetch_inventory_request("<llsd><map /></llsd>")?, []);
+        Ok(())
+    }
+
+    #[test]
+    fn fetch_inventory_items_request_round_trips() -> Result<(), TestError> {
+        let agent = uuid!("44444444-4444-4444-4444-444444444444");
+        let items = [
+            FetchItemRef {
+                owner_id: agent,
+                item_id: InventoryKey::from(uuid!("55555555-5555-5555-5555-555555555555")),
+            },
+            FetchItemRef {
+                owner_id: agent,
+                item_id: InventoryKey::from(uuid!("66666666-6666-6666-6666-666666666666")),
+            },
+        ];
+        let xml = build_fetch_inventory_items_request(agent, &items);
+        let parsed = parse_fetch_inventory_items_request(&xml)?;
+        assert_eq!(
+            parsed,
+            FetchInventoryItemsRequest {
+                agent_id: agent,
+                items: items.to_vec(),
+            }
+        );
+        // A body without an items array is tolerated as an empty request.
+        let empty = parse_fetch_inventory_items_request("<llsd><map /></llsd>")?;
+        assert_eq!(empty.items, []);
+        Ok(())
+    }
 
     #[test]
     fn seed_request_round_trips() -> Result<(), TestError> {

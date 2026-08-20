@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 266 |
+| ready | 265 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 841 |
+| done | 842 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1348** |
@@ -217,15 +217,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (266)
+## ready (265)
 
 ### protocol
 
 - [`protocol-sim-caps-experiences`](ready/protocol-sim-caps-experiences.md) —
   Server-side experience caps (blocked by `protocol-sim-caps-framework` (done))
-- [`protocol-sim-caps-inventory`](ready/protocol-sim-caps-inventory.md) —
-  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
-  `protocol-sim-caps-framework` (done))
 - [`protocol-sim-caps-region-info`](ready/protocol-sim-caps-region-info.md) —
   Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
   (done))
@@ -1159,7 +1156,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (841)
+## done (842)
 
 ### protocol
 
@@ -1295,6 +1292,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `protocol-sim-caps-framework` (done))
 - [`protocol-sim-caps-framework`](done/protocol-sim-caps-framework.md) —
   Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
+- [`protocol-sim-caps-inventory`](done/protocol-sim-caps-inventory.md) —
+  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
+  `protocol-sim-caps-framework` (done))
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
 - [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state

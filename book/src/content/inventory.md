@@ -239,12 +239,17 @@ mirroring inventory stays in sync. None has a reply; a mirror simply applies it:
 >   `sl-proto/src/types/editing.rs`.
 > - The capability names are `CAP_FETCH_INVENTORY`
 >   (`FetchInventoryDescendents2`), `CAP_FETCH_LIBRARY` (`FetchLibDescendents2`,
->   the read-only shared Library fetched with the Library owner id),
+>   the read-only shared Library fetched with the Library owner id), the
+>   per-item `CAP_FETCH_INVENTORY_ITEM` (`FetchInventory2`) /
+>   `CAP_FETCH_LIBRARY_ITEM` (`FetchLib2`),
 >   `CAP_INVENTORY_API_V3` (`InventoryAPIv3`), `CAP_LIBRARY_API_V3`
 >   (`LibraryAPIv3`), `CAP_CREATE_INVENTORY_CATEGORY`, in
 >   `sl-proto/src/session.rs`. The AIS3 URL/body helpers are in
 >   `sl-wire/src/inventory.rs` (`ais_category_url`,
->   `build_ais_update_item_body`, …).
+>   `build_ais_update_item_body`, …). The simulator serves all of them from
+>   the `SimInventoryTree` fixtures on `SimSession`
+>   (`sl-proto/src/sim_inventory.rs`; see
+>   [CAPS](../comms/caps.md)'s "The inventory handlers").
 > - The agent tree and the shared Library tree are held in one model
 >   (`sl-proto/src/session/inventory.rs`) tagged by `InventoryOwner` (`Agent` /
 >   `Library`), each with its own root and owner (`Session::inventory_root` /

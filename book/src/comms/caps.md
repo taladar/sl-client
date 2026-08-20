@@ -50,7 +50,8 @@ There are dozens. A non-exhaustive sense of the range:
 
 - **Bulk asset access** — `GetTexture`, `GetMesh2`, `ViewerAsset` (generic
   assets by class, e.g. `?sound_id=`/`?bodypart_id=`).
-- **Inventory** — `FetchInventoryDescendents2`, `InventoryAPIv3`,
+- **Inventory** — `FetchInventoryDescendents2`, the per-item
+  `FetchInventory2`/`FetchLib2`, `InventoryAPIv3`,
   `CreateInventoryCategory`. See [Inventory](../content/inventory.md).
 - **Appearance** — `UpdateAvatarAppearance`, `UploadBakedTexture`. See
   [Appearance](../content/appearance.md).
@@ -369,6 +370,82 @@ shared `build_asset_upload_response`, `server_appearance_update_to_llsd`,
 already existed; this cluster wired them into the dispatch. Loopback coverage is
 in `sl-proto/tests/sim_caps.rs`.
 
+### The inventory handlers
+
+The inventory cluster serves the modern AIS3 REST surface and the legacy
+fetch caps from an **in-memory inventory tree** (`SimInventoryTree`), two of
+which live on `SimSession` as driver-populated serving stores: the agent's
+tree and the read-only shared Library. Unlike the purely-read stores, the
+AIS3 mutations *apply* to the agent tree — it is fixture state, not world
+authority — so a follow-up fetch observes the create/rename/move/delete a
+test (or the fake grid) just performed, and every affected folder's
+`version` bumps exactly as the real service's `_updated_category_versions`
+reports it. Each mutation also surfaces a `ServerEvent`
+(`InventoryCategoryCreated`, `InventoryLinksCreated`, `…Renamed`, `…Moved`,
+`InventoryItemUpdated`/`Moved`/`Removed`, `…Removed`, `…Purged`) for a
+driver persisting inventory.
+
+- **`FetchInventoryDescendents2` / `FetchLibDescendents2`** parse the
+  `folders` batch (`parse_fetch_inventory_request`, the inverse of
+  `build_fetch_inventory_request`) and answer one entry per **known**
+  folder — direct children only, honouring `fetch_folders` /
+  `fetch_items` / `sort_order` — via the existing
+  `inventory_descendents_to_llsd`. Unknown folders are skipped tolerantly,
+  matching OpenSim.
+- **`FetchInventory2` / `FetchLib2`** are the per-item legacy fetches the
+  reference viewer falls back to for items referenced before their folder
+  was listed. Both directions were net-new: the request
+  (`build_fetch_inventory_items_request` /
+  `parse_fetch_inventory_items_request`, body
+  `{ agent_id, items: [ { owner_id, item_id } ] }`) and the reply envelope
+  (`fetch_inventory_items_to_llsd` / `fetch_inventory_items_from_llsd`,
+  `{ agent_id, items }` over the same flat item shape the descendents
+  caps use). Unknown ids are omitted (OpenSim-identical) and the reply
+  never carries an `error` member — the viewer treats one as a failed
+  fetch. The client now requests both caps and folds their replies into
+  `Event::InventoryBulkUpdate`. Note the real cap name is `FetchLib2`,
+  not "FetchLibrary2".
+- **`InventoryAPIv3` / `LibraryAPIv3`** route on HTTP verb × URL sub-path
+  exactly as the client builders lay the URLs out: `POST
+  /category/<parent>?tid=` creates a folder — or **links**, when the body
+  carries a `links` array (the Current Outfit Folder wear path; the link
+  items' `asset_id` is the linked object's id); `PATCH /category/<id>`
+  renames or (with `{ parent_id }`) moves; `DELETE /category/<id>` removes
+  a subtree, `DELETE /category/<id>/children` empties a folder; `GET
+  /category/<id>/children?depth=` lists a subtree; `GET`/`PATCH`/`DELETE
+  /item/<id>` fetch / update-or-move / remove an item. Mutation replies
+  carry the `AisUpdate` change-set meta (`_created_categories`,
+  `_updated_category_versions`, …) with the affected objects under
+  `_embedded` (`ais_mutation_reply_to_llsd`); deletes answer meta only.
+  `LibraryAPIv3` is read-only: its `GET`s serve the Library tree and every
+  mutating verb answers `405`. One deliberate divergence: the real AIS
+  nests `_embedded` recursively per depth level, but our client parser
+  reads only the top level, so a children fetch serves the subtree
+  **flattened** into the top-level `_embedded` — information-equivalent
+  (uuid-keyed maps, every entry carries its `parent_id`).
+- **`CreateInventoryCategory`** (served by OpenSim too, unlike AIS3)
+  applies the client-chosen folder id and echoes the request fields via
+  `build_create_inventory_category_response`.
+
+The status contract adds one deliberate exception to the tolerant-empty
+stance: an unknown **AIS3 target id** answers `404` (the REST convention),
+and an invalid move — an unknown new parent, or a folder moved under
+itself/its own descendant — answers `400`; the batch fetch caps keep
+skipping unknown ids silently. A fixture value the wire shape cannot carry
+(an out-of-range L$ sale price) answers `500` rather than disguising a
+server-data fault as a client error.
+
+The inverses added for this cluster: `parse_fetch_inventory_request`,
+`build_fetch_inventory_items_request` / `parse_fetch_inventory_items_request`
+(`sl-wire/src/llsd.rs`), `parse_ais_create_link_body` with its
+`AisLinkCreate` records and the `ais_update_to_llsd` tree form of
+`build_ais_update_response` (`sl-wire/src/inventory.rs`), and
+`fetch_inventory_items_to_llsd` / `ais_mutation_reply_to_llsd` /
+`ais_category_children_reply_to_llsd` / `ais_item_reply_to_llsd`
+(`sl-proto/src/session/conversions.rs`). The AIS3 URL/body codec both
+directions already existed (Tier-F #61); this cluster wired it into the
+dispatch, over the new tree.
+
 ---
 
 > **In this codebase**
@@ -422,3 +499,9 @@ in `sl-proto/tests/sim_caps.rs`.
 >   `sl-client-tokio` (`src/assets.rs`, `tests/asset_caps_roundtrip.rs`).
 >   The coverage table's predicate consults both `SimCaps::handler_for`
 >   and `AssetCaps::handler_for`.
+> - The inventory serving fixture (`SimInventoryTree`) is
+>   `sl-proto/src/sim_inventory.rs`, held twice on `SimSession`
+>   (`agent_inventory[_mut]` / `library_inventory[_mut]`). The per-item
+>   fetch caps' constants are `CAP_FETCH_INVENTORY_ITEM`
+>   (`"FetchInventory2"`) and `CAP_FETCH_LIBRARY_ITEM` (`"FetchLib2"`) in
+>   `sl-proto/src/session.rs`, requested alongside the descendents caps.

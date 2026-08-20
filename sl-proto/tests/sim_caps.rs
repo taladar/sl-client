@@ -12,28 +12,35 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey,
-        CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_GET_TEXTURE,
-        CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
+        CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
+        CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+        CAP_GET_TEXTURE, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+        CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
         CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
         CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
         CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
         CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
         CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DisplayName, Event,
         FaceMaterialPut, ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage,
-        InventoryFolderKey, InventoryKey, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams,
-        MaterialOverrideUpdate, MediaEntry, ObjectKey, ObjectMediaState, REQUESTED_CAPABILITIES,
-        RegionCoordinates, RegionHandle, ServerEvent, ServerHistoryMessage, Session, SimCaps,
-        SimChatSessionKind, SimSession, StartLocation, TextureKey, build_event_queue_request,
-        build_seed_request, chat_session_request_body, copy_inventory_from_notecard_body,
+        InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, LLSD_XML_CONTENT_TYPE,
+        LegacyMaterial, LoginParams, MaterialOverrideUpdate, MediaEntry, ObjectKey,
+        ObjectMediaState, OwnerKey, Permissions5, REQUESTED_CAPABILITIES, RegionCoordinates,
+        RegionHandle, ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind,
+        SimSession, StartLocation, TextureKey, build_event_queue_request, build_seed_request,
+        chat_session_request_body, copy_inventory_from_notecard_body,
         enable_simulator_to_caps_llsd, parse_event_queue_response, parse_seed_response,
     };
     use sl_wire::{
-        CircuitCode, Llsd, LoginRequest, LoginResponse, LoginSuccess,
-        build_agent_preferences_request, build_modify_material_params_request,
-        build_new_file_agent_inventory_request, build_object_media_get_request,
-        build_object_media_navigate_request, build_object_media_update_request,
-        build_render_materials_put_request, build_render_materials_request, build_send_user_report,
+        CircuitCode, FetchItemRef, Llsd, LoginRequest, LoginResponse, LoginSuccess,
+        ais_category_children_fetch_url, ais_category_url, ais_create_category_url, ais_item_url,
+        build_agent_preferences_request, build_ais_create_category_body,
+        build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+        build_ais_update_item_body, build_create_inventory_category_request,
+        build_fetch_inventory_items_request, build_fetch_inventory_request,
+        build_modify_material_params_request, build_new_file_agent_inventory_request,
+        build_object_media_get_request, build_object_media_navigate_request,
+        build_object_media_update_request, build_render_materials_put_request,
+        build_render_materials_request, build_send_user_report,
         build_update_avatar_appearance_request, build_update_item_asset_request,
         build_update_script_agent_request, build_update_task_item_asset_request,
         build_upload_baked_texture_request, display_names_query, parse_agent_preferences,
@@ -114,9 +121,11 @@ mod test {
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
         // Seven agent-comms/framework sim caps, the four asset-delivery caps
-        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), and the fifteen content
-        // upload/materials/MOAP caps.
-        assert_eq!(granted.len(), 26);
+        // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the fifteen content
+        // upload/materials/MOAP caps, and the seven inventory caps (the two
+        // descendents fetches, the two per-item fetches, AISv3 agent +
+        // Library, CreateInventoryCategory).
+        assert_eq!(granted.len(), 33);
         Ok(())
     }
 
@@ -1428,6 +1437,751 @@ mod test {
         let path = granted_cap_path(&caps, CAP_OBJECT_MEDIA)?;
         let (status, _) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map /></llsd>"))?;
         assert_eq!(status, 400);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // The inventory cluster: the descendents / per-item fetch caps, AISv3,
+    // and CreateInventoryCategory, served from the SimInventoryTree fixtures.
+    // -----------------------------------------------------------------------
+
+    /// An [`InventoryFolderKey`] from a small integer.
+    fn folder_key(id: u128) -> InventoryFolderKey {
+        InventoryFolderKey::from(uuid::Uuid::from_u128(id))
+    }
+
+    /// An [`InventoryKey`] from a small integer.
+    fn item_key(id: u128) -> InventoryKey {
+        InventoryKey::from(uuid::Uuid::from_u128(id))
+    }
+
+    /// A minimal deterministic inventory item for the serving fixtures.
+    fn sample_inventory_item(id: u128, folder: InventoryFolderKey, name: &str) -> InventoryItem {
+        InventoryItem {
+            item_id: item_key(id),
+            folder_id: folder,
+            name: name.to_owned(),
+            description: String::new(),
+            asset_id: uuid::Uuid::from_u128(id.wrapping_add(0x1000)),
+            item_type: 0,
+            inv_type: 0,
+            flags: 0,
+            sale_type: 0,
+            sale_price: None,
+            creation_date: 0,
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))),
+            last_owner_id: uuid::Uuid::nil(),
+            creator_id: AgentKey::from(uuid::Uuid::from_u128(1)),
+            group: None,
+            permissions: Permissions5::default(),
+        }
+    }
+
+    /// The seeded agent tree: root (`AGENT_ROOT`) → "Clothing"
+    /// (`AGENT_CLOTHING`) → item "Hat" (`AGENT_HAT`).
+    const AGENT_ROOT: u128 = 0x0A01;
+    /// The "Clothing" folder under the agent root.
+    const AGENT_CLOTHING: u128 = 0x0A02;
+    /// The "Hat" item inside "Clothing".
+    const AGENT_HAT: u128 = 0x0A11;
+    /// The seeded Library root folder.
+    const LIB_ROOT: u128 = 0x0B01;
+    /// The "Library Texture" item inside the Library root.
+    const LIB_TEXTURE: u128 = 0x0B11;
+
+    /// Seeds both serving trees with the small deterministic fixture above.
+    fn seed_inventory(sim: &mut SimSession) {
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder_key(AGENT_ROOT),
+            parent_id: None,
+            name: "My Inventory".to_owned(),
+            folder_type: 8,
+            version: 5,
+        });
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder_key(AGENT_CLOTHING),
+            parent_id: Some(folder_key(AGENT_ROOT)),
+            name: "Clothing".to_owned(),
+            folder_type: 5,
+            version: 3,
+        });
+        sim.agent_inventory_mut().insert_item(sample_inventory_item(
+            AGENT_HAT,
+            folder_key(AGENT_CLOTHING),
+            "Hat",
+        ));
+        sim.library_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder_key(LIB_ROOT),
+            parent_id: None,
+            name: "Library".to_owned(),
+            folder_type: 8,
+            version: 2,
+        });
+        sim.library_inventory_mut()
+            .insert_item(sample_inventory_item(
+                LIB_TEXTURE,
+                folder_key(LIB_ROOT),
+                "Library Texture",
+            ));
+    }
+
+    /// Dispatches one AIS3 request: splits the sl-wire URL suffix into the
+    /// path and query halves of a [`CapsRequest`] under the cap's own path,
+    /// the same split the HTTP glue performs.
+    fn respond_ais(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        method: &str,
+        cap_path: &str,
+        suffix: &str,
+        body: &str,
+    ) -> Result<(u16, String), TestError> {
+        let (path_part, query) = match suffix.split_once('?') {
+            Some((path_part, query)) => (path_part, Some(query)),
+            None => (suffix, None),
+        };
+        let path = format!("{cap_path}{path_part}");
+        let request = CapsRequest {
+            method,
+            path: &path,
+            query,
+            range: None,
+            body: body.as_bytes(),
+        };
+        respond(caps, sim, &request)
+    }
+
+    /// The `folders` batch fetch round-trips through the real client: known
+    /// folders answer their direct children, unknown folders are skipped.
+    #[test]
+    fn fetch_inventory_descendents2_round_trips_through_the_real_client() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let now = Instant::now();
+        let mut client = logged_in_client(now)?;
+
+        let body = build_fetch_inventory_request(
+            uuid::Uuid::from_u128(1),
+            &[
+                folder_key(AGENT_ROOT),
+                folder_key(AGENT_CLOTHING),
+                folder_key(0xdead),
+            ],
+        );
+        let path = granted_cap_path(&caps, CAP_FETCH_INVENTORY)?;
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+
+        client.handle_caps_event(CAP_FETCH_INVENTORY, &parse_llsd_xml(&reply)?, now)?;
+        let descendents: Vec<Event> = drain_client(&mut client)
+            .into_iter()
+            .filter(|event| matches!(event, Event::InventoryDescendents { .. }))
+            .collect();
+        // The unknown folder is skipped tolerantly, so two entries come back.
+        assert_eq!(descendents.len(), 2);
+        match descendents.first() {
+            Some(Event::InventoryDescendents {
+                folder_id,
+                version,
+                descendents,
+                folders,
+                items,
+            }) => {
+                assert_eq!(*folder_id, folder_key(AGENT_ROOT));
+                assert_eq!(*version, 5);
+                assert_eq!(*descendents, 1);
+                assert_eq!(
+                    folders
+                        .iter()
+                        .map(|folder| folder.folder_id)
+                        .collect::<Vec<_>>(),
+                    vec![folder_key(AGENT_CLOTHING)]
+                );
+                assert!(items.is_empty());
+            }
+            other => return Err(format!("unexpected first event: {other:?}").into()),
+        }
+        match descendents.get(1) {
+            Some(Event::InventoryDescendents {
+                folder_id,
+                version,
+                items,
+                ..
+            }) => {
+                assert_eq!(*folder_id, folder_key(AGENT_CLOTHING));
+                assert_eq!(*version, 3);
+                assert_eq!(
+                    items
+                        .iter()
+                        .map(|item| item.name.clone())
+                        .collect::<Vec<_>>(),
+                    vec!["Hat".to_owned()]
+                );
+            }
+            other => return Err(format!("unexpected second event: {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// `FetchLibDescendents2` answers from the Library tree — agent-tree
+    /// folders are unknown to it and are skipped.
+    #[test]
+    fn fetch_lib_descendents2_serves_the_library_tree() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+
+        let body = build_fetch_inventory_request(
+            uuid::Uuid::from_u128(2),
+            &[folder_key(LIB_ROOT), folder_key(AGENT_CLOTHING)],
+        );
+        let path = granted_cap_path(&caps, CAP_FETCH_LIBRARY)?;
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+
+        let tree = parse_llsd_xml(&reply)?;
+        let folders = tree
+            .get("folders")
+            .and_then(Llsd::as_array)
+            .ok_or("missing folders")?;
+        assert_eq!(folders.len(), 1);
+        let entry = folders.first().ok_or("empty folders")?;
+        assert_eq!(
+            entry.get("folder_id").and_then(Llsd::as_uuid),
+            Some(folder_key(LIB_ROOT).uuid())
+        );
+        let items = entry
+            .get("items")
+            .and_then(Llsd::as_array)
+            .ok_or("missing items")?;
+        assert_eq!(items.len(), 1);
+        Ok(())
+    }
+
+    /// The per-item `FetchInventory2` / `FetchLib2` caps round-trip through
+    /// the real client's new fold; unknown ids are omitted from the reply.
+    #[test]
+    fn fetch_inventory2_and_fetch_lib2_round_trip_per_item() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let now = Instant::now();
+        let mut client = logged_in_client(now)?;
+
+        let agent = uuid::Uuid::from_u128(1);
+        let body = build_fetch_inventory_items_request(
+            agent,
+            &[
+                FetchItemRef {
+                    owner_id: agent,
+                    item_id: item_key(AGENT_HAT),
+                },
+                FetchItemRef {
+                    owner_id: agent,
+                    item_id: item_key(0xdead),
+                },
+            ],
+        );
+        let path = granted_cap_path(&caps, CAP_FETCH_INVENTORY_ITEM)?;
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(CAP_FETCH_INVENTORY_ITEM, &parse_llsd_xml(&reply)?, now)?;
+        let items = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryBulkUpdate { items, .. } => Some(items),
+                _ => None,
+            })
+            .ok_or("no bulk update from FetchInventory2")?;
+        assert_eq!(
+            items.iter().map(|item| item.item_id).collect::<Vec<_>>(),
+            vec![item_key(AGENT_HAT)]
+        );
+
+        let body = build_fetch_inventory_items_request(
+            agent,
+            &[FetchItemRef {
+                owner_id: agent,
+                item_id: item_key(LIB_TEXTURE),
+            }],
+        );
+        let path = granted_cap_path(&caps, CAP_FETCH_LIBRARY_ITEM)?;
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(CAP_FETCH_LIBRARY_ITEM, &parse_llsd_xml(&reply)?, now)?;
+        let items = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryBulkUpdate { items, .. } => Some(items),
+                _ => None,
+            })
+            .ok_or("no bulk update from FetchLib2")?;
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.name.clone())
+                .collect::<Vec<_>>(),
+            vec!["Library Texture".to_owned()]
+        );
+        Ok(())
+    }
+
+    /// `CreateInventoryCategory` applies the client-chosen folder, surfaces
+    /// the server event, and a follow-up fetch sees the folder under a
+    /// bumped parent version.
+    #[test]
+    fn create_inventory_category_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let now = Instant::now();
+        let mut client = logged_in_client(now)?;
+
+        let new_folder = folder_key(0x0C01);
+        let body =
+            build_create_inventory_category_request(new_folder, folder_key(AGENT_ROOT), 8, "Toys");
+        let path = granted_cap_path(&caps, CAP_CREATE_INVENTORY_CATEGORY)?;
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+
+        client.handle_caps_event(CAP_CREATE_INVENTORY_CATEGORY, &parse_llsd_xml(&reply)?, now)?;
+        let folders = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryBulkUpdate { folders, .. } => Some(folders),
+                _ => None,
+            })
+            .ok_or("no bulk update from CreateInventoryCategory")?;
+        assert_eq!(
+            folders
+                .iter()
+                .map(|folder| folder.folder_id)
+                .collect::<Vec<_>>(),
+            vec![new_folder]
+        );
+
+        match sim.poll_event() {
+            Some(ServerEvent::InventoryCategoryCreated { folder }) => {
+                assert_eq!(folder.folder_id, new_folder);
+                assert_eq!(folder.name, "Toys");
+            }
+            other => return Err(format!("unexpected server event: {other:?}").into()),
+        }
+
+        // A follow-up descendents fetch sees the new folder and the bumped
+        // parent version (5 → 6).
+        let body =
+            build_fetch_inventory_request(uuid::Uuid::from_u128(1), &[folder_key(AGENT_ROOT)]);
+        let path = granted_cap_path(&caps, CAP_FETCH_INVENTORY)?;
+        let (_, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        let tree = parse_llsd_xml(&reply)?;
+        let entry = tree
+            .get("folders")
+            .and_then(Llsd::as_array)
+            .and_then(<[Llsd]>::first)
+            .ok_or("missing folder entry")?;
+        assert_eq!(entry.get("version").and_then(Llsd::as_i32), Some(6));
+        assert_eq!(entry.get("descendents").and_then(Llsd::as_i32), Some(2));
+        Ok(())
+    }
+
+    /// The AIS3 category lifecycle — create, rename, move, delete — mutates
+    /// the serving tree, reports `_updated_category_versions` at every step,
+    /// and folds through the real client.
+    #[test]
+    fn ais3_category_lifecycle_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let now = Instant::now();
+        let mut client = logged_in_client(now)?;
+        let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
+
+        // Create under the root.
+        let suffix = ais_create_category_url(folder_key(AGENT_ROOT), uuid::Uuid::from_u128(0x71d));
+        let body = build_ais_create_category_body(5, "Sub");
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "POST", &cap_path, &suffix, &body)?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        let created = tree
+            .get("_created_categories")
+            .and_then(Llsd::as_array)
+            .and_then(<[Llsd]>::first)
+            .and_then(Llsd::as_uuid)
+            .ok_or("no _created_categories")?;
+        let created = InventoryFolderKey::from(created);
+        // The parent's bumped version is reported for the client's re-fetch.
+        assert_eq!(
+            tree.get("_updated_category_versions")
+                .and_then(|versions| versions.get(&folder_key(AGENT_ROOT).to_string()))
+                .and_then(Llsd::as_i32),
+            Some(6)
+        );
+        // The reply folds through the real client as a bulk update carrying
+        // the embedded folder.
+        client.handle_caps_event("InventoryAPIv3", &tree, now)?;
+        let folders = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::InventoryBulkUpdate { folders, .. } => Some(folders),
+                _ => None,
+            })
+            .ok_or("no bulk update from the AIS create")?;
+        assert_eq!(
+            folders
+                .iter()
+                .map(|folder| folder.folder_id)
+                .collect::<Vec<_>>(),
+            vec![created]
+        );
+        match sim.poll_event() {
+            Some(ServerEvent::InventoryCategoryCreated { folder }) => {
+                assert_eq!(folder.name, "Sub");
+            }
+            other => return Err(format!("unexpected server event: {other:?}").into()),
+        }
+
+        // Rename bumps the folder's own version.
+        let suffix = ais_category_url(created);
+        let body = build_ais_rename_category_body("Renamed");
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        assert_eq!(
+            tree.get("_updated_category_versions")
+                .and_then(|versions| versions.get(&created.to_string()))
+                .and_then(Llsd::as_i32),
+            Some(2)
+        );
+        assert_eq!(
+            sim.agent_inventory()
+                .folder(created)
+                .map(|folder| folder.name.clone()),
+            Some("Renamed".to_owned())
+        );
+
+        // Move under Clothing bumps both parents.
+        let body = build_ais_move_body(folder_key(AGENT_CLOTHING));
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        let versions = tree
+            .get("_updated_category_versions")
+            .ok_or("no versions on move")?;
+        assert_eq!(
+            versions
+                .get(&folder_key(AGENT_ROOT).to_string())
+                .and_then(Llsd::as_i32),
+            Some(7)
+        );
+        assert_eq!(
+            versions
+                .get(&folder_key(AGENT_CLOTHING).to_string())
+                .and_then(Llsd::as_i32),
+            Some(4)
+        );
+        assert_eq!(
+            sim.agent_inventory()
+                .folder(created)
+                .and_then(|folder| folder.parent_id),
+            Some(folder_key(AGENT_CLOTHING))
+        );
+
+        // Delete removes the subtree and reports it.
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "DELETE", &cap_path, &suffix, "")?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        assert_eq!(
+            tree.get("_categories_removed")
+                .and_then(Llsd::as_array)
+                .and_then(<[Llsd]>::first)
+                .and_then(Llsd::as_uuid),
+            Some(created.uuid())
+        );
+        assert!(sim.agent_inventory().folder(created).is_none());
+        Ok(())
+    }
+
+    /// The AIS3 item verbs: update embeds the new item state, move re-parents
+    /// it, delete removes it and reports `_removed_items`.
+    #[test]
+    fn ais3_item_update_move_remove_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
+        let suffix = ais_item_url(item_key(AGENT_HAT));
+
+        // Update name/description; the updated item comes back embedded.
+        let body = build_ais_update_item_body("Fedora", "a fancy hat");
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        let embedded_name = tree
+            .get("_embedded")
+            .and_then(|embedded| embedded.get("items"))
+            .and_then(|items| items.get(&item_key(AGENT_HAT).to_string()))
+            .and_then(|item| item.get("name"))
+            .and_then(Llsd::as_str)
+            .map(str::to_owned);
+        assert_eq!(embedded_name, Some("Fedora".to_owned()));
+        assert_eq!(
+            tree.get("_updated_category_versions")
+                .and_then(|versions| versions.get(&folder_key(AGENT_CLOTHING).to_string()))
+                .and_then(Llsd::as_i32),
+            Some(4)
+        );
+
+        // Move into the root bumps both folders.
+        let body = build_ais_move_body(folder_key(AGENT_ROOT));
+        let (status, _) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &body)?;
+        assert_eq!(status, 200);
+        assert_eq!(
+            sim.agent_inventory()
+                .item(item_key(AGENT_HAT))
+                .map(|item| item.folder_id),
+            Some(folder_key(AGENT_ROOT))
+        );
+
+        // A GET fetches the item at the top level.
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        assert_eq!(tree.get("name").and_then(Llsd::as_str), Some("Fedora"));
+
+        // Delete removes it and reports `_removed_items`.
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "DELETE", &cap_path, &suffix, "")?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        assert_eq!(
+            tree.get("_removed_items")
+                .and_then(Llsd::as_array)
+                .and_then(<[Llsd]>::first)
+                .and_then(Llsd::as_uuid),
+            Some(item_key(AGENT_HAT).uuid())
+        );
+        assert!(sim.agent_inventory().item(item_key(AGENT_HAT)).is_none());
+        Ok(())
+    }
+
+    /// An AIS3 create with a `links` payload mints link items whose
+    /// `asset_id` is the linked object's id, embeds them, and surfaces the
+    /// server event.
+    #[test]
+    fn ais3_link_creation_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
+
+        let linked = uuid::Uuid::from_u128(0x117c);
+        let suffix =
+            ais_create_category_url(folder_key(AGENT_CLOTHING), uuid::Uuid::from_u128(0x71d));
+        let body = build_ais_create_link_body(linked, 24, 18, "Hat Link", "worn");
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "POST", &cap_path, &suffix, &body)?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        let created = tree
+            .get("_created_items")
+            .and_then(Llsd::as_array)
+            .and_then(<[Llsd]>::first)
+            .and_then(Llsd::as_uuid)
+            .ok_or("no _created_items")?;
+        let embedded_asset = tree
+            .get("_embedded")
+            .and_then(|embedded| embedded.get("items"))
+            .and_then(|items| items.get(&created.to_string()))
+            .and_then(|item| item.get("asset_id"))
+            .and_then(Llsd::as_uuid);
+        assert_eq!(embedded_asset, Some(linked));
+        match sim.poll_event() {
+            Some(ServerEvent::InventoryLinksCreated { links }) => {
+                assert_eq!(links.len(), 1);
+            }
+            other => return Err(format!("unexpected server event: {other:?}").into()),
+        }
+        assert!(
+            sim.agent_inventory()
+                .item(InventoryKey::from(created))
+                .is_some()
+        );
+        Ok(())
+    }
+
+    /// The AIS3 children fetch honours the depth parameter, flattening the
+    /// subtree into the top-level `_embedded` block.
+    #[test]
+    fn ais3_children_fetch_honours_depth() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        // Deepen the tree: Clothing → "Formal" → item "Tuxedo".
+        let formal = folder_key(0x0A03);
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: formal,
+            parent_id: Some(folder_key(AGENT_CLOTHING)),
+            name: "Formal".to_owned(),
+            folder_type: -1,
+            version: 1,
+        });
+        sim.agent_inventory_mut()
+            .insert_item(sample_inventory_item(0x0A12, formal, "Tuxedo"));
+        let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
+
+        let embedded_counts = |reply: &str| -> Result<(usize, usize), TestError> {
+            let tree = parse_llsd_xml(reply)?;
+            let embedded = tree.get("_embedded");
+            let categories = embedded
+                .and_then(|embedded| embedded.get("categories"))
+                .and_then(Llsd::as_map)
+                .map_or(0, std::collections::HashMap::len);
+            let items = embedded
+                .and_then(|embedded| embedded.get("items"))
+                .and_then(Llsd::as_map)
+                .map_or(0, std::collections::HashMap::len);
+            Ok((categories, items))
+        };
+
+        // Depth 0: the category alone, no children.
+        let suffix = ais_category_children_fetch_url(folder_key(AGENT_ROOT), 0);
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        assert_eq!(
+            tree.get("category_id").and_then(Llsd::as_uuid),
+            Some(folder_key(AGENT_ROOT).uuid())
+        );
+        assert!(tree.get("_embedded").is_none());
+
+        // Depth 1: only Clothing.
+        let suffix = ais_category_children_fetch_url(folder_key(AGENT_ROOT), 1);
+        let (_, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(embedded_counts(&reply)?, (1, 0));
+
+        // Depth 50: the whole flattened subtree (Clothing + Formal, Hat +
+        // Tuxedo).
+        let suffix = ais_category_children_fetch_url(folder_key(AGENT_ROOT), 50);
+        let (_, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(embedded_counts(&reply)?, (2, 2));
+        Ok(())
+    }
+
+    /// `LibraryAPIv3` serves reads from the Library tree and rejects every
+    /// mutating verb.
+    #[test]
+    fn library_api_v3_is_read_only() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+        let cap_path = granted_cap_path(&caps, "LibraryAPIv3")?;
+
+        let suffix = ais_category_children_fetch_url(folder_key(LIB_ROOT), 1);
+        let (status, reply) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(status, 200);
+        let tree = parse_llsd_xml(&reply)?;
+        let items = tree
+            .get("_embedded")
+            .and_then(|embedded| embedded.get("items"))
+            .and_then(Llsd::as_map)
+            .map_or(0, std::collections::HashMap::len);
+        assert_eq!(items, 1);
+
+        // Every mutating verb answers 405.
+        let rename = build_ais_rename_category_body("Nope");
+        let suffix = ais_category_url(folder_key(LIB_ROOT));
+        let (status, _) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &rename)?;
+        assert_eq!(status, 405);
+        let (status, _) = respond_ais(&mut caps, &mut sim, "DELETE", &cap_path, &suffix, "")?;
+        assert_eq!(status, 405);
+        let create_suffix =
+            ais_create_category_url(folder_key(LIB_ROOT), uuid::Uuid::from_u128(0x71d));
+        let create = build_ais_create_category_body(-1, "Nope");
+        let (status, _) = respond_ais(
+            &mut caps,
+            &mut sim,
+            "POST",
+            &cap_path,
+            &create_suffix,
+            &create,
+        )?;
+        assert_eq!(status, 405);
+        Ok(())
+    }
+
+    /// The inventory handlers' status contract: wrong methods 405, malformed
+    /// bodies and unroutable sub-paths 400, unknown AIS targets 404, and
+    /// invalid moves 400.
+    #[test]
+    fn inventory_caps_reject_bad_requests() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_inventory(&mut sim);
+
+        // The fetch caps are POST-only and reject garbage bodies.
+        for name in [
+            CAP_FETCH_INVENTORY,
+            CAP_FETCH_LIBRARY,
+            CAP_FETCH_INVENTORY_ITEM,
+            CAP_FETCH_LIBRARY_ITEM,
+            CAP_CREATE_INVENTORY_CATEGORY,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+            assert_eq!(status, 405, "GET on {name}");
+            let (status, _) = respond(&mut caps, &mut sim, &post(&path, "not xml <"))?;
+            assert_eq!(status, 400, "garbage body on {name}");
+        }
+
+        let cap_path = granted_cap_path(&caps, "InventoryAPIv3")?;
+        // An unknown AIS target is 404 (unlike the tolerant batch fetches).
+        let suffix = ais_category_url(folder_key(0xdead));
+        let rename = build_ais_rename_category_body("Ghost");
+        let (status, _) = respond_ais(&mut caps, &mut sim, "PATCH", &cap_path, &suffix, &rename)?;
+        assert_eq!(status, 404);
+        let suffix = ais_item_url(item_key(0xdead));
+        let (status, _) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, &suffix, "")?;
+        assert_eq!(status, 404);
+        // An unknown parent on the plain create cap is 404 too.
+        let path = granted_cap_path(&caps, CAP_CREATE_INVENTORY_CATEGORY)?;
+        let body = build_create_inventory_category_request(
+            folder_key(0x0C02),
+            folder_key(0xdead),
+            -1,
+            "Orphan",
+        );
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 404);
+
+        // A cycle-creating move is a bad request.
+        let suffix = ais_category_url(folder_key(AGENT_ROOT));
+        let into_child = build_ais_move_body(folder_key(AGENT_CLOTHING));
+        let (status, _) = respond_ais(
+            &mut caps,
+            &mut sim,
+            "PATCH",
+            &cap_path,
+            &suffix,
+            &into_child,
+        )?;
+        assert_eq!(status, 400);
+
+        // Garbage bodies and unroutable sub-paths are bad requests; unknown
+        // verbs are 405.
+        let suffix = ais_category_url(folder_key(AGENT_ROOT));
+        let (status, _) = respond_ais(
+            &mut caps,
+            &mut sim,
+            "PATCH",
+            &cap_path,
+            &suffix,
+            "not xml <",
+        )?;
+        assert_eq!(status, 400);
+        let (status, _) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, "/bogus", "")?;
+        assert_eq!(status, 400);
+        let (status, _) = respond_ais(&mut caps, &mut sim, "PUT", &cap_path, &suffix, "")?;
+        assert_eq!(status, 405);
         Ok(())
     }
 }
