@@ -2315,7 +2315,7 @@ fn update_minimap_hover(
         let (closest, _all) = dots_near(&state.dots, cursor, pick_radius);
         if let Some(agent) = closest {
             let name = avatars
-                .name_of(agent)
+                .shown_name_of(agent)
                 .map_or_else(|| agent.uuid().to_string(), ToOwned::to_owned);
             let dot = state.dots.iter().find(|dot| dot.agent == agent);
             let unknown = dot.is_some_and(|dot| dot.altitude_unknown);
@@ -2446,7 +2446,7 @@ fn parcel_tooltip_lines(
         ));
     }
     if let OwnerKey::Agent(agent) = info.owner
-        && let Some(name) = avatars.name_of(agent)
+        && let Some(name) = avatars.shown_name_of(agent)
     {
         lines.push(translator.format(
             "minimap-tooltip-owner",

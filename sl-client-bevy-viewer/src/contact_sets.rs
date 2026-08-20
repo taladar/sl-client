@@ -29,6 +29,24 @@
 //! someone than the set with eighty. Ties break by set name, so the answer is
 //! stable rather than hash-order.
 //!
+//! # Aliases: the other half of the feature
+//!
+//! The same store carries the reference's **pseudonyms**
+//! (`viewer-contact-set-pseudonyms`): a name the user gives one resident, and
+//! its special case, **display-name removal** (show me this person's legacy name
+//! and not the display name they chose). Those are per resident rather than per
+//! set, and they are not a panel feature: [`apply_name_aliases`] mirrors them
+//! into the [name cache](crate::avatars::NameRecord) as a
+//! [`NameAlias`](crate::avatars::NameAlias), so every surface that resolves a
+//! name — tags, the radar, tooltips, chat — shows the alias without knowing that
+//! contact sets exist.
+//!
+//! An alias is shown in the reference's **quoted** form (`'Nickname'`), which is
+//! the whole reason it can be trusted: a name in quotes is visibly the user's
+//! own, never something the grid answered. Nothing aliased is ever written back
+//! over the filed-name memo below, and a wire action still carries the grid's
+//! name ([`crate::avatars::AvatarState::name_of`]).
+//!
 //! # Names
 //!
 //! A set outlives everyone's presence — most of its members are nowhere near you
@@ -45,9 +63,10 @@
 //! `settings.toml`, whose top level is keyed by **set name** with a `color` and
 //! a `friends` map — the same layout Firestorm's `settings_friends_groups.xml`
 //! uses, so a list exported from there ports across by transcription. The
-//! reference's own internal keys (`globalSettings`, `extraAvs`, `Pseudonyms`)
-//! are recognised and skipped rather than mistaken for sets; the member-name
-//! memo above is our addition under [`NAMES_KEY`].
+//! reference's own internal keys (`globalSettings`, `extraAvs`) are recognised
+//! and skipped rather than mistaken for sets, its [`PSEUDONYMS_KEY`] map is read
+//! and written as the reference writes it, and the member-name memo above is our
+//! addition under [`NAMES_KEY`].
 //!
 //! Reference (Firestorm, read-only): `lggcontactsets`, `fspanelcontactsets`.
 
@@ -60,8 +79,9 @@ use serde::{Deserialize, Serialize};
 use sl_client_bevy::{AgentKey, Uuid};
 use tracing::{debug, info, warn};
 
-use crate::avatars::AvatarState;
+use crate::avatars::{AvatarState, NameAlias};
 use crate::notifications::ShowNotification;
+use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
 
 /// The per-account file the sets are stored in (a sibling of the account
@@ -76,24 +96,39 @@ const STORE_FILE: &str = "contact_sets.json";
 /// reference file simply has none.
 const NAMES_KEY: &str = "names";
 
+/// The reference's own top-level key holding the per-resident aliases
+/// (`id → alias`), read and written exactly as Firestorm writes it, so an alias
+/// list transcribed from there works and one written here still does after a
+/// trip through the reference. It doubles as the panel's third pseudo-set — the
+/// listing of everyone who has an alias — which is why it is a reserved set
+/// name.
+pub(crate) const PSEUDONYMS_KEY: &str = "Pseudonyms";
+
+/// The alias text the reference stores to mean "**remove** this resident's
+/// display name" rather than "call them this" (`lggcontactsets`'s
+/// `CS_PSEUDONYM`). It is a stored value rather than a flag because that is what
+/// the file format has room for — one string per resident.
+const DISPLAY_NAME_REMOVED: &str = "--- ---";
+
 /// The top-level keys the **reference** file uses for its own bookkeeping. They
 /// are not sets: a file written by Firestorm carries them, and reading one of
 /// them as a set would invent a set named `globalSettings`.
 ///
-/// `globalSettings` (the fallback colour for everyone in no set), `extraAvs`
-/// (which members are not friends) and `Pseudonyms` (per-avatar aliases) have no
-/// consumer here yet, so they are skipped on the way in and not written back.
-const REFERENCE_INTERNAL_KEYS: &[&str] = &["globalSettings", "extraAvs", "Pseudonyms"];
+/// `globalSettings` (the fallback colour for everyone in no set) and `extraAvs`
+/// (which members are not friends) have no consumer here yet, so they are
+/// skipped on the way in and not written back. ([`PSEUDONYMS_KEY`] used to be
+/// one of them and is now read.)
+const REFERENCE_INTERNAL_KEYS: &[&str] = &["globalSettings", "extraAvs"];
 
 /// The names a set may not be given: our own file key, the reference's internal
-/// keys, and the two pseudo-sets the panel's set list shows above the real ones.
+/// keys, and the pseudo-sets the panel's set list shows above the real ones.
 /// Compared case-insensitively — a set called `all sets` would be just as
 /// confusing as `All Sets`.
 pub(crate) const RESERVED_SET_NAMES: &[&str] = &[
     NAMES_KEY,
     "globalSettings",
     "extraAvs",
-    "Pseudonyms",
+    PSEUDONYMS_KEY,
     ALL_SETS_LABEL,
     NO_SETS_LABEL,
 ];
@@ -210,12 +245,22 @@ pub(crate) struct ContactSets {
     /// The name each member was filed under, as the filing surface knew it.
     /// Persisted; never overwritten by a name resolution.
     names: HashMap<AgentKey, String>,
+    /// The user's alias per resident, as the reference stores it: the alias
+    /// text, or [`DISPLAY_NAME_REMOVED`] for "show their legacy name only".
+    /// Persisted under [`PSEUDONYMS_KEY`]. Independent of set membership — one
+    /// may alias someone filed nowhere.
+    pseudonyms: HashMap<AgentKey, String>,
     /// What the live name cache last answered for a member, mirrored here by
     /// [`refresh_contact_set_names`] so a view rebuilds off one revision instead
     /// of polling the name cache per row. Session state: never persisted.
     live_names: HashMap<AgentKey, String>,
     /// Bumped on every change, so a view rebuilds exactly when something moved.
     revision: u64,
+    /// Bumped only when an **alias** moved. [`revision`](Self::revision) also
+    /// advances when a member's name resolves, which is far too often to rebuild
+    /// every transcript for; the alias mirror and the surfaces that re-read a
+    /// drawn name gate on this instead.
+    alias_revision: u64,
     /// How many sets have ever been created this session plus those loaded — the
     /// cursor into [`NEW_SET_COLORS`], so two sets made in a row differ.
     created: usize,
@@ -252,6 +297,13 @@ impl ContactSets {
         self.revision
     }
 
+    /// The **alias** revision, advancing only when someone's alias was given,
+    /// changed or cleared — what a surface that redraws whole panes of names
+    /// (the chat transcript) gates on.
+    pub(crate) const fn alias_revision(&self) -> u64 {
+        self.alias_revision
+    }
+
     /// The sets `agent` is filed under, in name order (empty when none).
     pub(crate) fn sets_of(&self, agent: AgentKey) -> &[String] {
         self.by_agent.get(&agent).map_or(&[], Vec::as_slice)
@@ -284,11 +336,73 @@ impl ContactSets {
 
     /// The best name known for `agent`: what the live name cache answered, else
     /// the name they were filed under, else `None` (the caller shows the id).
+    ///
+    /// Always the **grid's** answer — this is the name a filing remembers and a
+    /// wire action carries. [`Self::shown_label_of`] is the one to draw.
     pub(crate) fn label_of(&self, agent: AgentKey) -> Option<&str> {
         self.live_names
             .get(&agent)
             .or_else(|| self.names.get(&agent))
             .map(String::as_str)
+    }
+
+    /// The label to **show** for `agent`: their alias when they have one, else
+    /// [`Self::label_of`]. Display-name removal changes nothing here — the names
+    /// this store knows are legacy names already.
+    pub(crate) fn shown_label_of(&self, agent: AgentKey) -> Option<String> {
+        self.shown_alias_of(agent)
+            .or_else(|| self.label_of(agent).map(ToOwned::to_owned))
+    }
+
+    /// The text to show **in place of** `agent`'s name, for a surface that
+    /// already holds a legacy name for them (a chat line's speaker, a friends
+    /// row): the quoted alias, or `None` — display-name removal asks for the
+    /// legacy name, which is the one such a surface already has.
+    pub(crate) fn shown_alias_of(&self, agent: AgentKey) -> Option<String> {
+        match self.alias_of(agent) {
+            Some(NameAlias::Pseudonym(shown)) => Some(shown),
+            Some(NameAlias::LegacyOnly) | None => None,
+        }
+    }
+
+    /// The user's alias for `agent`, in the form the name cache takes.
+    pub(crate) fn alias_of(&self, agent: AgentKey) -> Option<NameAlias> {
+        let stored = self.pseudonyms.get(&agent)?;
+        if stored == DISPLAY_NAME_REMOVED {
+            return Some(NameAlias::LegacyOnly);
+        }
+        Some(NameAlias::Pseudonym(quoted(stored)))
+    }
+
+    /// Whether `agent` has any alias at all (either kind) — what the panel's
+    /// *Rem Alias…* button acts on.
+    pub(crate) fn has_alias(&self, agent: AgentKey) -> bool {
+        self.pseudonyms.contains_key(&agent)
+    }
+
+    /// Whether `agent`'s display name is the one being suppressed, so the
+    /// button that would suppress it again is not offered.
+    pub(crate) fn has_display_name_removed(&self, agent: AgentKey) -> bool {
+        self.pseudonyms
+            .get(&agent)
+            .is_some_and(|stored| stored == DISPLAY_NAME_REMOVED)
+    }
+
+    /// Everyone the user has given an alias, in id order — the population of the
+    /// panel's *Pseudonyms* pseudo-set.
+    pub(crate) fn everyone_aliased(&self) -> Vec<AgentKey> {
+        let mut agents: Vec<AgentKey> = self.pseudonyms.keys().copied().collect();
+        agents.sort_unstable_by_key(AgentKey::uuid);
+        agents
+    }
+
+    /// Every alias, as the name cache takes them — what
+    /// [`apply_name_aliases`] mirrors.
+    fn aliases(&self) -> HashMap<AgentKey, NameAlias> {
+        self.pseudonyms
+            .keys()
+            .filter_map(|agent| self.alias_of(*agent).map(|alias| (*agent, alias)))
+            .collect()
     }
 
     // --- Writes (guarded; the request system is the way in) ---------------
@@ -425,6 +539,71 @@ impl ContactSets {
         Ok(())
     }
 
+    /// Give `agent` an alias — the name the user would rather see for them,
+    /// remembering `name` as what the grid calls them so an aliased person who
+    /// is in no set is still identifiable in the panel.
+    pub(crate) fn set_pseudonym(
+        &mut self,
+        agent: AgentKey,
+        alias: &str,
+        name: &str,
+    ) -> Result<(), ContactSetRefusal> {
+        if agent.uuid().is_nil() {
+            return Err(ContactSetRefusal::NullAgent);
+        }
+        let alias = alias.trim();
+        if alias.is_empty() {
+            return Err(ContactSetRefusal::EmptyName);
+        }
+        // The removal marker is a stored value, not a name anyone may type: an
+        // alias of "--- ---" would silently mean something else entirely.
+        if alias == DISPLAY_NAME_REMOVED {
+            return Err(ContactSetRefusal::ReservedName);
+        }
+        self.store_pseudonym(agent, alias.to_owned(), name);
+        Ok(())
+    }
+
+    /// Suppress `agent`'s chosen display name, leaving their legacy name — the
+    /// reference's `removeDisplayName`, stored as the marker alias.
+    pub(crate) fn remove_display_name(
+        &mut self,
+        agent: AgentKey,
+        name: &str,
+    ) -> Result<(), ContactSetRefusal> {
+        if agent.uuid().is_nil() {
+            return Err(ContactSetRefusal::NullAgent);
+        }
+        self.store_pseudonym(agent, DISPLAY_NAME_REMOVED.to_owned(), name);
+        Ok(())
+    }
+
+    /// Drop `agent`'s alias, whichever kind it was: they go back to being called
+    /// what the grid calls them.
+    pub(crate) fn clear_pseudonym(&mut self, agent: AgentKey) -> Result<(), ContactSetRefusal> {
+        if self.pseudonyms.remove(&agent).is_some() {
+            self.alias_revision = self.alias_revision.wrapping_add(1);
+            self.touch();
+        }
+        Ok(())
+    }
+
+    /// Record an alias and the grid name that went with it.
+    fn store_pseudonym(&mut self, agent: AgentKey, stored: String, name: &str) {
+        let changed = self.pseudonyms.get(&agent) != Some(&stored);
+        if changed {
+            let _previous = self.pseudonyms.insert(agent, stored);
+            self.alias_revision = self.alias_revision.wrapping_add(1);
+        }
+        let renamed = !name.is_empty() && self.names.get(&agent).map(String::as_str) != Some(name);
+        if renamed {
+            let _previous = self.names.insert(agent, name.to_owned());
+        }
+        if changed || renamed {
+            self.touch();
+        }
+    }
+
     /// Mirror the live name cache's answer for a member, bumping the revision
     /// (so a view rebuilds) when it says something new. Not a change to the
     /// file: the stored name is the filing surface's and stays.
@@ -454,15 +633,24 @@ impl ContactSets {
                     .push(set.name.clone());
             }
         }
-        // The name memos exist to label filed people, so they follow the index.
-        // Bound as locals so each `retain` is a disjoint field borrow rather
-        // than a second borrow of the whole model.
+        // The name memos exist to label people the store knows — filed in a set
+        // or given an alias — so they follow both. Bound as locals so each
+        // `retain` is a disjoint field borrow rather than a second borrow of the
+        // whole model.
         let filed = &self.by_agent;
-        self.names.retain(|agent, _name| filed.contains_key(agent));
-        self.live_names
-            .retain(|agent, _name| filed.contains_key(agent));
+        let aliased = &self.pseudonyms;
+        let known = |agent: &AgentKey| filed.contains_key(agent) || aliased.contains_key(agent);
+        self.names.retain(|agent, _name| known(agent));
+        self.live_names.retain(|agent, _name| known(agent));
         self.revision = self.revision.wrapping_add(1);
     }
+}
+
+/// An alias as it is shown: in single quotes, the reference's own form
+/// (`LGGContactSets::getPseudonym`). The quotes are the feature's honesty — a
+/// name in quotes is visibly the user's own and never the grid's answer.
+fn quoted(alias: &str) -> String {
+    format!("'{alias}'")
 }
 
 /// The name a set may be given: trimmed, non-empty, and not one of the names the
@@ -540,6 +728,29 @@ pub(crate) enum RequestContactSet {
         /// The resident.
         agent: AgentKey,
     },
+    /// Give a resident an alias, shown in place of their name everywhere.
+    SetPseudonym {
+        /// The resident.
+        agent: AgentKey,
+        /// The alias, as the user typed it (quoted only when shown).
+        alias: String,
+        /// The best name the requesting surface knows for them, so an aliased
+        /// person is still identifiable (empty when it knows none).
+        name: String,
+    },
+    /// Show a resident's legacy name only, suppressing the display name they
+    /// chose.
+    RemoveDisplayName {
+        /// The resident.
+        agent: AgentKey,
+        /// The best name the requesting surface knows for them.
+        name: String,
+    },
+    /// Drop a resident's alias, whichever kind it was.
+    ClearPseudonym {
+        /// The resident.
+        agent: AgentKey,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -560,6 +771,7 @@ impl Plugin for ContactSetsPlugin {
                 (
                     load_contact_sets,
                     apply_contact_set_requests,
+                    apply_name_aliases,
                     refresh_contact_set_names,
                     flush_contact_sets,
                 )
@@ -596,6 +808,13 @@ pub(crate) fn apply_contact_set_requests(
             RequestContactSet::Add { set, agent, name } => sets.add_member(set, *agent, name),
             RequestContactSet::RemoveMember { set, agent } => sets.remove_member(set, *agent),
             RequestContactSet::Move { from, to, agent } => sets.move_member(from, to, *agent),
+            RequestContactSet::SetPseudonym { agent, alias, name } => {
+                sets.set_pseudonym(*agent, alias, name)
+            }
+            RequestContactSet::RemoveDisplayName { agent, name } => {
+                sets.remove_display_name(*agent, name)
+            }
+            RequestContactSet::ClearPseudonym { agent } => sets.clear_pseudonym(*agent),
         };
         match outcome {
             Ok(()) => debug!(?request, "contact sets changed"),
@@ -604,9 +823,49 @@ pub(crate) fn apply_contact_set_requests(
     }
 }
 
-/// Keep the name cache warm for every filed resident and mirror what it answers,
-/// so a view reads live names off one revision. Throttled: a name nobody can
-/// answer must not be re-requested every frame.
+/// Mirror the user's aliases into the [name cache](AvatarState), so every
+/// surface that draws a name shows them. The **one** hook the feature has: it
+/// runs when the store moves, and the cache folds an alias into a record it
+/// creates later, so an avatar first seen after the alias was given is aliased
+/// too.
+pub(crate) fn apply_name_aliases(
+    sets: Res<ContactSets>,
+    avatars: Option<ResMut<AvatarState>>,
+    friends: Option<ResMut<FriendsModel>>,
+    mut mirrored: Local<Option<u64>>,
+) {
+    if *mirrored == Some(sets.alias_revision()) {
+        return;
+    }
+    let aliases = sets.aliases();
+    if let Some(mut avatars) = avatars {
+        avatars.set_name_aliases(aliases.clone());
+        // Only once the name cache has it: it is the store every drawn name
+        // reads, and a half-applied alias would show in one place and not
+        // another.
+        *mirrored = Some(sets.alias_revision());
+    }
+    // The friends list keeps its own resolved names (it lists people who are
+    // nowhere near the viewer), so the alias is mirrored there too.
+    if let Some(mut friends) = friends {
+        friends.set_name_aliases(
+            aliases
+                .into_iter()
+                .filter_map(|(agent, alias)| match alias {
+                    NameAlias::Pseudonym(shown) => Some((agent, shown)),
+                    // A friends-list row shows a legacy name already, which is
+                    // exactly what display-name removal asks for.
+                    NameAlias::LegacyOnly => None,
+                })
+                .collect(),
+        );
+    }
+}
+
+/// Keep the name cache warm for every resident the store knows — filed in a set
+/// or given an alias — and mirror what it answers, so a view reads live names
+/// off one revision. Throttled: a name nobody can answer must not be
+/// re-requested every frame.
 pub(crate) fn refresh_contact_set_names(
     mut sets: ResMut<ContactSets>,
     avatars: Option<ResMut<AvatarState>>,
@@ -616,7 +875,7 @@ pub(crate) fn refresh_contact_set_names(
     let Some(mut avatars) = avatars else {
         return;
     };
-    if sets.by_agent.is_empty() {
+    if sets.by_agent.is_empty() && sets.pseudonyms.is_empty() {
         return;
     }
     let now = time.elapsed_secs_f64();
@@ -624,11 +883,22 @@ pub(crate) fn refresh_contact_set_names(
         return;
     }
     *last_run = Some(now);
-    let agents: Vec<AgentKey> = sets.by_agent.keys().copied().collect();
+    let agents: Vec<AgentKey> = sets
+        .by_agent
+        .keys()
+        .chain(
+            sets.pseudonyms
+                .keys()
+                .filter(|agent| !sets.by_agent.contains_key(*agent)),
+        )
+        .copied()
+        .collect();
     for agent in agents {
+        // The **grid's** answer, not the shown one: mirroring an alias here
+        // would file the user's own name for someone as what they are called.
         let resolved = avatars
             .name_record(agent)
-            .and_then(crate::avatars::NameRecord::preferred_name)
+            .and_then(crate::avatars::NameRecord::grid_name)
             .map(ToOwned::to_owned);
         match resolved {
             Some(name) => sets.note_live_name(agent, &name),
@@ -688,7 +958,7 @@ pub(crate) fn load_contact_sets(
     sets.loaded = true;
     let stored = read_store(&path);
     sets.path = Some(path);
-    if stored.sets.is_empty() && stored.names.is_empty() {
+    if stored.sets.is_empty() && stored.names.is_empty() && stored.pseudonyms.is_empty() {
         return;
     }
     // A load is not an edit — everything read is already on disk — but a set
@@ -704,6 +974,15 @@ pub(crate) fn load_contact_sets(
     for (agent, name) in stored.names {
         let _previous = sets.names.entry(agent).or_insert(name);
     }
+    let aliased = !stored.pseudonyms.is_empty();
+    for (agent, alias) in stored.pseudonyms {
+        let _previous = sets.pseudonyms.entry(agent).or_insert(alias);
+    }
+    if aliased {
+        // A load is the first time the aliases exist this session, so the mirror
+        // has to run — the name cache is empty of them.
+        sets.alias_revision = sets.alias_revision.wrapping_add(1);
+    }
     sets.created = sets.created.saturating_add(sets.sets.len());
     sets.reindex();
     sets.dirty = pending;
@@ -716,6 +995,8 @@ struct StoredContactSets {
     sets: BTreeMap<String, ContactSet>,
     /// The remembered member names.
     names: HashMap<AgentKey, String>,
+    /// The user's aliases, as stored (the marker included).
+    pseudonyms: HashMap<AgentKey, String>,
 }
 
 /// Read the persisted sets from `path`, tolerating a missing file (the first-run
@@ -747,6 +1028,10 @@ fn read_store(path: &Path) -> StoredContactSets {
             read.names = read_names(&value);
             continue;
         }
+        if key == PSEUDONYMS_KEY {
+            read.pseudonyms = read_names(&value);
+            continue;
+        }
         if REFERENCE_INTERNAL_KEYS.contains(&key.as_str()) {
             debug!(key, "skipping a reference-internal contact-sets key");
             continue;
@@ -775,11 +1060,11 @@ fn read_store(path: &Path) -> StoredContactSets {
     read
 }
 
-/// Read the remembered member names, ignoring anything that is not an id → name
-/// map.
+/// Read an id → text map (the remembered member names, and the aliases beside
+/// them), ignoring anything that is not one.
 fn read_names(value: &serde_json::Value) -> HashMap<AgentKey, String> {
     let Ok(names) = serde_json::from_value::<BTreeMap<String, String>>(value.clone()) else {
-        warn!("skipping malformed contact-set member names");
+        warn!("skipping a malformed contact-set id → name map");
         return HashMap::new();
     };
     names
@@ -827,22 +1112,33 @@ fn store_value(sets: &ContactSets) -> BTreeMap<String, serde_json::Value> {
             let _replaced = top.insert(set.name.clone(), value);
         }
     }
-    let names: BTreeMap<String, String> = sets
-        .names
+    insert_name_map(&mut top, NAMES_KEY, &sets.names);
+    if !sets.pseudonyms.is_empty() {
+        insert_name_map(&mut top, PSEUDONYMS_KEY, &sets.pseudonyms);
+    }
+    top
+}
+
+/// Write one id → text map into the file's top level under `key`.
+fn insert_name_map(
+    top: &mut BTreeMap<String, serde_json::Value>,
+    key: &str,
+    names: &HashMap<AgentKey, String>,
+) {
+    let stored: BTreeMap<String, String> = names
         .iter()
         .map(|(agent, name)| (agent.uuid().to_string(), name.clone()))
         .collect();
-    if let Ok(value) = serde_json::to_value(names) {
-        let _replaced = top.insert(NAMES_KEY.to_owned(), value);
+    if let Ok(value) = serde_json::to_value(stored) {
+        let _replaced = top.insert(key.to_owned(), value);
     }
-    top
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        ALL_SETS_LABEL, ContactSet, ContactSetRefusal, ContactSets, NAMES_KEY, StoredContactSets,
-        color_from_stored, read_names, store_value, stored_color,
+        ALL_SETS_LABEL, ContactSet, ContactSetRefusal, ContactSets, NAMES_KEY, NameAlias,
+        StoredContactSets, color_from_stored, read_names, store_value, stored_color,
     };
     use bevy::prelude::Color;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -1090,8 +1386,9 @@ mod tests {
     }
 
     /// A file written by the reference loads: its internal keys are skipped
-    /// rather than read as sets, and an entry that is not shaped like a set is
-    /// dropped instead of failing the whole read.
+    /// rather than read as sets (its aliases being read *as* aliases), and an
+    /// entry that is not shaped like a set is dropped instead of failing the
+    /// whole read.
     #[test]
     fn a_reference_file_loads() -> Result<(), Box<dyn core::error::Error>> {
         let json = r#"{
@@ -1110,6 +1407,11 @@ mod tests {
         let builders = read.sets.get("Builders").ok_or("the set was read")?;
         assert!(holds(builders, agent(1)));
         assert_eq!(builders.color(), color_from_stored([1.0, 0.0, 0.0, 1.0]));
+        assert_eq!(
+            read.pseudonyms.get(&agent(2)).map(String::as_str),
+            Some("Nickname"),
+            "an alias filed in Firestorm is an alias here"
+        );
         Ok(())
     }
 
@@ -1118,5 +1420,137 @@ mod tests {
     #[test]
     fn malformed_member_names_are_ignored() {
         assert!(read_names(&serde_json::Value::Bool(true)).is_empty());
+    }
+
+    /// An alias is shown quoted (never mistakable for the grid's answer), is
+    /// per resident rather than per set, and replaces itself rather than
+    /// stacking.
+    #[test]
+    fn an_alias_is_quoted_and_replaces_itself() -> Result<(), ContactSetRefusal> {
+        let mut sets = ContactSets::default();
+        sets.set_pseudonym(agent(1), "  Neighbour  ", "Alpha Resident")?;
+        assert_eq!(
+            sets.alias_of(agent(1)),
+            Some(NameAlias::Pseudonym("'Neighbour'".to_owned())),
+            "the alias is trimmed and quoted"
+        );
+        assert_eq!(
+            sets.shown_alias_of(agent(1)).as_deref(),
+            Some("'Neighbour'")
+        );
+        assert_eq!(
+            sets.shown_label_of(agent(1)).as_deref(),
+            Some("'Neighbour'"),
+            "the panel lists an aliased person under the alias"
+        );
+        assert!(sets.has_alias(agent(1)));
+        assert!(!sets.has_display_name_removed(agent(1)));
+        assert_eq!(
+            sets.label_of(agent(1)),
+            Some("Alpha Resident"),
+            "the grid's name is remembered beside the alias, not replaced by it"
+        );
+
+        sets.set_pseudonym(agent(1), "Neighbour Two", "")?;
+        assert_eq!(
+            sets.shown_alias_of(agent(1)).as_deref(),
+            Some("'Neighbour Two'")
+        );
+        assert_eq!(sets.everyone_aliased(), [agent(1)]);
+
+        sets.clear_pseudonym(agent(1))?;
+        assert_eq!(sets.alias_of(agent(1)), None);
+        assert!(sets.everyone_aliased().is_empty());
+        assert_eq!(
+            sets.label_of(agent(1)),
+            None,
+            "the name memo follows the alias, as it follows a filing"
+        );
+        Ok(())
+    }
+
+    /// Display-name removal is the reference's marker alias: it asks for the
+    /// legacy name rather than naming anyone, so it is *an* alias but not one to
+    /// show, and the marker itself may not be typed as one.
+    #[test]
+    fn display_name_removal_is_a_marker_not_a_name() -> Result<(), ContactSetRefusal> {
+        let mut sets = ContactSets::default();
+        sets.remove_display_name(agent(1), "Alpha Resident")?;
+        assert_eq!(sets.alias_of(agent(1)), Some(NameAlias::LegacyOnly));
+        assert!(sets.has_alias(agent(1)));
+        assert!(sets.has_display_name_removed(agent(1)));
+        assert_eq!(
+            sets.shown_alias_of(agent(1)),
+            None,
+            "there is no alias text to show — the legacy name is the point"
+        );
+        assert_eq!(
+            sets.shown_label_of(agent(1)).as_deref(),
+            Some("Alpha Resident")
+        );
+
+        assert_eq!(
+            sets.set_pseudonym(agent(2), super::DISPLAY_NAME_REMOVED, ""),
+            Err(ContactSetRefusal::ReservedName),
+            "the marker means something else entirely and may not be typed"
+        );
+        assert_eq!(
+            sets.set_pseudonym(agent(2), "   ", ""),
+            Err(ContactSetRefusal::EmptyName)
+        );
+        assert_eq!(
+            sets.set_pseudonym(AgentKey::from(Uuid::nil()), "Nobody", ""),
+            Err(ContactSetRefusal::NullAgent)
+        );
+        Ok(())
+    }
+
+    /// An alias moves only the alias revision, so the surfaces that redraw whole
+    /// panes of names are not rebuilt every time a member's name resolves.
+    #[test]
+    fn only_an_alias_moves_the_alias_revision() -> Result<(), ContactSetRefusal> {
+        let mut sets = with_sets(1)?;
+        sets.add_member("Set 0", agent(1), "Alpha Resident")?;
+        let aliases = sets.alias_revision();
+        sets.note_live_name(agent(1), "Alpha Renamed");
+        assert_eq!(
+            sets.alias_revision(),
+            aliases,
+            "a resolved name is not an alias change"
+        );
+
+        sets.set_pseudonym(agent(1), "Neighbour", "")?;
+        assert_ne!(sets.alias_revision(), aliases);
+        let after = sets.alias_revision();
+        sets.set_pseudonym(agent(1), "Neighbour", "")?;
+        assert_eq!(sets.alias_revision(), after, "no news is not a change");
+        Ok(())
+    }
+
+    /// The aliases round-trip through the reference's own `Pseudonyms` key —
+    /// unquoted, since the quotes are how one is *shown*, not how it is stored.
+    #[test]
+    fn aliases_round_trip_through_the_reference_key() -> Result<(), Box<dyn core::error::Error>> {
+        let mut sets = ContactSets::default();
+        sets.set_pseudonym(agent(1), "Neighbour", "Alpha Resident")?;
+        sets.remove_display_name(agent(2), "Beta Resident")?;
+        let json = serde_json::to_string(&store_value(&sets))?;
+        assert!(json.contains("\"Pseudonyms\""), "the reference key: {json}");
+        assert!(
+            json.contains("\"Neighbour\""),
+            "stored as typed, not quoted: {json}"
+        );
+
+        let read = super::read_store(&write_temp(&json)?);
+        assert_eq!(
+            read.pseudonyms.get(&agent(1)).map(String::as_str),
+            Some("Neighbour")
+        );
+        assert_eq!(
+            read.pseudonyms.get(&agent(2)).map(String::as_str),
+            Some(super::DISPLAY_NAME_REMOVED),
+            "display-name removal survives as the marker it is"
+        );
+        Ok(())
     }
 }

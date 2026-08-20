@@ -223,6 +223,18 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
                 when: None,
             }),
         },
+        // A **deliberate addition**: the reference reaches its pseudonyms only
+        // from the Contact Sets panel, but naming someone is something you do
+        // when you are looking at them, and the pie is where that is done. It
+        // sits beside Add to Set because both write the same store.
+        PieEntry {
+            at: Compass::North,
+            content: PieContent::Action(PieAction {
+                label: "Set Alias",
+                action: "set-alias",
+                when: None,
+            }),
+        },
     ],
 };
 
@@ -1285,6 +1297,7 @@ fn handle_avatar_menu_actions(
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
     mut contact_sets: MessageWriter<crate::contact_sets_panel::OpenAddToContactSet>,
+    mut aliases: MessageWriter<crate::contact_sets_panel::OpenSetPseudonym>,
 ) {
     for action in actions.read() {
         if action.element != AVATAR_MENU_ELEMENT && action.element != ATTACHMENT_MENU_ELEMENT {
@@ -1373,6 +1386,18 @@ fn handle_avatar_menu_actions(
                     move_from: None,
                 });
             }
+            // Give this person a name of the user's own
+            // (`viewer-contact-set-pseudonyms`) — the prompt is raised where it
+            // is answered, beside the sets it is stored with.
+            "set-alias" if action.element == AVATAR_MENU_ELEMENT => {
+                aliases.write(crate::contact_sets_panel::OpenSetPseudonym {
+                    agent,
+                    name: avatars
+                        .name_of(agent)
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_default(),
+                });
+            }
             // Every other slice is a disabled placeholder: no behaviour yet.
             _other => {}
         }
@@ -1458,6 +1483,7 @@ mod tests {
             ("report", vec![Compass::NorthWest]),
             ("add-friend", vec![Compass::West, Compass::East]),
             ("add-to-set", vec![Compass::West, Compass::NorthEast]),
+            ("set-alias", vec![Compass::West, Compass::North]),
             ("pay", vec![Compass::SouthWest]),
             ("freeze", vec![Compass::South, Compass::East]),
             ("give-card", vec![Compass::South, Compass::NorthEast]),

@@ -799,17 +799,26 @@ fn invite_command(key: ConversationKey, accept: bool) -> Option<Command> {
 /// our own lines use the localized `you` label with no link. The body is passed
 /// through verbatim, so any URLs / SLURLs it carries linkify too.
 ///
+/// `alias` is the name the user gave this speaker, if any
+/// (`viewer-contact-set-pseudonyms`): it replaces the name the wire carried, so
+/// a transcript calls someone what the rest of the viewer calls them — including
+/// the lines already on screen, since the shown name is resolved here at render
+/// rather than baked into the stored line.
+///
 /// Pure, so the link construction is unit-testable. The display name is stripped
 /// of `[` / `]` so it cannot break the labelled-link brackets (a labelled link's
 /// target is always the real id regardless, but this keeps the shown name clean).
-fn line_text(line: &TranscriptLine, you: &str) -> String {
+fn line_text(line: &TranscriptLine, you: &str, alias: Option<&str>) -> String {
+    // Only an avatar can be aliased — an object's name is the object's, and our
+    // own line is the localized "you".
+    let shown = alias.unwrap_or(&line.speaker);
     let name = match line.speaker_link {
         SpeakerLink::Own => you.to_owned(),
         SpeakerLink::Agent(agent) => {
             format!(
                 "[secondlife:///app/agent/{}/inspect {}]",
                 agent.uuid(),
-                sanitize_label(&line.speaker)
+                sanitize_label(shown)
             )
         }
         SpeakerLink::Object(object) => {
@@ -2024,7 +2033,9 @@ fn refresh_conversations(
     mut nodes: Query<&mut Node>,
     mut scrolls: Query<&mut ScrollPosition>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
+    sets: Option<Res<crate::contact_sets::ContactSets>>,
     mut last_palette: Local<Option<[Color; 5]>>,
+    mut last_alias_revision: Local<Option<u64>>,
     band_colors: Query<&SkinChatBands>,
 ) {
     let Some(ui) = ui.as_deref_mut() else {
@@ -2067,6 +2078,20 @@ fn refresh_conversations(
             }
         }
         *last_palette = Some(palette);
+    }
+    // The same force-rebuild when the user's names for people move: an alias
+    // given (or cleared) renames that speaker throughout the transcript at once,
+    // rather than from the next line they say onwards.
+    let alias_revision = sets
+        .as_deref()
+        .map(crate::contact_sets::ContactSets::alias_revision);
+    if *last_alias_revision != alias_revision {
+        if last_alias_revision.is_some() {
+            for view in ui.views.values_mut() {
+                view.rendered_revision = u64::MAX;
+            }
+        }
+        *last_alias_revision = alias_revision;
     }
     // The skin's transcript band colours, landed on the floater root by the
     // `.sk-conversations` CSS rule; the reference values are the fallback for a
@@ -2165,10 +2190,18 @@ fn refresh_conversations(
                 style.plain_color = band.unwrap_or_else(|| {
                     transcript_line_color(entry.key, line.speaker_link, settings.as_deref())
                 });
+                // The user's own name for the speaker, if they gave one — read
+                // at render, so an alias given now renames the backlog too.
+                let alias = match line.speaker_link {
+                    SpeakerLink::Agent(agent) => {
+                        sets.as_deref().and_then(|sets| sets.shown_alias_of(agent))
+                    }
+                    SpeakerLink::Own | SpeakerLink::Object(_) | SpeakerLink::None => None,
+                };
                 spawn_linkified_text(
                     &mut commands,
                     view.transcript_column,
-                    &line_text(line, &you),
+                    &line_text(line, &you, alias.as_deref()),
                     style,
                 );
             }
@@ -2652,7 +2685,7 @@ mod tests {
             body: "hi".to_owned(),
         };
         assert_eq!(
-            line_text(&remote, "You"),
+            line_text(&remote, "You", None),
             format!(
                 "[secondlife:///app/agent/{}/inspect Avatar Five]: hi",
                 agent.uuid()
@@ -2667,7 +2700,7 @@ mod tests {
             body: "tune in".to_owned(),
         };
         assert_eq!(
-            line_text(&object_line, "You"),
+            line_text(&object_line, "You", None),
             format!(
                 "[secondlife:///app/objectim/{}? Radio]: tune in",
                 object.uuid()
@@ -2680,7 +2713,7 @@ mod tests {
             speaker_link: SpeakerLink::Own,
             body: "hey".to_owned(),
         };
-        assert_eq!(line_text(&own, "You"), "You: hey");
+        assert_eq!(line_text(&own, "You", None), "You: hey");
 
         let system = TranscriptLine {
             own: false,
@@ -2688,7 +2721,27 @@ mod tests {
             speaker_link: SpeakerLink::None,
             body: "notice".to_owned(),
         };
-        assert_eq!(line_text(&system, "You"), "Region: notice");
+        assert_eq!(line_text(&system, "You", None), "Region: notice");
+    }
+
+    /// An alias replaces the name the wire carried — the link still targets the
+    /// real agent, so the person a renamed speaker links to is unchanged.
+    #[test]
+    fn an_alias_renames_the_speaker_not_the_link() {
+        let agent = AgentKey::from(Uuid::from_u128(0xa1));
+        let remote = TranscriptLine {
+            own: false,
+            speaker: "Avatar Five".to_owned(),
+            speaker_link: SpeakerLink::Agent(agent),
+            body: "hi".to_owned(),
+        };
+        assert_eq!(
+            line_text(&remote, "You", Some("'Neighbour'")),
+            format!(
+                "[secondlife:///app/agent/{}/inspect 'Neighbour']: hi",
+                agent.uuid()
+            )
+        );
     }
 
     /// Nearby recall lines render *above* the live lines, and only the Nearby tab

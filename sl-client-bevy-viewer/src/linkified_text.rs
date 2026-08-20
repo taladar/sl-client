@@ -761,6 +761,7 @@ mod tests {
             username: Some("first.last".to_owned()),
             display_name: Some("Coolname".to_owned()),
             is_display_name_default: false,
+            alias: None,
         };
         assert_eq!(
             agent_label(&custom, AgentNameStyle::Complete),
@@ -781,6 +782,7 @@ mod tests {
             username: Some("first.last".to_owned()),
             display_name: Some("First Last".to_owned()),
             is_display_name_default: true,
+            alias: None,
         };
         assert_eq!(
             agent_label(&default, AgentNameStyle::Complete),

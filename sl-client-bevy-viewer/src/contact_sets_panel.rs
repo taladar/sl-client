@@ -14,9 +14,11 @@
 //!
 //! # What it does
 //!
-//! - The **set chooser** lists every set, above the two pseudo-sets the
-//!   reference offers: *All Sets* (everyone filed anywhere) and *No Sets*
-//!   (friends filed nowhere — the list to work through when starting out).
+//! - The **set chooser** lists every set, above the three pseudo-sets the
+//!   reference offers: *All Sets* (everyone filed anywhere), *No Sets*
+//!   (friends filed nowhere — the list to work through when starting out) and
+//!   *Pseudonyms* (everyone the user has given an alias, who need not be in any
+//!   set at all).
 //! - **New Set…** raises the reference's own `AddNewContactSet` prompt;
 //!   **Delete Set** its `RemoveContactSet` confirmation; **Configure…** opens the
 //!   set's settings floater, where it is renamed and recoloured (the reference's
@@ -25,6 +27,11 @@
 //! - **Add Resident…** files someone chosen in the shared
 //!   [avatar picker](crate::avatar_picker); **Move to Set…** opens the
 //!   add-to-set floater in move mode; **Remove from Set** confirms first.
+//! - **Set Alias… / Rem Alias… / Rem DN…** are the reference's three pseudonym
+//!   buttons: the first raises its `SetAvatarPseudonym` prompt, the other two
+//!   clear an alias and suppress a display name. What they change is not shown
+//!   here alone — an alias is mirrored into the name cache, so the person is
+//!   renamed everywhere at once ([`crate::contact_sets`]).
 //! - Each member row is **tinted with that person's set colour**
 //!   ([`ContactSets::color_of`]) — the same answer the radar, name tags and chat
 //!   will read once they colour by set, so what the panel shows is what the rest
@@ -49,7 +56,8 @@ use sl_client_bevy::{AgentKey, Command, SlCommand};
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::contact_sets::{
-    ALL_SETS_LABEL, ContactSets, NO_SETS_LABEL, RequestContactSet, apply_contact_set_requests,
+    ALL_SETS_LABEL, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY, RequestContactSet,
+    apply_contact_set_requests,
 };
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -201,10 +209,14 @@ fn sort_rows(rows: &mut [MemberRow], keys: &[(&str, bool)]) {
     });
 }
 
-/// The set-chooser options: the two pseudo-sets first (they always work, even
+/// The set-chooser options: the three pseudo-sets first (they always work, even
 /// with no sets at all), then every real set in name order.
 fn chooser_options(sets: &ContactSets) -> Vec<String> {
-    let mut options = vec![ALL_SETS_LABEL.to_owned(), NO_SETS_LABEL.to_owned()];
+    let mut options = vec![
+        ALL_SETS_LABEL.to_owned(),
+        NO_SETS_LABEL.to_owned(),
+        PSEUDONYMS_KEY.to_owned(),
+    ];
     options.extend(sets.sets().map(|set| set.name().to_owned()));
     options
 }
@@ -348,6 +360,14 @@ enum PendingAction {
         /// The resident.
         agent: AgentKey,
     },
+    /// A resident is being given an alias, once the prompt is answered.
+    SetAlias {
+        /// The resident.
+        agent: AgentKey,
+        /// The best name the raising surface knew for them, remembered with the
+        /// alias so an aliased person filed nowhere is still identifiable.
+        name: String,
+    },
 }
 
 /// The agent a pooled row currently presents.
@@ -375,6 +395,12 @@ enum ContactSetsButton {
     Im,
     /// Offer the selected member a teleport.
     OfferTeleport,
+    /// Prompt for an alias to show the selected member under.
+    SetAlias,
+    /// Drop the selected member's alias.
+    ClearAlias,
+    /// Show the selected member's legacy name instead of their display name.
+    RemoveDisplayName,
 }
 
 impl ContactSetsButton {
@@ -390,6 +416,9 @@ impl ContactSetsButton {
             Self::Profile => "contact-sets-action-profile",
             Self::Im => "contact-sets-action-im",
             Self::OfferTeleport => "contact-sets-action-teleport",
+            Self::SetAlias => "contact-sets-action-set-alias",
+            Self::ClearAlias => "contact-sets-action-clear-alias",
+            Self::RemoveDisplayName => "contact-sets-action-remove-display-name",
         }
     }
 }
@@ -413,6 +442,19 @@ enum ConfigButton {
     Rename,
     /// Close the floater.
     Close,
+}
+
+/// Ask for the "give this resident an alias" prompt (the reference's
+/// `SetAvatarPseudonym`). The panel's **Set Alias…** and the avatar pie's
+/// **Add ▸ Set Alias** both write it, so the prompt is raised — and answered —
+/// in one place.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct OpenSetPseudonym {
+    /// The resident to alias.
+    pub(crate) agent: AgentKey,
+    /// The best name the opening surface knows for them, shown in the prompt and
+    /// remembered beside the alias.
+    pub(crate) name: String,
 }
 
 /// Ask for the add-to-set floater, for one resident. The avatar pie's
@@ -444,6 +486,7 @@ impl Plugin for ContactSetsPanelPlugin {
             .init_resource::<PendingRename>()
             .init_resource::<PendingAction>()
             .add_message::<OpenAddToContactSet>()
+            .add_message::<OpenSetPseudonym>()
             .add_systems(
                 Startup,
                 (
@@ -460,6 +503,7 @@ impl Plugin for ContactSetsPanelPlugin {
                     sync_chooser_options,
                     handle_chooser_picks,
                     handle_open_add_to_set,
+                    handle_open_set_pseudonym,
                     handle_contact_set_picks,
                     handle_contact_set_colors,
                     handle_contact_set_notifications,
@@ -647,6 +691,9 @@ fn spawn_contact_sets_panel(
         ContactSetsButton::Profile,
         ContactSetsButton::Im,
         ContactSetsButton::OfferTeleport,
+        ContactSetsButton::SetAlias,
+        ContactSetsButton::ClearAlias,
+        ContactSetsButton::RemoveDisplayName,
     ] {
         spawn_panel_button(&mut commands, actions, button);
     }
@@ -1107,6 +1154,8 @@ fn build_rows(
         friends.roster().into_iter().collect();
     let agents: Vec<AgentKey> = if choice == ALL_SETS_LABEL {
         sets.everyone_filed()
+    } else if choice == PSEUDONYMS_KEY {
+        sets.everyone_aliased()
     } else if choice == NO_SETS_LABEL {
         let mut unfiled: Vec<AgentKey> = roster
             .keys()
@@ -1123,9 +1172,11 @@ fn build_rows(
     let total = agents.len();
     rows.clear();
     rows.extend(agents.into_iter().filter_map(|agent| {
+        // The **shown** label: an aliased person is listed under the name the
+        // user gave them, quoted, exactly as the rest of the viewer now shows
+        // them ([`crate::contact_sets`]'s name-cache hook).
         let name = sets
-            .label_of(agent)
-            .map(ToOwned::to_owned)
+            .shown_label_of(agent)
             .or_else(|| roster.get(&agent).cloned())
             .unwrap_or_else(|| short_id(agent));
         matches_filter(&name, filter).then(|| MemberRow {
@@ -1234,8 +1285,9 @@ fn on_member_row_press(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy observer's parameters are its injected resources: the button pool, the \
-              sets and the view / selection the actions read, and the five channels the nine \
-              buttons write (prompts, picker, floaters, profile, IM, teleport)"
+              sets and the view / selection the actions read, and the channels the twelve \
+              buttons write (prompts, picker, floaters, aliases, requests, profile, IM, \
+              teleport)"
 )]
 fn on_panel_button_press(
     mut press: On<Pointer<Press>>,
@@ -1247,6 +1299,8 @@ fn on_panel_button_press(
     mut notifications: MessageWriter<ShowNotification>,
     mut pickers: MessageWriter<OpenAvatarPicker>,
     mut adds: MessageWriter<OpenAddToContactSet>,
+    mut aliases: MessageWriter<OpenSetPseudonym>,
+    mut requests: MessageWriter<RequestContactSet>,
     mut config: ResMut<ConfigTarget>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut conversations: MessageWriter<OpenConversation>,
@@ -1337,6 +1391,38 @@ fn on_panel_button_press(
                 }));
             }
         }
+        ContactSetsButton::SetAlias => {
+            if let Some(agent) = selected.0 {
+                aliases.write(OpenSetPseudonym {
+                    agent,
+                    name: sets
+                        .label_of(agent)
+                        .map_or_else(|| short_id(agent), ToOwned::to_owned),
+                });
+            }
+        }
+        ContactSetsButton::ClearAlias => {
+            // Nothing to clear is nothing to do — as with Delete Set on a
+            // pseudo-set, the button is simply inert until it applies.
+            if let Some(agent) = selected.0
+                && sets.has_alias(agent)
+            {
+                requests.write(RequestContactSet::ClearPseudonym { agent });
+            }
+        }
+        ContactSetsButton::RemoveDisplayName => {
+            if let Some(agent) = selected.0
+                && !sets.has_display_name_removed(agent)
+            {
+                requests.write(RequestContactSet::RemoveDisplayName {
+                    agent,
+                    name: sets
+                        .label_of(agent)
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_default(),
+                });
+            }
+        }
     }
 }
 
@@ -1414,6 +1500,29 @@ fn handle_open_add_to_set(
         if let Ok(mut shown) = panels.get_mut(ui.panel) {
             shown.0 = true;
         }
+    }
+}
+
+/// Raise the reference's `SetAvatarPseudonym` prompt for one resident, and
+/// remember who it is about until it is answered. Only the **last** request of a
+/// frame stands: the prompt has one text field, so two pending aliases would
+/// give the second one's answer to the first.
+fn handle_open_set_pseudonym(
+    mut requests: MessageReader<OpenSetPseudonym>,
+    mut pending: ResMut<PendingAction>,
+    mut notifications: MessageWriter<ShowNotification>,
+) {
+    for request in requests.read() {
+        let label = if request.name.is_empty() {
+            short_id(request.agent)
+        } else {
+            request.name.clone()
+        };
+        *pending = PendingAction::SetAlias {
+            agent: request.agent,
+            name: label.clone(),
+        };
+        notifications.write(ShowNotification::new("SetAvatarPseudonym").arg("AVATAR", label));
     }
 }
 
@@ -1755,6 +1864,29 @@ fn handle_contact_set_notifications(
                     requests.write(RequestContactSet::Remove { name });
                 }
             }
+            "SetAvatarPseudonym" => {
+                let taken = core::mem::take(&mut *pending);
+                let PendingAction::SetAlias { agent, name } = taken else {
+                    continue;
+                };
+                if response.button != Some("Create") {
+                    continue;
+                }
+                let alias = response
+                    .input
+                    .as_deref()
+                    .map(str::trim)
+                    .unwrap_or_default()
+                    .to_owned();
+                if alias.is_empty() {
+                    continue;
+                }
+                // The list is not switched to the Pseudonyms pseudo-set: the
+                // aliased person is renamed in place wherever they already show,
+                // which is the feedback the action wants — and the prompt is
+                // just as often raised from the avatar pie, with no panel open.
+                requests.write(RequestContactSet::SetPseudonym { agent, alias, name });
+            }
             "RemoveContactFromSet" => {
                 let taken = core::mem::take(&mut *pending);
                 let PendingAction::RemoveMember { set, agent } = taken else {
@@ -1772,7 +1904,9 @@ fn handle_contact_set_notifications(
 #[cfg(test)]
 mod tests {
     use super::{MemberRow, chooser_options, is_real_set, matches_filter, short_id, sort_rows};
-    use crate::contact_sets::{ALL_SETS_LABEL, ContactSetRefusal, ContactSets, NO_SETS_LABEL};
+    use crate::contact_sets::{
+        ALL_SETS_LABEL, ContactSetRefusal, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY,
+    };
     use bevy::prelude::Color;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, Uuid};
@@ -1835,7 +1969,11 @@ mod tests {
         let mut sets = ContactSets::default();
         assert_eq!(
             chooser_options(&sets),
-            [ALL_SETS_LABEL.to_owned(), NO_SETS_LABEL.to_owned()],
+            [
+                ALL_SETS_LABEL.to_owned(),
+                NO_SETS_LABEL.to_owned(),
+                PSEUDONYMS_KEY.to_owned(),
+            ],
             "the pseudo-sets work even with no sets at all"
         );
         sets.create_set("Zulu")?;
@@ -1845,6 +1983,7 @@ mod tests {
             [
                 ALL_SETS_LABEL.to_owned(),
                 NO_SETS_LABEL.to_owned(),
+                PSEUDONYMS_KEY.to_owned(),
                 "Builders".to_owned(),
                 "Zulu".to_owned(),
             ]
@@ -1852,6 +1991,10 @@ mod tests {
         assert!(is_real_set(&sets, "Builders"));
         assert!(!is_real_set(&sets, ALL_SETS_LABEL));
         assert!(!is_real_set(&sets, NO_SETS_LABEL));
+        assert!(
+            !is_real_set(&sets, PSEUDONYMS_KEY),
+            "the alias listing is not a set the buttons may change"
+        );
         Ok(())
     }
 

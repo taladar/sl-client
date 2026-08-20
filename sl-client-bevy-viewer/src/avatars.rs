@@ -373,10 +373,32 @@ pub(crate) struct NameTag {
     pub(crate) tag_height: f32,
 }
 
+/// The user's **own** naming of a resident, overriding what the grid answers:
+/// a contact-set pseudonym or display-name removal
+/// ([`crate::contact_sets`], `viewer-contact-set-pseudonyms`).
+///
+/// It is mirrored into the name cache rather than consulted beside it, so every
+/// surface that resolves a name through a [`NameRecord`] — name tags, the radar,
+/// tooltips, the inspectors, linkified names — shows the alias without knowing
+/// that contact sets exist. The grid's own answer is never overwritten; it stays
+/// in the record's fields and [`NameRecord::grid_name`] returns it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum NameAlias {
+    /// Show this text in place of the resident's name. It carries the
+    /// reference's **quoted** form (`'Nickname'`), which is what keeps an alias
+    /// from being read as the grid's own answer.
+    Pseudonym(String),
+    /// Show this resident's legacy name only — the reference's display-name
+    /// removal (`hasDisplayNameRemoved`), for someone whose chosen display name
+    /// the user would rather not see.
+    LegacyOnly,
+}
+
 /// One agent's resolved names, merged from every source: the instant
 /// `ObjectUpdate` NameValue seed, the legacy `UUIDNameReply`, and the
 /// `GetDisplayNames` cap (SL only — OpenSim generally lacks the cap, so the
-/// legacy fields must always work on their own).
+/// legacy fields must always work on their own) — plus the user's own
+/// [alias](NameAlias) for them, if they gave one.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct NameRecord {
     /// The legacy `"First Last"` name (`"First"` alone for a single-name
@@ -390,13 +412,53 @@ pub(crate) struct NameRecord {
     /// display name shows with the username line under it, the reference's
     /// `is_display_name_default` behaviour).
     pub(crate) is_display_name_default: bool,
+    /// The user's own name for this resident, mirrored from the contact-set
+    /// store by [`crate::contact_sets::apply_name_aliases`]. Not a grid answer,
+    /// and never written by an ingest path.
+    pub(crate) alias: Option<NameAlias>,
 }
 
 impl NameRecord {
-    /// The name the tag's main line shows: the display name when one
-    /// resolved, else the legacy name.
+    /// The name to show for this resident: the user's own alias when they gave
+    /// one, else the display name when one resolved, else the legacy name.
     pub(crate) fn preferred_name(&self) -> Option<&str> {
+        match self.alias {
+            Some(NameAlias::Pseudonym(ref shown)) => Some(shown),
+            Some(NameAlias::LegacyOnly) => self.legacy.as_deref(),
+            None => self.grid_name(),
+        }
+    }
+
+    /// [`Self::preferred_name`] with display names switched off (the name tags'
+    /// `ShowDisplayNames`): the legacy name, but a **pseudonym still wins** —
+    /// the toggle says which of the grid's two names to believe, and an alias is
+    /// not one of the grid's answers.
+    pub(crate) fn legacy_display_name(&self) -> Option<&str> {
+        match self.alias {
+            Some(NameAlias::Pseudonym(ref shown)) => Some(shown),
+            Some(NameAlias::LegacyOnly) | None => self.legacy.as_deref(),
+        }
+    }
+
+    /// The **grid's** own answer, with no alias applied — what a surface shows
+    /// when the person's real identity is the point (a profile), and what a
+    /// name filed in a store must remember.
+    pub(crate) fn grid_name(&self) -> Option<&str> {
         self.display_name.as_deref().or(self.legacy.as_deref())
+    }
+
+    /// Whether the shown name is something other than this resident's legacy
+    /// name — a custom display name, or a pseudonym. It is what puts the
+    /// username line under a name tag: the shown name does not say who this is,
+    /// so the username has to.
+    pub(crate) const fn has_custom_display_name(&self) -> bool {
+        match self.alias {
+            Some(NameAlias::Pseudonym(_)) => true,
+            // The point of display-name removal is to be shown the legacy name,
+            // which is the one name that needs no username under it.
+            Some(NameAlias::LegacyOnly) => false,
+            None => self.display_name.is_some() && !self.is_display_name_default,
+        }
     }
 }
 
@@ -588,6 +650,12 @@ pub(crate) struct AvatarState {
     /// a repeatedly-seen avatar from being re-requested; merged from the
     /// NameValue seed, the legacy `UUIDNameReply` and the display-name cap.
     names: HashMap<AgentKey, NameRecord>,
+    /// The user's own [aliases](NameAlias), mirrored from the contact-set store
+    /// by [`crate::contact_sets::apply_name_aliases`]. Held beside the records
+    /// (as well as folded into them) so an avatar seen *after* the alias was
+    /// given still shows it: [`Self::name_entry`] folds it in as the record is
+    /// created. Session state — the store is what persists.
+    name_aliases: HashMap<AgentKey, NameAlias>,
     /// Group titles from each avatar object's NameValue `Title` — the classic
     /// mechanism the reference reads for other avatars' tags. (The own
     /// avatar's fresher title comes from `ActiveGroupChanged` via
@@ -1643,6 +1711,39 @@ impl AvatarState {
         self.names.get(&agent)
     }
 
+    /// The name to **show** for this agent — the user's alias, else the display
+    /// name, else the legacy name — or `None` while nothing has resolved.
+    ///
+    /// This is the accessor a drawn name wants; [`Self::name_of`] is the grid's
+    /// legacy answer, which is what a wire action (a mute entry naming the muted
+    /// avatar) has to carry.
+    pub(crate) fn shown_name_of(&self, agent: AgentKey) -> Option<&str> {
+        self.names.get(&agent).and_then(NameRecord::preferred_name)
+    }
+
+    /// Replace the user's name aliases, re-folding every cached record so a
+    /// pseudonym given (or cleared) now shows (or stops showing) everywhere at
+    /// once. The one way an alias reaches the name cache.
+    pub(crate) fn set_name_aliases(&mut self, aliases: HashMap<AgentKey, NameAlias>) {
+        for (agent, record) in &mut self.names {
+            record.alias = aliases.get(agent).cloned();
+        }
+        self.name_aliases = aliases;
+    }
+
+    /// The record for `agent`, created if this is the first thing known about
+    /// them, with the user's alias folded in — the one way an ingest path takes
+    /// a record, so a name that arrives after the alias was given is aliased
+    /// too.
+    fn name_entry(&mut self, agent: AgentKey) -> &mut NameRecord {
+        let alias = self.name_aliases.get(&agent).cloned();
+        let record = self.names.entry(agent).or_default();
+        if record.alias != alias {
+            record.alias = alias;
+        }
+        record
+    }
+
     /// This agent's group title (from its avatar object's NameValue `Title`),
     /// if it has one.
     pub(crate) fn title_of(&self, agent: AgentKey) -> Option<&str> {
@@ -1941,7 +2042,7 @@ impl AvatarState {
                 _ => first,
             };
             if !legacy.is_empty() {
-                let record = self.names.entry(agent).or_default();
+                let record = self.name_entry(agent);
                 if record.legacy.is_none() {
                     record.legacy = Some(legacy);
                 }
@@ -1980,7 +2081,7 @@ impl AvatarState {
         if resolved.missing {
             return false;
         }
-        let record = self.names.entry(resolved.id).or_default();
+        let record = self.name_entry(resolved.id);
         record.legacy = Some(resolved.legacy_name());
         record.username = Some(resolved.username.clone());
         record.display_name = Some(resolved.display_name.clone());
@@ -2681,7 +2782,7 @@ impl AvatarState {
     fn set_name(&mut self, name: &AvatarName) {
         let agent = name.id;
         let resolved = name.legacy_name();
-        self.names.entry(agent).or_default().legacy = Some(resolved.clone());
+        self.name_entry(agent).legacy = Some(resolved.clone());
         debug!("resolved avatar name {agent} = {resolved:?}");
     }
 
@@ -5095,10 +5196,11 @@ pub(crate) fn apply_bom_face_materials(
 mod tests {
     use super::{
         AvatarEntities, AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics,
-        PROVISIONAL_ID_CHARS, SeatChainQuery, Seated, SeatedTarget, body_root_transform,
-        bom_face_alpha_mode, classify_bake_alpha, coarse_translation, drop_to_hips,
-        invisible_body_slots, provisional_label, root_drop_from_metrics, seat_world_transform,
-        seated_offset, should_refetch_bakes, used_baked_slots, visible_body_bakes,
+        HashMap, NameAlias, PROVISIONAL_ID_CHARS, SeatChainQuery, Seated, SeatedTarget,
+        body_root_transform, bom_face_alpha_mode, classify_bake_alpha, coarse_translation,
+        drop_to_hips, invisible_body_slots, provisional_label, root_drop_from_metrics,
+        seat_world_transform, seated_offset, should_refetch_bakes, used_baked_slots,
+        visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -5491,6 +5593,83 @@ mod tests {
         };
         assert!(!state.merge_display_name_record(&record));
         assert_eq!(state.label_text(agent), "Old Timer");
+    }
+
+    /// An alias renames someone everywhere a name is drawn, and nowhere a name
+    /// is *used*: the shown name becomes the quoted alias, the grid's own
+    /// answers stay exactly as they were, and the wire-facing accessor still
+    /// carries the legacy name.
+    #[test]
+    fn an_alias_renames_the_shown_name_only() -> Result<(), Box<dyn core::error::Error>> {
+        use sl_client_bevy::DisplayName;
+
+        let agent: super::AgentKey = super::Uuid::from_u128(0x54).into();
+        let mut state = AvatarState::default();
+        let resolved = DisplayName {
+            id: agent,
+            username: "avatar.tester".to_owned(),
+            display_name: "Shiny Name".to_owned(),
+            legacy_first_name: "Avatar".to_owned(),
+            legacy_last_name: "Tester".to_owned(),
+            is_display_name_default: false,
+            ..DisplayName::default()
+        };
+        assert!(state.merge_display_name_record(&resolved));
+
+        state.set_name_aliases(HashMap::from([(
+            agent,
+            NameAlias::Pseudonym("'Neighbour'".to_owned()),
+        )]));
+        assert_eq!(state.label_text(agent), "'Neighbour'");
+        assert_eq!(state.shown_name_of(agent), Some("'Neighbour'"));
+        assert_eq!(
+            state.name_of(agent),
+            Some("Avatar Tester"),
+            "a wire action still carries the grid's name"
+        );
+        let record = state.name_record(agent).ok_or("the record survives")?;
+        assert_eq!(record.grid_name(), Some("Shiny Name"));
+        assert_eq!(
+            record.legacy_display_name(),
+            Some("'Neighbour'"),
+            "display names off still shows the user's own name for them"
+        );
+        assert!(
+            record.has_custom_display_name(),
+            "so the username line shows"
+        );
+
+        // Display-name removal is the other kind: the legacy name, and no
+        // username line under it.
+        state.set_name_aliases(HashMap::from([(agent, NameAlias::LegacyOnly)]));
+        assert_eq!(state.label_text(agent), "Avatar Tester");
+        let record = state.name_record(agent).ok_or("the record survives")?;
+        assert!(!record.has_custom_display_name());
+
+        // Cleared: the grid's answer is back.
+        state.set_name_aliases(HashMap::new());
+        assert_eq!(state.label_text(agent), "Shiny Name");
+        Ok(())
+    }
+
+    /// An avatar first seen *after* the alias was given is aliased too — the
+    /// record the ingest path creates picks the alias up as it is made.
+    #[test]
+    fn an_alias_survives_a_record_that_did_not_exist_yet() {
+        let agent: super::AgentKey = super::Uuid::from_u128(0x55).into();
+        let mut state = AvatarState::default();
+        state.set_name_aliases(HashMap::from([(
+            agent,
+            NameAlias::Pseudonym("'Neighbour'".to_owned()),
+        )]));
+        state.seed_name_fields(
+            agent,
+            Some("Avatar".to_owned()),
+            Some("Tester".to_owned()),
+            None,
+        );
+        assert_eq!(state.label_text(agent), "'Neighbour'");
+        assert_eq!(state.name_of(agent), Some("Avatar Tester"));
     }
 
     /// A single-name ("Resident") account seeds as just the first name,

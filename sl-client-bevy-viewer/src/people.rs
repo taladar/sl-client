@@ -385,6 +385,11 @@ pub(crate) struct FriendsModel {
     friends: BTreeMap<FriendKey, FriendEntry>,
     /// Last-seen legacy display name per agent, for the row labels.
     names: BTreeMap<AgentKey, String>,
+    /// The name the user gave a friend instead, if any (already quoted, as the
+    /// name cache shows it) — mirrored from the contact-set store by
+    /// [`crate::contact_sets::apply_name_aliases`]. Kept beside the resolved
+    /// names rather than over them: a wire action still needs the real one.
+    aliases: BTreeMap<AgentKey, String>,
     /// The current multi-column sort order (persisted per avatar).
     sort: SortState,
     /// Bumped on each mutation; the view compares its last-built value to skip an
@@ -470,9 +475,30 @@ impl FriendsModel {
         }
     }
 
-    /// The resolved name for an agent, if known.
+    /// The resolved name for an agent, if known — the **grid's** answer, which
+    /// is what a wire action (a mute entry) has to carry.
     fn name_of(&self, id: AgentKey) -> Option<&str> {
         self.names.get(&id).map(String::as_str)
+    }
+
+    /// The name to **show** for an agent: the alias the user gave them, else the
+    /// resolved name.
+    fn shown_name_of(&self, id: AgentKey) -> Option<&str> {
+        self.aliases
+            .get(&id)
+            .or_else(|| self.names.get(&id))
+            .map(String::as_str)
+    }
+
+    /// Replace the mirrored aliases, rebuilding the list when they moved (an
+    /// alias given now renames that friend in the list at once). The one way in;
+    /// [`crate::contact_sets::apply_name_aliases`] is the caller.
+    pub(crate) fn set_name_aliases(&mut self, aliases: BTreeMap<AgentKey, String>) {
+        if self.aliases == aliases {
+            return;
+        }
+        self.aliases = aliases;
+        self.touch();
     }
 
     /// The model revision — a consumer that mirrors the roster (the friends-only
@@ -539,7 +565,7 @@ impl FriendsModel {
             .map(|(id, entry)| {
                 let agent = AgentKey::from(*id);
                 let name = self
-                    .name_of(agent)
+                    .shown_name_of(agent)
                     .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
                 FriendRow {
                     friend: *id,

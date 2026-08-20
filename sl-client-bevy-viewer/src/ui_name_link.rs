@@ -300,7 +300,9 @@ fn refresh_name_links(
             continue;
         }
         let resolved = match link.binding {
-            NameBinding::Set(OwnerKey::Agent(agent)) => avatars.name_of(agent).map(str::to_owned),
+            NameBinding::Set(OwnerKey::Agent(agent)) => {
+                avatars.shown_name_of(agent).map(str::to_owned)
+            }
             NameBinding::Set(OwnerKey::Group(group)) => groups.group_name(group).map(str::to_owned),
             NameBinding::Loading | NameBinding::Unset => None,
         };

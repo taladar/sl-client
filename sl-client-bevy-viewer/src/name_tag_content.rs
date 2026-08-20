@@ -549,19 +549,16 @@ pub(crate) fn compose_tag(
     colors: &TagColors,
 ) -> TagContent {
     // --- The whole-tag colour (the reference's precedence chain). ---
+    // A user-given alias counts as a custom name too: the shown name is not
+    // this person's legacy name, so it gets the mismatch colour and the
+    // username line under it (`viewer-contact-set-pseudonyms`).
     let has_custom_display_name = toggles.show_display_names
         && inputs
             .record
-            .is_some_and(|record| record.display_name.is_some() && !record.is_display_name_default);
-    let display_base = if !toggles.show_display_names
-        || inputs
-            .record
-            .is_none_or(|record| record.display_name.is_none())
-    {
-        // A legacy name and a matching display name share the base colour
-        // (the reference's NameTagLegacy / NameTagMatch, both White).
-        colors.default
-    } else if has_custom_display_name {
+            .is_some_and(crate::avatars::NameRecord::has_custom_display_name);
+    // A legacy name and a matching display name share the base colour (the
+    // reference's NameTagLegacy / NameTagMatch, both White).
+    let display_base = if has_custom_display_name {
         colors.mismatch
     } else {
         colors.default
@@ -629,7 +626,9 @@ pub(crate) fn compose_tag(
             if toggles.show_display_names {
                 record.preferred_name()
             } else {
-                record.legacy.as_deref()
+                // Display names off still shows a user-given alias: the toggle
+                // picks between the grid's two names, and an alias is neither.
+                record.legacy_display_name()
             }
         })
         .map_or_else(|| inputs.provisional.clone(), str::to_owned);
@@ -847,6 +846,7 @@ mod tests {
             username: Some("avatar.tester".to_owned()),
             display_name: Some("Shiny Name".to_owned()),
             is_display_name_default: false,
+            alias: None,
         }
     }
 

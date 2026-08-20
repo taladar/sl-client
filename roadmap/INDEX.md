@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 266 |
+| ready | 265 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 841 |
+| done | 842 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1348** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (266)
+## ready (265)
 
 ### protocol
 
@@ -372,8 +372,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   ad-hoc conference from a multi-selection
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
   — Consolidate the per-widget double-click interval constants
-- [`viewer-contact-set-pseudonyms`](ready/viewer-contact-set-pseudonyms.md) —
-  Contact sets — pseudonyms and display-name removal
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
@@ -1159,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (841)
+## done (842)
 
 ### protocol
 
@@ -1425,6 +1423,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
   — "\"Entity despawned\" command warnings during a plain scene run"
+- [`viewer-contact-set-pseudonyms`](done/viewer-contact-set-pseudonyms.md) —
+  Contact sets — pseudonyms and display-name removal
 - [`viewer-contact-sets`](done/viewer-contact-sets.md) — Contact sets — named,
   coloured contact groups (blocked by `viewer-social-people-panel` (done))
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
