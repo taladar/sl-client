@@ -200,13 +200,23 @@ add-to-contact-set-new = New Set…
 add-to-contact-set-cancel = Cancel
 
 ## The contact-set settings floater (viewer-contact-sets) — one set's name and
-## colour.
+## colour, and (viewer-contact-set-presence-extras) what else the set does.
 
 contact-set-config-title = { $name } settings
 contact-set-config-name = Set name
 contact-set-config-rename = Rename
 contact-set-config-color = Set colour
 contact-set-config-close = Close
+# Announce this set's members coming and going even with the global friend
+# notice off (it also needs the preferences row that allows the per-set path).
+contact-set-config-notify = Show online notices for this set
+# List this set's members online-first in the panel.
+contact-set-config-sort-online = Sort this set by online status
+# The three per-set canned replies: each overrides the global reply of that
+# mode for the people in this set.
+contact-set-config-reply-busy = Use a reply of this set's own when Unavailable
+contact-set-config-reply-autorespond = Use a reply of this set's own when autoresponding
+contact-set-config-reply-non-friends = Use a reply of this set's own for non-friends
 
 ## The Asset Blacklist floater (viewer-derender-blacklist) — everything this
 ## avatar has derendered (dropped from its own view), and the way back.
@@ -3501,6 +3511,9 @@ preferences-audio-device-default = System default
 # per-notification popup list.
 preferences-section-alert-headlines = Notices
 preferences-row-friend-online-toasts = Notify me when my friends log in or out
+# The per-set path (viewer-contact-set-presence-extras): with the row above off,
+# a contact set marked "Show notices for this set" is still announced.
+preferences-row-contact-set-online-toasts = … and for contact sets set to notify, even when that is off
 preferences-row-group-notice-toasts = Show a toast when a group notice arrives
 preferences-row-auto-accept-inventory = Automatically accept incoming inventory offers
 # The radar's enter / leave reports (viewer-avatar-radar): opt-in per-avatar

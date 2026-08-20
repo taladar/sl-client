@@ -165,6 +165,12 @@ pub(crate) fn build_alerts_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_checkbox(
         commands,
         panel,
+        "preferences-row-contact-set-online-toasts",
+        SettingBinding::account(crate::people::SETTING_CONTACT_SET_NOTIFY),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
         "preferences-row-group-notice-toasts",
         SettingBinding::account(crate::group_notice::SETTING_GROUP_NOTICE_TOASTS),
     );

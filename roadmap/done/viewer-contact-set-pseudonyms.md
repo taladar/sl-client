@@ -90,3 +90,6 @@ Deliberately not built: the reference's multi-select
 member), and greying the three buttons when they do not apply — the panel
 has nine older buttons that are inert in the same way, and greying three
 of twelve would read as a bug.
+
+**Resolved 2026-08-20** by [[viewer-contact-set-presence-extras]], which
+greys **all twelve** — so the objection above no longer holds.

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 265 |
+| ready | 264 |
 | blocked | 67 |
 | in-progress | 16 |
-| bugs | 30 |
-| done | 843 |
+| bugs | 31 |
+| done | 844 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1350** |
+| **total** | **1351** |
 
 ## ideas (93)
 
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (265)
+## ready (264)
 
 ### protocol
 
@@ -372,8 +372,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   ad-hoc conference from a multi-selection
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
   — Consolidate the per-widget double-click interval constants
-- [`viewer-contact-set-presence-extras`](ready/viewer-contact-set-presence-extras.md)
-  — Contact sets — per-set autoresponse and notify settings
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
@@ -1082,7 +1080,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (30)
+## bugs (31)
 
 ### protocol
 
@@ -1107,6 +1105,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
+- [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
+  can stop dropping down (seen on the contact-sets chooser)
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
@@ -1158,7 +1158,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (843)
+## done (844)
 
 ### protocol
 
@@ -1424,6 +1424,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
   — "\"Entity despawned\" command warnings during a plain scene run"
+- [`viewer-contact-set-presence-extras`](done/viewer-contact-set-presence-extras.md)
+  — Contact sets — per-set autoresponse and notify settings
 - [`viewer-contact-set-pseudonyms`](done/viewer-contact-set-pseudonyms.md) —
   Contact sets — pseudonyms and display-name removal
 - [`viewer-contact-sets`](done/viewer-contact-sets.md) — Contact sets — named,

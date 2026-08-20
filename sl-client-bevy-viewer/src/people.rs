@@ -273,6 +273,14 @@ const FRIENDS_WIDTHS_SETTING: &str = "friends_widths";
 /// with the other notification preferences.
 pub(crate) const SETTING_FRIEND_NOTIFY: &str = "ChatOnlineNotification";
 
+/// The account setting that lets a **contact set** ask for its members' online /
+/// offline toasts even while [`SETTING_FRIEND_NOTIFY`] is off (the reference
+/// `FSContactSetsNotificationToast`, default off — one opts in to the per-set
+/// path deliberately). The per-set flag itself lives on the set
+/// ([`crate::contact_sets::ContactSets::notifies`]); this is the master switch
+/// over all of them, so the feature can be turned off without editing every set.
+pub(crate) const SETTING_CONTACT_SET_NOTIFY: &str = "ContactSetsNotificationToast";
+
 /// The friends list, expressed for the reusable table widget. The Name and Status
 /// columns are widget-owned **text** cells (Name gains the locale ellipsis); the
 /// two permission groups are widget **custom** columns the People code fills with
@@ -524,6 +532,15 @@ impl FriendsModel {
     /// who already is one, matching the reference viewer's `on_enable`.
     pub(crate) fn is_friend(&self, agent: AgentKey) -> bool {
         self.friends.contains_key(&FriendKey::from(agent.uuid()))
+    }
+
+    /// Whether `agent` is a friend the grid last reported **online**. Someone
+    /// who is not a friend at all is not online as far as this model knows — the
+    /// buddy cache is the only presence the protocol gives us.
+    pub(crate) fn is_online(&self, agent: AgentKey) -> bool {
+        self.friends
+            .get(&FriendKey::from(agent.uuid()))
+            .is_some_and(|entry| entry.online)
     }
 
     /// The whole roster as `(agent, display label)` pairs, name order — the
@@ -2109,6 +2126,12 @@ fn register_people_settings(settings: Option<ResMut<ViewerSettings>>) {
         SettingValue::Bool(true),
         "Show a toast when a friend comes online or goes offline",
     );
+    settings.register_in(
+        &[crate::notifications::NOTIFICATIONS_SECTION],
+        SETTING_CONTACT_SET_NOTIFY,
+        SettingValue::Bool(false),
+        "Show that toast for contact sets marked to notify, even when the above is off",
+    );
 }
 
 /// Raise a `FriendOnlineOffline` tip as friends come and go — the reference's
@@ -2119,9 +2142,16 @@ fn register_people_settings(settings: Option<ResMut<ViewerSettings>>) {
 /// back to the short-id placeholder exactly like the list rows, so the
 /// post-login burst (one `OnlineNotification` per online friend) never blocks
 /// on name resolution.
+///
+/// With the global toggle off there is still the **per-set** path
+/// (`viewer-contact-set-presence-extras`): a friend in a contact set marked to
+/// notify is announced anyway, provided [`SETTING_CONTACT_SET_NOTIFY`] is on —
+/// the reference's own two-part gate in `llnotificationtiphandler`, which is why
+/// the decision is per friend rather than one early return.
 fn notify_friend_presence(
     mut events: MessageReader<SlEvent>,
     model: Res<FriendsModel>,
+    sets: Option<Res<crate::contact_sets::ContactSets>>,
     settings: Option<Res<ViewerSettings>>,
     translator: Translator,
     mut show: MessageWriter<crate::notifications::ShowNotification>,
@@ -2130,13 +2160,17 @@ fn notify_friend_presence(
         .as_deref()
         .and_then(|settings| settings.store().get_bool(SETTING_FRIEND_NOTIFY).ok())
         .unwrap_or(true);
+    let by_set = settings
+        .as_deref()
+        .and_then(|settings| settings.store().get_bool(SETTING_CONTACT_SET_NOTIFY).ok())
+        .unwrap_or(false);
     for event in events.read() {
         let (friends, online) = match &event.0 {
             SlSessionEvent::FriendsOnline(friends) => (friends, true),
             SlSessionEvent::FriendsOffline(friends) => (friends, false),
             _other => continue,
         };
-        if !enabled {
+        if !enabled && !by_set {
             continue;
         }
         let status = translator.get(if online {
@@ -2146,6 +2180,9 @@ fn notify_friend_presence(
         });
         for friend in friends {
             let agent = AgentKey::from(*friend);
+            if !enabled && !sets.as_deref().is_some_and(|sets| sets.notifies(agent)) {
+                continue;
+            }
             let name = model
                 .name_of(agent)
                 .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);

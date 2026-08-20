@@ -293,6 +293,22 @@ fn toggle_combo_popover(
     if press.button != PointerButton::Primary {
         return;
     }
+    // The open/close decision, logged for `viewer-combo-stops-opening` — a combo
+    // that stops dropping down has exactly four possible causes, and this line
+    // says which: it is disabled, one of its popovers is still open (so the
+    // press closes rather than opens), it has no options to list, or none of
+    // those and the popover is being built but not seen. Absent the line
+    // entirely, the press never reached the combo at all. `debug!`, so it costs
+    // nothing until asked for with
+    // `RUST_LOG=sl_client_bevy_viewer::ui_combo=debug`.
+    tracing::debug!(
+        anchor = ?press.entity,
+        disabled = disabled.contains(press.entity),
+        open_popovers = popovers.iter().count(),
+        mine_open = popovers.iter().any(|(_entity, marker)| marker.combo == press.entity),
+        options = anchors.get(press.entity).map(|options| options.labels.len()).ok(),
+        "combo press"
+    );
     // A disabled combo does not open — it consumes the press so the click lands
     // nowhere, but changes nothing (the reference's disabled-control behaviour).
     if disabled.contains(press.entity) {
@@ -316,6 +332,7 @@ fn toggle_combo_popover(
     let Ok(options) = anchors.get(anchor) else {
         return;
     };
+    tracing::debug!(rows = options.labels.len(), "building a combo popover");
     build_combo_popover(&mut commands, anchor, options);
 }
 

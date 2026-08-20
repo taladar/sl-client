@@ -47,6 +47,25 @@
 //! over the filed-name memo below, and a wire action still carries the grid's
 //! name ([`crate::avatars::AvatarState::name_of`]).
 //!
+//! # What a set *does*, beyond its colour
+//!
+//! Three per-set behaviours ride along with the colour
+//! (`viewer-contact-set-presence-extras`), each the reference's own field in the
+//! same file:
+//!
+//! - **Notify** — announce this set's members coming and going even when the
+//!   global friend online / offline notice is off ([`ContactSets::notifies`],
+//!   read by [`crate::people`]).
+//! - **Sort by online status** — list this set online-first in the panel.
+//! - **Per-set autoresponses** — a canned reply of this set's own for each of
+//!   the three answering modes ([`SetAutoresponseMode`]), consulted by
+//!   [`crate::presence`] *before* the global reply, so "my partner gets a
+//!   different Unavailable message" works.
+//!
+//! Someone may be in several sets, so the reply lookup needs the same rule the
+//! colour does, and uses it: [`ContactSets::autoresponse_for`] answers with the
+//! **smallest** set that has one, ties broken by name.
+//!
 //! # Names
 //!
 //! A set outlives everyone's presence — most of its members are nowhere near you
@@ -166,7 +185,52 @@ const NEW_SET_COLORS: &[Color] = &[
 // The model.
 // ---------------------------------------------------------------------------
 
-/// One contact set: a name, a colour, and the residents filed under it.
+/// Which canned reply a per-set autoresponse overrides — the reference's
+/// `ContactSetAutoresponseMode`. There is deliberately no entry for the *away*
+/// or *blocked* replies: the reference has none either, and both are statements
+/// about the user rather than about the sender.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetAutoresponseMode {
+    /// The Do Not Disturb (*Unavailable*) reply.
+    Busy,
+    /// The autorespond reply.
+    Autorespond,
+    /// The autorespond-to-non-friends reply.
+    NonFriends,
+}
+
+/// One per-set canned reply: whether it overrides the global one at all, and
+/// the text. Both are stored even when the override is off, so switching it back
+/// on does not lose what was typed (the reference stores them the same way).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct SetAutoresponse {
+    /// Whether this set's text is used in place of the global reply.
+    enabled: bool,
+    /// The reply text.
+    text: String,
+}
+
+impl SetAutoresponse {
+    /// Whether this set's text overrides the global reply.
+    pub(crate) const fn enabled(&self) -> bool {
+        self.enabled
+    }
+
+    /// The reply text, whether or not the override is on.
+    pub(crate) fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The text to actually answer with, or `None` when the override is off or
+    /// blank — a blank override would silence the reply rather than change it,
+    /// which is not what "use a custom reply for this set" means.
+    fn override_text(&self) -> Option<&str> {
+        (self.enabled && !self.text.is_empty()).then_some(self.text.as_str())
+    }
+}
+
+/// One contact set: a name, a colour, the residents filed under it, and the
+/// three behaviours the set carries.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ContactSet {
     /// The set's name, as the user typed it — also its key in the file.
@@ -175,9 +239,36 @@ pub(crate) struct ContactSet {
     color: Color,
     /// The residents in the set, ordered by id so the file is stable.
     members: BTreeSet<Uuid>,
+    /// Whether this set's members are announced coming and going even when the
+    /// global friend notice is off (the reference's `notify`).
+    notify: bool,
+    /// Whether the panel lists this set online-first (the reference's
+    /// `sort_by_online_status`).
+    sort_by_online_status: bool,
+    /// This set's override of the Do Not Disturb reply.
+    busy_reply: SetAutoresponse,
+    /// This set's override of the autorespond reply.
+    autorespond_reply: SetAutoresponse,
+    /// This set's override of the autorespond-to-non-friends reply.
+    non_friends_reply: SetAutoresponse,
 }
 
 impl ContactSet {
+    /// An empty set of that name and colour, with every behaviour off — the
+    /// shape both a fresh set and a read entry start from.
+    fn new(name: String, color: Color) -> Self {
+        Self {
+            name,
+            color,
+            members: BTreeSet::new(),
+            notify: false,
+            sort_by_online_status: false,
+            busy_reply: SetAutoresponse::default(),
+            autorespond_reply: SetAutoresponse::default(),
+            non_friends_reply: SetAutoresponse::default(),
+        }
+    }
+
     /// The set's name.
     pub(crate) fn name(&self) -> &str {
         &self.name
@@ -186,6 +277,34 @@ impl ContactSet {
     /// The set's colour.
     pub(crate) const fn color(&self) -> Color {
         self.color
+    }
+
+    /// Whether this set announces its members coming and going.
+    pub(crate) const fn notify(&self) -> bool {
+        self.notify
+    }
+
+    /// Whether the panel lists this set online-first.
+    pub(crate) const fn sorts_by_online_status(&self) -> bool {
+        self.sort_by_online_status
+    }
+
+    /// This set's override of one canned reply.
+    pub(crate) const fn autoresponse(&self, mode: SetAutoresponseMode) -> &SetAutoresponse {
+        match mode {
+            SetAutoresponseMode::Busy => &self.busy_reply,
+            SetAutoresponseMode::Autorespond => &self.autorespond_reply,
+            SetAutoresponseMode::NonFriends => &self.non_friends_reply,
+        }
+    }
+
+    /// This set's override of one canned reply, to write.
+    const fn autoresponse_mut(&mut self, mode: SetAutoresponseMode) -> &mut SetAutoresponse {
+        match mode {
+            SetAutoresponseMode::Busy => &mut self.busy_reply,
+            SetAutoresponseMode::Autorespond => &mut self.autorespond_reply,
+            SetAutoresponseMode::NonFriends => &mut self.non_friends_reply,
+        }
     }
 
     /// How many residents are in the set — the size the colour rule compares.
@@ -334,6 +453,34 @@ impl ContactSets {
             .map(ContactSet::color)
     }
 
+    /// Whether any set `agent` is filed under asks for their comings and goings
+    /// to be announced — the reference's `notifyForFriend`, read by the friend
+    /// online / offline notice ([`crate::people`]) as the *second* way a notice
+    /// can be enabled, beside the global toggle.
+    pub(crate) fn notifies(&self, agent: AgentKey) -> bool {
+        self.sets_of(agent)
+            .iter()
+            .filter_map(|name| self.sets.get(name))
+            .any(ContactSet::notify)
+    }
+
+    /// The reply `agent`'s sets answer with in `mode`, if one of them overrides
+    /// the global text: the **smallest** such set's, ties broken by set name —
+    /// the same rule (and the same reason) as [`Self::color_of`], and the
+    /// reference's own in `getAutoresponseForFriend`.
+    pub(crate) fn autoresponse_for(
+        &self,
+        agent: AgentKey,
+        mode: SetAutoresponseMode,
+    ) -> Option<&str> {
+        self.sets_of(agent)
+            .iter()
+            .filter_map(|name| self.sets.get(name))
+            .filter(|set| set.autoresponse(mode).override_text().is_some())
+            .min_by_key(|set| (set.member_count(), set.name.clone()))
+            .and_then(|set| set.autoresponse(mode).override_text())
+    }
+
     /// The best name known for `agent`: what the live name cache answered, else
     /// the name they were filed under, else `None` (the caller shows the id).
     ///
@@ -420,14 +567,7 @@ impl ContactSets {
             .nth(self.created)
             .unwrap_or(Color::WHITE);
         self.created = self.created.saturating_add(1);
-        let _replaced = self.sets.insert(
-            name.clone(),
-            ContactSet {
-                name,
-                color,
-                members: BTreeSet::new(),
-            },
-        );
+        let _replaced = self.sets.insert(name.clone(), ContactSet::new(name, color));
         self.touch();
         Ok(())
     }
@@ -476,6 +616,58 @@ impl ContactSets {
             return Ok(());
         }
         set.color = color;
+        self.touch();
+        Ok(())
+    }
+
+    /// Turn a set's online / offline announcement on or off.
+    pub(crate) fn set_notify(&mut self, name: &str, notify: bool) -> Result<(), ContactSetRefusal> {
+        let Some(set) = self.sets.get_mut(name) else {
+            return Err(ContactSetRefusal::UnknownSet);
+        };
+        if set.notify == notify {
+            return Ok(());
+        }
+        set.notify = notify;
+        self.touch();
+        Ok(())
+    }
+
+    /// Turn a set's online-first panel ordering on or off.
+    pub(crate) fn set_sort_by_online_status(
+        &mut self,
+        name: &str,
+        sort: bool,
+    ) -> Result<(), ContactSetRefusal> {
+        let Some(set) = self.sets.get_mut(name) else {
+            return Err(ContactSetRefusal::UnknownSet);
+        };
+        if set.sort_by_online_status == sort {
+            return Ok(());
+        }
+        set.sort_by_online_status = sort;
+        self.touch();
+        Ok(())
+    }
+
+    /// Set a set's override of one canned reply. The text is kept whether or not
+    /// the override is on, so turning it back on restores what was typed.
+    pub(crate) fn set_autoresponse(
+        &mut self,
+        name: &str,
+        mode: SetAutoresponseMode,
+        enabled: bool,
+        text: &str,
+    ) -> Result<(), ContactSetRefusal> {
+        let Some(set) = self.sets.get_mut(name) else {
+            return Err(ContactSetRefusal::UnknownSet);
+        };
+        let reply = set.autoresponse_mut(mode);
+        if reply.enabled == enabled && reply.text == text {
+            return Ok(());
+        }
+        reply.enabled = enabled;
+        text.clone_into(&mut reply.text);
         self.touch();
         Ok(())
     }
@@ -702,6 +894,31 @@ pub(crate) enum RequestContactSet {
         /// Its new colour.
         color: Color,
     },
+    /// Turn a set's online / offline announcement on or off.
+    SetNotify {
+        /// The set.
+        name: String,
+        /// Whether its members' comings and goings are announced.
+        notify: bool,
+    },
+    /// Turn a set's online-first panel ordering on or off.
+    SetSortByOnlineStatus {
+        /// The set.
+        name: String,
+        /// Whether the panel lists it online-first.
+        sort: bool,
+    },
+    /// Set a set's override of one canned reply.
+    SetAutoresponse {
+        /// The set.
+        name: String,
+        /// Which reply is overridden.
+        mode: SetAutoresponseMode,
+        /// Whether the override is on.
+        enabled: bool,
+        /// The reply text (kept even while the override is off).
+        text: String,
+    },
     /// File a resident under a set.
     Add {
         /// The set to file them under.
@@ -805,6 +1022,16 @@ pub(crate) fn apply_contact_set_requests(
             }
             RequestContactSet::Remove { name } => sets.remove_set(name),
             RequestContactSet::Recolor { name, color } => sets.recolor_set(name, *color),
+            RequestContactSet::SetNotify { name, notify } => sets.set_notify(name, *notify),
+            RequestContactSet::SetSortByOnlineStatus { name, sort } => {
+                sets.set_sort_by_online_status(name, *sort)
+            }
+            RequestContactSet::SetAutoresponse {
+                name,
+                mode,
+                enabled,
+                text,
+            } => sets.set_autoresponse(name, *mode, *enabled, text),
             RequestContactSet::Add { set, agent, name } => sets.add_member(set, *agent, name),
             RequestContactSet::RemoveMember { set, agent } => sets.remove_member(set, *agent),
             RequestContactSet::Move { from, to, agent } => sets.move_member(from, to, *agent),
@@ -914,10 +1141,21 @@ pub(crate) fn refresh_contact_set_names(
 // Persistence.
 // ---------------------------------------------------------------------------
 
-/// One set as it is written: the reference's `color` and `friends` members of a
-/// set entry. `friends` is a map of id → `""` rather than a list because that is
+/// One set as it is written: the reference's own members of a set entry, name
+/// for name. `friends` is a map of id → `""` rather than a list because that is
 /// what the reference writes (an LLSD map used as a set), and the point of the
 /// layout is that a transcribed file loads.
+///
+/// Every field is `#[serde(default)]` because a set written by an older build
+/// (or hand-transcribed) has only some of them, and a missing behaviour means
+/// "off" rather than a failed read.
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "this struct is the file format, not a model: one field per key the reference \
+              writes into a set entry. Folding the five flags into enums or sub-structs would \
+              change the on-disk layout, which is the whole point of the type — a set \
+              configured in Firestorm has to load here and back"
+)]
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct StoredSet {
     /// The set's colour as sRGB + alpha, the reference's `LLColor4` order.
@@ -926,6 +1164,30 @@ struct StoredSet {
     /// The members, as a map of id string → `""`.
     #[serde(default)]
     friends: BTreeMap<String, String>,
+    /// Whether the set announces its members coming and going.
+    #[serde(default)]
+    notify: bool,
+    /// Whether the panel lists the set online-first.
+    #[serde(default)]
+    sort_by_online_status: bool,
+    /// Whether the Do Not Disturb reply is overridden for this set.
+    #[serde(default)]
+    autoresponse_busy_enabled: bool,
+    /// This set's Do Not Disturb reply.
+    #[serde(default)]
+    autoresponse_busy: String,
+    /// Whether the autorespond reply is overridden for this set.
+    #[serde(default)]
+    autoresponse_mode_enabled: bool,
+    /// This set's autorespond reply.
+    #[serde(default)]
+    autoresponse_mode: String,
+    /// Whether the autorespond-to-non-friends reply is overridden for this set.
+    #[serde(default)]
+    autoresponse_nonfriends_enabled: bool,
+    /// This set's autorespond-to-non-friends reply.
+    #[serde(default)]
+    autoresponse_nonfriends: String,
 }
 
 /// The colour a set was stored with, as the model's [`Color`].
@@ -1044,14 +1306,23 @@ fn read_store(path: &Path) -> StoredContactSets {
                     .filter_map(|id| id.parse::<Uuid>().ok())
                     .collect();
                 let color = stored.color.map_or(Color::WHITE, color_from_stored);
-                let _replaced = read.sets.insert(
-                    key.clone(),
-                    ContactSet {
-                        name: key,
-                        color,
-                        members,
-                    },
-                );
+                let mut set = ContactSet::new(key.clone(), color);
+                set.members = members;
+                set.notify = stored.notify;
+                set.sort_by_online_status = stored.sort_by_online_status;
+                set.busy_reply = SetAutoresponse {
+                    enabled: stored.autoresponse_busy_enabled,
+                    text: stored.autoresponse_busy,
+                };
+                set.autorespond_reply = SetAutoresponse {
+                    enabled: stored.autoresponse_mode_enabled,
+                    text: stored.autoresponse_mode,
+                };
+                set.non_friends_reply = SetAutoresponse {
+                    enabled: stored.autoresponse_nonfriends_enabled,
+                    text: stored.autoresponse_nonfriends,
+                };
+                let _replaced = read.sets.insert(key, set);
             }
             Err(error) => warn!(key, %error, "skipping a contact-sets entry that is not a set"),
         }
@@ -1107,6 +1378,14 @@ fn store_value(sets: &ContactSets) -> BTreeMap<String, serde_json::Value> {
                 .iter()
                 .map(|member| (member.to_string(), String::new()))
                 .collect(),
+            notify: set.notify,
+            sort_by_online_status: set.sort_by_online_status,
+            autoresponse_busy_enabled: set.busy_reply.enabled,
+            autoresponse_busy: set.busy_reply.text.clone(),
+            autoresponse_mode_enabled: set.autorespond_reply.enabled,
+            autoresponse_mode: set.autorespond_reply.text.clone(),
+            autoresponse_nonfriends_enabled: set.non_friends_reply.enabled,
+            autoresponse_nonfriends: set.non_friends_reply.text.clone(),
         };
         if let Ok(value) = serde_json::to_value(stored) {
             let _replaced = top.insert(set.name.clone(), value);
@@ -1138,7 +1417,8 @@ fn insert_name_map(
 mod tests {
     use super::{
         ALL_SETS_LABEL, ContactSet, ContactSetRefusal, ContactSets, NAMES_KEY, NameAlias,
-        StoredContactSets, color_from_stored, read_names, store_value, stored_color,
+        SetAutoresponseMode, StoredContactSets, color_from_stored, read_names, store_value,
+        stored_color,
     };
     use bevy::prelude::Color;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -1420,6 +1700,182 @@ mod tests {
     #[test]
     fn malformed_member_names_are_ignored() {
         assert!(read_names(&serde_json::Value::Bool(true)).is_empty());
+    }
+
+    /// A per-set reply overrides the global one only when it is switched on and
+    /// non-blank, and the **smallest** set carrying one wins — the same rule the
+    /// colour uses, and the reference's own in `getAutoresponseForFriend`.
+    #[test]
+    fn the_smallest_set_with_a_reply_answers() -> Result<(), ContactSetRefusal> {
+        let mut sets = ContactSets::default();
+        sets.create_set("Big")?;
+        sets.create_set("Small")?;
+        for id in 1..=4 {
+            sets.add_member("Big", agent(id), "")?;
+        }
+        sets.add_member("Small", agent(1), "")?;
+
+        // Nothing configured: no override at all.
+        assert_eq!(
+            sets.autoresponse_for(agent(1), SetAutoresponseMode::Busy),
+            None
+        );
+
+        sets.set_autoresponse("Big", SetAutoresponseMode::Busy, true, "from the big set")?;
+        assert_eq!(
+            sets.autoresponse_for(agent(1), SetAutoresponseMode::Busy),
+            Some("from the big set"),
+            "the only set with a reply answers, whatever its size"
+        );
+
+        sets.set_autoresponse(
+            "Small",
+            SetAutoresponseMode::Busy,
+            true,
+            "from the small set",
+        )?;
+        assert_eq!(
+            sets.autoresponse_for(agent(1), SetAutoresponseMode::Busy),
+            Some("from the small set"),
+            "the smaller set is the more specific answer"
+        );
+        assert_eq!(
+            sets.autoresponse_for(agent(2), SetAutoresponseMode::Busy),
+            Some("from the big set"),
+            "someone only in the big set still gets its reply"
+        );
+
+        // A mode with no override falls through to the global reply (`None`).
+        assert_eq!(
+            sets.autoresponse_for(agent(1), SetAutoresponseMode::Autorespond),
+            None
+        );
+
+        // Switched off, or blank, is not an override — the global reply stands
+        // rather than the sender hearing nothing.
+        sets.set_autoresponse(
+            "Small",
+            SetAutoresponseMode::Busy,
+            false,
+            "from the small set",
+        )?;
+        assert_eq!(
+            sets.autoresponse_for(agent(1), SetAutoresponseMode::Busy),
+            Some("from the big set"),
+            "an override switched off falls back to the next set"
+        );
+        assert_eq!(
+            sets.set("Small").map(|set| set
+                .autoresponse(SetAutoresponseMode::Busy)
+                .text()
+                .to_owned()),
+            Some("from the small set".to_owned()),
+            "the text is kept, so switching it back on restores what was typed"
+        );
+        sets.set_autoresponse("Big", SetAutoresponseMode::Busy, true, "")?;
+        assert_eq!(
+            sets.autoresponse_for(agent(1), SetAutoresponseMode::Busy),
+            None,
+            "a blank override is not a reply"
+        );
+        Ok(())
+    }
+
+    /// Any set the resident is in asking to notify is enough — the reference's
+    /// `notifyForFriend`, which is an *or* across their sets.
+    #[test]
+    fn one_notifying_set_is_enough() -> Result<(), ContactSetRefusal> {
+        let mut sets = with_sets(2)?;
+        sets.add_member("Set 0", agent(1), "")?;
+        sets.add_member("Set 1", agent(1), "")?;
+        sets.add_member("Set 0", agent(2), "")?;
+        assert!(!sets.notifies(agent(1)), "off by default");
+
+        sets.set_notify("Set 1", true)?;
+        assert!(sets.notifies(agent(1)));
+        assert!(
+            !sets.notifies(agent(2)),
+            "someone in the other set alone is not announced"
+        );
+        assert!(!sets.notifies(agent(9)), "nor is someone in no set");
+
+        sets.set_notify("Set 1", false)?;
+        assert!(!sets.notifies(agent(1)));
+        assert_eq!(
+            sets.set_notify("Nowhere", true),
+            Err(ContactSetRefusal::UnknownSet)
+        );
+        Ok(())
+    }
+
+    /// The three behaviours round-trip through the reference's own field names,
+    /// and a set written without them (an older file, or one transcribed by
+    /// hand) reads as all-off rather than failing.
+    #[test]
+    fn the_behaviours_round_trip_in_the_reference_layout() -> Result<(), Box<dyn core::error::Error>>
+    {
+        let mut sets = ContactSets::default();
+        sets.create_set("Builders")?;
+        sets.set_notify("Builders", true)?;
+        sets.set_sort_by_online_status("Builders", true)?;
+        sets.set_autoresponse("Builders", SetAutoresponseMode::Busy, true, "busy text")?;
+        sets.set_autoresponse(
+            "Builders",
+            SetAutoresponseMode::Autorespond,
+            false,
+            "mode text",
+        )?;
+        sets.set_autoresponse(
+            "Builders",
+            SetAutoresponseMode::NonFriends,
+            true,
+            "non-friends text",
+        )?;
+        let json = serde_json::to_string(&store_value(&sets))?;
+        for key in [
+            "\"notify\"",
+            "\"sort_by_online_status\"",
+            "\"autoresponse_busy_enabled\"",
+            "\"autoresponse_busy\"",
+            "\"autoresponse_mode\"",
+            "\"autoresponse_nonfriends\"",
+        ] {
+            assert!(
+                json.contains(key),
+                "the reference key {key} is written: {json}"
+            );
+        }
+
+        let read = super::read_store(&write_temp(&json)?);
+        let builders = read.sets.get("Builders").ok_or("the set survived")?;
+        assert!(builders.notify());
+        assert!(builders.sorts_by_online_status());
+        let busy = builders.autoresponse(SetAutoresponseMode::Busy);
+        assert!(busy.enabled());
+        assert_eq!(busy.text(), "busy text");
+        let mode = builders.autoresponse(SetAutoresponseMode::Autorespond);
+        assert!(
+            !mode.enabled(),
+            "the switch survives independently of the text"
+        );
+        assert_eq!(mode.text(), "mode text");
+        assert_eq!(
+            builders
+                .autoresponse(SetAutoresponseMode::NonFriends)
+                .text(),
+            "non-friends text"
+        );
+
+        // A set entry with none of the behaviours (what an older file holds) is
+        // all-off, not a failed read.
+        let bare = super::read_store(&write_temp(
+            r#"{"Bare": {"color": [1.0, 1.0, 1.0, 1.0], "friends": {}}}"#,
+        )?);
+        let bare = bare.sets.get("Bare").ok_or("the bare set was read")?;
+        assert!(!bare.notify());
+        assert!(!bare.sorts_by_online_status());
+        assert!(!bare.autoresponse(SetAutoresponseMode::Busy).enabled());
+        Ok(())
     }
 
     /// An alias is shown quoted (never mistakable for the grid's answer), is

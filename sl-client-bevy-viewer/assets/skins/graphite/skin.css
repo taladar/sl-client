@@ -37,6 +37,7 @@
   /* Controls */
   --control-bg: #2a2f3a;
   --control-bg-hover: #353c4a;
+  --control-bg-disabled: #232730;
   --control-border: #66809e;
   --control-radius: 4px;
 

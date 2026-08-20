@@ -33,7 +33,10 @@ and the individual gated notices:
   [[viewer-money-economy-ui]].
 - **Friend online/offline to nearby chat**
   (`OnlineOfflinetoNearbyChat`, `ChatOnlineNotification`) — presence is
-  modelled ([[chat-b1]]); this adds the emitter.
+  modelled ([[chat-b1]]); this adds the emitter. Once it exists it also owes
+  the **per-set** half (`FSContactSetsNotificationNearbyChat`): one call to
+  `ContactSets::notifies`, the same gate the toast path already uses
+  ([[viewer-contact-set-presence-extras]]).
 - **Auto-accepted inventory logged to chat**
   (`FSLogAutoAcceptInventoryToChat`).
 - **Muted-group-chat / block reports**

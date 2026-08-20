@@ -50,6 +50,15 @@
 //! autorespond-to-non-friends (for a non-friend), then autorespond, then away
 //! (only with [`SETTING_SEND_AWAY_RESPONSE`] on).
 //!
+//! The **text** of that reply is not always the global one: a
+//! [contact set](crate::contact_sets) the sender is filed under may carry its
+//! own ([`crate::contact_sets::SetAutoresponseMode`]), and it wins — the
+//! reference's `getAutoresponseForFriend`, consulted before
+//! `gSavedPerAccountSettings`, which is what makes "my partner gets a different
+//! Unavailable message" work. Only the three *mode* replies can be overridden
+//! that way; the away and blocked replies are statements about the user, not
+//! about the sender, and the reference gives them no per-set layer either.
+//!
 //! A **blocked** sender is handled first and separately: with
 //! [`SETTING_SEND_MUTED_RESPONSE`] on they get the "you are blocked" reply and
 //! nothing else, and with it off they get no reply at all, whatever mode is on.
@@ -67,6 +76,7 @@ use sl_client_bevy::{
 };
 use sl_settings::SettingValue;
 
+use crate::contact_sets::{ContactSets, SetAutoresponseMode};
 use crate::conversations::{ConversationKey, ConversationModel, ConversationNotice};
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
@@ -203,6 +213,20 @@ pub(crate) enum ReplyMode {
     Autorespond,
     /// Away, with [`SETTING_SEND_AWAY_RESPONSE`] on.
     Away,
+}
+
+impl ReplyMode {
+    /// Which per-set override, if any, answers this mode. The away and blocked
+    /// replies have none — see the module doc.
+    #[must_use]
+    const fn set_override(self) -> Option<SetAutoresponseMode> {
+        match self {
+            Self::DoNotDisturb => Some(SetAutoresponseMode::Busy),
+            Self::Autorespond => Some(SetAutoresponseMode::Autorespond),
+            Self::AutorespondNonFriends => Some(SetAutoresponseMode::NonFriends),
+            Self::Muted | Self::Away => None,
+        }
+    }
 }
 
 /// The mode flags a reply decision reads — pulled out of the settings store and
@@ -507,8 +531,9 @@ fn apply_sit_on_away(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its dependencies: the event stream, the presence \
               state, the settings the replies come from, the friend and block lists the \
-              decision reads, the conversation model that says whether a session is already \
-              open, and the two streams it writes (the wire reply and the transcript notice)"
+              decision reads, the contact sets a per-set reply comes from, the conversation \
+              model that says whether a session is already open, and the two streams it writes \
+              (the wire reply and the transcript notice)"
 )]
 fn auto_respond_to_ims(
     mut events: MessageReader<SlEvent>,
@@ -516,6 +541,7 @@ fn auto_respond_to_ims(
     settings: Option<Res<ViewerSettings>>,
     friends: Option<Res<crate::people::FriendsModel>>,
     mutes: Option<Res<crate::mutes::MuteModel>>,
+    sets: Option<Res<ContactSets>>,
     conversations: Res<ConversationModel>,
     identity: Res<SlIdentity>,
     mut commands: MessageWriter<SlCommand>,
@@ -563,7 +589,9 @@ fn auto_respond_to_ims(
         if conversations.has_conversation(key) {
             continue;
         }
-        let Some(message) = reply_text(settings.as_deref(), mode) else {
+        let Some(message) =
+            reply_text(settings.as_deref(), sets.as_deref(), im.from_agent_id, mode)
+        else {
             continue;
         };
         commands.write(SlCommand(Command::AutoResponse {
@@ -582,9 +610,21 @@ fn bool_setting(settings: Option<&ViewerSettings>, name: &str) -> bool {
     settings.is_some_and(|settings| settings.store().get_bool(name).unwrap_or(false))
 }
 
-/// The configured reply text for a resolved [`ReplyMode`], or `None` when it is
-/// empty (a user who blanked the field wants no reply sent).
-fn reply_text(settings: Option<&ViewerSettings>, mode: ReplyMode) -> Option<String> {
+/// The reply text to answer `sender` with in a resolved [`ReplyMode`]: the
+/// override from the smallest contact set they are filed under that carries one,
+/// else the configured global text — or `None` when that is empty (a user who
+/// blanked the field wants no reply sent).
+fn reply_text(
+    settings: Option<&ViewerSettings>,
+    sets: Option<&ContactSets>,
+    sender: sl_client_bevy::AgentKey,
+    mode: ReplyMode,
+) -> Option<String> {
+    if let Some(set_mode) = mode.set_override()
+        && let Some(text) = sets.and_then(|sets| sets.autoresponse_for(sender, set_mode))
+    {
+        return Some(text.to_owned());
+    }
     let name = match mode {
         ReplyMode::Muted => SETTING_MUTED_RESPONSE,
         ReplyMode::DoNotDisturb => crate::preferences_chat::SETTING_BUSY_RESPONSE,
@@ -683,8 +723,8 @@ const fn direct_peer(key: ConversationKey) -> Option<sl_client_bevy::AgentKey> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AWAY_ANIMATION, DND_ANIMATION, MIN_AFK_SECS, PresenceState, ReplyMode, ReplyModes,
-        direct_peer, reply_for,
+        AWAY_ANIMATION, ContactSets, DND_ANIMATION, MIN_AFK_SECS, PresenceState, ReplyMode,
+        ReplyModes, SetAutoresponseMode, direct_peer, reply_for,
     };
     use crate::conversations::ConversationKey;
     use pretty_assertions::assert_eq;
@@ -812,6 +852,60 @@ mod tests {
             (state.away_secs - 30.0).abs() < f32::EPSILON,
             "a redundant set left the away clock alone"
         );
+    }
+
+    /// Only the three *mode* replies can be overridden per contact set: the away
+    /// and blocked texts are statements about the user, not about the sender.
+    #[test]
+    fn only_the_mode_replies_have_a_per_set_layer() {
+        assert_eq!(
+            ReplyMode::DoNotDisturb.set_override(),
+            Some(SetAutoresponseMode::Busy)
+        );
+        assert_eq!(
+            ReplyMode::Autorespond.set_override(),
+            Some(SetAutoresponseMode::Autorespond)
+        );
+        assert_eq!(
+            ReplyMode::AutorespondNonFriends.set_override(),
+            Some(SetAutoresponseMode::NonFriends)
+        );
+        assert_eq!(ReplyMode::Away.set_override(), None);
+        assert_eq!(ReplyMode::Muted.set_override(), None);
+    }
+
+    /// A contact set's own reply is answered with in place of the global one —
+    /// and with no settings store at all, which is what proves the per-set text
+    /// is consulted *before* the global reply rather than after it.
+    #[test]
+    fn a_per_set_reply_answers_before_the_global_one()
+    -> Result<(), crate::contact_sets::ContactSetRefusal> {
+        let sender = AgentKey::from(sl_client_bevy::Uuid::from_u128(0x7));
+        let mut sets = ContactSets::default();
+        sets.create_set("Partner")?;
+        sets.add_member("Partner", sender, "Alpha Resident")?;
+        sets.set_autoresponse(
+            "Partner",
+            SetAutoresponseMode::Busy,
+            true,
+            "back in five minutes",
+        )?;
+        assert_eq!(
+            super::reply_text(None, Some(&sets), sender, ReplyMode::DoNotDisturb).as_deref(),
+            Some("back in five minutes")
+        );
+        // A mode this set does not override has no answer without a store.
+        assert_eq!(
+            super::reply_text(None, Some(&sets), sender, ReplyMode::Autorespond),
+            None
+        );
+        // Nor does someone the set has never heard of.
+        let stranger = AgentKey::from(sl_client_bevy::Uuid::from_u128(0x8));
+        assert_eq!(
+            super::reply_text(None, Some(&sets), stranger, ReplyMode::DoNotDisturb),
+            None
+        );
+        Ok(())
     }
 
     /// A direct conversation key names the resident the reply is addressed to.

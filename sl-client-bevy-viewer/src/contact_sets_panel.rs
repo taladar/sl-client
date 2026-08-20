@@ -21,9 +21,12 @@
 //!   set at all).
 //! - **New Set…** raises the reference's own `AddNewContactSet` prompt;
 //!   **Delete Set** its `RemoveContactSet` confirmation; **Configure…** opens the
-//!   set's settings floater, where it is renamed and recoloured (the reference's
-//!   `floater_fs_contact_set_configuration`, minus the notification / autoresponse
-//!   knobs, which have no consumer here yet).
+//!   set's settings floater, where the set is renamed, recoloured, and given the
+//!   three behaviours it carries — announce this set's comings and goings, list
+//!   it online-first, and answer its members with replies of its own
+//!   (`viewer-contact-set-presence-extras`; the reference's
+//!   `floater_fs_contact_set_configuration`). The reply fields commit on losing
+//!   focus, and on the floater turning to another set, as the reference's do.
 //! - **Add Resident…** files someone chosen in the shared
 //!   [avatar picker](crate::avatar_picker); **Move to Set…** opens the
 //!   add-to-set floater in move mode; **Remove from Set** confirms first.
@@ -36,6 +39,17 @@
 //!   ([`ContactSets::color_of`]) — the same answer the radar, name tags and chat
 //!   will read once they colour by set, so what the panel shows is what the rest
 //!   of the viewer will show.
+//!
+//! # A button that cannot act says so
+//!
+//! Each action button is **greyed and inert** whenever it does not apply to
+//! what the panel is showing — *Configure…* with a pseudo-set chosen (there is
+//! no *All Sets* to configure), *Rem Alias…* with nobody selected or nobody
+//! aliased, and so on ([`ContactSetsButton::is_enabled`], the one predicate both
+//! [`sync_panel_button_states`] and [`on_panel_button_press`] read, so the look
+//! and the behaviour cannot drift). The greying is the **skin's**: each button
+//! and label carries a base class and gains `.sk-disabled-surface` /
+//! `.sk-disabled-text` on top, so a skin decides what greyed looks like.
 //!
 //! # One way in
 //!
@@ -51,13 +65,16 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
+use bevy::ui::InteractionDisabled;
+use bevy::ui_widgets::{Activate, Button};
+use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AgentKey, Command, SlCommand};
 
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::contact_sets::{
-    ALL_SETS_LABEL, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY, RequestContactSet,
-    apply_contact_set_requests,
+    ALL_SETS_LABEL, ContactSet, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY, RequestContactSet,
+    SetAutoresponseMode, apply_contact_set_requests,
 };
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -111,11 +128,32 @@ const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 /// A selected row's background highlight.
 const SELECTED_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
-/// An action button's background.
+/// An action button's background. The pre-skin fallback only: the button also
+/// carries [`BUTTON_CLASS`], and the skin's `.sk-button` rule is what actually
+/// paints it once the stylesheet has loaded.
 const ACTION_BACKGROUND: Color = Color::srgb(0.24, 0.29, 0.38);
+
+/// The skin class every action button's surface carries.
+const BUTTON_CLASS: &str = "sk-button";
+
+/// The skin class every action button's **label** carries.
+const BUTTON_LABEL_CLASS: &str = "sk-text";
+
+/// The skin class greying the surface of a button whose action does not apply
+/// right now (`--control-bg-disabled`; see `assets/skins/common.css`).
+const DISABLED_SURFACE_CLASS: &str = "sk-disabled-surface";
+
+/// The skin class greying such a button's label (`--text-disabled`).
+const DISABLED_TEXT_CLASS: &str = "sk-disabled-text";
 
 /// The trailing action column's width, logical px.
 const ACTION_COL_WIDTH: f32 = 150.0;
+
+/// The glyph a checked settings-floater toggle shows.
+const CHECKED_GLYPH: &str = "\u{2611}";
+
+/// The glyph an unchecked one shows.
+const UNCHECKED_GLYPH: &str = "\u{2610}";
 
 // --- Table ----------------------------------------------------------------
 
@@ -178,6 +216,10 @@ struct MemberRow {
     sets: String,
     /// The colour their smallest set gives them, if any.
     color: Option<Color>,
+    /// Whether the grid last reported them online — the leading sort key of a
+    /// set configured to sort by online status. A member who is not a friend has
+    /// no presence to report, and sorts with the offline.
+    online: bool,
 }
 
 /// Whether `name` survives the list's filter (case-insensitive substring, like
@@ -189,8 +231,18 @@ fn matches_filter(name: &str, filter: &str) -> bool {
 
 /// Order `rows` by the table's sort keys (most significant first), falling back
 /// to a case-insensitive name compare so the order is total.
-fn sort_rows(rows: &mut [MemberRow], keys: &[(&str, bool)]) {
+///
+/// A set configured to **sort by online status**
+/// (`viewer-contact-set-presence-extras`) puts the residents the grid last
+/// reported online first, ahead of every other key — the reference's own
+/// comparator, which likewise falls through to the ordinary order within each
+/// group.
+fn sort_rows(rows: &mut [MemberRow], keys: &[(&str, bool)], online_first: bool) {
     rows.sort_by(|left, right| {
+        if online_first && left.online != right.online {
+            // `true` sorts first, which `bool`'s own order has backwards.
+            return right.online.cmp(&left.online);
+        }
         for (token, ascending) in keys {
             let ordering = match *token {
                 "sets" => left.sets.to_lowercase().cmp(&right.sets.to_lowercase()),
@@ -310,6 +362,16 @@ struct AddToSetTarget {
     chosen: String,
 }
 
+/// One per-set autoresponse block in the settings floater: the "use a reply of
+/// this set's own" toggle and the reply field under it.
+#[derive(Debug, Clone, Copy)]
+struct ConfigAutoresponseUi {
+    /// The toggle's glyph node, showing checked / unchecked.
+    glyph: Entity,
+    /// The reply field's [`EditableText`] entity.
+    field: Entity,
+}
+
 /// The set-settings floater's retained entities.
 #[derive(Resource, Debug)]
 struct ConfigUi {
@@ -321,7 +383,36 @@ struct ConfigUi {
     name_field: Entity,
     /// The set-colour swatch (also the [`ColorPicked`] requester).
     swatch: Entity,
+    /// The "announce this set's comings and goings" toggle's glyph node.
+    notify_glyph: Entity,
+    /// The "list this set online-first" toggle's glyph node.
+    sort_glyph: Entity,
+    /// The Do Not Disturb reply block.
+    busy_reply: ConfigAutoresponseUi,
+    /// The autorespond reply block.
+    autorespond_reply: ConfigAutoresponseUi,
+    /// The autorespond-to-non-friends reply block.
+    non_friends_reply: ConfigAutoresponseUi,
 }
+
+impl ConfigUi {
+    /// The block for one reply mode.
+    const fn autoresponse(&self, mode: SetAutoresponseMode) -> ConfigAutoresponseUi {
+        match mode {
+            SetAutoresponseMode::Busy => self.busy_reply,
+            SetAutoresponseMode::Autorespond => self.autorespond_reply,
+            SetAutoresponseMode::NonFriends => self.non_friends_reply,
+        }
+    }
+}
+
+/// The three reply modes in the order the floater lists them (the reference's
+/// own order), so the build, the seed and the commit walk the same list.
+const AUTORESPONSE_MODES: &[SetAutoresponseMode] = &[
+    SetAutoresponseMode::Busy,
+    SetAutoresponseMode::Autorespond,
+    SetAutoresponseMode::NonFriends,
+];
 
 /// Which set the open settings floater is about.
 #[derive(Resource, Debug, Default)]
@@ -403,6 +494,12 @@ enum ContactSetsButton {
     RemoveDisplayName,
 }
 
+/// An action button's label node, so [`sync_panel_button_states`] can grey the
+/// two nodes together (bevy_ui has no style inheritance, so the label carries
+/// its own colour).
+#[derive(Component, Debug, Clone, Copy)]
+struct PanelButtonLabel(Entity);
+
 impl ContactSetsButton {
     /// The Fluent key for this button's label.
     const fn label_key(self) -> &'static str {
@@ -419,6 +516,30 @@ impl ContactSetsButton {
             Self::SetAlias => "contact-sets-action-set-alias",
             Self::ClearAlias => "contact-sets-action-clear-alias",
             Self::RemoveDisplayName => "contact-sets-action-remove-display-name",
+        }
+    }
+
+    /// Whether this button applies to what the panel is showing right now —
+    /// what [`sync_panel_button_states`] greys on, and what the press handler
+    /// checks before doing anything.
+    ///
+    /// Three preconditions between them cover all twelve: a **real** set is
+    /// chosen (the three pseudo-sets are views, and there is no *All Sets* to
+    /// rename, delete, configure or file someone into), a **member** is
+    /// selected, and — for the two alias buttons — that member has an alias to
+    /// drop, or a display name still to suppress. *New Set…* alone always
+    /// applies: it is how the first set comes into being.
+    fn is_enabled(self, sets: &ContactSets, choice: &str, selected: Option<AgentKey>) -> bool {
+        let real_set = is_real_set(sets, choice);
+        match self {
+            Self::NewSet => true,
+            Self::DeleteSet | Self::Configure | Self::AddResident => real_set,
+            Self::MoveMember | Self::RemoveMember => real_set && selected.is_some(),
+            Self::Profile | Self::Im | Self::OfferTeleport | Self::SetAlias => selected.is_some(),
+            Self::ClearAlias => selected.is_some_and(|agent| sets.has_alias(agent)),
+            Self::RemoveDisplayName => {
+                selected.is_some_and(|agent| !sets.has_display_name_removed(agent))
+            }
         }
     }
 }
@@ -442,6 +563,18 @@ enum ConfigButton {
     Rename,
     /// Close the floater.
     Close,
+}
+
+/// Which of the settings floater's five checkboxes a node is
+/// (`viewer-contact-set-presence-extras`).
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+enum ConfigToggle {
+    /// Announce this set's members coming and going.
+    Notify,
+    /// List this set online-first.
+    SortByOnlineStatus,
+    /// Answer this set with a reply of its own, in one mode.
+    Autoresponse(SetAutoresponseMode),
 }
 
 /// Ask for the "give this resident an alias" prompt (the reference's
@@ -507,8 +640,12 @@ impl Plugin for ContactSetsPanelPlugin {
                     handle_contact_set_picks,
                     handle_contact_set_colors,
                     handle_contact_set_notifications,
+                    // Ahead of the sync, which re-seeds the reply fields: a
+                    // pending edit is written back before it is overwritten.
+                    commit_config_autoresponses,
                     sync_config_floater,
                     rebuild_contact_sets_view,
+                    sync_panel_button_states,
                 )
                     .chain()
                     .before(layout_virtual_lists)
@@ -709,6 +846,20 @@ fn spawn_contact_sets_panel(
 
 /// Spawn one panel button.
 fn spawn_panel_button(commands: &mut Commands, parent: Entity, button: ContactSetsButton) {
+    let label = commands
+        .spawn((
+            Text::default(),
+            Translated::new(button.label_key()),
+            TextLayout {
+                linebreak: LineBreak::NoWrap,
+                ..default()
+            },
+            UiFont::Sans.at(FONT_SIZE),
+            TextColor(LABEL_COLOR),
+            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
+            Pickable::IGNORE,
+        ))
+        .id();
     commands
         .spawn((
             Node {
@@ -719,25 +870,19 @@ fn spawn_panel_button(commands: &mut Commands, parent: Entity, button: ContactSe
                 ..default()
             },
             BackgroundColor(ACTION_BACKGROUND),
+            ClassList::new_with_classes([BUTTON_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
             },
             button,
+            // The label is held on the button so the greying pass reaches it
+            // without walking children (and cannot grey the wrong node).
+            PanelButtonLabel(label),
             Name::new("contact-sets-action"),
             ChildOf(parent),
         ))
-        .with_child((
-            Text::default(),
-            Translated::new(button.label_key()),
-            TextLayout {
-                linebreak: LineBreak::NoWrap,
-                ..default()
-            },
-            UiFont::Sans.at(FONT_SIZE),
-            TextColor(LABEL_COLOR),
-            Pickable::IGNORE,
-        ))
+        .add_child(label)
         .observe(on_panel_button_press);
 }
 
@@ -811,6 +956,7 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
                     ..default()
                 },
                 BackgroundColor(ACTION_BACKGROUND),
+                ClassList::new_with_classes([BUTTON_CLASS]),
                 Pickable {
                     should_block_lower: true,
                     is_hoverable: true,
@@ -828,6 +974,7 @@ fn spawn_add_to_set_floater(mut commands: Commands, root: Res<UiRoot>) {
                 }),
                 UiFont::Sans.at(FONT_SIZE),
                 TextColor(LABEL_COLOR),
+                ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
                 Pickable::IGNORE,
             ))
             .observe(on_add_to_set_press);
@@ -920,6 +1067,31 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
         2,
         LABEL_COLOR,
     );
+
+    // The two behaviour checkboxes, then one block per reply mode: a toggle over
+    // the reply this set answers with.
+    let notify_glyph = spawn_config_toggle(
+        &mut commands,
+        content,
+        "contact-set-config-notify",
+        3,
+        ConfigToggle::Notify,
+    );
+    let sort_glyph = spawn_config_toggle(
+        &mut commands,
+        content,
+        "contact-set-config-sort-online",
+        4,
+        ConfigToggle::SortByOnlineStatus,
+    );
+    // Two focus stops per block (the toggle and its field), after the four
+    // above, in the order [`AUTORESPONSE_MODES`] lists them.
+    let busy_reply =
+        spawn_config_autoresponse(&mut commands, content, SetAutoresponseMode::Busy, 5);
+    let autorespond_reply =
+        spawn_config_autoresponse(&mut commands, content, SetAutoresponseMode::Autorespond, 7);
+    let non_friends_reply =
+        spawn_config_autoresponse(&mut commands, content, SetAutoresponseMode::NonFriends, 9);
     spawn_config_button(&mut commands, content, ConfigButton::Close);
 
     commands.insert_resource(ConfigUi {
@@ -927,7 +1099,101 @@ fn spawn_config_floater(mut commands: Commands, root: Res<UiRoot>) {
         title: handle.title_text,
         name_field,
         swatch,
+        notify_glyph,
+        sort_glyph,
+        busy_reply,
+        autorespond_reply,
+        non_friends_reply,
     });
+}
+
+/// Spawn one of the settings floater's checkboxes — a clickable ☐/☑ glyph and a
+/// label — returning the glyph node the sync pass writes.
+fn spawn_config_toggle(
+    commands: &mut Commands,
+    parent: Entity,
+    label_key: &'static str,
+    tab: i32,
+    toggle: ConfigToggle,
+) -> Entity {
+    let button = commands
+        .spawn((
+            Button,
+            TabIndex(tab),
+            Node {
+                align_items: AlignItems::Center,
+                column_gap: Val::Px(6.0),
+                ..row(Val::Px(0.0))
+            },
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
+            toggle,
+            Name::new("contact-set-config-toggle"),
+            ChildOf(parent),
+        ))
+        .observe(on_config_toggle_press)
+        .id();
+    let glyph = commands
+        .spawn((
+            Text::new(UNCHECKED_GLYPH.to_owned()),
+            UiFont::Sans.at(FONT_SIZE),
+            TextColor(DIM_LABEL_COLOR),
+            Pickable::IGNORE,
+            ChildOf(button),
+        ))
+        .id();
+    commands.spawn((
+        Text::default(),
+        Translated::new(label_key),
+        UiFont::Sans.at(FONT_SIZE),
+        TextColor(LABEL_COLOR),
+        Pickable::IGNORE,
+        ChildOf(button),
+    ));
+    glyph
+}
+
+/// Spawn one reply block: the "use a reply of this set's own" toggle over the
+/// reply field it enables.
+fn spawn_config_autoresponse(
+    commands: &mut Commands,
+    parent: Entity,
+    mode: SetAutoresponseMode,
+    tab: i32,
+) -> ConfigAutoresponseUi {
+    let glyph = spawn_config_toggle(
+        commands,
+        parent,
+        match mode {
+            SetAutoresponseMode::Busy => "contact-set-config-reply-busy",
+            SetAutoresponseMode::Autorespond => "contact-set-config-reply-autorespond",
+            SetAutoresponseMode::NonFriends => "contact-set-config-reply-non-friends",
+        },
+        tab,
+        ConfigToggle::Autoresponse(mode),
+    );
+    let field = spawn_text_input(
+        commands,
+        parent,
+        &TextInputSpec {
+            font_size: FONT_SIZE,
+            visible_lines: 3.0,
+            tab_index: tab.saturating_add(1),
+            ..TextInputSpec::new(
+                match mode {
+                    SetAutoresponseMode::Busy => "contact-set-config-reply-busy-field",
+                    SetAutoresponseMode::Autorespond => {
+                        "contact-set-config-reply-autorespond-field"
+                    }
+                    SetAutoresponseMode::NonFriends => "contact-set-config-reply-non-friends-field",
+                },
+                TextInputKind::Multiline,
+            )
+        },
+    );
+    ConfigAutoresponseUi { glyph, field }
 }
 
 /// Spawn one settings-floater button.
@@ -943,6 +1209,7 @@ fn spawn_config_button(commands: &mut Commands, parent: Entity, button: ConfigBu
                 ..default()
             },
             BackgroundColor(ACTION_BACKGROUND),
+            ClassList::new_with_classes([BUTTON_CLASS]),
             Pickable {
                 should_block_lower: true,
                 is_hoverable: true,
@@ -959,6 +1226,7 @@ fn spawn_config_button(commands: &mut Commands, parent: Entity, button: ConfigBu
             }),
             UiFont::Sans.at(FONT_SIZE),
             TextColor(LABEL_COLOR),
+            ClassList::new_with_classes([BUTTON_LABEL_CLASS]),
             Pickable::IGNORE,
         ))
         .observe(on_config_button_press);
@@ -1117,7 +1385,11 @@ fn rebuild_contact_sets_view(
                 .map(|column| (column.token, key.ascending))
         })
         .collect();
-    sort_rows(&mut view.rows, &keys);
+    // Only a real set carries the flag; the pseudo-sets are views, not sets.
+    let online_first = sets
+        .set(&view.choice)
+        .is_some_and(ContactSet::sorts_by_online_status);
+    sort_rows(&mut view.rows, &keys, online_first);
 
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
@@ -1183,6 +1455,7 @@ fn build_rows(
             agent,
             sets: sets.sets_of(agent).join(", "),
             color: sets.color_of(agent),
+            online: friends.is_online(agent),
             name,
         })
     }));
@@ -1313,6 +1586,12 @@ fn on_panel_button_press(
         return;
     };
     press.propagate(false);
+    // The greyed buttons are inert. `InteractionDisabled` is advisory for a
+    // hand-rolled button, so the same predicate that greys them decides here —
+    // one source of truth, and no way for the look and the behaviour to drift.
+    if !button.is_enabled(&sets, &view.choice, selected.0) {
+        return;
+    }
     let real_set = is_real_set(&sets, &view.choice).then(|| view.choice.clone());
     match button {
         ContactSetsButton::NewSet => {
@@ -1650,6 +1929,158 @@ fn on_config_button_press(
     }
 }
 
+/// Grey every action button whose action does not apply to what the panel is
+/// showing, and mark it [`InteractionDisabled`].
+///
+/// The greying is the skin's, not ours: each button and label carries a base
+/// class (`.sk-button` / `.sk-text`) and gains a disabled one on top, so a skin
+/// decides what "greyed" looks like and dropping the class falls back to the
+/// base rule. `InteractionDisabled` is the state marker beside it — advisory for
+/// our hand-rolled buttons, which is why [`on_panel_button_press`] asks
+/// [`ContactSetsButton::is_enabled`] itself rather than trusting the marker.
+fn sync_panel_button_states(
+    sets: Res<ContactSets>,
+    view: Res<ContactSetsView>,
+    selected: Res<SelectedMember>,
+    buttons: Query<(
+        Entity,
+        &ContactSetsButton,
+        &PanelButtonLabel,
+        Has<InteractionDisabled>,
+    )>,
+    mut classes: Query<&mut ClassList>,
+    mut commands: Commands,
+) {
+    for (entity, button, label, was_disabled) in &buttons {
+        let enabled = button.is_enabled(&sets, &view.choice, selected.0);
+        set_skin_class(&mut classes, entity, DISABLED_SURFACE_CLASS, !enabled);
+        set_skin_class(&mut classes, label.0, DISABLED_TEXT_CLASS, !enabled);
+        if enabled && was_disabled {
+            commands.entity(entity).remove::<InteractionDisabled>();
+        } else if !enabled && !was_disabled {
+            commands.entity(entity).insert(InteractionDisabled);
+        }
+    }
+}
+
+/// Add or drop one skin class on a node, writing only on a real change so an
+/// idle panel does not re-trigger the style pass.
+fn set_skin_class(
+    classes: &mut Query<&mut ClassList>,
+    node: Entity,
+    class: &'static str,
+    wanted: bool,
+) {
+    let Ok(mut list) = classes.get_mut(node) else {
+        return;
+    };
+    if wanted {
+        if !list.contains(class) {
+            list.add(class);
+        }
+    } else if list.contains(class) {
+        list.remove(class);
+    }
+}
+
+/// A press on one of the settings floater's checkboxes: flip that behaviour on
+/// the set the floater is showing. The reply toggles carry the field's current
+/// text with them, so turning an override on answers with what is already typed
+/// rather than with nothing.
+fn on_config_toggle_press(
+    activate: On<Activate>,
+    toggles: Query<&ConfigToggle>,
+    ui: Option<Res<ConfigUi>>,
+    sets: Res<ContactSets>,
+    fields: Query<&EditableText>,
+    target: Res<ConfigTarget>,
+    mut requests: MessageWriter<RequestContactSet>,
+) {
+    let Ok(toggle) = toggles.get(activate.entity).copied() else {
+        return;
+    };
+    let (Some(ui), Some(name)) = (ui, target.0.clone()) else {
+        return;
+    };
+    let Some(set) = sets.set(&name) else {
+        return;
+    };
+    match toggle {
+        ConfigToggle::Notify => requests.write(RequestContactSet::SetNotify {
+            name,
+            notify: !set.notify(),
+        }),
+        ConfigToggle::SortByOnlineStatus => {
+            requests.write(RequestContactSet::SetSortByOnlineStatus {
+                name,
+                sort: !set.sorts_by_online_status(),
+            })
+        }
+        ConfigToggle::Autoresponse(mode) => {
+            let text = fields
+                .get(ui.autoresponse(mode).field)
+                .map(|field| field.value().to_string())
+                .unwrap_or_default();
+            requests.write(RequestContactSet::SetAutoresponse {
+                name,
+                mode,
+                enabled: !set.autoresponse(mode).enabled(),
+                text,
+            })
+        }
+    };
+}
+
+/// Write the reply fields back to the set they belong to, on the two edges that
+/// mean the user is done with one: the field losing focus (the reference commits
+/// on focus lost too) and the floater turning to another set or closing — the
+/// latter committing against the set the fields were *seeded* from, since
+/// [`sync_config_floater`] has not re-seeded them yet.
+fn commit_config_autoresponses(
+    ui: Option<Res<ConfigUi>>,
+    sets: Res<ContactSets>,
+    target: Res<ConfigTarget>,
+    focus: Res<InputFocus>,
+    fields: Query<&EditableText>,
+    mut requests: MessageWriter<RequestContactSet>,
+    mut seeded_for: Local<Option<String>>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let switching = *seeded_for != target.0;
+    let Some(name) = seeded_for.clone() else {
+        seeded_for.clone_from(&target.0);
+        return;
+    };
+    if let Some(set) = sets.set(&name) {
+        for mode in AUTORESPONSE_MODES {
+            let block = ui.autoresponse(*mode);
+            // While the field has focus the user is still typing in it, so only
+            // a switch away from this set forces the write.
+            if !switching && focus.get() == Some(block.field) {
+                continue;
+            }
+            let Ok(field) = fields.get(block.field) else {
+                continue;
+            };
+            let text = field.value().to_string();
+            let stored = set.autoresponse(*mode);
+            if stored.text() != text {
+                requests.write(RequestContactSet::SetAutoresponse {
+                    name: name.clone(),
+                    mode: *mode,
+                    enabled: stored.enabled(),
+                    text,
+                });
+            }
+        }
+    }
+    if switching {
+        seeded_for.clone_from(&target.0);
+    }
+}
+
 /// Show / hide the settings floater with its target, and keep its title, name
 /// field and swatch showing that set.
 #[expect(
@@ -1718,12 +2149,32 @@ fn sync_config_floater(
             background.0 = set.color();
         }
     }
+    // The five checkboxes follow the set on every change too — each is flipped
+    // through the model, so this is what actually draws the new state.
+    set_config_check(&mut texts, ui.notify_glyph, set.notify());
+    set_config_check(&mut texts, ui.sort_glyph, set.sorts_by_online_status());
+    for mode in AUTORESPONSE_MODES {
+        set_config_check(
+            &mut texts,
+            ui.autoresponse(*mode).glyph,
+            set.autoresponse(*mode).enabled(),
+        );
+    }
     if shown_for.as_deref() == Some(name.as_str()) {
         return;
     }
     *shown_for = Some(name.clone());
     if let Ok(mut editor) = editors.get_mut(ui.name_field) {
         crate::web_floater::set_editor_text(&mut editor, &name, &mut font_cx, &mut layout_cx);
+    }
+    // The reply fields are seeded on the same edge as the name field, for the
+    // same reason: they are edited in place, and re-seeding them every frame
+    // would fight the user's typing.
+    for mode in AUTORESPONSE_MODES {
+        let text = set.autoresponse(*mode).text().to_owned();
+        if let Ok(mut editor) = editors.get_mut(ui.autoresponse(*mode).field) {
+            crate::web_floater::set_editor_text(&mut editor, &text, &mut font_cx, &mut layout_cx);
+        }
     }
     let title = translator.format(
         "contact-set-config-title",
@@ -1733,6 +2184,20 @@ fn sync_config_floater(
         && text.0 != title
     {
         text.0 = title;
+    }
+}
+
+/// Draw one settings-floater checkbox in its checked / unchecked state.
+fn set_config_check(texts: &mut Query<&mut Text>, node: Entity, checked: bool) {
+    let glyph = if checked {
+        CHECKED_GLYPH
+    } else {
+        UNCHECKED_GLYPH
+    };
+    if let Ok(mut text) = texts.get_mut(node)
+        && text.0 != glyph
+    {
+        glyph.clone_into(&mut text.0);
     }
 }
 
@@ -1916,13 +2381,19 @@ mod tests {
         AgentKey::from(Uuid::from_u128(id))
     }
 
-    /// A row named `name` in `sets`.
+    /// A row named `name` in `sets`, offline.
     fn row(name: &str, sets: &str) -> MemberRow {
+        online_row(name, sets, false)
+    }
+
+    /// A row named `name` in `sets`, with an explicit presence.
+    fn online_row(name: &str, sets: &str, online: bool) -> MemberRow {
         MemberRow {
             agent: agent(1),
             name: name.to_owned(),
             sets: sets.to_owned(),
             color: None,
+            online,
         }
     }
 
@@ -1945,21 +2416,153 @@ mod tests {
             row("Alpha", "Zulu"),
             row("gamma", "Builders"),
         ];
-        sort_rows(&mut rows, &[("name", true)]);
+        sort_rows(&mut rows, &[("name", true)], false);
         let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
         assert_eq!(names, ["Alpha", "beta", "gamma"]);
 
-        sort_rows(&mut rows, &[("name", false)]);
+        sort_rows(&mut rows, &[("name", false)], false);
         let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
         assert_eq!(names, ["gamma", "beta", "Alpha"]);
 
-        sort_rows(&mut rows, &[("sets", true)]);
+        sort_rows(&mut rows, &[("sets", true)], false);
         let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
         assert_eq!(
             names,
             ["beta", "gamma", "Alpha"],
             "the two Builders rows tie and fall back to the name"
         );
+    }
+
+    /// A set that sorts by online status puts the online first, whatever the
+    /// table's own keys say — and falls through to those keys within each group
+    /// (`viewer-contact-set-presence-extras`).
+    #[test]
+    fn sorting_by_online_status_leads() {
+        let mut rows = vec![
+            online_row("beta", "Builders", false),
+            online_row("Alpha", "Builders", false),
+            online_row("gamma", "Builders", true),
+            online_row("Delta", "Builders", true),
+        ];
+        sort_rows(&mut rows, &[("name", true)], true);
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["Delta", "gamma", "Alpha", "beta"],
+            "online first, then the name key within each group"
+        );
+
+        // The same rows, with the set's flag off, are the plain name order.
+        sort_rows(&mut rows, &[("name", true)], false);
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["Alpha", "beta", "Delta", "gamma"]);
+    }
+
+    /// Which buttons apply to which state of the panel: the pseudo-sets are
+    /// views, so nothing that changes *a set* applies to them; nothing that acts
+    /// on a member applies with none selected; and the two alias buttons need an
+    /// alias to drop, or a display name still to suppress.
+    #[test]
+    fn buttons_grey_out_when_they_do_not_apply() -> Result<(), ContactSetRefusal> {
+        use super::ContactSetsButton as Button;
+
+        // A free function rather than a closure over `sets`, so the alias cases
+        // below can still mutate it between assertions.
+        fn enabled(
+            sets: &ContactSets,
+            button: Button,
+            choice: &str,
+            who: Option<AgentKey>,
+        ) -> bool {
+            button.is_enabled(sets, choice, who)
+        }
+
+        let mut sets = ContactSets::default();
+        sets.create_set("Builders")?;
+        sets.add_member("Builders", agent(1), "Alpha Resident")?;
+
+        // New Set… is the only button that always applies — it is how the first
+        // set comes into being.
+        for choice in [ALL_SETS_LABEL, NO_SETS_LABEL, PSEUDONYMS_KEY, "Builders"] {
+            assert!(
+                enabled(&sets, Button::NewSet, choice, None),
+                "New Set… applies with {choice} chosen"
+            );
+        }
+        // The set-changing buttons need a real set.
+        for button in [Button::DeleteSet, Button::Configure, Button::AddResident] {
+            assert!(
+                enabled(&sets, button, "Builders", None),
+                "{button:?} on a real set"
+            );
+            for choice in [ALL_SETS_LABEL, NO_SETS_LABEL, PSEUDONYMS_KEY] {
+                assert!(
+                    !enabled(&sets, button, choice, None),
+                    "{button:?} is greyed on the {choice} pseudo-set"
+                );
+            }
+        }
+        // The member buttons need a selection; two of them need a real set too.
+        for button in [Button::MoveMember, Button::RemoveMember] {
+            assert!(
+                !enabled(&sets, button, "Builders", None),
+                "{button:?} needs a member"
+            );
+            assert!(enabled(&sets, button, "Builders", Some(agent(1))));
+            assert!(
+                !enabled(&sets, button, ALL_SETS_LABEL, Some(agent(1))),
+                "{button:?} has no set to move or remove from"
+            );
+        }
+        for button in [
+            Button::Profile,
+            Button::Im,
+            Button::OfferTeleport,
+            Button::SetAlias,
+        ] {
+            assert!(
+                !enabled(&sets, button, ALL_SETS_LABEL, None),
+                "{button:?} needs a member"
+            );
+            assert!(
+                enabled(&sets, button, ALL_SETS_LABEL, Some(agent(1))),
+                "{button:?} acts on the person, so a pseudo-set is fine"
+            );
+        }
+
+        // Rem Alias… only once there is one; Rem DN… only while the display name
+        // is not already suppressed.
+        assert!(!enabled(
+            &sets,
+            Button::ClearAlias,
+            "Builders",
+            Some(agent(1))
+        ));
+        assert!(enabled(
+            &sets,
+            Button::RemoveDisplayName,
+            "Builders",
+            Some(agent(1))
+        ));
+        sets.set_pseudonym(agent(1), "Neighbour", "")?;
+        assert!(enabled(
+            &sets,
+            Button::ClearAlias,
+            "Builders",
+            Some(agent(1))
+        ));
+        sets.remove_display_name(agent(1), "")?;
+        assert!(
+            !enabled(&sets, Button::RemoveDisplayName, "Builders", Some(agent(1))),
+            "there is nothing left to suppress"
+        );
+        assert!(enabled(
+            &sets,
+            Button::ClearAlias,
+            "Builders",
+            Some(agent(1))
+        ));
+        Ok(())
     }
 
     /// The chooser lists the two pseudo-sets first, then the sets in name order,

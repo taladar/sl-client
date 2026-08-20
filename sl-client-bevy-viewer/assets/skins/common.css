@@ -57,6 +57,22 @@
   background-color: var(--control-bg-hover);
 }
 
+/* A control whose action does not apply to what its panel is showing right now
+ * — greyed rather than removed, so a row of actions keeps its shape as the
+ * selection moves (Contact Sets' Configure… with a pseudo-set chosen, its
+ * Rem Alias… with nobody selected, …). Two rules because bevy_ui has no style
+ * inheritance: the surface and its label are separate nodes, so each carries
+ * the class that greys it. Both come later in the cascade than .sk-button /
+ * .sk-text so they win while both apply, and dropping the disabled class falls
+ * back to the base rule rather than to nothing. */
+.sk-disabled-surface {
+  background-color: var(--control-bg-disabled);
+}
+
+.sk-disabled-text {
+  color: var(--text-disabled);
+}
+
 /* The universal keyboard focus ring. Every focusable widget — one carrying a
  * TabIndex — is tagged `.sk-focusable` by the scaffold (src/skin.rs
  * `stamp_focus_ring_class`), so this one pair of rules rings all of them
