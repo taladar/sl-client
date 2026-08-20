@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, FriendKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
+    AgentKey, ExperienceKey, FriendKey, GroupKey, GroupRoleKey, InventoryFolderKey,
+    InventoryItemOrFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{GridCoordinates, RegionCoordinates};
@@ -126,10 +126,10 @@ use sl_wire::messages::{
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
-    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, GlobalCoordinates, Llsd, MessageId,
-    PacketFlags, Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId,
-    RegionLocalParcelId, SequenceNumber, WireError, Writer, build_event_queue_response,
-    encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceInfo, ExperiencePermission,
+    ExperienceUpdate, GlobalCoordinates, Llsd, MessageId, PacketFlags, Permissions, Permissions5,
+    Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError,
+    Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -150,6 +150,7 @@ use crate::session::{
     required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
     sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
+use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
 use crate::types::directory::category_from_wire;
 use crate::types::{
@@ -1470,6 +1471,36 @@ pub enum ServerEvent {
         /// The deleted item.
         item_id: InventoryKey,
     },
+    /// The client set (or forgot) a per-experience preference
+    /// (`ExperiencePreferences` PUT / DELETE). Already applied to the
+    /// serving store ([`SimSession::experiences`]); fire-and-forget for a
+    /// driver persisting agent preferences.
+    ExperiencePermissionSet {
+        /// The experience the preference addresses.
+        experience_id: ExperienceKey,
+        /// `Allow` / `Block` from the PUT body; `Forget` for the DELETE
+        /// form.
+        permission: ExperiencePermission,
+    },
+    /// The client edited an experience's metadata (`UpdateExperience`
+    /// POST). Already applied to the serving store's record; fire-and-forget
+    /// for a driver persisting experience profiles.
+    ExperienceUpdated {
+        /// The parsed edit the store applied (editable fields only — owner,
+        /// quota and expiration are server-controlled and untouched).
+        update: Box<ExperienceUpdate>,
+    },
+    /// The client replaced the region's experience lists
+    /// (`RegionExperiences` POST). Already applied wholesale to the serving
+    /// store; fire-and-forget for a driver persisting region settings.
+    RegionExperiencesSet {
+        /// The region's new allowed list.
+        allowed: Vec<ExperienceKey>,
+        /// The region's new blocked list.
+        blocked: Vec<ExperienceKey>,
+        /// The region's new trusted list.
+        trusted: Vec<ExperienceKey>,
+    },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
@@ -2247,6 +2278,13 @@ pub struct SimSession {
     /// details GET serves ([`SimSession::set_land_resource_details`]).
     /// Driver-populated.
     land_resource_details: Vec<ParcelScriptResources>,
+    /// The experience fixture set the twelve experience capabilities serve
+    /// from. Driver-populated ([`SimSession::experiences_mut`]) like
+    /// [`display_names`](Self::display_names), but the three mutating caps
+    /// (`ExperiencePreferences`, `UpdateExperience`, the
+    /// `RegionExperiences` POST) apply to it — fixture state, not world
+    /// authority — so follow-up reads observe them.
+    experiences: SimExperiences,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -2431,6 +2469,7 @@ impl SimSession {
             attachment_resources: AttachmentResourcesReport::default(),
             land_resource_summary: ResourceSummary::default(),
             land_resource_details: Vec::new(),
+            experiences: SimExperiences::default(),
             events: VecDeque::new(),
         }
     }
@@ -2966,6 +3005,73 @@ impl SimSession {
     /// The stored `LandResources` per-parcel detail reports.
     pub(crate) fn land_resource_details(&self) -> &[ParcelScriptResources] {
         &self.land_resource_details
+    }
+
+    /// The experience serving store — read access for the experience
+    /// capability handlers and for tests asserting post-mutation state.
+    #[must_use]
+    pub const fn experiences(&self) -> &SimExperiences {
+        &self.experiences
+    }
+
+    /// Mutable access to the experience serving store — the driver/test
+    /// population API ([`SimExperiences::insert`] and the `set_*` list
+    /// setters).
+    pub const fn experiences_mut(&mut self) -> &mut SimExperiences {
+        &mut self.experiences
+    }
+
+    /// Applies one `ExperiencePreferences` mutation to the serving store
+    /// and surfaces [`ServerEvent::ExperiencePermissionSet`]. Returns the
+    /// post-mutation `(allowed, blocked)` lists — the reply payload both
+    /// the PUT and DELETE forms echo.
+    pub(crate) fn set_experience_preference(
+        &mut self,
+        experience_id: ExperienceKey,
+        permission: ExperiencePermission,
+    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>) {
+        self.experiences.set_preference(experience_id, permission);
+        self.events.push_back(ServerEvent::ExperiencePermissionSet {
+            experience_id,
+            permission,
+        });
+        self.experiences.agent_permissions()
+    }
+
+    /// Applies one `UpdateExperience` edit to the serving store's record
+    /// and surfaces [`ServerEvent::ExperienceUpdated`]. Returns the updated
+    /// record for the reply, or `None` when the id is unknown (→ `404`, no
+    /// event).
+    pub(crate) fn apply_experience_update(
+        &mut self,
+        update: ExperienceUpdate,
+    ) -> Option<ExperienceInfo> {
+        let updated = self.experiences.apply_update(&update)?;
+        self.events.push_back(ServerEvent::ExperienceUpdated {
+            update: Box::new(update),
+        });
+        Some(updated)
+    }
+
+    /// Replaces the region's experience lists wholesale (the
+    /// `RegionExperiences` POST) and surfaces
+    /// [`ServerEvent::RegionExperiencesSet`]. Returns the stored triple for
+    /// the reply's echo.
+    pub(crate) fn apply_region_experiences(
+        &mut self,
+        allowed: Vec<ExperienceKey>,
+        blocked: Vec<ExperienceKey>,
+        trusted: Vec<ExperienceKey>,
+    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
+        let stored =
+            self.experiences
+                .apply_region_lists(allowed.clone(), blocked.clone(), trusted.clone());
+        self.events.push_back(ServerEvent::RegionExperiencesSet {
+            allowed,
+            blocked,
+            trusted,
+        });
+        stored
     }
 
     /// Routes a fire-and-forget server event to the driver. Used by the CAPS

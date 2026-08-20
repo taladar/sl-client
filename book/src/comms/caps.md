@@ -531,6 +531,78 @@ Everything else already existed client-paired
 `remote_parcel` / `object_cost` / `object_physics` / `resource_report`
 codecs); this cluster wired them into dispatch over the new stores.
 
+### The experience handlers
+
+The experience cluster serves the twelve experience caps from one new
+driver-populated fixture set, `SimExperiences`
+(`sl-proto/src/sim_experiences.rs`, held as `SimSession::experiences[_mut]`):
+metadata records keyed by public id, the agent's allowed/blocked
+preference lists, the agent's owned/admin/creator id lists, per-group id
+lists, and the region's allowed/blocked/trusted triple. Three caps
+mutate — `ExperiencePreferences`, `UpdateExperience` and the
+`RegionExperiences` POST — and their edits apply to the fixture (so
+follow-up reads observe them), each surfacing a `ServerEvent`
+(`ExperiencePermissionSet`, `ExperienceUpdated`, `RegionExperiencesSet`).
+
+- **`GetExperienceInfo`** (GET, the `/id/?public_id=…` sub-path + query
+  form) serves the stored record per requested id via
+  `build_experience_infos_response`; unknown ids come back as `error_ids`
+  entries, which the client folds into `missing` placeholders.
+- **`FindExperienceByName`** (GET `?page=…&query=…`) answers a 1-based
+  `SEARCH_PAGE_SIZE` page of records whose name contains the
+  percent-decoded text case-insensitively, hiding invalid and
+  `PROPERTY_PRIVATE` records (the grid's search lists public experiences
+  only), sorted by name with an id tie-break.
+- **`GetExperiences`** (bodyless GET) serves the agent's
+  allowed/blocked lists via `build_experience_permissions_response`.
+- **`ExperiencePreferences`** routes on method: PUT parses the
+  `{ "<id>": { permission } }` body and applies `Allow`/`Block` (moving
+  the id between the two lists); DELETE parses the `?<id>` query and
+  forgets the preference. Both echo the full post-mutation lists — the
+  same shape as `GetExperiences`, which is how the client folds them.
+  Any id is accepted without a record lookup: a preference is the
+  agent's own keyed entry (viewers block ids they never resolved).
+- **`AgentExperiences` / `GetAdminExperiences` /
+  `GetCreatorExperiences` / `GroupExperiences`** (bodyless GETs; the
+  group form takes a bare `?<group_id>` query) are name-routed through
+  one handler to the owned / admin / creator / per-group lists, each
+  answered via `build_experience_ids_response`. An unknown group answers
+  an empty list. The reply carries no group id, so the client runtimes
+  parse it out-of-band and echo the queried id themselves.
+- **`IsExperienceAdmin` / `IsExperienceContributor`** (GET
+  `?experience_id=…`) answer `{ status }` from admin- / creator-list
+  membership ("contributor" is the reference viewer's name for the
+  creator list — it files `GetCreatorExperiences` under its Contributor
+  tab). An unknown id answers `{ status: false }`, never an error; these
+  replies are also parsed out-of-band by the runtimes.
+- **`UpdateExperience`** (POST) applies the editable fields (name,
+  description, maturity, properties, SLURL, extended metadata) to the
+  stored record — owner, quota and expiration are server-controlled and
+  untouched, matching the fields the reference viewer strips from the
+  POST — and echoes the updated record in the wrapped
+  `{ experience_keys }` form, whose first record the client folds into
+  `Event::ExperienceUpdated`.
+- **`RegionExperiences`** routes on method: GET serves the stored
+  triple, POST parses the same-shaped `{ allowed, blocked, trusted }`
+  body, replaces the lists wholesale and echoes the stored result, both
+  via `build_region_experiences_response`.
+
+The status contract is the house standard — wrong method `405`,
+malformed body or query `400`, an `UpdateExperience` targeting an
+unknown record `404` — plus two deliberate exceptions:
+`GetExperienceInfo` with an empty or absent query answers `200` with no
+records (the parser is lenient by design), and `ExperiencePreferences`
+never 404s on an unknown id (see above).
+
+No new codecs: the whole server-direction surface
+(`parse_experience_info_query` … `parse_region_experiences_request`,
+`build_experience_infos_response` … `build_experience_status_response`
+in `sl-wire/src/experience/server.rs`) already existed inverse-paired
+from the experience service-pairing task; this cluster wired it into
+dispatch over the new fixture. The AIS-style `ais_suffix` helper
+reconstructs the URL suffix those parsers consume (the `/id/` sub-path
+and the bare-query forms both round-trip through it).
+
 ---
 
 > **In this codebase**
@@ -600,3 +672,10 @@ codecs); this cluster wired them into dispatch over the new stores.
 >   `Command::SetEnvironment` → `build_environment_update_request` →
 >   an `ExtEnvironment` PUT (`put_caps_llsd` / `run_put_caps_llsd`),
 >   folded back through the ordinary `Event::Environment`.
+> - The experience serving fixture (`SimExperiences`) is
+>   `sl-proto/src/sim_experiences.rs`, held as
+>   `SimSession::experiences[_mut]`; the three mutating caps go through
+>   the session wrappers `set_experience_preference`,
+>   `apply_experience_update` and `apply_region_experiences`, which push
+>   the `ExperiencePermissionSet` / `ExperienceUpdated` /
+>   `RegionExperiencesSet` server events.

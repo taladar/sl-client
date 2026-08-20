@@ -11,35 +11,46 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey,
+        AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey, CAP_AGENT_EXPERIENCES,
         CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-        CAP_CREATE_INVENTORY_CATEGORY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
-        CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_GET_OBJECT_COST,
-        CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
+        CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
+        CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+        CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+        CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
+        CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
+        CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
         CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_REMOTE_PARCEL_REQUEST,
-        CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-        CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
-        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
-        CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-        CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
-        CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DayCycle, DisplayName,
-        EnvironmentSettings, EnvironmentUpdate, Event, FaceMaterialPut, ImDialog, ImSessionId,
-        InMemoryAssetSource, InstantMessage, InventoryFolder, InventoryFolderKey, InventoryItem,
-        InventoryKey, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE,
-        LegacyMaterial, LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry,
-        ObjectCost, ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey,
-        ParcelScriptResources, Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES,
-        RegionCoordinates, RegionHandle, RegionLocalParcelId, ResourceAmount, ResourceSummary,
-        ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind, SelectedResourceCost,
-        ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel,
-        SimSession, SimulatorFeatures, StartLocation, TextureKey, build_environment_update_request,
+        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+        CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+        CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+        CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+        CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT,
+        CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
+        CHAT_SESSION_FETCH_HISTORY_TAG, CapsDispatch, CapsRequest, CapsUploadMetadata,
+        ChatSessionKind, DayCycle, DisplayName, EnvironmentSettings, EnvironmentUpdate, Event,
+        ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+        ExperienceUpdate, FaceMaterialPut, GroupKey, ImDialog, ImSessionId, InMemoryAssetSource,
+        InstantMessage, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey,
+        LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial,
+        LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost,
+        ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources,
+        Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
+        RegionLocalParcelId, ResourceAmount, ResourceSummary, ScriptedObjectInfo,
+        ScriptedObjectResources, SelectedCostKind, SelectedResourceCost, ServerEvent,
+        ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel, SimSession,
+        SimulatorFeatures, StartLocation, TextureKey, build_environment_update_request,
         build_event_queue_request, build_get_object_cost_request,
         build_get_object_physics_data_request, build_land_resources_request,
-        build_remote_parcel_request, build_resource_cost_selected_request, build_seed_request,
+        build_region_experiences_request, build_remote_parcel_request,
+        build_resource_cost_selected_request, build_seed_request,
+        build_set_experience_permission_request, build_update_experience_request,
         chat_session_request_body, copy_inventory_from_notecard_body,
-        enable_simulator_to_caps_llsd, parse_event_queue_response, parse_seed_response,
+        enable_simulator_to_caps_llsd, experience_id_query, experience_info_query,
+        find_experience_query, forget_experience_query, group_experiences_query,
+        parse_event_queue_response, parse_experience_ids, parse_experience_infos,
+        parse_experience_status, parse_seed_response,
     };
+    use sl_wire::PROPERTY_PRIVATE;
     use sl_wire::{
         CircuitCode, FetchItemRef, Llsd, LoginRequest, LoginResponse, LoginSuccess,
         ais_category_children_fetch_url, ais_category_url, ais_create_category_url, ais_item_url,
@@ -134,9 +145,9 @@ mod test {
         // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the fifteen content
         // upload/materials/MOAP caps, the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
-        // Library, CreateInventoryCategory), and the nine
-        // region/object-information caps.
-        assert_eq!(granted.len(), 42);
+        // Library, CreateInventoryCategory), the nine
+        // region/object-information caps, and the twelve experience caps.
+        assert_eq!(granted.len(), 54);
         Ok(())
     }
 
@@ -3019,6 +3030,684 @@ mod test {
         let summary = format!("{path}/summary");
         let (status, _) = respond(&mut caps, &mut sim, &post(&summary, ""))?;
         assert_eq!(status, 405);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // The experience cluster.
+    // -----------------------------------------------------------------------
+
+    /// A `DELETE` [`CapsRequest`] carrying a query string (no body).
+    fn delete<'a>(path: &'a str, query: Option<&'a str>) -> CapsRequest<'a> {
+        CapsRequest {
+            method: "DELETE",
+            path,
+            query,
+            range: None,
+            body: b"",
+        }
+    }
+
+    /// Splits a client-built URL suffix (`/sub/?query` or `?query`) into the
+    /// full request path under the granted cap path and the bare query
+    /// string — what the runtime's HTTP layer does before the request
+    /// reaches [`SimCaps::dispatch`].
+    fn split_suffix(cap_path: &str, suffix: &str) -> (String, Option<String>) {
+        match suffix.split_once('?') {
+            Some((sub_path, query)) => (format!("{cap_path}{sub_path}"), Some(query.to_owned())),
+            None => (format!("{cap_path}{suffix}"), None),
+        }
+    }
+
+    /// A public experience the agent owns, admins and has allowed.
+    const EXP_A: u128 = 0x0E0A;
+    /// A private (`PROPERTY_PRIVATE`) experience the agent has blocked.
+    const EXP_B: u128 = 0x0E0B;
+    /// A group-owned experience the agent admins and created.
+    const EXP_C: u128 = 0x0E0C;
+    /// An experience id no fixture knows — the "could not resolve" probe.
+    const EXP_UNKNOWN: u128 = 0x0EFF;
+    /// The group that owns [`EXP_C`].
+    const EXP_GROUP: u128 = 0x0E60;
+
+    /// The [`ExperienceKey`] for one of the `EXP_*` constants.
+    fn exp_key(id: u128) -> ExperienceKey {
+        ExperienceKey::from(uuid::Uuid::from_u128(id))
+    }
+
+    /// Seeds the experience fixture set: three records (one private), the
+    /// agent's permission/owned/admin/creator lists, one group list, and
+    /// the region triple.
+    fn seed_experiences(sim: &mut SimSession) {
+        let experiences = sim.experiences_mut();
+        experiences.insert(ExperienceInfo {
+            public_id: exp_key(EXP_A),
+            name: "Magic Quest".to_owned(),
+            owner: Some(OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1)))),
+            description: "A quest of magic".to_owned(),
+            quota: 128,
+            maturity: 13,
+            ..ExperienceInfo::default()
+        });
+        experiences.insert(ExperienceInfo {
+            public_id: exp_key(EXP_B),
+            name: "Magic Dungeon".to_owned(),
+            properties: ExperienceProperties(PROPERTY_PRIVATE),
+            ..ExperienceInfo::default()
+        });
+        experiences.insert(ExperienceInfo {
+            public_id: exp_key(EXP_C),
+            name: "Tour Guide".to_owned(),
+            owner: Some(OwnerKey::Group(GroupKey::from(uuid::Uuid::from_u128(
+                EXP_GROUP,
+            )))),
+            ..ExperienceInfo::default()
+        });
+        experiences.set_agent_permissions(vec![exp_key(EXP_A)], vec![exp_key(EXP_B)]);
+        experiences.set_owned(vec![exp_key(EXP_A)]);
+        experiences.set_admin(vec![exp_key(EXP_A), exp_key(EXP_C)]);
+        experiences.set_creator(vec![exp_key(EXP_C)]);
+        experiences.set_group(uuid::Uuid::from_u128(EXP_GROUP), vec![exp_key(EXP_C)]);
+        experiences.set_region_lists(
+            vec![exp_key(EXP_A)],
+            vec![exp_key(EXP_B)],
+            vec![exp_key(EXP_C)],
+        );
+    }
+
+    /// The `GetExperienceInfo` GET serves the stored records through the
+    /// client's own query builder and reply parser; an unknown id comes
+    /// back as an `error_ids` entry the client folds into a `missing`
+    /// placeholder.
+    #[test]
+    fn get_experience_info_serves_records_and_error_ids() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let cap_path = granted_cap_path(&caps, CAP_GET_EXPERIENCE_INFO)?;
+        let suffix = experience_info_query(&[exp_key(EXP_A), exp_key(EXP_UNKNOWN)]);
+        let (path, query) = split_suffix(&cap_path, &suffix);
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, query.as_deref()),
+            CAP_GET_EXPERIENCE_INFO,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperienceInfo(infos)] => {
+                assert_eq!(
+                    infos
+                        .iter()
+                        .map(|info| (info.public_id, info.missing))
+                        .collect::<Vec<_>>(),
+                    vec![(exp_key(EXP_A), false), (exp_key(EXP_UNKNOWN), true)]
+                );
+                assert_eq!(
+                    infos.first().map(|info| info.name.as_str()),
+                    Some("Magic Quest")
+                );
+                assert_eq!(
+                    infos.first().and_then(|info| info.owner),
+                    Some(OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))))
+                );
+            }
+            other => return Err(format!("expected ExperienceInfo, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `FindExperienceByName` GET matches case-insensitively, hides the
+    /// private record, and answers an empty second page.
+    #[test]
+    fn find_experience_by_name_pages_and_hides_private() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let cap_path = granted_cap_path(&caps, CAP_FIND_EXPERIENCE_BY_NAME)?;
+        for (page, expected) in [(1, vec![exp_key(EXP_A)]), (2, Vec::new())] {
+            let suffix = find_experience_query("mAgIc", page);
+            let (path, query) = split_suffix(&cap_path, &suffix);
+            let events = fold_into_client(
+                &mut caps,
+                &mut sim,
+                &mut client,
+                &get(&path, query.as_deref()),
+                CAP_FIND_EXPERIENCE_BY_NAME,
+                now,
+            )?;
+            match events.as_slice() {
+                [Event::ExperienceSearchResults(infos)] => {
+                    assert_eq!(
+                        infos.iter().map(|info| info.public_id).collect::<Vec<_>>(),
+                        expected,
+                        "page {page}"
+                    );
+                }
+                other => {
+                    return Err(format!("expected ExperienceSearchResults, got {other:?}").into());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// The bodyless `GetExperiences` GET serves the agent's allowed /
+    /// blocked lists through the client fold.
+    #[test]
+    fn get_experiences_serves_the_permission_lists() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_GET_EXPERIENCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_GET_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperiencePermissions { allowed, blocked }] => {
+                assert_eq!(allowed, &vec![exp_key(EXP_A)]);
+                assert_eq!(blocked, &vec![exp_key(EXP_B)]);
+            }
+            other => return Err(format!("expected ExperiencePermissions, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The bodyless `AgentExperiences` GET serves the owned list.
+    #[test]
+    fn agent_experiences_serves_owned_ids() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_AGENT_EXPERIENCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_AGENT_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::OwnedExperiences(ids)] => assert_eq!(ids, &vec![exp_key(EXP_A)]),
+            other => return Err(format!("expected OwnedExperiences, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The bodyless `GetAdminExperiences` / `GetCreatorExperiences` GETs
+    /// serve their respective lists, name-routed through one handler.
+    #[test]
+    fn admin_and_creator_experiences_serve_their_lists() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let admin_path = granted_cap_path(&caps, CAP_GET_ADMIN_EXPERIENCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&admin_path, None),
+            CAP_GET_ADMIN_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::AdminExperiences(ids)] => {
+                assert_eq!(ids, &vec![exp_key(EXP_A), exp_key(EXP_C)]);
+            }
+            other => return Err(format!("expected AdminExperiences, got {other:?}").into()),
+        }
+        let creator_path = granted_cap_path(&caps, CAP_GET_CREATOR_EXPERIENCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&creator_path, None),
+            CAP_GET_CREATOR_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::CreatorExperiences(ids)] => assert_eq!(ids, &vec![exp_key(EXP_C)]),
+            other => return Err(format!("expected CreatorExperiences, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `GroupExperiences` GET serves the queried group's list (an
+    /// unknown group answers empty). The reply does not echo the group id,
+    /// so the runtimes parse it out-of-band — this test parses the raw
+    /// reply exactly as they do.
+    #[test]
+    fn group_experiences_serves_the_group_list() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let cap_path = granted_cap_path(&caps, CAP_GROUP_EXPERIENCES)?;
+        let suffix = group_experiences_query(uuid::Uuid::from_u128(EXP_GROUP));
+        let (path, query) = split_suffix(&cap_path, &suffix);
+        let (status, body) = respond(&mut caps, &mut sim, &get(&path, query.as_deref()))?;
+        assert_eq!(status, 200);
+        assert_eq!(
+            parse_experience_ids(&parse_llsd_xml(&body)?)?,
+            vec![exp_key(EXP_C)]
+        );
+        // An unknown group answers an empty list, not an error.
+        let suffix = group_experiences_query(uuid::Uuid::from_u128(0xDEAD));
+        let (path, query) = split_suffix(&cap_path, &suffix);
+        let (status, body) = respond(&mut caps, &mut sim, &get(&path, query.as_deref()))?;
+        assert_eq!(status, 200);
+        assert_eq!(parse_experience_ids(&parse_llsd_xml(&body)?)?, Vec::new());
+        Ok(())
+    }
+
+    /// The `IsExperienceAdmin` / `IsExperienceContributor` GETs answer the
+    /// store's admin / creator membership; unknown ids answer `false`. The
+    /// reply does not echo the queried id, so the runtimes parse it
+    /// out-of-band — this test parses the raw replies exactly as they do.
+    #[test]
+    fn is_experience_admin_and_contributor_answer_from_the_lists() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        for (name, id, expected) in [
+            (CAP_IS_EXPERIENCE_ADMIN, EXP_A, true),
+            (CAP_IS_EXPERIENCE_ADMIN, EXP_UNKNOWN, false),
+            (CAP_IS_EXPERIENCE_CONTRIBUTOR, EXP_C, true),
+            (CAP_IS_EXPERIENCE_CONTRIBUTOR, EXP_A, false),
+        ] {
+            let cap_path = granted_cap_path(&caps, name)?;
+            let suffix = experience_id_query(exp_key(id));
+            let (path, query) = split_suffix(&cap_path, &suffix);
+            let (status, body) = respond(&mut caps, &mut sim, &get(&path, query.as_deref()))?;
+            assert_eq!(status, 200, "{name} for {id:#x}");
+            assert_eq!(
+                parse_experience_status(&parse_llsd_xml(&body)?)?,
+                expected,
+                "{name} for {id:#x}"
+            );
+        }
+        Ok(())
+    }
+
+    /// The `ExperiencePreferences` PUT moves an id between the allowed /
+    /// blocked lists, echoes the full post-mutation lists through the
+    /// client fold, surfaces [`ServerEvent::ExperiencePermissionSet`], and
+    /// a follow-up `GetExperiences` observes the move.
+    #[test]
+    fn experience_preferences_put_moves_between_lists() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXPERIENCE_PREFERENCES)?;
+        let body =
+            build_set_experience_permission_request(exp_key(EXP_B), ExperiencePermission::Allow);
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &put(&path, None, &body),
+            CAP_EXPERIENCE_PREFERENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperiencePermissions { allowed, blocked }] => {
+                assert_eq!(allowed, &vec![exp_key(EXP_A), exp_key(EXP_B)]);
+                assert_eq!(blocked, &Vec::new());
+            }
+            other => return Err(format!("expected ExperiencePermissions, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::ExperiencePermissionSet {
+                experience_id,
+                permission,
+            }) => {
+                assert_eq!(experience_id, exp_key(EXP_B));
+                assert_eq!(permission, ExperiencePermission::Allow);
+            }
+            other => {
+                return Err(format!("expected ExperiencePermissionSet, got {other:?}").into());
+            }
+        }
+        // The mutation is fixture state: a follow-up read observes it.
+        let get_path = granted_cap_path(&caps, CAP_GET_EXPERIENCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&get_path, None),
+            CAP_GET_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperiencePermissions { allowed, blocked }] => {
+                assert_eq!(allowed, &vec![exp_key(EXP_A), exp_key(EXP_B)]);
+                assert_eq!(blocked, &Vec::new());
+            }
+            other => return Err(format!("expected ExperiencePermissions, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `ExperiencePreferences` DELETE (the client's `Forget` form)
+    /// removes the id from both lists and surfaces the `Forget` event.
+    #[test]
+    fn experience_preferences_delete_forgets() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let cap_path = granted_cap_path(&caps, CAP_EXPERIENCE_PREFERENCES)?;
+        let suffix = forget_experience_query(exp_key(EXP_A));
+        let (path, query) = split_suffix(&cap_path, &suffix);
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &delete(&path, query.as_deref()),
+            CAP_EXPERIENCE_PREFERENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperiencePermissions { allowed, blocked }] => {
+                assert_eq!(allowed, &Vec::new());
+                assert_eq!(blocked, &vec![exp_key(EXP_B)]);
+            }
+            other => return Err(format!("expected ExperiencePermissions, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::ExperiencePermissionSet {
+                experience_id,
+                permission,
+            }) => {
+                assert_eq!(experience_id, exp_key(EXP_A));
+                assert_eq!(permission, ExperiencePermission::Forget);
+            }
+            other => {
+                return Err(format!("expected ExperiencePermissionSet, got {other:?}").into());
+            }
+        }
+        Ok(())
+    }
+
+    /// The `UpdateExperience` POST applies the editable fields (preserving
+    /// the server-controlled quota), echoes the updated record through the
+    /// client fold, surfaces [`ServerEvent::ExperienceUpdated`], and a
+    /// follow-up `GetExperienceInfo` observes the edit.
+    #[test]
+    fn update_experience_applies_and_echoes() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_UPDATE_EXPERIENCE)?;
+        let body = build_update_experience_request(&ExperienceUpdate {
+            public_id: exp_key(EXP_A),
+            name: "Magic Quest II".to_owned(),
+            description: "Now with more magic".to_owned(),
+            maturity: 21,
+            properties: 0,
+            slurl: None,
+            extended_metadata: String::new(),
+        });
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_UPDATE_EXPERIENCE,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperienceUpdated(info)] => {
+                assert_eq!(info.public_id, exp_key(EXP_A));
+                assert_eq!(info.name, "Magic Quest II");
+                assert_eq!(info.description, "Now with more magic");
+                assert_eq!(info.maturity, 21);
+                // Server-controlled fields survive the edit untouched.
+                assert_eq!(info.quota, 128);
+                assert_eq!(
+                    info.owner,
+                    Some(OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))))
+                );
+            }
+            other => return Err(format!("expected ExperienceUpdated, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::ExperienceUpdated { update }) => {
+                assert_eq!(update.public_id, exp_key(EXP_A));
+                assert_eq!(update.name, "Magic Quest II");
+            }
+            other => return Err(format!("expected ExperienceUpdated, got {other:?}").into()),
+        }
+        // The edit is fixture state: a follow-up lookup observes it.
+        let info_path = granted_cap_path(&caps, CAP_GET_EXPERIENCE_INFO)?;
+        let suffix = experience_info_query(&[exp_key(EXP_A)]);
+        let (path, query) = split_suffix(&info_path, &suffix);
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, query.as_deref()),
+            CAP_GET_EXPERIENCE_INFO,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ExperienceInfo(infos)] => {
+                assert_eq!(
+                    infos.first().map(|info| info.name.as_str()),
+                    Some("Magic Quest II")
+                );
+            }
+            other => return Err(format!("expected ExperienceInfo, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `RegionExperiences` GET serves the seeded triple; the POST
+    /// replaces it wholesale, echoes the stored lists, surfaces
+    /// [`ServerEvent::RegionExperiencesSet`], and a follow-up GET observes
+    /// the replacement.
+    #[test]
+    fn region_experiences_get_and_post_round_trip() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_REGION_EXPERIENCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_REGION_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [
+                Event::RegionExperiences {
+                    allowed,
+                    blocked,
+                    trusted,
+                },
+            ] => {
+                assert_eq!(allowed, &vec![exp_key(EXP_A)]);
+                assert_eq!(blocked, &vec![exp_key(EXP_B)]);
+                assert_eq!(trusted, &vec![exp_key(EXP_C)]);
+            }
+            other => return Err(format!("expected RegionExperiences, got {other:?}").into()),
+        }
+        let body = build_region_experiences_request(
+            &[exp_key(EXP_C)],
+            &[],
+            &[exp_key(EXP_A), exp_key(EXP_B)],
+        );
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_REGION_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [
+                Event::RegionExperiences {
+                    allowed,
+                    blocked,
+                    trusted,
+                },
+            ] => {
+                assert_eq!(allowed, &vec![exp_key(EXP_C)]);
+                assert_eq!(blocked, &Vec::new());
+                assert_eq!(trusted, &vec![exp_key(EXP_A), exp_key(EXP_B)]);
+            }
+            other => return Err(format!("expected RegionExperiences, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::RegionExperiencesSet {
+                allowed,
+                blocked,
+                trusted,
+            }) => {
+                assert_eq!(allowed, vec![exp_key(EXP_C)]);
+                assert_eq!(blocked, Vec::new());
+                assert_eq!(trusted, vec![exp_key(EXP_A), exp_key(EXP_B)]);
+            }
+            other => return Err(format!("expected RegionExperiencesSet, got {other:?}").into()),
+        }
+        // The replacement is fixture state: a follow-up GET observes it.
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_REGION_EXPERIENCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::RegionExperiences { allowed, .. }] => {
+                assert_eq!(allowed, &vec![exp_key(EXP_C)]);
+            }
+            other => return Err(format!("expected RegionExperiences, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The experience handlers' status contract: wrong verbs answer `405`,
+    /// malformed queries/bodies `400`, and an `UpdateExperience` targeting
+    /// an unknown record `404`. (`GetExperienceInfo` with no query is the
+    /// documented lenient exception — `200` with no records.)
+    #[test]
+    fn experience_handlers_reject_wrong_methods_and_bad_requests() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_experiences(&mut sim);
+
+        // The GET-only caps are GET-only.
+        for name in [
+            CAP_GET_EXPERIENCE_INFO,
+            CAP_FIND_EXPERIENCE_BY_NAME,
+            CAP_GET_EXPERIENCES,
+            CAP_AGENT_EXPERIENCES,
+            CAP_GET_ADMIN_EXPERIENCES,
+            CAP_GET_CREATOR_EXPERIENCES,
+            CAP_GROUP_EXPERIENCES,
+            CAP_IS_EXPERIENCE_ADMIN,
+            CAP_IS_EXPERIENCE_CONTRIBUTOR,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _) = respond(&mut caps, &mut sim, &post(&path, ""))?;
+            assert_eq!(status, 405, "POST on {name}");
+        }
+
+        // The query-carrying GETs reject a missing or malformed query.
+        let path = granted_cap_path(&caps, CAP_FIND_EXPERIENCE_BY_NAME)?;
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 400, "FindExperienceByName without a query");
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, Some("query=magic")))?;
+        assert_eq!(status, 400, "FindExperienceByName without a page");
+        let path = granted_cap_path(&caps, CAP_GROUP_EXPERIENCES)?;
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 400, "GroupExperiences without a query");
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, Some("not-a-uuid")))?;
+        assert_eq!(status, 400, "GroupExperiences with a malformed id");
+        let path = granted_cap_path(&caps, CAP_IS_EXPERIENCE_ADMIN)?;
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 400, "IsExperienceAdmin without a query");
+
+        // The lenient exception: an id-less GetExperienceInfo answers 200
+        // with no records rather than an error.
+        let path = granted_cap_path(&caps, CAP_GET_EXPERIENCE_INFO)?;
+        let (status, body) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 200);
+        assert_eq!(parse_experience_infos(&parse_llsd_xml(&body)?)?, Vec::new());
+
+        // ExperiencePreferences: POST is 405; a malformed PUT body, a
+        // well-formed non-permission PUT body, and a query-less DELETE are
+        // all 400.
+        let path = granted_cap_path(&caps, CAP_EXPERIENCE_PREFERENCES)?;
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, ""))?;
+        assert_eq!(status, 405);
+        let (status, _) = respond(&mut caps, &mut sim, &put(&path, None, "not xml <"))?;
+        assert_eq!(status, 400);
+        let (status, _) = respond(
+            &mut caps,
+            &mut sim,
+            &put(&path, None, "<llsd><map/></llsd>"),
+        )?;
+        assert_eq!(status, 400);
+        let (status, _) = respond(&mut caps, &mut sim, &delete(&path, None))?;
+        assert_eq!(status, 400);
+
+        // UpdateExperience: GET is 405, a malformed body 400, an unknown
+        // target 404.
+        let path = granted_cap_path(&caps, CAP_UPDATE_EXPERIENCE)?;
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+        assert_eq!(status, 405);
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, "not xml <"))?;
+        assert_eq!(status, 400);
+        let unknown = build_update_experience_request(&ExperienceUpdate {
+            public_id: exp_key(EXP_UNKNOWN),
+            name: "Ghost".to_owned(),
+            description: String::new(),
+            maturity: 13,
+            properties: 0,
+            slurl: None,
+            extended_metadata: String::new(),
+        });
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, &unknown))?;
+        assert_eq!(status, 404);
+
+        // RegionExperiences: PUT is 405, a malformed POST body 400.
+        let path = granted_cap_path(&caps, CAP_REGION_EXPERIENCES)?;
+        let (status, _) = respond(&mut caps, &mut sim, &put(&path, None, ""))?;
+        assert_eq!(status, 405);
+        let (status, _) = respond(&mut caps, &mut sim, &post(&path, "not xml <"))?;
+        assert_eq!(status, 400);
+
+        // No mutation above landed: the server-event queue stays empty.
+        assert!(sim.poll_event().is_none());
         Ok(())
     }
 }

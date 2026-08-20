@@ -28,28 +28,36 @@ use std::collections::{BTreeMap, HashMap};
 
 use sl_types::key::AgentKey;
 use sl_wire::{
-    AisUpdate, AssetUploadResponse, DisplayName, LandResourcesUrls, Llsd, ObjectMediaRequest,
-    ObjectMediaResponse, build_agent_preferences_response, build_asset_upload_response,
-    build_attachment_resources_response, build_create_inventory_category_response,
-    build_display_names_response, build_get_object_cost_response,
-    build_get_object_physics_data_response, build_land_resource_detail_response,
-    build_land_resource_summary_response, build_land_resources_response, build_lsl_syntax_document,
-    build_modify_material_params_response, build_remote_parcel_response,
-    build_render_materials_response, build_resource_cost_selected_response, build_seed_response,
-    build_simulator_features_response, parse_agent_preferences,
-    parse_ais_category_children_fetch_url, parse_ais_category_children_url, parse_ais_category_url,
-    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
-    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
-    parse_ais_update_item_body, parse_create_inventory_category_request, parse_display_names_query,
-    parse_event_queue_request, parse_fetch_inventory_items_request, parse_fetch_inventory_request,
+    AisUpdate, AssetUploadResponse, DisplayName, ExperiencePermission, LandResourcesUrls, Llsd,
+    ObjectMediaRequest, ObjectMediaResponse, build_agent_preferences_response,
+    build_asset_upload_response, build_attachment_resources_response,
+    build_create_inventory_category_response, build_display_names_response,
+    build_experience_ids_response, build_experience_infos_response,
+    build_experience_permissions_response, build_experience_status_response,
+    build_get_object_cost_response, build_get_object_physics_data_response,
+    build_land_resource_detail_response, build_land_resource_summary_response,
+    build_land_resources_response, build_lsl_syntax_document,
+    build_modify_material_params_response, build_region_experiences_response,
+    build_remote_parcel_response, build_render_materials_response,
+    build_resource_cost_selected_response, build_seed_response, build_simulator_features_response,
+    parse_agent_preferences, parse_ais_category_children_fetch_url,
+    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
+    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
+    parse_experience_id_query, parse_experience_info_query, parse_fetch_inventory_items_request,
+    parse_fetch_inventory_request, parse_find_experience_query, parse_forget_experience_query,
     parse_get_object_cost_request, parse_get_object_physics_data_request,
-    parse_land_resources_request, parse_llsd_xml, parse_modify_material_params_request,
-    parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
-    parse_object_media_request, parse_remote_parcel_request, parse_render_materials_put_request,
-    parse_render_materials_request, parse_resource_cost_selected_request, parse_seed_request,
-    parse_send_user_report, parse_update_avatar_appearance_request,
-    parse_update_item_asset_request, parse_update_script_agent_request,
-    parse_update_script_task_request, parse_update_task_item_asset_request,
+    parse_group_experiences_query, parse_land_resources_request, parse_llsd_xml,
+    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
+    parse_object_media_navigate_request, parse_object_media_request,
+    parse_region_experiences_request, parse_remote_parcel_request,
+    parse_render_materials_put_request, parse_render_materials_request,
+    parse_resource_cost_selected_request, parse_seed_request, parse_send_user_report,
+    parse_set_experience_permission_request, parse_update_avatar_appearance_request,
+    parse_update_experience_request, parse_update_item_asset_request,
+    parse_update_script_agent_request, parse_update_script_task_request,
+    parse_update_task_item_asset_request,
 };
 use url::Url;
 use uuid::Uuid;
@@ -65,15 +73,19 @@ use crate::session::{
 use crate::sim_inventory::SimInventoryError;
 use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
-    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
-    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXT_ENVIRONMENT,
-    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_INVENTORY_API_V3,
-    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
-    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
-    CAP_READ_OFFLINE_MSGS, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
-    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
+    CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM,
+    CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_GROUP_EXPERIENCES, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
+    CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
+    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
     CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
     CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT,
@@ -177,6 +189,19 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_RESOURCE_COST_SELECTED,
     CAP_ATTACHMENT_RESOURCES,
     CAP_LAND_RESOURCES,
+    // The experience cluster.
+    CAP_GET_EXPERIENCE_INFO,
+    CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_EXPERIENCES,
+    CAP_AGENT_EXPERIENCES,
+    CAP_GET_ADMIN_EXPERIENCES,
+    CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GROUP_EXPERIENCES,
+    CAP_EXPERIENCE_PREFERENCES,
+    CAP_IS_EXPERIENCE_ADMIN,
+    CAP_IS_EXPERIENCE_CONTRIBUTOR,
+    CAP_UPDATE_EXPERIENCE,
+    CAP_REGION_EXPERIENCES,
 ];
 
 /// How the simulator serves one capability name.
@@ -274,6 +299,35 @@ pub enum CapHandler {
     /// ([`SimSession::set_land_resource_summary`] /
     /// [`SimSession::set_land_resource_details`]).
     LandResources,
+    /// The `GetExperienceInfo` record lookup GET (a `/id/?public_id=…`
+    /// sub-path + query), served from the session's experience store
+    /// ([`SimSession::experiences`]).
+    ExperienceInfo,
+    /// The `FindExperienceByName` search GET (`?page=…&query=…`), served
+    /// from the same store's public records.
+    ExperienceSearch,
+    /// The bodyless `GetExperiences` GET: the agent's allowed / blocked
+    /// preference lists.
+    ExperiencePermissions,
+    /// The `ExperiencePreferences` mutation surface (PUT `Allow`/`Block`
+    /// body, DELETE `?<id>` forget), echoing the full permission lists.
+    ExperiencePreferences,
+    /// The experience id-list GETs (`AgentExperiences`,
+    /// `GetAdminExperiences`, `GetCreatorExperiences`, `GroupExperiences`),
+    /// name-routed to the store's owned / admin / creator / per-group
+    /// lists; `GroupExperiences` requires its `?<group_id>` query.
+    ExperienceIdList,
+    /// The `IsExperienceAdmin` / `IsExperienceContributor` status GETs
+    /// (`?experience_id=…`), name-routed to the store's admin / creator
+    /// membership.
+    ExperienceStatus,
+    /// The `UpdateExperience` metadata-edit POST, applied to the same
+    /// store's record (`SimSession::apply_experience_update`).
+    UpdateExperience,
+    /// The `RegionExperiences` surface: GET serves the region's
+    /// allowed / blocked / trusted lists, POST replaces them wholesale
+    /// (`SimSession::apply_region_experiences`).
+    RegionExperiences,
 }
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
@@ -563,6 +617,19 @@ impl SimCaps {
             CAP_RESOURCE_COST_SELECTED => Some(CapHandler::ResourceCostSelected),
             CAP_ATTACHMENT_RESOURCES => Some(CapHandler::AttachmentResources),
             CAP_LAND_RESOURCES => Some(CapHandler::LandResources),
+            CAP_GET_EXPERIENCE_INFO => Some(CapHandler::ExperienceInfo),
+            CAP_FIND_EXPERIENCE_BY_NAME => Some(CapHandler::ExperienceSearch),
+            CAP_GET_EXPERIENCES => Some(CapHandler::ExperiencePermissions),
+            CAP_EXPERIENCE_PREFERENCES => Some(CapHandler::ExperiencePreferences),
+            CAP_AGENT_EXPERIENCES
+            | CAP_GET_ADMIN_EXPERIENCES
+            | CAP_GET_CREATOR_EXPERIENCES
+            | CAP_GROUP_EXPERIENCES => Some(CapHandler::ExperienceIdList),
+            CAP_IS_EXPERIENCE_ADMIN | CAP_IS_EXPERIENCE_CONTRIBUTOR => {
+                Some(CapHandler::ExperienceStatus)
+            }
+            CAP_UPDATE_EXPERIENCE => Some(CapHandler::UpdateExperience),
+            CAP_REGION_EXPERIENCES => Some(CapHandler::RegionExperiences),
             // Every two-stage upload cap shares one handler; the cap name only
             // picks the step-1 metadata parser inside it.
             name if UPLOAD_CAPABILITIES.contains(&name) => Some(CapHandler::AssetUpload),
@@ -710,6 +777,30 @@ impl SimCaps {
                 }
                 Some(CapHandler::LandResources) => {
                     CapsDispatch::Response(self.dispatch_land_resources(sim, request))
+                }
+                Some(CapHandler::ExperienceInfo) => {
+                    CapsDispatch::Response(Self::dispatch_experience_info(sim, request))
+                }
+                Some(CapHandler::ExperienceSearch) => {
+                    CapsDispatch::Response(Self::dispatch_experience_search(sim, request))
+                }
+                Some(CapHandler::ExperiencePermissions) => {
+                    CapsDispatch::Response(Self::dispatch_experience_permissions(sim, request))
+                }
+                Some(CapHandler::ExperiencePreferences) => {
+                    CapsDispatch::Response(Self::dispatch_experience_preferences(sim, request))
+                }
+                Some(CapHandler::ExperienceIdList) => {
+                    CapsDispatch::Response(Self::dispatch_experience_id_list(sim, request, name))
+                }
+                Some(CapHandler::ExperienceStatus) => {
+                    CapsDispatch::Response(Self::dispatch_experience_status(sim, request, name))
+                }
+                Some(CapHandler::UpdateExperience) => {
+                    CapsDispatch::Response(Self::dispatch_update_experience(sim, request))
+                }
+                Some(CapHandler::RegionExperiences) => {
+                    CapsDispatch::Response(Self::dispatch_region_experiences(sim, request))
                 }
                 // Tokens are only minted for served capabilities, so a
                 // resolved name always has a handler; answer 404 rather than
@@ -1745,6 +1836,200 @@ impl SimCaps {
         url
     }
 
+    /// Serves one `GetExperienceInfo` GET (the `/id/?public_id=…`
+    /// sub-path-plus-query form the client builder emits): the stored
+    /// record per requested id ([`SimSession::experiences`]); unknown ids
+    /// answer as `error_ids` entries. An empty or absent query answers
+    /// `200` with no records — the parser is lenient by design (a
+    /// documented exception to the `400`-on-malformed rule). Wrong
+    /// method → `405`.
+    fn dispatch_experience_info(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let ids = parse_experience_info_query(&ais_suffix(request));
+        CapsResponse::llsd_xml(build_experience_infos_response(
+            &sim.experiences().infos(&ids),
+        ))
+    }
+
+    /// Serves one `FindExperienceByName` GET: a 1-based
+    /// `SEARCH_PAGE_SIZE` page of public records whose name contains the
+    /// search text case-insensitively ([`SimExperiences::find`], which
+    /// hides invalid and private records). A query missing `page` or
+    /// `query` → `400`; wrong method → `405`.
+    ///
+    /// [`SimExperiences::find`]: crate::SimExperiences::find
+    fn dispatch_experience_search(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some((text, page)) = parse_find_experience_query(&ais_suffix(request)) else {
+            return CapsResponse::bad_request();
+        };
+        CapsResponse::llsd_xml(build_experience_infos_response(
+            &sim.experiences().find(&text, page),
+        ))
+    }
+
+    /// Serves the bodyless `GetExperiences` GET: the agent's allowed /
+    /// blocked preference lists ([`SimSession::experiences`]). Wrong
+    /// method → `405`.
+    fn dispatch_experience_permissions(
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let (allowed, blocked) = sim.experiences().agent_permissions();
+        CapsResponse::llsd_xml(build_experience_permissions_response(&allowed, &blocked))
+    }
+
+    /// Serves the `ExperiencePreferences` mutation surface. PUT parses the
+    /// `{ "<id>": { permission } }` body and applies `Allow`/`Block` (a
+    /// malformed or non-permission body → `400`); DELETE parses the
+    /// `?<id>` query and forgets the preference (missing/unparsable id →
+    /// `400`). Both echo the full post-mutation permission lists — the
+    /// same reply shape as `GetExperiences`, which is how the client folds
+    /// it. Any experience id is accepted without a record lookup (a
+    /// documented exception to the `404`-on-unknown rule: a preference is
+    /// the agent's own keyed entry, and viewers can block ids they never
+    /// resolved). Other methods → `405`.
+    fn dispatch_experience_preferences(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        let (id, permission) = match request.method {
+            "PUT" => {
+                let Ok(body) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Ok(Some(parsed)) = parse_set_experience_permission_request(body) else {
+                    return CapsResponse::bad_request();
+                };
+                parsed
+            }
+            "DELETE" => {
+                let Some(id) = parse_forget_experience_query(&ais_suffix(request)) else {
+                    return CapsResponse::bad_request();
+                };
+                (id, ExperiencePermission::Forget)
+            }
+            _ => return CapsResponse::method_not_allowed(),
+        };
+        let (allowed, blocked) = sim.set_experience_preference(id, permission);
+        CapsResponse::llsd_xml(build_experience_permissions_response(&allowed, &blocked))
+    }
+
+    /// Serves the experience id-list GETs, routed on the cap name:
+    /// `AgentExperiences` → the owned list, `GetAdminExperiences` → the
+    /// admin list, `GetCreatorExperiences` → the creator list,
+    /// `GroupExperiences` → the `?<group_id>` group's list (missing or
+    /// unparsable group id → `400`; an unknown group answers an empty
+    /// list). Wrong method → `405`.
+    fn dispatch_experience_id_list(
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+        name: &str,
+    ) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let ids = if name == CAP_GROUP_EXPERIENCES {
+            let Some(group_id) = parse_group_experiences_query(&ais_suffix(request)) else {
+                return CapsResponse::bad_request();
+            };
+            sim.experiences().group(group_id)
+        } else if name == CAP_GET_ADMIN_EXPERIENCES {
+            sim.experiences().admin()
+        } else if name == CAP_GET_CREATOR_EXPERIENCES {
+            sim.experiences().creator()
+        } else {
+            sim.experiences().owned()
+        };
+        CapsResponse::llsd_xml(build_experience_ids_response(&ids))
+    }
+
+    /// Serves the `IsExperienceAdmin` / `IsExperienceContributor` status
+    /// GETs, routed on the cap name: `{ status }` from the store's admin /
+    /// creator membership. An unknown experience id answers
+    /// `{ status: false }`, never an error; a missing or unparsable
+    /// `?experience_id=` query → `400`; wrong method → `405`.
+    fn dispatch_experience_status(
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+        name: &str,
+    ) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(id) = parse_experience_id_query(&ais_suffix(request)) else {
+            return CapsResponse::bad_request();
+        };
+        let status = if name == CAP_IS_EXPERIENCE_ADMIN {
+            sim.experiences().is_admin(id)
+        } else {
+            sim.experiences().is_contributor(id)
+        };
+        CapsResponse::llsd_xml(build_experience_status_response(status))
+    }
+
+    /// Serves one `UpdateExperience` POST: parses the edit body, applies it
+    /// to the stored record ([`SimSession::apply_experience_update`]), and
+    /// echoes the updated record in the wrapped `{ experience_keys }` form
+    /// (the client folds the first record into its updated-experience
+    /// event). An unknown `public_id` → `404`; a malformed body → `400`;
+    /// wrong method → `405`.
+    fn dispatch_update_experience(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(body) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(update) = parse_update_experience_request(body) else {
+            return CapsResponse::bad_request();
+        };
+        match sim.apply_experience_update(update) {
+            Some(updated) => CapsResponse::llsd_xml(build_experience_infos_response(&[updated])),
+            None => CapsResponse::not_found(),
+        }
+    }
+
+    /// Serves the `RegionExperiences` surface. GET answers the region's
+    /// stored allowed / blocked / trusted lists; POST parses the
+    /// same-shaped body, replaces the lists wholesale
+    /// ([`SimSession::apply_region_experiences`]), and echoes the stored
+    /// triple. A malformed POST body → `400`; other methods → `405`.
+    fn dispatch_region_experiences(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        match request.method {
+            "GET" => {
+                let (allowed, blocked, trusted) = sim.experiences().region_lists();
+                CapsResponse::llsd_xml(build_region_experiences_response(
+                    &allowed, &blocked, &trusted,
+                ))
+            }
+            "POST" => {
+                let Ok(body) = std::str::from_utf8(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Ok((allowed, blocked, trusted)) = parse_region_experiences_request(body) else {
+                    return CapsResponse::bad_request();
+                };
+                let (allowed, blocked, trusted) =
+                    sim.apply_region_experiences(allowed, blocked, trusted);
+                CapsResponse::llsd_xml(build_region_experiences_response(
+                    &allowed, &blocked, &trusted,
+                ))
+            }
+            _ => CapsResponse::method_not_allowed(),
+        }
+    }
+
     /// Mints the URL for one capability token: `{base}/cap/{token}`.
     ///
     /// Built via `path_segments_mut` rather than `Url::join` (whose
@@ -1842,9 +2127,13 @@ fn cap_sub_path(path: &str) -> Option<&str> {
         .filter(|sub_path| !sub_path.is_empty())
 }
 
-/// Reconstructs the sl-wire AIS3 URL suffix (`/category/<id>…` plus the
+/// Reconstructs the sl-wire URL suffix (any capability sub-path plus the
 /// original query string) from a dispatched request — the exact form the
 /// client-side URL builders emit and the `parse_ais_*_url` inverses consume.
+/// The experience-cluster query parsers (`parse_experience_info_query` and
+/// friends) consume the same suffix shape: `GetExperienceInfo`'s `/id/?…`
+/// sub-path round-trips through it, and the bare-query caps yield `/?…`,
+/// whose leading segment the parsers ignore.
 fn ais_suffix(request: &CapsRequest<'_>) -> String {
     let sub_path = cap_sub_path(request.path).unwrap_or_default();
     match request.query {
@@ -1927,18 +2216,18 @@ mod tests {
             ("ProvisionVoiceAccountRequest", CapStatus::Pending),
             ("ParcelVoiceInfoRequest", CapStatus::Pending),
             ("VoiceSignalingRequest", CapStatus::Pending),
-            ("GetExperienceInfo", CapStatus::Pending),
-            ("FindExperienceByName", CapStatus::Pending),
-            ("GetExperiences", CapStatus::Pending),
-            ("AgentExperiences", CapStatus::Pending),
-            ("GetAdminExperiences", CapStatus::Pending),
-            ("GetCreatorExperiences", CapStatus::Pending),
-            ("GroupExperiences", CapStatus::Pending),
-            ("ExperiencePreferences", CapStatus::Pending),
-            ("IsExperienceAdmin", CapStatus::Pending),
-            ("IsExperienceContributor", CapStatus::Pending),
-            ("UpdateExperience", CapStatus::Pending),
-            ("RegionExperiences", CapStatus::Pending),
+            ("GetExperienceInfo", CapStatus::Served),
+            ("FindExperienceByName", CapStatus::Served),
+            ("GetExperiences", CapStatus::Served),
+            ("AgentExperiences", CapStatus::Served),
+            ("GetAdminExperiences", CapStatus::Served),
+            ("GetCreatorExperiences", CapStatus::Served),
+            ("GroupExperiences", CapStatus::Served),
+            ("ExperiencePreferences", CapStatus::Served),
+            ("IsExperienceAdmin", CapStatus::Served),
+            ("IsExperienceContributor", CapStatus::Served),
+            ("UpdateExperience", CapStatus::Served),
+            ("RegionExperiences", CapStatus::Served),
             ("ReadOfflineMsgs", CapStatus::Served),
             ("ChatSessionRequest", CapStatus::Served),
             ("AcceptGroupInvite", CapStatus::Pending),

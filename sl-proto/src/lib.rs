@@ -17,6 +17,7 @@ mod particles;
 mod scoped_id;
 mod session;
 mod sim_caps;
+mod sim_experiences;
 mod sim_inventory;
 mod sim_session;
 mod terrain;
@@ -104,6 +105,7 @@ pub use session::{
 pub use sim_caps::{
     CapHandler, CapsDispatch, CapsRequest, CapsResponse, LLSD_XML_CONTENT_TYPE, SimCaps,
 };
+pub use sim_experiences::SimExperiences;
 pub use sim_inventory::SimInventoryTree;
 pub use sim_session::{
     AgentPresence, AgentUpdateInfo, CapsUploadMetadata, FlowMirrorStatus, ObjectMediaState,
