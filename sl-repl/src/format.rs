@@ -653,6 +653,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestGroupNames(..) => "request_group_names",
         Command::RequestDisplayNames(..) => "request_display_names",
         Command::RequestEnvironment { .. } => "request_environment",
+        Command::SetEnvironment { .. } => "set_environment",
         Command::RequestParcelProperties { .. } => "request_parcel_properties",
         Command::RequestParcelPropertiesById { .. } => "request_parcel_properties_by_id",
         Command::SetParcelOtherCleanTime { .. } => "set_parcel_other_clean_time",

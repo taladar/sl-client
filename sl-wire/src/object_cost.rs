@@ -166,6 +166,16 @@ pub fn build_get_object_cost_request(object_ids: &[ObjectKey]) -> String {
     object_ids_request(object_ids).to_llsd_xml()
 }
 
+/// Decodes a `GetObjectCost` request: the requested object ids — the inverse
+/// of [`build_get_object_cost_request`] (server side).
+///
+/// # Errors
+/// Returns [`WireError::Llsd`] if a decoded LLSD field is present but
+/// of the wrong kind.
+pub fn parse_get_object_cost_request(body: &Llsd) -> Result<Vec<ObjectKey>, WireError> {
+    parse_object_ids(body)
+}
+
 /// Decodes a `GetObjectCost` reply: the per-object costs, keyed by object id.
 /// The result is sorted by id so it is deterministic. Objects absent from the
 /// reply map (the "no such object" signal) are simply not present in the result.
@@ -310,12 +320,12 @@ mod tests {
     use super::{
         ObjectCost, SelectedCostKind, SelectedResourceCost, build_get_object_cost_request,
         build_get_object_cost_response, build_resource_cost_selected_request,
-        build_resource_cost_selected_response, parse_get_object_cost, parse_resource_cost_selected,
+        build_resource_cost_selected_response, parse_get_object_cost,
+        parse_get_object_cost_request, parse_resource_cost_selected,
         parse_resource_cost_selected_request,
     };
     use crate::WireError;
     use crate::llsd::parse_llsd_xml;
-    use crate::object_cost::parse_object_ids;
 
     /// The per-object costs round-trip through the server reply builder and the
     /// client decoder, sorted by id.
@@ -367,9 +377,10 @@ mod tests {
             ObjectKey::from(Uuid::from_u128(0xbb)),
         ];
         let body = build_get_object_cost_request(&ids);
-        let parsed =
-            parse_object_ids(&parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?)
-                .map_err(|error| format!("{error:?}"))?;
+        let parsed = parse_get_object_cost_request(
+            &parse_llsd_xml(&body).map_err(|error| format!("{error:?}"))?,
+        )
+        .map_err(|error| format!("{error:?}"))?;
         assert_eq!(parsed, ids);
         Ok(())
     }

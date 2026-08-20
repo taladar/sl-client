@@ -1479,22 +1479,23 @@ pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
 pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub(crate) use conversions::{
-    ZERO_VECTOR, build_task_inventory, instant_message, parse_copy_inventory_from_notecard,
-    region_handshake_message, shape_from_object_shape_block, unpack_uuids,
+    ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, instant_message,
+    parse_copy_inventory_from_notecard, region_handshake_message, shape_from_object_shape_block,
+    unpack_uuids,
 };
 pub use conversions::{
     agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
     ais_category_children_reply_to_llsd, ais_inventory_update_to_llsd, ais_item_reply_to_llsd,
-    ais_mutation_reply_to_llsd, build_map_block_reply, build_map_item_reply, build_map_layer_reply,
-    bulk_update_inventory_to_llsd, chat_session_request_body, chat_session_request_from_llsd,
-    chat_session_roster_to_llsd, chatterbox_invitation_to_llsd, copy_inventory_from_notecard_body,
-    created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
-    enable_simulator_to_caps_llsd, environment_asset_from_bytes, environment_to_llsd,
-    establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd,
-    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
-    inventory_descendents_to_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
-    open_region_info_to_llsd, parcel_info_to_llsd, required_voice_version_to_llsd,
-    server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
-    sim_console_response_to_llsd, sky_settings_from_asset, teleport_finish_to_llsd,
-    water_settings_from_asset, windlight_refresh_to_llsd,
+    ais_mutation_reply_to_llsd, build_environment_update_request, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
+    chat_session_request_body, chat_session_request_from_llsd, chat_session_roster_to_llsd,
+    chatterbox_invitation_to_llsd, copy_inventory_from_notecard_body, created_category_to_llsd,
+    crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
+    environment_asset_from_bytes, environment_to_llsd, establish_agent_communication_to_llsd,
+    fetch_inventory_items_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
+    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
+    required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
+    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
+    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
 };

@@ -9,8 +9,8 @@ use crate::types::{
     AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
     ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha, DayCycle,
     DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails,
-    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+    EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
+    GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
@@ -759,6 +759,33 @@ pub(crate) fn environment_from_llsd(body: &Llsd) -> Option<EnvironmentSettings> 
         env_version: i32_member(env, "env_version"),
         track_altitudes: [altitude(0), altitude(1), altitude(2)],
         day_cycle: day_cycle_from_llsd(env.get("day_cycle")),
+    })
+}
+
+/// Parses an `ExtEnvironment` PUT body (the reference viewer's
+/// `coroUpdateEnvironment` shape) into an [`EnvironmentUpdate`] — the inverse of
+/// [`build_environment_update_request`] (server side). Each optional field is
+/// `Some` only when the client sent it. Returns `None` if the `environment`
+/// envelope is absent (a malformed request).
+pub(crate) fn environment_update_from_llsd(body: &Llsd) -> Option<EnvironmentUpdate> {
+    let env = body.get("environment")?;
+    let track_altitudes = env.get("track_altitudes").map(|alt| {
+        let altitude = |index: usize| alt.index(index).and_then(Llsd::as_f32).unwrap_or(0.0);
+        [altitude(0), altitude(1), altitude(2)]
+    });
+    Some(EnvironmentUpdate {
+        day_length: env.get("day_length").and_then(Llsd::as_i32),
+        day_offset: env.get("day_offset").and_then(Llsd::as_i32),
+        track_altitudes,
+        day_cycle: env
+            .get("day_cycle")
+            .map(|cycle| day_cycle_from_llsd(Some(cycle))),
+        day_asset: env.get("day_asset").and_then(Llsd::as_uuid),
+        day_name: env
+            .get("day_name")
+            .and_then(Llsd::as_str)
+            .map(str::to_owned),
+        flags: u32_member(env, "flags"),
     })
 }
 
@@ -4564,6 +4591,36 @@ pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
     ])
 }
 
+/// Builds an `ExtEnvironment` PUT body (the reference viewer's
+/// `coroUpdateEnvironment` shape) from an [`EnvironmentUpdate`]: an
+/// `environment` envelope carrying each optional field only when `Some`, plus
+/// the flags. The inverse is the crate-private `environment_update_from_llsd`
+/// (server side).
+#[must_use]
+pub fn build_environment_update_request(update: &EnvironmentUpdate) -> String {
+    let mut entries: Vec<(&str, Llsd)> = Vec::new();
+    if let Some(day_length) = update.day_length {
+        entries.push(("day_length", Llsd::Integer(day_length)));
+    }
+    if let Some(day_offset) = update.day_offset {
+        entries.push(("day_offset", Llsd::Integer(day_offset)));
+    }
+    if let Some(track_altitudes) = update.track_altitudes {
+        entries.push(("track_altitudes", reals_to_llsd(&track_altitudes)));
+    }
+    if let Some(day_cycle) = &update.day_cycle {
+        entries.push(("day_cycle", day_cycle_to_llsd(day_cycle)));
+    }
+    if let Some(day_asset) = update.day_asset {
+        entries.push(("day_asset", Llsd::Uuid(day_asset)));
+    }
+    if let Some(day_name) = &update.day_name {
+        entries.push(("day_name", Llsd::String(day_name.clone())));
+    }
+    entries.push(("flags", u32_to_llsd(update.flags)));
+    llsd_map(vec![("environment", llsd_map(entries))]).to_llsd_xml()
+}
+
 /// Serializes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body (inverse
 /// of `parcel_info_from_llsd`). The three trailing single-blocks the parser
 /// reads are emitted as one-element arrays, and the CAPS-only `SeeAVs` /
@@ -6460,5 +6517,50 @@ mod caps_serializer_tests {
             created_category_from_llsd(&created_category_to_llsd(&folder)),
             Some(folder)
         );
+    }
+
+    /// The `ExtEnvironment` PUT body round-trips: every field the client
+    /// builder emits comes back out of the server parser, and fields the
+    /// client did not send stay `None` (an all-absent body parses as the
+    /// default update).
+    #[test]
+    fn environment_update_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+        let full = crate::types::EnvironmentUpdate {
+            day_length: Some(14400),
+            day_offset: Some(3600),
+            track_altitudes: Some([500.0, 1500.0, 2500.0]),
+            day_cycle: Some(crate::types::DayCycle {
+                name: "Cycle".to_owned(),
+                water_track: vec![crate::types::DayCycleFrame {
+                    keyframe: 0.0,
+                    name: "Water".to_owned(),
+                }],
+                sky_tracks: Vec::new(),
+                sky_frames: std::collections::BTreeMap::new(),
+                water_frames: std::collections::BTreeMap::new(),
+            }),
+            day_asset: Some(Uuid::from_u128(0xda)),
+            day_name: Some("A Preset".to_owned()),
+            flags: 3,
+        };
+        let body = sl_wire::parse_llsd_xml(&super::build_environment_update_request(&full))?;
+        // The empty day cycle's frame maps decode as empty; the water track
+        // survives, so compare piecewise where the wholesale comparison would
+        // be distorted by nothing — the shapes match exactly here.
+        assert_eq!(super::environment_update_from_llsd(&body), Some(full));
+
+        let sparse = crate::types::EnvironmentUpdate {
+            flags: 1,
+            ..crate::types::EnvironmentUpdate::default()
+        };
+        let body = sl_wire::parse_llsd_xml(&super::build_environment_update_request(&sparse))?;
+        assert_eq!(super::environment_update_from_llsd(&body), Some(sparse));
+
+        // A body without the `environment` envelope is a malformed request.
+        assert_eq!(
+            super::environment_update_from_llsd(&sl_wire::parse_llsd_xml("<llsd><map/></llsd>")?),
+            None
+        );
+        Ok(())
     }
 }

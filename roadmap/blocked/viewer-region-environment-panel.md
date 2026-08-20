@@ -16,8 +16,14 @@ a day cycle (from the picker of [[viewer-environment-my-environments]]) or
 the legacy defaults, set day length / offset, manage the altitude sky
 tracks, apply / reset — written through the `ExtEnvironment` capability
 (get/put per region or parcel; the parcel variant carries the parcel id).
-The ingest side of `ExtEnvironment` exists (P22 reads region environments);
-this task adds the **write** pairing in `sl-proto` plus the two panels.
+The ingest side of `ExtEnvironment` exists (P22 reads region environments),
+and [[protocol-sim-caps-region-info]] (2026-08-20) added the **write**
+pairing in `sl-proto`: `Command::SetEnvironment` →
+`build_environment_update_request` → `ExtEnvironment` PUT through both
+runtimes (repl `set_environment` publishes day length/offset today). What
+remains here is the two panels — day-cycle publishing (inline `day_cycle`
+or `day_asset`), altitude-track management, per-track (`trackno`) scoping,
+and the reset (DELETE) verb, none of which the repl command exercises.
 
 Reference (Firestorm, read-only): `llpanelenvironment` /
 `panel_region_environment.xml`, `llenvironment` (`ExtEnvironment` PUT).

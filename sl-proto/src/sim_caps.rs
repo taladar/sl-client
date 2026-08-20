@@ -28,19 +28,25 @@ use std::collections::{BTreeMap, HashMap};
 
 use sl_types::key::AgentKey;
 use sl_wire::{
-    AisUpdate, AssetUploadResponse, DisplayName, Llsd, ObjectMediaRequest, ObjectMediaResponse,
-    build_agent_preferences_response, build_asset_upload_response,
-    build_create_inventory_category_response, build_display_names_response,
-    build_modify_material_params_response, build_render_materials_response, build_seed_response,
-    parse_agent_preferences, parse_ais_category_children_fetch_url,
-    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
-    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
-    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
-    parse_create_inventory_category_request, parse_display_names_query, parse_event_queue_request,
-    parse_fetch_inventory_items_request, parse_fetch_inventory_request, parse_llsd_xml,
-    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
-    parse_object_media_navigate_request, parse_object_media_request,
-    parse_render_materials_put_request, parse_render_materials_request, parse_seed_request,
+    AisUpdate, AssetUploadResponse, DisplayName, LandResourcesUrls, Llsd, ObjectMediaRequest,
+    ObjectMediaResponse, build_agent_preferences_response, build_asset_upload_response,
+    build_attachment_resources_response, build_create_inventory_category_response,
+    build_display_names_response, build_get_object_cost_response,
+    build_get_object_physics_data_response, build_land_resource_detail_response,
+    build_land_resource_summary_response, build_land_resources_response, build_lsl_syntax_document,
+    build_modify_material_params_response, build_remote_parcel_response,
+    build_render_materials_response, build_resource_cost_selected_response, build_seed_response,
+    build_simulator_features_response, parse_agent_preferences,
+    parse_ais_category_children_fetch_url, parse_ais_category_children_url, parse_ais_category_url,
+    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
+    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
+    parse_ais_update_item_body, parse_create_inventory_category_request, parse_display_names_query,
+    parse_event_queue_request, parse_fetch_inventory_items_request, parse_fetch_inventory_request,
+    parse_get_object_cost_request, parse_get_object_physics_data_request,
+    parse_land_resources_request, parse_llsd_xml, parse_modify_material_params_request,
+    parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
+    parse_object_media_request, parse_remote_parcel_request, parse_render_materials_put_request,
+    parse_render_materials_request, parse_resource_cost_selected_request, parse_seed_request,
     parse_send_user_report, parse_update_avatar_appearance_request,
     parse_update_item_asset_request, parse_update_script_agent_request,
     parse_update_script_task_request, parse_update_task_item_asset_request,
@@ -52,25 +58,27 @@ use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
     ais_category_children_reply_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
-    chat_session_request_from_llsd, chat_session_roster_to_llsd, fetch_inventory_items_to_llsd,
-    inventory_descendents_to_llsd, parse_copy_inventory_from_notecard,
-    server_appearance_update_to_llsd, session_history_to_llsd,
+    chat_session_request_from_llsd, chat_session_roster_to_llsd, environment_to_llsd,
+    environment_update_from_llsd, fetch_inventory_items_to_llsd, inventory_descendents_to_llsd,
+    parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
 };
 use crate::sim_inventory::SimInventoryError;
 use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
-    CAP_AGENT_PREFERENCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_CREATE_INVENTORY_CATEGORY, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM,
-    CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_GET_DISPLAY_NAMES, CAP_INVENTORY_API_V3,
-    CAP_LIBRARY_API_V3, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
-    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_UPDATE_AVATAR_APPEARANCE,
-    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
-    CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event, InventoryFolder,
-    InventoryItem, ServerEvent, offline_messages_to_llsd,
+    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
+    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA, CAP_INVENTORY_API_V3,
+    CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_READ_OFFLINE_MSGS, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
+    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
+    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT,
+    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event,
+    InventoryFolder, InventoryItem, ServerEvent, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -93,6 +101,14 @@ const SCREENSHOT_SUB_PATH: &str = "screenshot";
 /// uploader URL and step 2 POSTs the raw asset bytes to. The generalisation of
 /// [`SCREENSHOT_SUB_PATH`] across the whole `NewFile*`/`Update*` family.
 const UPLOAD_SUB_PATH: &str = "upload";
+
+/// The sub-path under the `LandResources` cap URL the POST mints as its
+/// `ScriptResourceSummary` follow-up URL.
+const LAND_RESOURCES_SUMMARY_SUB_PATH: &str = "summary";
+
+/// The sub-path under the `LandResources` cap URL the POST mints as its
+/// `ScriptResourceDetails` follow-up URL.
+const LAND_RESOURCES_DETAIL_SUB_PATH: &str = "detail";
 
 /// The two-stage asset-upload capabilities routed to
 /// [`CapHandler::AssetUpload`]: the shared server-side uploader state machine
@@ -151,6 +167,16 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_INVENTORY_API_V3,
     CAP_LIBRARY_API_V3,
     CAP_CREATE_INVENTORY_CATEGORY,
+    // The region/object-information cluster.
+    CAP_SIMULATOR_FEATURES,
+    CAP_LSL_SYNTAX,
+    CAP_EXT_ENVIRONMENT,
+    CAP_REMOTE_PARCEL_REQUEST,
+    CAP_GET_OBJECT_COST,
+    CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_RESOURCE_COST_SELECTED,
+    CAP_ATTACHMENT_RESOURCES,
+    CAP_LAND_RESOURCES,
 ];
 
 /// How the simulator serves one capability name.
@@ -217,6 +243,37 @@ pub enum CapHandler {
     Ais3,
     /// The plain `CreateInventoryCategory` POST (client-chosen folder id).
     CreateInventoryCategory,
+    /// The bodyless `SimulatorFeatures` GET, served from the session's
+    /// feature document ([`SimSession::set_simulator_features`]).
+    SimulatorFeatures,
+    /// The bodyless `LSLSyntax` GET, served from the session's syntax
+    /// document ([`SimSession::set_lsl_syntax`]).
+    LslSyntax,
+    /// The `ExtEnvironment` EEP surface (GET with a `?parcelid=` query, PUT
+    /// publishing an update), served from the session's environment store
+    /// ([`SimSession::set_environment`]).
+    Environment,
+    /// The `RemoteParcelRequest` location→parcel-id lookup POST, resolved
+    /// against the session's parcel-cover store ([`SimSession::add_parcel`]).
+    RemoteParcel,
+    /// The `GetObjectCost` per-object cost POST
+    /// ([`SimSession::set_object_cost`]).
+    ObjectCost,
+    /// The `GetObjectPhysicsData` per-object physics POST
+    /// ([`SimSession::set_object_physics`]).
+    ObjectPhysics,
+    /// The `ResourceCostSelected` selection-sum POST
+    /// ([`SimSession::set_selection_cost`]).
+    ResourceCostSelected,
+    /// The bodyless `AttachmentResources` GET
+    /// ([`SimSession::set_attachment_resources`]).
+    AttachmentResources,
+    /// The two-stage `LandResources` surface: the POST answers the
+    /// summary/detail follow-up URLs (sub-paths of the cap's own URL), the
+    /// follow-up GETs serve the stored reports
+    /// ([`SimSession::set_land_resource_summary`] /
+    /// [`SimSession::set_land_resource_details`]).
+    LandResources,
 }
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
@@ -497,6 +554,15 @@ impl SimCaps {
             CAP_FETCH_INVENTORY_ITEM | CAP_FETCH_LIBRARY_ITEM => Some(CapHandler::FetchItems),
             CAP_INVENTORY_API_V3 | CAP_LIBRARY_API_V3 => Some(CapHandler::Ais3),
             CAP_CREATE_INVENTORY_CATEGORY => Some(CapHandler::CreateInventoryCategory),
+            CAP_SIMULATOR_FEATURES => Some(CapHandler::SimulatorFeatures),
+            CAP_LSL_SYNTAX => Some(CapHandler::LslSyntax),
+            CAP_EXT_ENVIRONMENT => Some(CapHandler::Environment),
+            CAP_REMOTE_PARCEL_REQUEST => Some(CapHandler::RemoteParcel),
+            CAP_GET_OBJECT_COST => Some(CapHandler::ObjectCost),
+            CAP_GET_OBJECT_PHYSICS_DATA => Some(CapHandler::ObjectPhysics),
+            CAP_RESOURCE_COST_SELECTED => Some(CapHandler::ResourceCostSelected),
+            CAP_ATTACHMENT_RESOURCES => Some(CapHandler::AttachmentResources),
+            CAP_LAND_RESOURCES => Some(CapHandler::LandResources),
             // Every two-stage upload cap shares one handler; the cap name only
             // picks the step-1 metadata parser inside it.
             name if UPLOAD_CAPABILITIES.contains(&name) => Some(CapHandler::AssetUpload),
@@ -617,6 +683,33 @@ impl SimCaps {
                 }
                 Some(CapHandler::CreateInventoryCategory) => {
                     CapsDispatch::Response(Self::dispatch_create_inventory_category(sim, request))
+                }
+                Some(CapHandler::SimulatorFeatures) => {
+                    CapsDispatch::Response(Self::dispatch_simulator_features(sim, request))
+                }
+                Some(CapHandler::LslSyntax) => {
+                    CapsDispatch::Response(Self::dispatch_lsl_syntax(sim, request))
+                }
+                Some(CapHandler::Environment) => {
+                    CapsDispatch::Response(Self::dispatch_environment(sim, request))
+                }
+                Some(CapHandler::RemoteParcel) => {
+                    CapsDispatch::Response(Self::dispatch_remote_parcel(sim, request))
+                }
+                Some(CapHandler::ObjectCost) => {
+                    CapsDispatch::Response(Self::dispatch_object_cost(sim, request))
+                }
+                Some(CapHandler::ObjectPhysics) => {
+                    CapsDispatch::Response(Self::dispatch_object_physics(sim, request))
+                }
+                Some(CapHandler::ResourceCostSelected) => {
+                    CapsDispatch::Response(Self::dispatch_resource_cost_selected(sim, request))
+                }
+                Some(CapHandler::AttachmentResources) => {
+                    CapsDispatch::Response(Self::dispatch_attachment_resources(sim, request))
+                }
+                Some(CapHandler::LandResources) => {
+                    CapsDispatch::Response(self.dispatch_land_resources(sim, request))
                 }
                 // Tokens are only minted for served capabilities, so a
                 // resolved name always has a handler; answer 404 rather than
@@ -1434,6 +1527,224 @@ impl SimCaps {
         }
     }
 
+    /// Serves the bodyless `SimulatorFeatures` GET: the session's stored
+    /// feature document ([`SimSession::set_simulator_features`]). Wrong
+    /// method → `405`.
+    fn dispatch_simulator_features(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        CapsResponse::llsd_xml(build_simulator_features_response(sim.simulator_features()))
+    }
+
+    /// Serves the bodyless `LSLSyntax` GET: the session's stored syntax
+    /// document ([`SimSession::set_lsl_syntax`]). Wrong method → `405`.
+    fn dispatch_lsl_syntax(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        CapsResponse::llsd_xml(build_lsl_syntax_document(sim.lsl_syntax()))
+    }
+
+    /// Serves the `ExtEnvironment` EEP surface. GET answers the stored
+    /// settings for the `?parcelid=` query (absent → `-1`, the region; an
+    /// unset parcel inherits the region entry). PUT parses the update body,
+    /// applies it via [`SimSession::apply_environment_update`], and echoes
+    /// the stored result (the `{ environment, success: true }` envelope the
+    /// reference viewer reads back); a `day_asset`-only update answers a
+    /// graceful `200 { success: false, message }` — the fixture has no
+    /// settings-asset store to resolve the id against. A malformed query or
+    /// body → `400`; other methods (including the reference's DELETE reset,
+    /// out of scope here) → `405`.
+    fn dispatch_environment(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        let Ok(parcel_id) = parse_parcel_id_query(request.query) else {
+            return CapsResponse::bad_request();
+        };
+        match request.method {
+            "GET" => CapsResponse::llsd_xml(
+                environment_to_llsd(&sim.environment(parcel_id)).to_llsd_xml(),
+            ),
+            "PUT" => {
+                let Ok(track_no) = parse_track_no_query(request.query) else {
+                    return CapsResponse::bad_request();
+                };
+                let Some(body) = parse_llsd_body(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Some(update) = environment_update_from_llsd(&body) else {
+                    return CapsResponse::bad_request();
+                };
+                if update.day_cycle.is_none() && update.day_asset.is_some() {
+                    return CapsResponse::llsd_xml(environment_failure_body(
+                        "day_asset updates are not supported: this simulator has no \
+                         settings-asset store",
+                    ));
+                }
+                let stored = sim.apply_environment_update(parcel_id, track_no, update);
+                CapsResponse::llsd_xml(environment_to_llsd(&stored).to_llsd_xml())
+            }
+            _ => CapsResponse::method_not_allowed(),
+        }
+    }
+
+    /// Serves one `RemoteParcelRequest` POST: resolves the requested region +
+    /// location against the parcel-cover store
+    /// ([`SimSession::resolve_remote_parcel`]). A hit answers the parcel id;
+    /// a miss (foreign region or uncovered location) answers a `200` empty
+    /// map — the "could not resolve" signal. Wrong method → `405`, malformed
+    /// body → `400`.
+    fn dispatch_remote_parcel(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(remote) = parse_remote_parcel_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        match sim.resolve_remote_parcel(&remote) {
+            Some(parcel_id) => CapsResponse::llsd_xml(build_remote_parcel_response(parcel_id)),
+            None => CapsResponse::llsd_xml(Llsd::Map(HashMap::new()).to_llsd_xml()),
+        }
+    }
+
+    /// Serves one `GetObjectCost` POST: the stored costs of the requested
+    /// objects ([`SimSession::set_object_cost`]); unknown ids are omitted
+    /// (the "no such object" signal). Wrong method → `405`, malformed body →
+    /// `400`.
+    fn dispatch_object_cost(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(ids) = parse_get_object_cost_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        CapsResponse::llsd_xml(build_get_object_cost_response(&sim.object_costs(&ids)))
+    }
+
+    /// Serves one `GetObjectPhysicsData` POST: the stored physics data of the
+    /// requested objects ([`SimSession::set_object_physics`]); unknown ids
+    /// are omitted. Wrong method → `405`, malformed body → `400`.
+    fn dispatch_object_physics(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(ids) = parse_get_object_physics_data_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        CapsResponse::llsd_xml(build_get_object_physics_data_response(
+            &sim.object_physics(&ids),
+        ))
+    }
+
+    /// Serves one `ResourceCostSelected` POST: the component-wise sum of the
+    /// stored selection costs of the requested objects
+    /// ([`SimSession::set_selection_cost`]); the roots/prims request form is
+    /// validated but does not change the arithmetic. Wrong method → `405`,
+    /// malformed body → `400`.
+    fn dispatch_resource_cost_selected(
+        sim: &SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Some(body) = parse_llsd_body(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok((_kind, ids)) = parse_resource_cost_selected_request(&body) else {
+            return CapsResponse::bad_request();
+        };
+        CapsResponse::llsd_xml(build_resource_cost_selected_response(
+            &sim.selection_cost(&ids),
+        ))
+    }
+
+    /// Serves the bodyless `AttachmentResources` GET: the agent's stored
+    /// scripted-attachment report
+    /// ([`SimSession::set_attachment_resources`]). Wrong method → `405`.
+    fn dispatch_attachment_resources(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        CapsResponse::llsd_xml(build_attachment_resources_response(
+            sim.attachment_resources(),
+        ))
+    }
+
+    /// Serves the two-stage `LandResources` surface. The cap URL itself takes
+    /// the `{ parcel_id }` POST (validated; the stored reports are served
+    /// as-is regardless of the requested parcel — their scope is the
+    /// driver's choice) and answers the summary/detail follow-up URLs,
+    /// minted as the cap's own sub-paths. The follow-up GETs serve the
+    /// stored reports ([`SimSession::set_land_resource_summary`] /
+    /// [`SimSession::set_land_resource_details`]). Wrong method → `405`,
+    /// malformed POST body → `400`, unknown sub-path → `404`.
+    fn dispatch_land_resources(&self, sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        match cap_sub_path(request.path) {
+            None => {
+                if request.method != "POST" {
+                    return CapsResponse::method_not_allowed();
+                }
+                let Some(body) = parse_llsd_body(request.body) else {
+                    return CapsResponse::bad_request();
+                };
+                let Ok(_parcel_id) = parse_land_resources_request(&body) else {
+                    return CapsResponse::bad_request();
+                };
+                CapsResponse::llsd_xml(build_land_resources_response(&LandResourcesUrls {
+                    script_resource_summary: Some(
+                        self.land_resources_url(LAND_RESOURCES_SUMMARY_SUB_PATH),
+                    ),
+                    script_resource_details: Some(
+                        self.land_resources_url(LAND_RESOURCES_DETAIL_SUB_PATH),
+                    ),
+                }))
+            }
+            Some(LAND_RESOURCES_SUMMARY_SUB_PATH) => {
+                if request.method != "GET" {
+                    return CapsResponse::method_not_allowed();
+                }
+                CapsResponse::llsd_xml(build_land_resource_summary_response(
+                    sim.land_resource_summary(),
+                ))
+            }
+            Some(LAND_RESOURCES_DETAIL_SUB_PATH) => {
+                if request.method != "GET" {
+                    return CapsResponse::method_not_allowed();
+                }
+                CapsResponse::llsd_xml(build_land_resource_detail_response(
+                    sim.land_resource_details(),
+                ))
+            }
+            Some(_) => CapsResponse::not_found(),
+        }
+    }
+
+    /// Mints a `LandResources` follow-up URL: the cap's own URL plus the
+    /// given sub-path (which [`SimCaps::resolve`] tolerates and
+    /// [`SimCaps::dispatch_land_resources`] routes on) — the
+    /// [`SimCaps::screenshot_uploader_url`] pattern.
+    fn land_resources_url(&self, sub_path: &str) -> Url {
+        let token = self
+            .tokens
+            .get(CAP_LAND_RESOURCES)
+            .copied()
+            .unwrap_or_default();
+        let mut url = self.cap_url(token);
+        if let Ok(mut segments) = url.path_segments_mut() {
+            segments.push(sub_path);
+        }
+        url
+    }
+
     /// Mints the URL for one capability token: `{base}/cap/{token}`.
     ///
     /// Built via `path_segments_mut` rather than `Url::join` (whose
@@ -1477,6 +1788,45 @@ impl SimCaps {
 fn parse_llsd_body(body: &[u8]) -> Option<Llsd> {
     let text = std::str::from_utf8(body).ok()?;
     parse_llsd_xml(text).ok()
+}
+
+/// The value of `key` in a raw query string (`a=1&b=2`), if present.
+fn query_param<'a>(query: Option<&'a str>, key: &str) -> Option<&'a str> {
+    query?
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find(|(name, _value)| *name == key)
+        .map(|(_name, value)| value)
+}
+
+/// The `ExtEnvironment` `?parcelid=` query value: absent → `-1` (the region),
+/// present but not a decimal integer → `Err` (→ `400`).
+fn parse_parcel_id_query(query: Option<&str>) -> Result<i32, ()> {
+    match query_param(query, "parcelid") {
+        None => Ok(-1),
+        Some(value) => value.parse::<i32>().map_err(|_error| ()),
+    }
+}
+
+/// The `ExtEnvironment` `?trackno=` query value: absent → `None`, present but
+/// not a decimal integer → `Err` (→ `400`).
+fn parse_track_no_query(query: Option<&str>) -> Result<Option<i32>, ()> {
+    match query_param(query, "trackno") {
+        None => Ok(None),
+        Some(value) => value.parse::<i32>().map(Some).map_err(|_error| ()),
+    }
+}
+
+/// The `ExtEnvironment` graceful-failure reply body:
+/// `{ success: false, message }`, HTTP `200` — the reference viewer reads
+/// `message` as the failure reason (its `FAIL_REASON` path) rather than an
+/// HTTP error.
+fn environment_failure_body(message: &str) -> String {
+    Llsd::Map(HashMap::from([
+        ("success".to_owned(), Llsd::Boolean(false)),
+        ("message".to_owned(), Llsd::String(message.to_owned())),
+    ]))
+    .to_llsd_xml()
 }
 
 /// The sub-path below a capability URL's token, if any: the segment(s) after
@@ -1596,18 +1946,18 @@ mod tests {
             ("InventoryAPIv3", CapStatus::Served),
             ("LibraryAPIv3", CapStatus::Served),
             ("CreateInventoryCategory", CapStatus::Served),
-            ("ExtEnvironment", CapStatus::Pending),
+            ("ExtEnvironment", CapStatus::Served),
             ("GetDisplayNames", CapStatus::Served),
-            ("RemoteParcelRequest", CapStatus::Pending),
-            ("SimulatorFeatures", CapStatus::Pending),
-            ("LSLSyntax", CapStatus::Pending),
+            ("RemoteParcelRequest", CapStatus::Served),
+            ("SimulatorFeatures", CapStatus::Served),
+            ("LSLSyntax", CapStatus::Served),
             ("AgentPreferences", CapStatus::Served),
             ("UserInfo", CapStatus::Pending),
-            ("GetObjectCost", CapStatus::Pending),
-            ("ResourceCostSelected", CapStatus::Pending),
-            ("GetObjectPhysicsData", CapStatus::Pending),
-            ("AttachmentResources", CapStatus::Pending),
-            ("LandResources", CapStatus::Pending),
+            ("GetObjectCost", CapStatus::Served),
+            ("ResourceCostSelected", CapStatus::Served),
+            ("GetObjectPhysicsData", CapStatus::Served),
+            ("AttachmentResources", CapStatus::Served),
+            ("LandResources", CapStatus::Served),
             ("SendUserReport", CapStatus::Served),
             ("SendUserReportWithScreenshot", CapStatus::Served),
             ("DirectDelivery", CapStatus::Pending),

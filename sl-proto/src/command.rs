@@ -11,24 +11,25 @@ use crate::{
     AssetUpdateLocation, AssociateInventory, AttachmentMode, AttachmentPoint, Camera, ChatChannel,
     ChatSessionKind, ChatType, ClassifiedCategory, ClassifiedKey, ClassifiedUpdate, ClickAction,
     ControlFlags, CreateGroupParams, CreateListing, DeRezDestination, DetachOrder, DirFindFlags,
-    DirectoryVisibility, Distance, EjectAction, EstateAccessDelta, EstateInfoUpdate, EventId,
-    ExperienceKey, ExperiencePermission, ExperienceUpdate, FaceMaterialPut, FolderType,
-    FreezeAction, FriendKey, FriendRights, GestureActivation, GodRegionUpdate, GroupKey,
-    GroupNoticeAttachment, GroupNoticeKey, GroupRequestId, GroupRoleEdit, GroupRoleKey,
-    GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate, InventoryCursor,
-    InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer, InventoryType, LandEdit,
-    LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId, MapItemType, Material,
-    MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor, MoneyTransactionType, MovementMode,
-    MuteFlags, MuteType, NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem,
-    ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
-    ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType, ParcelUpdate, PermissionField,
-    Permissions, PickKey, PickUpdate, Postcard, PrimShape, PrimShapeParams, ProfileUpdate,
-    ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate, RegionHandle, RegionInfoUpdate,
-    RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    Rotation, SaleType, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
-    SimWideDeleteFlags, StartLocationSlot, SurfaceInfo, TaskInventoryKey, TextureEntry, TextureKey,
-    Throttle, TransactionId, UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid,
-    Vector, ViewerEffect, VoiceProvisionRequest, Wearable,
+    DirectoryVisibility, Distance, EjectAction, EnvironmentUpdate, EstateAccessDelta,
+    EstateInfoUpdate, EventId, ExperienceKey, ExperiencePermission, ExperienceUpdate,
+    FaceMaterialPut, FolderType, FreezeAction, FriendKey, FriendRights, GestureActivation,
+    GodRegionUpdate, GroupKey, GroupNoticeAttachment, GroupNoticeKey, GroupRequestId,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMemberChange, IceCandidate, ImSessionId, InterestsUpdate,
+    InventoryCursor, InventoryFolderKey, InventoryItem, InventoryKey, InventoryOffer,
+    InventoryType, LandEdit, LandSearchType, LandStatReportType, LindenAmount, ListingId, LureId,
+    MapItemType, Material, MaterialOverrideUpdate, MediaEntry, MeshKey, MessageCursor,
+    MoneyTransactionType, MovementMode, MuteFlags, MuteType, NewInventoryItem, NewInventoryLink,
+    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectTransform,
+    OwnerKey, ParcelAccessEntry, ParcelAccessScope, ParcelCategory, ParcelKey, ParcelReturnType,
+    ParcelUpdate, PermissionField, Permissions, PickKey, PickUpdate, Postcard, PrimShape,
+    PrimShapeParams, ProfileUpdate, ProposalVoteId, QueryId, RegionCoordinates, RegionDebugUpdate,
+    RegionHandle, RegionInfoUpdate, RegionTerrainUpdate, Reliability, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, Rotation, SaleType, ScriptLanguage, ScriptPermissions,
+    ScriptTarget, ScriptUploadLocation, SimWideDeleteFlags, StartLocationSlot, SurfaceInfo,
+    TaskInventoryKey, TextureEntry, TextureKey, Throttle, TransactionId, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, VoiceProvisionRequest,
+    Wearable,
 };
 
 /// A command sent to a running [`Session`](crate::Session) via an I/O driver.
@@ -876,6 +877,20 @@ pub enum Command {
     RequestEnvironment {
         /// The parcel's region-local id, or [`None`] for the region environment.
         parcel_id: Option<i32>,
+    },
+    /// Publish extended-environment (EEP) settings via an `ExtEnvironment`
+    /// PUT (the reference viewer's `coroUpdateEnvironment`); the success
+    /// reply carries the stored settings and is folded into
+    /// [`Event::Environment`](crate::Event::Environment).
+    SetEnvironment {
+        /// The parcel's region-local id, or [`None`] for the region
+        /// environment.
+        parcel_id: Option<i32>,
+        /// The single sky track to scope the update to, or [`None`] for all
+        /// tracks.
+        track_no: Option<i32>,
+        /// The partial update to publish.
+        update: Box<EnvironmentUpdate>,
     },
     /// Request `ParcelProperties` for a metre rectangle (region-local).
     RequestParcelProperties {

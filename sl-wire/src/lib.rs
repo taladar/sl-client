@@ -134,8 +134,8 @@ pub use messages::{AnyMessage, message_name};
 pub use object_cost::{
     ObjectCost, SelectedCostKind, SelectedResourceCost, build_get_object_cost_request,
     build_get_object_cost_response, build_resource_cost_selected_request,
-    build_resource_cost_selected_response, parse_get_object_cost, parse_resource_cost_selected,
-    parse_resource_cost_selected_request,
+    build_resource_cost_selected_response, parse_get_object_cost, parse_get_object_cost_request,
+    parse_resource_cost_selected, parse_resource_cost_selected_request,
 };
 pub use object_physics::{
     ObjectPhysicsData, PhysicsShapeType, build_get_object_physics_data_request,

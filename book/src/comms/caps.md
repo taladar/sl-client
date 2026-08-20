@@ -58,6 +58,10 @@ There are dozens. A non-exhaustive sense of the range:
 - **Media & materials** — `ObjectMedia`, `RenderMaterials`,
   `ModifyMaterialParams`. See [Materials](../content/materials.md) and
   [Sound, Music & Media](../content/sound-media.md).
+- **Region & object info** — `SimulatorFeatures`, `LSLSyntax`,
+  `ExtEnvironment` (EEP), `RemoteParcelRequest`, the object cost/physics
+  reports (`GetObjectCost`, `GetObjectPhysicsData`, `ResourceCostSelected`)
+  and the script-resource reports (`AttachmentResources`, `LandResources`).
 - **Voice** — `ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`,
   `VoiceSignalingRequest`.
 - **Groups** — `GroupMemberData`.
@@ -446,6 +450,87 @@ The inverses added for this cluster: `parse_fetch_inventory_request`,
 directions already existed (Tier-F #61); this cluster wired it into the
 dispatch, over the new tree.
 
+### The region-information handlers
+
+The region/object-information cluster serves nine caps from small
+driver-populated stores on `SimSession` (the `display_names` stance): a
+`SimulatorFeatures` document, an `LslSyntax` document, a per-parcel
+environment map, three per-object maps (cost, physics, selection cost), a
+region id + parcel-cover rectangle list, and the attachment/land resource
+reports. One cap mutates: an `ExtEnvironment` PUT applies to the environment
+store and surfaces `ServerEvent::EnvironmentUpdated` for a driver persisting
+environments (which can then push `enqueue_windlight_refresh` so other
+clients re-fetch).
+
+- **`SimulatorFeatures`** (bodyless GET) serves the stored feature document
+  via `build_simulator_features_response`. Its `lsl_syntax_id` is owned by
+  `SimSession::set_lsl_syntax`, which stores the syntax document **and**
+  advertises its id — the two caps can never drift apart (the client keys
+  its `LSLSyntax` re-fetch on that id).
+- **`LSLSyntax`** (bodyless GET) serves the stored language document via
+  `build_lsl_syntax_document`, stamped with the schema version the client's
+  parser insists on.
+- **`ExtEnvironment`** routes on method. GET answers the stored
+  `EnvironmentSettings` for the `?parcelid=` query (absent or `-1` = the
+  region entry, seeded at construction; a parcel without its own entry
+  inherits the region's) via `environment_to_llsd`. PUT parses the
+  reference viewer's `coroUpdateEnvironment` body
+  (`environment_update_from_llsd`, optional `?trackno=` scope), merges the
+  `Some` fields wholesale (per-track splicing is deferred), bumps
+  `env_version`, and echoes the stored result — the same
+  `{ environment, success: true }` envelope the GET serves, which the
+  client folds into `Event::Environment` unchanged. A `day_asset`-only
+  update answers the reference's graceful failure,
+  `200 { success: false, message }` — the fixture has no settings-asset
+  store to resolve the id against. The reference's DELETE reset is out of
+  scope (the task covers get/put) and answers `405`.
+- **`RemoteParcelRequest`** (POST) resolves the requested region +
+  location against the parcel-cover store (`SimParcel` rectangles,
+  first-hit-wins): the request targets this region iff its non-nil region
+  id or non-zero region handle matches the session's. A hit answers the
+  parcel id (`build_remote_parcel_response`); a miss answers a `200`
+  empty map — the "could not resolve" signal the client's `Ok(None)` fold
+  reports as a decode failure rather than a typed event. (OpenSim instead
+  synthesizes an id from handle + location so every lookup "succeeds";
+  the store-driven miss is a deliberate divergence.)
+- **`GetObjectCost` / `GetObjectPhysicsData`** (POST `{ object_ids }`)
+  serve the stored per-object records in id order; unknown ids are
+  omitted — the "no such object" signal, matching the batch-fetch
+  tolerance stance.
+- **`ResourceCostSelected`** (POST `selected_roots`/`selected_prims`)
+  answers the component-wise **sum** of the stored per-object selection
+  costs; unknown ids contribute zero, and the roots/prims kind validates
+  the body without changing the arithmetic.
+- **`AttachmentResources`** (bodyless GET) serves the stored
+  agent-scoped report via `build_attachment_resources_response`.
+- **`LandResources`** is the cluster's only two-stage cap: the
+  `{ parcel_id }` POST (validated, but the stored reports are served
+  as-is — their scope is the driver's choice) answers the
+  `ScriptResourceSummary` / `ScriptResourceDetails` follow-up URLs,
+  minted as the cap's own `summary` / `detail` sub-paths (the
+  screenshot-uploader pattern — `resolve` routes on the token and the
+  handler on the sub-path). The follow-up GETs serve the stored reports,
+  which the client runtimes fold under the `LAND_RESOURCE_SUMMARY_TAG` /
+  `LAND_RESOURCE_DETAIL_TAG` pseudo-cap names.
+
+The status contract is the house standard — wrong method `405`, malformed
+body or query (a non-integer `?parcelid=`/`?trackno=`) `400`, unknown
+`LandResources` sub-path `404` — plus two deliberate soft failures: the EEP
+`day_asset` case and the unresolved `RemoteParcelRequest` both answer `200`
+with a body the client reads as "no result", never an HTTP error, because
+that is what the reference stacks do.
+
+The inverses added for this cluster: `parse_get_object_cost_request`
+(`sl-wire/src/object_cost.rs`) and the net-new `ExtEnvironment` PUT pair —
+`build_environment_update_request` / `environment_update_from_llsd` over the
+new `EnvironmentUpdate` type (`sl-proto/src/session/conversions.rs`,
+`sl-proto/src/types/environment.rs`) — driven client-side by the new
+`Command::SetEnvironment` (both runtimes, repl command `set_environment`).
+Everything else already existed client-paired
+(`build_simulator_features_response`, `build_lsl_syntax_document`, the
+`remote_parcel` / `object_cost` / `object_physics` / `resource_report`
+codecs); this cluster wired them into dispatch over the new stores.
+
 ---
 
 > **In this codebase**
@@ -505,3 +590,13 @@ dispatch, over the new tree.
 >   fetch caps' constants are `CAP_FETCH_INVENTORY_ITEM`
 >   (`"FetchInventory2"`) and `CAP_FETCH_LIBRARY_ITEM` (`"FetchLib2"`) in
 >   `sl-proto/src/session.rs`, requested alongside the descendents caps.
+> - The region/object-information serving stores are inline `SimSession`
+>   fields with `set_*` driver setters (`set_simulator_features`,
+>   `set_lsl_syntax`, `set_environment`, `set_object_cost`,
+>   `set_object_physics`, `set_selection_cost`, `set_region_id` +
+>   `add_parcel` (`SimParcel`), `set_attachment_resources`,
+>   `set_land_resource_summary`, `set_land_resource_details`) in
+>   `sl-proto/src/sim_session.rs`. The client-side EEP **write** path is
+>   `Command::SetEnvironment` → `build_environment_update_request` →
+>   an `ExtEnvironment` PUT (`put_caps_llsd` / `run_put_caps_llsd`),
+>   folded back through the ordinary `Event::Environment`.

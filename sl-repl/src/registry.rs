@@ -3130,6 +3130,21 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "set_environment",
+            usage: "<day_length> <day_offset> [parcel_id]",
+            build: |args, ctx| {
+                Ok(Command::SetEnvironment {
+                    parcel_id: args.opt_parse(ctx, "parcel_id", 2, "i32")?,
+                    track_no: None,
+                    update: Box::new(sl_proto::EnvironmentUpdate {
+                        day_length: Some(args.req_parse(ctx, "day_length", 0, "i32")?),
+                        day_offset: Some(args.req_parse(ctx, "day_offset", 1, "i32")?),
+                        ..sl_proto::EnvironmentUpdate::default()
+                    }),
+                })
+            },
+        },
+        CommandSpec {
             name: "request_parcel_properties",
             usage: "<west> <south> <east> <north> [sequence_id=0]",
             build: |args, ctx| {

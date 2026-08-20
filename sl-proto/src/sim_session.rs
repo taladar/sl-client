@@ -154,24 +154,25 @@ use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
-    ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult,
-    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DirectoryVisibility, DisplayNameUpdate, EjectAction, EstateCovenant, EventInfo,
-    FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
-    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
-    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem,
-    InventoryItemMove, InventoryType, Kick, LandBrushAction, LandBrushSize, LandEdit,
-    LandSearchType, LandStatItem, LandStatReportType, MapItem, MapItemType, MapLayer,
-    MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode, NavMeshStatus, NewInventoryLink,
-    NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectPlayingAnimation, ObjectPropertiesFamily,
-    OpenRegionInfo, ParcelCategory, ParcelDetails, ParcelObjectOwner, PlacesResult, Postcard,
-    PrimShapeParams, ProposalVoteId, RegionIdentity, RegionStats, Reliability,
-    RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType,
-    ScriptControl, ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DayCycle, DetachOrder,
+    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EjectAction,
+    EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo, FeatureDisabled,
+    FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
+    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
+    MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
+    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
+    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
+    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
+    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
+    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, StartLocationSlot,
+    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+    ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -201,6 +202,10 @@ use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
 };
 use sl_wire::{AgentPreferences, DisplayName, ObjectPermMasks};
+use sl_wire::{
+    AttachmentResourcesReport, LslSyntax, ObjectCost, ObjectPhysicsData, ParcelScriptResources,
+    RemoteParcelRequest, ResourceSummary, SelectedResourceCost, SimulatorFeatures,
+};
 use sl_wire::{
     FaceMaterialPut, LegacyMaterial, MaterialOverrideUpdate, MediaEntry,
     NewFileAgentInventoryRequest, RenderMaterialEntry, UpdateScriptAgentRequest,
@@ -1372,6 +1377,20 @@ pub enum ServerEvent {
         /// The URL the face was navigated to.
         url: String,
     },
+    /// The client published environment settings (`ExtEnvironment` PUT). The
+    /// update is already applied to the serving store
+    /// ([`SimSession::set_environment`]); fire-and-forget for a driver
+    /// persisting environments or notifying other clients (e.g. via
+    /// [`SimSession::enqueue_windlight_refresh`]).
+    EnvironmentUpdated {
+        /// The updated parcel's region-local id, or `-1` for the region.
+        parcel_id: i32,
+        /// The single sky track the client scoped the update to, if any (the
+        /// serving store applies the update wholesale either way).
+        track_no: Option<i32>,
+        /// The parsed update the store merged.
+        update: Box<EnvironmentUpdate>,
+    },
     /// The client created an inventory folder over the `InventoryAPIv3`
     /// create verb or the `CreateInventoryCategory` capability. The folder is
     /// already applied to the session's serving tree
@@ -2181,8 +2200,71 @@ pub struct SimSession {
     /// Driver-populated ([`SimSession::library_inventory_mut`]); the
     /// mutation caps never touch it (`LibraryAPIv3` is GET-only).
     library_inventory: SimInventoryTree,
+    /// The feature document the `SimulatorFeatures` capability serves.
+    /// Driver-populated ([`SimSession::set_simulator_features`]); its
+    /// `lsl_syntax_id` is owned by [`SimSession::set_lsl_syntax`] so the
+    /// advertised id always matches the served `LSLSyntax` document.
+    simulator_features: SimulatorFeatures,
+    /// The LSL syntax document the `LSLSyntax` capability serves.
+    /// Driver-populated ([`SimSession::set_lsl_syntax`]).
+    lsl_syntax: LslSyntax,
+    /// The environment settings the `ExtEnvironment` capability serves and
+    /// updates, keyed by parcel id (`-1` = the region entry, seeded at
+    /// construction and never removed; a parcel without its own entry falls
+    /// back to the region's — SL parcels inherit the region environment).
+    environments: BTreeMap<i32, EnvironmentSettings>,
+    /// The per-object costs the `GetObjectCost` capability serves, keyed by
+    /// object ([`SimSession::set_object_cost`]). Driver-populated.
+    object_costs: BTreeMap<ObjectKey, ObjectCost>,
+    /// The per-object physics data the `GetObjectPhysicsData` capability
+    /// serves, keyed by object ([`SimSession::set_object_physics`]).
+    /// Driver-populated.
+    object_physics: BTreeMap<ObjectKey, ObjectPhysicsData>,
+    /// The per-object selection costs the `ResourceCostSelected` capability
+    /// sums over, keyed by object ([`SimSession::set_selection_cost`]).
+    /// Driver-populated; the request's roots/prims distinction validates the
+    /// body but does not change the arithmetic — the driver stores whichever
+    /// contributions it wants summed.
+    selection_costs: BTreeMap<ObjectKey, SelectedResourceCost>,
+    /// This region's id, matched against `RemoteParcelRequest` lookups (and
+    /// useful to seed [`EnvironmentSettings::region_id`]). Nil until the
+    /// driver sets it ([`SimSession::set_region_id`]).
+    region_id: Uuid,
+    /// The parcel-cover rectangles the `RemoteParcelRequest` capability
+    /// resolves locations against ([`SimSession::add_parcel`]).
+    /// Driver-populated, first containing rectangle wins.
+    parcels: Vec<SimParcel>,
+    /// The agent's scripted-attachment report the `AttachmentResources`
+    /// capability serves ([`SimSession::set_attachment_resources`]).
+    /// Driver-populated.
+    attachment_resources: AttachmentResourcesReport,
+    /// The parcel script-resource summary the `LandResources` follow-up
+    /// summary GET serves ([`SimSession::set_land_resource_summary`]).
+    /// Driver-populated; the POST's parcel id is validated but the stored
+    /// report is served as-is — its scope is the driver's choice.
+    land_resource_summary: ResourceSummary,
+    /// The per-parcel script-resource details the `LandResources` follow-up
+    /// details GET serves ([`SimSession::set_land_resource_details`]).
+    /// Driver-populated.
+    land_resource_details: Vec<ParcelScriptResources>,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
+}
+
+/// One parcel-cover rectangle the `RemoteParcelRequest` lookup resolves
+/// against: `[west, east) × [south, north)`, in region-local metres.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimParcel {
+    /// The parcel's id, answered on a hit.
+    pub parcel_id: ParcelKey,
+    /// The rectangle's west edge (inclusive), in metres.
+    pub west: f32,
+    /// The rectangle's south edge (inclusive), in metres.
+    pub south: f32,
+    /// The rectangle's east edge (exclusive), in metres.
+    pub east: f32,
+    /// The rectangle's north edge (exclusive), in metres.
+    pub north: f32,
 }
 
 /// The parsed step-1 metadata of a two-stage CAPS upload, parked in
@@ -2247,6 +2329,29 @@ pub struct ObjectMediaState {
     /// Per-face media, one slot per prim face in order; `None` for a face
     /// without media.
     pub faces: Vec<Option<MediaEntry>>,
+}
+
+/// The environment a fresh session's region entry starts from: SL's stock
+/// four-hour day (`day_length` 14400 s, `day_offset` 57600 s), version 1, the
+/// default sky-track altitude breakpoints, and an empty day cycle (both codec
+/// directions tolerate empty tracks/frames) named "Default Daycycle".
+fn default_region_environment() -> EnvironmentSettings {
+    EnvironmentSettings {
+        parcel_id: -1,
+        region_id: Uuid::nil(),
+        day_length: 14400,
+        day_offset: 57600,
+        flags: 0,
+        env_version: 1,
+        track_altitudes: [1000.0, 2000.0, 3000.0],
+        day_cycle: DayCycle {
+            name: "Default Daycycle".to_owned(),
+            water_track: Vec::new(),
+            sky_tracks: Vec::new(),
+            sky_frames: BTreeMap::new(),
+            water_frames: BTreeMap::new(),
+        },
+    }
 }
 
 /// The `AgentPreferences` set a fresh session starts from — OpenSim's stored
@@ -2315,6 +2420,17 @@ impl SimSession {
             object_media: BTreeMap::new(),
             agent_inventory: SimInventoryTree::default(),
             library_inventory: SimInventoryTree::default(),
+            simulator_features: SimulatorFeatures::default(),
+            lsl_syntax: LslSyntax::default(),
+            environments: BTreeMap::from([(-1, default_region_environment())]),
+            object_costs: BTreeMap::new(),
+            object_physics: BTreeMap::new(),
+            selection_costs: BTreeMap::new(),
+            region_id: Uuid::nil(),
+            parcels: Vec::new(),
+            attachment_resources: AttachmentResourcesReport::default(),
+            land_resource_summary: ResourceSummary::default(),
+            land_resource_details: Vec::new(),
             events: VecDeque::new(),
         }
     }
@@ -2650,6 +2766,206 @@ impl SimSession {
     fn mint_media_version(&mut self, object_id: ObjectKey) -> String {
         let serial = self.next_serial();
         format!("x-mv:{serial:010}/{}", object_id.uuid())
+    }
+
+    /// Replaces the feature document the `SimulatorFeatures` capability
+    /// serves. `lsl_syntax_id` is subsequently overwritten by
+    /// [`SimSession::set_lsl_syntax`], which owns the consistency invariant
+    /// between the advertised id and the served `LSLSyntax` document.
+    pub fn set_simulator_features(&mut self, features: SimulatorFeatures) {
+        self.simulator_features = features;
+    }
+
+    /// The feature document the `SimulatorFeatures` capability serves.
+    pub(crate) const fn simulator_features(&self) -> &SimulatorFeatures {
+        &self.simulator_features
+    }
+
+    /// Replaces the LSL syntax document the `LSLSyntax` capability serves and
+    /// advertises its id in the feature document's `lsl_syntax_id`, keeping
+    /// the two capabilities consistent (the client re-fetches `LSLSyntax`
+    /// keyed on that id).
+    pub fn set_lsl_syntax(&mut self, syntax_id: Uuid, syntax: LslSyntax) {
+        self.simulator_features.lsl_syntax_id = Some(syntax_id);
+        self.lsl_syntax = syntax;
+    }
+
+    /// The LSL syntax document the `LSLSyntax` capability serves.
+    pub(crate) const fn lsl_syntax(&self) -> &LslSyntax {
+        &self.lsl_syntax
+    }
+
+    /// Stores (or replaces) the environment served for
+    /// `environment.parcel_id` (`-1` = the region entry) — the driver API the
+    /// `ExtEnvironment` GET serves from.
+    pub fn set_environment(&mut self, environment: EnvironmentSettings) {
+        self.environments.insert(environment.parcel_id, environment);
+    }
+
+    /// The environment served for `parcel_id`: its own entry when the driver
+    /// stored one, else the region entry (parcels inherit the region
+    /// environment). The region entry is seeded at construction and never
+    /// removed; the final fallback only fires if a driver somehow displaced
+    /// it, and serves a fresh default rather than panicking.
+    pub(crate) fn environment(&self, parcel_id: i32) -> EnvironmentSettings {
+        self.environments
+            .get(&parcel_id)
+            .or_else(|| self.environments.get(&-1))
+            .cloned()
+            .unwrap_or_else(default_region_environment)
+    }
+
+    /// Applies an `ExtEnvironment` PUT to the store: merges the update's
+    /// `Some` fields over the effective settings for `parcel_id` (a wholesale
+    /// day-cycle replacement — `track_no` scopes nothing here and is only
+    /// forwarded to the driver), bumps `env_version`, stores the result under
+    /// `parcel_id`, surfaces [`ServerEvent::EnvironmentUpdated`], and returns
+    /// the stored value for the handler to serialize.
+    pub(crate) fn apply_environment_update(
+        &mut self,
+        parcel_id: i32,
+        track_no: Option<i32>,
+        update: EnvironmentUpdate,
+    ) -> EnvironmentSettings {
+        let mut environment = self.environment(parcel_id);
+        environment.parcel_id = parcel_id;
+        if let Some(day_length) = update.day_length {
+            environment.day_length = day_length;
+        }
+        if let Some(day_offset) = update.day_offset {
+            environment.day_offset = day_offset;
+        }
+        if let Some(track_altitudes) = update.track_altitudes {
+            environment.track_altitudes = track_altitudes;
+        }
+        if let Some(day_cycle) = &update.day_cycle {
+            environment.day_cycle = day_cycle.clone();
+        }
+        environment.flags = update.flags;
+        environment.env_version = environment.env_version.saturating_add(1);
+        self.environments.insert(parcel_id, environment.clone());
+        self.events.push_back(ServerEvent::EnvironmentUpdated {
+            parcel_id,
+            track_no,
+            update: Box::new(update),
+        });
+        environment
+    }
+
+    /// Stores (or replaces) an object's `GetObjectCost` record — the driver
+    /// API the cost capability serves from.
+    pub fn set_object_cost(&mut self, object_id: ObjectKey, cost: ObjectCost) {
+        self.object_costs.insert(object_id, cost);
+    }
+
+    /// The stored costs for the requested objects, in id order. Unknown ids
+    /// are omitted — the capability's "no such object" signal.
+    pub(crate) fn object_costs(&self, ids: &[ObjectKey]) -> Vec<(ObjectKey, ObjectCost)> {
+        ids.iter()
+            .filter_map(|id| self.object_costs.get(id).map(|cost| (*id, cost.clone())))
+            .collect()
+    }
+
+    /// Stores (or replaces) an object's `GetObjectPhysicsData` record — the
+    /// driver API the physics-data capability serves from.
+    pub fn set_object_physics(&mut self, object_id: ObjectKey, data: ObjectPhysicsData) {
+        self.object_physics.insert(object_id, data);
+    }
+
+    /// The stored physics data for the requested objects, in id order.
+    /// Unknown ids are omitted — the capability's "no such object" signal.
+    pub(crate) fn object_physics(&self, ids: &[ObjectKey]) -> Vec<(ObjectKey, ObjectPhysicsData)> {
+        ids.iter()
+            .filter_map(|id| self.object_physics.get(id).map(|data| (*id, *data)))
+            .collect()
+    }
+
+    /// Stores (or replaces) an object's `ResourceCostSelected` contribution —
+    /// the driver API the selection-cost capability sums over.
+    pub fn set_selection_cost(&mut self, object_id: ObjectKey, cost: SelectedResourceCost) {
+        self.selection_costs.insert(object_id, cost);
+    }
+
+    /// The component-wise sum of the stored selection costs of the requested
+    /// objects; unknown ids contribute zero.
+    pub(crate) fn selection_cost(&self, ids: &[ObjectKey]) -> SelectedResourceCost {
+        ids.iter()
+            .filter_map(|id| self.selection_costs.get(id))
+            .fold(SelectedResourceCost::default(), |sum, cost| {
+                SelectedResourceCost {
+                    physics: sum.physics + cost.physics,
+                    streaming: sum.streaming + cost.streaming,
+                    simulation: sum.simulation + cost.simulation,
+                }
+            })
+    }
+
+    /// Sets this region's id, matched against `RemoteParcelRequest` lookups.
+    pub const fn set_region_id(&mut self, region_id: Uuid) {
+        self.region_id = region_id;
+    }
+
+    /// Adds a parcel-cover rectangle to the `RemoteParcelRequest` lookup
+    /// store. Rectangles are checked in insertion order; the first containing
+    /// one wins.
+    pub fn add_parcel(&mut self, parcel: SimParcel) {
+        self.parcels.push(parcel);
+    }
+
+    /// Resolves a `RemoteParcelRequest` against the parcel-cover store: the
+    /// request targets this region iff its non-nil region id matches
+    /// [`SimSession::set_region_id`]'s or its non-zero region handle matches
+    /// the session's; a hit is the first stored rectangle containing the
+    /// requested location. A miss answers `None` (the handler replies with an
+    /// empty map, the "could not resolve" signal).
+    pub(crate) fn resolve_remote_parcel(&self, request: &RemoteParcelRequest) -> Option<ParcelKey> {
+        let by_id = !request.region_id.is_nil() && request.region_id == self.region_id;
+        let by_handle =
+            request.region_handle.get() != 0 && request.region_handle == self.region_handle;
+        if !by_id && !by_handle {
+            return None;
+        }
+        let x = request.location.x();
+        let y = request.location.y();
+        self.parcels
+            .iter()
+            .find(|parcel| {
+                parcel.west <= x && x < parcel.east && parcel.south <= y && y < parcel.north
+            })
+            .map(|parcel| parcel.parcel_id)
+    }
+
+    /// Replaces the agent's scripted-attachment report the
+    /// `AttachmentResources` capability serves.
+    pub fn set_attachment_resources(&mut self, report: AttachmentResourcesReport) {
+        self.attachment_resources = report;
+    }
+
+    /// The stored `AttachmentResources` report.
+    pub(crate) const fn attachment_resources(&self) -> &AttachmentResourcesReport {
+        &self.attachment_resources
+    }
+
+    /// Replaces the script-resource summary the `LandResources` follow-up
+    /// summary GET serves.
+    pub fn set_land_resource_summary(&mut self, summary: ResourceSummary) {
+        self.land_resource_summary = summary;
+    }
+
+    /// The stored `LandResources` summary report.
+    pub(crate) const fn land_resource_summary(&self) -> &ResourceSummary {
+        &self.land_resource_summary
+    }
+
+    /// Replaces the per-parcel script-resource details the `LandResources`
+    /// follow-up details GET serves.
+    pub fn set_land_resource_details(&mut self, parcels: Vec<ParcelScriptResources>) {
+        self.land_resource_details = parcels;
+    }
+
+    /// The stored `LandResources` per-parcel detail reports.
+    pub(crate) fn land_resource_details(&self) -> &[ParcelScriptResources] {
+        &self.land_resource_details
     }
 
     /// Routes a fire-and-forget server event to the driver. Used by the CAPS

@@ -12,21 +12,31 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_proto::{
         AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey,
-        CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_CREATE_INVENTORY_CATEGORY,
-        CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
-        CAP_GET_TEXTURE, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-        CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
+        CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
+        CAP_CREATE_INVENTORY_CATEGORY, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY,
+        CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_GET_OBJECT_COST,
+        CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
+        CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
+        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_REMOTE_PARCEL_REQUEST,
+        CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
         CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
         CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
         CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
         CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
-        CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DisplayName, Event,
-        FaceMaterialPut, ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage,
-        InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey, LLSD_XML_CONTENT_TYPE,
-        LegacyMaterial, LoginParams, MaterialOverrideUpdate, MediaEntry, ObjectKey,
-        ObjectMediaState, OwnerKey, Permissions5, REQUESTED_CAPABILITIES, RegionCoordinates,
-        RegionHandle, ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind,
-        SimSession, StartLocation, TextureKey, build_event_queue_request, build_seed_request,
+        CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DayCycle, DisplayName,
+        EnvironmentSettings, EnvironmentUpdate, Event, FaceMaterialPut, ImDialog, ImSessionId,
+        InMemoryAssetSource, InstantMessage, InventoryFolder, InventoryFolderKey, InventoryItem,
+        InventoryKey, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE,
+        LegacyMaterial, LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry,
+        ObjectCost, ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey,
+        ParcelScriptResources, Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES,
+        RegionCoordinates, RegionHandle, RegionLocalParcelId, ResourceAmount, ResourceSummary,
+        ScriptedObjectInfo, ScriptedObjectResources, SelectedCostKind, SelectedResourceCost,
+        ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel,
+        SimSession, SimulatorFeatures, StartLocation, TextureKey, build_environment_update_request,
+        build_event_queue_request, build_get_object_cost_request,
+        build_get_object_physics_data_request, build_land_resources_request,
+        build_remote_parcel_request, build_resource_cost_selected_request, build_seed_request,
         chat_session_request_body, copy_inventory_from_notecard_body,
         enable_simulator_to_caps_llsd, parse_event_queue_response, parse_seed_response,
     };
@@ -122,10 +132,11 @@ mod test {
         assert_eq!(granted, expected);
         // Seven agent-comms/framework sim caps, the four asset-delivery caps
         // (GetTexture/GetMesh/GetMesh2/ViewerAsset), the fifteen content
-        // upload/materials/MOAP caps, and the seven inventory caps (the two
+        // upload/materials/MOAP caps, the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
-        // Library, CreateInventoryCategory).
-        assert_eq!(granted.len(), 33);
+        // Library, CreateInventoryCategory), and the nine
+        // region/object-information caps.
+        assert_eq!(granted.len(), 42);
         Ok(())
     }
 
@@ -147,17 +158,17 @@ mod test {
     fn unsupported_caps_are_omitted_from_the_grant() -> Result<(), TestError> {
         let mut caps = new_caps()?;
         let mut sim = new_sim();
-        // `GetObjectCost` is still a Pending capability (no handler), so it
+        // `GroupMemberData` is still a Pending capability (no handler), so it
         // stands in here for "requested but unsupported"; `GetTexture` is now
         // served by the composed asset surface and would be granted.
         let request_body =
-            build_seed_request(&["EventQueueGet", "GetObjectCost", "NoSuchCapability"]);
+            build_seed_request(&["EventQueueGet", "GroupMemberData", "NoSuchCapability"]);
         let seed_path = caps.seed_url().path().to_owned();
         let (status, body) = respond(&mut caps, &mut sim, &post(&seed_path, &request_body))?;
         assert_eq!(status, 200);
         let granted = parse_seed_response(&body)?;
         assert!(granted.contains_key("EventQueueGet"));
-        assert!(!granted.contains_key("GetObjectCost"));
+        assert!(!granted.contains_key("GroupMemberData"));
         assert!(!granted.contains_key("NoSuchCapability"));
         Ok(())
     }
@@ -2181,6 +2192,832 @@ mod test {
         let (status, _) = respond_ais(&mut caps, &mut sim, "GET", &cap_path, "/bogus", "")?;
         assert_eq!(status, 400);
         let (status, _) = respond_ais(&mut caps, &mut sim, "PUT", &cap_path, &suffix, "")?;
+        assert_eq!(status, 405);
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // The region/object-information cluster.
+    // -----------------------------------------------------------------------
+
+    /// A `PUT` [`CapsRequest`] carrying an LLSD-XML body and a query string.
+    fn put<'a>(path: &'a str, query: Option<&'a str>, body: &'a str) -> CapsRequest<'a> {
+        CapsRequest {
+            method: "PUT",
+            path,
+            query,
+            range: None,
+            body: body.as_bytes(),
+        }
+    }
+
+    /// The syntax id `seed_region_info` advertises for its LSL document.
+    const SYNTAX_ID: u128 = 0x5b7a;
+
+    /// Two seeded objects with cost/physics/selection records, and one id
+    /// deliberately never seeded.
+    const OBJECT_A: u128 = 0x0C0A;
+    /// The second seeded object.
+    const OBJECT_B: u128 = 0x0C0B;
+    /// An object id no fixture knows — the "no such object" probe.
+    const OBJECT_UNKNOWN: u128 = 0x0CFF;
+
+    /// A deterministic [`ObjectCost`] whose four costs derive from `base`.
+    fn sample_object_cost(base: f32) -> ObjectCost {
+        ObjectCost {
+            linked_set_resource_cost: base,
+            resource_cost: base / 2.0,
+            physics_cost: base / 4.0,
+            linked_set_physics_cost: base / 8.0,
+            resource_limiting_type: "legacy".to_owned(),
+        }
+    }
+
+    /// A deterministic scripted-object entry for the resource reports.
+    fn sample_scripted_object(id: u128, name: &str) -> ScriptedObjectInfo {
+        ScriptedObjectInfo {
+            id: uuid::Uuid::from_u128(id),
+            location: RegionCoordinates::new(10.0, 20.0, 30.0),
+            name: name.to_owned(),
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(1))),
+            resources: ScriptedObjectResources {
+                memory: Some(0x0001_0000),
+                urls: Some(2),
+            },
+        }
+    }
+
+    /// Seeds every region/object-information fixture: the feature + syntax
+    /// documents (with the shared syntax id), a parcel environment override,
+    /// two costed objects, the parcel-cover rectangles, and the resource
+    /// reports.
+    fn seed_region_info(sim: &mut SimSession) {
+        sim.set_simulator_features(SimulatorFeatures {
+            mesh_rez_enabled: Some(true),
+            mesh_upload_enabled: Some(true),
+            max_agent_attachments: Some(38),
+            ..SimulatorFeatures::default()
+        });
+        let mut syntax = LslSyntax::default();
+        syntax.controls.insert(
+            "if".to_owned(),
+            LslKeyword {
+                tooltip: Some("Conditional.".to_owned()),
+                deprecated: false,
+                god_mode: false,
+            },
+        );
+        sim.set_lsl_syntax(uuid::Uuid::from_u128(SYNTAX_ID), syntax);
+
+        sim.set_region_id(uuid::Uuid::from_u128(0x1e6));
+        sim.set_environment(EnvironmentSettings {
+            parcel_id: 3,
+            region_id: uuid::Uuid::from_u128(0x1e6),
+            day_length: 7200,
+            day_offset: 57600,
+            flags: 0,
+            env_version: 1,
+            track_altitudes: [1000.0, 2000.0, 3000.0],
+            day_cycle: DayCycle {
+                name: "Parcel Cycle".to_owned(),
+                water_track: Vec::new(),
+                sky_tracks: Vec::new(),
+                sky_frames: std::collections::BTreeMap::new(),
+                water_frames: std::collections::BTreeMap::new(),
+            },
+        });
+
+        sim.set_object_cost(
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_A)),
+            sample_object_cost(16.0),
+        );
+        sim.set_object_cost(
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+            sample_object_cost(8.0),
+        );
+        sim.set_object_physics(
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_A)),
+            ObjectPhysicsData {
+                physics_shape_type: PhysicsShapeType::Prim,
+                density: 1000.0,
+                friction: 0.6,
+                restitution: 0.5,
+                gravity_multiplier: 1.0,
+            },
+        );
+        sim.set_object_physics(
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+            ObjectPhysicsData {
+                physics_shape_type: PhysicsShapeType::ConvexHull,
+                density: 500.0,
+                friction: 0.3,
+                restitution: 0.25,
+                gravity_multiplier: 2.0,
+            },
+        );
+        sim.set_selection_cost(
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_A)),
+            SelectedResourceCost {
+                physics: 1.0,
+                streaming: 2.0,
+                simulation: 3.0,
+            },
+        );
+        sim.set_selection_cost(
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+            SelectedResourceCost {
+                physics: 0.5,
+                streaming: 0.25,
+                simulation: 0.125,
+            },
+        );
+
+        sim.add_parcel(SimParcel {
+            parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0xACE1)),
+            west: 0.0,
+            south: 0.0,
+            east: 128.0,
+            north: 256.0,
+        });
+        sim.add_parcel(SimParcel {
+            parcel_id: ParcelKey::from(uuid::Uuid::from_u128(0xACE2)),
+            west: 128.0,
+            south: 0.0,
+            east: 256.0,
+            north: 256.0,
+        });
+
+        sim.set_attachment_resources(sl_proto::AttachmentResourcesReport {
+            attachments: vec![sl_proto::AttachmentLocation {
+                location: "Skull".to_owned(),
+                objects: vec![sample_scripted_object(0xA771, "HUD")],
+            }],
+            summary: ResourceSummary {
+                available: vec![ResourceAmount {
+                    resource_type: "memory".to_owned(),
+                    amount: 0x0010_0000,
+                }],
+                used: vec![ResourceAmount {
+                    resource_type: "memory".to_owned(),
+                    amount: 0x0001_0000,
+                }],
+            },
+        });
+        sim.set_land_resource_summary(ResourceSummary {
+            available: vec![ResourceAmount {
+                resource_type: "urls".to_owned(),
+                amount: 38,
+            }],
+            used: vec![ResourceAmount {
+                resource_type: "urls".to_owned(),
+                amount: 2,
+            }],
+        });
+        sim.set_land_resource_details(vec![ParcelScriptResources {
+            name: "Test Parcel".to_owned(),
+            id: uuid::Uuid::from_u128(0xACE1),
+            local_id: RegionLocalParcelId(3),
+            objects: vec![sample_scripted_object(0xA772, "Greeter")],
+        }]);
+    }
+
+    /// Dispatches a request and folds the LLSD reply into the client under
+    /// `tag`, returning the client events it produced. Asserts the reply is a
+    /// 200.
+    fn fold_into_client(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        client: &mut Session,
+        request: &CapsRequest<'_>,
+        tag: &str,
+        now: Instant,
+    ) -> Result<Vec<Event>, TestError> {
+        let (status, body) = respond(caps, sim, request)?;
+        assert_eq!(status, 200);
+        client.handle_caps_event(tag, &parse_llsd_xml(&body)?, now)?;
+        Ok(drain_client(client))
+    }
+
+    /// The `SimulatorFeatures` GET serves the stored document through the
+    /// client's own parser, and its `lsl_syntax_id` matches the id
+    /// `set_lsl_syntax` advertised — the cross-cap consistency invariant.
+    #[test]
+    fn simulator_features_serve_the_stored_features() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_SIMULATOR_FEATURES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_SIMULATOR_FEATURES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::SimulatorFeatures(features)] => {
+                assert_eq!(features.mesh_rez_enabled, Some(true));
+                assert_eq!(features.max_agent_attachments, Some(38));
+                assert_eq!(
+                    features.lsl_syntax_id,
+                    Some(uuid::Uuid::from_u128(SYNTAX_ID))
+                );
+            }
+            other => return Err(format!("expected SimulatorFeatures, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `LSLSyntax` GET serves the stored document (with the version the
+    /// client's parser insists on) through the client's own parser.
+    #[test]
+    fn lsl_syntax_serves_the_stored_document() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_LSL_SYNTAX)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_LSL_SYNTAX,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::LslSyntax(syntax)] => {
+                assert_eq!(
+                    syntax
+                        .controls
+                        .get("if")
+                        .and_then(|kw| kw.tooltip.as_deref()),
+                    Some("Conditional.")
+                );
+            }
+            other => return Err(format!("expected LslSyntax, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `ExtEnvironment` GET serves the region entry (`?parcelid=-1` and
+    /// no query at all), a stored parcel override, and falls back to the
+    /// region entry for a parcel without one.
+    #[test]
+    fn environment_get_serves_region_and_parcel_with_fallback() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+        for (query, expected_parcel, expected_day_length) in [
+            (None, -1, 14400),
+            (Some("parcelid=-1"), -1, 14400),
+            (Some("parcelid=3"), 3, 7200),
+            // Parcel 9 has no override: it inherits the region entry.
+            (Some("parcelid=9"), -1, 14400),
+        ] {
+            let events = fold_into_client(
+                &mut caps,
+                &mut sim,
+                &mut client,
+                &get(&path, query),
+                CAP_EXT_ENVIRONMENT,
+                now,
+            )?;
+            match events.as_slice() {
+                [Event::Environment(environment)] => {
+                    assert_eq!(environment.parcel_id, expected_parcel, "query {query:?}");
+                    assert_eq!(
+                        environment.day_length, expected_day_length,
+                        "query {query:?}"
+                    );
+                }
+                other => return Err(format!("expected Environment, got {other:?}").into()),
+            }
+        }
+        Ok(())
+    }
+
+    /// The `ExtEnvironment` PUT merges the update into the store (bumping
+    /// `env_version`), echoes the stored result through the client fold,
+    /// surfaces [`ServerEvent::EnvironmentUpdated`] for the driver, and the
+    /// driver's follow-up `WindLightRefresh` push tells the client to
+    /// re-fetch — which then observes the update.
+    #[test]
+    fn environment_put_updates_the_stored_environment() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+
+        let update_body = build_environment_update_request(&EnvironmentUpdate {
+            day_length: Some(28800),
+            day_offset: Some(0),
+            track_altitudes: Some([800.0, 1600.0, 2400.0]),
+            flags: 1,
+            ..EnvironmentUpdate::default()
+        });
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &put(&path, Some("parcelid=-1&trackno=1"), &update_body),
+            CAP_EXT_ENVIRONMENT,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::Environment(environment)] => {
+                assert_eq!(environment.parcel_id, -1);
+                assert_eq!(environment.day_length, 28800);
+                assert_eq!(environment.day_offset, 0);
+                assert_eq!(environment.flags, 1);
+                // The seeded region entry was version 1; the PUT bumps it.
+                assert_eq!(environment.env_version, 2);
+            }
+            other => return Err(format!("expected Environment, got {other:?}").into()),
+        }
+        match sim.poll_event() {
+            Some(ServerEvent::EnvironmentUpdated {
+                parcel_id,
+                track_no,
+                update,
+            }) => {
+                assert_eq!(parcel_id, -1);
+                assert_eq!(track_no, Some(1));
+                assert_eq!(update.day_length, Some(28800));
+            }
+            other => return Err(format!("expected EnvironmentUpdated, got {other:?}").into()),
+        }
+
+        // The driver notifies other clients over the event queue; the client
+        // re-fetches on the refresh and observes the stored update.
+        sim.enqueue_windlight_refresh(true);
+        let eq_path = granted_event_queue_path(&caps)?;
+        let poll = build_event_queue_request(None, false);
+        let (status, body) = respond(&mut caps, &mut sim, &post(&eq_path, &poll))?;
+        assert_eq!(status, 200);
+        let batch = parse_event_queue_response(&body)?;
+        let refresh = batch
+            .events
+            .first()
+            .ok_or("expected a queued WindLightRefresh event")?;
+        assert_eq!(refresh.message, "WindLightRefresh");
+        client.handle_caps_event(&refresh.message, &refresh.body, now)?;
+        assert!(matches!(
+            drain_client(&mut client).as_slice(),
+            [Event::WindLightRefresh { .. }]
+        ));
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, Some("parcelid=-1")),
+            CAP_EXT_ENVIRONMENT,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::Environment(environment)] => assert_eq!(environment.day_length, 28800),
+            other => return Err(format!("expected Environment, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// A `day_asset`-only PUT answers the reference's graceful failure —
+    /// `200 { success: false, message }` — because the fixture has no
+    /// settings-asset store; nothing is stored and no client event fires.
+    #[test]
+    fn environment_put_without_day_cycle_asset_store_fails_gracefully() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+        let update_body = build_environment_update_request(&EnvironmentUpdate {
+            day_asset: Some(uuid::Uuid::from_u128(0xda)),
+            day_name: Some("A Preset".to_owned()),
+            flags: 0,
+            ..EnvironmentUpdate::default()
+        });
+        let (status, body) = respond(&mut caps, &mut sim, &put(&path, None, &update_body))?;
+        assert_eq!(status, 200);
+        let reply = parse_llsd_xml(&body)?;
+        assert_eq!(reply.get("success").and_then(Llsd::as_bool), Some(false));
+        assert!(
+            reply
+                .get("message")
+                .and_then(Llsd::as_str)
+                .is_some_and(|message| !message.is_empty())
+        );
+        // The failure reply carries no `environment` envelope: the client
+        // fold surfaces nothing (its decode-failed diagnostic path).
+        client.handle_caps_event(CAP_EXT_ENVIRONMENT, &reply, now)?;
+        assert!(
+            drain_client(&mut client)
+                .iter()
+                .all(|event| !matches!(event, Event::Environment(..)))
+        );
+        assert!(sim.poll_event().is_none());
+        Ok(())
+    }
+
+    /// The `RemoteParcelRequest` lookup resolves a covered location by region
+    /// id and by region handle; a foreign region or an uncovered location
+    /// answers the empty "could not resolve" map (no client event).
+    #[test]
+    fn remote_parcel_request_resolves_the_covering_parcel() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_REMOTE_PARCEL_REQUEST)?;
+
+        // By region id: (64, 100) falls in the first (western) rectangle.
+        let body = build_remote_parcel_request(
+            RegionCoordinates::new(64.0, 100.0, 0.0),
+            uuid::Uuid::from_u128(0x1e6),
+            RegionHandle(0),
+        );
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_REMOTE_PARCEL_REQUEST,
+            now,
+        )?;
+        assert_eq!(
+            events,
+            vec![Event::RemoteParcelId(ParcelKey::from(
+                uuid::Uuid::from_u128(0xACE1)
+            ))]
+        );
+
+        // By region handle: (200, 10) falls in the second (eastern) one.
+        let body = build_remote_parcel_request(
+            RegionCoordinates::new(200.0, 10.0, 0.0),
+            uuid::Uuid::nil(),
+            RegionHandle(REGION_HANDLE),
+        );
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_REMOTE_PARCEL_REQUEST,
+            now,
+        )?;
+        assert_eq!(
+            events,
+            vec![Event::RemoteParcelId(ParcelKey::from(
+                uuid::Uuid::from_u128(0xACE2)
+            ))]
+        );
+
+        // A foreign region and an uncovered location both answer `{}`; the
+        // client's fold treats that as a failed resolve and surfaces no
+        // typed event.
+        for body in [
+            build_remote_parcel_request(
+                RegionCoordinates::new(64.0, 100.0, 0.0),
+                uuid::Uuid::from_u128(0xbad),
+                RegionHandle(0),
+            ),
+            build_remote_parcel_request(
+                RegionCoordinates::new(64.0, 300.0, 0.0),
+                uuid::Uuid::from_u128(0x1e6),
+                RegionHandle(0),
+            ),
+        ] {
+            let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+            assert_eq!(status, 200);
+            client.handle_caps_event(CAP_REMOTE_PARCEL_REQUEST, &parse_llsd_xml(&reply)?, now)?;
+            assert!(
+                drain_client(&mut client)
+                    .iter()
+                    .all(|event| !matches!(event, Event::RemoteParcelId(..)))
+            );
+        }
+        Ok(())
+    }
+
+    /// The `GetObjectCost` POST serves the stored costs of the requested
+    /// objects through the client's own parser; an unknown id is omitted (the
+    /// "no such object" signal).
+    #[test]
+    fn object_cost_serves_the_stored_costs() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_GET_OBJECT_COST)?;
+        let body = build_get_object_cost_request(&[
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_A)),
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_UNKNOWN)),
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+        ]);
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_GET_OBJECT_COST,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ObjectCosts(costs)] => {
+                let mut expected = vec![
+                    (
+                        ObjectKey::from(uuid::Uuid::from_u128(OBJECT_A)),
+                        sample_object_cost(16.0),
+                    ),
+                    (
+                        ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+                        sample_object_cost(8.0),
+                    ),
+                ];
+                expected.sort_by_key(|(id, _cost)| id.uuid());
+                assert_eq!(costs, &expected);
+            }
+            other => return Err(format!("expected ObjectCosts, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `GetObjectPhysicsData` POST serves the stored physics data of the
+    /// requested objects; an unknown id is omitted.
+    #[test]
+    fn object_physics_data_serves_the_stored_data() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_GET_OBJECT_PHYSICS_DATA)?;
+        let body = build_get_object_physics_data_request(&[
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+            ObjectKey::from(uuid::Uuid::from_u128(OBJECT_UNKNOWN)),
+        ]);
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_GET_OBJECT_PHYSICS_DATA,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ObjectPhysicsData(data)] => match data.as_slice() {
+                [(id, physics)] => {
+                    assert_eq!(*id, ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)));
+                    assert_eq!(physics.physics_shape_type, PhysicsShapeType::ConvexHull);
+                    assert_eq!(physics.gravity_multiplier.to_bits(), 2.0_f32.to_bits());
+                }
+                other => return Err(format!("expected one record, got {other:?}").into()),
+            },
+            other => return Err(format!("expected ObjectPhysicsData, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The `ResourceCostSelected` POST sums the stored selection costs of the
+    /// requested objects — in both the roots and prims request forms —
+    /// with unknown ids contributing zero.
+    #[test]
+    fn resource_cost_selected_sums_the_selection() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_RESOURCE_COST_SELECTED)?;
+        for kind in [SelectedCostKind::Roots, SelectedCostKind::Prims] {
+            let body = build_resource_cost_selected_request(
+                kind,
+                &[
+                    ObjectKey::from(uuid::Uuid::from_u128(OBJECT_A)),
+                    ObjectKey::from(uuid::Uuid::from_u128(OBJECT_B)),
+                    ObjectKey::from(uuid::Uuid::from_u128(OBJECT_UNKNOWN)),
+                ],
+            );
+            let events = fold_into_client(
+                &mut caps,
+                &mut sim,
+                &mut client,
+                &post(&path, &body),
+                CAP_RESOURCE_COST_SELECTED,
+                now,
+            )?;
+            match events.as_slice() {
+                [Event::SelectedResourceCost(cost)] => {
+                    assert_eq!(cost.physics.to_bits(), 1.5_f32.to_bits());
+                    assert_eq!(cost.streaming.to_bits(), 2.25_f32.to_bits());
+                    assert_eq!(cost.simulation.to_bits(), 3.125_f32.to_bits());
+                }
+                other => return Err(format!("expected SelectedResourceCost, got {other:?}").into()),
+            }
+        }
+        Ok(())
+    }
+
+    /// The `AttachmentResources` GET serves the stored report through the
+    /// client's own parser.
+    #[test]
+    fn attachment_resources_serve_the_stored_report() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_ATTACHMENT_RESOURCES)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, None),
+            CAP_ATTACHMENT_RESOURCES,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::AttachmentResources(report)] => {
+                assert_eq!(report.attachments.len(), 1);
+                assert_eq!(
+                    report
+                        .attachments
+                        .first()
+                        .map(|location| location.location.as_str()),
+                    Some("Skull")
+                );
+                assert_eq!(
+                    report.summary.used.first().map(|amount| amount.amount),
+                    Some(0x0001_0000)
+                );
+            }
+            other => return Err(format!("expected AttachmentResources, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The two-stage `LandResources` flow: the POST answers the two follow-up
+    /// URLs (sub-paths of the cap's own URL), and GETting each serves the
+    /// stored summary/detail reports through the client's own parsers under
+    /// the runtime's `LAND_RESOURCE_*_TAG` pseudo-cap names.
+    #[test]
+    fn land_resources_serves_the_summary_and_detail_reports() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_LAND_RESOURCES)?;
+        let body = build_land_resources_request(ParcelKey::from(uuid::Uuid::from_u128(0xACE1)));
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_LAND_RESOURCES,
+            now,
+        )?;
+        let urls = match events.as_slice() {
+            [Event::LandResourcesUrls(urls)] => urls.clone(),
+            other => return Err(format!("expected LandResourcesUrls, got {other:?}").into()),
+        };
+        let summary_path = urls
+            .script_resource_summary
+            .ok_or("expected a summary URL")?
+            .path()
+            .to_owned();
+        let detail_path = urls
+            .script_resource_details
+            .ok_or("expected a details URL")?
+            .path()
+            .to_owned();
+
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&summary_path, None),
+            LAND_RESOURCE_SUMMARY_TAG,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::LandResourceSummary(summary)] => {
+                assert_eq!(
+                    summary.available.first().map(|amount| amount.amount),
+                    Some(38)
+                );
+            }
+            other => return Err(format!("expected LandResourceSummary, got {other:?}").into()),
+        }
+
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&detail_path, None),
+            LAND_RESOURCE_DETAIL_TAG,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::LandResourceDetail(parcels)] => {
+                assert_eq!(
+                    parcels.first().map(|parcel| parcel.name.as_str()),
+                    Some("Test Parcel")
+                );
+                assert_eq!(
+                    parcels
+                        .first()
+                        .and_then(|parcel| parcel.objects.first())
+                        .map(|object| object.name.as_str()),
+                    Some("Greeter")
+                );
+            }
+            other => return Err(format!("expected LandResourceDetail, got {other:?}").into()),
+        }
+        Ok(())
+    }
+
+    /// The region/object-information handlers' status contract: wrong
+    /// methods 405 (including the reference's DELETE reset, out of scope),
+    /// malformed queries and bodies 400, unknown `LandResources` sub-paths
+    /// 404.
+    #[test]
+    fn region_info_handlers_reject_wrong_methods_and_bad_bodies() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+
+        // The bodyless GETs are GET-only.
+        for name in [
+            CAP_SIMULATOR_FEATURES,
+            CAP_LSL_SYNTAX,
+            CAP_ATTACHMENT_RESOURCES,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _) = respond(&mut caps, &mut sim, &post(&path, ""))?;
+            assert_eq!(status, 405, "POST on {name}");
+        }
+
+        // The POST caps are POST-only and reject garbage bodies.
+        for name in [
+            CAP_REMOTE_PARCEL_REQUEST,
+            CAP_GET_OBJECT_COST,
+            CAP_GET_OBJECT_PHYSICS_DATA,
+            CAP_RESOURCE_COST_SELECTED,
+            CAP_LAND_RESOURCES,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _) = respond(&mut caps, &mut sim, &get(&path, None))?;
+            assert_eq!(status, 405, "GET on {name}");
+            let (status, _) = respond(&mut caps, &mut sim, &post(&path, "not xml <"))?;
+            assert_eq!(status, 400, "garbage body on {name}");
+        }
+
+        // ExtEnvironment: a malformed `parcelid` is a bad request, a PUT
+        // without the `environment` envelope is a bad request, and any other
+        // method (the DELETE reset stays unimplemented) is 405.
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+        let (status, _) = respond(&mut caps, &mut sim, &get(&path, Some("parcelid=abc")))?;
+        assert_eq!(status, 400);
+        let (status, _) = respond(
+            &mut caps,
+            &mut sim,
+            &put(&path, None, "<llsd><map/></llsd>"),
+        )?;
+        assert_eq!(status, 400);
+        let (status, _) = respond(
+            &mut caps,
+            &mut sim,
+            &CapsRequest {
+                method: "DELETE",
+                path: &path,
+                query: Some("parcelid=-1"),
+                range: None,
+                body: b"",
+            },
+        )?;
+        assert_eq!(status, 405);
+
+        // LandResources: an unknown sub-path is 404; the follow-up GETs are
+        // GET-only.
+        let path = granted_cap_path(&caps, CAP_LAND_RESOURCES)?;
+        let bogus = format!("{path}/bogus");
+        let (status, _) = respond(&mut caps, &mut sim, &get(&bogus, None))?;
+        assert_eq!(status, 404);
+        let summary = format!("{path}/summary");
+        let (status, _) = respond(&mut caps, &mut sim, &post(&summary, ""))?;
         assert_eq!(status, 405);
         Ok(())
     }

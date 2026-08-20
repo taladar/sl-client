@@ -51,6 +51,34 @@ pub struct EnvironmentSettings {
     pub day_cycle: DayCycle,
 }
 
+/// A partial environment update: the body of an `ExtEnvironment` PUT (the
+/// reference viewer's `coroUpdateEnvironment`), published via
+/// [`Command::SetEnvironment`](crate::Command::SetEnvironment). Every field is
+/// optional except `flags`; a field is only sent (and only applied) when
+/// `Some`. A full day cycle is carried inline in [`Self::day_cycle`], or
+/// referenced by settings-asset id in [`Self::day_asset`] (with an optional
+/// display name in [`Self::day_name`]).
+///
+/// (Not `Eq`: holds `f32` settings.)
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct EnvironmentUpdate {
+    /// The new length of a full day, in seconds, if changed.
+    pub day_length: Option<i32>,
+    /// The new day-cycle phase offset, in seconds, if changed.
+    pub day_offset: Option<i32>,
+    /// The new sky-track altitude breakpoints, in metres, if changed
+    /// (region-scope updates only).
+    pub track_altitudes: Option<[f32; 3]>,
+    /// The new day cycle, carried inline, if changed.
+    pub day_cycle: Option<DayCycle>,
+    /// The new day cycle, referenced as a settings asset, if changed.
+    pub day_asset: Option<Uuid>,
+    /// The display name accompanying [`Self::day_asset`].
+    pub day_name: Option<String>,
+    /// The raw environment behaviour flags to store.
+    pub flags: u32,
+}
+
 /// A day cycle: the tracks scheduling named frames over a day, plus the frame
 /// definitions the tracks reference by name.
 ///
