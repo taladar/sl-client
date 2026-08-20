@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 265 |
-| blocked | 68 |
+| ready | 266 |
+| blocked | 67 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 840 |
+| done | 841 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1347** |
+| **total** | **1348** |
 
 ## ideas (93)
 
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (265)
+## ready (266)
 
 ### protocol
 
@@ -372,8 +372,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   ad-hoc conference from a multi-selection
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
   — Consolidate the per-widget double-click interval constants
-- [`viewer-contact-sets`](ready/viewer-contact-sets.md) — Contact sets — named,
-  coloured contact groups (blocked by `viewer-social-people-panel` (done))
+- [`viewer-contact-set-pseudonyms`](ready/viewer-contact-set-pseudonyms.md) —
+  Contact sets — pseudonyms and display-name removal
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
@@ -543,6 +543,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
   Minimap context menu — About Land / Place Profile / World Map (blocked by
   `viewer-parcel-options-general` (done), `viewer-world-map-floater` (done))
+- [`viewer-minimap-menu-multi-avatar`](ready/viewer-minimap-menu-multi-avatar.md)
+  — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
+  `viewer-contact-sets` (done))
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -842,7 +845,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (68)
+## blocked (67)
 
 ### viewer
 
@@ -912,9 +915,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
   `viewer-block-list` (done), `viewer-report-abuse`, `viewer-derender-blacklist`
   (done))
-- [`viewer-minimap-menu-multi-avatar`](blocked/viewer-minimap-menu-multi-avatar.md)
-  — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
-  `viewer-contact-sets`)
 - [`viewer-money-economy-ui`](blocked/viewer-money-economy-ui.md) — Money /
   economy / L$ UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-media-prim-browser`)
@@ -1159,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (840)
+## done (841)
 
 ### protocol
 
@@ -1425,6 +1425,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
   — "\"Entity despawned\" command warnings during a plain scene run"
+- [`viewer-contact-sets`](done/viewer-contact-sets.md) — Contact sets — named,
+  coloured contact groups (blocked by `viewer-social-people-panel` (done))
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-crossing-stale-minimap-self-dot`](done/viewer-crossing-stale-minimap-self-dot.md)

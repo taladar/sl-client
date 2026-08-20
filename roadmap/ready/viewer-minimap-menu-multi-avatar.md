@@ -2,7 +2,7 @@
 id: viewer-minimap-menu-multi-avatar
 title: Minimap context menu — multi-avatar entries (dynamic labels)
 topic: viewer
-status: blocked
+status: ready
 origin: split from viewer-minimap-interactions (2026-07-23)
 blocked_by: [viewer-contact-sets]
 refs: [viewer-minimap-interactions, viewer-minimap-avatar-dots]

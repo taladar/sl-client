@@ -83,6 +83,7 @@ people-tab = People
 people-friends-tab = Friends
 people-groups-tab = Groups
 people-blocked-tab = Blocked
+people-contact-sets-tab = Contact Sets
 # The friends-table column headers (always shown, even for an empty list).
 people-header-name = Name
 people-header-status = Status
@@ -158,6 +159,49 @@ block-by-name-prompt = Block an object:
 block-by-name-note = * Only blocks object text, not sounds
 block-by-name-ok = OK
 block-by-name-cancel = Cancel
+
+## The Contact Sets surface (viewer-contact-sets), hosted in the Contact Sets
+## sub-tab of the People pane — the user's own named, coloured groups of
+## residents, with the two floaters that file into them and configure one.
+
+# The member-table column headers.
+contact-sets-col-name = Name
+contact-sets-col-sets = Sets
+# The prompt in the empty filter box above the list.
+contact-sets-filter-placeholder = Filter by name
+# The count line under the list: how many members the filter shows out of how
+# many the chosen set has.
+contact-sets-count = { $shown } of { $total } shown
+# The buttons that change the set itself, beside the set chooser.
+contact-sets-action-new = New Set…
+contact-sets-action-delete = Delete Set
+contact-sets-action-configure = Configure…
+# The buttons that act on the list and its selected member.
+contact-sets-action-add = Add Resident…
+contact-sets-action-move = Move to Set…
+contact-sets-action-remove = Remove from Set
+contact-sets-action-profile = Profile
+contact-sets-action-im = IM
+contact-sets-action-teleport = Offer Teleport
+
+## The "Add to Contact Set" floater (viewer-contact-sets) — which set to file
+## someone under, opened from the avatar menu and from Move to Set…
+
+add-to-contact-set-title = Add to Contact Set
+add-to-contact-set-prompt = Add { $name } to contact set:
+move-to-contact-set-prompt = Move { $name } to contact set:
+add-to-contact-set-add = Add
+add-to-contact-set-new = New Set…
+add-to-contact-set-cancel = Cancel
+
+## The contact-set settings floater (viewer-contact-sets) — one set's name and
+## colour.
+
+contact-set-config-title = { $name } settings
+contact-set-config-name = Set name
+contact-set-config-rename = Rename
+contact-set-config-color = Set colour
+contact-set-config-close = Close
 
 ## The Asset Blacklist floater (viewer-derender-blacklist) — everything this
 ## avatar has derendered (dropped from its own view), and the way back.
@@ -810,6 +854,8 @@ profile-offer-teleport = Offer Teleport
 profile-add-friend = Add Friend
 profile-remove-friend = Remove Friend
 profile-block = Block
+# Files the shown avatar under one of the user's own contact sets.
+profile-add-to-contact-set = Add to Set…
 profile-copy-slurl = Copy SLURL
 profile-find-on-map = Find on Map
 profile-invite-to-group = Invite to Group

@@ -427,6 +427,9 @@ enum ProfileAction {
     RemoveFriend,
     /// Block (mute) the shown avatar.
     Block,
+    /// File the shown avatar under one of the user's own contact sets
+    /// ([`crate::contact_sets`]) — the floater asks which.
+    AddToContactSet,
     /// Copy the shown avatar's SLURL (`secondlife:///app/agent/<id>/about`) to
     /// the OS clipboard, for pasting into chat / a notecard (the reference
     /// profile's "Copy" → agent SLURL).
@@ -1210,9 +1213,16 @@ fn build_second_life_structure(
         spawn_action_button(
             commands,
             buttons,
+            "profile-add-to-contact-set",
+            ProfileAction::AddToContactSet,
+            7,
+        );
+        spawn_action_button(
+            commands,
+            buttons,
             "profile-copy-slurl",
             ProfileAction::CopySlurl,
-            7,
+            8,
         );
         spawn_disabled_button(commands, buttons, "profile-find-on-map");
         spawn_disabled_button(commands, buttons, "profile-invite-to-group");
@@ -2496,6 +2506,7 @@ fn on_profile_action(
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
+    mut contact_sets: MessageWriter<crate::contact_sets_panel::OpenAddToContactSet>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2528,6 +2539,16 @@ fn on_profile_action(
                 to_agent_id: target,
                 message: String::new(),
             }));
+        }
+        ProfileAction::AddToContactSet => {
+            contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet {
+                agent: target,
+                name: avatars
+                    .name_of(target)
+                    .map(ToOwned::to_owned)
+                    .unwrap_or_default(),
+                move_from: None,
+            });
         }
         ProfileAction::CopySlurl => {
             crate::clipboard::copy_to_clipboard(

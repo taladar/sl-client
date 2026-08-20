@@ -63,6 +63,8 @@ mod camera;
 mod chat;
 mod chat_input;
 mod clipboard;
+mod contact_sets;
+mod contact_sets_panel;
 mod conversations;
 mod coords;
 mod crowd_debug_button;
@@ -1386,6 +1388,12 @@ fn run_session(
     // built into the Blocked sub-tab of the People pane, plus the by-name block
     // floater. After PeoplePlugin, whose Blocked content slot it fills.
     .add_plugins(BlockedPlugin)
+    // Contact sets (viewer-contact-sets): the client-side named, coloured groups
+    // of residents, their per-account store, and the Contact Sets sub-tab of the
+    // People pane (plus the add-to-set and set-settings floaters). After
+    // PeoplePlugin, whose Contact Sets content slot the panel fills.
+    .add_plugins(crate::contact_sets::ContactSetsPlugin)
+    .add_plugins(crate::contact_sets_panel::ContactSetsPanelPlugin)
     // Avatar complexity limiting (viewer-avatar-complexity-limit): score what each
     // nearby avatar costs to draw and, past the budget, draw them as a flat
     // jellydoll instead of their attachments. Its systems bracket the scene mirror

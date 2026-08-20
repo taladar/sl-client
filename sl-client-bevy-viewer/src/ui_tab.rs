@@ -122,10 +122,18 @@ const STRIP_PANEL_GAP: f32 = 0.0;
 
 /// A panel's widest allowed width, in logical pixels — a bound, never a size, so
 /// prose wraps inside it rather than overflowing (convention 2). Narrower than a
-/// standalone panel's bound to leave room for a vertical strip beside it. Also
-/// bounds a **horizontal** strip, so tabs too wide for it scroll rather than
-/// growing the widget.
+/// standalone panel's bound to leave room for a vertical strip beside it.
 const PANEL_MAX_WIDTH: f32 = 320.0;
+
+/// The widest a **horizontal** strip may grow, in logical pixels, before its
+/// tabs scroll instead of growing the widget — about eight tabs at the default
+/// size, and the mirror of [`TAB_STRIP_MAX_HEIGHT`] for the other orientation.
+///
+/// Deliberately much wider than a panel's bound ([`PANEL_MAX_WIDTH`]), which is
+/// about wrapping *prose*: a strip of four short tabs in a wide pane was being
+/// measured against the prose bound and grew scroll arrows with room to spare
+/// either side of it — a widget arguing with a window nobody has.
+const TAB_STRIP_MAX_WIDTH: f32 = 640.0;
 
 /// The tallest a **vertical** strip may grow, in logical pixels, before its tabs
 /// scroll instead of growing the widget. A definite bound is what makes the
@@ -301,7 +309,7 @@ impl TabPlacement {
             }
         } else {
             node.min_width = Val::Px(0.0);
-            node.max_width = Val::Px(PANEL_MAX_WIDTH);
+            node.max_width = Val::Px(TAB_STRIP_MAX_WIDTH);
         }
         node
     }
@@ -2415,63 +2423,81 @@ mod tests {
         Ok(())
     }
 
-    /// **Real layout:** a strip with more tabs than the bound holds overflows its
-    /// viewport (so its control shows), and a light one does not. Driven through
-    /// the layout harness so it is the actual measured sizes, not a guess about
-    /// flexbox.
+    /// **Real layout:** a strip with more tabs than its space holds overflows its
+    /// viewport (so its control shows), and one that fits does not. Driven
+    /// through the layout harness so it is the actual measured sizes, not a
+    /// guess about flexbox.
+    ///
+    /// The horizontal cases pin the **bound itself**: eight tabs sit inside
+    /// [`TAB_STRIP_MAX_WIDTH`] and must not grow arrows (a four-tab People strip
+    /// that did is what moved this bound off the prose one), while sixteen do
+    /// outgrow it. The vertical strip's own bound is [`TAB_STRIP_MAX_HEIGHT`].
     #[test]
     fn a_full_strip_overflows_its_viewport_and_a_light_one_does_not() -> Result<(), TestError> {
         use crate::ui::{UiRoot, UiScaffoldSystems};
         use crate::ui_test::{LayoutTest, settle};
-        for (placement, vertical, few, many) in [
-            (TabPlacement::BlockStart, false, 3usize, 16usize),
-            (TabPlacement::InlineStart, true, 2usize, 16usize),
+        for (placement, vertical, host, count, want_overflow) in [
+            (TabPlacement::BlockStart, false, None::<f32>, 3_usize, false),
+            (TabPlacement::BlockStart, false, None, 8, false),
+            (TabPlacement::BlockStart, false, None, 16, true),
+            (TabPlacement::InlineStart, true, None, 2, false),
+            (TabPlacement::InlineStart, true, None, 16, true),
         ] {
-            for (count, want_overflow) in [(few, false), (many, true)] {
-                let mut app = LayoutTest::new().build();
-                let labels: Vec<String> =
-                    (1..=count).map(|number| format!("Tab {number}")).collect();
-                app.add_systems(
-                    Startup,
-                    (move |mut commands: Commands, root: Res<UiRoot>| {
-                        spawn_tab_container(
-                            &mut commands,
-                            root.0,
-                            &super::TabSpec {
-                                element: "overflow-fixture",
-                                placement,
-                                labels: &labels,
-                                active: 0,
-                                tab_index: 1,
-                                font_size: 15.0,
-                                strip_width: None,
-                                ellipsis: super::DEFAULT_ELLIPSIS,
-                                translate_labels: false,
-                            },
-                        );
-                    })
-                    .after(UiScaffoldSystems::SpawnRoot),
-                );
-                settle(&mut app);
+            let mut app = LayoutTest::new().build();
+            let labels: Vec<String> = (1..=count).map(|number| format!("Tab {number}")).collect();
+            app.add_systems(
+                Startup,
+                (move |mut commands: Commands, root: Res<UiRoot>| {
+                    let parent = match host {
+                        Some(width) => commands
+                            .spawn((
+                                Node {
+                                    width: Val::Px(width),
+                                    ..default()
+                                },
+                                Name::new("overflow-fixture-host"),
+                                ChildOf(root.0),
+                            ))
+                            .id(),
+                        None => root.0,
+                    };
+                    spawn_tab_container(
+                        &mut commands,
+                        parent,
+                        &super::TabSpec {
+                            element: "overflow-fixture",
+                            placement,
+                            labels: &labels,
+                            active: 0,
+                            tab_index: 1,
+                            font_size: 15.0,
+                            strip_width: None,
+                            ellipsis: super::DEFAULT_ELLIPSIS,
+                            translate_labels: false,
+                        },
+                    );
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+            settle(&mut app);
 
-                let mut query = app.world_mut().query::<(&ComputedNode, &TabViewport)>();
-                let computed = query
-                    .iter(app.world())
-                    .next()
-                    .map(|(computed, _)| *computed)
-                    .ok_or("no viewport laid out")?;
-                // A logical-pixel slack, as the harness's own overflow check uses.
-                let slack = 2.0 * computed.inverse_scale_factor;
-                let overflow = if vertical {
-                    computed.content_size.y > computed.size.y + slack
-                } else {
-                    computed.content_size.x > computed.size.x + slack
-                };
-                assert_eq!(
-                    overflow, want_overflow,
-                    "{placement:?} with {count} tabs: overflow"
-                );
-            }
+            let mut query = app.world_mut().query::<(&ComputedNode, &TabViewport)>();
+            let computed = query
+                .iter(app.world())
+                .next()
+                .map(|(computed, _)| *computed)
+                .ok_or("no viewport laid out")?;
+            // A logical-pixel slack, as the harness's own overflow check uses.
+            let slack = 2.0 * computed.inverse_scale_factor;
+            let overflow = if vertical {
+                computed.content_size.y > computed.size.y + slack
+            } else {
+                computed.content_size.x > computed.size.x + slack
+            };
+            assert_eq!(
+                overflow, want_overflow,
+                "{placement:?} with {count} tabs in a {host:?} host: overflow"
+            );
         }
         Ok(())
     }

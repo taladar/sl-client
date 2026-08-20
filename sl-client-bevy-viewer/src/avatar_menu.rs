@@ -220,7 +220,7 @@ static OTHER_ADD_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Add to Set",
                 action: "add-to-set",
-                when: Some(UNIMPLEMENTED),
+                when: None,
             }),
         },
     ],
@@ -1269,7 +1269,8 @@ fn open_avatar_menu(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading the picked target / avatar state and the several action \
-              channels each wired slice dispatches on (command, conversation, profile, tex-refresh)"
+              channels each wired slice dispatches on (command, conversation, profile, \
+              tex-refresh, contact set)"
 )]
 fn handle_avatar_menu_actions(
     mut actions: MessageReader<UiAction>,
@@ -1283,6 +1284,7 @@ fn handle_avatar_menu_actions(
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
+    mut contact_sets: MessageWriter<crate::contact_sets_panel::OpenAddToContactSet>,
 ) {
     for action in actions.read() {
         if action.element != AVATAR_MENU_ELEMENT && action.element != ATTACHMENT_MENU_ELEMENT {
@@ -1357,6 +1359,19 @@ fn handle_avatar_menu_actions(
                     to_agent_id: agent,
                     message: String::new(),
                 }));
+            }
+            // File this person under one of the user's own contact sets
+            // (`viewer-contact-sets`) — the floater asks which, since the pie
+            // cannot grow a slice per set.
+            "add-to-set" if action.element == AVATAR_MENU_ELEMENT => {
+                contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet {
+                    agent,
+                    name: avatars
+                        .name_of(agent)
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_default(),
+                    move_from: None,
+                });
             }
             // Every other slice is a disabled placeholder: no behaviour yet.
             _other => {}

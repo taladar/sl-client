@@ -178,6 +178,9 @@ const GROUPS_TAB_KEY: &str = "people-groups-tab";
 /// The Fluent key for the Blocked sub-tab's label.
 const BLOCKED_TAB_KEY: &str = "people-blocked-tab";
 
+/// The Fluent key for the Contact Sets sub-tab's label.
+const CONTACT_SETS_TAB_KEY: &str = "people-contact-sets-tab";
+
 /// The Fluent key for the friends-table "Name" column header.
 const HEADER_NAME_KEY: &str = "people-header-name";
 
@@ -248,6 +251,9 @@ const GROUPS_TAB_INDEX: usize = 1;
 
 /// The Blocked sub-tab's index in the sub-strip.
 const BLOCKED_TAB_INDEX: usize = 2;
+
+/// The Contact Sets sub-tab's index in the sub-strip.
+const CONTACT_SETS_TAB_INDEX: usize = 3;
 
 /// The persisted-setting name for the friends-table sort order.
 const FRIENDS_SORT_SETTING: &str = "friends_sort";
@@ -1145,6 +1151,11 @@ pub(crate) struct PeopleUi {
     /// its visibility) but filled by [`crate::blocked`], which owns the mute
     /// list.
     blocked_content: Entity,
+    /// The Contact Sets sub-tab content container, shown for the Contact Sets
+    /// tab. Like [`Self::groups_content`] it is spawned here (so the sub-tab
+    /// switch owns its visibility) but filled by
+    /// [`crate::contact_sets_panel`], which owns the contact-set UI.
+    contact_sets_content: Entity,
     /// The Name header's sort-direction arrow node (updated from the primary sort).
     name_arrow: Entity,
     /// The Status header's sort-direction arrow node.
@@ -1171,6 +1182,13 @@ impl PeopleUi {
     /// the mute list into the same pane (see [`Self::groups_content`]).
     pub(crate) const fn blocked_content(&self) -> Entity {
         self.blocked_content
+    }
+
+    /// The Contact Sets sub-tab content container, so
+    /// [`crate::contact_sets_panel`] can build the set list into the same pane
+    /// (see [`Self::groups_content`]).
+    pub(crate) const fn contact_sets_content(&self) -> Entity {
+        self.contact_sets_content
     }
 }
 
@@ -1440,6 +1458,7 @@ fn spawn_people_tab(
                 FRIENDS_TAB_KEY.to_owned(),
                 GROUPS_TAB_KEY.to_owned(),
                 BLOCKED_TAB_KEY.to_owned(),
+                CONTACT_SETS_TAB_KEY.to_owned(),
             ],
             active: FRIENDS_TAB_INDEX,
             tab_index: 1,
@@ -1454,6 +1473,7 @@ fn spawn_people_tab(
         spawn_friends_content(&mut commands, pane, &icons);
     let groups_content = spawn_groups_content(&mut commands, pane);
     let blocked_content = spawn_blocked_content(&mut commands, pane);
+    let contact_sets_content = spawn_contact_sets_content(&mut commands, pane);
     let (confirm_overlay, confirm_text) = spawn_grant_confirm_modal(&mut commands, root.0);
 
     commands.insert_resource(PeopleUi {
@@ -1465,6 +1485,7 @@ fn spawn_people_tab(
         friends_viewport,
         groups_content,
         blocked_content,
+        contact_sets_content,
         name_arrow,
         status_arrow,
         icons,
@@ -1894,6 +1915,25 @@ fn spawn_groups_content(commands: &mut Commands, pane: Entity) -> Entity {
         .id()
 }
 
+/// Spawn the Contact Sets sub-tab content container — the same empty, hidden
+/// slot arrangement as [`spawn_groups_content`]; the contact-set UI that fills
+/// it is [`crate::contact_sets_panel`]'s job (the `viewer-contact-sets` task).
+fn spawn_contact_sets_content(commands: &mut Commands, pane: Entity) -> Entity {
+    commands
+        .spawn((
+            Node {
+                width: Val::Percent(100.0),
+                flex_grow: 1.0,
+                min_height: Val::Px(0.0),
+                display: Display::None,
+                ..column(Val::ZERO)
+            },
+            Name::new("people-contact-sets-content"),
+            ChildOf(pane),
+        ))
+        .id()
+}
+
 /// Spawn the Blocked sub-tab content container — the same empty, hidden slot
 /// arrangement as [`spawn_groups_content`]; the block list that fills it is
 /// [`crate::blocked`]'s job (the `viewer-block-list` task).
@@ -2210,14 +2250,20 @@ fn refresh_people(
 
     set_display(&mut nodes, ui.pane, active);
 
-    // Switch the Friends / Groups / Blocked content from the sub-strip's active
-    // tab (an unreadable strip falls back to Friends, the default tab).
+    // Switch the Friends / Groups / Blocked / Contact Sets content from the
+    // sub-strip's active tab (an unreadable strip falls back to Friends, the
+    // default tab).
     let sub_tab = strips
         .get(ui.sub_strip)
         .map_or(FRIENDS_TAB_INDEX, |strip| strip.active);
     set_display(&mut nodes, ui.friends_content, sub_tab == FRIENDS_TAB_INDEX);
     set_display(&mut nodes, ui.groups_content, sub_tab == GROUPS_TAB_INDEX);
     set_display(&mut nodes, ui.blocked_content, sub_tab == BLOCKED_TAB_INDEX);
+    set_display(
+        &mut nodes,
+        ui.contact_sets_content,
+        sub_tab == CONTACT_SETS_TAB_INDEX,
+    );
 }
 
 /// Set a node's background only on a real change.
