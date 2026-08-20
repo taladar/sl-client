@@ -1366,6 +1366,12 @@ fn advance_running(
                     .ok();
                 chat_log.log_outbound_im(*to_agent_id, message);
             }
+            Command::AutoResponse {
+                to_agent_id,
+                message,
+            } => {
+                session.send_auto_response(*to_agent_id, message, now).ok();
+            }
             Command::ImTyping {
                 to_agent_id,
                 typing,

@@ -550,6 +550,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::Chat { .. } => "chat",
         Command::Typing(..) => "typing",
         Command::InstantMessage { .. } => "im",
+        Command::AutoResponse { .. } => "auto_response",
         Command::ImTyping { .. } => "im_typing",
         Command::SetControls(..) => "set_controls",
         Command::SetThrottle(..) => "set_throttle",

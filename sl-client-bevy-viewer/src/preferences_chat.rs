@@ -376,6 +376,37 @@ pub(crate) fn build_chat_tab(commands: &mut Commands, panel: Entity) {
         TextInputKind::Multiline,
         REPLY_FIELD_LINES,
     );
+    // The two opt-in replies (`viewer-do-not-disturb-away`): each is a toggle
+    // plus its text, since neither state — merely away, or blocking the sender
+    // — implies wanting to answer at all.
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-send-away-response",
+        SettingBinding::account(crate::presence::SETTING_SEND_AWAY_RESPONSE),
+    );
+    spawn_pref_text(
+        commands,
+        panel,
+        "preferences-row-away-response",
+        SettingBinding::account(crate::presence::SETTING_AWAY_RESPONSE),
+        TextInputKind::Multiline,
+        REPLY_FIELD_LINES,
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-send-muted-response",
+        SettingBinding::account(crate::presence::SETTING_SEND_MUTED_RESPONSE),
+    );
+    spawn_pref_text(
+        commands,
+        panel,
+        "preferences-row-muted-response",
+        SettingBinding::account(crate::presence::SETTING_MUTED_RESPONSE),
+        TextInputKind::Multiline,
+        REPLY_FIELD_LINES,
+    );
 
     spawn_pref_section(commands, panel, "preferences-section-privacy");
     spawn_pref_checkbox(

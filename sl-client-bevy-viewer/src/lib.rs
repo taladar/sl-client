@@ -180,6 +180,7 @@ mod preferences_colors_skins;
 mod preferences_general;
 mod preferences_graphics;
 mod preferences_network_cache;
+mod presence;
 mod probe_layers;
 mod probes;
 mod procedural;
@@ -1466,6 +1467,11 @@ fn run_session(
     // NotificationHostPlugin, whose shared channel it adopts its card into, and
     // InventoryPlugin, whose folders the accept replies file into.
     .add_plugins(OffersInvitesPlugin)
+    // The presence modes (viewer-do-not-disturb-away): Away / auto-AFK, Do Not
+    // Disturb and the two autorespond modes, their signalled-animation wire
+    // writes, and the canned IM replies they send. After the conversations
+    // plugin, whose ingest the auto-reply orders itself ahead of.
+    .add_plugins(crate::presence::PresencePlugin)
     // The About Land floater (viewer-parcel-options-general): the parcel's
     // General / Covenant / Objects tabs. Subject-bound, persistence-exempt;
     // opened from the top-bar location read-out and the land pie.

@@ -61,6 +61,11 @@ pub(crate) const SETTING_SHOW_DISTANCE: &str = "ShowDistance";
 /// on-by-default deviation as [`SETTING_SHOW_DISTANCE`]).
 pub(crate) const SETTING_SHOW_TYPING: &str = "ShowTyping";
 
+/// Show the `Auto-Response` status on the **own** tag while an autorespond
+/// mode is on (Firestorm `FSShowAutorespondInNametag`, default off — the state
+/// is yours alone, and the reference leaves it hidden until asked for).
+pub(crate) const SETTING_SHOW_AUTORESPONSE: &str = "ShowAutorespondInNameTag";
+
 /// Tint the whole tag by chat-range band (Firestorm
 /// `FSTagShowDistanceColors`, default off).
 pub(crate) const SETTING_COLOR_BY_DISTANCE: &str = "ColorByDistance";
@@ -289,6 +294,14 @@ pub(crate) struct TagInputs<'a> {
     pub(crate) is_typing: bool,
     /// Whether the avatar's signalled animation set carries the AWAY entry.
     pub(crate) is_away: bool,
+    /// Whether the avatar's signalled animation set carries the DO NOT DISTURB
+    /// entry, shown as the reference's `Unavailable` status.
+    pub(crate) is_do_not_disturb: bool,
+    /// Whether *our own* tag should carry the `Auto-Response` status — one of
+    /// the two autorespond modes is on ([`crate::presence`]). Purely local:
+    /// autorespond has no wire representation, so it can only ever be true on
+    /// the own tag.
+    pub(crate) is_autoresponse: bool,
     /// Whether the avatar is editing its appearance (the CUSTOMIZE signalled
     /// animation), shown as the reference's `(Editing Appearance)` status.
     pub(crate) is_editing_appearance: bool,
@@ -327,6 +340,8 @@ pub(crate) struct TagToggles {
     pub(crate) show_distance: bool,
     /// [`SETTING_SHOW_TYPING`].
     pub(crate) show_typing: bool,
+    /// [`SETTING_SHOW_AUTORESPONSE`].
+    pub(crate) show_autoresponse: bool,
     /// [`SETTING_COLOR_BY_DISTANCE`].
     pub(crate) color_by_distance: bool,
     /// [`SETTING_SHOW_COMPLEXITY`].
@@ -353,6 +368,7 @@ impl Default for TagToggles {
             show_friend_color: true,
             show_distance: true,
             show_typing: true,
+            show_autoresponse: false,
             color_by_distance: false,
             show_complexity: true,
             show_own_complexity: false,
@@ -379,6 +395,7 @@ impl TagToggles {
             show_friend_color: get(SETTING_SHOW_FRIEND_COLOR, true),
             show_distance: get(SETTING_SHOW_DISTANCE, true),
             show_typing: get(SETTING_SHOW_TYPING, true),
+            show_autoresponse: get(SETTING_SHOW_AUTORESPONSE, false),
             color_by_distance: get(SETTING_COLOR_BY_DISTANCE, false),
             show_complexity: get(SETTING_SHOW_COMPLEXITY, true),
             show_own_complexity: get(SETTING_SHOW_OWN_COMPLEXITY, false),
@@ -542,7 +559,8 @@ fn is_linden(record: Option<&crate::avatars::NameRecord>) -> bool {
 /// Assemble one avatar's tag content — the reference's
 /// `idleUpdateNameTagText` line order and `getNameTagColor` precedence, pure
 /// and unit-testable. Line order, top to bottom: status (comma-joined
-/// `Away` / `Blocked` / `Typing`), group title, name, username, distance.
+/// `Away` / `Unavailable` / `Auto-Response` / `Blocked` / `Typing`), group
+/// title, name, username, distance.
 pub(crate) fn compose_tag(
     inputs: &TagInputs<'_>,
     toggles: &TagToggles,
@@ -587,6 +605,14 @@ pub(crate) fn compose_tag(
     let mut states: Vec<&str> = Vec::new();
     if inputs.is_away {
         states.push("Away");
+    }
+    // The reference's `AvatarDoNotDisturb` reads "Unavailable" — the state's
+    // outward name, distinct from the menu entry that sets it.
+    if inputs.is_do_not_disturb {
+        states.push("Unavailable");
+    }
+    if inputs.is_autoresponse && toggles.show_autoresponse {
+        states.push("Auto-Response");
     }
     // The reference shows this for the own and other avatars alike (the CUSTOMIZE
     // animation is signalled either way).
@@ -701,6 +727,14 @@ pub(crate) static AWAY_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
         sl_anim::registry::builtin_animation_by_name("away").map(|animation| animation.id)
     });
 
+/// The DO NOT DISTURB built-in animation's id, resolved once — like AWAY, the
+/// signalled-set entry is the protocol's only carrier of another avatar's
+/// unavailable state.
+static DND_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
+    std::sync::LazyLock::new(|| {
+        sl_anim::registry::builtin_animation_by_name("do_not_disturb").map(|animation| animation.id)
+    });
+
 /// The CUSTOMIZE built-in animation's id, resolved once — its presence in an
 /// avatar's signalled set is the protocol's carrier of "editing appearance".
 static CUSTOMIZE_ANIM: std::sync::LazyLock<Option<sl_client_bevy::Uuid>> =
@@ -746,6 +780,8 @@ pub(crate) fn compose_name_tags(
 ) {
     let toggles = TagToggles::from_settings(settings.as_deref());
     let colors = TagColors::from_settings(settings.as_deref());
+    // Autorespond is local-only state, so it can only ever mark the own tag.
+    let autoresponse = crate::presence::shows_autoresponse(settings.as_deref());
     let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
     // The distance line measures from the OWN AVATAR (the reference's
     // behaviour) — the camera-based distances only govern fade/cut-off.
@@ -807,6 +843,8 @@ pub(crate) fn compose_name_tags(
                 .is_some_and(|mutes| mutes.is_muted(agent.uuid())),
             is_typing: statuses.is_typing(agent),
             is_away: AWAY_ANIM.is_some_and(|away| playback.is_playing(agent, away)),
+            is_do_not_disturb: DND_ANIM.is_some_and(|busy| playback.is_playing(agent, busy)),
+            is_autoresponse: is_self && autoresponse,
             is_editing_appearance: CUSTOMIZE_ANIM
                 .is_some_and(|customize| playback.is_playing(agent, customize)),
             distance_m: if is_self {
@@ -1183,6 +1221,38 @@ mod tests {
         assert_eq!(
             content.lines.first().map(|line| line.text.as_str()),
             Some("Away, (Editing Appearance)"),
+        );
+    }
+
+    /// The presence statuses read as the reference's outward names and join in
+    /// its order: `Unavailable` for do-not-disturb, `Auto-Response` for an
+    /// autorespond mode, both after `Away`.
+    #[test]
+    fn presence_statuses_use_the_reference_wording() {
+        let record = custom_record();
+        let inputs = TagInputs {
+            record: Some(&record),
+            is_self: true,
+            is_away: true,
+            is_do_not_disturb: true,
+            is_autoresponse: true,
+            ..TagInputs::default()
+        };
+        let toggles = TagToggles {
+            show_autoresponse: true,
+            ..TagToggles::default()
+        };
+        let content = compose_tag(&inputs, &toggles, &TagColors::default());
+        assert_eq!(
+            content.lines.first().map(|line| line.text.as_str()),
+            Some("Away, Unavailable, Auto-Response"),
+        );
+        // The autorespond entry is off by default, like the reference's
+        // `FSShowAutorespondInNametag`; the wire-carried states are not.
+        let quiet = compose_tag(&inputs, &TagToggles::default(), &TagColors::default());
+        assert_eq!(
+            quiet.lines.first().map(|line| line.text.as_str()),
+            Some("Away, Unavailable"),
         );
     }
 

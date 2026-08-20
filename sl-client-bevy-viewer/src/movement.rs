@@ -279,9 +279,19 @@ pub(crate) fn drive_avatar_controls(
     avatar_axes: Res<AvatarAxisSettings>,
     mut nav_smoothing: ResMut<AvatarNavSmoothing>,
     motions: Query<&AvatarMotion>,
+    presence: Option<Res<crate::presence::PresenceState>>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {
+    // The away bit rides along with the movement bits: the reference keeps
+    // `AGENT_CONTROL_AWAY` in the same control word across its per-frame reset
+    // (`LLAgent::resetControlFlags`), so it is folded in here rather than sent
+    // by a second writer that would fight this one for the field.
+    let away_bit = if presence.is_some_and(|presence| presence.is_away()) {
+        ControlFlags::AWAY
+    } else {
+        ControlFlags::empty()
+    };
     // The reference clamps the frame time so a big frame-rate drop does not make a
     // huge feathered turn jump.
     let dt = time.delta_secs().min(0.2);
@@ -293,11 +303,11 @@ pub(crate) fn drive_avatar_controls(
     // the camera switched to flycam. With `FLY` set and no motion bits the avatar
     // just hovers in place, which is what a spectator flycam wants.
     if *mode == CameraMode::Flycam {
-        let parked = if controls.flying {
+        let parked = away_bit.union(if controls.flying {
             ControlFlags::FLY
         } else {
             ControlFlags::empty()
-        };
+        });
         if controls.last_controls != parked {
             writer.write(SlCommand(Command::SetControls(parked)));
             controls.last_controls = parked;
@@ -481,6 +491,7 @@ pub(crate) fn drive_avatar_controls(
 
     // Emit a `SetControls` only when the flag set changes; the simulator holds the
     // last set via its keep-alive re-sends.
+    let flags = flags.union(away_bit);
     let controls_changed = flags != controls.last_controls;
     if controls_changed {
         writer.write(SlCommand(Command::SetControls(flags)));

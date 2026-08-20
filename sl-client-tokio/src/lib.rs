@@ -861,6 +861,9 @@ impl Client {
                             self.session.send_instant_message(to_agent_id, &message, Instant::now())?;
                             chat_log.log_outbound_im(to_agent_id, &message);
                         }
+                        Some(Command::AutoResponse { to_agent_id, message }) => {
+                            self.session.send_auto_response(to_agent_id, &message, Instant::now())?;
+                        }
                         Some(Command::ImTyping { to_agent_id, typing }) => {
                             self.session.send_im_typing(to_agent_id, typing, Instant::now())?;
                         }

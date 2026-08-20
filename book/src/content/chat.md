@@ -41,7 +41,11 @@ envelope carries:
 - session control for group and conference chat (below).
 
 Send a direct IM with `Command::InstantMessage { to_agent_id, message }` (typing
-via `Command::ImTyping`); incoming IMs arrive as
+via `Command::ImTyping`); an **automatic** reply — the viewer's Do Not Disturb /
+autorespond / away canned answer — goes out as `Command::AutoResponse` instead,
+which sends the same envelope under the `DoNotDisturbAutoResponse` dialog so the
+recipient can tell it from a typed message and never answers it in turn.
+Incoming IMs arrive as
 `Event::InstantMessageReceived(..)`, which the application dispatches on the
 dialog type. Inventory offers carried in an IM are accepted or declined with
 `Command::AcceptInventoryOffer` / `DeclineInventoryOffer` (see
@@ -105,7 +109,7 @@ itself over the event queue with `enqueue_chatterbox_invitation`.
 >   unknown), folding the wire `SourceID` + `SourceType`; an `InventoryOffer`'s
 >   `item_id` is a typed `InventoryItemOrFolderKey` (a folder offer is a folder
 >   id, otherwise an item id).
-> - Commands (`Chat`, `Typing`, `InstantMessage`, `ImTyping`,
+> - Commands (`Chat`, `Typing`, `InstantMessage`, `AutoResponse`, `ImTyping`,
 >   `StartGroupSession`, `SendGroupMessage`, `LeaveGroupSession`,
 >   `StartConference`, `SendConferenceMessage`, `LeaveConference`,
 >   `AcceptInventoryOffer`, `DeclineInventoryOffer`) are in

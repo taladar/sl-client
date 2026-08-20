@@ -3351,6 +3351,8 @@ preferences-afk-5-min = 5 minutes
 preferences-afk-10-min = 10 minutes
 preferences-afk-30-min = 30 minutes
 preferences-afk-60-min = 60 minutes
+preferences-row-sit-on-away = Sit down while I'm away
+preferences-row-quit-after-afk = Log me out after being away for
 # The chat / IM + privacy tab (viewer-preferences-chat-privacy-tab): display,
 # disk logging, automatic replies (moved from the general tab), privacy.
 preferences-section-chat-display = Chat display
@@ -3374,6 +3376,10 @@ preferences-section-busy-response = Automatic replies
 preferences-row-busy-response = Do Not Disturb reply
 preferences-row-autorespond-response = Autorespond reply
 preferences-row-autorespond-non-friends-response = Autorespond reply to non-friends
+preferences-row-send-away-response = Reply automatically while I'm away
+preferences-row-away-response = Away reply
+preferences-row-send-muted-response = Tell blocked residents their message was not delivered
+preferences-row-muted-response = Reply to blocked residents
 preferences-section-privacy = Privacy
 preferences-row-online-status-hidden = Only friends and groups know I'm online
 preferences-row-im-via-email = Email me IMs that arrive while I'm offline

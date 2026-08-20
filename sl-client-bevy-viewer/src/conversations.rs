@@ -464,6 +464,14 @@ impl ConversationModel {
         self.entries.iter().position(|entry| entry.key == key)
     }
 
+    /// Whether a conversation is open for `key` — the reference's
+    /// `LLIMMgr::hasSession`, which the presence auto-reply
+    /// ([`crate::presence`]) consults so a resident is answered once per
+    /// conversation rather than once per line.
+    pub(crate) fn has_conversation(&self, key: ConversationKey) -> bool {
+        self.index_of(key).is_some()
+    }
+
     /// The index of `key`, creating the conversation (appended after the existing
     /// tabs) if it does not exist. Nearby is always present, so only IM / group /
     /// conference keys are ever created here.
@@ -963,6 +971,20 @@ pub(crate) struct NearbyChatNotice {
     pub(crate) body: String,
 }
 
+/// A viewer-generated system line for a **keyed** conversation — the IM /
+/// group / conference sibling of [`NearbyChatNotice`]. Written by a producer
+/// that has something to say *inside* a conversation rather than about the
+/// world, today the presence auto-reply's "autoresponse sent" note
+/// ([`crate::presence`]). The line opens the conversation if it is not open
+/// yet, exactly as an incoming message would.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct ConversationNotice {
+    /// The conversation the line belongs to.
+    pub(crate) key: ConversationKey,
+    /// The line body, shown with no speaker label.
+    pub(crate) body: String,
+}
+
 /// Which surface currently owns the conversations floater's shared strip and
 /// panel area: a **conversation** pane, or an **external** pane hosted in the
 /// same strip (the People / Contacts tab, [`crate::people`]). The two are
@@ -1053,6 +1075,7 @@ impl Plugin for ConversationsPlugin {
             .add_message::<RespondToInvite>()
             .add_message::<OpenConversation>()
             .add_message::<NearbyChatNotice>()
+            .add_message::<ConversationNotice>()
             .add_systems(
                 Startup,
                 spawn_conversations_floater.after(UiScaffoldSystems::SpawnRoot),
@@ -1062,6 +1085,7 @@ impl Plugin for ConversationsPlugin {
                 (
                     ingest_conversation_events,
                     ingest_nearby_notices,
+                    ingest_conversation_notices,
                     open_conversations,
                     apply_conversation_selection,
                     respond_to_invites,
@@ -1625,10 +1649,29 @@ fn ingest_nearby_notices(
     }
 }
 
+/// Fold viewer-generated [`ConversationNotice`] lines into their keyed
+/// conversation as speaker-less system lines.
+fn ingest_conversation_notices(
+    mut notices: MessageReader<ConversationNotice>,
+    mut model: ResMut<ConversationModel>,
+) {
+    for notice in notices.read() {
+        model.push_line(
+            notice.key,
+            TranscriptLine {
+                own: false,
+                speaker: String::new(),
+                speaker_link: SpeakerLink::None,
+                body: notice.body.clone(),
+            },
+        );
+    }
+}
+
 /// Fold every relevant inbound event into the model: chat / IM / group /
 /// conference lines, typing notifications, invites, and the name caches behind
 /// the tab titles.
-fn ingest_conversation_events(
+pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
     identity: Res<SlIdentity>,

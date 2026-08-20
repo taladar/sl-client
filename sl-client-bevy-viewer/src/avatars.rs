@@ -528,6 +528,12 @@ pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) 
     );
     settings.register_in(
         NAME_TAG_SECTION,
+        crate::name_tag_content::SETTING_SHOW_AUTORESPONSE,
+        sl_settings::SettingValue::Bool(false),
+        "Show an Auto-Response status on your own tag while an autorespond mode is on",
+    );
+    settings.register_in(
+        NAME_TAG_SECTION,
         crate::name_tag_content::SETTING_COLOR_BY_DISTANCE,
         sl_settings::SettingValue::Bool(false),
         "Tint whole name tags by chat range (whisper/say/shout)",

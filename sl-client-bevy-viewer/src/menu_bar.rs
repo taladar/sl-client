@@ -71,6 +71,16 @@ const ABOUT_OPEN: &str = "about-open";
 /// the check mark on the Comm ▸ Conversations entry.
 const CONVERSATIONS_OPEN: &str = "conversations-open";
 
+/// The condition keys that hold while each presence mode is on — they drive the
+/// check marks on Comm ▸ Online Status ([`crate::presence`]).
+const PRESENCE_AWAY: &str = "presence-away-on";
+/// See [`PRESENCE_AWAY`].
+const PRESENCE_DO_NOT_DISTURB: &str = "presence-do-not-disturb-on";
+/// See [`PRESENCE_AWAY`].
+const PRESENCE_AUTORESPOND: &str = "presence-autorespond-on";
+/// See [`PRESENCE_AWAY`].
+const PRESENCE_AUTORESPOND_NON_FRIENDS: &str = "presence-autorespond-non-friends-on";
+
 /// The condition key that holds while the Experiences floater is open — drives the
 /// check mark on the Avatar ▸ Experiences entry.
 const EXPERIENCES_OPEN: &str = "experiences-open";
@@ -180,6 +190,33 @@ static AVATAR_MENU: MenuDef = MenuDef {
     ],
 };
 
+/// The Comm ▸ **Online Status** submenu — the presence modes
+/// ([`crate::presence`]), in the reference's order and with its labels (Do Not
+/// Disturb shows as *Unavailable*, the name other residents see on the tag).
+/// The reference's reject-teleport / group-invite / friendship entries belong
+/// to the separate auto-reject task and join this submenu when it lands.
+static ONLINE_STATUS_MENU: MenuDef = MenuDef {
+    label: "Online Status",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("Away", "presence-away").checked_when(PRESENCE_AWAY)),
+        MenuItemDef::Command(
+            MenuCommand::new("Unavailable", "presence-do-not-disturb")
+                .checked_when(PRESENCE_DO_NOT_DISTURB),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Autorespond", "presence-autorespond")
+                .checked_when(PRESENCE_AUTORESPOND),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new(
+                "Autorespond to non-friends",
+                "presence-autorespond-non-friends",
+            )
+            .checked_when(PRESENCE_AUTORESPOND_NON_FRIENDS),
+        ),
+    ],
+};
+
 /// The Comm menu — the reference viewer's Communicate menu. Its Conversations
 /// entry opens the [`crate::conversations`] floater (the reference's
 /// `Comm > Conversations…`); friends / groups and the rest are future entries.
@@ -191,6 +228,8 @@ static COMM_MENU: MenuDef = MenuDef {
                 .accel("Ctrl+T")
                 .checked_when(CONVERSATIONS_OPEN),
         ),
+        MenuItemDef::Separator,
+        MenuItemDef::Submenu(&ONLINE_STATUS_MENU),
         MenuItemDef::Separator,
         // The reference's `Comm > Contacts / Groups / Block List`. All three
         // lists live in sub-tabs of the People pane inside the conversations
@@ -502,12 +541,20 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
 /// Cheap — one small `Vec` and only written on a real change — and read only
 /// when a menu opens ([`crate::menu`] rebuilds a popup from the conditions that
 /// hold at open time), so nothing here needs to run against an open menu.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries, and this one is \
+              the fan-in of every condition the bar's check marks and enable gates read: the \
+              floaters, the environment, the selection and edit tool, the settings, the \
+              presence modes, the panel-shown query, and the bar itself"
+)]
 fn update_top_menu_conditions(
     floaters: Query<(Entity, &crate::floater::Floater)>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
     selection: Res<crate::edit_selection::SelectionSet>,
     edit_tool: Res<crate::edit_tool::EditToolState>,
     settings: Res<crate::settings::ViewerSettings>,
+    presence: Option<Res<crate::presence::PresenceState>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -582,6 +629,30 @@ fn update_top_menu_conditions(
     {
         wanted.push(FRIENDS_ONLY_ON);
     }
+    // The Comm ▸ Online Status check marks: the two session modes from the
+    // presence state, the two autorespond modes from their persisted settings.
+    if let Some(presence) = &presence {
+        if presence.is_away() {
+            wanted.push(PRESENCE_AWAY);
+        }
+        if presence.is_do_not_disturb() {
+            wanted.push(PRESENCE_DO_NOT_DISTURB);
+        }
+    }
+    if settings
+        .store()
+        .get_bool(crate::presence::SETTING_AUTORESPOND_MODE)
+        .unwrap_or(false)
+    {
+        wanted.push(PRESENCE_AUTORESPOND);
+    }
+    if settings
+        .store()
+        .get_bool(crate::presence::SETTING_AUTORESPOND_NON_FRIENDS_MODE)
+        .unwrap_or(false)
+    {
+        wanted.push(PRESENCE_AUTORESPOND_NON_FRIENDS);
+    }
     // The World ▸ Property Lines check mark, from the in-world property-lines
     // setting (default on).
     if settings
@@ -653,8 +724,9 @@ const fn environment_condition(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries: the action \
               stream, the by-id floater lookup, the environment state, the parcel, the two \
-              open-request channels, the panel-shown query, the People sub-tab request, and \
-              the quit-request writer"
+              open-request channels, the settings, the panel-shown query, the People sub-tab \
+              request, the presence modes and their notification channel, and the \
+              quit-request writer"
 )]
 fn handle_top_menu_actions(
     mut actions: MessageReader<UiAction>,
@@ -666,6 +738,8 @@ fn handle_top_menu_actions(
     mut settings: ResMut<crate::settings::ViewerSettings>,
     mut panels: Query<&mut UiPanelShown>,
     mut people_tabs: MessageWriter<crate::people::OpenPeopleSubTab>,
+    mut presence: Option<ResMut<crate::presence::PresenceState>>,
+    mut notify: MessageWriter<crate::notifications::ShowNotification>,
     mut quit: MessageWriter<crate::session::QuitRequested>,
 ) {
     use crate::environment::FixedEnvironment;
@@ -680,6 +754,19 @@ fn handle_top_menu_actions(
     };
     for action in actions.read() {
         if action.element != TOP_MENU_ELEMENT {
+            continue;
+        }
+        // The Comm ▸ Online Status picks all share one handler (they toggle a
+        // mode and raise its notification); it reports whether it claimed the
+        // action, so the ordinary dispatch below stays untouched.
+        if let Some(presence) = presence.as_deref_mut()
+            && crate::presence::toggle_presence_mode(
+                action.action,
+                presence,
+                &mut settings,
+                &mut notify,
+            )
+        {
             continue;
         }
         match action.action {

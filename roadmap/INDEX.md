@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 265 |
 | blocked | 67 |
 | in-progress | 16 |
-| bugs | 29 |
-| done | 842 |
+| bugs | 30 |
+| done | 843 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1348** |
+| **total** | **1350** |
 
 ## ideas (93)
 
@@ -372,6 +372,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   ad-hoc conference from a multi-selection
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
   — Consolidate the per-widget double-click interval constants
+- [`viewer-contact-set-presence-extras`](ready/viewer-contact-set-presence-extras.md)
+  — Contact sets — per-set autoresponse and notify settings
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
@@ -388,9 +390,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   screen (greyscale + error dialog) instead of closing the window
 - [`viewer-display-name-set`](ready/viewer-display-name-set.md) — Set own
   display name (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-do-not-disturb-away`](ready/viewer-do-not-disturb-away.md) — Away /
-  auto-AFK / Do-Not-Disturb modes + autoresponse (blocked by
-  `viewer-chat-input-bar` (done))
 - [`viewer-draw-distance-stepping`](ready/viewer-draw-distance-stepping.md) —
   Progressive draw-distance ramp after teleport
 - [`viewer-edit-attachment-behavior`](ready/viewer-edit-attachment-behavior.md)
@@ -1083,7 +1082,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (29)
+## bugs (30)
 
 ### protocol
 
@@ -1126,6 +1125,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Minimap other-avatar dots are red, not green like the reference
 - [`viewer-mouselook-own-head-visible-from-inside`](bugs/viewer-mouselook-own-head-visible-from-inside.md)
   — Mouselook — parts of the own avatar's head render from the inside
+- [`viewer-muted-residents-text-still-shown`](bugs/viewer-muted-residents-text-still-shown.md)
+  — A blocked resident's chat and IMs are still shown
 - [`viewer-nametags-occluded-by-clouds`](bugs/viewer-nametags-occluded-by-clouds.md)
   — Name tags render behind the cloud layer (near tag occluded by far clouds)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
@@ -1157,7 +1158,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (842)
+## done (843)
 
 ### protocol
 
@@ -1448,6 +1449,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-dialog-script-load-url`](done/viewer-dialog-script-load-url.md) —
   Script web-page request dialog (llLoadURL) (blocked by
   `viewer-ui-notification-host` (done))
+- [`viewer-do-not-disturb-away`](done/viewer-do-not-disturb-away.md) — Away /
+  auto-AFK / Do-Not-Disturb modes + autoresponse (blocked by
+  `viewer-chat-input-bar` (done))
 - [`viewer-double-click-teleport`](done/viewer-double-click-teleport.md) —
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select

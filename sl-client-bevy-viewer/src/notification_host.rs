@@ -217,6 +217,7 @@ impl Plugin for NotificationHostPlugin {
             .add_message::<ResolveNotification>()
             .add_message::<CycleToasts>()
             .init_resource::<NotificationManager>()
+            .init_resource::<DoNotDisturbQueue>()
             .add_systems(
                 Startup,
                 (
@@ -249,6 +250,26 @@ impl Plugin for NotificationHostPlugin {
                     .chain(),
             );
     }
+}
+
+/// Notifications held back while **Do Not Disturb** is on
+/// ([`crate::presence`]) — the reference's muted notification channels plus its
+/// `LLDoNotDisturbNotificationStorage`: a corner toast raised while the mode is
+/// on is not shown, it is *kept*, and every held toast is raised for real the
+/// moment the mode is switched off, so nothing is silently lost.
+///
+/// **Modals are never queued.** A modal is a blocking confirm in front of
+/// something the user is doing right now (a quit confirm, a discard-changes
+/// prompt); holding one back would deadlock the flow it belongs to. Do Not
+/// Disturb suppresses the *unsolicited* interruptions, which is what the corner
+/// channel carries.
+#[derive(Resource, Debug, Default)]
+struct DoNotDisturbQueue {
+    /// The raises held back, oldest first.
+    held: Vec<ShowNotification>,
+    /// Whether Do Not Disturb was on last frame, so the drain runs on the
+    /// falling edge only.
+    was_busy: bool,
 }
 
 /// The channel container and its overflow control, so [`raise_notifications`]
@@ -959,6 +980,8 @@ fn raise_notifications(
     root: Res<UiRoot>,
     translator: Translator,
     settings: Option<Res<ViewerSettings>>,
+    presence: Option<Res<crate::presence::PresenceState>>,
+    mut queue: ResMut<DoNotDisturbQueue>,
     mut dismiss: MessageWriter<DismissNotification>,
     mut chat: MessageWriter<LocalChatNotice>,
     mut persist: MessageWriter<PersistNotification>,
@@ -967,7 +990,25 @@ fn raise_notifications(
     let Some(channel) = channel else {
         return;
     };
-    for request in requests.read() {
+    // Do Not Disturb holds the corner channel back and replays it on the way
+    // out — so the raises this frame are the fresh ones plus, on the falling
+    // edge, everything that was held.
+    let busy = presence.is_some_and(|presence| presence.is_do_not_disturb());
+    let mut pending: Vec<ShowNotification> = if !busy && queue.was_busy {
+        let held = std::mem::take(&mut queue.held);
+        if !held.is_empty() {
+            info!(
+                "notification: do-not-disturb ended, showing {} held notification(s)",
+                held.len()
+            );
+        }
+        held
+    } else {
+        Vec::new()
+    };
+    queue.was_busy = busy;
+    pending.extend(requests.read().cloned());
+    for request in &pending {
         let Some(tmpl) = template(request.template) else {
             warn!(
                 "notification: dropping raise of unknown template {}",
@@ -975,6 +1016,13 @@ fn raise_notifications(
             );
             continue;
         };
+        // Do Not Disturb: hold the corner toast for later rather than
+        // interrupting. A modal is never held (see [`DoNotDisturbQueue`]).
+        if busy && !tmpl.kind.is_modal() {
+            queue.held.push(request.clone());
+            debug!(template = tmpl.name, "notification held for do-not-disturb");
+            continue;
+        }
         // A suppressed raise is not shown, but it still *answers* — the
         // reference `handleIgnoredNotification`: the default button (or the
         // saved last response) fires so the confirmed action proceeds

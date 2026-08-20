@@ -66,6 +66,17 @@ pub enum Command {
         /// The message text.
         message: String,
     },
+    /// Send an **automatic reply** to `to_agent_id` — the Do Not Disturb /
+    /// autorespond / away canned answer, carried by the
+    /// [`ImDialog::DoNotDisturbAutoResponse`](crate::ImDialog::DoNotDisturbAutoResponse)
+    /// dialog so the recipient's client can tell it from a typed IM (and never
+    /// auto-replies to it in turn).
+    AutoResponse {
+        /// The recipient's agent id — the sender whose IM triggered the reply.
+        to_agent_id: AgentKey,
+        /// The canned reply text.
+        message: String,
+    },
     /// Send an instant-message typing indicator to `to_agent_id` (`true` = start,
     /// `false` = stop). Other clients see it as an [`Event::ImTyping`](crate::Event::ImTyping).
     ImTyping {

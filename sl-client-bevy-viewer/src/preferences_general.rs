@@ -319,6 +319,26 @@ pub(crate) fn build_general_tab(commands: &mut Commands, panel: Entity) {
             ("preferences-afk-60-min", SettingValue::U32(3_600)),
         ],
     );
+    crate::preferences::spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-sit-on-away",
+        SettingBinding::global(crate::presence::SETTING_SIT_ON_AWAY),
+    );
+    spawn_pref_combo(
+        commands,
+        panel,
+        "preferences-row-quit-after-afk",
+        SettingBinding::global(crate::presence::SETTING_QUIT_AFTER_AFK),
+        &[
+            ("preferences-afk-never", SettingValue::U32(0)),
+            ("preferences-afk-2-min", SettingValue::U32(120)),
+            ("preferences-afk-5-min", SettingValue::U32(300)),
+            ("preferences-afk-10-min", SettingValue::U32(600)),
+            ("preferences-afk-30-min", SettingValue::U32(1_800)),
+            ("preferences-afk-60-min", SettingValue::U32(3_600)),
+        ],
+    );
 }
 
 /// A [`SettingValue::String`] from a literal, so the option tables read flat.

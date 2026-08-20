@@ -1832,6 +1832,16 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "auto_response",
+            usage: "<to_agent_id> <message>",
+            build: |args, ctx| {
+                Ok(Command::AutoResponse {
+                    to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
+                    message: args.req_str(ctx, "message", 1)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "im_typing",
             usage: "<to_agent_id> <true|false>",
             build: |args, ctx| {

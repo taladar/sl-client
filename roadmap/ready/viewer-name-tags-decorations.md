@@ -21,8 +21,6 @@ top of that renderer:
   mark-colour override;
 - the **client-tag** display / colouring question (`FSColorClienttags`
   family — decide how much of the tag-guessing system to carry);
-- the own tag's **Unavailable / Auto-Response** status entries, fed by
-  the local do-not-disturb state ([[viewer-do-not-disturb-away]]);
 - the **"Loading..."** cloud line and the rez-state debug line
   (`NameTagDebugAVRezState`);
 - a **speaking-indicator** hook: the voice dot placement, fed by the
@@ -34,6 +32,12 @@ top of that renderer:
 
 The complexity (ARC) lines are split out to
 [[viewer-name-tags-complexity-distance]].
+
+The **Unavailable / Auto-Response** status entries shipped with
+[[viewer-do-not-disturb-away]] (2026-08-20), which owns the state behind
+them: `Unavailable` comes off the do-not-disturb signalled animation like
+`Away` does, and `Auto-Response` is own-tag-only behind
+`ShowAutorespondInNameTag` (default off, as the reference has it).
 
 Reference (Firestorm, read-only): `llhudnametag`,
 `llvoavatar::idleUpdateNameTag`, `llavatarnamecache`.

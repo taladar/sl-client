@@ -216,9 +216,25 @@ impl Plugin for OffersInvitesPlugin {
     /// Ingest received offer / invite `ImprovedInstantMessage`s into the shared
     /// toast channel.
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, register_offers_settings)
+        app.init_resource::<DeferredOffers>()
+            .add_systems(Startup, register_offers_settings)
             .add_systems(Update, ingest_offers_invites);
     }
+}
+
+/// Offer / invite cards held back while **Do Not Disturb** is on
+/// ([`crate::presence`]), the bespoke-card sibling of the catalogue toast queue
+/// in [`crate::notification_host`]: the offer IM is kept verbatim and its card
+/// is built for real when the mode is switched off, so an offer is deferred,
+/// never dropped. The protocol needs no reply until the user answers, so a held
+/// offer stays valid — the same as one the user simply has not clicked yet.
+#[derive(Resource, Debug, Default)]
+struct DeferredOffers {
+    /// The offer / invite IMs held back, oldest first.
+    held: Vec<InstantMessage>,
+    /// Whether Do Not Disturb was on last frame, so the drain runs on the
+    /// falling edge only.
+    was_busy: bool,
 }
 
 /// Read the event stream; for each received offer / invite IM, build its card and
@@ -228,7 +244,8 @@ impl Plugin for OffersInvitesPlugin {
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the event stream, the \
               shared channel + manager, i18n, the auto-accept setting with the inventory model \
-              + command writer it files through, and the commands the cards spawn with"
+              + command writer it files through, the do-not-disturb state and its deferral \
+              queue, and the commands the cards spawn with"
 )]
 fn ingest_offers_invites(
     mut events: MessageReader<SlEvent>,
@@ -236,6 +253,8 @@ fn ingest_offers_invites(
     mut manager: ResMut<NotificationManager>,
     translator: Translator,
     settings: Option<Res<crate::settings::ViewerSettings>>,
+    presence: Option<Res<crate::presence::PresenceState>>,
+    mut deferred: ResMut<DeferredOffers>,
     inventory: Res<InventoryModel>,
     mut sl: MessageWriter<SlCommand>,
     mut commands: Commands,
@@ -252,17 +271,47 @@ fn ingest_offers_invites(
                 .ok()
         })
         .unwrap_or(false);
+    // Do Not Disturb defers the cards and replays them on the way out, so this
+    // frame's work is the fresh offers plus, on the falling edge, the held ones.
+    let busy = presence.is_some_and(|presence| presence.is_do_not_disturb());
+    let mut pending: Vec<InstantMessage> = if !busy && deferred.was_busy {
+        let held = std::mem::take(&mut deferred.held);
+        if !held.is_empty() {
+            info!(
+                "offers: do-not-disturb ended, showing {} deferred offer(s)",
+                held.len()
+            );
+        }
+        held
+    } else {
+        Vec::new()
+    };
+    deferred.was_busy = busy;
     for event in events.read() {
         let SlSessionEvent::InstantMessageReceived(im) = &event.0 else {
             continue;
         };
+        if matches!(
+            im.dialog,
+            ImDialog::InventoryOffered
+                | ImDialog::TaskInventoryOffered
+                | ImDialog::LureUser
+                | ImDialog::FriendshipOffered
+                | ImDialog::GroupInvitation
+        ) {
+            pending.push((**im).clone());
+        }
+    }
+    for im in &pending {
         match im.dialog {
             ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered => {
                 // The alerts-tab auto-accept (the reference
                 // `AutoAcceptNewInventory`): file the item silently instead of
                 // raising the card. An unresolvable destination (inventory
                 // skeleton still loading) falls back to the card so the offer
-                // is never dropped.
+                // is never dropped. This runs *before* the do-not-disturb
+                // deferral: silently filing an item interrupts nobody, so
+                // there is nothing to defer.
                 if auto_accept
                     && let Some(offer) = im.inventory_offer()
                     && let Some(folder_id) = inventory_destination(&inventory, offer.asset_type)
@@ -273,7 +322,16 @@ fn ingest_offers_invites(
                     }));
                     continue;
                 }
+                if busy {
+                    deferred.held.push(im.clone());
+                    continue;
+                }
                 spawn_inventory_offer_card(&mut commands, &channel, &mut manager, &translator, im);
+            }
+            ImDialog::LureUser | ImDialog::FriendshipOffered | ImDialog::GroupInvitation
+                if busy =>
+            {
+                deferred.held.push(im.clone());
             }
             ImDialog::LureUser => {
                 spawn_lure_card(&mut commands, &channel, &mut manager, &translator, im);

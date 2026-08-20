@@ -5168,6 +5168,36 @@ impl Session {
         Ok(())
     }
 
+    /// Sends an **automatic reply** to `to_agent_id` — the Do Not Disturb /
+    /// autorespond / away canned answer — as an `ImprovedInstantMessage` with the
+    /// [`ImDialog::DoNotDisturbAutoResponse`] dialog. It is deliberately *not*
+    /// recorded in the chat log as an outbound message: the reference viewer keeps
+    /// the canned reply out of the transcript proper and shows a separate
+    /// "autoresponse sent" notice instead, and a recipient's client must never
+    /// answer an auto-reply with an auto-reply.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the message fails to encode.
+    pub fn send_auto_response(
+        &mut self,
+        to_agent_id: AgentKey,
+        message: &str,
+        now: Instant,
+    ) -> Result<(), Error> {
+        let from_name = self.agent_name();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_instant_message_raw(
+            to_agent_id,
+            ImDialog::DoNotDisturbAutoResponse,
+            message,
+            &from_name,
+            now,
+        )?;
+        Ok(())
+    }
+
     /// Sends an instant-message typing indicator to `to_agent_id`: an
     /// `IM_TYPING_START` message when `typing`, otherwise `IM_TYPING_STOP`. The
     /// counterpart is surfaced to other clients as [`Event::ImTyping`].
