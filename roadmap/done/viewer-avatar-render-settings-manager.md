@@ -96,9 +96,16 @@ selection actions do the same from the list; Add Fully… adds someone through
 the picker; and the list is still there — and still applied — after a relog
 (`loaded the avatar render exceptions count=1`).
 
-Also learned: on the local grid a name can come back as OpenSim's
+Also learned: on the local grid a name could come back as OpenSim's
 `Unknown UserUPUUI` sentinel (`OpenSim/Framework/Util.cs`'s
-`ParseUniversalUserIdentifier` default), for an account that exists and is
-online. It is grid-side state — the in-world hover text shows the same string
-for that avatar — and it is what makes the "never overwrite the stored name"
-rule earn its keep.
+`ParseUniversalUserIdentifier` default) for an account that exists and is
+online — in every name surface, the in-world hover text included, not just
+here. Chased down afterwards and fixed in the local grid build: the SQLite
+data plugin never implemented `GetUsersWhere`, so every **bulk** id → account
+lookup missed, the `GetDisplayNames` cap fell through to its GridUser fallback
+and cached that placeholder as the user's name for half an hour — poisoning the
+legacy `UUIDNameRequest` along with it. It stayed intermittent because our
+client fires both paths and the cap call is skipped while the cap map is still
+filling, so whichever answered first won. It is still the case that a grid can
+answer a name it cannot resolve with a placeholder, which is what the "never
+overwrite the stored name" rule is there for.
