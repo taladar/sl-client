@@ -103,6 +103,10 @@ const FRIENDS_ONLY_ON: &str = "render-friends-only-on";
 /// drives the check mark on the World ▸ Asset Blacklist entry.
 const BLACKLIST_OPEN: &str = "asset-blacklist-open";
 
+/// The condition key that holds while the Avatar Render Settings floater is
+/// open — drives the check mark on the World ▸ Avatar Render Settings entry.
+const AVATAR_RENDER_SETTINGS_OPEN: &str = "avatar-render-settings-open";
+
 /// The condition key that holds while the in-world property lines are shown —
 /// drives the check mark on the World ▸ Property Lines entry.
 const PROPERTY_LINES_ON: &str = "property-lines-on";
@@ -323,6 +327,13 @@ static WORLD_MENU: MenuDef = MenuDef {
             MenuCommand::new("Asset Blacklist…", "toggle-asset-blacklist")
                 .checked_when(BLACKLIST_OPEN),
         ),
+        // The standing per-avatar render exceptions
+        // (viewer-avatar-render-settings-manager), where the reference keeps
+        // them: World ▸ Avatar Render Settings.
+        MenuItemDef::Command(
+            MenuCommand::new("Avatar Render Settings…", "toggle-avatar-render-settings")
+                .checked_when(AVATAR_RENDER_SETTINGS_OPEN),
+        ),
         // Draw only friends' avatars (viewer-render-friends-only) — the
         // crowded-event performance escape hatch, at the reference's own World
         // ▸ Show Friends only.
@@ -520,6 +531,7 @@ fn update_top_menu_conditions(
     let build_tools_open = open(crate::edit_tool::BUILD_TOOLS_FLOATER_ID);
     let experiences_open = open(crate::experiences_floater::EXPERIENCES_FLOATER_ID);
     let blacklist_open = open(crate::asset_blacklist::BLACKLIST_FLOATER_ID);
+    let render_settings_open = open(crate::avatar_render_floater::RENDER_SETTINGS_FLOATER_ID);
     let mut wanted: Vec<&'static str> = Vec::new();
     if preferences_open {
         wanted.push(PREFERENCES_OPEN);
@@ -559,6 +571,9 @@ fn update_top_menu_conditions(
     }
     if blacklist_open {
         wanted.push(BLACKLIST_OPEN);
+    }
+    if render_settings_open {
+        wanted.push(AVATAR_RENDER_SETTINGS_OPEN);
     }
     if settings
         .store()
@@ -767,6 +782,13 @@ fn handle_top_menu_actions(
                     &floaters,
                     &mut panels,
                     crate::asset_blacklist::BLACKLIST_FLOATER_ID,
+                );
+            }
+            "toggle-avatar-render-settings" => {
+                toggle_floater(
+                    &floaters,
+                    &mut panels,
+                    crate::avatar_render_floater::RENDER_SETTINGS_FLOATER_ID,
                 );
             }
             "toggle-experiences" => {

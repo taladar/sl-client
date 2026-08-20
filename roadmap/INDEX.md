@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 266 |
+| ready | 265 |
 | blocked | 68 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 839 |
+| done | 840 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1347** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (266)
+## ready (265)
 
 ### protocol
 
@@ -278,9 +278,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
-- [`viewer-avatar-render-settings-manager`](ready/viewer-avatar-render-settings-manager.md)
-  — Per-avatar render-settings manager (blocked by
-  `viewer-avatar-complexity-limit` (done))
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -1162,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (839)
+## done (840)
 
 ### protocol
 
@@ -1356,6 +1353,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
 - [`viewer-avatar-radar`](done/viewer-avatar-radar.md) — Avatar radar
   (nearby-avatar list)
+- [`viewer-avatar-render-settings-manager`](done/viewer-avatar-render-settings-manager.md)
+  — Per-avatar render-settings manager (blocked by
+  `viewer-avatar-complexity-limit` (done))
 - [`viewer-avatar-state-dump-replay`](done/viewer-avatar-state-dump-replay.md) —
   Capture/replay a live avatar's full render state for offline reproduction
 - [`viewer-avatar-tongue-protrudes`](done/viewer-avatar-tongue-protrudes.md) —

@@ -188,6 +188,33 @@ derender-type-sound = Sound
 derender-type-animation = Animation
 derender-type-texture = Texture
 
+## The Avatar Render Settings floater (viewer-avatar-render-settings-manager) —
+## the standing per-avatar exceptions to the automatic complexity limit.
+
+avatar-render-title = Avatar Render Settings
+# The exception table's column headers.
+avatar-render-col-name = Name
+avatar-render-col-setting = Setting
+avatar-render-col-date = Date
+# The prompt in the empty filter box above the list.
+avatar-render-filter-placeholder = Filter by name
+# The count line under the list: how many exceptions the filter shows out of how
+# many are held in total.
+avatar-render-count = { $shown } of { $total } exceptions
+# The action buttons beside the list. The first three re-decide the selected
+# person; the last two pick someone who is not in the list yet.
+avatar-render-action-fully = Render Fully
+avatar-render-action-never = Never Render
+avatar-render-action-remove = Remove
+avatar-render-action-add-fully = Add Fully…
+avatar-render-action-add-never = Add Never…
+# The Setting column's values — what was decided about this person. "Normally"
+# is never listed (it is the absence of an exception) but names the pie slice
+# that clears one.
+avatar-render-setting-normal = Normally
+avatar-render-setting-fully = Render Fully
+avatar-render-setting-never = Never Render
+
 ## The group profile floater (viewer-social-group-profile) — reached from the
 ## Groups list's Info button: General / Members & Roles / Notices.
 

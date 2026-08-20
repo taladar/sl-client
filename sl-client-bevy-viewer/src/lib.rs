@@ -46,6 +46,8 @@ mod avatar_dump;
 mod avatar_menu;
 mod avatar_picker;
 mod avatar_profile;
+mod avatar_render_floater;
+mod avatar_render_settings;
 mod avatar_replay;
 mod avatars;
 mod bake_inputs;
@@ -1389,6 +1391,13 @@ fn run_session(
     // jellydoll instead of their attachments. Its systems bracket the scene mirror
     // and the avatar bake / visibility passes through explicit edges.
     .add_plugins(crate::avatar_complexity::AvatarComplexityPlugin)
+    // The standing per-avatar render exceptions
+    // (viewer-avatar-render-settings-manager): the persisted "always draw this
+    // person in full" / "never draw them in full" decisions the complexity
+    // limit obeys above its own rules, and the floater that manages them.
+    // Before AvatarComplexityPlugin's mirror by explicit edge.
+    .add_plugins(crate::avatar_render_settings::AvatarRenderSettingsPlugin)
+    .add_plugins(crate::avatar_render_floater::AvatarRenderFloaterPlugin)
     // Derender + asset blacklist (viewer-derender-blacklist): the client-side
     // suppression of an object / avatar the user does not want to see, its
     // per-avatar persisted blacklist, and the scene purge. Its systems bracket

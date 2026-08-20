@@ -49,10 +49,11 @@
 //! [`jelly_reason`] applies the reference's priority order: yourself is never
 //! jellied, then the per-avatar override wins, then the complexity mode, then
 //! the budget and the attachment surface-area trigger. The per-avatar override
-//! ([`RenderOverride`]) is this session's — Render Fully exempts an avatar from
-//! every automatic rule, Never Render pins them to the jellydoll. Persisting
-//! those overrides across relogs, and the floater that manages them, are
-//! `viewer-avatar-render-settings-manager`, which builds on the machinery here.
+//! ([`RenderOverride`]) is a standing decision about one person — Render Fully
+//! exempts them from every automatic rule, Never Render pins them to the
+//! jellydoll. It outlives the session: the set of them is persisted per account
+//! by [`crate::avatar_render_settings`] and mirrored in here by
+//! [`sync_complexity_exceptions`], so the decision stays one hash lookup.
 //!
 //! # The jellydoll
 //!
@@ -210,6 +211,9 @@ impl ComplexityMode {
 
 /// A per-avatar override of the automatic rules (the reference's
 /// `VisualMuteSettings`).
+///
+/// Standing, not per session: the set of them is persisted per account by
+/// [`crate::avatar_render_settings`], which is also where they are managed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum RenderOverride {
     /// No override: the automatic rules decide.
@@ -219,6 +223,48 @@ pub(crate) enum RenderOverride {
     AlwaysFull,
     /// Never draw this avatar in full — pin them to the jellydoll.
     Never,
+}
+
+impl RenderOverride {
+    /// The override for a stored value, defaulting to [`Normal`](Self::Normal)
+    /// for anything unrecognised.
+    pub(crate) const fn from_stored(value: u32) -> Self {
+        match value {
+            1 => Self::Never,
+            2 => Self::AlwaysFull,
+            _other => Self::Normal,
+        }
+    }
+
+    /// The stored value for this override — the reference's
+    /// `VisualMuteSettings` numbering, so a Firestorm exception list ports
+    /// across unchanged.
+    pub(crate) const fn stored(self) -> u32 {
+        match self {
+            Self::Normal => 0,
+            Self::Never => 1,
+            Self::AlwaysFull => 2,
+        }
+    }
+
+    /// The Fluent key naming this override in the exception list.
+    pub(crate) const fn label_key(self) -> &'static str {
+        match self {
+            Self::Normal => "avatar-render-setting-normal",
+            Self::AlwaysFull => "avatar-render-setting-fully",
+            Self::Never => "avatar-render-setting-never",
+        }
+    }
+
+    /// A stable sort rank, so the exception list's Setting column orders
+    /// deterministically.
+    pub(crate) const fn rank(self) -> u8 {
+        match self {
+            Self::Normal => 0,
+            Self::AlwaysFull => 1,
+            Self::Never => 2,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -408,9 +454,11 @@ pub(crate) struct ComplexityLimits {
 pub(crate) struct AvatarComplexityModel {
     /// The last measured cost per avatar.
     scores: HashMap<AgentKey, AvatarComplexity>,
-    /// The per-avatar overrides this session
-    /// (`viewer-avatar-render-settings-manager` will persist them).
+    /// The per-avatar overrides, mirrored from the persisted exception store
+    /// ([`crate::avatar_render_settings`]) when its revision moves.
     overrides: HashMap<AgentKey, RenderOverride>,
+    /// The exception-store revision that mirror was taken at.
+    overrides_revision: Option<u64>,
     /// Who is currently jellied, and why.
     jellied: HashMap<AgentKey, JellyReason>,
     /// Avatars whose score is stale and needs re-measuring.
@@ -477,13 +525,14 @@ impl AvatarComplexityModel {
         self.overrides.get(&agent).copied().unwrap_or_default()
     }
 
-    /// Set (or clear) an avatar's per-avatar override.
-    pub(crate) fn set_override(&mut self, agent: AgentKey, over: RenderOverride) {
-        if over == RenderOverride::Normal {
-            let _dropped = self.overrides.remove(&agent);
-        } else {
-            let _previous = self.overrides.insert(agent, over);
+    /// Adopt the persisted exception set wholesale — the mirror
+    /// [`sync_complexity_exceptions`] keeps current, in the shape the decision
+    /// pass reads.
+    fn mirror_overrides(&mut self, overrides: HashMap<AgentKey, RenderOverride>) {
+        if self.overrides == overrides {
+            return;
         }
+        self.overrides = overrides;
         self.bump();
     }
 
@@ -523,7 +572,8 @@ impl AvatarComplexityModel {
         self.known = known;
         self.bump();
         // The overrides are the user's standing intent, not scene state: an
-        // avatar who walks away and comes back keeps the setting they were given.
+        // avatar who walks away and comes back keeps the setting they were
+        // given — and it outlives the session entirely, in the exception store.
     }
 }
 
@@ -992,6 +1042,7 @@ impl Plugin for AvatarComplexityPlugin {
                 (
                     sync_complexity_settings,
                     sync_complexity_friends,
+                    sync_complexity_exceptions,
                     recompute_avatar_complexity,
                     decide_avatar_appearance,
                 )
@@ -1085,6 +1136,27 @@ pub(crate) fn sync_complexity_friends(
         })
         .unwrap_or_default();
     model.bump();
+}
+
+/// Keep the per-avatar exception mirror current, so the decision pass reads one
+/// hash map rather than the persisted store (which also holds each entry's name
+/// and date, neither of which the decision cares about).
+pub(crate) fn sync_complexity_exceptions(
+    mut model: ResMut<AvatarComplexityModel>,
+    exceptions: Option<Res<crate::avatar_render_settings::AvatarRenderSettings>>,
+) {
+    let revision = exceptions
+        .as_deref()
+        .map(crate::avatar_render_settings::AvatarRenderSettings::revision);
+    if model.overrides_revision == revision {
+        return;
+    }
+    model.overrides_revision = revision;
+    let overrides = exceptions
+        .as_deref()
+        .map(crate::avatar_render_settings::AvatarRenderSettings::overrides)
+        .unwrap_or_default();
+    model.mirror_overrides(overrides);
 }
 
 /// Mark an avatar's score stale whenever something it is made of changed: one of
@@ -1526,7 +1598,7 @@ mod tests {
     };
     use crate::objects::PrimComplexityFacts;
     use bevy::prelude::{Entity, Vec3};
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{AgentKey, MeshKey, PRIM_LOD_COUNT, PrimShapeParams, TextureKey, Uuid};
     use std::collections::HashMap;
 
@@ -1851,5 +1923,53 @@ mod tests {
             ComplexityMode::ByComplexity,
             "an unrecognised value falls back to the plain budget"
         );
+    }
+
+    /// The per-avatar override's stored numbering is the reference's
+    /// `VisualMuteSettings`, so an exception list exported from Firestorm ports
+    /// across by transcription.
+    #[test]
+    fn override_numbering_is_the_reference_numbering() {
+        assert_eq!(RenderOverride::Normal.stored(), 0);
+        assert_eq!(RenderOverride::Never.stored(), 1);
+        assert_eq!(RenderOverride::AlwaysFull.stored(), 2);
+        for over in [
+            RenderOverride::Normal,
+            RenderOverride::Never,
+            RenderOverride::AlwaysFull,
+        ] {
+            assert_eq!(RenderOverride::from_stored(over.stored()), over);
+        }
+        assert_eq!(
+            RenderOverride::from_stored(99),
+            RenderOverride::Normal,
+            "an unrecognised value falls back to no exception"
+        );
+    }
+
+    /// Mirroring the persisted exceptions bumps the model revision — the gate
+    /// the decision pass skips on — only when the set actually moved, so a
+    /// re-decision takes effect at once and an unchanged store costs nothing.
+    #[test]
+    fn mirroring_exceptions_bumps_only_on_a_change() {
+        let mut model = AvatarComplexityModel::default();
+        let agent = AgentKey::from(Uuid::from_u128(1));
+        let before = model.revision();
+
+        model.mirror_overrides(HashMap::new());
+        assert_eq!(model.revision(), before, "an empty mirror changes nothing");
+
+        let mut overrides = HashMap::new();
+        let _fresh = overrides.insert(agent, RenderOverride::Never);
+        model.mirror_overrides(overrides.clone());
+        assert_ne!(model.revision(), before);
+        assert_eq!(model.override_of(agent), RenderOverride::Never);
+
+        let after = model.revision();
+        model.mirror_overrides(overrides);
+        assert_eq!(model.revision(), after, "the same set is not a change");
+
+        model.mirror_overrides(HashMap::new());
+        assert_eq!(model.override_of(agent), RenderOverride::Normal);
     }
 }

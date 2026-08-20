@@ -139,6 +139,40 @@ pub(crate) const SELF_STANDING: &str = "self-standing";
 /// Friend", matching the reference's `Avatar.EnableAddFriend`.
 pub(crate) const TARGET_NOT_FRIEND: &str = "target-not-friend";
 
+/// Holds when the picked agent is **not** already pinned to "always draw in
+/// full" — enables More ▸ Render ▸ Fully.
+pub(crate) const TARGET_RENDER_NOT_FULLY: &str = "target-render-not-fully";
+
+/// Holds when the picked agent is **not** already pinned to "never draw in
+/// full" — enables More ▸ Render ▸ Never.
+pub(crate) const TARGET_RENDER_NOT_NEVER: &str = "target-render-not-never";
+
+/// Holds when the picked agent **has** a standing render exception — enables
+/// More ▸ Render ▸ Normally, which clears it. The reference shows the three as
+/// check items; a pie slice cannot carry a tick, so the decision already in
+/// force is the one shown greyed out.
+pub(crate) const TARGET_RENDER_EXCEPTED: &str = "target-render-excepted";
+
+/// The render conditions that hold for an agent whose standing exception is
+/// `setting` — every slice of the Render sub-pie except the one already in
+/// force.
+pub(crate) fn render_pie_conditions(
+    setting: crate::avatar_complexity::RenderOverride,
+) -> Vec<&'static str> {
+    use crate::avatar_complexity::RenderOverride;
+    let mut conditions = Vec::new();
+    if setting != RenderOverride::AlwaysFull {
+        conditions.push(TARGET_RENDER_NOT_FULLY);
+    }
+    if setting != RenderOverride::Never {
+        conditions.push(TARGET_RENDER_NOT_NEVER);
+    }
+    if setting != RenderOverride::Normal {
+        conditions.push(TARGET_RENDER_EXCEPTED);
+    }
+    conditions
+}
+
 // ---------------------------------------------------------------------------
 // The "other avatar" pie. Top level matches menu_pie_avatar_other.xml exactly:
 // Profile, Mute>, Go to, Report, Add>, Pay, More>, IM (reference slots 0..7 →
@@ -315,9 +349,10 @@ static OTHER_MORE_PIE: PieMenuDef = PieMenuDef {
 /// never draw them in full, or go back to letting the limit decide.
 ///
 /// The reference offers the same three as check items in the avatar context
-/// menu (`AlwaysRenderFully` / `DoNotRender` / `RenderNormally`). The exceptions
-/// are this session's; persisting them, and the floater that manages the whole
-/// list, are `viewer-avatar-render-settings-manager`.
+/// menu (`AlwaysRenderFully` / `DoNotRender` / `RenderNormally`). A pick is a
+/// standing decision about that person, persisted per account by
+/// [`crate::avatar_render_settings`] and managed in its floater
+/// (World ▸ Avatar Render Settings).
 static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
     label: "Render",
     entries: &[
@@ -326,7 +361,7 @@ static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Fully",
                 action: "render-fully",
-                when: None,
+                when: Some(TARGET_RENDER_NOT_FULLY),
             }),
         },
         PieEntry {
@@ -334,7 +369,7 @@ static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Normally",
                 action: "render-normally",
-                when: None,
+                when: Some(TARGET_RENDER_EXCEPTED),
             }),
         },
         PieEntry {
@@ -342,7 +377,7 @@ static OTHER_RENDER_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Never",
                 action: "render-never",
-                when: None,
+                when: Some(TARGET_RENDER_NOT_NEVER),
             }),
         },
     ],
@@ -1172,12 +1207,19 @@ pub(crate) fn resolve_right_click_pick(
 
 /// Turn a resolved pick into an open pie: choose self vs other, snapshot the
 /// conditions, and stash the target for the action handler.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system: the pick stream plus every piece of state a slice's \
+              condition is read from (own identity, seat, ground-sit, friendship, \
+              the target's standing render exception), and the two things written"
+)]
 fn open_avatar_menu(
     mut requests: MessageReader<OpenAvatarMenu>,
     identity: Res<SlIdentity>,
     parcel: Res<SlAgentParcel>,
     ground_sit: Res<SelfGroundSit>,
     friends: Res<FriendsModel>,
+    exceptions: Res<crate::avatar_render_settings::AvatarRenderSettings>,
     mut target: ResMut<AvatarMenuTarget>,
     mut pies: MessageWriter<OpenPieMenu>,
 ) {
@@ -1197,6 +1239,9 @@ fn open_avatar_menu(
             if !friends.is_friend(request.agent) {
                 conditions.push(TARGET_NOT_FRIEND);
             }
+            // The Render sub-pie greys out the decision already in force for
+            // this person, so the pie also *reads* their standing exception.
+            conditions.extend(render_pie_conditions(exceptions.setting_of(request.agent)));
             (&AVATAR_OTHER_PIE, conditions)
         };
         pies.write(OpenPieMenu {
@@ -1234,7 +1279,7 @@ fn handle_avatar_menu_actions(
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut derenders: MessageWriter<RequestDerender>,
-    mut complexity: ResMut<crate::avatar_complexity::AvatarComplexityModel>,
+    mut exceptions: MessageWriter<crate::avatar_render_settings::RequestRenderException>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
@@ -1269,8 +1314,14 @@ fn handle_avatar_menu_actions(
         // worn object, not its wearer.
         if let Some(over) = render_override_for(action.action) {
             if action.element == AVATAR_MENU_ELEMENT {
-                complexity.set_override(agent, over);
-                info!(%agent, ?over, "per-avatar render exception set");
+                exceptions.write(crate::avatar_render_settings::RequestRenderException {
+                    agent,
+                    name: avatars
+                        .name_of(agent)
+                        .map(ToOwned::to_owned)
+                        .unwrap_or_default(),
+                    setting: over,
+                });
             }
             continue;
         }
@@ -1598,6 +1649,37 @@ mod tests {
         let im = slot_at(&other, Compass::SouthEast)?;
         assert_eq!(im.outcome, SlotOutcome::Action("im"));
         assert!(im.enabled, "IM must always be available on another avatar");
+        Ok(())
+    }
+
+    /// The Render sub-pie shows which standing exception is in force by greying
+    /// out that slice: with no exception only "Normally" is dead, and with one
+    /// the slice that would re-decide the same way is.
+    #[test]
+    fn render_slices_grey_out_the_decision_in_force() -> Result<(), TestError> {
+        use crate::avatar_complexity::RenderOverride;
+
+        let live = |setting: RenderOverride, at: Compass| -> Result<bool, TestError> {
+            let conditions = PieConditions::new(super::render_pie_conditions(setting));
+            let slots = resolve_slots(&super::OTHER_RENDER_PIE, &conditions);
+            Ok(slot_at(&slots, at)?.enabled)
+        };
+
+        // No exception: Fully and Never are the two things you can decide;
+        // "Normally" would clear an exception that is not there.
+        assert!(live(RenderOverride::Normal, Compass::East)?);
+        assert!(live(RenderOverride::Normal, Compass::West)?);
+        assert!(!live(RenderOverride::Normal, Compass::North)?);
+
+        // Pinned to full detail: Fully is the state, not an action.
+        assert!(!live(RenderOverride::AlwaysFull, Compass::East)?);
+        assert!(live(RenderOverride::AlwaysFull, Compass::North)?);
+        assert!(live(RenderOverride::AlwaysFull, Compass::West)?);
+
+        // Pinned to the jellydoll: likewise for Never.
+        assert!(live(RenderOverride::Never, Compass::East)?);
+        assert!(live(RenderOverride::Never, Compass::North)?);
+        assert!(!live(RenderOverride::Never, Compass::West)?);
         Ok(())
     }
 
