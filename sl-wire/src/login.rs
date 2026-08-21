@@ -2115,6 +2115,14 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     );
     push_opt_string_member(
         out,
+        "agent_appearance_service",
+        success
+            .agent_appearance_service
+            .as_ref()
+            .map(url::Url::as_str),
+    );
+    push_opt_string_member(
+        out,
         "openid_url",
         success.openid_url.as_ref().map(url::Url::as_str),
     );
