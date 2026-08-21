@@ -70,6 +70,12 @@ impl SimInventoryTree {
         self.items.get(&id)
     }
 
+    /// Every folder in the tree, in id order — e.g. for deriving a login
+    /// response's inventory skeleton from a fixture tree.
+    pub fn folders(&self) -> impl Iterator<Item = &InventoryFolder> {
+        self.folders.values()
+    }
+
     /// The direct child folders of `folder_id`, sorted by name with an id
     /// tie-break (the deterministic listing order).
     fn child_folders(&self, folder_id: InventoryFolderKey) -> Vec<InventoryFolder> {

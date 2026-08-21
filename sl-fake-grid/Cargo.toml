@@ -1,0 +1,54 @@
+[package]
+name = "sl-fake-grid"
+description = "In-process loopback fake Second Life grid over the sans-I/O SimSession/SimCaps machinery: HTTP login + CAPS endpoints and a UDP pump for integration tests and manual viewer testing"
+readme = "README.md"
+license = "LGPL-2.1-only"
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+publish = false
+repository = "https://github.com/taladar/sl-client"
+keywords = ["opensim", "secondlife", "server", "simulator", "testing"]
+categories = ["network-programming", "simulation"]
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+
+[[bin]]
+name = "sl-fake-grid"
+path = "src/bin/sl-fake-grid.rs"
+
+[dependencies]
+bytes = "1.12.1"
+clap = { version = "4.6.2", features = ["cargo", "derive", "env"] }
+http = "1.4.2"
+http-body-util = "0.1.4"
+hyper = { version = "1.10.1", features = ["http1", "server"] }
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+sl-proto = { version = "0.1.0", path = "../sl-proto" }
+sl-types = { version = "0.8.0" }
+sl-wire = { version = "0.1.0", path = "../sl-wire" }
+thiserror = "2.0.18"
+tokio = { version = "1.52.1", features = [
+  "macros",
+  "net",
+  "rt",
+  "rt-multi-thread",
+  "signal",
+  "sync",
+  "time"
+] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = [
+  "env-filter",
+  "tracing-log"
+] }
+url = "2.5.8"
+uuid = { version = "1.18.1", features = ["v4"] }
+
+[dev-dependencies]
+pretty_assertions = { version = "1.4.1" }
+reqwest = { version = "0.12.15", default-features = false }
+sl-client-tokio = { path = "../sl-client-tokio", version = "0.1.0" }
+
+[lints]
+workspace = true

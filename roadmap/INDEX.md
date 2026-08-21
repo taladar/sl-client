@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 93 |
 | ready | 263 |
-| blocked | 67 |
+| blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 844 |
+| done | 845 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1348** |
@@ -406,8 +406,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-fake-grid`](ready/viewer-fake-grid.md) — A loopback fake grid over
-  SimSession (blocked by `protocol-sim-caps-framework` (done))
+- [`viewer-fake-grid-login-smoke`](ready/viewer-fake-grid-login-smoke.md) — The
+  real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -837,7 +837,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (67)
+## blocked (66)
 
 ### viewer
 
@@ -854,8 +854,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
-  The real client stack against the fake grid (blocked by `viewer-fake-grid`)
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness`, `viewer-floater-registry`)
@@ -1151,7 +1149,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (844)
+## done (845)
 
 ### protocol
 
@@ -1476,6 +1474,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-facelight-too-bright`](done/viewer-facelight-too-bright.md) —
   Facelights render far brighter than in Firestorm
+- [`viewer-fake-grid`](done/viewer-fake-grid.md) — A loopback fake grid over
+  SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-flair-style-panic-on-caps-failure-notification`](done/viewer-flair-style-panic-on-caps-failure-notification.md)
   — bevy_flair debug panic — recalculate_style on a freshly spawned
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi

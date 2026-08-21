@@ -13,6 +13,7 @@ members = [
     "sl-client-tokio",
     "sl-conformance",
     "sl-emoji",
+    "sl-fake-grid",
     "sl-gst",
     "sl-j2c-encode",
     "sl-l10n",

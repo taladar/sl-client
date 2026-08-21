@@ -2,7 +2,7 @@
 id: viewer-fake-grid-login-smoke
 title: The real client stack against the fake grid
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — full client testing without a real server
 points: 5
 blocked_by: [viewer-fake-grid]
