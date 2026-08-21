@@ -979,9 +979,9 @@ fn on_blocked_button_press(
             }));
         }
         BlockedButton::BlockResident => {
-            pickers.write(OpenAvatarPicker {
-                requester: PICKER_REQUESTER,
-            });
+            // Single, as the reference's is (`allow_multiple = false`); blocking
+            // several at once belongs with the multi-select block *list*.
+            pickers.write(OpenAvatarPicker::one(PICKER_REQUESTER));
         }
         BlockedButton::BlockObject => {
             if let Some(by_name) = by_name
@@ -1039,9 +1039,12 @@ fn handle_blocked_picks(
         if pick.requester != PICKER_REQUESTER {
             continue;
         }
+        let Some(chosen) = pick.first() else {
+            continue;
+        };
         blocks.write(RequestBlock::new(
-            pick.agent.uuid(),
-            pick.name.clone(),
+            chosen.agent.uuid(),
+            chosen.name.clone(),
             MuteType::Agent,
         ));
     }

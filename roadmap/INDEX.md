@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 264 |
+| ready | 263 |
 | blocked | 68 |
 | in-progress | 16 |
 | bugs | 31 |
-| done | 847 |
+| done | 848 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1355** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (264)
+## ready (263)
 
 ### protocol
 
@@ -275,8 +275,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
-- [`viewer-avatar-picker-multi-pick`](ready/viewer-avatar-picker-multi-pick.md)
-  — Avatar picker — pick several residents at once
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -1159,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (847)
+## done (848)
 
 ### protocol
 
@@ -1352,6 +1350,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (blocked by `viewer-avatar-context-menu` (done))
 - [`viewer-avatar-motion-render-smoothing`](done/viewer-avatar-motion-render-smoothing.md)
   — Smooth the avatar's rendered position (dead-reckoning jitter)
+- [`viewer-avatar-picker-multi-pick`](done/viewer-avatar-picker-multi-pick.md) —
+  Avatar picker — pick several residents at once
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
 - [`viewer-avatar-radar`](done/viewer-avatar-radar.md) — Avatar radar

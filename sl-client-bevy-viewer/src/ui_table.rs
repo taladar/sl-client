@@ -224,8 +224,9 @@ pub(crate) enum TableSelectionMode {
     /// At most one selected row; a click selects only that row.
     Single,
     /// Any number of selected rows: a plain click selects one, `Ctrl`+click
-    /// toggles a row, `Shift`+click selects the range from the anchor. Awaiting
-    /// its first consumer (the friends-list conference / multi-invite picker).
+    /// toggles a row, `Shift`+click selects the range from the anchor — the
+    /// radar's mode, and the algebra the avatar picker's (non-table) results
+    /// list borrows through [`apply_selection_click`].
     Multi,
 }
 
@@ -486,37 +487,67 @@ impl TableState {
     }
 
     /// Apply a click on row `index` under the current mode and modifier keys,
-    /// bumping the revision only on a real change. Pure so the selection algebra is
-    /// unit-testable without an ECS world.
+    /// bumping the revision only on a real change. The algebra itself is
+    /// [`apply_selection_click`], shared with the lists that are not tables.
     fn apply_click(&mut self, index: usize, ctrl: bool, shift: bool) {
         let mode = self.spec.selection;
         if mode == TableSelectionMode::None {
             return;
         }
         let before = self.selected.clone();
-        if mode == TableSelectionMode::Multi && ctrl {
-            // Ctrl+click toggles the row in or out of the selection.
-            if let Some(position) = self.selected.iter().position(|selected| *selected == index) {
-                self.selected.remove(position);
-            } else {
-                self.selected.push(index);
-                self.selected.sort_unstable();
-            }
-            self.anchor = Some(index);
-        } else if mode == TableSelectionMode::Multi && shift {
-            // Shift+click selects the inclusive range from the anchor; the anchor
-            // stays put across a shift-drag of the far end.
-            let anchor = self.anchor.unwrap_or(index);
-            let (low, high) = (anchor.min(index), anchor.max(index));
-            self.selected = (low..=high).collect();
-        } else {
-            // A plain click (either mode) selects only the clicked row.
-            self.selected = vec![index];
-            self.anchor = Some(index);
-        }
+        apply_selection_click(
+            &mut self.selected,
+            &mut self.anchor,
+            index,
+            mode == TableSelectionMode::Multi,
+            ctrl,
+            shift,
+        );
         if self.selected != before {
             self.selection_revision = self.selection_revision.wrapping_add(1);
         }
+    }
+}
+
+/// Apply a click on row `index` to a selection of row **data indices** and its
+/// range anchor: `Ctrl` toggles the row in or out, `Shift` selects the inclusive
+/// range from the anchor, and a plain click selects only the clicked row (which
+/// is also all a `multi == false` list ever does). `selected` stays sorted and
+/// duplicate-free.
+///
+/// Pure, so the algebra is unit-testable without an ECS world — and free rather
+/// than a [`TableState`] method because it is not only tables that let the user
+/// pick several rows: the avatar picker's results list
+/// ([`crate::avatar_picker`]) is a plain column with the same `Ctrl` / `Shift`
+/// idiom, and one implementation of "what a modified click means" is what keeps
+/// the two feeling like one viewer.
+pub(crate) fn apply_selection_click(
+    selected: &mut Vec<usize>,
+    anchor: &mut Option<usize>,
+    index: usize,
+    multi: bool,
+    ctrl: bool,
+    shift: bool,
+) {
+    if multi && ctrl {
+        // Ctrl+click toggles the row in or out of the selection.
+        if let Some(position) = selected.iter().position(|row| *row == index) {
+            selected.remove(position);
+        } else {
+            selected.push(index);
+            selected.sort_unstable();
+        }
+        *anchor = Some(index);
+    } else if multi && shift {
+        // Shift+click selects the inclusive range from the anchor; the anchor
+        // stays put across a shift-drag of the far end.
+        let start = anchor.unwrap_or(index);
+        let (low, high) = (start.min(index), start.max(index));
+        *selected = (low..=high).collect();
+    } else {
+        // A plain click (either mode) selects only the clicked row.
+        *selected = vec![index];
+        *anchor = Some(index);
     }
 }
 

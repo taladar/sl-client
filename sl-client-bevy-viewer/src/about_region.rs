@@ -2285,9 +2285,7 @@ fn on_about_region_action(
             sl_commands.write(SlCommand(Command::SetEstateInfo(update)));
         }
         AboutRegionAction::TeleportHomeOne => {
-            pickers.write(OpenAvatarPicker {
-                requester: PICK_TELEPORT,
-            });
+            pickers.write(OpenAvatarPicker::one(PICK_TELEPORT));
         }
         AboutRegionAction::TeleportHomeAll => {
             sl_commands.write(SlCommand(Command::TeleportHomeAllUsers));
@@ -2309,24 +2307,19 @@ fn on_about_region_action(
             }
         }
         AboutRegionAction::KickEstate => {
-            pickers.write(OpenAvatarPicker {
-                requester: PICK_KICK,
-            });
+            pickers.write(OpenAvatarPicker::one(PICK_KICK));
         }
+        // The three estate access lists take a multi-pick, as the reference's do
+        // ("avatar picker yes multi-select"); a kick or a send-home is about one
+        // resident, so those stay single.
         AboutRegionAction::AddManager => {
-            pickers.write(OpenAvatarPicker {
-                requester: PICK_MANAGER,
-            });
+            pickers.write(OpenAvatarPicker::many(PICK_MANAGER));
         }
         AboutRegionAction::AddAllowed => {
-            pickers.write(OpenAvatarPicker {
-                requester: PICK_ALLOWED,
-            });
+            pickers.write(OpenAvatarPicker::many(PICK_ALLOWED));
         }
         AboutRegionAction::AddBanned => {
-            pickers.write(OpenAvatarPicker {
-                requester: PICK_BANNED,
-            });
+            pickers.write(OpenAvatarPicker::many(PICK_BANNED));
         }
     }
 }
@@ -2392,7 +2385,8 @@ fn apply_combo_edits(
     }
 }
 
-/// Fold an avatar pick into the estate action that opened the picker.
+/// Fold the avatar picks into the estate action that opened the picker — each
+/// chosen resident in turn, since the access lists open a multi-picker.
 fn apply_avatar_picks(
     mut picked: MessageReader<AvatarPicked>,
     mut state: ResMut<AboutRegionState>,
@@ -2402,20 +2396,26 @@ fn apply_avatar_picks(
         if !state.can_manage {
             continue;
         }
-        let agent = event.agent;
-        match event.requester {
-            PICK_TELEPORT => {
-                commands.write(SlCommand(Command::TeleportHomeUser { target: agent }));
+        for chosen in &event.picks {
+            let agent = chosen.agent;
+            match event.requester {
+                PICK_TELEPORT => {
+                    commands.write(SlCommand(Command::TeleportHomeUser { target: agent }));
+                }
+                PICK_KICK => {
+                    commands.write(SlCommand(Command::KickEstateUser { target: agent }));
+                }
+                PICK_MANAGER => {
+                    add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
+                }
+                PICK_ALLOWED => {
+                    add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands);
+                }
+                PICK_BANNED => {
+                    add_access_entry(&mut state, AccessList::Banned, agent, &mut commands);
+                }
+                _other => {}
             }
-            PICK_KICK => {
-                commands.write(SlCommand(Command::KickEstateUser { target: agent }));
-            }
-            PICK_MANAGER => {
-                add_access_entry(&mut state, AccessList::Managers, agent, &mut commands);
-            }
-            PICK_ALLOWED => add_access_entry(&mut state, AccessList::Allowed, agent, &mut commands),
-            PICK_BANNED => add_access_entry(&mut state, AccessList::Banned, agent, &mut commands),
-            _other => {}
         }
     }
 }

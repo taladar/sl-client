@@ -2413,15 +2413,15 @@ fn on_about_land_action(
         AboutLandAction::ClearLandingPoint => {
             state.draft.user_location = RegionCoordinates::new(0.0, 0.0, 0.0);
         }
+        // Both access lists take a multi-pick. The reference only does that on
+        // the ban list — its allow list was never updated when the ban path
+        // grew one — and two buttons side by side that answer a modified click
+        // differently is worse than the small divergence.
         AboutLandAction::AddAllowed => {
-            pickers.write(OpenAvatarPicker {
-                requester: "about-land-allow",
-            });
+            pickers.write(OpenAvatarPicker::many("about-land-allow"));
         }
         AboutLandAction::AddBanned => {
-            pickers.write(OpenAvatarPicker {
-                requester: "about-land-ban",
-            });
+            pickers.write(OpenAvatarPicker::many("about-land-ban"));
         }
     }
 }
@@ -2523,7 +2523,7 @@ fn apply_texture_edits(
     }
 }
 
-/// Fold an avatar pick into the allow / ban list and commit it.
+/// Fold the avatar picks into the allow / ban list and commit them.
 fn apply_avatar_picks(
     mut picked: MessageReader<AvatarPicked>,
     mut state: ResMut<AboutLandState>,
@@ -2539,7 +2539,9 @@ fn apply_avatar_picks(
             "about-land-ban" => AccessScope::Ban,
             _other => continue,
         };
-        add_access_entry(&mut state, scope, event.agent, scoped, &mut commands);
+        for chosen in &event.picks {
+            add_access_entry(&mut state, scope, chosen.agent, scoped, &mut commands);
+        }
     }
 }
 

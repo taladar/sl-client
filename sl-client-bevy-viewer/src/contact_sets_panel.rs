@@ -1653,9 +1653,10 @@ fn on_panel_button_press(
         }
         ContactSetsButton::AddResident => {
             if real_set.is_some() {
-                pickers.write(OpenAvatarPicker {
-                    requester: PICKER_REQUESTER,
-                });
+                // The reference's Add Avatar picker is a multi-picker: a set is
+                // exactly the sort of thing one files several people into at
+                // once.
+                pickers.write(OpenAvatarPicker::many(PICKER_REQUESTER));
             }
         }
         ContactSetsButton::MoveMember => {
@@ -2296,7 +2297,7 @@ fn settle_contact_set_rename(
     target.0 = Some(wanted);
 }
 
-/// File a resident chosen in the shared avatar picker under the chosen set.
+/// File the residents chosen in the shared avatar picker under the chosen set.
 fn handle_contact_set_picks(
     mut picks: MessageReader<AvatarPicked>,
     view: Res<ContactSetsView>,
@@ -2310,11 +2311,13 @@ fn handle_contact_set_picks(
         if !is_real_set(&sets, &view.choice) {
             continue;
         }
-        requests.write(RequestContactSet::Add {
-            set: view.choice.clone(),
-            agent: pick.agent,
-            name: pick.name.clone(),
-        });
+        for chosen in &pick.picks {
+            requests.write(RequestContactSet::Add {
+                set: view.choice.clone(),
+                agent: chosen.agent,
+                name: chosen.name.clone(),
+            });
+        }
     }
 }
 

@@ -31,8 +31,10 @@ wants several:
   members at once. The model half is already there: the add-to-set floater
   takes a list of residents and files them under one set
   ([[viewer-minimap-menu-multi-avatar]] made `OpenAddToContactSet` a list, with
-  the reference's counted success notification), so the panel only needs to be
-  able to *pick* several.
+  the reference's counted success notification), and Add Resident… already
+  opens the shared picker in its multi mode
+  ([[viewer-avatar-picker-multi-pick]]), so the panel only needs to be able to
+  *pick* several of its own rows.
 - **Groups sub-tab** — leave several groups at once (lower value; include only
   if it falls out of the same selection work).
 

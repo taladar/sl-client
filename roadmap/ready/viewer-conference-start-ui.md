@@ -38,6 +38,11 @@ away. The same applies to whatever multi-selection
 [[viewer-people-lists-multi-select]] brings to the People panel's
 lists.
 
+**The picker is ready.** [[viewer-avatar-picker-multi-pick]] landed, so the
+shared avatar picker already opens in a multi mode
+(`OpenAvatarPicker::many`) and answers with the whole list — this task invites
+N from that reply rather than growing a picker of its own.
+
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/menu_inventory.xml`
 ("Start Conference Chat"), `menu_people_nearby_multiselect.xml`,

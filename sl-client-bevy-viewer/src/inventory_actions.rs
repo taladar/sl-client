@@ -1703,9 +1703,11 @@ fn handle_inventory_menu_actions(
         match action.action {
             "share" => {
                 pending_share.targets.clone_from(&targets);
-                picker_opens.write(crate::avatar_picker::OpenAvatarPicker {
-                    requester: SHARE_REQUESTER,
-                });
+                // The reference shares with several residents at once
+                // (`give_inventory` opens the picker with `allow_multiple`).
+                picker_opens.write(crate::avatar_picker::OpenAvatarPicker::many(
+                    SHARE_REQUESTER,
+                ));
             }
             "open" => {
                 for target_row in &targets {
@@ -2694,7 +2696,7 @@ pub(crate) struct PendingShare {
 const SHARE_REQUESTER: &str = "inventory-share";
 
 /// Complete a Share when the avatar picker confirms: give the stashed item /
-/// folder to the chosen avatar (the same wire path as drag-to-give).
+/// folder to every chosen avatar (the same wire path as drag-to-give).
 fn handle_share_picks(
     mut picks: MessageReader<crate::avatar_picker::AvatarPicked>,
     mut pending: ResMut<PendingShare>,
@@ -2704,9 +2706,15 @@ fn handle_share_picks(
         if pick.requester != SHARE_REQUESTER {
             continue;
         }
-        for target in pending.targets.drain(..) {
-            if let Some(give) = crate::inventory_drag::give_command(&target, false, pick.agent) {
-                commands.write(SlCommand(give));
+        // Taken once, not once per resident: the same stash is given to each
+        // of them.
+        let targets: Vec<MenuTarget> = std::mem::take(&mut pending.targets);
+        for chosen in &pick.picks {
+            for target in &targets {
+                if let Some(give) = crate::inventory_drag::give_command(target, false, chosen.agent)
+                {
+                    commands.write(SlCommand(give));
+                }
             }
         }
     }

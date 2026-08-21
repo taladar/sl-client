@@ -13,6 +13,17 @@
 //! consumer is the inventory context menu's **Share** entry
 //! ([`crate::inventory_actions`]).
 //!
+//! # One resident or several
+//!
+//! A request opens the picker in one of two modes — [`OpenAvatarPicker::one`]
+//! or [`OpenAvatarPicker::many`], the reference's `allow_multiple` flag. In the
+//! many mode the results list takes `Ctrl` (toggle) and `Shift` (range) clicks,
+//! through the same [`crate::ui_table::apply_selection_click`] algebra the table
+//! widget uses. Either way the answer is the *same* message: [`AvatarPicked`]
+//! carries a list of [`PickedAvatar`], and a one-resident request simply answers
+//! with one element — so no consumer needs a second channel, and a consumer that
+//! only ever wants one reads [`AvatarPicked::first`].
+//!
 //! # The three sources
 //!
 //! - **Search** — the wire's name lookup: `AvatarPickerRequest` with a
@@ -73,13 +84,34 @@ const MAX_ROWS: usize = 100;
 pub(crate) struct OpenAvatarPicker {
     /// The feature tag echoed back in [`AvatarPicked`].
     pub(crate) requester: &'static str,
+    /// Whether the user may choose several residents at once — the reference's
+    /// `allow_multiple`. Build one with [`OpenAvatarPicker::one`] or
+    /// [`OpenAvatarPicker::many`] rather than by hand, so the choice reads at
+    /// the call site.
+    pub(crate) allow_multiple: bool,
 }
 
-/// The confirmed pick.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct AvatarPicked {
-    /// The tag of the feature that opened the picker.
-    pub(crate) requester: &'static str,
+impl OpenAvatarPicker {
+    /// Ask for exactly one resident.
+    pub(crate) const fn one(requester: &'static str) -> Self {
+        Self {
+            requester,
+            allow_multiple: false,
+        }
+    }
+
+    /// Ask for any number of residents at once.
+    pub(crate) const fn many(requester: &'static str) -> Self {
+        Self {
+            requester,
+            allow_multiple: true,
+        }
+    }
+}
+
+/// One resident the picker returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PickedAvatar {
     /// The chosen avatar.
     pub(crate) agent: AgentKey,
     /// The label the picked row carried — the avatar's name as the source that
@@ -88,6 +120,24 @@ pub(crate) struct AvatarPicked {
     /// against the id (the block list writes it into the mute entry) take it
     /// from here rather than re-resolving.
     pub(crate) name: String,
+}
+
+/// The confirmed pick: every chosen resident, in list order. A picker opened
+/// with [`OpenAvatarPicker::one`] answers with exactly one element.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct AvatarPicked {
+    /// The tag of the feature that opened the picker.
+    pub(crate) requester: &'static str,
+    /// The chosen residents — never empty (the picker does not confirm an empty
+    /// selection).
+    pub(crate) picks: Vec<PickedAvatar>,
+}
+
+impl AvatarPicked {
+    /// The first chosen resident — for a single-resident requester, *the* pick.
+    pub(crate) fn first(&self) -> Option<&PickedAvatar> {
+        self.picks.first()
+    }
 }
 
 /// Which source tab is active.
@@ -123,8 +173,13 @@ pub(crate) struct AvatarPickerState {
     tab: PickerTab,
     /// The current rows, top to bottom.
     rows: Vec<PickerRow>,
-    /// The selected row index.
-    selected: Option<usize>,
+    /// The selected row indices, ascending. At most one unless `allow_multiple`.
+    selected: Vec<usize>,
+    /// The range anchor a `Shift`+click ranges from — the last row plainly
+    /// clicked or `Ctrl`-toggled on.
+    anchor: Option<usize>,
+    /// Whether this request lets the user choose several residents.
+    allow_multiple: bool,
     /// The in-flight search query id, so a stale reply is ignored.
     pending_query: Option<QueryId>,
     /// Bumped whenever `rows` / `selected` change, driving the list rebuild.
@@ -136,16 +191,66 @@ impl AvatarPickerState {
     fn set_rows(&mut self, rows: Vec<PickerRow>) {
         self.rows = rows;
         self.rows.truncate(MAX_ROWS);
-        self.selected = None;
+        self.selected.clear();
+        self.anchor = None;
         self.revision = self.revision.wrapping_add(1);
     }
 
-    /// Select a row.
-    const fn select(&mut self, index: usize) {
-        if index < self.rows.len() {
-            self.selected = Some(index);
+    /// Apply a click on a row under the held modifier keys — the table widget's
+    /// selection algebra, so a modified click means the same thing here as it
+    /// does in every list that *is* a table.
+    fn select(&mut self, index: usize, ctrl: bool, shift: bool) {
+        if index >= self.rows.len() {
+            return;
+        }
+        let before = self.selected.clone();
+        crate::ui_table::apply_selection_click(
+            &mut self.selected,
+            &mut self.anchor,
+            index,
+            self.allow_multiple,
+            ctrl,
+            shift,
+        );
+        if self.selected != before {
             self.revision = self.revision.wrapping_add(1);
         }
+    }
+
+    /// Replace the rows, carrying the selection across by **agent** rather than
+    /// by row index: the Near Me list re-sorts as people move, so whoever is
+    /// still listed stays picked and whoever left drops out (a selected row that
+    /// is no longer shown would confirm invisibly).
+    fn set_rows_keeping_selection(&mut self, rows: Vec<PickerRow>) {
+        let selected: Vec<AgentKey> = self
+            .selected
+            .iter()
+            .filter_map(|index| self.rows.get(*index))
+            .map(|row| row.agent)
+            .collect();
+        let anchor = self
+            .anchor
+            .and_then(|index| self.rows.get(index))
+            .map(|row| row.agent);
+        self.set_rows(rows);
+        self.selected = selected
+            .iter()
+            .filter_map(|agent| self.rows.iter().position(|row| row.agent == *agent))
+            .collect();
+        self.selected.sort_unstable();
+        self.anchor = anchor.and_then(|agent| self.rows.iter().position(|row| row.agent == agent));
+    }
+
+    /// The chosen residents, top to bottom — what [`AvatarPicked`] carries.
+    fn picks(&self) -> Vec<PickedAvatar> {
+        self.selected
+            .iter()
+            .filter_map(|index| self.rows.get(*index))
+            .map(|row| PickedAvatar {
+                agent: row.agent,
+                name: row.label.clone(),
+            })
+            .collect()
     }
 }
 
@@ -405,14 +510,11 @@ fn confirm_pick(
     let Some(requester) = state.requester else {
         return;
     };
-    let Some(row) = state.selected.and_then(|index| state.rows.get(index)) else {
+    let picks = state.picks();
+    if picks.is_empty() {
         return;
-    };
-    picked.write(AvatarPicked {
-        requester,
-        agent: row.agent,
-        name: row.label.clone(),
-    });
+    }
+    picked.write(AvatarPicked { requester, picks });
     state.requester = None;
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
         shown.0 = false;
@@ -431,6 +533,7 @@ fn handle_open_requests(
     };
     for open in opens.read() {
         state.requester = Some(open.requester);
+        state.allow_multiple = open.allow_multiple;
         state.set_rows(Vec::new());
         if let Ok(mut shown) = panels.get_mut(ui.panel) {
             shown.0 = true;
@@ -547,19 +650,7 @@ fn refresh_local_sources(
     // Write-guarded: replacing the rows every frame would defeat the
     // revision-driven rebuild.
     if rows != state.rows {
-        let selected = state
-            .selected
-            .and_then(|index| state.rows.get(index).cloned());
-        state.set_rows(rows);
-        // Keep the selection on the same agent if it survived the refresh.
-        if let Some(previous) = selected
-            && let Some(index) = state
-                .rows
-                .iter()
-                .position(|row| row.agent == previous.agent)
-        {
-            state.selected = Some(index);
-        }
+        state.set_rows_keeping_selection(rows);
     }
 }
 
@@ -585,7 +676,7 @@ fn rebuild_picker_list(
         }
     }
     for (index, row_data) in state.rows.iter().enumerate() {
-        let selected = state.selected == Some(index);
+        let selected = state.selected.contains(&index);
         commands
             .spawn((
                 Button,
@@ -603,10 +694,17 @@ fn rebuild_picker_list(
                 ChildOf(ui.list),
             ))
             .observe(
-                move |press: On<Pointer<Press>>, mut state: ResMut<AvatarPickerState>| {
-                    if press.button == PointerButton::Primary {
-                        state.select(index);
+                move |press: On<Pointer<Press>>,
+                      keyboard: Res<ButtonInput<KeyCode>>,
+                      mut state: ResMut<AvatarPickerState>| {
+                    if press.button != PointerButton::Primary {
+                        return;
                     }
+                    let ctrl = keyboard.pressed(KeyCode::ControlLeft)
+                        || keyboard.pressed(KeyCode::ControlRight);
+                    let shift = keyboard.pressed(KeyCode::ShiftLeft)
+                        || keyboard.pressed(KeyCode::ShiftRight);
+                    state.select(index, ctrl, shift);
                 },
             )
             .with_child((
@@ -615,5 +713,131 @@ fn rebuild_picker_list(
                 TextColor(LABEL_COLOR),
                 Pickable::IGNORE,
             ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AgentKey, AvatarPickerState, PickerRow, Uuid};
+    use pretty_assertions::assert_eq;
+
+    /// An agent id that is only ever compared, never resolved.
+    fn agent(id: u128) -> AgentKey {
+        AgentKey::from(Uuid::from_u128(id))
+    }
+
+    /// A results list of `count` rows, agent `n` labelled `resident n`.
+    fn rows(count: u128) -> Vec<PickerRow> {
+        (0..count)
+            .map(|id| PickerRow {
+                agent: agent(id),
+                label: format!("resident {id}"),
+            })
+            .collect()
+    }
+
+    /// A picker holding `count` rows in the given mode.
+    fn picker(count: u128, allow_multiple: bool) -> AvatarPickerState {
+        let mut state = AvatarPickerState {
+            allow_multiple,
+            ..AvatarPickerState::default()
+        };
+        state.set_rows(rows(count));
+        state
+    }
+
+    /// A single-resident request answers with one pick however the user clicks:
+    /// the modifiers that mean "and this one too" in the many mode do nothing.
+    #[test]
+    fn single_mode_never_selects_more_than_one() {
+        let mut state = picker(5, false);
+        state.select(1, false, false);
+        state.select(3, true, false);
+        state.select(4, false, true);
+        assert_eq!(state.selected, vec![4]);
+        assert_eq!(state.picks().len(), 1);
+    }
+
+    /// The many mode takes the table widget's algebra: Ctrl toggles a row in and
+    /// out, Shift ranges from the anchor.
+    #[test]
+    fn multi_mode_ctrl_toggles_and_shift_ranges() {
+        let mut state = picker(6, true);
+        state.select(1, false, false);
+        state.select(3, true, false);
+        assert_eq!(state.selected, vec![1, 3]);
+        state.select(1, true, false);
+        assert_eq!(state.selected, vec![3]);
+        // The Ctrl+click left the anchor on row 1, so the range runs from there.
+        state.select(4, false, true);
+        assert_eq!(state.selected, vec![1, 2, 3, 4]);
+    }
+
+    /// A click past the end of the list is ignored rather than selecting a row
+    /// that is not there (a stale click against rows that have just shrunk).
+    #[test]
+    fn a_click_past_the_last_row_is_ignored() {
+        let mut state = picker(2, true);
+        state.select(7, false, false);
+        assert!(state.selected.is_empty());
+    }
+
+    /// The reply carries every selected row, top to bottom, with the label the
+    /// row was showing — the name a consumer records against the id.
+    #[test]
+    fn picks_are_in_row_order_with_their_labels() {
+        let mut state = picker(4, true);
+        state.select(2, false, false);
+        state.select(0, true, false);
+        let picks = state.picks();
+        assert_eq!(
+            picks.iter().map(|pick| pick.agent).collect::<Vec<_>>(),
+            vec![agent(0), agent(2)]
+        );
+        assert_eq!(
+            picks
+                .iter()
+                .map(|pick| pick.name.clone())
+                .collect::<Vec<_>>(),
+            vec!["resident 0".to_owned(), "resident 2".to_owned()]
+        );
+    }
+
+    /// The Near Me list re-sorts under the user, so the selection is carried
+    /// across a refresh by agent: whoever is still listed stays picked at their
+    /// new index, whoever left drops out, and the anchor follows the same way.
+    #[test]
+    fn a_refresh_carries_the_selection_by_agent() {
+        let mut state = picker(4, true);
+        state.select(1, false, false);
+        state.select(3, true, false);
+        assert_eq!(state.anchor, Some(3));
+        // Row 1's resident walked away; the rest re-sorted.
+        state.set_rows_keeping_selection(vec![
+            PickerRow {
+                agent: agent(3),
+                label: "resident 3".to_owned(),
+            },
+            PickerRow {
+                agent: agent(0),
+                label: "resident 0".to_owned(),
+            },
+        ]);
+        assert_eq!(state.selected, vec![0]);
+        assert_eq!(state.anchor, Some(0));
+        assert_eq!(state.picks().first().map(|pick| pick.agent), Some(agent(3)));
+    }
+
+    /// Opening the picker afresh starts from nothing selected — a leftover pick
+    /// from the last request would confirm someone the user never chose.
+    #[test]
+    fn replacing_the_rows_clears_the_selection() {
+        let mut state = picker(3, true);
+        state.select(0, false, false);
+        state.select(2, true, false);
+        state.set_rows(Vec::new());
+        assert!(state.selected.is_empty());
+        assert_eq!(state.anchor, None);
+        assert!(state.picks().is_empty());
     }
 }

@@ -542,7 +542,9 @@ fn spawn_render_settings_action(
                     return;
                 }
                 if let Some(requester) = button.picker_tag() {
-                    pickers.write(OpenAvatarPicker { requester });
+                    // The reference's Add buttons open a multi-picker: one
+                    // decision, however many residents it is about.
+                    pickers.write(OpenAvatarPicker::many(requester));
                     return;
                 }
                 let (Some(setting), Some(agent)) = (button.setting(), selected.0) else {
@@ -565,7 +567,7 @@ fn spawn_render_settings_action(
         );
 }
 
-/// Record an exception for someone chosen in the shared avatar picker — the
+/// Record an exception for everyone chosen in the shared avatar picker — the
 /// setting is the one whose Add button opened it.
 fn handle_render_settings_picks(
     mut picks: MessageReader<AvatarPicked>,
@@ -575,11 +577,13 @@ fn handle_render_settings_picks(
         let Some(setting) = picked_setting(pick.requester) else {
             continue;
         };
-        requests.write(RequestRenderException {
-            agent: pick.agent,
-            name: pick.name.clone(),
-            setting,
-        });
+        for chosen in &pick.picks {
+            requests.write(RequestRenderException {
+                agent: chosen.agent,
+                name: chosen.name.clone(),
+                setting,
+            });
+        }
     }
 }
 
