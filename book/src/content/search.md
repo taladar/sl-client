@@ -109,9 +109,27 @@ are trusted simulator↔dataserver messages the viewer never sends or receives
 
 ## Avatar-name autocomplete
 
-`AvatarPickerRequest` is the lookup behind the avatar picker: send a partial
-name, receive a short list of matches in `Event::AvatarPickerReply` (each an
-`AvatarPickerResult` of avatar id and legacy first/last name).
+`Command::AvatarPickerRequest` is the lookup behind the avatar picker: send a
+partial name, receive a short list of matches in `Event::AvatarPickerReply`
+(each an `AvatarPickerResult`). It has **two wire paths**, and the runtimes pick
+by capability presence:
+
+- **`AvatarPickerSearch`** (the modern one) — `GET
+  <cap>?page_size=100&names=<escaped>`, answering `{ agents: [ … ] }` with the
+  *same* per-avatar records `GetDisplayNames` returns. It matches the
+  **username and display name** as well as the legacy name, and each result
+  carries all three.
+- **`AvatarPickerRequest`** (the legacy UDP message) — a partial legacy name,
+  answered by `AvatarPickerReply`. Kept for grids without the capability
+  (OpenSim). On Second Life it answers a single nil-uuid "no matches" block to
+  *every* query, however common the name, which is why the capability is
+  preferred wherever it exists — the reference viewer made the same switch
+  (`llfloateravatarpicker.cpp`).
+
+So `AvatarPickerResult`'s `username` / `display_name` are filled on the
+capability path and empty on the legacy one; its legacy pair is always set.
+A **uuid** is not a name search at all: look it up through `GetDisplayNames`
+(`Command::RequestDisplayNames`), as the reference's picker does.
 
 ```rust,ignore
 session.avatar_picker_request(query_id, "bob", now)?;

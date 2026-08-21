@@ -6,47 +6,9 @@ use super::{
 };
 use crate::WireError;
 use crate::llsd::{Llsd, push_escaped};
+use crate::url::percent_encode;
 use sl_types::key::ExperienceKey;
 use uuid::Uuid;
-
-/// Percent-encodes `text` for a URL query value (RFC 3986 unreserved set kept,
-/// everything else `%`-escaped). Used for the `FindExperienceByName` query.
-fn percent_encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
-            out.push(char::from(byte));
-        } else {
-            out.push('%');
-            out.push(hex_digit(byte >> 4));
-            out.push(hex_digit(byte & 0x0f));
-        }
-    }
-    out
-}
-
-/// Maps a nibble (0–15) to its uppercase ASCII hex digit (a match, so no
-/// arithmetic or indexing).
-const fn hex_digit(nibble: u8) -> char {
-    match nibble {
-        0 => '0',
-        1 => '1',
-        2 => '2',
-        3 => '3',
-        4 => '4',
-        5 => '5',
-        6 => '6',
-        7 => '7',
-        8 => '8',
-        9 => '9',
-        10 => 'A',
-        11 => 'B',
-        12 => 'C',
-        13 => 'D',
-        14 => 'E',
-        _ => 'F',
-    }
-}
 
 /// Builds the URL suffix for a `GetExperienceInfo` GET, to be appended directly
 /// to the capability URL (`{cap}{suffix}` → `{cap}/id/?page_size=N&public_id=…`).

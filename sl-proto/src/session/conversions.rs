@@ -7,9 +7,9 @@ use crate::appearance;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
-    AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
-    ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha, DayCycle,
-    DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
+    AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties, ChatAudible, ChatMessage,
+    ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha,
+    DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
     EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails,
     GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
@@ -3348,6 +3348,20 @@ pub fn chat_session_agent_params_from_llsd(body: &Llsd) -> Vec<AgentKey> {
         .filter_map(Llsd::as_uuid)
         .map(AgentKey::from)
         .collect()
+}
+
+/// Projects a display-name record onto an [`AvatarPickerResult`] — how an
+/// `AvatarPickerSearch` match reaches the picker. The legacy pair comes straight
+/// across, and the two fields the UDP path cannot fill (username, display name)
+/// carry the search's whole point: matching, and showing, the modern identity.
+pub(crate) fn avatar_picker_result(name: &DisplayName) -> AvatarPickerResult {
+    AvatarPickerResult {
+        avatar_id: name.id,
+        first_name: name.legacy_first_name.clone(),
+        last_name: name.legacy_last_name.clone(),
+        username: name.username.clone(),
+        display_name: name.display_name.clone(),
+    }
 }
 
 /// Decodes a `ChatterBoxSessionStartReply` CAPS event body into an

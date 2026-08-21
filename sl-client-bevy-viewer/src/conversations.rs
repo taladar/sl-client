@@ -2299,6 +2299,7 @@ fn apply_participant_picks(
     mut picks: MessageReader<AvatarPicked>,
     mut pending: ResMut<PendingParticipantPick>,
     mut conferences: MessageWriter<StartConference>,
+    mut closes: MessageWriter<CloseConversation>,
 ) {
     for pick in picks.read() {
         if pick.requester != ADD_PARTICIPANTS_REQUESTER {
@@ -2313,6 +2314,17 @@ fn apply_participant_picks(
                 conferences.write(StartConference::with(
                     std::iter::once(peer).chain(picked).collect(),
                 ));
+                // The 1:1 does not survive the upgrade. A one-to-one session
+                // *becomes* the conference — the reference closes the P2P
+                // floater and re-homes it onto the new ad-hoc session
+                // (`llfloaterimsession.cpp`'s `addP2PSessionParticipants`) —
+                // and leaving both open is two tabs for one conversation, the
+                // older of which the peer is no longer the only party to.
+                //
+                // Ordered after the conference in the same frame: it is
+                // selected first, so closing this one never falls back to
+                // Nearby.
+                closes.write(CloseConversation { key });
             }
             ConversationKey::Conference(session) => {
                 conferences.write(StartConference::adding(session, picked.collect()));

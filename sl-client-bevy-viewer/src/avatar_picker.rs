@@ -26,9 +26,15 @@
 //!
 //! # The three sources
 //!
-//! - **Search** — the wire's name lookup: `AvatarPickerRequest` with a
-//!   client query id, answered by `AvatarPickerReply` (matching avatars by
-//!   partial legacy name).
+//! - **Search** — the grid's name lookup. Typed text goes out as
+//!   [`Command::AvatarPickerRequest`], which the runtimes drive over the
+//!   **`AvatarPickerSearch` capability** where the region has it (matching the
+//!   username and display name as well as the legacy name) and over the legacy
+//!   `AvatarPickerRequest` message otherwise; either way the answer arrives as
+//!   `AvatarPickerReply`. Text that parses as a **uuid** is looked up by id
+//!   through `GetDisplayNames` instead, as the reference does — pasting a key
+//!   is a normal way to name someone. A search that matches nobody says so
+//!   rather than leaving a blank list.
 //! - **Friends** — the held friends roster ([`crate::people::FriendsModel`]).
 //! - **Near Me** — the avatars this viewer currently knows in-world
 //!   ([`crate::avatars::AvatarState`]), sorted by distance from the own
@@ -42,7 +48,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AgentKey, Command, QueryId, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    AgentKey, AvatarPickerResult, Command, QueryId, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    Uuid,
 };
 
 use crate::avatars::AvatarState;
@@ -66,6 +73,12 @@ const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 const BUTTON_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 /// A button's border colour.
 const BUTTON_BORDER: Color = Color::srgb(0.34, 0.40, 0.52);
+
+/// The Fluent key for the "nobody matched" row.
+const NOT_FOUND_KEY: &str = "avatar-picker-not-found";
+
+/// The username column's colour — dimmer than the name it trails.
+const USERNAME_COLOR: Color = Color::srgb(0.62, 0.66, 0.74);
 
 /// A selected result row's background.
 const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
@@ -160,8 +173,14 @@ const TAB_ORDER: [PickerTab; 3] = [PickerTab::Search, PickerTab::Friends, Picker
 struct PickerRow {
     /// The avatar the row names.
     agent: AgentKey,
-    /// The row label.
+    /// The row label — the avatar's **display name** where the source knows one
+    /// (the modern search), else its legacy `First Last`.
     label: String,
+    /// The dimmer trailing column: the avatar's **username** / SLID, empty when
+    /// the source has none (the friends / nearby lists, and the legacy search
+    /// message, which carries only the legacy pair). The reference's picker
+    /// shows the same two columns.
+    username: String,
 }
 
 /// The picker's live state.
@@ -184,6 +203,14 @@ pub(crate) struct AvatarPickerState {
     pending_query: Option<QueryId>,
     /// Bumped whenever `rows` / `selected` change, driving the list rebuild.
     revision: u64,
+    /// The agent a **by-uuid** search is waiting on, so its `GetDisplayNames`
+    /// reply — which carries no query id — is recognised as this search's
+    /// answer and not as some other feature's name lookup.
+    pending_agent: Option<AgentKey>,
+    /// Whether a search has answered since the picker opened — what tells an
+    /// empty list "nobody matched" from "nothing has been searched for yet",
+    /// which is the difference between a *result* and a blank panel.
+    searched: bool,
 }
 
 impl AvatarPickerState {
@@ -288,6 +315,7 @@ impl Plugin for AvatarPickerPlugin {
                     handle_open_requests,
                     bridge_picker_tabs,
                     ingest_picker_replies,
+                    ingest_picker_id_lookups,
                     refresh_local_sources,
                     rebuild_picker_list,
                 )
@@ -481,7 +509,15 @@ fn spawn_picker_button(
         .id()
 }
 
-/// Fire the wire name search for the field's current text.
+/// Fire the name search for the field's current text.
+///
+/// Text that parses as a **uuid** is looked up by id instead
+/// (`Command::RequestDisplayNames`, the `GetDisplayNames` capability), the
+/// reference's own split (`llfloateravatarpicker.cpp`, `findByIdCoro`) — pasting
+/// a key is a normal way to name someone you cannot spell, and the name search
+/// would never match one. That reply arrives as
+/// [`SlSessionEvent::DisplayNames`] rather than a picker reply, so it carries no
+/// query id: the pending query is cleared and the id itself remembered instead.
 fn send_search(
     ui: &AvatarPickerUi,
     fields: &Query<&EditableText>,
@@ -495,8 +531,18 @@ fn send_search(
     if name.is_empty() {
         return;
     }
+    state.searched = false;
+    if let Ok(id) = Uuid::parse_str(&name) {
+        let agent = AgentKey::from(id);
+        state.pending_query = None;
+        state.pending_agent = Some(agent);
+        state.set_rows(Vec::new());
+        commands.write(SlCommand(Command::RequestDisplayNames(vec![agent])));
+        return;
+    }
     let query_id = QueryId::from(Uuid::new_v4());
     state.pending_query = Some(query_id);
+    state.pending_agent = None;
     commands.write(SlCommand(Command::AvatarPickerRequest { query_id, name }));
 }
 
@@ -534,6 +580,7 @@ fn handle_open_requests(
     for open in opens.read() {
         state.requester = Some(open.requester);
         state.allow_multiple = open.allow_multiple;
+        state.searched = false;
         state.set_rows(Vec::new());
         if let Ok(mut shown) = panels.get_mut(ui.panel) {
             shown.0 = true;
@@ -559,6 +606,7 @@ fn bridge_picker_tabs(
     };
     if state.tab != tab {
         state.tab = tab;
+        state.searched = false;
         state.set_rows(Vec::new());
     }
     // The search row only applies to the Search tab.
@@ -568,6 +616,20 @@ fn bridge_picker_tabs(
         } else {
             Display::None
         };
+    }
+}
+
+/// The label a search match shows: its **display name** when the grid supplied
+/// one (the modern capability), else the legacy `First Last` pair — the same
+/// fallback the reference's `LLAvatarName` makes, so a resident who never set a
+/// display name still reads normally.
+fn picker_label(result: &AvatarPickerResult) -> String {
+    if result.display_name.is_empty() {
+        format!("{} {}", result.first_name, result.last_name)
+            .trim()
+            .to_owned()
+    } else {
+        result.display_name.clone()
     }
 }
 
@@ -582,15 +644,58 @@ fn ingest_picker_replies(mut events: MessageReader<SlEvent>, mut state: ResMut<A
                 continue;
             }
             state.pending_query = None;
+            // A nil id with no name is the legacy message's "no matches"
+            // sentinel; it must not become a row that looks pickable.
             let rows = results
                 .iter()
+                .filter(|result| !result.avatar_id.uuid().is_nil())
                 .map(|result| PickerRow {
+                    label: picker_label(result),
                     agent: result.avatar_id,
-                    label: format!("{} {}", result.first_name, result.last_name),
+                    username: result.username.clone(),
                 })
                 .collect();
             state.set_rows(rows);
+            state.searched = true;
         }
+    }
+}
+
+/// Fold a **by-uuid** search's `GetDisplayNames` reply into the rows: the one
+/// record it asked about, if the grid resolved it. An id the grid could not
+/// resolve comes back flagged `missing`, which is a "not found", not a row.
+fn ingest_picker_id_lookups(
+    mut events: MessageReader<SlEvent>,
+    mut state: ResMut<AvatarPickerState>,
+) {
+    for event in events.read() {
+        let SlSessionEvent::DisplayNames(names) = &event.0 else {
+            continue;
+        };
+        let Some(agent) = state.pending_agent else {
+            continue;
+        };
+        let Some(record) = names.iter().find(|name| name.id == agent) else {
+            continue;
+        };
+        state.pending_agent = None;
+        state.searched = true;
+        if record.missing {
+            state.set_rows(Vec::new());
+            continue;
+        }
+        let label = if record.display_name.is_empty() {
+            format!("{} {}", record.legacy_first_name, record.legacy_last_name)
+                .trim()
+                .to_owned()
+        } else {
+            record.display_name.clone()
+        };
+        state.set_rows(vec![PickerRow {
+            agent,
+            label,
+            username: record.username.clone(),
+        }]);
     }
 }
 
@@ -618,7 +723,11 @@ fn refresh_local_sources(
         PickerTab::Friends => friends
             .roster()
             .into_iter()
-            .map(|(agent, name)| PickerRow { agent, label: name })
+            .map(|(agent, name)| PickerRow {
+                agent,
+                label: name,
+                username: String::new(),
+            })
             .collect(),
         PickerTab::NearMe => {
             let own_position = own
@@ -640,7 +749,14 @@ fn refresh_local_sources(
                     let name = avatars
                         .name_of(agent)
                         .map_or_else(|| "(resolving)".to_owned(), str::to_owned);
-                    (distance, PickerRow { agent, label: name })
+                    (
+                        distance,
+                        PickerRow {
+                            agent,
+                            label: name,
+                            username: String::new(),
+                        },
+                    )
                 })
                 .collect();
             with_distance.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -675,6 +791,24 @@ fn rebuild_picker_list(
             commands.entity(*child).despawn();
         }
     }
+    // A search that answered nobody says so. An empty list is otherwise
+    // indistinguishable from a search that never ran — the reference shows a
+    // "not found" row for exactly this reason.
+    if state.rows.is_empty() && state.searched && state.tab == PickerTab::Search {
+        commands.spawn((
+            Text::default(),
+            Translated::new(NOT_FOUND_KEY),
+            UiFont::Sans.at(PICKER_FONT_SIZE),
+            TextColor(USERNAME_COLOR),
+            Node {
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                ..default()
+            },
+            Pickable::IGNORE,
+            Name::new("avatar-picker-not-found"),
+            ChildOf(ui.list),
+        ));
+    }
     for (index, row_data) in state.rows.iter().enumerate() {
         let selected = state.selected.contains(&index);
         commands
@@ -682,7 +816,8 @@ fn rebuild_picker_list(
                 Button,
                 Node {
                     padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
-                    ..default()
+                    align_items: AlignItems::Center,
+                    ..row(Val::Px(8.0))
                 },
                 BackgroundColor(if selected {
                     SELECTED_ROW_BACKGROUND
@@ -707,23 +842,60 @@ fn rebuild_picker_list(
                     state.select(index, ctrl, shift);
                 },
             )
-            .with_child((
-                Text::new(row_data.label.clone()),
-                UiFont::Sans.at(PICKER_FONT_SIZE),
-                TextColor(LABEL_COLOR),
-                Pickable::IGNORE,
-            ));
+            .with_children(|row| {
+                row.spawn((
+                    Text::new(row_data.label.clone()),
+                    UiFont::Sans.at(PICKER_FONT_SIZE),
+                    TextColor(LABEL_COLOR),
+                    Pickable::IGNORE,
+                ));
+                // The username column, only where the source knows one.
+                if !row_data.username.is_empty() {
+                    row.spawn((
+                        Text::new(row_data.username.clone()),
+                        UiFont::Sans.at(PICKER_FONT_SIZE),
+                        TextColor(USERNAME_COLOR),
+                        Pickable::IGNORE,
+                    ));
+                }
+            });
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AgentKey, AvatarPickerState, PickerRow, Uuid};
+    use super::{AgentKey, AvatarPickerResult, AvatarPickerState, PickerRow, Uuid};
     use pretty_assertions::assert_eq;
 
     /// An agent id that is only ever compared, never resolved.
     fn agent(id: u128) -> AgentKey {
         AgentKey::from(Uuid::from_u128(id))
+    }
+
+    /// A search match, with the modern identity the capability supplies.
+    fn search_result(id: u128, display: &str, username: &str) -> AvatarPickerResult {
+        AvatarPickerResult {
+            avatar_id: agent(id),
+            first_name: "Legacy".to_owned(),
+            last_name: "Name".to_owned(),
+            username: username.to_owned(),
+            display_name: display.to_owned(),
+        }
+    }
+
+    /// A row is labelled with the **display name** the modern search supplies,
+    /// and falls back to the legacy pair for a match that has none — which is
+    /// every match on the legacy message path.
+    #[test]
+    fn a_row_prefers_the_display_name() {
+        assert_eq!(
+            super::picker_label(&search_result(1, "Marina", "marina.vector")),
+            "Marina"
+        );
+        assert_eq!(
+            super::picker_label(&search_result(2, "", "marina.vector")),
+            "Legacy Name"
+        );
     }
 
     /// A results list of `count` rows, agent `n` labelled `resident n`.
@@ -732,6 +904,7 @@ mod tests {
             .map(|id| PickerRow {
                 agent: agent(id),
                 label: format!("resident {id}"),
+                username: String::new(),
             })
             .collect()
     }
@@ -817,10 +990,12 @@ mod tests {
             PickerRow {
                 agent: agent(3),
                 label: "resident 3".to_owned(),
+                username: String::new(),
             },
             PickerRow {
                 agent: agent(0),
                 label: "resident 0".to_owned(),
+                username: String::new(),
             },
         ]);
         assert_eq!(state.selected, vec![0]);

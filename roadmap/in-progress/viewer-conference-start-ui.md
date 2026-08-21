@@ -120,8 +120,9 @@ Two entry points beyond the plan, both the reference's:
   never a group, whose roster is the group). It opens the shared multi picker
   ([[viewer-avatar-picker-multi-pick]], as this task's note predicted) and turns
   the answer into a conference: from a 1:1 that is the peer plus everyone
-  picked, from a conference an invitation into the session already open. This is
-  `llfloaterimsession.cpp:573`.
+  picked — and the 1:1 **closes**, since a one-to-one becomes the conference
+  rather than sitting beside it — from a conference an invitation into the
+  session already open. This is `llfloaterimsession.cpp:573`.
 - **Start Conference Chat** on an inventory **folder** of calling cards, not
   only on selected cards — the reference's two `Inventory.BeginIMSession`
   parameters (`"selected"` and `"everyone"`), which are one arm over a different
@@ -146,9 +147,21 @@ Offline coverage stands: the sim-caps start + invite round trips, the
 client-side re-key and failed-start tests in `sl-proto/tests/lifecycle.rs`, and
 the viewer's pure-model tests.
 
-**The live run was attempted on aditi (2026-08-21) and could not reach the
-feature**, because every route to a multi-selection of *those particular*
-avatars is blocked by something else:
+**Reached live on aditi (2026-08-21), once
+[[viewer-avatar-picker-search-finds-nothing]] was fixed**: the
+add-participants ✚ route ran end to end — the grid answered our start with a
+`ChatterBoxSessionStartReply` and then pushed the new session's roster
+(`ChatterBoxSessionAgentListUpdates`). Two things that run exposed, both since
+fixed: the 1:1 the conference was started *from* stayed open beside it (the
+reference closes it — a one-to-one **becomes** the conference), and the
+brand-new session was swept for a server-history backlog it cannot have, which
+the grid answers with an error.
+
+Still to confirm on a grid: that a conference message actually **round-trips**
+between all three avatars, and the re-key under a start reply whose
+`session_id` differs from ours. The first attempt could not reach the feature
+at all, because every route to a multi-selection of *those particular* avatars
+was blocked by something else:
 
 - the **radar** needs them in one region — they log in wherever they were, and
   we have no way to gather them;
@@ -162,8 +175,8 @@ avatars is blocked by something else:
   Second Life has retired in favour of the `AvatarPickerSearch` capability
   ([[viewer-avatar-picker-search-finds-nothing]]).
 
-So the wire path — mint → cap `start conference` → `ChatterBoxSessionStartReply`
-re-key → the peers' `ChatterBoxInvitation` under the grid's id — is **still
-unobserved on a real grid**. Fixing the picker search (or landing a
-conformance `conference-roster` case, which needs none of this UI) is the way
-in. Until then this stays in progress, however green the tests are.
+The picker fix opened the way in; what remains is the *other end* of the wire
+path — the peers receiving their `ChatterBoxInvitation` under the grid's id and
+a message crossing between them. A conformance `conference-roster` case
+([[test-conference-roster]]) would assert exactly that without any UI, and is
+the better closer for this than another hand-driven session.

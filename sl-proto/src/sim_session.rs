@@ -2326,6 +2326,39 @@ impl SimSession {
         self.display_names.get(&agent)
     }
 
+    /// The display-name records matching `names` — the `AvatarPickerSearch`
+    /// capability's lookup over the same store [`SimSession::set_display_name`]
+    /// fills. At most `page_size` records, in the store's (id) order.
+    ///
+    /// Searching the **username and display name** next to the legacy name is
+    /// the whole point of the modern picker; the legacy UDP one knew only the
+    /// legacy name. The query is tokenised on whitespace and **every** token
+    /// must appear somewhere in a record's searchable text, so `"marina
+    /// vector"` finds `marina.vector` — the client turns a typed `.` into a
+    /// space before sending, and this normalises the stored side the same way.
+    /// A blank query matches nobody rather than everybody.
+    pub(crate) fn search_display_names(&self, names: &str, page_size: u32) -> Vec<DisplayName> {
+        let needle = names.to_lowercase();
+        let tokens: Vec<&str> = needle.split_whitespace().collect();
+        if tokens.is_empty() {
+            return Vec::new();
+        }
+        self.display_names
+            .values()
+            .filter(|name| {
+                let haystack = format!(
+                    "{} {} {} {}",
+                    name.username, name.display_name, name.legacy_first_name, name.legacy_last_name
+                )
+                .to_lowercase()
+                .replace('.', " ");
+                tokens.iter().all(|token| haystack.contains(token))
+            })
+            .take(usize::try_from(page_size).unwrap_or(usize::MAX))
+            .cloned()
+            .collect()
+    }
+
     /// The agent's server-stored preferences — the full set the
     /// `AgentPreferences` capability echoes on every request. Starts at
     /// OpenSim's defaults (`IAgentPreferencesService.cs`): hover height `0.0`,

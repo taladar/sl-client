@@ -18254,6 +18254,43 @@ mod test {
         Ok(())
     }
 
+    /// A conference **we** started schedules no server-history fetch: it has no
+    /// backlog by construction, and the grid answers that request with an error
+    /// rather than an empty page. A conference we were *invited* to still does.
+    #[test]
+    fn a_conference_we_started_fetches_no_backlog() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let ours = ImSessionId::from(uuid::Uuid::from_u128(0x69_01));
+        session.start_conference(
+            ours,
+            &[AgentKey::from(uuid::Uuid::from_u128(0x69_0A))],
+            "",
+            now,
+        )?;
+        drain(&mut session)?;
+        assert!(
+            !session
+                .next_server_history_fetches()
+                .contains(&ChatSessionKind::Conference { id: ours }),
+            "the session we just made has nothing to fetch"
+        );
+
+        // A conference someone else opened — reached by an inbound message —
+        // is still swept.
+        let theirs = ImSessionId::from(uuid::Uuid::from_u128(0x69_02));
+        session.send_conference_message(theirs, "hi", now)?;
+        drain(&mut session)?;
+        let swept = session.next_server_history_fetches();
+        assert!(
+            swept.contains(&ChatSessionKind::Conference { id: theirs }),
+            "a session we did not create is still swept, got {swept:?}"
+        );
+        Ok(())
+    }
+
     /// A **failed** start drops the optimistic session rather than leaving a
     /// conference nobody is in.
     #[test]

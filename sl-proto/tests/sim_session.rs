@@ -1024,6 +1024,8 @@ mod test {
                 avatar_id: AgentKey::from(uuid::Uuid::from_u128(0xF16)),
                 first_name: "Bob".to_owned(),
                 last_name: "Resident".to_owned(),
+                username: String::new(),
+                display_name: String::new(),
             }],
             now,
         )?;

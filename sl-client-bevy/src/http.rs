@@ -6,9 +6,10 @@ use crate::lsl_syntax_cache::LslSyntaxCache;
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
-    CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX, CHAT_SESSION_FETCH_HISTORY_TAG,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid,
-    build_land_resources_request, parse_land_resources_reply, parse_llsd_xml,
+    AVATAR_PICKER_SEARCH_TAG, CAP_CHAT_SESSION_REQUEST, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
+    CHAT_SESSION_FETCH_HISTORY_TAG, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG,
+    LSL_SYNTAX_VERSION, Llsd, ParcelKey, Uuid, build_land_resources_request,
+    parse_land_resources_reply, parse_llsd_xml,
 };
 use std::collections::HashMap;
 
@@ -155,6 +156,30 @@ pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(
         }
         None => report_caps_failure(caps_tx, cap),
     }
+}
+
+/// GETs the `AvatarPickerSearch` capability (blocking) and forwards its reply to
+/// `caps_tx` tagged [`AVATAR_PICKER_SEARCH_TAG`], stamping the caller's
+/// `query_id` into the reply map — the HTTP path carries no `QueryID` of its
+/// own, so without the stamp the answer could not be routed back to the search
+/// that asked. Mirrors the tokio `get_avatar_picker_search`.
+pub(crate) fn run_avatar_picker_search(
+    url: &str,
+    query_id: Uuid,
+    caps_tx: &Sender<(String, Llsd)>,
+) {
+    let Some(reply) = blocking_get_llsd(url) else {
+        report_caps_failure(caps_tx, AVATAR_PICKER_SEARCH_TAG);
+        return;
+    };
+    let mut map = match reply {
+        Llsd::Map(map) => map,
+        _other => HashMap::new(),
+    };
+    let _previous = map.insert("query-id".to_owned(), Llsd::Uuid(query_id));
+    caps_tx
+        .send((AVATAR_PICKER_SEARCH_TAG.to_owned(), Llsd::Map(map)))
+        .ok();
 }
 
 /// GETs the `LSLSyntax` capability (blocking), caches the raw document under

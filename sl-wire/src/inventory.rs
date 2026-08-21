@@ -30,6 +30,7 @@ use uuid::Uuid;
 
 use crate::WireError;
 use crate::llsd::{Llsd, LlsdError, parse_llsd_xml, push_escaped};
+use crate::url::query_param;
 
 /// The viewer's maximum AIS3 folder-fetch depth (`MAX_FOLDER_DEPTH_REQUEST`);
 /// the grid caps deeper requests regardless.
@@ -170,15 +171,6 @@ fn split_url_suffix(suffix: &str) -> (&str, Option<&str>) {
         Some((path, query)) => (path, Some(query)),
         None => (path, None),
     }
-}
-
-/// Returns the value of query parameter `name` within a `key=value&…` query
-/// string, if present.
-fn query_param<'query>(query: &'query str, name: &str) -> Option<&'query str> {
-    query
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .find_map(|(key, value)| (key == name).then_some(value))
 }
 
 /// Parses the [`ais_create_category_url`] suffix back into its `(parent_id, tid)`

@@ -216,6 +216,13 @@ non-LLSD or unroutable body → `400`):
   `SimSession::store_offline_message` while the agent was offline —
   **deliver-once**, OpenSim's delete-on-fetch semantics: the fetch
   drains the store, so a repeated GET answers an empty array.
+- **`AvatarPickerSearch`** is a GET serving the "Choose Resident" name
+  search over the same display-name store: the residents whose username,
+  display name or legacy name matches the `names` query parameter (capped
+  at its `page_size`), as an `agents` array of the very records
+  `GetDisplayNames` answers with. A query naming nobody is a `400`; one
+  matching nobody is an empty — but successful — array, since a search
+  answers with what it found.
 - **`GetDisplayNames`** is a GET answering each `ids` query parameter
   from the session's display-name store (`SimSession::set_display_name`):
   known agents as full `agents` records, unknown ids as `bad_ids` — the

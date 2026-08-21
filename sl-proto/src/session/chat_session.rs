@@ -199,6 +199,12 @@ pub(crate) enum ServerHistoryState {
     /// A reply was received and folded into
     /// [`ChatSession::server_history`].
     Fetched,
+    /// There is no server-side backlog to fetch, because **this client created
+    /// the session**: a conference we just started has said nothing before we
+    /// were listening. Asking anyway is a request the grid answers with an
+    /// error (and a warning in the log) for the one session guaranteed to have
+    /// nothing.
+    NothingToFetch,
 }
 
 /// Whether the automatic server-side chat-backlog fetch is enabled — the

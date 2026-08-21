@@ -4,9 +4,9 @@ use super::conversions::{
     OutgoingIm, ZERO_VECTOR, active_group, agent_drop_group_from_llsd,
     agent_list_voice_updates_from_llsd, agent_state_update_from_llsd,
     ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
-    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
-    bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
-    chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
+    avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_picker_result,
+    avatar_properties, bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item,
+    chat_message, chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
     chatterbox_session_start_reply_from_llsd, classified_info, created_category_from_llsd,
     crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
     enable_simulator_from_caps_llsd, environment_from_llsd,
@@ -28,16 +28,16 @@ use super::conversions::{
     windlight_refresh_from_llsd,
 };
 use super::{
-    AGENT_UPDATE_INTERVAL, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES,
-    CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES,
-    CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    AGENT_UPDATE_INTERVAL, AVATAR_PICKER_SEARCH_TAG, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
+    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
+    CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory, InventoryOwner,
@@ -101,13 +101,13 @@ use sl_wire::{
     MessageId, ObjectMediaResponse, PacketFlags, ParcelVoiceInfo, Permissions, Permissions5,
     Reader, RegionFlags, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber,
     VoiceAccountInfo, WireError, build_group_notice_bucket, build_login_request, message_name,
-    parse_agent_preferences, parse_attachment_resources, parse_datagram, parse_display_names,
-    parse_experience_ids, parse_experience_infos, parse_experience_permissions,
-    parse_get_object_cost, parse_get_object_physics_data, parse_gltf_material_override,
-    parse_land_resource_detail, parse_land_resource_summary, parse_land_resources_reply,
-    parse_lsl_syntax, parse_object_physics_properties, parse_region_experiences,
-    parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features,
-    parse_user_info_reply, zero_decode,
+    parse_agent_preferences, parse_attachment_resources, parse_avatar_picker_search,
+    parse_datagram, parse_display_names, parse_experience_ids, parse_experience_infos,
+    parse_experience_permissions, parse_get_object_cost, parse_get_object_physics_data,
+    parse_gltf_material_override, parse_land_resource_detail, parse_land_resource_summary,
+    parse_land_resources_reply, parse_lsl_syntax, parse_object_physics_properties,
+    parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
+    parse_simulator_features, parse_user_info_reply, zero_decode,
 };
 use sl_wire::{Direction, GlobalCoordinates, combine_uuids};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -635,6 +635,30 @@ impl Session {
             // names (with unresolved ids folded in as `missing` placeholders).
             CAP_GET_DISPLAY_NAMES => match parse_display_names(body) {
                 Ok(names) => self.events.push_back(Event::DisplayNames(names)),
+                Err(error) => self.caps_decode_error(message, &error),
+            },
+            // The reply to an `AvatarPickerSearch` GET: the residents whose
+            // username or display name matched. The runtime stamps the query id
+            // the caller minted into the reply map (the HTTP path has no
+            // `QueryID` of its own), so the answer routes back to the search
+            // that asked. Matches carry the full identity, so they also seed the
+            // display-name cache — one search, both uses, exactly as the
+            // reference's picker fills its `LLAvatarName` map from the same
+            // rows.
+            AVATAR_PICKER_SEARCH_TAG => match parse_avatar_picker_search(body) {
+                Ok(names) => {
+                    let query_id = body
+                        .get("query-id")
+                        .and_then(Llsd::as_uuid)
+                        .unwrap_or_default();
+                    self.events.push_back(Event::AvatarPickerReply {
+                        query_id,
+                        results: names.iter().map(avatar_picker_result).collect(),
+                    });
+                    if !names.is_empty() {
+                        self.events.push_back(Event::DisplayNames(names));
+                    }
+                }
                 Err(error) => self.caps_decode_error(message, &error),
             },
             // The reply to a `RemoteParcelRequest` POST: the grid-wide parcel id
@@ -4303,6 +4327,10 @@ impl Session {
                             avatar_id: AgentKey::from(block.avatar_id),
                             first_name: trimmed_string(&block.first_name),
                             last_name: trimmed_string(&block.last_name),
+                            // The legacy message carries no username / display
+                            // name; only the capability does.
+                            username: String::new(),
+                            display_name: String::new(),
                         })
                         .collect(),
                 });
@@ -7527,7 +7555,17 @@ impl Session {
         invitees: &[AgentKey],
         now: Instant,
     ) {
-        let session = self.chat_session_mut(ChatSessionKind::Conference { id: session_id }, now);
+        let kind = ChatSessionKind::Conference { id: session_id };
+        // A conference *we* are opening has no backlog: nothing was said in it
+        // before this moment. Marking it so keeps the auto-fetch sweep off the
+        // one session guaranteed to answer nothing — where the grid replies
+        // with an error, not an empty page. A session we are merely adding
+        // people to already has its own state and keeps it.
+        let fresh = !self.chat_sessions.contains_key(&kind);
+        let session = self.chat_session_mut(kind, now);
+        if fresh {
+            session.server_history_state = ServerHistoryState::NothingToFetch;
+        }
         for invitee in invitees {
             session.participants.insert(*invitee);
         }
@@ -9339,7 +9377,9 @@ impl Session {
     /// and surfaces as [`Event::SessionServerHistory`]. On a grid without the
     /// capability (stock OpenSim) the runtime never calls this, so nothing is
     /// ever marked `Requested` there. `Direct` sessions never schedule (the
-    /// reference fetches no 1:1 backlog), nor do still-`Invited` sessions.
+    /// reference fetches no 1:1 backlog), nor do still-`Invited` sessions, nor
+    /// a conference **this client started** — it has no backlog by
+    /// construction ([`Session::open_conference`]).
     pub fn next_server_history_fetches(&mut self) -> Vec<ChatSessionKind> {
         if !self.fetch_server_chat_history.is_enabled() {
             return Vec::new();

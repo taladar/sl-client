@@ -11,10 +11,10 @@ mod test {
 
     use pretty_assertions::assert_eq;
     use sl_proto::{
-        AbuseReport, AbuseReportType, AgentKey, AgentPreferences, AssetKey,
-        CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_GET_TEXTURE,
-        CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
+        AVATAR_PICKER_PAGE_SIZE, AVATAR_PICKER_SEARCH_TAG, AbuseReport, AbuseReportType, AgentKey,
+        AgentPreferences, AssetKey, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
+        CAP_GET_TEXTURE, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
+        CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
         CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
         CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
         CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
@@ -25,9 +25,10 @@ mod test {
         LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams, MaterialOverrideUpdate, MediaEntry,
         ObjectKey, ObjectMediaState, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
         ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimSession,
-        StartLocation, TextureKey, build_event_queue_request, build_seed_request,
-        chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
-        enable_simulator_to_caps_llsd, parse_event_queue_response, parse_seed_response,
+        StartLocation, TextureKey, avatar_picker_search_query, build_event_queue_request,
+        build_seed_request, chat_session_agents_body, chat_session_request_body,
+        copy_inventory_from_notecard_body, enable_simulator_to_caps_llsd,
+        parse_event_queue_response, parse_seed_response,
     };
     use sl_wire::{
         CircuitCode, Llsd, LoginRequest, LoginResponse, LoginSuccess,
@@ -114,10 +115,10 @@ mod test {
             .collect();
         let expected = caps.grant(&requested);
         assert_eq!(granted, expected);
-        // Seven agent-comms/framework sim caps, the four asset-delivery caps
+        // Eight agent-comms/framework sim caps, the four asset-delivery caps
         // (GetTexture/GetMesh/GetMesh2/ViewerAsset), and the fifteen content
         // upload/materials/MOAP caps.
-        assert_eq!(granted.len(), 26);
+        assert_eq!(granted.len(), 27);
         Ok(())
     }
 
@@ -739,6 +740,73 @@ mod test {
             .find(|name| name.id == unknown)
             .ok_or("expected the bad_ids record")?;
         assert!(missing.missing);
+        Ok(())
+    }
+
+    /// An `AvatarPickerSearch` GET (with the query the client's own builder
+    /// mints) answers the residents whose **username, display name or legacy
+    /// name** matches — the three fields the legacy UDP picker could not search
+    /// — and the client folds the reply into an `AvatarPickerReply` under the
+    /// query id the runtime stamped, with the modern identity intact.
+    #[test]
+    fn avatar_picker_search_round_trips() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+
+        let found = AgentKey::from(uuid::Uuid::from_u128(0x7601));
+        let other = AgentKey::from(uuid::Uuid::from_u128(0x7602));
+        sim.set_display_name(DisplayName {
+            id: found,
+            username: "marina.vector".to_owned(),
+            display_name: "Marina".to_owned(),
+            legacy_first_name: "MarinaVector".to_owned(),
+            legacy_last_name: "Resident".to_owned(),
+            ..DisplayName::default()
+        });
+        sim.set_display_name(DisplayName {
+            id: other,
+            username: "someone.else".to_owned(),
+            display_name: "Someone Else".to_owned(),
+            legacy_first_name: "SomeoneElse".to_owned(),
+            legacy_last_name: "Resident".to_owned(),
+            ..DisplayName::default()
+        });
+
+        // A username match, typed the way a user types one: with the dot the
+        // builder turns into a space.
+        let query = avatar_picker_search_query("marina.vector", AVATAR_PICKER_PAGE_SIZE);
+        let query = query.trim_start_matches('?').to_owned();
+        let path = granted_cap_path(&caps, "AvatarPickerSearch")?;
+        let (status, body) = respond(&mut caps, &mut sim, &get(&path, Some(&query)))?;
+        assert_eq!(status, 200);
+
+        // The runtime stamps the query id it minted before handing the reply on.
+        let query_id = uuid::Uuid::from_u128(0x7603);
+        let Llsd::Map(mut map) = parse_llsd_xml(&body)? else {
+            return Err("expected a search reply map".into());
+        };
+        let _previous = map.insert("query-id".to_owned(), Llsd::Uuid(query_id));
+        client.handle_caps_event(AVATAR_PICKER_SEARCH_TAG, &Llsd::Map(map), now)?;
+
+        let reply = drain_client(&mut client)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::AvatarPickerReply { query_id, results } => Some((query_id, results)),
+                _other => None,
+            })
+            .ok_or("expected an AvatarPickerReply on the client")?;
+        assert_eq!(reply.0, query_id, "the answer routes back to its search");
+        assert_eq!(
+            reply
+                .1
+                .iter()
+                .map(|result| (result.avatar_id, result.username.clone()))
+                .collect::<Vec<_>>(),
+            vec![(found, "marina.vector".to_owned())],
+            "only the match, and it kept its modern identity"
+        );
         Ok(())
     }
 

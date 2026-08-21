@@ -29,13 +29,14 @@ use std::collections::{BTreeMap, HashMap};
 use sl_types::key::AgentKey;
 use sl_wire::{
     AssetUploadResponse, DisplayName, Llsd, ObjectMediaRequest, ObjectMediaResponse,
-    build_agent_preferences_response, build_asset_upload_response, build_display_names_response,
+    build_agent_preferences_response, build_asset_upload_response,
+    build_avatar_picker_search_response, build_display_names_response,
     build_modify_material_params_response, build_render_materials_response, build_seed_response,
-    parse_agent_preferences, parse_display_names_query, parse_event_queue_request, parse_llsd_xml,
-    parse_modify_material_params_request, parse_new_file_agent_inventory_request,
-    parse_object_media_navigate_request, parse_object_media_request,
-    parse_render_materials_put_request, parse_render_materials_request, parse_seed_request,
-    parse_send_user_report, parse_update_avatar_appearance_request,
+    parse_agent_preferences, parse_avatar_picker_search_query, parse_display_names_query,
+    parse_event_queue_request, parse_llsd_xml, parse_modify_material_params_request,
+    parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
+    parse_object_media_request, parse_render_materials_put_request, parse_render_materials_request,
+    parse_seed_request, parse_send_user_report, parse_update_avatar_appearance_request,
     parse_update_item_asset_request, parse_update_script_agent_request,
     parse_update_script_task_request, parse_update_task_item_asset_request,
 };
@@ -51,10 +52,11 @@ use crate::session::{
 };
 use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
-    CAP_AGENT_PREFERENCES, CAP_CHAT_SESSION_REQUEST, CAP_COPY_INVENTORY_FROM_NOTECARD,
-    CAP_GET_DISPLAY_NAMES, CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY,
-    CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_UPDATE_AVATAR_APPEARANCE,
+    CAP_AGENT_PREFERENCES, CAP_AVATAR_PICKER_SEARCH, CAP_CHAT_SESSION_REQUEST,
+    CAP_COPY_INVENTORY_FROM_NOTECARD, CAP_GET_DISPLAY_NAMES, CAP_MODIFY_MATERIAL_PARAMS,
+    CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA, CAP_OBJECT_MEDIA_NAVIGATE,
+    CAP_READ_OFFLINE_MSGS, CAP_RENDER_MATERIALS, CAP_SEND_USER_REPORT,
+    CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_UPDATE_AVATAR_APPEARANCE,
     CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
@@ -114,6 +116,7 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_CHAT_SESSION_REQUEST,
     CAP_READ_OFFLINE_MSGS,
     CAP_GET_DISPLAY_NAMES,
+    CAP_AVATAR_PICKER_SEARCH,
     CAP_AGENT_PREFERENCES,
     CAP_SEND_USER_REPORT,
     CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
@@ -155,6 +158,9 @@ pub enum CapHandler {
     /// The deliver-once `ReadOfflineMsgs` fetch of messages stored while the
     /// agent was offline ([`SimSession::take_offline_messages`]).
     OfflineMessages,
+    /// The `AvatarPickerSearch` name search over [`SimSession`]'s display-name
+    /// store — the modern replacement for the UDP `AvatarPickerRequest`.
+    AvatarPickerSearch,
     /// The `GetDisplayNames` people-service lookup, served from
     /// [`SimSession`]'s display-name store ([`SimSession::display_name`]).
     DisplayNames,
@@ -447,6 +453,7 @@ impl SimCaps {
             CAP_CHAT_SESSION_REQUEST => Some(CapHandler::ChatSession),
             CAP_READ_OFFLINE_MSGS => Some(CapHandler::OfflineMessages),
             CAP_GET_DISPLAY_NAMES => Some(CapHandler::DisplayNames),
+            CAP_AVATAR_PICKER_SEARCH => Some(CapHandler::AvatarPickerSearch),
             CAP_AGENT_PREFERENCES => Some(CapHandler::AgentPreferences),
             CAP_SEND_USER_REPORT => Some(CapHandler::UserReport),
             CAP_SEND_USER_REPORT_WITH_SCREENSHOT => Some(CapHandler::UserReportScreenshot),
@@ -534,6 +541,9 @@ impl SimCaps {
                 }
                 Some(CapHandler::DisplayNames) => {
                     CapsDispatch::Response(Self::dispatch_display_names(sim, request))
+                }
+                Some(CapHandler::AvatarPickerSearch) => {
+                    CapsDispatch::Response(Self::dispatch_avatar_picker_search(sim, request))
                 }
                 Some(CapHandler::AgentPreferences) => {
                     CapsDispatch::Response(Self::dispatch_agent_preferences(sim, request))
@@ -740,6 +750,24 @@ impl SimCaps {
             })
             .collect::<Vec<DisplayName>>();
         CapsResponse::llsd_xml(build_display_names_response(&records))
+    }
+
+    /// Serves one `AvatarPickerSearch` GET: the residents whose username,
+    /// display name or legacy name contains the `names` query parameter, capped
+    /// at its `page_size`, as the reply's `agents` array. A query with no
+    /// `names` at all is a `400`; one that matches nobody is an empty (but
+    /// successful) `agents` array — a search answers with what it found.
+    fn dispatch_avatar_picker_search(sim: &SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "GET" {
+            return CapsResponse::method_not_allowed();
+        }
+        let query = request.query.unwrap_or_default();
+        let Some((names, page_size)) = parse_avatar_picker_search_query(&format!("?{query}"))
+        else {
+            return CapsResponse::bad_request();
+        };
+        let matches = sim.search_display_names(&names, page_size);
+        CapsResponse::llsd_xml(build_avatar_picker_search_response(&matches))
     }
 
     /// Serves one `AgentPreferences` POST: merges the request's `Some` fields
@@ -1265,6 +1293,7 @@ mod tests {
             ("CreateInventoryCategory", CapStatus::Pending),
             ("ExtEnvironment", CapStatus::Pending),
             ("GetDisplayNames", CapStatus::Served),
+            ("AvatarPickerSearch", CapStatus::Served),
             ("RemoteParcelRequest", CapStatus::Pending),
             ("SimulatorFeatures", CapStatus::Pending),
             ("LSLSyntax", CapStatus::Pending),

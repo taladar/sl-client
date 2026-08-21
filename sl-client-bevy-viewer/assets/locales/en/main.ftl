@@ -758,6 +758,8 @@ avatar-picker-tab-search = Search
 avatar-picker-tab-friends = Friends
 avatar-picker-tab-near-me = Near me
 avatar-picker-go = Go
+# Shown in the results list when a search matched nobody.
+avatar-picker-not-found = No residents found
 avatar-picker-ok = OK
 avatar-picker-cancel = Cancel
 ## The item properties floater + Open previews

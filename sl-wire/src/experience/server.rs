@@ -5,6 +5,7 @@ use super::{
 };
 use crate::WireError;
 use crate::llsd::{Llsd, LlsdError, parse_llsd_xml};
+use crate::url::{percent_decode, query_param, url_query};
 use sl_types::key::ExperienceKey;
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -18,61 +19,6 @@ use uuid::Uuid;
 // counterpart, so a request round-trips builder → parser and a reply round-trips
 // builder → parser.
 // ---------------------------------------------------------------------------
-
-/// Returns the query string of a `{cap}{suffix}` URL — everything after the
-/// first `?` — or `None` when the suffix carries no query.
-fn url_query(suffix: &str) -> Option<&str> {
-    suffix.split_once('?').map(|(_path, query)| query)
-}
-
-/// Returns the value of query parameter `name` within a `key=value&…` query
-/// string, if present.
-fn query_param<'query>(query: &'query str, name: &str) -> Option<&'query str> {
-    query
-        .split('&')
-        .filter_map(|pair| pair.split_once('='))
-        .find_map(|(key, value)| (key == name).then_some(value))
-}
-
-/// Maps an ASCII hex digit (`0-9`, `a-f`, `A-F`) to its nibble value, or `None`.
-const fn from_hex_digit(byte: u8) -> Option<u8> {
-    match byte {
-        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
-        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
-        b'A'..=b'F' => Some(byte.wrapping_sub(b'A').wrapping_add(10)),
-        _ => None,
-    }
-}
-
-/// Decodes a percent-encoded URL query value — the inverse of [`percent_encode`].
-/// A `%XX` pair becomes its byte; a malformed `%` (not followed by two hex
-/// digits) is kept verbatim. The resulting bytes are interpreted as UTF-8
-/// (lossily, since the encoder only ever emits valid UTF-8).
-fn percent_decode(text: &str) -> String {
-    let mut bytes = Vec::with_capacity(text.len());
-    let mut iter = text.bytes();
-    while let Some(byte) = iter.next() {
-        if byte == b'%' {
-            let high = iter.next();
-            let low = iter.next();
-            match (high.and_then(from_hex_digit), low.and_then(from_hex_digit)) {
-                (Some(high), Some(low)) => bytes.push(high.wrapping_shl(4) | low),
-                _ => {
-                    bytes.push(b'%');
-                    if let Some(high) = high {
-                        bytes.push(high);
-                    }
-                    if let Some(low) = low {
-                        bytes.push(low);
-                    }
-                }
-            }
-        } else {
-            bytes.push(byte);
-        }
-    }
-    String::from_utf8_lossy(&bytes).into_owned()
-}
 
 /// Parses the [`experience_info_query`](crate::experience_info_query) URL suffix back into the requested ids
 /// (every `public_id` query parameter). Unparsable ids are skipped; an absent

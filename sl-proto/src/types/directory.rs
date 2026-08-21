@@ -274,6 +274,13 @@ pub struct DirLandResult {
 
 /// One name matched by an [`AvatarPickerRequest`](crate::Command::AvatarPickerRequest),
 /// carried in an [`AvatarPickerReply`](crate::Event::AvatarPickerReply).
+///
+/// The search has two wire paths and this is the answer of both. The modern
+/// `AvatarPickerSearch` capability matches on username *and* display name and
+/// fills every field; the legacy UDP `AvatarPickerRequest` knows only the legacy
+/// name, so it leaves [`username`](Self::username) and
+/// [`display_name`](Self::display_name) empty — a consumer showing them falls
+/// back to the legacy pair.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AvatarPickerResult {
     /// The matched avatar.
@@ -282,6 +289,11 @@ pub struct AvatarPickerResult {
     pub first_name: String,
     /// The avatar's last (legacy) name.
     pub last_name: String,
+    /// The avatar's username / SLID (`james.linden`), or empty on the legacy
+    /// path.
+    pub username: String,
+    /// The avatar's chosen display name, or empty on the legacy path.
+    pub display_name: String,
 }
 
 /// One land holding returned by a [`PlacesQuery`](crate::Command::PlacesQuery),

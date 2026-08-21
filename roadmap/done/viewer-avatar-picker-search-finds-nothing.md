@@ -2,7 +2,7 @@
 id: viewer-avatar-picker-search-finds-nothing
 title: The avatar picker searches over the retired UDP path, so it finds nobody
 topic: viewer
-status: bugs
+status: done
 origin: seen on aditi while live-checking [[viewer-conference-start-ui]]
   (2026-08-21)
 refs: [viewer-inventory-share-picker, viewer-avatar-picker-multi-pick,
@@ -83,3 +83,33 @@ someone new, and the reason
 
 Reference (Firestorm, read-only): `llfloateravatarpicker.cpp` (`find`,
 `findByNameCoro`, `findByIdCoro`, `processResponse`).
+
+## Fixed (2026-08-21)
+
+`AvatarPickerSearch` is now a requested capability and the preferred path:
+`Command::AvatarPickerRequest` GETs `?page_size=100&names=<escaped>` where the
+region publishes it, and falls back to the legacy message where it does not
+(OpenSim). The reply's rows are the display-name records the codec already had,
+so `parse_avatar_picker_search` is `parse_display_names` without the `bad_ids`
+half; the runtimes stamp the caller's query id into the reply (the HTTP path has
+none of its own) under `AVATAR_PICKER_SEARCH_TAG`, so an answer still routes
+back to the search that asked. A match now seeds the display-name cache too —
+one search, both uses, as the reference's picker does.
+
+`AvatarPickerResult` grew `username` and `display_name`, empty on the legacy
+path. The picker shows the display name with the username beside it in a dimmer
+column (the reference's two columns), searches a typed **uuid** through
+`GetDisplayNames` instead, drops the nil-uuid sentinel rather than rendering it
+as a row, and says **No residents found** when a search answers nobody.
+
+The server direction came with it: `SimCaps` serves `AvatarPickerSearch` from
+`SimSession`'s display-name store, tokenising the query and matching username /
+display name / legacy name (`search_display_names`). A round-trip test drives a
+username search through the cap and folds the reply into a real client's
+`AvatarPickerReply`.
+
+**Verified live on aditi** the same day: a search answered
+`AvatarPickerSearch/reply` and resolved a real resident (display name plus
+`@username`), where minutes earlier the legacy path had answered its nil
+sentinel to every query — including `Linden`. The match also seeded the
+display-name cache, as intended.

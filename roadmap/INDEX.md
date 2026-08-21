@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 263 |
 | blocked | 68 |
 | in-progress | 17 |
-| bugs | 36 |
-| done | 848 |
+| bugs | 35 |
+| done | 849 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1361** |
@@ -1081,7 +1081,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (36)
+## bugs (35)
 
 ### protocol
 
@@ -1106,8 +1106,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Unit tests open real audio devices on the developer's machine
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-avatar-picker-search-finds-nothing`](bugs/viewer-avatar-picker-search-finds-nothing.md)
-  — The avatar picker searches over the retired UDP path, so it finds nobody
 - [`viewer-clipped-links-still-pickable`](bugs/viewer-clipped-links-still-pickable.md)
   — Scrolled-out chat links still hover and click, above the floater
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1169,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (848)
+## done (849)
 
 ### protocol
 
@@ -1364,6 +1362,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Smooth the avatar's rendered position (dead-reckoning jitter)
 - [`viewer-avatar-picker-multi-pick`](done/viewer-avatar-picker-multi-pick.md) —
   Avatar picker — pick several residents at once
+- [`viewer-avatar-picker-search-finds-nothing`](done/viewer-avatar-picker-search-finds-nothing.md)
+  — The avatar picker searches over the retired UDP path, so it finds nobody
 - [`viewer-avatar-profile-group-list`](done/viewer-avatar-profile-group-list.md)
   — Avatar profile — make the 2nd-Life groups a proper (clickable) group list
 - [`viewer-avatar-radar`](done/viewer-avatar-radar.md) — Avatar radar

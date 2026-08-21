@@ -430,6 +430,31 @@ pub const CAP_EXT_ENVIRONMENT: &str = "ExtEnvironment";
 /// stock OpenSim serves it only when its user-management component is present.
 pub const CAP_GET_DISPLAY_NAMES: &str = "GetDisplayNames";
 
+/// The HTTP capability behind the **"Choose Resident" name search**
+/// (`AvatarPickerSearch`): a GET of `…?page_size=N&names=<escaped>` returning
+/// `{ agents: [ … ] }` — the same per-avatar records
+/// [`CAP_GET_DISPLAY_NAMES`] answers with, so a match carries the username, the
+/// display name *and* the legacy pair.
+///
+/// This is the modern replacement for the UDP `AvatarPickerRequest`
+/// ([`Session::avatar_picker_request`]), and on Second Life the *only* one that
+/// works: the legacy message answers a single nil-uuid "no matches" block for
+/// every query there, however common the name. The runtimes prefer this
+/// capability where the region publishes it and fall back to the message
+/// otherwise (OpenSim), exactly as Firestorm does
+/// (`llfloateravatarpicker.cpp`). The reply is decoded by
+/// [`Session::handle_caps_event`] into [`Event::AvatarPickerReply`], tagged
+/// [`AVATAR_PICKER_SEARCH_TAG`] so the query id rides along.
+pub const CAP_AVATAR_PICKER_SEARCH: &str = "AvatarPickerSearch";
+
+/// The tag the runtimes attach when forwarding a [`CAP_AVATAR_PICKER_SEARCH`]
+/// reply to [`Session::handle_caps_event`]. A synthetic routing key (never a
+/// real capability name): the reply carries no query id of its own — the
+/// legacy message's `QueryID` has no HTTP counterpart — so the runtime wraps it
+/// as `{ "agents": <array>, "query-id": <uuid> }` under this tag, the same
+/// stamping convention [`CHAT_SESSION_FETCH_HISTORY_TAG`] uses.
+pub const AVATAR_PICKER_SEARCH_TAG: &str = "AvatarPickerSearch/reply";
+
 /// The HTTP capability that resolves a region location to a grid-wide **parcel
 /// id** (`RemoteParcelRequest`): a POST of `{ location, region_id | region_handle
 /// }` returning `{ parcel_id }`. Driven by the runtimes' `RequestRemoteParcelId`
@@ -623,6 +648,7 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     CAP_CREATE_INVENTORY_CATEGORY,
     CAP_EXT_ENVIRONMENT,
     CAP_GET_DISPLAY_NAMES,
+    CAP_AVATAR_PICKER_SEARCH,
     CAP_REMOTE_PARCEL_REQUEST,
     CAP_SIMULATOR_FEATURES,
     CAP_LSL_SYNTAX,

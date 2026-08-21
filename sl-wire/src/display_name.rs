@@ -22,11 +22,16 @@
 
 use std::collections::HashMap;
 
+/// The result-page size the reference's avatar picker asks for
+/// (`llfloateravatarpicker.cpp`: `page_size=100`).
+pub const AVATAR_PICKER_PAGE_SIZE: u32 = 100;
+
 use sl_types::key::AgentKey;
 use uuid::Uuid;
 
 use crate::WireError;
 use crate::llsd::Llsd;
+use crate::url::{percent_decode, percent_encode, query_param, url_query};
 
 /// A single avatar's display-name record, as carried in a `GetDisplayNames`
 /// reply's `agents` array (and decoded by [`DisplayName::from_llsd`]).
@@ -257,6 +262,76 @@ pub fn parse_display_names_query(suffix: &str) -> Vec<Uuid> {
         .collect()
 }
 
+/// Builds the URL suffix for an `AvatarPickerSearch` GET, appended directly to
+/// the capability URL (`{cap}{suffix}` → `{cap}?page_size=N&names=<escaped>`).
+///
+/// This is the **modern name search behind the "Choose Resident" picker**: it
+/// matches on the username / SLID *and* the display name, where the legacy UDP
+/// `AvatarPickerRequest` matched only the legacy name — and, on Second Life
+/// today, matches nothing at all. Firestorm sends the same GET whenever the
+/// region publishes the capability (`llfloateravatarpicker.cpp`, "Prefer use of
+/// capabilities to search on both SLID and display name"), and falls back to the
+/// UDP message only without it.
+///
+/// `names` is percent-encoded; a `.` is first turned into a space, as the
+/// reference does, so a typed username (`james.linden`) matches the same way a
+/// typed legacy name does.
+#[must_use]
+pub fn avatar_picker_search_query(names: &str, page_size: u32) -> String {
+    let spaced = names.replace('.', " ");
+    format!("?page_size={page_size}&names={}", percent_encode(&spaced))
+}
+
+/// Decodes an `AvatarPickerSearch` reply into [`DisplayName`] records — the
+/// reply's `agents` array holds the *same* per-avatar maps a `GetDisplayNames`
+/// reply does (Firestorm reads each row straight into an `LLAvatarName`), so
+/// this is [`parse_display_names`] without the `bad_ids` half: a search has no
+/// "could not resolve" ids, only matches.
+///
+/// A search that matched nobody answers an empty `agents` array (or no `agents`
+/// member at all), which decodes to an empty list — a legitimate answer, not an
+/// error.
+///
+/// # Errors
+///
+/// Returns [`WireError::Llsd`] if `agents` is present with the wrong LLSD kind,
+/// or an element has a wrong-kind / absent identity field.
+pub fn parse_avatar_picker_search(body: &Llsd) -> Result<Vec<DisplayName>, WireError> {
+    let Some(agents) = body.field_array("agents", "agents")? else {
+        return Ok(Vec::new());
+    };
+    agents.iter().map(DisplayName::from_llsd).collect()
+}
+
+/// Parses an [`avatar_picker_search_query`] URL suffix back into its
+/// `(names, page_size)` pair (the names percent-decoded), for the server side of
+/// the capability. Returns `None` when the suffix carries no `names` parameter;
+/// an absent or unparsable `page_size` defaults to
+/// [`AVATAR_PICKER_PAGE_SIZE`].
+#[must_use]
+pub fn parse_avatar_picker_search_query(suffix: &str) -> Option<(String, u32)> {
+    let query = url_query(suffix)?;
+    let names = percent_decode(query_param(query, "names")?);
+    let page_size = query_param(query, "page_size")
+        .and_then(|value| value.parse::<u32>().ok())
+        .unwrap_or(AVATAR_PICKER_PAGE_SIZE);
+    Some((names, page_size))
+}
+
+/// Builds an `AvatarPickerSearch` reply (`{ agents }`) from the matched records
+/// — the inverse of [`parse_avatar_picker_search`]. A record flagged
+/// [`missing`](DisplayName::missing) is skipped rather than emitted: unlike a
+/// by-id lookup, a *search* answers with what it found.
+#[must_use]
+pub fn build_avatar_picker_search_response(names: &[DisplayName]) -> String {
+    let agents = names
+        .iter()
+        .filter(|name| !name.missing)
+        .map(DisplayName::to_llsd)
+        .collect();
+    Llsd::Map(HashMap::from([("agents".to_owned(), Llsd::Array(agents))])).to_llsd_xml()
+}
+
 /// Builds a `GetDisplayNames` reply (`{ agents, bad_ids }`) from a list of
 /// records — the inverse of [`parse_display_names`]. Records flagged
 /// [`missing`](DisplayName::missing) are emitted as bare ids in `bad_ids` (the
@@ -289,7 +364,9 @@ mod tests {
     use uuid::Uuid;
 
     use super::{
-        DisplayName, build_display_names_response, display_names_query, parse_display_names,
+        AVATAR_PICKER_PAGE_SIZE, DisplayName, avatar_picker_search_query,
+        build_avatar_picker_search_response, build_display_names_response, display_names_query,
+        parse_avatar_picker_search, parse_avatar_picker_search_query, parse_display_names,
         parse_display_names_query,
     };
     use crate::WireError;
@@ -406,6 +483,57 @@ mod tests {
         assert_eq!(first, &name);
         assert_eq!(second.id.uuid(), bad);
         assert!(second.missing);
+        Ok(())
+    }
+
+    /// The `AvatarPickerSearch` query carries the page size and the
+    /// percent-encoded names, turning a typed `.` into a space (as the
+    /// reference does, so a username matches the way a legacy name does), and
+    /// parses straight back.
+    #[test]
+    fn avatar_picker_search_query_round_trips() {
+        let suffix = avatar_picker_search_query("marina.vector", AVATAR_PICKER_PAGE_SIZE);
+        assert_eq!(suffix, "?page_size=100&names=marina%20vector");
+        assert_eq!(
+            parse_avatar_picker_search_query(&suffix),
+            Some(("marina vector".to_owned(), 100))
+        );
+        // A query naming nobody is not a search.
+        assert_eq!(parse_avatar_picker_search_query("?page_size=100"), None);
+        // A missing page size falls back to the reference's.
+        assert_eq!(
+            parse_avatar_picker_search_query("?names=bob"),
+            Some(("bob".to_owned(), AVATAR_PICKER_PAGE_SIZE))
+        );
+    }
+
+    /// The search reply's `agents` rows are the same records `GetDisplayNames`
+    /// answers with, so they round-trip through the same codec — and a search
+    /// that matched nobody decodes as an empty list, not an error.
+    #[test]
+    fn avatar_picker_search_response_round_trips() -> Result<(), String> {
+        let record = DisplayName {
+            id: AgentKey::from(Uuid::from_u128(0x51)),
+            username: "marina.vector".to_owned(),
+            display_name: "Marina".to_owned(),
+            legacy_first_name: "MarinaVector".to_owned(),
+            legacy_last_name: "Resident".to_owned(),
+            is_display_name_default: false,
+            display_name_expires: "2026-09-01T00:00:00Z".to_owned(),
+            display_name_next_update: "2026-08-15T00:00:00Z".to_owned(),
+            missing: false,
+        };
+        let body = build_avatar_picker_search_response(std::slice::from_ref(&record));
+        let parsed =
+            parse_avatar_picker_search(&parse_llsd_xml(&body).map_err(|e| format!("{e:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
+        assert_eq!(parsed, vec![record]);
+
+        let empty = build_avatar_picker_search_response(&[]);
+        let none =
+            parse_avatar_picker_search(&parse_llsd_xml(&empty).map_err(|e| format!("{e:?}"))?)
+                .map_err(|error| format!("{error:?}"))?;
+        assert!(none.is_empty(), "a search matching nobody is not an error");
         Ok(())
     }
 }

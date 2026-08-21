@@ -71,6 +71,111 @@ pub fn optional_url_to_wire(url: Option<&Url>) -> String {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Capability query strings
+//
+// Several capabilities are plain GETs whose arguments ride in the URL's query
+// string (`FindExperienceByName`, `AvatarPickerSearch`, the AIS3 fetches, …).
+// These are the shared pieces both directions need: a client builds the suffix,
+// a simulator parses it back.
+// ---------------------------------------------------------------------------
+
+/// Percent-encodes `text` for a URL query value: the RFC 3986 unreserved set is
+/// kept verbatim, every other byte becomes `%XX`. The inverse is
+/// [`percent_decode`].
+pub(crate) fn percent_encode(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for byte in text.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+            out.push(char::from(byte));
+        } else {
+            out.push('%');
+            out.push(hex_digit(byte >> 4));
+            out.push(hex_digit(byte & 0x0f));
+        }
+    }
+    out
+}
+
+/// Maps a nibble (0–15) to its uppercase ASCII hex digit (a match, so no
+/// arithmetic or indexing).
+const fn hex_digit(nibble: u8) -> char {
+    match nibble {
+        0 => '0',
+        1 => '1',
+        2 => '2',
+        3 => '3',
+        4 => '4',
+        5 => '5',
+        6 => '6',
+        7 => '7',
+        8 => '8',
+        9 => '9',
+        10 => 'A',
+        11 => 'B',
+        12 => 'C',
+        13 => 'D',
+        14 => 'E',
+        _ => 'F',
+    }
+}
+
+/// Maps an ASCII hex digit (`0-9`, `a-f`, `A-F`) to its nibble value, or `None`.
+const fn from_hex_digit(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte.wrapping_sub(b'0')),
+        b'a'..=b'f' => Some(byte.wrapping_sub(b'a').wrapping_add(10)),
+        b'A'..=b'F' => Some(byte.wrapping_sub(b'A').wrapping_add(10)),
+        _ => None,
+    }
+}
+
+/// Decodes a percent-encoded URL query value — the inverse of
+/// [`percent_encode`]. A `%XX` pair becomes its byte; a malformed `%` (not
+/// followed by two hex digits) is kept verbatim. The resulting bytes are
+/// interpreted as UTF-8 (lossily, since the encoder only ever emits valid
+/// UTF-8).
+pub(crate) fn percent_decode(text: &str) -> String {
+    let mut bytes = Vec::with_capacity(text.len());
+    let mut iter = text.bytes();
+    while let Some(byte) = iter.next() {
+        if byte == b'%' {
+            let high = iter.next();
+            let low = iter.next();
+            match (high.and_then(from_hex_digit), low.and_then(from_hex_digit)) {
+                (Some(high), Some(low)) => bytes.push(high.wrapping_shl(4) | low),
+                _ => {
+                    bytes.push(b'%');
+                    if let Some(high) = high {
+                        bytes.push(high);
+                    }
+                    if let Some(low) = low {
+                        bytes.push(low);
+                    }
+                }
+            }
+        } else {
+            bytes.push(byte);
+        }
+    }
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Returns the query string of a `{cap}{suffix}` URL — everything after the
+/// first `?` — or `None` when the suffix carries no query.
+pub(crate) fn url_query(suffix: &str) -> Option<&str> {
+    suffix.split_once('?').map(|(_path, query)| query)
+}
+
+/// Returns the value of query parameter `name` within a `key=value&…` query
+/// string, if present.
+pub(crate) fn query_param<'query>(query: &'query str, name: &str) -> Option<&'query str> {
+    query
+        .split('&')
+        .filter_map(|pair| pair.split_once('='))
+        .find_map(|(key, value)| (key == name).then_some(value))
+}
+
 #[cfg(test)]
 mod test {
     use super::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};

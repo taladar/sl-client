@@ -49,7 +49,9 @@ pub use agent_preferences::{
 pub use circuit_code::CircuitCode;
 pub use control_flags::ControlFlags;
 pub use display_name::{
-    DisplayName, build_display_names_response, display_names_query, parse_display_names,
+    AVATAR_PICKER_PAGE_SIZE, DisplayName, avatar_picker_search_query,
+    build_avatar_picker_search_response, build_display_names_response, display_names_query,
+    parse_avatar_picker_search, parse_avatar_picker_search_query, parse_display_names,
     parse_display_names_query,
 };
 pub use error::WireError;
