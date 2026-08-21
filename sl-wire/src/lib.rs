@@ -212,11 +212,12 @@ pub use user_info::{
     build_user_info_update, parse_user_info_reply, parse_user_info_update,
 };
 pub use voice::{
-    IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
-    VoiceAccountInfo, VoiceProvisionRequest, build_parcel_voice_info_request,
-    build_parcel_voice_info_response, build_provision_voice_account_request,
-    build_provision_voice_account_response, build_voice_signaling_request,
-    parse_provision_voice_account_request, parse_voice_signaling_request,
+    IceCandidate, ParcelVoiceInfo, VOICE_CHANNEL_TYPE_LOCAL, VOICE_CHANNEL_TYPE_MULTIAGENT,
+    VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC, VoiceAccountInfo, VoiceChannelUri,
+    VoiceProvisionRequest, build_parcel_voice_info_request, build_parcel_voice_info_response,
+    build_provision_voice_account_request, build_provision_voice_account_response,
+    build_voice_signaling_request, parse_provision_voice_account_request,
+    parse_voice_signaling_request,
 };
 pub use xfer::{
     XFER_CHUNK_SIZE, XFER_EOF_FLAG, XferChunk, XferOutgoingPacket, XferPacketId, decode_xfer_chunk,

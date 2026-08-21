@@ -16867,8 +16867,10 @@ mod test {
         assert_eq!(info.parcel_local_id, sl_proto::RegionLocalParcelId(7));
         assert_eq!(info.region_name, region_name("Default Region"));
         assert_eq!(
-            info.channel_uri.as_ref().map(url::Url::as_str),
-            Some("sip:Region@sip.example.com")
+            info.channel_uri
+                .as_ref()
+                .map(sl_wire::VoiceChannelUri::to_wire),
+            Some("sip:Region@sip.example.com".to_owned())
         );
         Ok(())
     }
@@ -19229,7 +19231,9 @@ mod test {
             .ok_or("expected a voice channel")?;
         assert_eq!(
             channel.channel_uri,
-            url::Url::parse("sip:conf@example.com").ok()
+            url::Url::parse("sip:conf@example.com")
+                .ok()
+                .map(sl_wire::VoiceChannelUri::Uri)
         );
         assert_eq!(channel.channel_credentials.as_deref(), Some("tok123"));
         assert_eq!(channel.voice_server_type.as_deref(), Some("vivox"));
@@ -19268,7 +19272,9 @@ mod test {
             .ok_or("expected a voice channel")?;
         assert_eq!(
             channel.channel_uri,
-            url::Url::parse("sip:room@example.com").ok()
+            url::Url::parse("sip:room@example.com")
+                .ok()
+                .map(sl_wire::VoiceChannelUri::Uri)
         );
         assert_eq!(channel.voice_server_type.as_deref(), Some("webrtc"));
         assert_eq!(channel.channel_credentials, None);
@@ -19507,7 +19513,9 @@ mod test {
             .ok_or("expected the voice channel to survive")?;
         assert_eq!(
             channel.channel_uri,
-            url::Url::parse("sip:room@example.com").ok()
+            url::Url::parse("sip:room@example.com")
+                .ok()
+                .map(sl_wire::VoiceChannelUri::Uri)
         );
         Ok(())
     }

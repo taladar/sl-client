@@ -37,7 +37,8 @@ use sl_wire::{
     build_get_object_cost_response, build_get_object_physics_data_response,
     build_land_resource_detail_response, build_land_resource_summary_response,
     build_land_resources_response, build_lsl_syntax_document,
-    build_modify_material_params_response, build_region_experiences_response,
+    build_modify_material_params_response, build_parcel_voice_info_response,
+    build_provision_voice_account_response, build_region_experiences_response,
     build_remote_parcel_response, build_render_materials_response,
     build_resource_cost_selected_response, build_seed_response, build_simulator_features_response,
     parse_agent_preferences, parse_ais_category_children_fetch_url,
@@ -51,13 +52,14 @@ use sl_wire::{
     parse_group_experiences_query, parse_land_resources_request, parse_llsd_xml,
     parse_modify_material_params_request, parse_new_file_agent_inventory_request,
     parse_object_media_navigate_request, parse_object_media_request,
-    parse_region_experiences_request, parse_remote_parcel_request,
-    parse_render_materials_put_request, parse_render_materials_request,
-    parse_resource_cost_selected_request, parse_seed_request, parse_send_user_report,
-    parse_set_experience_permission_request, parse_update_avatar_appearance_request,
-    parse_update_experience_request, parse_update_item_asset_request,
-    parse_update_script_agent_request, parse_update_script_task_request,
-    parse_update_task_item_asset_request,
+    parse_provision_voice_account_request, parse_region_experiences_request,
+    parse_remote_parcel_request, parse_render_materials_put_request,
+    parse_render_materials_request, parse_resource_cost_selected_request, parse_seed_request,
+    parse_send_user_report, parse_set_experience_permission_request,
+    parse_update_avatar_appearance_request, parse_update_experience_request,
+    parse_update_item_asset_request, parse_update_script_agent_request,
+    parse_update_script_task_request, parse_update_task_item_asset_request,
+    parse_voice_signaling_request,
 };
 use url::Url;
 use uuid::Uuid;
@@ -82,15 +84,16 @@ use crate::{
     CAP_GROUP_EXPERIENCES, CAP_INVENTORY_API_V3, CAP_IS_EXPERIENCE_ADMIN,
     CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX,
     CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-    CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
-    CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_GESTURE_AGENT_INVENTORY,
-    CAP_UPDATE_MATERIAL_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
-    CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK,
-    CAP_UPDATE_SETTINGS_AGENT_INVENTORY, CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT,
-    CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event,
-    InventoryFolder, InventoryItem, ServerEvent, offline_messages_to_llsd,
+    CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS,
+    CAP_RESOURCE_COST_SELECTED, CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
+    CAP_UPDATE_GESTURE_AGENT_INVENTORY, CAP_UPDATE_MATERIAL_AGENT_INVENTORY,
+    CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
+    CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
+    CAP_UPLOAD_BAKED_TEXTURE, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event, InventoryFolder,
+    InventoryItem, ServerEvent, VoiceProvisionRefusal, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -202,6 +205,10 @@ const SERVED_CAPABILITIES: &[&str] = &[
     CAP_IS_EXPERIENCE_CONTRIBUTOR,
     CAP_UPDATE_EXPERIENCE,
     CAP_REGION_EXPERIENCES,
+    // The voice signalling cluster.
+    CAP_PROVISION_VOICE_ACCOUNT,
+    CAP_PARCEL_VOICE_INFO,
+    CAP_VOICE_SIGNALING,
 ];
 
 /// How the simulator serves one capability name.
@@ -328,6 +335,16 @@ pub enum CapHandler {
     /// allowed / blocked / trusted lists, POST replaces them wholesale
     /// (`SimSession::apply_region_experiences`).
     RegionExperiences,
+    /// `ProvisionVoiceAccountRequest`: a WebRTC offer → JSEP answer (or a
+    /// logout), or the Vivox account fixture, served from the voice stub
+    /// ([`SimSession::voice`], `SimSession::provision_voice`).
+    ProvisionVoiceAccount,
+    /// `ParcelVoiceInfoRequest`: the agent's parcel voice channel from the
+    /// stub's parcel table (`SimSession::parcel_voice_info`).
+    ParcelVoiceInfo,
+    /// `VoiceSignalingRequest`: the WebRTC ICE trickle, recorded on its
+    /// connection (`SimSession::record_voice_signaling`).
+    VoiceSignaling,
 }
 
 /// A transport-agnostic CAPS HTTP request, borrowed from the server glue.
@@ -405,6 +422,12 @@ impl CapsResponse {
     /// LLSD-XML.
     const fn bad_request() -> Self {
         Self::empty(400)
+    }
+
+    /// `401 Unauthorized` — a voice provision whose channel credentials do
+    /// not match (the viewer reports it as "channel locked").
+    const fn unauthorized() -> Self {
+        Self::empty(401)
     }
 
     /// `502 Bad Gateway` — the "nothing yet, re-poll" answer to a held
@@ -630,6 +653,9 @@ impl SimCaps {
             }
             CAP_UPDATE_EXPERIENCE => Some(CapHandler::UpdateExperience),
             CAP_REGION_EXPERIENCES => Some(CapHandler::RegionExperiences),
+            CAP_PROVISION_VOICE_ACCOUNT => Some(CapHandler::ProvisionVoiceAccount),
+            CAP_PARCEL_VOICE_INFO => Some(CapHandler::ParcelVoiceInfo),
+            CAP_VOICE_SIGNALING => Some(CapHandler::VoiceSignaling),
             // Every two-stage upload cap shares one handler; the cap name only
             // picks the step-1 metadata parser inside it.
             name if UPLOAD_CAPABILITIES.contains(&name) => Some(CapHandler::AssetUpload),
@@ -801,6 +827,15 @@ impl SimCaps {
                 }
                 Some(CapHandler::RegionExperiences) => {
                     CapsDispatch::Response(Self::dispatch_region_experiences(sim, request))
+                }
+                Some(CapHandler::ProvisionVoiceAccount) => {
+                    CapsDispatch::Response(Self::dispatch_provision_voice_account(sim, request))
+                }
+                Some(CapHandler::ParcelVoiceInfo) => {
+                    CapsDispatch::Response(Self::dispatch_parcel_voice_info(sim, request))
+                }
+                Some(CapHandler::VoiceSignaling) => {
+                    CapsDispatch::Response(Self::dispatch_voice_signaling(sim, request))
                 }
                 // Tokens are only minted for served capabilities, so a
                 // resolved name always has a handler; answer 404 rather than
@@ -2030,6 +2065,68 @@ impl SimCaps {
         }
     }
 
+    /// Serves one `ProvisionVoiceAccountRequest` POST from the voice stub.
+    /// A refusal maps to the status the viewer interprets
+    /// (`llvoicewebrtc.cpp`, `LLVoiceWebRTCConnection::OnVoiceConnectionRequestFailure`):
+    /// bad channel credentials → `401` ("channel locked"), a logout for an
+    /// unknown `viewer_session` → `404`, an unavailable backend / missing
+    /// offer / unknown channel → `400`. The body must be LLSD (else `400`);
+    /// the request's fields are otherwise decoded leniently.
+    fn dispatch_provision_voice_account(
+        sim: &mut SimSession,
+        request: &CapsRequest<'_>,
+    ) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(body) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok(provision) = parse_provision_voice_account_request(body) else {
+            return CapsResponse::bad_request();
+        };
+        match sim.provision_voice(provision) {
+            Ok(info) => CapsResponse::llsd_xml(build_provision_voice_account_response(&info)),
+            Err(VoiceProvisionRefusal::BadCredentials) => CapsResponse::unauthorized(),
+            Err(VoiceProvisionRefusal::UnknownSession) => CapsResponse::not_found(),
+            Err(_refused) => CapsResponse::bad_request(),
+        }
+    }
+
+    /// Serves one `ParcelVoiceInfoRequest` POST: the body is ignored (the
+    /// viewer sends `undef`), the reply describes the agent's recorded
+    /// parcel — its stored channel, or the empty-`channel_uri` "no voice
+    /// here" form.
+    fn dispatch_parcel_voice_info(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        CapsResponse::llsd_xml(build_parcel_voice_info_response(&sim.parcel_voice_info()))
+    }
+
+    /// Serves one `VoiceSignalingRequest` POST (the WebRTC ICE trickle):
+    /// records the batch on its connection and acks with an undefined body
+    /// (the viewer only looks at the status — a non-2xx makes it restart the
+    /// voice session). An unknown `viewer_session` answers `404`; a
+    /// malformed body `400`.
+    fn dispatch_voice_signaling(sim: &mut SimSession, request: &CapsRequest<'_>) -> CapsResponse {
+        if request.method != "POST" {
+            return CapsResponse::method_not_allowed();
+        }
+        let Ok(body) = std::str::from_utf8(request.body) else {
+            return CapsResponse::bad_request();
+        };
+        let Ok((viewer_session, candidates, completed)) = parse_voice_signaling_request(body)
+        else {
+            return CapsResponse::bad_request();
+        };
+        if sim.record_voice_signaling(viewer_session, candidates, completed) {
+            CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+        } else {
+            CapsResponse::not_found()
+        }
+    }
+
     /// Mints the URL for one capability token: `{base}/cap/{token}`.
     ///
     /// Built via `path_segments_mut` rather than `Url::join` (whose
@@ -2213,9 +2310,9 @@ mod tests {
             ("RenderMaterials", CapStatus::Served),
             ("ModifyMaterialParams", CapStatus::Served),
             ("UpdateMaterialAgentInventory", CapStatus::Served),
-            ("ProvisionVoiceAccountRequest", CapStatus::Pending),
-            ("ParcelVoiceInfoRequest", CapStatus::Pending),
-            ("VoiceSignalingRequest", CapStatus::Pending),
+            ("ProvisionVoiceAccountRequest", CapStatus::Served),
+            ("ParcelVoiceInfoRequest", CapStatus::Served),
+            ("VoiceSignalingRequest", CapStatus::Served),
             ("GetExperienceInfo", CapStatus::Served),
             ("FindExperienceByName", CapStatus::Served),
             ("GetExperiences", CapStatus::Served),

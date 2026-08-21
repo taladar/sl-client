@@ -8,9 +8,10 @@ mod test {
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_tokio::{
         ChatChannel, ChatType, Client, Command, Event, LoginParams, LoginRequest, StartLocation,
+        VoiceProvisionRequest,
     };
     use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
-    use sl_proto::ServerEvent;
+    use sl_proto::{ServerEvent, VoiceChannelUri};
     use tokio::sync::mpsc;
 
     /// A boxed error for terse test signatures.
@@ -405,6 +406,147 @@ mod test {
             })
             .await?;
         assert_eq!(data, uploaded);
+        Ok(())
+    }
+
+    /// The WebRTC voice signalling path end to end through the real client:
+    /// the region advertises WebRTC (`SimulatorFeatures.VoiceServerType`,
+    /// the arrival `RequiredVoiceVersion` push), a spatial offer is answered
+    /// (`Event::VoiceAccountProvisioned`), the ICE trickle lands grid-side,
+    /// the parcel channel is the region id, and logout closes the session.
+    #[tokio::test]
+    async fn voice_signalling_round_trips_through_the_real_client() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let region_id = running.agent.with_sim(|sim| sim.region_id()).await;
+        let mut server_events = running.agent.events();
+
+        // The backend advertisement reaches the client both ways.
+        let mut features_seen = false;
+        let mut version_seen = false;
+        while !(features_seen && version_seen) {
+            running
+                .wait_for(|event| match event {
+                    Event::SimulatorFeatures(features)
+                        if features.voice_server_type.as_deref() == Some("webrtc") =>
+                    {
+                        Some(true)
+                    }
+                    Event::RequiredVoiceVersion(version)
+                        if version.voice_server_type.as_deref() == Some("webrtc") =>
+                    {
+                        Some(false)
+                    }
+                    _ => None,
+                })
+                .await
+                .map(|is_features| {
+                    if is_features {
+                        features_seen = true;
+                    } else {
+                        version_seen = true;
+                    }
+                })?;
+        }
+
+        // Offer in → answer out.
+        let offer = "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n\
+            m=audio 9 UDP/TLS/RTP/SAVPF 111\r\nc=IN IP4 0.0.0.0\r\n\
+            a=setup:actpass\r\na=mid:0\r\na=sendrecv\r\na=rtpmap:111 opus/48000/2\r\n";
+        running
+            .commands
+            .send(Command::RequestVoiceAccount {
+                request: VoiceProvisionRequest::webrtc(offer, "local", None),
+            })
+            .await?;
+        let info = running
+            .wait_for(|event| match event {
+                Event::VoiceAccountProvisioned(info) => Some(info.clone()),
+                _ => None,
+            })
+            .await?;
+        assert!(info.is_webrtc());
+        assert_eq!(info.jsep_type.as_deref(), Some("answer"));
+        let viewer_session = info.viewer_session.clone().ok_or("no viewer session")?;
+        let answer = info.jsep_sdp.clone().ok_or("no answer sdp")?;
+        assert!(answer.lines().any(|line| line == "a=setup:passive"));
+        assert!(answer.lines().any(|line| line == "a=ice-ufrag:fakegrid"));
+
+        // The ICE trickle is recorded on the grid-side connection.
+        let candidate = sl_client_tokio::IceCandidate {
+            sdp_mid: "0".to_owned(),
+            sdp_mline_index: 0,
+            candidate: "candidate:1 1 udp 2122260223 192.168.1.10 51234 typ host".to_owned(),
+        };
+        running
+            .commands
+            .send(Command::SendVoiceSignaling {
+                viewer_session: viewer_session.clone(),
+                candidates: vec![candidate.clone()],
+                completed: false,
+            })
+            .await?;
+        loop {
+            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            if let ServerEvent::VoiceSignalingReceived {
+                viewer_session: seen,
+                candidates,
+                known,
+                ..
+            } = &event
+            {
+                assert_eq!(seen, &viewer_session);
+                assert_eq!(candidates, &vec![candidate.clone()]);
+                assert!(known);
+                break;
+            }
+        }
+        let recorded = running
+            .agent
+            .with_sim(|sim| {
+                sim.voice()
+                    .connection(&viewer_session)
+                    .map(|connection| connection.ice_candidates.clone())
+            })
+            .await;
+        assert_eq!(recorded, Some(vec![candidate]));
+
+        // The parcel channel is the region id (SL's estate-wide WebRTC
+        // channel form).
+        running
+            .commands
+            .send(Command::RequestParcelVoiceInfo)
+            .await?;
+        let parcel = running
+            .wait_for(|event| match event {
+                Event::ParcelVoiceInfo(info) => Some(info.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(parcel.channel_uri, Some(VoiceChannelUri::Id(region_id)));
+
+        // Logout tears the connection down.
+        running
+            .commands
+            .send(Command::RequestVoiceAccount {
+                request: VoiceProvisionRequest::webrtc_logout(viewer_session.clone()),
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::VoiceAccountProvisioned(info)
+                    if info.viewer_session.as_deref() == Some(viewer_session.as_str())
+                        && info.jsep_sdp.is_none() =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await?;
+        let closed = running
+            .agent
+            .with_sim(|sim| sim.voice().connection(&viewer_session).is_none())
+            .await;
+        assert!(closed);
         Ok(())
     }
 

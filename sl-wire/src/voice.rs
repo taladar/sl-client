@@ -32,6 +32,79 @@ pub const VOICE_SERVER_TYPE_VIVOX: &str = "vivox";
 /// The voice server type string for the modern WebRTC backend.
 pub const VOICE_SERVER_TYPE_WEBRTC: &str = "webrtc";
 
+/// The WebRTC `channel_type` of the spatial (parcel / estate) voice channel
+/// (Firestorm `llvoicewebrtc.cpp`, `LLVoiceWebRTCSpatialConnection`).
+pub const VOICE_CHANNEL_TYPE_LOCAL: &str = "local";
+
+/// The WebRTC `channel_type` of a group / ad-hoc / P2P voice channel, which
+/// carries the chat session's `channel` id and its `credentials` (Firestorm
+/// `llvoicewebrtc.cpp`, `LLVoiceWebRTCAdHocConnection`).
+pub const VOICE_CHANNEL_TYPE_MULTIAGENT: &str = "multiagent";
+
+/// A voice channel's identity as the grid sends it in `channel_uri`.
+///
+/// Vivox / FreeSWITCH grids (OpenSim) send a `sip:` URI; Second Life's WebRTC
+/// backend sends a **bare UUID** — the region id for an estate-wide channel, a
+/// per-parcel id otherwise (Firestorm `llvoicewebrtc.cpp`,
+/// `LLWebRTCVoiceClient::setSpatialChannel` compares
+/// `channel_uri.asUUID()` to the region id) — and the chat-session voice
+/// channels of both backends use the same field. Which form a channel takes
+/// therefore depends on the backend, not the context, so one type carries both.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum VoiceChannelUri {
+    /// A URI (a `sip:` room on Vivox / FreeSWITCH).
+    Uri(url::Url),
+    /// A bare channel id (the WebRTC region / parcel / session channel).
+    Id(uuid::Uuid),
+}
+
+impl VoiceChannelUri {
+    /// Decodes a raw `channel_uri` string. An empty value is the grid's
+    /// "no voice" sentinel and decodes to `None`; a UUID decodes to
+    /// [`Id`](Self::Id); anything else must parse as a URL
+    /// ([`Uri`](Self::Uri)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::InvalidUrl`] if a non-empty value is neither a
+    /// UUID nor a parseable URL.
+    pub fn from_wire(field: &'static str, raw: &str) -> Result<Option<Self>, WireError> {
+        if raw.trim().is_empty() {
+            return Ok(None);
+        }
+        if let Ok(id) = uuid::Uuid::parse_str(raw) {
+            return Ok(Some(Self::Id(id)));
+        }
+        crate::url_from_wire(field, raw).map(|url| Some(Self::Uri(url)))
+    }
+
+    /// Encodes the channel back to its raw wire string — the inverse of
+    /// [`from_wire`](Self::from_wire).
+    #[must_use]
+    pub fn to_wire(&self) -> String {
+        match self {
+            Self::Uri(url) => crate::url_to_wire(url),
+            Self::Id(id) => id.to_string(),
+        }
+    }
+
+    /// Encodes an optional channel, the empty string standing for "no voice".
+    #[must_use]
+    pub fn optional_to_wire(channel: Option<&Self>) -> String {
+        channel.map(Self::to_wire).unwrap_or_default()
+    }
+}
+
+impl std::fmt::Display for VoiceChannelUri {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Uri(url) => url.fmt(f),
+            Self::Id(id) => id.fmt(f),
+        }
+    }
+}
+
 /// Parameters for a `ProvisionVoiceAccountRequest` capability POST.
 ///
 /// The same capability serves both voice backends; which fields are populated
@@ -53,9 +126,17 @@ pub struct VoiceProvisionRequest {
     /// [`VOICE_SERVER_TYPE_WEBRTC`]); omitted from the body when `None` (the
     /// oldest grids infer Vivox).
     pub voice_server_type: Option<String>,
-    /// The WebRTC channel type (`"local"` for the spatial parcel channel);
-    /// `None` for Vivox.
+    /// The WebRTC channel type ([`VOICE_CHANNEL_TYPE_LOCAL`] for the spatial
+    /// parcel channel, [`VOICE_CHANNEL_TYPE_MULTIAGENT`] for a chat session's
+    /// channel); `None` for Vivox.
     pub channel_type: Option<String>,
+    /// The chat session's voice channel id (the `channel_uri` of its
+    /// `voice_channel_info`) for a [`VOICE_CHANNEL_TYPE_MULTIAGENT`] request;
+    /// `None` for the spatial channel.
+    pub channel: Option<String>,
+    /// The chat session's voice `channel_credentials` for a
+    /// [`VOICE_CHANNEL_TYPE_MULTIAGENT`] request; `None` otherwise.
+    pub credentials: Option<String>,
     /// The parcel's local id to bind the channel to, or `None` to omit it (the
     /// grid then uses the agent's current parcel / the region channel).
     pub parcel_local_id: Option<crate::RegionLocalParcelId>,
@@ -93,8 +174,28 @@ impl VoiceProvisionRequest {
             channel_type: Some(channel_type.into()),
             parcel_local_id,
             jsep_offer_sdp: Some(offer_sdp.into()),
-            logout: false,
-            viewer_session: None,
+            ..Self::default()
+        }
+    }
+
+    /// A WebRTC provision request for a chat session's voice channel
+    /// ([`VOICE_CHANNEL_TYPE_MULTIAGENT`]): the JSEP `offer` SDP plus the
+    /// session's `channel` id and `credentials` as received in its
+    /// `voice_channel_info` (Firestorm `llvoicewebrtc.cpp`,
+    /// `LLVoiceWebRTCAdHocConnection::requestVoiceConnection`).
+    #[must_use]
+    pub fn webrtc_channel(
+        offer_sdp: impl Into<String>,
+        channel: impl Into<String>,
+        credentials: Option<String>,
+    ) -> Self {
+        Self {
+            voice_server_type: Some(VOICE_SERVER_TYPE_WEBRTC.to_owned()),
+            channel_type: Some(VOICE_CHANNEL_TYPE_MULTIAGENT.to_owned()),
+            channel: Some(channel.into()),
+            credentials,
+            jsep_offer_sdp: Some(offer_sdp.into()),
+            ..Self::default()
         }
     }
 
@@ -131,7 +232,9 @@ pub struct IceCandidate {
 /// (see [`VoiceProvisionRequest`]). Only the populated fields are emitted, so a
 /// [`VoiceProvisionRequest::vivox`] produces just `{ voice_server_type: "vivox"
 /// }` while a [`VoiceProvisionRequest::webrtc`] additionally carries the nested
-/// `jsep` offer, the `channel_type` and any `parcel_local_id`.
+/// `jsep` offer, the `channel_type` and any `parcel_local_id`, and a
+/// [`VoiceProvisionRequest::webrtc_channel`] the session `channel` and
+/// `credentials` instead of the parcel.
 #[must_use]
 pub fn build_provision_voice_account_request(request: &VoiceProvisionRequest) -> String {
     let mut out = String::from("<llsd><map>");
@@ -153,6 +256,16 @@ pub fn build_provision_voice_account_request(request: &VoiceProvisionRequest) ->
     if let Some(channel_type) = &request.channel_type {
         out.push_str("<key>channel_type</key><string>");
         push_escaped(&mut out, channel_type);
+        out.push_str("</string>");
+    }
+    if let Some(channel) = &request.channel {
+        out.push_str("<key>channel</key><string>");
+        push_escaped(&mut out, channel);
+        out.push_str("</string>");
+    }
+    if let Some(credentials) = &request.credentials {
+        out.push_str("<key>credentials</key><string>");
+        push_escaped(&mut out, credentials);
         out.push_str("</string>");
     }
     if let Some(viewer_session) = &request.viewer_session {
@@ -252,6 +365,10 @@ pub fn parse_provision_voice_account_request(
             .map(str::to_owned),
         channel_type: root
             .field_str("channel_type", "channel_type")?
+            .map(str::to_owned),
+        channel: root.field_str("channel", "channel")?.map(str::to_owned),
+        credentials: root
+            .field_str("credentials", "credentials")?
             .map(str::to_owned),
         parcel_local_id: root
             .field_i32("parcel_local_id", "parcel_local_id")?
@@ -504,10 +621,11 @@ pub struct ParcelVoiceInfo {
     /// The region's name, or `None` when the reply carried an empty (unknown)
     /// name.
     pub region_name: Option<sl_types::map::RegionName>,
-    /// The channel URI to connect to (a `sip:` URI for Vivox/FreeSWITCH), or
-    /// `None`/empty when the parcel has no voice (the viewer then drops out of
-    /// spatial voice).
-    pub channel_uri: Option<url::Url>,
+    /// The channel to connect to (a `sip:` URI for Vivox/FreeSWITCH, a bare
+    /// channel UUID for WebRTC — see [`VoiceChannelUri`]), or `None`/empty
+    /// when the parcel has no voice (the viewer then drops out of spatial
+    /// voice).
+    pub channel_uri: Option<VoiceChannelUri>,
     /// Optional per-channel credentials (rarely sent — OpenSim leaves it unset).
     pub channel_credentials: Option<String>,
 }
@@ -546,7 +664,7 @@ impl ParcelVoiceInfo {
         let (channel_uri, channel_credentials) = match body.get("voice_credentials") {
             None | Some(Llsd::Undef) => (None, None),
             Some(credentials @ Llsd::Map(_)) => (
-                crate::optional_url_from_wire(
+                VoiceChannelUri::from_wire(
                     "channel_uri",
                     credentials.require_str("channel_uri", "channel_uri")?,
                 )?,
@@ -596,7 +714,7 @@ impl ParcelVoiceInfo {
     pub fn to_llsd(&self) -> Llsd {
         let mut credentials: HashMap<String, Llsd> = HashMap::from([(
             "channel_uri".to_owned(),
-            Llsd::String(crate::optional_url_to_wire(self.channel_uri.as_ref())),
+            Llsd::String(VoiceChannelUri::optional_to_wire(self.channel_uri.as_ref())),
         )]);
         if let Some(value) = &self.channel_credentials {
             let _previous = credentials.insert(
@@ -632,7 +750,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        IceCandidate, ParcelVoiceInfo, VoiceAccountInfo, VoiceProvisionRequest,
+        IceCandidate, ParcelVoiceInfo, VoiceAccountInfo, VoiceChannelUri, VoiceProvisionRequest,
         build_parcel_voice_info_request, build_parcel_voice_info_response,
         build_provision_voice_account_request, build_provision_voice_account_response,
         build_voice_signaling_request, parse_provision_voice_account_request,
@@ -728,7 +846,10 @@ mod tests {
             "Default Region"
         );
         assert_eq!(
-            info.channel_uri.as_ref().map(url::Url::as_str),
+            info.channel_uri
+                .as_ref()
+                .map(VoiceChannelUri::to_wire)
+                .as_deref(),
             Some("sip:Region@sip.example.com")
         );
         assert_eq!(info.channel_credentials, None);
@@ -796,6 +917,40 @@ mod tests {
         }
     }
 
+    /// A `channel_uri` is a `sip:` URI on Vivox / FreeSWITCH grids and a bare
+    /// UUID on Second Life's WebRTC backend; both decode (and re-encode
+    /// verbatim), the empty string is `None`, and anything else is rejected.
+    #[test]
+    fn voice_channel_uri_forms() -> Result<(), String> {
+        let sip = VoiceChannelUri::from_wire("channel_uri", "sip:Region@sip.example.com")
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or("expected a sip channel")?;
+        assert!(matches!(sip, VoiceChannelUri::Uri(_)));
+        assert_eq!(sip.to_wire(), "sip:Region@sip.example.com");
+
+        let id = VoiceChannelUri::from_wire("channel_uri", "3d9c5c8e-0000-0000-0000-000000000001")
+            .map_err(|error| format!("{error:?}"))?
+            .ok_or("expected an id channel")?;
+        assert_eq!(
+            id,
+            VoiceChannelUri::Id(uuid::Uuid::from_u128(
+                0x3d9c_5c8e_0000_0000_0000_0000_0000_0001
+            ))
+        );
+        assert_eq!(id.to_wire(), "3d9c5c8e-0000-0000-0000-000000000001");
+
+        assert_eq!(
+            VoiceChannelUri::from_wire("channel_uri", "  ")
+                .map_err(|error| format!("{error:?}"))?,
+            None
+        );
+        assert!(matches!(
+            VoiceChannelUri::from_wire("channel_uri", "not a channel"),
+            Err(crate::WireError::InvalidUrl { .. })
+        ));
+        Ok(())
+    }
+
     /// An empty `channel_uri` (no voice on the parcel) decodes to `None`.
     #[test]
     fn parcel_voice_info_no_voice() -> Result<(), String> {
@@ -850,6 +1005,11 @@ mod tests {
                 Some(crate::RegionLocalParcelId(7)),
             ),
             VoiceProvisionRequest::webrtc("v=0 offer", "local", None),
+            VoiceProvisionRequest::webrtc_channel(
+                "v=0 offer",
+                "3d9c5c8e-0000-0000-0000-000000000001",
+                Some("token".to_owned()),
+            ),
             VoiceProvisionRequest::webrtc_logout("sess-9"),
         ] {
             let body = build_provision_voice_account_request(&request);
@@ -936,9 +1096,9 @@ mod tests {
             parcel_local_id: crate::RegionLocalParcelId(42),
             region_name: crate::region_name_from_wire("region_name", "Default Region")
                 .map_err(|error| format!("{error:?}"))?,
-            channel_uri: Some(
+            channel_uri: Some(VoiceChannelUri::Uri(
                 url::Url::parse("sip:Region@sip.example.com").map_err(|e| e.to_string())?,
-            ),
+            )),
             channel_credentials: Some("creds".to_owned()),
         };
         let reply = parse_llsd_xml(&build_parcel_voice_info_response(&info))

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use bytes::Bytes;
 use sl_proto::{
     DEFAULT_TERRAIN_DETAIL_TEXTURES, Maturity, OpenSimExtras, ProductType, RegionHandle,
-    RegionIdentity, RegionTerrainComposition, SimSession, SimulatorFeatures, Uuid,
+    RegionIdentity, RegionTerrainComposition, SimSession, SimulatorFeatures, Uuid, VoiceConfig,
     region_name_from_wire,
 };
 use sl_types::key::AgentKey;
@@ -238,8 +238,11 @@ impl GridCore {
         if *sim.simulator_features() == SimulatorFeatures::default() {
             // The scenario left the feature document untouched: advertise
             // the grid-wide URLs (map tiles, currency helper) the way an
-            // OpenSim region does through `OpenSimExtras`.
-            sim.set_simulator_features(self.simulator_features());
+            // OpenSim region does through `OpenSimExtras`, and the voice
+            // backend the scenario enabled (`VoiceServerType`).
+            let mut features = self.simulator_features();
+            features.voice_server_type = sim.voice().advertised_server_type().map(str::to_owned);
+            sim.set_simulator_features(features);
         }
 
         let base_url: url::Url =
@@ -355,6 +358,13 @@ fn enrich_success(
     success.region_size_y = Some(256);
     success.agent_access = Some("M".to_owned());
     success.agent_access_max = Some("A".to_owned());
+    // The `voice-config` section mirrors the backend the scenario enabled.
+    success.voice_config = sim
+        .voice()
+        .advertised_server_type()
+        .map(|voice_server_type| VoiceConfig {
+            voice_server_type: voice_server_type.to_owned(),
+        });
     success.start_location = Some("last".to_owned());
     success.seconds_since_epoch = Some(now_epoch_seconds());
 

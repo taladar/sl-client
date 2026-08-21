@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 262 |
+| ready | 261 |
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 849 |
+| done | 850 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1351** |
@@ -217,13 +217,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (262)
+## ready (261)
 
 ### protocol
 
-- [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
-  Server-side voice provisioning and WebRTC signalling stub (blocked by
-  `protocol-sim-caps-framework` (done))
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -1147,7 +1144,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (849)
+## done (850)
 
 ### protocol
 
@@ -1301,6 +1298,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   machines for the higher-level LLUDP flows
 - [`protocol-sim-udp-flows-2`](done/protocol-sim-udp-flows-2.md) — Server-side
   mirrors for the remaining Session flow machines
+- [`protocol-sim-voice-signalling`](done/protocol-sim-voice-signalling.md) —
+  Server-side voice provisioning and WebRTC signalling stub (blocked by
+  `protocol-sim-caps-framework` (done))
 - [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)

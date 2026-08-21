@@ -1695,6 +1695,8 @@ fn build_voice_request(
         jsep_offer_sdp: args.opt_str(ctx, "jsep_offer_sdp", 3)?,
         logout: args.bool_or(ctx, "logout", 4, false)?,
         viewer_session: args.opt_str(ctx, "viewer_session", 5)?,
+        channel: args.opt_str(ctx, "channel", 6)?,
+        credentials: args.opt_str(ctx, "credentials", 7)?,
     })
 }
 
@@ -5175,7 +5177,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_voice_account",
-            usage: "[logout=] [jsep_offer_sdp=] [channel_type=] …",
+            usage: "[logout=] [jsep_offer_sdp=] [channel_type=] [channel=] [credentials=] …",
             build: |args, ctx| {
                 Ok(Command::RequestVoiceAccount {
                     request: build_voice_request(args, ctx)?,

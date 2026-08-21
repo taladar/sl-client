@@ -268,9 +268,10 @@ pub struct NearbyHistoryLine {
 /// no-coordinates channel. Signalling only — never the audio stream.
 #[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct VoiceChannelInfo {
-    /// The voice room URI to connect to (`sip:…` for Vivox, the session room for
-    /// WebRTC), or `None` when the grid carried an empty/absent uri.
-    pub channel_uri: Option<url::Url>,
+    /// The voice room to connect to (`sip:…` for Vivox, the session's channel
+    /// id for WebRTC — see [`VoiceChannelUri`](sl_wire::VoiceChannelUri)), or
+    /// `None` when the grid carried an empty/absent uri.
+    pub channel_uri: Option<sl_wire::VoiceChannelUri>,
     /// Optional per-channel credentials (a token the voice client presents when
     /// connecting; rarely sent — OpenSim leaves it unset).
     pub channel_credentials: Option<String>,

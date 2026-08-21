@@ -30,4 +30,9 @@ manager and the world map expect: `GET /get_grid_info` (and the XML-RPC
 points back at the grid), and the economy helper scripts
 `/currency.php` + `/landtool.php` for the buy-L$ / buy-land flows.
 
+The stock scenario also speaks WebRTC **voice signalling** (offer →
+answer, ICE trickle, parcel channel, logout — no media plane) and
+advertises it the way a Second Life region does (`voice-config`,
+`SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`).
+
 See the book chapter "The fake grid" for architecture and usage.

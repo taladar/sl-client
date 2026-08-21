@@ -3558,8 +3558,9 @@ fn optional_string_member(map: &Llsd, key: &str) -> Option<String> {
 
 /// Decodes a [`VoiceChannelInfo`] from a session-voice LLSD map — either an
 /// invitation's `voice` body or the `ChatSessionRequest "accept invitation"`
-/// reply's `voice_channel_info` block. Reads the room `channel_uri` (a non-empty,
-/// parseable uri; an empty/garbled uri decodes to `None`), the optional
+/// reply's `voice_channel_info` block. Reads the room `channel_uri` (a non-empty
+/// `sip:` uri or a bare WebRTC channel id; an empty/garbled uri decodes to
+/// `None`), the optional
 /// per-channel `channel_credentials`, the `voice_server_type` backend tag, and the
 /// SL `session_handle`. A map with none of these decodes to an empty
 /// [`VoiceChannelInfo`] (the channel exists but its coordinates are not yet
@@ -3568,8 +3569,8 @@ pub(crate) fn voice_channel_info_from_llsd(map: &Llsd) -> VoiceChannelInfo {
     let channel_uri = map
         .get("channel_uri")
         .and_then(Llsd::as_str)
-        .filter(|uri| !uri.is_empty())
-        .and_then(|uri| url::Url::parse(uri).ok());
+        .and_then(|uri| sl_wire::VoiceChannelUri::from_wire("channel_uri", uri).ok())
+        .flatten();
     VoiceChannelInfo {
         channel_uri,
         channel_credentials: optional_string_member(map, "channel_credentials"),

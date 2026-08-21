@@ -101,6 +101,20 @@ impl SharedSim {
                 if let Err(error) = state.sim.send_region_handshake(&state.identity, now) {
                     tracing::warn!("auto region handshake failed: {error}");
                 }
+                // A voice-enabled region tells the arriving viewer which
+                // backend to load (`RequiredVoiceVersion` over the event
+                // queue, as the simulator does on region entry).
+                if let Some(voice_server_type) = state.sim.voice().advertised_server_type() {
+                    state
+                        .sim
+                        .enqueue_required_voice_version(&sl_proto::RequiredVoiceVersion {
+                            major_version: 1,
+                            region_name: sl_wire::region_name_to_wire(
+                                state.identity.sim_name.as_ref(),
+                            ),
+                            voice_server_type: Some(voice_server_type.to_owned()),
+                        });
+                }
                 if let Some(hook) = &state.on_agent_arrived {
                     hook(&mut state.sim);
                 }

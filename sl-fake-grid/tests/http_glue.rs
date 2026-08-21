@@ -76,6 +76,14 @@ mod test {
         assert!(!success.inventory_skeleton.is_empty());
         assert!(success.inventory_root.is_some());
         assert_eq!(success.sim_ip, std::net::Ipv4Addr::LOCALHOST);
+        // The stock scenario speaks WebRTC voice; the login says so.
+        assert_eq!(
+            success
+                .voice_config
+                .as_ref()
+                .map(|voice| voice.voice_server_type.as_str()),
+            Some("webrtc")
+        );
 
         let text = post_login(
             &grid,

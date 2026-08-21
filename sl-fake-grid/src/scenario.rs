@@ -17,8 +17,9 @@ use std::sync::Arc;
 
 use sl_proto::{
     AssetKey, AssetType, ChatSource, ChatType, InventoryFolder, InventoryItem, InventoryType,
-    LindenAmount, Permissions, Permissions5, RegionLocalObjectId, SaleType, ServerEvent,
-    SimSession, TaskInventoryItem,
+    LindenAmount, ParcelVoiceInfo, Permissions, Permissions5, RegionLocalObjectId,
+    RegionLocalParcelId, SaleType, ServerEvent, SimSession, TaskInventoryItem, VoiceChannelUri,
+    WebRtcStub,
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
@@ -213,8 +214,17 @@ fn stock_item(id: u128, folder: InventoryFolderKey, name: &str) -> InventoryItem
     }
 }
 
+/// The region-local id of the stock region-wide parcel.
+pub const STOCK_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1);
+
 /// Seeds the stock fixtures on a fresh session: agent inventory (root →
-/// Clothing → Party Hat), a library, and one region-wide parcel.
+/// Clothing → Party Hat), a library, one region-wide parcel, and WebRTC
+/// voice — the stub answerer ([`WebRtcStub::default`]) plus the parcel's
+/// estate-wide voice channel (its `channel_uri` is the region id, as
+/// Second Life sends it), with the agent standing on that parcel. The
+/// runtime advertises the backend from this (`SimulatorFeatures
+/// .VoiceServerType`, the login `voice-config`, the arrival
+/// `RequiredVoiceVersion` push).
 fn default_setup(sim: &mut SimSession) {
     sim.agent_inventory_mut().insert_folder(InventoryFolder {
         folder_id: folder_key(AGENT_ROOT),
@@ -254,6 +264,16 @@ fn default_setup(sim: &mut SimSession) {
         east: 256.0,
         north: 256.0,
     });
+    let region_id = sim.region_id();
+    sim.voice_mut().enable_webrtc(WebRtcStub::default());
+    sim.voice_mut().set_parcel_voice_info(ParcelVoiceInfo {
+        parcel_local_id: STOCK_PARCEL_LOCAL_ID,
+        region_name: None,
+        channel_uri: Some(VoiceChannelUri::Id(region_id)),
+        channel_credentials: None,
+    });
+    sim.voice_mut()
+        .set_agent_parcel(Some(STOCK_PARCEL_LOCAL_ID));
 }
 
 /// Greets the arriving avatar with a system chat line.

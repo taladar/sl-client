@@ -64,15 +64,26 @@ is only to *provision* the client into it:
 
 - **Vivox** (the long-standing system) — the client requests an account and a
   parcel's channel credentials, then connects a Vivox/SIP client out-of-band.
-- **WebRTC** (the newer Second Life path) — provisioning exchanges SDP offers
-  and trickles ICE candidates through capabilities.
+- **WebRTC** (the newer Second Life path) — provisioning exchanges a JSEP
+  offer for an answer over a capability and trickles the client's ICE
+  candidates through another; the server's candidates ride inside the
+  answer, so the trickle is one-way (client → server).
 
 The relevant capabilities are `ProvisionVoiceAccountRequest`,
 `ParcelVoiceInfoRequest`, and (WebRTC) `VoiceSignalingRequest`. The client
 drives them with `Command::RequestVoiceAccount`, `RequestParcelVoiceInfo`, and
 `SendVoiceSignaling`, and receives `Event::VoiceAccountProvisioned` and
 `Event::ParcelVoiceInfo`. Actually carrying the audio is left to a voice client
-the application supplies.
+the application supplies. A parcel's or session's `channel_uri` is a
+`VoiceChannelUri`: a `sip:` URI on Vivox/FreeSWITCH grids, a bare channel
+UUID (the region id for the estate-wide channel) on Second Life's WebRTC
+backend.
+
+The server side of the same signalling — the three caps served from a
+`SimVoice` stub that answers offers, records the trickle, and advertises
+its backend (login `voice-config`, `SimulatorFeatures.VoiceServerType`,
+`RequiredVoiceVersion`) — is described in
+[Capabilities → The voice handlers](../comms/caps.md#the-voice-handlers).
 
 ---
 

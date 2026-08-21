@@ -603,6 +603,73 @@ dispatch over the new fixture. The AIS-style `ais_suffix` helper
 reconstructs the URL suffix those parsers consume (the `/id/` sub-path
 and the bare-query forms both round-trip through it).
 
+### The voice handlers
+
+The voice cluster serves the three voice caps from a signalling **stub**,
+`SimVoice` (`sl-proto/src/sim_voice.rs`, held as `SimSession::voice[_mut]`).
+Its fixtures say which backends the region speaks — a `WebRtcStub` (the
+ICE/DTLS identity every JSEP answer advertises; `Default` is a
+deterministic loopback identity) and/or a Vivox `VoiceAccountInfo` — plus
+a per-parcel `ParcelVoiceInfo` table with the agent's current parcel and
+optional per-channel credentials for chat-session channels. Its live state
+is the WebRTC connections the client provisioned (`VoiceConnection`:
+channel, offer, minted answer, trickled ICE candidates, end-of-gathering
+flag), keyed by the `viewer_session` the stub mints serially. There is
+**no media plane**: nothing listens on the advertised candidate, so the
+stub drives a client's signalling state machine end to end without ever
+carrying audio.
+
+- **`ProvisionVoiceAccountRequest`** (POST) routes on the request:
+  `voice_server_type: "webrtc"` with a JSEP offer opens a connection —
+  `channel_type: "local"` binds the spatial channel (with the optional
+  `parcel_local_id`), `"multiagent"` binds a chat session's `channel`
+  and must present its registered `credentials` — and answers
+  `{ viewer_session, jsep: { type: "answer", sdp } }`, the SDP derived
+  from the offer by `WebRtcStub::answer_for` (media sections mirrored,
+  `a=setup:passive`, the offer's ICE/DTLS lines replaced by ours, our
+  candidates inline plus `a=end-of-candidates`). `logout: true` tears the
+  `viewer_session` down. `"vivox"` (or no server type) hands out the
+  Vivox fixture. Every request surfaces `ServerEvent::VoiceProvisionRequested`
+  with its `VoiceProvisionOutcome`.
+- **`ParcelVoiceInfoRequest`** (POST, body ignored — the viewer sends
+  `undef`) answers the agent's recorded parcel: its stored entry, or the
+  empty-`channel_uri` "no voice here" form. A Second Life WebRTC
+  `channel_uri` is a bare UUID (the region id for the estate-wide
+  channel), which is why `ParcelVoiceInfo` / `VoiceChannelInfo` carry a
+  `VoiceChannelUri` (`Uri(sip:…)` | `Id(uuid)`) rather than a URL.
+  Surfaces `ServerEvent::ParcelVoiceInfoRequested`.
+- **`VoiceSignalingRequest`** (POST) records the ICE trickle
+  (`candidates` batch or `candidate.completed`) on its connection and
+  acks with an undefined body — the viewer only looks at the status (a
+  non-2xx restarts its voice session). Surfaces
+  `ServerEvent::VoiceSignalingReceived` (with `known: false` for a
+  session the stub never provisioned).
+
+The status contract: wrong method `405`, malformed body `400`, an
+unavailable backend / missing offer / unknown channel type `400`, a
+logout or trickle for an unknown `viewer_session` `404`, and mismatched
+channel credentials `401` — the code the reference viewer reports as
+"channel locked" (`409` would be "channel full"; the stub has no capacity
+limit).
+
+Two protocol facts worth knowing: the server's own ICE candidates ride
+**inside the JSEP answer** — the viewer has no inbound ICE-trickle path,
+so there is no server→client signalling event to serve; and the backend
+is advertised three ways, all of which the fake grid derives from the
+stub (`SimVoice::advertised_server_type`): the login response's
+`voice-config`, `SimulatorFeatures.VoiceServerType` (the field the viewer
+picks its spatial voice module from), and the `RequiredVoiceVersion`
+event-queue push on region entry.
+
+No new wire codecs beyond two gaps the cluster closed:
+`SimulatorFeatures.voice_server_type`, and the multi-agent form's
+`channel` / `credentials` on `VoiceProvisionRequest`
+(`VoiceProvisionRequest::webrtc_channel`). The parsers and builders
+(`parse_provision_voice_account_request`, `parse_voice_signaling_request`,
+`build_provision_voice_account_response`,
+`build_parcel_voice_info_response` in `sl-wire/src/voice.rs`) already
+existed inverse-paired from the voice service-pairing task.
+
 ---
 
 > **In this codebase**
@@ -679,3 +746,10 @@ and the bare-query forms both round-trip through it).
 >   `apply_experience_update` and `apply_region_experiences`, which push
 >   the `ExperiencePermissionSet` / `ExperienceUpdated` /
 >   `RegionExperiencesSet` server events.
+> - The voice signalling stub (`SimVoice`, `WebRtcStub`,
+>   `VoiceConnection`, `VoiceChannel`, `VoiceProvisionOutcome` /
+>   `VoiceProvisionRefusal`) is `sl-proto/src/sim_voice.rs`, held as
+>   `SimSession::voice[_mut]`; the caps go through the session wrappers
+>   `provision_voice`, `record_voice_signaling` and `parcel_voice_info`,
+>   which push the `VoiceProvisionRequested` / `VoiceSignalingReceived` /
+>   `ParcelVoiceInfoRequested` server events.

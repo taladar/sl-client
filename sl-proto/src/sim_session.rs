@@ -152,6 +152,7 @@ use crate::session::{
 };
 use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
+use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
@@ -214,6 +215,7 @@ use sl_wire::{
     NewFileAgentInventoryRequest, RenderMaterialEntry, UpdateScriptAgentRequest,
     UpdateScriptTaskRequest,
 };
+use sl_wire::{IceCandidate, ParcelVoiceInfo, VoiceAccountInfo, VoiceProvisionRequest};
 use sl_wire::{
     TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_ASSET, TRANSFER_SOURCE_SIM_ESTATE,
     TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsAsset, TransferSourceParamsEstate,
@@ -1556,6 +1558,42 @@ pub enum ServerEvent {
         /// The region's new trusted list.
         trusted: Vec<ExperienceKey>,
     },
+    /// The client POSTed a `ProvisionVoiceAccountRequest` — a WebRTC offer
+    /// (spatial or chat-session channel), a WebRTC logout, or a Vivox
+    /// account request. Already answered from the voice stub
+    /// ([`SimSession::voice`]); the `outcome` says how (an opened
+    /// connection carries its minted `viewer_session`). Informational for a
+    /// driver — a world-authority grid would hand the connection to its
+    /// media server here.
+    VoiceProvisionRequested {
+        /// The decoded request, verbatim (the offer SDP included).
+        request: Box<VoiceProvisionRequest>,
+        /// What the stub did with it.
+        outcome: VoiceProvisionOutcome,
+    },
+    /// The client trickled ICE candidates (or end-of-gathering) over
+    /// `VoiceSignalingRequest`. Already recorded on the connection when
+    /// `known`; a trickle for a `viewer_session` the stub never provisioned
+    /// answers `404` and is surfaced with `known: false`.
+    VoiceSignalingReceived {
+        /// The connection the trickle belongs to.
+        viewer_session: String,
+        /// The candidates in this batch (empty for the end-of-gathering form).
+        candidates: Vec<IceCandidate>,
+        /// Whether this batch signalled end-of-gathering.
+        completed: bool,
+        /// Whether the `viewer_session` is a live connection.
+        known: bool,
+    },
+    /// The client asked for its parcel's voice channel
+    /// (`ParcelVoiceInfoRequest`). Already answered from the stub's parcel
+    /// table for the agent's recorded parcel; informational.
+    ParcelVoiceInfoRequested {
+        /// The parcel the reply described (`-1` when unknown).
+        parcel_local_id: RegionLocalParcelId,
+        /// Whether the reply carried a channel (`false` = "no voice here").
+        enabled: bool,
+    },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
     PostcardReceived(Box<Postcard>),
@@ -2363,6 +2401,10 @@ pub struct SimSession {
     /// `RegionExperiences` POST) apply to it — fixture state, not world
     /// authority — so follow-up reads observe them.
     experiences: SimExperiences,
+    /// The voice signalling stub the three voice capabilities serve from
+    /// ([`SimSession::voice_mut`] to enable a backend and seed parcel
+    /// channels; the live WebRTC connections are its mutable state).
+    voice: SimVoice,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
 }
@@ -2548,6 +2590,7 @@ impl SimSession {
             land_resource_summary: ResourceSummary::default(),
             land_resource_details: Vec::new(),
             experiences: SimExperiences::default(),
+            voice: SimVoice::default(),
             events: VecDeque::new(),
         }
     }
@@ -3018,9 +3061,17 @@ impl SimSession {
             })
     }
 
-    /// Sets this region's id, matched against `RemoteParcelRequest` lookups.
+    /// Sets this region's id, matched against `RemoteParcelRequest` lookups
+    /// (and the WebRTC estate voice channel id a scenario seeds).
     pub const fn set_region_id(&mut self, region_id: Uuid) {
         self.region_id = region_id;
+    }
+
+    /// This region's id ([`set_region_id`](Self::set_region_id)); nil until
+    /// set.
+    #[must_use]
+    pub const fn region_id(&self) -> Uuid {
+        self.region_id
     }
 
     /// Adds a parcel-cover rectangle to the `RemoteParcelRequest` lookup
@@ -3098,6 +3149,70 @@ impl SimSession {
     /// setters).
     pub const fn experiences_mut(&mut self) -> &mut SimExperiences {
         &mut self.experiences
+    }
+
+    /// The voice signalling stub — read access for the voice capability
+    /// handlers and for tests asserting the live connections.
+    #[must_use]
+    pub const fn voice(&self) -> &SimVoice {
+        &self.voice
+    }
+
+    /// Mutable access to the voice signalling stub — the driver/test
+    /// population API ([`SimVoice::enable_webrtc`],
+    /// [`SimVoice::set_vivox_account`], [`SimVoice::set_parcel_voice_info`],
+    /// [`SimVoice::set_agent_parcel`], [`SimVoice::set_channel_credentials`]).
+    pub const fn voice_mut(&mut self) -> &mut SimVoice {
+        &mut self.voice
+    }
+
+    /// Serves one `ProvisionVoiceAccountRequest` from the voice stub and
+    /// surfaces [`ServerEvent::VoiceProvisionRequested`] with the outcome.
+    /// Returns the reply body on success or the refusal (which the cap maps
+    /// to a status code).
+    pub(crate) fn provision_voice(
+        &mut self,
+        request: VoiceProvisionRequest,
+    ) -> Result<VoiceAccountInfo, VoiceProvisionRefusal> {
+        let (result, outcome) = self.voice.provision(&request);
+        self.events.push_back(ServerEvent::VoiceProvisionRequested {
+            request: Box::new(request),
+            outcome,
+        });
+        result
+    }
+
+    /// Records one `VoiceSignalingRequest` trickle on its connection and
+    /// surfaces [`ServerEvent::VoiceSignalingReceived`]. Returns whether the
+    /// `viewer_session` was a live connection.
+    pub(crate) fn record_voice_signaling(
+        &mut self,
+        viewer_session: String,
+        candidates: Vec<IceCandidate>,
+        completed: bool,
+    ) -> bool {
+        let known = self
+            .voice
+            .record_signaling(&viewer_session, &candidates, completed);
+        self.events.push_back(ServerEvent::VoiceSignalingReceived {
+            viewer_session,
+            candidates,
+            completed,
+            known,
+        });
+        known
+    }
+
+    /// Serves one `ParcelVoiceInfoRequest` from the voice stub's parcel
+    /// table and surfaces [`ServerEvent::ParcelVoiceInfoRequested`].
+    pub(crate) fn parcel_voice_info(&mut self) -> ParcelVoiceInfo {
+        let info = self.voice.parcel_voice_info();
+        self.events
+            .push_back(ServerEvent::ParcelVoiceInfoRequested {
+                parcel_local_id: info.parcel_local_id,
+                enabled: info.channel_uri.is_some(),
+            });
+        info
     }
 
     /// Applies one `ExperiencePreferences` mutation to the serving store

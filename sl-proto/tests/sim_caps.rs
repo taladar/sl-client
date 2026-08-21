@@ -20,25 +20,27 @@ mod test {
         CAP_GET_OBJECT_PHYSICS_DATA, CAP_GET_TEXTURE, CAP_GROUP_EXPERIENCES,
         CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, CAP_LAND_RESOURCES, CAP_LSL_SYNTAX,
         CAP_MODIFY_MATERIAL_PARAMS, CAP_NEW_FILE_AGENT_INVENTORY, CAP_OBJECT_MEDIA,
-        CAP_OBJECT_MEDIA_NAVIGATE, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-        CAP_REMOTE_PARCEL_REQUEST, CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED,
-        CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE,
-        CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
-        CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE, CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT,
-        CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY,
-        CHAT_SESSION_FETCH_HISTORY_TAG, CapsDispatch, CapsRequest, CapsUploadMetadata,
-        ChatSessionKind, DayCycle, DisplayName, EnvironmentSettings, EnvironmentUpdate, Event,
-        ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
-        ExperienceUpdate, FaceMaterialPut, GroupKey, ImDialog, ImSessionId, InMemoryAssetSource,
-        InstantMessage, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryKey,
-        LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial,
-        LoginParams, LslKeyword, LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost,
-        ObjectKey, ObjectMediaState, ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources,
-        Permissions5, PhysicsShapeType, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
+        CAP_OBJECT_MEDIA_NAVIGATE, CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT,
+        CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST,
+        CAP_RENDER_MATERIALS, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
+        CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_UPDATE_NOTECARD_AGENT_INVENTORY,
+        CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
+        CAP_VIEWER_ASSET, CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
+        CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
+        CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DayCycle, DisplayName,
+        EnvironmentSettings, EnvironmentUpdate, Event, ExperienceInfo, ExperienceKey,
+        ExperiencePermission, ExperienceProperties, ExperienceUpdate, FaceMaterialPut, GroupKey,
+        ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage, InventoryFolder,
+        InventoryFolderKey, InventoryItem, InventoryKey, LAND_RESOURCE_DETAIL_TAG,
+        LAND_RESOURCE_SUMMARY_TAG, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams, LslKeyword,
+        LslSyntax, MaterialOverrideUpdate, MediaEntry, ObjectCost, ObjectKey, ObjectMediaState,
+        ObjectPhysicsData, OwnerKey, ParcelKey, ParcelScriptResources, Permissions5,
+        PhysicsShapeType, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
         RegionLocalParcelId, ResourceAmount, ResourceSummary, ScriptedObjectInfo,
         ScriptedObjectResources, SelectedCostKind, SelectedResourceCost, ServerEvent,
         ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimParcel, SimSession,
-        SimulatorFeatures, StartLocation, TextureKey, build_environment_update_request,
+        SimulatorFeatures, StartLocation, TextureKey, VoiceChannel, VoiceProvisionOutcome,
+        VoiceProvisionRefusal, WebRtcStub, build_environment_update_request,
         build_event_queue_request, build_get_object_cost_request,
         build_get_object_physics_data_request, build_land_resources_request,
         build_region_experiences_request, build_remote_parcel_request,
@@ -146,8 +148,9 @@ mod test {
         // upload/materials/MOAP caps, the seven inventory caps (the two
         // descendents fetches, the two per-item fetches, AISv3 agent +
         // Library, CreateInventoryCategory), the nine
-        // region/object-information caps, and the twelve experience caps.
-        assert_eq!(granted.len(), 54);
+        // region/object-information caps, the twelve experience caps, and
+        // the three voice signalling caps.
+        assert_eq!(granted.len(), 57);
         Ok(())
     }
 
@@ -3707,6 +3710,491 @@ mod test {
         assert_eq!(status, 400);
 
         // No mutation above landed: the server-event queue stays empty.
+        assert!(sim.poll_event().is_none());
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // The voice signalling cluster.
+    // -----------------------------------------------------------------------
+
+    /// A Firestorm-shaped JSEP offer with one bundled audio section.
+    const VOICE_OFFER: &str = "v=0\r\n\
+        o=- 42 2 IN IP4 127.0.0.1\r\n\
+        s=-\r\n\
+        t=0 0\r\n\
+        a=group:BUNDLE 0\r\n\
+        m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n\
+        c=IN IP4 0.0.0.0\r\n\
+        a=ice-ufrag:viewer\r\n\
+        a=ice-pwd:viewerviewerviewerviewer\r\n\
+        a=setup:actpass\r\n\
+        a=mid:0\r\n\
+        a=sendrecv\r\n\
+        a=rtcp-mux\r\n\
+        a=rtpmap:111 opus/48000/2\r\n";
+
+    /// A fresh sim with the WebRTC stub enabled.
+    fn webrtc_sim() -> SimSession {
+        let mut sim = new_sim();
+        sim.voice_mut().enable_webrtc(WebRtcStub::default());
+        sim
+    }
+
+    /// Drives one provision POST through the cap and the real client's fold,
+    /// returning the provisioned account the client surfaced.
+    fn provision_through_client(
+        caps: &mut SimCaps,
+        sim: &mut SimSession,
+        client: &mut Session,
+        request: &sl_wire::VoiceProvisionRequest,
+        now: Instant,
+    ) -> Result<sl_wire::VoiceAccountInfo, TestError> {
+        let path = granted_cap_path(caps, CAP_PROVISION_VOICE_ACCOUNT)?;
+        let body = sl_wire::build_provision_voice_account_request(request);
+        let events = fold_into_client(
+            caps,
+            sim,
+            client,
+            &post(&path, &body),
+            CAP_PROVISION_VOICE_ACCOUNT,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::VoiceAccountProvisioned(info)] => Ok(info.clone()),
+            other => Err(format!("expected VoiceAccountProvisioned, got {other:?}").into()),
+        }
+    }
+
+    /// A WebRTC spatial offer is answered with a JSEP answer the real client
+    /// decodes (`Event::VoiceAccountProvisioned`), the stub records the
+    /// connection, and the driver sees `WebRtcOpened` with the parcel.
+    #[test]
+    fn webrtc_spatial_provision_round_trips_through_the_real_client() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+
+        let request = sl_wire::VoiceProvisionRequest::webrtc(
+            VOICE_OFFER,
+            sl_wire::VOICE_CHANNEL_TYPE_LOCAL,
+            Some(RegionLocalParcelId(7)),
+        );
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &request, now)?;
+        assert!(info.is_webrtc());
+        assert_eq!(info.jsep_type.as_deref(), Some("answer"));
+        let session = info
+            .viewer_session
+            .clone()
+            .ok_or("expected a viewer session")?;
+        let answer = info.jsep_sdp.clone().ok_or("expected an answer sdp")?;
+        // XML normalises the SDP's CRLF line ends to LF on the way through
+        // the LLSD body, so compare line-wise.
+        let answer_lines: Vec<&str> = answer.lines().collect();
+        assert!(answer_lines.contains(&"a=setup:passive"));
+        assert!(answer_lines.contains(&"a=ice-ufrag:fakegrid"));
+        assert!(answer_lines.contains(&"a=rtpmap:111 opus/48000/2"));
+        assert!(!answer.contains("viewer"));
+
+        let connection = sim
+            .voice()
+            .connection(&session)
+            .ok_or("expected the live connection")?;
+        assert_eq!(
+            connection.offer_sdp.lines().collect::<Vec<_>>(),
+            VOICE_OFFER.lines().collect::<Vec<_>>()
+        );
+        assert_eq!(
+            connection.answer_sdp.lines().collect::<Vec<_>>(),
+            answer_lines
+        );
+        assert_eq!(
+            connection.channel,
+            VoiceChannel::Spatial {
+                parcel_local_id: Some(RegionLocalParcelId(7)),
+            }
+        );
+        match sim.poll_event() {
+            Some(ServerEvent::VoiceProvisionRequested {
+                request: seen,
+                outcome,
+            }) => {
+                assert_eq!(seen.channel_type, request.channel_type);
+                assert_eq!(seen.parcel_local_id, request.parcel_local_id);
+                assert_eq!(
+                    seen.jsep_offer_sdp
+                        .as_deref()
+                        .map(|sdp| sdp.lines().collect::<Vec<_>>()),
+                    Some(VOICE_OFFER.lines().collect::<Vec<_>>())
+                );
+                assert_eq!(
+                    outcome,
+                    VoiceProvisionOutcome::WebRtcOpened {
+                        viewer_session: session,
+                        channel: VoiceChannel::Spatial {
+                            parcel_local_id: Some(RegionLocalParcelId(7)),
+                        },
+                    }
+                );
+            }
+            other => return Err(format!("expected VoiceProvisionRequested, got {other:?}").into()),
+        }
+        assert!(sim.poll_event().is_none());
+        Ok(())
+    }
+
+    /// The ICE trickle lands on its connection (candidates, then the
+    /// end-of-gathering flag), each batch surfacing a `ServerEvent`; an
+    /// unknown `viewer_session` answers `404` and surfaces `known: false`.
+    #[test]
+    fn voice_signaling_trickles_onto_the_connection() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+        let request = sl_wire::VoiceProvisionRequest::webrtc(
+            VOICE_OFFER,
+            sl_wire::VOICE_CHANNEL_TYPE_LOCAL,
+            None,
+        );
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &request, now)?;
+        let session = info.viewer_session.ok_or("expected a viewer session")?;
+        let _provisioned = sim.poll_event();
+
+        let path = granted_cap_path(&caps, CAP_VOICE_SIGNALING)?;
+        let candidates = vec![
+            sl_wire::IceCandidate {
+                sdp_mid: "0".to_owned(),
+                sdp_mline_index: 0,
+                candidate: "candidate:1 1 udp 2122260223 192.168.1.10 51234 typ host".to_owned(),
+            },
+            sl_wire::IceCandidate {
+                sdp_mid: "0".to_owned(),
+                sdp_mline_index: 0,
+                candidate: "candidate:2 1 udp 1686052607 203.0.113.5 51234 typ srflx".to_owned(),
+            },
+        ];
+        let body = sl_wire::build_voice_signaling_request(&session, &candidates, false);
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!((status, reply.as_str()), (200, "<llsd><undef /></llsd>"));
+        let done = sl_wire::build_voice_signaling_request(&session, &[], true);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &done))?;
+        assert_eq!(status, 200);
+
+        let connection = sim
+            .voice()
+            .connection(&session)
+            .ok_or("expected the live connection")?;
+        assert_eq!(connection.ice_candidates, candidates);
+        assert!(connection.ice_completed);
+        let events: Vec<ServerEvent> = std::iter::from_fn(|| sim.poll_event()).collect();
+        assert_eq!(
+            events,
+            vec![
+                ServerEvent::VoiceSignalingReceived {
+                    viewer_session: session.clone(),
+                    candidates,
+                    completed: false,
+                    known: true,
+                },
+                ServerEvent::VoiceSignalingReceived {
+                    viewer_session: session,
+                    candidates: Vec::new(),
+                    completed: true,
+                    known: true,
+                },
+            ]
+        );
+
+        let stray = sl_wire::build_voice_signaling_request("nope", &[], true);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &stray))?;
+        assert_eq!(status, 404);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::VoiceSignalingReceived { known: false, .. })
+        ));
+        Ok(())
+    }
+
+    /// A WebRTC logout tears the connection down (`WebRtcClosed`); a second
+    /// logout for the same session is an unknown session (`404`).
+    #[test]
+    fn webrtc_logout_closes_the_connection() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+        let open = sl_wire::VoiceProvisionRequest::webrtc(
+            VOICE_OFFER,
+            sl_wire::VOICE_CHANNEL_TYPE_LOCAL,
+            None,
+        );
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &open, now)?;
+        let session = info.viewer_session.ok_or("expected a viewer session")?;
+        let _provisioned = sim.poll_event();
+
+        let logout = sl_wire::VoiceProvisionRequest::webrtc_logout(session.clone());
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &logout, now)?;
+        assert_eq!(info.viewer_session.as_deref(), Some(session.as_str()));
+        assert!(sim.voice().connection(&session).is_none());
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::VoiceProvisionRequested {
+                outcome: VoiceProvisionOutcome::WebRtcClosed { viewer_session },
+                ..
+            }) if viewer_session == session
+        ));
+
+        let path = granted_cap_path(&caps, CAP_PROVISION_VOICE_ACCOUNT)?;
+        let body = sl_wire::build_provision_voice_account_request(&logout);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 404);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::VoiceProvisionRequested {
+                outcome: VoiceProvisionOutcome::Refused(VoiceProvisionRefusal::UnknownSession),
+                ..
+            })
+        ));
+        Ok(())
+    }
+
+    /// A chat session's channel (`multiagent`) is gated by its registered
+    /// credentials: a match opens the connection, a mismatch answers `401`
+    /// (the viewer's "channel locked"), an unknown channel type `400`.
+    #[test]
+    fn multiagent_provision_checks_credentials() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+        sim.voice_mut().set_channel_credentials("room-1", "secret");
+        let path = granted_cap_path(&caps, CAP_PROVISION_VOICE_ACCOUNT)?;
+
+        let good = sl_wire::VoiceProvisionRequest::webrtc_channel(
+            VOICE_OFFER,
+            "room-1",
+            Some("secret".to_owned()),
+        );
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &good, now)?;
+        let session = info.viewer_session.ok_or("expected a viewer session")?;
+        assert_eq!(
+            sim.voice()
+                .connection(&session)
+                .map(|connection| connection.channel.clone()),
+            Some(VoiceChannel::MultiAgent {
+                channel: "room-1".to_owned(),
+            })
+        );
+        let _opened = sim.poll_event();
+
+        let bad = sl_wire::VoiceProvisionRequest::webrtc_channel(
+            VOICE_OFFER,
+            "room-1",
+            Some("wrong".to_owned()),
+        );
+        let body = sl_wire::build_provision_voice_account_request(&bad);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 401);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::VoiceProvisionRequested {
+                outcome: VoiceProvisionOutcome::Refused(VoiceProvisionRefusal::BadCredentials),
+                ..
+            })
+        ));
+
+        let odd = sl_wire::VoiceProvisionRequest::webrtc(VOICE_OFFER, "estate", None);
+        let body = sl_wire::build_provision_voice_account_request(&odd);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 400);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::VoiceProvisionRequested {
+                outcome: VoiceProvisionOutcome::Refused(VoiceProvisionRefusal::UnknownChannel),
+                ..
+            })
+        ));
+        Ok(())
+    }
+
+    /// The Vivox fixture is handed out to a Vivox request (and the real
+    /// client decodes the SIP account); without a fixture — or for a WebRTC
+    /// request on a sim without the stub — the backend is unavailable
+    /// (`400`).
+    #[test]
+    fn vivox_provision_serves_the_fixture() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+        let path = granted_cap_path(&caps, CAP_PROVISION_VOICE_ACCOUNT)?;
+
+        let vivox = sl_wire::VoiceProvisionRequest::vivox();
+        let body = sl_wire::build_provision_voice_account_request(&vivox);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 400);
+        let webrtc = sl_wire::VoiceProvisionRequest::webrtc(
+            VOICE_OFFER,
+            sl_wire::VOICE_CHANNEL_TYPE_LOCAL,
+            None,
+        );
+        let body = sl_wire::build_provision_voice_account_request(&webrtc);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 400);
+        let refused: Vec<ServerEvent> = std::iter::from_fn(|| sim.poll_event()).collect();
+        assert_eq!(refused.len(), 2);
+        assert!(refused.iter().all(|event| matches!(
+            event,
+            ServerEvent::VoiceProvisionRequested {
+                outcome: VoiceProvisionOutcome::Refused(VoiceProvisionRefusal::BackendUnavailable),
+                ..
+            }
+        )));
+
+        let account = sl_wire::VoiceAccountInfo {
+            voice_server_type: Some(sl_wire::VOICE_SERVER_TYPE_VIVOX.to_owned()),
+            username: Some("xAgent".to_owned()),
+            password: Some("hunter2".to_owned()),
+            sip_uri_hostname: Some("sip.example.com".to_owned()),
+            account_server_name: Some("https://vivox.example/api".parse()?),
+            ..sl_wire::VoiceAccountInfo::default()
+        };
+        sim.voice_mut().set_vivox_account(account.clone());
+        let info = provision_through_client(&mut caps, &mut sim, &mut client, &vivox, now)?;
+        assert_eq!(info, account);
+        assert!(matches!(
+            sim.poll_event(),
+            Some(ServerEvent::VoiceProvisionRequested {
+                outcome: VoiceProvisionOutcome::VivoxAccount,
+                ..
+            })
+        ));
+        Ok(())
+    }
+
+    /// `ParcelVoiceInfoRequest` describes the agent's recorded parcel: a
+    /// seeded WebRTC channel (a bare region UUID, decoded by the real client
+    /// as `VoiceChannelUri::Id`), or the "no voice here" form elsewhere — and
+    /// the `RequiredVoiceVersion` push reaches the client through the real
+    /// event-queue poll.
+    #[test]
+    fn parcel_voice_info_follows_the_agent_parcel() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+        let region = uuid::Uuid::from_u128(0x1e6);
+        sim.set_region_id(region);
+        sim.voice_mut().enable_webrtc(WebRtcStub::default());
+        sim.voice_mut()
+            .set_parcel_voice_info(sl_wire::ParcelVoiceInfo {
+                parcel_local_id: RegionLocalParcelId(7),
+                region_name: sl_wire::region_name_from_wire("region_name", "Fake Region")?,
+                channel_uri: Some(sl_wire::VoiceChannelUri::Id(region)),
+                channel_credentials: None,
+            });
+        sim.voice_mut()
+            .set_agent_parcel(Some(RegionLocalParcelId(7)));
+
+        let path = granted_cap_path(&caps, CAP_PARCEL_VOICE_INFO)?;
+        let body = sl_wire::build_parcel_voice_info_request();
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_PARCEL_VOICE_INFO,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ParcelVoiceInfo(info)] => {
+                assert_eq!(info.parcel_local_id, RegionLocalParcelId(7));
+                assert_eq!(
+                    info.region_name,
+                    sl_wire::region_name_from_wire("region_name", "Fake Region")?
+                );
+                assert_eq!(info.channel_uri, Some(sl_wire::VoiceChannelUri::Id(region)));
+            }
+            other => return Err(format!("expected ParcelVoiceInfo, got {other:?}").into()),
+        }
+        assert_eq!(
+            sim.poll_event(),
+            Some(ServerEvent::ParcelVoiceInfoRequested {
+                parcel_local_id: RegionLocalParcelId(7),
+                enabled: true,
+            })
+        );
+
+        sim.voice_mut()
+            .set_agent_parcel(Some(RegionLocalParcelId(8)));
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &post(&path, &body),
+            CAP_PARCEL_VOICE_INFO,
+            now,
+        )?;
+        match events.as_slice() {
+            [Event::ParcelVoiceInfo(info)] => {
+                assert_eq!(info.parcel_local_id, RegionLocalParcelId(8));
+                assert_eq!(info.channel_uri, None);
+            }
+            other => return Err(format!("expected ParcelVoiceInfo, got {other:?}").into()),
+        }
+        assert_eq!(
+            sim.poll_event(),
+            Some(ServerEvent::ParcelVoiceInfoRequested {
+                parcel_local_id: RegionLocalParcelId(8),
+                enabled: false,
+            })
+        );
+
+        sim.enqueue_required_voice_version(&sl_proto::RequiredVoiceVersion {
+            major_version: 1,
+            region_name: "Fake Region".to_owned(),
+            voice_server_type: Some(sl_wire::VOICE_SERVER_TYPE_WEBRTC.to_owned()),
+        });
+        let eq_path = granted_event_queue_path(&caps)?;
+        let poll = build_event_queue_request(None, false);
+        let (status, body) = respond(&mut caps, &mut sim, &post(&eq_path, &poll))?;
+        assert_eq!(status, 200);
+        let batch = parse_event_queue_response(&body)?;
+        for event in &batch.events {
+            client.handle_caps_event(&event.message, &event.body, now)?;
+        }
+        assert!(matches!(
+            drain_client(&mut client).as_slice(),
+            [Event::RequiredVoiceVersion(version)]
+                if version.major_version == 1
+                    && version.voice_server_type.as_deref() == Some("webrtc")
+        ));
+        Ok(())
+    }
+
+    /// The three voice caps reject the wrong method with `405` and a
+    /// malformed body with `400`, without touching the stub.
+    #[test]
+    fn voice_handlers_reject_wrong_methods_and_bad_bodies() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = webrtc_sim();
+        for name in [
+            CAP_PROVISION_VOICE_ACCOUNT,
+            CAP_PARCEL_VOICE_INFO,
+            CAP_VOICE_SIGNALING,
+        ] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _body) = respond(&mut caps, &mut sim, &get(&path, None))?;
+            assert_eq!(status, 405, "{name} GET");
+        }
+        for name in [CAP_PROVISION_VOICE_ACCOUNT, CAP_VOICE_SIGNALING] {
+            let path = granted_cap_path(&caps, name)?;
+            let (status, _body) = respond(&mut caps, &mut sim, &post(&path, "<llsd><map>"))?;
+            assert_eq!(status, 400, "{name} garbage");
+        }
+        assert!(sim.voice().connections().is_empty());
         assert!(sim.poll_event().is_none());
         Ok(())
     }

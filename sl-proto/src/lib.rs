@@ -20,6 +20,7 @@ mod sim_caps;
 mod sim_experiences;
 mod sim_inventory;
 mod sim_session;
+mod sim_voice;
 mod terrain;
 mod types;
 
@@ -112,6 +113,10 @@ pub use sim_session::{
     SESSION_FLOW_COVERAGE, ServerEvent, SimChatSession, SimChatSessionKind, SimParcel, SimSession,
     SitTransform, TransferRequestSource, UserRightsEntry,
 };
+pub use sim_voice::{
+    SimVoice, VoiceChannel, VoiceConnection, VoiceProvisionOutcome, VoiceProvisionRefusal,
+    WebRtcStub,
+};
 pub use terrain::encode_layer;
 pub use types::{
     ActiveGroup, AgentOrObjectKey, AlertInfo, Asset, AssetType, AssetUpdateLocation,
@@ -195,8 +200,9 @@ pub use sl_wire::{
     RemoteParcelRequest, RenderMaterialEntry, ResourceAmount, ResourceSummary, ScriptedObjectInfo,
     ScriptedObjectResources, SelectedCostKind, SelectedResourceCost, SequenceNumber,
     SimulatorFeatures, StartLocation, StartLocationParseError, SymbolKind, TutorialSetting,
-    UiConfig, UserInfoCapReply, UserInfoUpdate, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
-    VoiceAccountInfo, VoiceConfig, VoiceProvisionRequest, WireError,
+    UiConfig, UserInfoCapReply, UserInfoUpdate, VOICE_CHANNEL_TYPE_LOCAL,
+    VOICE_CHANNEL_TYPE_MULTIAGENT, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
+    VoiceAccountInfo, VoiceChannelUri, VoiceConfig, VoiceProvisionRequest, WireError,
     ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
     ais_create_category_url, ais_item_url, build_agent_preferences_request,
     build_agent_preferences_response, build_ais_create_category_body, build_ais_create_link_body,

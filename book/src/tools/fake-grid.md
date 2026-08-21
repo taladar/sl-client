@@ -142,10 +142,32 @@ not cover goes in `Scenario::on_event`, a hook that sees every drained
 `client_end_to_end.rs` drives each of these flows through the real
 `sl-client-tokio` commands.
 
-The stock `Scenario` is intentionally small (an inventory skeleton, a
-library, one parcel, a chat greeting). A real viewer will ask for much
-more — terrain, appearance, nearby objects — and renders a login into an
-empty world; growing the default scenario against what a viewer actually
-requests is expected iteration, not a bug. Firestorm's seed-request
-retries (up to 30×) are harmless: the grant is minted once, so every
-retry gets a byte-identical reply.
+## Voice signalling
+
+The stock scenario speaks **WebRTC voice**: `default_setup` enables the
+`WebRtcStub` answerer on `SimSession::voice_mut()` and files the stock
+parcel's estate-wide channel (its `channel_uri` is the region id, the
+form Second Life sends) with the agent standing on it. The runtime
+derives every backend advertisement from that — the login response's
+`voice-config`, `SimulatorFeatures.VoiceServerType`, and a
+`RequiredVoiceVersion` push over the event queue when the avatar
+arrives — so a scenario that leaves voice disabled advertises none of
+them, and one that sets a Vivox fixture instead (`set_vivox_account`)
+advertises `vivox`. A client's `RequestVoiceAccount` (WebRTC offer) is
+answered with a JSEP answer, its `SendVoiceSignaling` trickle is recorded
+on the connection, `RequestParcelVoiceInfo` returns the region-id
+channel, and a logout closes the session; the grid side sees
+`VoiceProvisionRequested` / `VoiceSignalingReceived` /
+`ParcelVoiceInfoRequested`. No media plane: nothing listens on the
+advertised loopback candidate, so a real viewer will negotiate and then
+sit in "connecting" — the signalling, not the audio, is what this
+exercises. Chat-session channels can be gated with
+`set_channel_credentials(channel, credentials)`.
+
+The stock `Scenario` is intentionally small (an inventory skeleton, a library,
+one parcel, a chat greeting, WebRTC voice signalling). A real viewer will ask
+for much more — terrain, appearance, nearby objects — and renders a login into
+an empty world; growing the default scenario against what a viewer actually
+requests is expected iteration, not a bug. Firestorm's seed-request retries (up
+to 30×) are harmless: the grant is minted once, so every retry gets a
+byte-identical reply.

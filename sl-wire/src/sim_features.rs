@@ -136,6 +136,12 @@ pub struct SimulatorFeatures {
     pub gltf_enabled: Option<bool>,
     /// The asset id of the LSL syntax definition for this simulator (`LSLSyntaxId`).
     pub lsl_syntax_id: Option<Uuid>,
+    /// The voice backend the region speaks (`VoiceServerType`: `"webrtc"` or
+    /// `"vivox"`). The viewer selects its spatial-voice module from this field
+    /// (Firestorm `llvoiceclient.cpp`, `LLVoiceClient::onSimulatorFeaturesReceived`);
+    /// [`None`] when the region did not advertise one (older grids — the viewer
+    /// then falls back to the login response's `voice-config`).
+    pub voice_server_type: Option<String>,
     /// The OpenSim-only grid extras, or [`None`] on grids omitting them.
     pub open_sim_extras: Option<OpenSimExtras>,
 }
@@ -324,6 +330,9 @@ pub fn parse_simulator_features(body: &Llsd) -> Result<SimulatorFeatures, WireEr
         pbr_terrain_enabled: body.field_bool("PBRTerrainEnabled", "PBRTerrainEnabled")?,
         gltf_enabled: body.field_bool("GLTFEnabled", "GLTFEnabled")?,
         lsl_syntax_id: body.field_uuid("LSLSyntaxId", "LSLSyntaxId")?,
+        voice_server_type: body
+            .field_str("VoiceServerType", "VoiceServerType")?
+            .map(str::to_owned),
         open_sim_extras: match body.get("OpenSimExtras") {
             None | Some(Llsd::Undef) => None,
             Some(map @ Llsd::Map(_)) => Some(OpenSimExtras::from_llsd(map)?),
@@ -415,6 +424,9 @@ pub fn build_simulator_features_response(features: &SimulatorFeatures) -> String
     if let Some(value) = features.lsl_syntax_id {
         put("LSLSyntaxId", Llsd::Uuid(value));
     }
+    if let Some(value) = &features.voice_server_type {
+        put("VoiceServerType", Llsd::String(value.clone()));
+    }
     if let Some(extras) = &features.open_sim_extras {
         put("OpenSimExtras", extras.to_llsd());
     }
@@ -503,6 +515,7 @@ mod tests {
                 Uuid::parse_str("11111111-1111-1111-1111-111111111111")
                     .map_err(|error| error.to_string())?,
             ),
+            voice_server_type: Some("webrtc".to_owned()),
             open_sim_extras: Some(OpenSimExtras {
                 export_supported: Some(true),
                 map_server_url: Some(
