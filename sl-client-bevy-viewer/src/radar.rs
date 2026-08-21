@@ -19,6 +19,13 @@
 //! grid-overridable chat ranges ([`ChatRanges`]), and the minimap's tracking
 //! target ([`MapTracking`]) for the Track row action.
 //!
+//! The list is **multi-select**, as the reference's is: the table widget's
+//! [`TableSelectionMode::Multi`] supplies the Ctrl / Shift click algebra, the
+//! radar keeps the answer by [`AgentKey`] ([`RadarSelection`]) so it survives the
+//! every-second re-sort, and a right-click opens one of two menus by how many
+//! rows are in it — the reference's `menu_fs_radar.xml` and its separate
+//! `menu_fs_radar_multiselect.xml`. Both declare over the *same* action arms.
+//!
 //! Deliberate divergences from the reference radar: no voice / notes columns
 //! (no voice or notes support yet), no per-column show / hide bitmask, no
 //! LSL-bridge altitude correction, no script-channel (Phoenix) alerts, and no
@@ -26,31 +33,46 @@
 //! muted name styling is colour-only (table cells have no bold / italic).
 //! The range cell's chat / shout colours follow the name tag's distance
 //! palette (green / yellow); beyond-shout keeps the plain cell colour, like
-//! the reference radar's silver.
+//! the reference radar's silver. Both row menus are missing the reference's
+//! parcel / estate moderation entries (Freeze, Parcel Eject, Estate Kick /
+//! Teleport Home / Ban), which no viewer surface offers per avatar yet — they
+//! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
+//! the minimap at once when that shared layer lands; and *IM* on several rows
+//! opens several conversations rather than the reference's ad-hoc conference,
+//! which is `viewer-conference-start-ui`'s to bring.
 
+use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui::Checked;
 use sl_client_bevy::{
-    AgentKey, Command, GlobalCoordinates, MuteType, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
-    Vector,
+    AgentKey, Command, FriendKey, GlobalCoordinates, MuteType, SlCommand, SlEvent, SlIdentity,
+    SlSessionEvent, Vector,
 };
 use sl_settings::SettingValue;
 
 use crate::animations::AnimationPlayback;
+use crate::avatar_complexity::RenderOverride;
 use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED, OpenAvatarProfile};
+use crate::avatar_render_settings::RequestRenderException;
 use crate::avatars::AvatarState;
 use crate::chat::LocalChatNotice;
+use crate::contact_sets_panel::OpenAddToContactSet;
 use crate::conversations::{ConversationKey, NearbyChatNotice, OpenConversation};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
-use crate::minimap::{ChatRanges, MapTracking, TrackTarget, global_from_bevy, origin_global};
+use crate::menu::{
+    MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
+};
+use crate::minimap::{
+    ChatRanges, MARK_COLORS, MapTracking, MinimapMarks, TrackTarget, global_from_bevy,
+    origin_global,
+};
 use crate::mutes::{MuteModel, RequestBlock};
 use crate::name_tag_content::{AWAY_ANIM, NameTagStatuses};
 use crate::notifications::ShowNotification;
@@ -190,11 +212,16 @@ const COL_RANGE: usize = 7;
 const COL_COMPLEXITY: usize = 8;
 
 /// The radar table: a flexible name over the status / info columns, default
-/// sort range-ascending (the reference default). Selection is radar-owned
-/// (keyed by agent, not row index) because the list re-sorts every sweep.
+/// sort range-ascending (the reference default).
+///
+/// Selection is the widget's [`TableSelectionMode::Multi`] — the reference radar
+/// is multi-select and ships a whole second menu for it — but the *identities*
+/// stay radar-owned ([`RadarSelection`]): the widget addresses rows by data
+/// index, and this list re-sorts every sweep, so the radar re-projects its agents
+/// onto the new indices after each rebuild.
 static RADAR_TABLE: TableSpec = TableSpec {
     element: "radar",
-    selection: TableSelectionMode::None,
+    selection: TableSelectionMode::Multi,
     columns: &[
         TableColumn {
             header_key: "radar-col-name",
@@ -294,16 +321,52 @@ static RADAR_TABLE: TableSpec = TableSpec {
 const COND_TRACKING: &str = "radar-tracking";
 /// Condition: the pressed avatar's full position is known (teleport-to).
 const COND_POSITION: &str = "radar-position-known";
-/// Condition: the pressed avatar is muted.
+/// Condition: at least one selected avatar is muted.
 const COND_MUTED: &str = "radar-muted";
-/// Condition: the pressed avatar is not muted.
+/// Condition: at least one selected avatar is not muted.
 const COND_NOT_MUTED: &str = "radar-not-muted";
-/// Condition: the pressed avatar is not already a friend.
+/// Condition: at least one selected avatar is not already a friend.
 const COND_NOT_FRIEND: &str = "radar-not-friend";
+/// Condition: at least one selected avatar already is a friend.
+const COND_FRIEND: &str = "radar-friend";
 
-/// The radar row context menu — every action our client supports of the
-/// reference's radar menu (see the module docs for what is deliberately
-/// absent).
+/// The dynamic slot the multi-selection **View Profiles** lines come from — one
+/// per selected avatar, in [`RadarMenuTarget::agents`] order.
+const SLOT_PROFILES: &str = "radar-profiles";
+
+/// The *Mark…* submenu — the reference's five colours plus the two clears,
+/// writing the shared [`MinimapMarks`] the minimap's own Mark submenu writes.
+/// Present in both menu shapes, because marking is exactly as useful for one
+/// avatar as for ten.
+static RADAR_MARK_MENU: MenuDef = MenuDef {
+    label: "Mark",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("Mark Red", "mark-red")),
+        MenuItemDef::Command(MenuCommand::new("Mark Green", "mark-green")),
+        MenuItemDef::Command(MenuCommand::new("Mark Blue", "mark-blue")),
+        MenuItemDef::Command(MenuCommand::new("Mark Purple", "mark-purple")),
+        MenuItemDef::Command(MenuCommand::new("Mark Light Yellow", "mark-yellow")),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("Clear Mark", "mark-clear")),
+        MenuItemDef::Command(MenuCommand::new("Clear All Marks", "mark-clear-all")),
+    ],
+};
+
+/// The *Render Settings* submenu — the standing per-avatar render exception
+/// ([`crate::avatar_render_settings`]), the reference's own radar entries.
+/// *Render Normally* is the absence of a decision, so it clears the entry.
+static RADAR_RENDER_MENU: MenuDef = MenuDef {
+    label: "Render Settings",
+    items: &[
+        MenuItemDef::Command(MenuCommand::new("Render Normally", "render-normally")),
+        MenuItemDef::Command(MenuCommand::new("Do Not Render", "render-never")),
+        MenuItemDef::Command(MenuCommand::new("Render Fully", "render-fully")),
+    ],
+};
+
+/// The radar row context menu with **one** row selected — every action our
+/// client supports of the reference's `menu_fs_radar.xml` (see the module docs
+/// for what is deliberately absent).
 static RADAR_MENU: MenuDef = MenuDef {
     label: "Radar",
     items: &[
@@ -324,6 +387,11 @@ static RADAR_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("Add Friend", "add-friend").visible_when(COND_NOT_FRIEND),
         ),
+        MenuItemDef::Command(
+            MenuCommand::new("Remove Friend", "remove-friend").visible_when(COND_FRIEND),
+        ),
+        MenuItemDef::Command(MenuCommand::new("Add to Set", "add-to-set")),
+        MenuItemDef::Submenu(&RADAR_MARK_MENU),
         MenuItemDef::Command(MenuCommand::new("Block", "block").visible_when(COND_NOT_MUTED)),
         MenuItemDef::Command(MenuCommand::new("Unblock", "unblock").visible_when(COND_MUTED)),
         MenuItemDef::Separator,
@@ -335,6 +403,50 @@ static RADAR_MENU: MenuDef = MenuDef {
             "Derender + Blacklist",
             "derender-blacklist",
         )),
+        MenuItemDef::Submenu(&RADAR_RENDER_MENU),
+    ],
+};
+
+/// The radar row context menu with **several** rows selected — the reference's
+/// separate `menu_fs_radar_multiselect.xml`, and a separate menu here for the
+/// same reason: the entries that only make sense pointed at one avatar (Teleport
+/// To, tracking) are absent rather than greyed, and the ones that read as plural
+/// say so.
+///
+/// Every entry routes to the same action arm the single-avatar menu writes; the
+/// arms take the whole selection, so "act on each of them" is not a second
+/// implementation of anything.
+static RADAR_MULTI_MENU: MenuDef = MenuDef {
+    label: "Radar",
+    items: &[
+        // The one thing a `&'static` menu cannot spell: a line per selected
+        // avatar, labelled with the name as it arrives (the machinery
+        // `viewer-minimap-menu-multi-avatar` built).
+        MenuItemDef::DynamicSubmenu {
+            label: "View Profiles",
+            slot: SLOT_PROFILES,
+        },
+        MenuItemDef::Command(MenuCommand::new("IM", "im")),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("Offer Teleport", "offer-teleport")),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(
+            MenuCommand::new("Add Friends", "add-friend").visible_when(COND_NOT_FRIEND),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Remove Friends", "remove-friend").visible_when(COND_FRIEND),
+        ),
+        MenuItemDef::Command(MenuCommand::new("Add to Set", "add-to-set")),
+        MenuItemDef::Submenu(&RADAR_MARK_MENU),
+        MenuItemDef::Command(MenuCommand::new("Block", "block").visible_when(COND_NOT_MUTED)),
+        MenuItemDef::Command(MenuCommand::new("Unblock", "unblock").visible_when(COND_MUTED)),
+        MenuItemDef::Separator,
+        MenuItemDef::Command(MenuCommand::new("Derender", "derender")),
+        MenuItemDef::Command(MenuCommand::new(
+            "Derender + Blacklist",
+            "derender-blacklist",
+        )),
+        MenuItemDef::Submenu(&RADAR_RENDER_MENU),
     ],
 };
 
@@ -392,10 +504,64 @@ struct RadarView {
     built_complexity_revision: u64,
 }
 
-/// The radar's own row selection, keyed by agent (not row index) so it
-/// survives the every-sweep re-sort and the virtualized row recycling.
+impl RadarView {
+    /// Where `agent` sits in the current row order, if they are shown at all —
+    /// the translation between the radar's identity-keyed selection and the
+    /// table widget's index-keyed one.
+    fn index_of(&self, agent: AgentKey) -> Option<usize> {
+        self.rows.iter().position(|row| row.agent == agent)
+    }
+}
+
+/// The radar's row selection, keyed by **agent** so it survives the every-sweep
+/// re-sort, a filter change and the virtualized row recycling.
+///
+/// The click algebra itself is the table widget's
+/// ([`TableSelectionMode::Multi`] — Ctrl toggles, Shift ranges): this is the
+/// mirror of it in the only terms that stay meaningful across a rebuild, kept in
+/// step by [`mirror_radar_selection`] one way and by [`rebuild_radar_view`]'s
+/// re-projection the other.
 #[derive(Resource, Debug, Default)]
-struct SelectedRadarAvatar(Option<AgentKey>);
+struct RadarSelection {
+    /// The selected agents, in the table order they were read at.
+    agents: Vec<AgentKey>,
+    /// The range anchor — whom a `Shift`+click ranges from.
+    anchor: Option<AgentKey>,
+    /// The table selection revision the agents were last read at.
+    read_revision: u64,
+}
+
+impl RadarSelection {
+    /// The row a single-avatar surface (the trailing action buttons) acts on:
+    /// the first of the selection, as the widget's own `primary_selected` is.
+    fn primary(&self) -> Option<AgentKey> {
+        self.agents.first().copied()
+    }
+
+    /// Re-key the selection onto a freshly built row order, returning the
+    /// `(indices, anchor index)` to hand back to the table widget.
+    ///
+    /// Anyone whose row went away — they left the region, or the filter now
+    /// excludes them — drops out of the selection: a selection is what the user
+    /// can see and act on, and a hidden member would act invisibly from the
+    /// menu. Everyone else keeps their place in the set, whatever index the sort
+    /// just moved them to. Pure, so the rule is unit-testable without a table.
+    fn reproject(&mut self, view: &RadarView) -> (Vec<usize>, Option<usize>) {
+        self.agents.retain(|agent| view.index_of(*agent).is_some());
+        self.anchor = self
+            .anchor
+            .filter(|anchor| view.index_of(*anchor).is_some());
+        let indices = self
+            .agents
+            .iter()
+            .filter_map(|agent| view.index_of(*agent))
+            .collect();
+        (
+            indices,
+            self.anchor.and_then(|anchor| view.index_of(anchor)),
+        )
+    }
+}
 
 /// Double-click bookkeeping, by agent (rows are recycled).
 #[derive(Resource, Debug, Default)]
@@ -406,9 +572,18 @@ struct RadarClickTracker {
     time: f32,
 }
 
-/// The avatar the open context menu targets.
+/// The avatars the open context menu targets — the snapshot taken when the
+/// right-click opened it, exactly as the minimap keeps the pick radius it opened
+/// on, so a sweep that re-sorts (or empties) the rows underneath does not move
+/// what the menu is about to act on.
 #[derive(Resource, Debug, Default)]
-struct RadarMenuTarget(Option<AgentKey>);
+struct RadarMenuTarget {
+    /// The targeted agents, in the selection's order.
+    agents: Vec<AgentKey>,
+    /// Whether any **View Profiles** line is still the loading placeholder, so
+    /// [`refresh_radar_menu_names`] runs only until the answers land.
+    names_pending: bool,
+}
 
 /// The radar floater's retained entities (inserted by the deferred content
 /// build; consumers take `Option<Res<RadarUi>>` until then).
@@ -438,6 +613,45 @@ struct BoundRadar(Option<AgentKey>);
 #[derive(Message, Debug, Clone, Copy)]
 struct RadarAlertMessage(RadarAlert);
 
+/// The per-avatar fact sources a radar row is projected from, bundled as one
+/// [`SystemParam`] to stay inside Bevy's system-parameter limit.
+///
+/// Every one of them is a *shared* model rather than a radar-local mirror: the
+/// same name / seat records the name tags read, the same typing set, the same
+/// friend roster the People panel shows, the same mute list, the same render-cost
+/// scores the jellydoll decides by.
+#[derive(SystemParam)]
+struct RadarRowFacts<'w> {
+    /// Names, usernames, group titles, seated state.
+    avatars: Res<'w, AvatarState>,
+    /// The typing set behind the `T` glyph.
+    statuses: Res<'w, NameTagStatuses>,
+    /// Playing animations, for the away (`A`) glyph.
+    playback: Res<'w, AnimationPlayback>,
+    /// The friend roster, for the friend name colour (absent before login).
+    friends: Option<Res<'w, FriendsModel>>,
+    /// The mute list, for the muted name colour.
+    mutes: Res<'w, MuteModel>,
+    /// The render-cost scores behind the Complexity cell.
+    complexity: Res<'w, crate::avatar_complexity::AvatarComplexityModel>,
+}
+
+/// The facts a radar row menu's conditions are read from, bundled as one
+/// [`SystemParam`] for the same reason.
+#[derive(SystemParam)]
+struct RadarMenuFacts<'w> {
+    /// The current row order, to place a right-clicked agent.
+    view: Res<'w, RadarView>,
+    /// The map tracking target (Start / Stop Tracking).
+    tracking: Res<'w, MapTracking>,
+    /// The friend roster (Add / Remove Friend).
+    friends: Option<Res<'w, FriendsModel>>,
+    /// The mute list (Block / Unblock).
+    mutes: Res<'w, MuteModel>,
+    /// The model, for whether a full position is known (Teleport To).
+    state: Res<'w, RadarState>,
+}
+
 // --- Plugin ---------------------------------------------------------------
 
 /// Registers the radar model, sweep systems, floater and settings.
@@ -447,7 +661,7 @@ impl Plugin for RadarPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RadarState>()
             .init_resource::<RadarView>()
-            .init_resource::<SelectedRadarAvatar>()
+            .init_resource::<RadarSelection>()
             .init_resource::<RadarClickTracker>()
             .init_resource::<RadarMenuTarget>()
             .add_message::<RadarAlertMessage>()
@@ -464,7 +678,13 @@ impl Plugin for RadarPlugin {
                     sweep_radar,
                     ingest_radar_properties,
                     report_radar_alerts,
+                    // Read the widget's click through into agents *before* the
+                    // actions consume it and before the view rebuild re-sorts
+                    // the indices it was expressed in.
+                    mirror_radar_selection,
                     handle_radar_actions,
+                    handle_radar_profile_picks,
+                    refresh_radar_menu_names,
                     (
                         mirror_radar_filter,
                         apply_radar_range_field,
@@ -741,6 +961,10 @@ enum RadarButtonAction {
 
 /// Spawn one trailing action button that maps the current selection through
 /// `action` on press.
+///
+/// These stay **single-avatar** even though the table is multi-select: a button
+/// on the row strip belongs to a row, and the reference's own radar buttons act
+/// on the focused one. Acting on many is the context menu's job.
 fn spawn_radar_action_button(
     commands: &mut Commands,
     parent: Entity,
@@ -773,14 +997,14 @@ fn spawn_radar_action_button(
         ))
         .observe(
             move |mut press: On<Pointer<Press>>,
-                  selected: Res<SelectedRadarAvatar>,
+                  selected: Res<RadarSelection>,
                   mut profiles: MessageWriter<OpenAvatarProfile>,
                   mut conversations: MessageWriter<OpenConversation>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                let Some(agent) = selected.0 else {
+                let Some(agent) = selected.primary() else {
                     return;
                 };
                 match action(agent) {
@@ -1097,23 +1321,20 @@ fn sync_radar_limit_checkbox(
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the model, the view, \
-              the UI handles, and the five per-avatar status sources the rows project"
+              the UI handles, the bundled per-avatar status sources the rows project, and \
+              the selection the rebuild re-keys"
 )]
 fn rebuild_radar_view(
     state: Res<RadarState>,
     mut view: ResMut<RadarView>,
     ui: Option<Res<RadarUi>>,
     settings: Option<Res<ViewerSettings>>,
-    avatars: Res<AvatarState>,
-    statuses: Res<NameTagStatuses>,
-    playback: Res<AnimationPlayback>,
-    friends: Option<Res<FriendsModel>>,
-    mutes: Res<MuteModel>,
-    complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
+    facts: RadarRowFacts,
     identity: Res<SlIdentity>,
     time: Res<Time>,
     translator: Translator,
-    tables: Query<&TableState>,
+    mut selection: ResMut<RadarSelection>,
+    mut tables: Query<&mut TableState>,
     mut lists: Query<&mut VirtualList>,
     mut texts: Query<&mut Text>,
 ) {
@@ -1137,7 +1358,7 @@ fn rebuild_radar_view(
         && view.built_sort_revision == sort_revision
         && view.built_filter == state.filter
         && view.built_limit == limit
-        && view.built_complexity_revision == complexity.revision()
+        && view.built_complexity_revision == facts.complexity.revision()
     {
         return;
     }
@@ -1145,7 +1366,7 @@ fn rebuild_radar_view(
     view.built_sort_revision = sort_revision;
     view.built_filter.clone_from(&state.filter);
     view.built_limit = limit;
-    view.built_complexity_revision = complexity.revision();
+    view.built_complexity_revision = facts.complexity.revision();
 
     let own_region = identity.region_handle;
     let now = time.elapsed_secs_f64();
@@ -1153,30 +1374,35 @@ fn rebuild_radar_view(
         .model
         .entries()
         .map(|(agent, entry)| {
-            let record = avatars.name_record(*agent);
+            let record = facts.avatars.name_record(*agent);
             let username = record
                 .and_then(|record| record.username.clone())
                 .unwrap_or_default();
             RadarRow {
                 agent: *agent,
-                name: avatars.label_text(*agent),
+                name: facts.avatars.label_text(*agent),
                 username,
-                title: avatars.title_of(*agent).unwrap_or_default().to_owned(),
+                title: facts
+                    .avatars
+                    .title_of(*agent)
+                    .unwrap_or_default()
+                    .to_owned(),
                 payment: entry.payment,
                 age_days: entry.age_days,
                 seen_seconds: elapsed_seconds(now, entry.first_seen),
                 distance: entry.last_distance,
                 coarse_only: entry.coarse_only,
                 in_own_region: own_region.is_some() && entry.last_region == own_region,
-                typing: statuses.is_typing(*agent),
-                sitting: avatars.is_seated(*agent),
-                away: AWAY_ANIM.is_some_and(|away| playback.is_playing(*agent, away)),
-                friend: friends
+                typing: facts.statuses.is_typing(*agent),
+                sitting: facts.avatars.is_seated(*agent),
+                away: AWAY_ANIM.is_some_and(|away| facts.playback.is_playing(*agent, away)),
+                friend: facts
+                    .friends
                     .as_deref()
                     .is_some_and(|friends| friends.is_friend(*agent)),
-                muted: mutes.is_muted(agent.uuid()),
-                complexity: complexity.complexity(*agent).map(|cost| cost.score),
-                jellied: complexity.jelly_reason_for(*agent).is_some(),
+                muted: facts.mutes.is_muted(agent.uuid()),
+                complexity: facts.complexity.complexity(*agent).map(|cost| cost.score),
+                jellied: facts.complexity.jelly_reason_for(*agent).is_some(),
             }
         })
         .collect();
@@ -1196,6 +1422,16 @@ fn rebuild_radar_view(
         .collect();
     sort_rows(&mut rows, &keys);
     view.rows = rows;
+
+    // Re-key the selection onto the order that just replaced the one it was
+    // clicked in.
+    if let Ok(mut table) = tables.get_mut(ui.table) {
+        let (indices, anchor) = selection.reproject(&view);
+        table.set_selection(indices, anchor);
+        // The re-projection is not a selection *event* — it is the same people
+        // at new indices — so the mirror must not read it back as one.
+        selection.read_revision = table.selection_revision();
+    }
 
     if let Ok(mut list) = lists.get_mut(ui.viewport) {
         list.item_count = view.rows.len();
@@ -1264,28 +1500,23 @@ fn status_cell_text(row: &RadarRow) -> String {
 }
 
 /// Bind each pooled radar row to the [`RadarRow`] it now presents: the cell
-/// texts, the per-cell colours (range band, friend / muted name), and the
-/// selection highlight.
+/// texts and the per-cell colours (range band, friend / muted name).
+///
+/// The selection **highlight** is not here: the table is a
+/// [`TableSelectionMode::Multi`] one now, so the widget paints its own selected
+/// rows and the radar would only be fighting it.
 fn bind_radar_rows(
     view: Res<RadarView>,
     state: Res<RadarState>,
-    selected: Res<SelectedRadarAvatar>,
     ui: Option<Res<RadarUi>>,
-    mut rows: Query<(
-        Entity,
-        Ref<VirtualRow>,
-        &ChildOf,
-        &TableRowCells,
-        &mut BoundRadar,
-    )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
+    mut rows: Query<(Ref<VirtualRow>, &ChildOf, &TableRowCells, &mut BoundRadar)>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
 ) {
     let Some(ui) = ui else {
         return;
     };
-    let refresh_all = view.is_changed() || selected.is_changed();
-    for (row_entity, row, child_of, cells, mut bound) in &mut rows {
+    let refresh_all = view.is_changed();
+    for (row, child_of, cells, mut bound) in &mut rows {
         if child_of.parent() != ui.viewport {
             continue;
         }
@@ -1363,16 +1594,6 @@ fn bind_radar_rows(
         for (column, value, color) in cell_values {
             if let Some(cell) = cells.cell(column) {
                 set_table_cell(&mut texts, cell, &value, color);
-            }
-        }
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if selected.0 == Some(data.agent) {
-                SELECTED_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
             }
         }
     }
@@ -1504,29 +1725,39 @@ pub(crate) fn spawn_radar_specimen(
     root
 }
 
-/// A press on a pooled radar row: primary selects (double-press opens the
-/// profile); secondary selects and opens the context menu with the open-time
-/// condition snapshot.
+/// A press on a pooled radar row.
+///
+/// The **selection** itself is the table widget's: `spawn_table_row` already
+/// attached its Ctrl / Shift click handler, and this row observer only adds what
+/// the widget has no business knowing — the focus move, the double-press that
+/// opens a profile, and the right-click that opens the menu.
+///
+/// A secondary press is where the two halves meet. The widget ignores it (a
+/// right-click is not a selection gesture), so the radar applies the reference's
+/// rule itself: right-clicking **inside** the selection keeps it and acts on all
+/// of it, right-clicking **outside** makes that row the selection first. Which
+/// menu then opens is a matter of how many rows are in it.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy observer's parameters are its injected resources: the row pool, the \
-              selection / double-click / menu-target stashes, and the fact sources the \
-              condition snapshot reads"
+              view / table the selection is expressed against, the double-click and \
+              menu-target stashes, and the fact sources the condition snapshot reads"
 )]
 fn on_radar_row_press(
     mut press: On<Pointer<Press>>,
     rows: Query<&BoundRadar>,
     ui: Res<RadarUi>,
     time: Res<Time>,
-    tracking: Res<MapTracking>,
-    friends: Option<Res<FriendsModel>>,
-    mutes: Res<MuteModel>,
-    state: Res<RadarState>,
+    facts: RadarMenuFacts,
+    mut avatars: ResMut<AvatarState>,
+    translator: Translator,
+    mut tables: Query<&mut TableState>,
     mut focus: ResMut<InputFocus>,
-    mut selected: ResMut<SelectedRadarAvatar>,
+    mut selection: ResMut<RadarSelection>,
     mut clicks: ResMut<RadarClickTracker>,
     mut target: ResMut<RadarMenuTarget>,
     mut menus: MessageWriter<OpenContextMenu>,
+    mut labels: MessageWriter<SetMenuDynamicLabels>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
 ) {
     let Ok(BoundRadar(Some(agent))) = rows.get(press.entity).copied() else {
@@ -1534,7 +1765,6 @@ fn on_radar_row_press(
     };
     press.propagate(false);
     focus.set(ui.viewport, FocusCause::Navigated);
-    selected.0 = Some(agent);
     match press.button {
         PointerButton::Primary => {
             let now = time.elapsed_secs();
@@ -1547,31 +1777,38 @@ fn on_radar_row_press(
             }
         }
         PointerButton::Secondary => {
-            target.0 = Some(agent);
-            let mut conditions: Vec<&'static str> = Vec::new();
-            if tracking.target == Some(TrackTarget::Avatar(agent)) {
-                conditions.push(COND_TRACKING);
+            if !selection.agents.contains(&agent) {
+                selection.agents = vec![agent];
+                selection.anchor = Some(agent);
+                if let Some(index) = facts.view.index_of(agent)
+                    && let Ok(mut table) = tables.get_mut(ui.table)
+                {
+                    table.set_selection(vec![index], Some(index));
+                    selection.read_revision = table.selection_revision();
+                }
             }
-            if state
-                .model
-                .entry(agent)
-                .is_some_and(|entry| entry.position.is_some())
-            {
-                conditions.push(COND_POSITION);
-            }
-            if mutes.is_muted(agent.uuid()) {
-                conditions.push(COND_MUTED);
+            let agents = selection.agents.clone();
+            let (names, pending) = if agents.len() > 1 {
+                crate::minimap::menu_agent_labels(&agents, &mut avatars, &translator)
             } else {
-                conditions.push(COND_NOT_MUTED);
-            }
-            if !friends
-                .as_deref()
-                .is_some_and(|friends| friends.is_friend(agent))
-            {
-                conditions.push(COND_NOT_FRIEND);
-            }
+                (Vec::new(), false)
+            };
+            labels.write(SetMenuDynamicLabels {
+                slot: SLOT_PROFILES,
+                labels: names,
+            });
+            let conditions = radar_menu_conditions(&agents, &facts);
+            let menu = if agents.len() > 1 {
+                &RADAR_MULTI_MENU
+            } else {
+                &RADAR_MENU
+            };
+            *target = RadarMenuTarget {
+                agents,
+                names_pending: pending,
+            };
             menus.write(OpenContextMenu {
-                menu: &RADAR_MENU,
+                menu,
                 at: press.pointer_location.position,
                 element: RADAR_ELEMENT,
                 conditions,
@@ -1581,50 +1818,206 @@ fn on_radar_row_press(
     }
 }
 
+/// The conditions that hold for a radar menu about `agents`.
+///
+/// With one selected row these read as the reference's per-avatar `on_enable` /
+/// `on_visible` do. With several they are the **any** of them: *Block* is offered
+/// while anyone in the selection is unmuted (it blocks those), *Unblock* while
+/// anyone is muted — the alternative, hiding an entry unless the whole selection
+/// agrees, makes a mixed selection a menu with nothing in it.
+fn radar_menu_conditions(agents: &[AgentKey], facts: &RadarMenuFacts) -> Vec<&'static str> {
+    let is_friend = |agent: &AgentKey| {
+        facts
+            .friends
+            .as_deref()
+            .is_some_and(|friends| friends.is_friend(*agent))
+    };
+    let is_muted = |agent: &AgentKey| facts.mutes.is_muted(agent.uuid());
+    let mut conditions: Vec<&'static str> = Vec::new();
+    if agents
+        .iter()
+        .any(|agent| facts.tracking.target == Some(TrackTarget::Avatar(*agent)))
+    {
+        conditions.push(COND_TRACKING);
+    }
+    if agents.iter().any(|agent| {
+        facts
+            .state
+            .model
+            .entry(*agent)
+            .is_some_and(|entry| entry.position.is_some())
+    }) {
+        conditions.push(COND_POSITION);
+    }
+    if agents.iter().any(is_muted) {
+        conditions.push(COND_MUTED);
+    }
+    if agents.iter().any(|agent| !is_muted(agent)) {
+        conditions.push(COND_NOT_MUTED);
+    }
+    if agents.iter().any(|agent| !is_friend(agent)) {
+        conditions.push(COND_NOT_FRIEND);
+    }
+    if agents.iter().any(is_friend) {
+        conditions.push(COND_FRIEND);
+    }
+    conditions
+}
+
+/// Mirror the table widget's click-driven selection into the radar's
+/// agent-keyed one.
+///
+/// The widget owns the algebra (plain / Ctrl / Shift) and expresses its answer
+/// in data indices; those indices mean something only against the row order they
+/// were clicked in, which the next sweep replaces. Reading them through here —
+/// before the actions and before the rebuild — is what makes the selection a set
+/// of *people* rather than a set of table positions.
+fn mirror_radar_selection(
+    view: Res<RadarView>,
+    ui: Option<Res<RadarUi>>,
+    mut selection: ResMut<RadarSelection>,
+    tables: Query<&TableState>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let Ok(table) = tables.get(ui.table) else {
+        return;
+    };
+    if table.selection_revision() == selection.read_revision {
+        return;
+    }
+    selection.read_revision = table.selection_revision();
+    selection.agents = table
+        .selected()
+        .iter()
+        .filter_map(|index| view.rows.get(*index))
+        .map(|row| row.agent)
+        .collect();
+    selection.anchor = table
+        .anchor()
+        .and_then(|index| view.rows.get(index))
+        .map(|row| row.agent);
+}
+
+/// Re-label the open **View Profiles** lines as the names land — the same
+/// asynchronous half the minimap's multi-avatar menu has, since a selection of
+/// ten strangers is exactly where the name cache is still catching up.
+fn refresh_radar_menu_names(
+    mut target: ResMut<RadarMenuTarget>,
+    mut avatars: ResMut<AvatarState>,
+    translator: Translator,
+    mut labels: MessageWriter<SetMenuDynamicLabels>,
+) {
+    if !target.names_pending {
+        return;
+    }
+    let agents = target.agents.clone();
+    let (names, pending) = crate::minimap::menu_agent_labels(&agents, &mut avatars, &translator);
+    target.names_pending = pending;
+    labels.write(SetMenuDynamicLabels {
+        slot: SLOT_PROFILES,
+        labels: names,
+    });
+}
+
+/// A pick of one **View Profiles** line: open that avatar's profile.
+///
+/// The line carries only its index; who it means is the snapshot the right-click
+/// kept ([`RadarMenuTarget::agents`]).
+fn handle_radar_profile_picks(
+    mut picks: MessageReader<MenuDynamicPick>,
+    target: Res<RadarMenuTarget>,
+    mut profiles: MessageWriter<OpenAvatarProfile>,
+) {
+    for pick in picks.read() {
+        if pick.element != RADAR_ELEMENT || pick.slot != SLOT_PROFILES {
+            continue;
+        }
+        if let Some(agent) = target.agents.get(pick.index) {
+            profiles.write(OpenAvatarProfile { agent: *agent });
+        }
+    }
+}
+
 /// Dispatch the radar context menu's picks onto the shared avatar-action
-/// channels (profile, IM, tracking, teleports, friendship, mutes, derender).
+/// channels (profile, IM, tracking, teleports, friendship, contact sets, marks,
+/// mutes, derender, render exceptions).
+///
+/// **One dispatch for both menu shapes.** The target is the whole selection the
+/// right-click snapshotted, so the reference's two menus are two *declarations*
+/// over one set of arms: an arm that acts per avatar loops, an arm the protocol
+/// already takes a list for (a teleport offer) sends one message, and the arms
+/// that only make sense pointed at one row read the first — those entries only
+/// appear in the single-row menu, which is what makes that safe.
 #[expect(
     clippy::too_many_arguments,
-    reason = "the action dispatch fans out to the tracking resource and the shared \
-              avatar-action message / command channels"
+    reason = "the action dispatch fans out to the tracking / mark resources, the mute and \
+              friend facts a mixed selection is filtered by, and the shared avatar-action \
+              message / command channels"
 )]
 fn handle_radar_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<RadarMenuTarget>,
     state: Res<RadarState>,
     avatars: Res<AvatarState>,
+    mutes: Res<MuteModel>,
+    friends: Option<Res<FriendsModel>>,
     mut tracking: ResMut<MapTracking>,
+    mut marks: ResMut<MinimapMarks>,
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut derenders: MessageWriter<RequestDerender>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
+    mut contact_sets: MessageWriter<OpenAddToContactSet>,
+    mut exceptions: MessageWriter<RequestRenderException>,
 ) {
     for action in actions.read() {
         if action.element != RADAR_ELEMENT {
             continue;
         }
-        let Some(agent) = target.0 else {
+        let agents = target.agents.as_slice();
+        if agents.is_empty() {
             continue;
+        }
+        // The row a single-avatar entry means: those entries are declared only
+        // in the one-row menu, so the first of the selection *is* the row.
+        let first = agents.first().copied();
+        let name_of = |agent: AgentKey| {
+            avatars
+                .name_of(agent)
+                .map(ToOwned::to_owned)
+                .unwrap_or_default()
         };
         match action.action {
             "profile" => {
-                profiles.write(OpenAvatarProfile { agent });
+                if let Some(agent) = first {
+                    profiles.write(OpenAvatarProfile { agent });
+                }
             }
             "im" => {
-                conversations.write(OpenConversation {
-                    key: ConversationKey::Direct(agent),
-                });
+                // Several selected rows are several conversations, not a
+                // conference: ad-hoc conferences are `viewer-conference-start-ui`,
+                // which is where this entry becomes the reference's one.
+                for agent in agents {
+                    conversations.write(OpenConversation {
+                        key: ConversationKey::Direct(*agent),
+                    });
+                }
             }
             "start-tracking" => {
-                tracking.target = Some(TrackTarget::Avatar(agent));
+                if let Some(agent) = first {
+                    tracking.target = Some(TrackTarget::Avatar(agent));
+                }
             }
             "stop-tracking" => {
                 tracking.target = None;
             }
             "teleport-to" => {
-                let Some((east, north, up)) =
-                    state.model.entry(agent).and_then(|entry| entry.position)
+                let Some((east, north, up)) = first
+                    .and_then(|agent| state.model.entry(agent))
+                    .and_then(|entry| entry.position)
                 else {
                     continue;
                 };
@@ -1643,47 +2036,417 @@ fn handle_radar_actions(
                 }));
             }
             "offer-teleport" => {
+                // One offer naming everyone — the message already carries a list.
                 sl_commands.write(SlCommand(Command::OfferTeleport {
-                    targets: vec![agent],
+                    targets: agents.to_vec(),
                     message: String::new(),
                 }));
             }
             "add-friend" => {
-                sl_commands.write(SlCommand(Command::OfferFriendship {
-                    to_agent_id: agent,
-                    message: String::new(),
-                }));
+                for agent in agents.iter().filter(|agent| {
+                    !friends
+                        .as_deref()
+                        .is_some_and(|friends| friends.is_friend(**agent))
+                }) {
+                    sl_commands.write(SlCommand(Command::OfferFriendship {
+                        to_agent_id: *agent,
+                        message: String::new(),
+                    }));
+                }
             }
-            "block" => {
-                let name = avatars
-                    .name_of(agent)
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_default();
-                blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
+            "remove-friend" => {
+                for agent in agents.iter().filter(|agent| {
+                    friends
+                        .as_deref()
+                        .is_some_and(|friends| friends.is_friend(**agent))
+                }) {
+                    sl_commands.write(SlCommand(Command::TerminateFriendship(FriendKey::from(
+                        agent.uuid(),
+                    ))));
+                }
             }
-            "unblock" => {
-                let name = avatars
-                    .name_of(agent)
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_default();
-                sl_commands.write(SlCommand(Command::Unmute {
-                    id: agent.uuid(),
-                    name,
-                }));
-            }
-            action @ ("derender" | "derender-blacklist") => {
-                let name = avatars
-                    .name_of(agent)
-                    .map(ToOwned::to_owned)
-                    .unwrap_or_default();
-                derenders.write(RequestDerender::new(
-                    agent.uuid(),
-                    name,
-                    DerenderKind::Resident,
-                    action == "derender-blacklist",
+            "add-to-set" => {
+                // The floater asks for the one set and files the lot under it —
+                // one resident or ten, the same request.
+                contact_sets.write(OpenAddToContactSet::many(
+                    agents
+                        .iter()
+                        .map(|agent| (*agent, name_of(*agent)))
+                        .collect(),
                 ));
             }
-            _other => {}
+            "mark-clear" => {
+                marks.clear(agents);
+            }
+            "mark-clear-all" => {
+                marks.clear_all();
+            }
+            "block" => {
+                for agent in agents.iter().filter(|agent| !mutes.is_muted(agent.uuid())) {
+                    blocks.write(RequestBlock::new(
+                        agent.uuid(),
+                        name_of(*agent),
+                        MuteType::Agent,
+                    ));
+                }
+            }
+            "unblock" => {
+                for agent in agents.iter().filter(|agent| mutes.is_muted(agent.uuid())) {
+                    sl_commands.write(SlCommand(Command::Unmute {
+                        id: agent.uuid(),
+                        name: name_of(*agent),
+                    }));
+                }
+            }
+            action @ ("derender" | "derender-blacklist") => {
+                for agent in agents {
+                    derenders.write(RequestDerender::new(
+                        agent.uuid(),
+                        name_of(*agent),
+                        DerenderKind::Resident,
+                        action == "derender-blacklist",
+                    ));
+                }
+            }
+            action @ ("render-normally" | "render-never" | "render-fully") => {
+                let setting = match action {
+                    "render-never" => RenderOverride::Never,
+                    "render-fully" => RenderOverride::AlwaysFull,
+                    _normally => RenderOverride::Normal,
+                };
+                for agent in agents {
+                    exceptions.write(RequestRenderException {
+                        agent: *agent,
+                        name: name_of(*agent),
+                        setting,
+                    });
+                }
+            }
+            other => {
+                // The five mark colours, one action name each — the same table
+                // the minimap's Mark submenu dispatches from.
+                if let Some((_action, color)) =
+                    MARK_COLORS.iter().find(|(name, _color)| *name == other)
+                {
+                    marks.mark(agents, *color);
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        AgentKey, AvatarState, ConversationKey, MARK_COLORS, MapTracking, MenuCommand, MenuDef,
+        MenuDynamicPick, MenuItemDef, MinimapMarks, MuteModel, OpenAddToContactSet,
+        OpenAvatarProfile, OpenConversation, PaymentInfo, RADAR_ELEMENT, RADAR_MENU,
+        RADAR_MULTI_MENU, RadarMenuTarget, RadarRow, RadarSelection, RadarState, RadarView,
+        RequestBlock, RequestDerender, RequestRenderException, SLOT_PROFILES, UiAction,
+        handle_radar_actions, handle_radar_profile_picks,
+    };
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{Command, SlCommand, Uuid};
+
+    /// An agent id that is only ever compared, never resolved.
+    fn agent(id: u128) -> AgentKey {
+        AgentKey::from(Uuid::from_u128(id))
+    }
+
+    /// A row carrying nothing but its identity — enough for the ordering and
+    /// selection rules, which never look at the cells.
+    fn row(id: u128) -> RadarRow {
+        RadarRow {
+            agent: agent(id),
+            name: String::new(),
+            username: String::new(),
+            title: String::new(),
+            payment: PaymentInfo::default(),
+            age_days: None,
+            seen_seconds: 0,
+            distance: None,
+            coarse_only: false,
+            in_own_region: true,
+            typing: false,
+            sitting: false,
+            away: false,
+            friend: false,
+            muted: false,
+            complexity: None,
+            jellied: false,
+        }
+    }
+
+    /// A view over the given agents, in that order.
+    fn view_of(ids: &[u128]) -> RadarView {
+        RadarView {
+            rows: ids.iter().copied().map(row).collect(),
+            ..RadarView::default()
+        }
+    }
+
+    /// Every command in a menu tree, with the entries a submenu contributes.
+    fn collect_commands(menu: &MenuDef, out: &mut Vec<MenuCommand>) {
+        for item in menu.items {
+            match item {
+                MenuItemDef::Command(command) => out.push(*command),
+                MenuItemDef::Submenu(submenu) | MenuItemDef::SubmenuWhen(submenu, _) => {
+                    collect_commands(submenu, out);
+                }
+                MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
+            }
+        }
+    }
+
+    /// The actions [`handle_radar_actions`] dispatches by name (the mark colours
+    /// are matched from [`MARK_COLORS`] instead).
+    const HANDLED: &[&str] = &[
+        "profile",
+        "im",
+        "start-tracking",
+        "stop-tracking",
+        "teleport-to",
+        "offer-teleport",
+        "add-friend",
+        "remove-friend",
+        "add-to-set",
+        "mark-clear",
+        "mark-clear-all",
+        "block",
+        "unblock",
+        "derender",
+        "derender-blacklist",
+        "render-normally",
+        "render-never",
+        "render-fully",
+    ];
+
+    /// Both menu shapes route to arms that exist — a menu line with no handler
+    /// is a line that does nothing when picked.
+    #[test]
+    fn every_menu_action_has_a_handler() {
+        let mut commands = Vec::new();
+        collect_commands(&RADAR_MENU, &mut commands);
+        collect_commands(&RADAR_MULTI_MENU, &mut commands);
+        for command in commands {
+            let handled = HANDLED.contains(&command.action)
+                || MARK_COLORS
+                    .iter()
+                    .any(|(name, _color)| *name == command.action);
+            assert!(
+                handled,
+                "menu action {:?} has no handler arm",
+                command.action
+            );
+        }
+    }
+
+    /// The two shapes differ exactly where the reference's two menus do: the
+    /// entries that can only mean one avatar (the profile, the tracking pair,
+    /// Teleport To) are the single-row menu's alone, and the per-avatar profile
+    /// list is the multi-row menu's alone.
+    #[test]
+    fn the_two_menu_shapes_differ_by_what_only_one_row_can_mean() {
+        let mut single = Vec::new();
+        collect_commands(&RADAR_MENU, &mut single);
+        let mut many = Vec::new();
+        collect_commands(&RADAR_MULTI_MENU, &mut many);
+        let single_only: Vec<&str> = single
+            .iter()
+            .map(|command| command.action)
+            .filter(|action| !many.iter().any(|command| command.action == *action))
+            .collect();
+        assert_eq!(
+            single_only,
+            vec!["profile", "start-tracking", "stop-tracking", "teleport-to"],
+            "only the entries that address one row stand down for a multi-selection"
+        );
+        assert!(
+            many.iter()
+                .all(|command| single.iter().any(|other| other.action == command.action)),
+            "the multi-row menu adds no action the single-row menu cannot dispatch"
+        );
+        assert!(
+            RADAR_MULTI_MENU.items.iter().any(|item| matches!(
+                item,
+                MenuItemDef::DynamicSubmenu {
+                    slot: SLOT_PROFILES,
+                    ..
+                }
+            )),
+            "the per-avatar View Profiles list is the multi-row shape"
+        );
+    }
+
+    /// A selection is a set of *people*: a re-sort that moves everyone to new
+    /// indices keeps it, and only someone whose row is gone drops out.
+    #[test]
+    fn the_selection_survives_a_re_sort_and_drops_who_left() {
+        let mut selection = RadarSelection {
+            agents: vec![agent(1), agent(2), agent(3)],
+            anchor: Some(agent(2)),
+            read_revision: 0,
+        };
+        // The same three, re-sorted (3, 1, 2).
+        let (indices, anchor) = selection.reproject(&view_of(&[3, 1, 2]));
+        assert_eq!(selection.agents, vec![agent(1), agent(2), agent(3)]);
+        assert_eq!(indices, vec![1, 2, 0]);
+        assert_eq!(anchor, Some(2));
+        // Avatar 2 leaves the region: they are no longer selected, and the
+        // anchor they held goes with them.
+        let (indices, anchor) = selection.reproject(&view_of(&[3, 1]));
+        assert_eq!(selection.agents, vec![agent(1), agent(3)]);
+        assert_eq!(selection.anchor, None);
+        assert_eq!(indices, vec![1, 0]);
+        assert_eq!(anchor, None);
+    }
+
+    /// An app with just the action dispatch and the world it reads / writes.
+    fn action_app(agents: Vec<AgentKey>) -> App {
+        let mut app = App::new();
+        app.add_message::<UiAction>()
+            .add_message::<SlCommand>()
+            .add_message::<RequestBlock>()
+            .add_message::<RequestDerender>()
+            .add_message::<OpenConversation>()
+            .add_message::<OpenAvatarProfile>()
+            .add_message::<OpenAddToContactSet>()
+            .add_message::<RequestRenderException>()
+            .init_resource::<RadarState>()
+            .init_resource::<AvatarState>()
+            .init_resource::<MuteModel>()
+            .init_resource::<MapTracking>()
+            .init_resource::<MinimapMarks>()
+            .insert_resource(RadarMenuTarget {
+                agents,
+                names_pending: false,
+            })
+            .add_systems(Update, handle_radar_actions);
+        app
+    }
+
+    /// Run one menu action against a target selection.
+    fn pick(app: &mut App, action: &'static str) {
+        app.world_mut().write_message(UiAction {
+            element: RADAR_ELEMENT,
+            action,
+        });
+        app.update();
+    }
+
+    /// Every message of a type an update produced.
+    fn drain<M: Message + Clone>(app: &App) -> Vec<M> {
+        let messages = app.world().resource::<Messages<M>>();
+        let mut cursor = messages.get_cursor();
+        cursor.read(messages).cloned().collect()
+    }
+
+    /// A multi-selection action acts on **every** selected row, through the same
+    /// arm the single-row menu writes — and where the protocol already takes a
+    /// list (a teleport offer), it stays one message rather than becoming N.
+    #[test]
+    fn a_multi_selection_action_reaches_every_selected_row() {
+        let selection = vec![agent(1), agent(2), agent(3)];
+        let mut app = action_app(selection.clone());
+
+        pick(&mut app, "offer-teleport");
+        let offers: Vec<Vec<AgentKey>> = {
+            let messages = app.world().resource::<Messages<SlCommand>>();
+            let mut cursor = messages.get_cursor();
+            cursor
+                .read(messages)
+                .filter_map(|command| match &command.0 {
+                    Command::OfferTeleport { targets, .. } => Some(targets.clone()),
+                    _other => None,
+                })
+                .collect()
+        };
+        assert_eq!(
+            offers,
+            vec![selection.clone()],
+            "one offer names everyone, as the message's own target list does"
+        );
+
+        pick(&mut app, "im");
+        let opened: Vec<AgentKey> = drain::<OpenConversation>(&app)
+            .into_iter()
+            .filter_map(|open| match open.key {
+                ConversationKey::Direct(agent) => Some(agent),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(opened, selection, "a conversation per selected row");
+
+        pick(&mut app, "add-to-set");
+        let filed: Vec<Vec<AgentKey>> = drain::<OpenAddToContactSet>(&app)
+            .into_iter()
+            .map(|open| {
+                open.agents
+                    .into_iter()
+                    .map(|(agent, _name)| agent)
+                    .collect()
+            })
+            .collect();
+        assert_eq!(
+            filed,
+            vec![selection.clone()],
+            "the add-to-set floater is asked once, for the whole selection"
+        );
+
+        pick(&mut app, "mark-red");
+        let marked = app.world().resource::<MinimapMarks>();
+        assert!(
+            selection
+                .iter()
+                .all(|agent| marked.color_of(*agent).is_some()),
+            "a mark colours every selected row"
+        );
+        pick(&mut app, "mark-clear");
+        let marked = app.world().resource::<MinimapMarks>();
+        assert!(
+            selection
+                .iter()
+                .all(|agent| marked.color_of(*agent).is_none()),
+            "clearing drops the marks it set"
+        );
+    }
+
+    /// A single-row entry addresses the row it was opened on, not a list: the
+    /// tracking target is one avatar however many the snapshot holds.
+    #[test]
+    fn a_single_row_action_addresses_the_first_of_the_target() {
+        let mut app = action_app(vec![agent(7)]);
+        pick(&mut app, "start-tracking");
+        assert_eq!(
+            app.world().resource::<MapTracking>().target,
+            Some(super::TrackTarget::Avatar(agent(7)))
+        );
+        pick(&mut app, "stop-tracking");
+        assert_eq!(app.world().resource::<MapTracking>().target, None);
+    }
+
+    /// A **View Profiles** pick names its avatar by index into the snapshot the
+    /// right-click kept — the line itself carries no key.
+    #[test]
+    fn a_profile_pick_opens_the_avatar_at_that_index() {
+        let mut app = App::new();
+        app.add_message::<MenuDynamicPick>()
+            .add_message::<OpenAvatarProfile>()
+            .insert_resource(RadarMenuTarget {
+                agents: vec![agent(1), agent(2), agent(3)],
+                names_pending: false,
+            })
+            .add_systems(Update, handle_radar_profile_picks);
+        app.world_mut().write_message(MenuDynamicPick {
+            element: RADAR_ELEMENT,
+            slot: SLOT_PROFILES,
+            index: 2,
+        });
+        app.update();
+        let messages = app.world().resource::<Messages<OpenAvatarProfile>>();
+        let mut cursor = messages.get_cursor();
+        let opened: Vec<AgentKey> = cursor.read(messages).map(|open| open.agent).collect();
+        assert_eq!(opened, vec![agent(3)]);
     }
 }

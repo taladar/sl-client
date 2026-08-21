@@ -556,11 +556,65 @@ struct CompositeStamp {
     tracking: Option<(i64, i64, u128)>,
     /// The visibility toggles that pick layers (objects, lines, rings).
     toggles: (bool, bool, bool),
+    /// The avatar-mark revision the dot colours were taken at.
+    marks: u64,
 }
 
-/// A per-avatar map mark set from the context menu (colours the dot).
+/// A per-avatar map mark set from a context menu (colours the dot).
+///
+/// Session-scoped and client-only, as in the reference — and set from more than
+/// one surface: the minimap's own menu and the radar's row menu
+/// (`viewer-radar-multi-select`) write the same marks, exactly as the reference's
+/// radar menu writes `LLNetMap`'s.
 #[derive(Resource, Default)]
-pub(crate) struct MinimapMarks(HashMap<AgentKey, Rgba>);
+pub(crate) struct MinimapMarks {
+    /// The colour each marked avatar carries.
+    colors: HashMap<AgentKey, Rgba>,
+    /// Bumped on every change, and folded into [`CompositeStamp`] — which is how
+    /// a mark set from *any* surface recolours the dots on the next frame. The
+    /// alternative (each setter reaching into [`MinimapState`] to invalidate the
+    /// composite by hand) only works for the setters that remember to.
+    revision: u64,
+}
+
+impl MinimapMarks {
+    /// The colour `agent` is marked with, if any.
+    pub(crate) fn color_of(&self, agent: AgentKey) -> Option<Rgba> {
+        self.colors.get(&agent).copied()
+    }
+
+    /// Mark every one of `agents` in `color`.
+    pub(crate) fn mark(&mut self, agents: &[AgentKey], color: Rgba) {
+        for agent in agents {
+            self.colors.insert(*agent, color);
+        }
+        self.touch();
+    }
+
+    /// Drop the marks on `agents` (the reference's *Clear Mark(s)*).
+    pub(crate) fn clear(&mut self, agents: &[AgentKey]) {
+        for agent in agents {
+            self.colors.remove(agent);
+        }
+        self.touch();
+    }
+
+    /// Drop every mark (the reference's *Clear all Marks*).
+    pub(crate) fn clear_all(&mut self) {
+        self.colors.clear();
+        self.touch();
+    }
+
+    /// The revision the composite stamps itself with.
+    const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Note that the marks moved.
+    const fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+}
 
 /// The map tracking target — a shared shape for the minimap today and the
 /// world map later (`viewer-world-map-tracking-teleport`), so both surfaces
@@ -1818,6 +1872,7 @@ fn composite_minimap(
             TrackTarget::Avatar(agent) => (0, 0, agent.uuid().as_u128()),
         }),
         toggles: (show_objects, show_lines, rings_on),
+        marks: marks.revision(),
     };
 
     // Keep the hit-test dots current every frame regardless of the render path.
@@ -2179,8 +2234,8 @@ fn avatar_color(
     avatars: &AvatarState,
     marks: &MinimapMarks,
 ) -> Rgba {
-    if let Some(mark) = marks.0.get(&agent) {
-        return *mark;
+    if let Some(mark) = marks.color_of(agent) {
+        return mark;
     }
     if let Some(name) = avatars.name_of(agent)
         && name.ends_with(" Linden")
@@ -2771,7 +2826,12 @@ fn on_minimap_context(
 /// `LoadingData` placeholder rather than as a UUID: the list exists to say who
 /// is under the cursor, and a key says nothing. The pending flag is what keeps
 /// [`refresh_minimap_menu_names`] running only until the answers arrive.
-fn menu_agent_labels(
+///
+/// Shared with the radar's multi-selection menu
+/// (`viewer-radar-multi-select`), whose **View Profiles** lines want exactly
+/// this — a name where one is known, the placeholder plus a request where one is
+/// not.
+pub(crate) fn menu_agent_labels(
     agents: &[AgentKey],
     avatars: &mut AvatarState,
     translator: &Translator,
@@ -3043,8 +3103,10 @@ static MINIMAP_MENU: MenuDef = MenuDef {
     ],
 };
 
-/// The mark colours by action suffix.
-const MARK_COLORS: [(&str, Rgba); 5] = [
+/// The mark colours by action name — the one table, shared with every surface
+/// that offers the reference's *Mark…* submenu (the radar's row menu writes the
+/// same [`MinimapMarks`] with the same five colours).
+pub(crate) const MARK_COLORS: [(&str, Rgba); 5] = [
     ("mark-red", [255, 64, 64, 255]),
     ("mark-green", [64, 255, 64, 255]),
     ("mark-blue", [64, 96, 255, 255]),
@@ -3144,12 +3206,10 @@ fn handle_minimap_actions(
                 tracking.target = None;
             }
             "mark-clear" => {
-                for agent in &state.menu.agents {
-                    marks.0.remove(agent);
-                }
+                marks.clear(&state.menu.agents);
             }
             "mark-clear-all" => {
-                marks.0.clear();
+                marks.clear_all();
             }
             "zoom-very-close" => set_scale(&mut state, minimap_math::MAP_SCALE_VERY_CLOSE),
             "zoom-close" => set_scale(&mut state, minimap_math::MAP_SCALE_CLOSE),
@@ -3194,11 +3254,9 @@ fn handle_minimap_actions(
                 if let Some((_action, color)) =
                     MARK_COLORS.iter().find(|(name, _color)| *name == other)
                 {
-                    for agent in state.menu.agents.clone() {
-                        marks.0.insert(agent, *color);
-                    }
-                    // A mark recolours dots immediately.
-                    state.last_stamp = None;
+                    // The mark revision is in the composite stamp, so the dots
+                    // recolour on the next frame without invalidating by hand.
+                    marks.mark(&state.menu.agents, *color);
                 }
             }
         }

@@ -5,7 +5,13 @@ topic: viewer
 status: blocked
 origin: split from viewer-minimap-interactions (2026-07-23)
 blocked_by: [viewer-block-list, viewer-report-abuse, viewer-derender-blacklist]
-refs: [viewer-minimap-interactions, viewer-region-options-estate, api-g17]
+refs:
+  [
+    viewer-minimap-interactions,
+    viewer-region-options-estate,
+    viewer-avatar-moderation-actions,
+    api-g17,
+  ]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -24,10 +30,12 @@ per-menu reimplementation:
   Info.
 - Unblock (needs the mute-list mirror — [[viewer-block-list]]).
 - Report ([[viewer-report-abuse]]).
-- Freeze / Parcel Eject (parcel-manager moderation; freeze send-side —
-  the receive side was [[api-g17]]).
-- Estate Kick / Teleport Home / Ban
-  ([[viewer-region-options-estate]]).
+- Freeze / Parcel Eject / Estate Kick / Teleport Home / Ban — all five
+  are now [[viewer-avatar-moderation-actions]], which owns the shared
+  per-avatar layer (the two visibility predicates and one guarded
+  request channel per action) that this menu, the avatar pie and the
+  radar's row menus all want. Freeze's receive side was [[api-g17]];
+  the estate half waits on [[viewer-region-options-estate]].
 - Derender / Derender + Blacklist ([[viewer-derender-blacklist]]).
 
 Deps carry the partial order for the three with concrete task files;

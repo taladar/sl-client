@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 265 |
-| blocked | 67 |
+| ready | 264 |
+| blocked | 68 |
 | in-progress | 16 |
 | bugs | 31 |
-| done | 846 |
+| done | 847 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1354** |
+| **total** | **1355** |
 
 ## ideas (93)
 
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (265)
+## ready (264)
 
 ### protocol
 
@@ -685,8 +685,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
-- [`viewer-radar-multi-select`](ready/viewer-radar-multi-select.md) — Radar
-  multi-row selection and its multi-avatar menu
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
@@ -840,10 +838,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 
-## blocked (67)
+## blocked (68)
 
 ### viewer
 
+- [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
+  — Per-avatar parcel / estate moderation — the shared action layer (blocked by
+  `viewer-region-options-estate`)
 - [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
@@ -1158,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (846)
+## done (847)
 
 ### protocol
 
@@ -2181,6 +2182,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   centre-fan cross (sl-prim)
 - [`viewer-r9`](done/viewer-r9-planar-texgen-unconfirmed.md) — Planar texgen,
   unconfirmed
+- [`viewer-radar-multi-select`](done/viewer-radar-multi-select.md) — Radar
+  multi-row selection and its multi-avatar menu
 - [`viewer-reattached-rigged-mesh-renders-static-mislocated`](done/viewer-reattached-rigged-mesh-renders-static-mislocated.md)
   — Re-attached rigged mesh renders static and mislocated (fine at login)
 - [`viewer-region-name-connecting-after-crossing`](done/viewer-region-name-connecting-after-crossing.md)

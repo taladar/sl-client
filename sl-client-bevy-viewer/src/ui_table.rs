@@ -423,16 +423,18 @@ impl TableState {
     }
 
     /// The selected row data indices, ascending. Empty when nothing is selected.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the multi-select read-back a Multi-mode consumer reads; single-select \
-                      consumers use primary_selected. Exercised by the unit tests"
-        )
-    )]
     pub(crate) fn selected(&self) -> &[usize] {
         &self.selected
+    }
+
+    /// The range anchor — the last row plainly selected or `Ctrl`-toggled on, the
+    /// far end a `Shift`+click ranges from. A consumer that re-keys the selection
+    /// across a re-sort ([`set_selection`]) carries this over too, or the next
+    /// `Shift`+click ranges from whatever row the old index now happens to be.
+    ///
+    /// [`set_selection`]: Self::set_selection
+    pub(crate) const fn anchor(&self) -> Option<usize> {
+        self.anchor
     }
 
     /// The single selected index for a single-select consumer (the first, if
@@ -459,6 +461,26 @@ impl TableState {
         if !self.selected.is_empty() || self.anchor.is_some() {
             self.selected.clear();
             self.anchor = None;
+            self.selection_revision = self.selection_revision.wrapping_add(1);
+        }
+    }
+
+    /// Replace the selection (and its range anchor) wholesale.
+    ///
+    /// The widget stores a selection as **data indices**, which is what a click
+    /// hands it; a consumer whose rows re-sort or re-filter under the user (the
+    /// radar re-sorts every second) keeps the selection by its own row identity
+    /// and re-projects it here after each rebuild. Out-of-order or repeated
+    /// indices are normalised, and the revision only advances on a real change,
+    /// so a rebuild that leaves the selection where it was is not a selection
+    /// event.
+    pub(crate) fn set_selection(&mut self, selected: Vec<usize>, anchor: Option<usize>) {
+        let mut selected = selected;
+        selected.sort_unstable();
+        selected.dedup();
+        if self.selected != selected || self.anchor != anchor {
+            self.selected = selected;
+            self.anchor = anchor;
             self.selection_revision = self.selection_revision.wrapping_add(1);
         }
     }
@@ -1363,8 +1385,10 @@ pub(crate) struct TableWidgetPlugin;
 
 impl Plugin for TableWidgetPlugin {
     /// Register the reconciliation systems. The width sync and ellipsis reveal
-    /// run after the virtual-list layout (they read laid-out sizes); the sort /
-    /// seed / persist systems are independent.
+    /// run after the virtual-list layout (they read laid-out sizes); so does the
+    /// selection highlight, which paints by the row's *data index* and would
+    /// otherwise repaint a recycled row from the index it held last frame; the
+    /// sort / seed / persist systems are independent.
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
@@ -1372,7 +1396,7 @@ impl Plugin for TableWidgetPlugin {
                 seed_tables_from_settings,
                 sync_table_column_widths,
                 drive_table_sort_arrows,
-                apply_table_selection_highlight,
+                apply_table_selection_highlight.after(crate::virtual_list::layout_virtual_lists),
                 persist_table_state,
             ),
         )
@@ -1615,6 +1639,31 @@ mod tests {
         table.apply_click(2, false, false);
         table.apply_click(5, false, true);
         assert_eq!(table.selected(), &[2, 3, 4, 5]);
+    }
+
+    /// Re-projecting a selection across a re-sort: the consumer hands back the
+    /// indices its identities now sit at (in whatever order it found them), the
+    /// widget normalises them, and only a *different* selection is an event —
+    /// so a rebuild that did not move the selection is silent.
+    #[test]
+    fn set_selection_reprojects_and_only_bumps_on_change() {
+        let mut table = state(&MULTI_SPEC);
+        table.apply_click(1, false, false);
+        table.apply_click(3, true, false);
+        assert_eq!(table.selected(), &[1, 3]);
+        assert_eq!(table.anchor(), Some(3));
+        let revision = table.selection_revision();
+        // The same rows, re-sorted: the consumer found them at 4 and 0, anchor 0.
+        table.set_selection(vec![4, 0, 4], Some(0));
+        assert_eq!(table.selected(), &[0, 4]);
+        assert_eq!(table.anchor(), Some(0));
+        assert_eq!(table.selection_revision(), revision + 1);
+        // A rebuild that leaves them where they are says nothing.
+        table.set_selection(vec![0, 4], Some(0));
+        assert_eq!(table.selection_revision(), revision + 1);
+        // A Shift+click now ranges from the re-projected anchor, not the old index.
+        table.apply_click(2, false, true);
+        assert_eq!(table.selected(), &[0, 1, 2]);
     }
 
     /// A `None` table never records a selection, and clearing an empty selection

@@ -5,7 +5,8 @@ topic: viewer
 status: ready
 origin: Firestorm full-parity audit (2026-08-19)
 refs: [chat-b2, chat-b5, test-conference-roster,
-  viewer-social-people-panel]
+  viewer-social-people-panel, viewer-radar-multi-select,
+  viewer-people-lists-multi-select]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -25,6 +26,17 @@ N invitees. Scope: multi-select in the people / friends lists
 Conference context entry (people rows and calling-card inventory rows),
 and the N-agent session-open command. Pairs with the
 [[test-conference-roster]] live case for verification.
+
+**One consumer is already waiting.** The radar is multi-select as of
+[[viewer-radar-multi-select]], and its multi-selection menu's **IM**
+entry opens *one direct conversation per selected row* — a stand-in for
+the reference's `Avatar.IM`, which starts a conference when handed
+several ids. When this task lands, that entry (`radar.rs`, the `"im"`
+arm of `handle_radar_actions`) becomes the conference verb for a
+selection of more than one, and the module's stated divergence goes
+away. The same applies to whatever multi-selection
+[[viewer-people-lists-multi-select]] brings to the People panel's
+lists.
 
 Reference (Firestorm, read-only):
 `indra/newview/skins/default/xui/en/menu_inventory.xml`
