@@ -103,6 +103,46 @@ impl TransferSourceParamsInvItem {
     }
 }
 
+/// The `Params` blob of a `LLTST_ASSET` transfer — a plain asset-by-id
+/// download, legacy-superseded by the `ViewerAsset` capability on both grids.
+/// 20 bytes on the wire: the raw asset UUID at offset 0 and a little-endian
+/// `S32` asset-type code at offset 16 (`LLTransferSourceParamsAsset::
+/// packParams`). Decoded only so a simulator can *report* what a client tried
+/// before refusing it per the legacy-skip rule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct TransferSourceParamsAsset {
+    /// The requested asset.
+    pub asset_id: Uuid,
+    /// The asset-type code the requester expects.
+    pub asset_type: i32,
+}
+
+impl TransferSourceParamsAsset {
+    /// Encodes the params blob in the exact `packParams` layout.
+    #[must_use]
+    pub fn encode(&self) -> Vec<u8> {
+        let mut writer = Writer::new();
+        writer.put_uuid(self.asset_id);
+        writer.put_i32(self.asset_type);
+        writer.into_bytes()
+    }
+
+    /// Decodes a params blob (the inverse of [`encode`](Self::encode)).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`WireError::UnexpectedEof`] if the blob is shorter than the
+    /// 20-byte layout.
+    pub fn decode(bytes: &[u8]) -> Result<Self, WireError> {
+        let mut reader = Reader::new(bytes);
+        Ok(Self {
+            asset_id: reader.uuid()?,
+            asset_type: reader.i32()?,
+        })
+    }
+}
+
 /// The `Params` blob of a `LLTST_SIM_ESTATE` transfer — an estate asset (the
 /// covenant notecard). 36 bytes on the wire: two raw UUIDs at offsets 0/16 and
 /// a little-endian `S32` estate-asset-type code at offset 32. Unlike the
@@ -152,7 +192,10 @@ mod tests {
     use pretty_assertions::assert_eq;
     use uuid::Uuid;
 
-    use super::{TransferSourceParamsEstate, TransferSourceParamsInvItem};
+    use super::{
+        TransferSourceParamsAsset, TransferSourceParamsEstate, TransferSourceParamsInvItem,
+    };
+    use crate::error::WireError;
 
     /// The task-item params encode to the exact 100-byte `packParams` layout —
     /// six raw UUIDs at offsets 0/16/32/48/64/80, then the asset-type `S32`
@@ -232,5 +275,37 @@ mod tests {
             TransferSourceParamsEstate::decode(bytes.get(0..35).unwrap_or(&[])),
             Err(crate::WireError::UnexpectedEof { .. })
         ));
+    }
+
+    #[test]
+    fn asset_params_pin_the_layout() {
+        let params = TransferSourceParamsAsset {
+            asset_id: Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f10),
+            asset_type: 10,
+        };
+        let bytes = params.encode();
+        assert_eq!(bytes.len(), 20, "LLTST_ASSET params are 20 bytes");
+        assert_eq!(
+            bytes.get(0..16),
+            Some(params.asset_id.as_bytes().as_slice()),
+            "raw uuid first"
+        );
+        assert_eq!(
+            bytes.get(16..20),
+            Some([10, 0, 0, 0].as_slice()),
+            "little-endian asset type"
+        );
+        assert_eq!(
+            TransferSourceParamsAsset::decode(&bytes),
+            Ok(params),
+            "round trip"
+        );
+        assert!(
+            matches!(
+                TransferSourceParamsAsset::decode(bytes.get(0..18).unwrap_or(&[])),
+                Err(WireError::UnexpectedEof { .. })
+            ),
+            "truncated blob is an EOF error"
+        );
     }
 }

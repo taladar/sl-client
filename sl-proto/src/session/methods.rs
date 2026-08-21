@@ -45,8 +45,8 @@ use super::{
     PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
     ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
     SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
-    TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE,
-    XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo, XferDownload,
+    XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -109,7 +109,10 @@ use sl_wire::{
     parse_remote_parcel_reply, parse_resource_cost_selected, parse_simulator_features,
     parse_user_info_reply, zero_decode,
 };
-use sl_wire::{Direction, GlobalCoordinates, combine_uuids};
+use sl_wire::{
+    Direction, GlobalCoordinates, XFER_CHUNK_SIZE, XferPacketId, combine_uuids, decode_xfer_chunk,
+    next_xfer_chunk,
+};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Instant;
@@ -124,7 +127,7 @@ const UUID_NAMES_PER_REQUEST: usize = 80;
 /// a single `AssetUploadRequest`; a larger asset sends an empty `AssetData` and
 /// streams over `Xfer`. Kept at the `Xfer` chunk size so it comfortably fits one
 /// reliable UDP packet alongside the message header.
-const ASSET_UPLOAD_INLINE_LIMIT: usize = crate::session::XFER_UPLOAD_CHUNK_SIZE;
+const ASSET_UPLOAD_INLINE_LIMIT: usize = XFER_CHUNK_SIZE;
 
 /// Splits a slice of [`ScopedObjectId`]s into the single [`CircuitId`] they all
 /// belong to and the bare region-local ids, ready for a batch request (which
@@ -3551,26 +3554,18 @@ impl Session {
             }
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
-                let packet_num = packet.xfer_id.packet;
-                // The high bit marks the final packet; the low 31 bits are the
-                // sequence number (the first packet is sequence 0).
-                let is_last = packet_num & 0x8000_0000 != 0;
-                let sequence = packet_num & 0x7fff_ffff;
+                let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
                 if self.xfer_downloads.contains_key(&xfer_id) {
-                    // The first packet carries a 4-byte little-endian length
-                    // prefix before the file data; later packets are raw.
-                    let chunk: &[u8] = if sequence == 0 {
-                        packet.data_packet.data.get(4..).unwrap_or(&[])
-                    } else {
-                        &packet.data_packet.data
-                    };
+                    let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
                     if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
-                        download.buffer.extend_from_slice(chunk);
+                        download.buffer.extend_from_slice(chunk.payload);
                     }
                     if let Some(circuit) = self.circuit.as_mut() {
-                        circuit.send_confirm_xfer_packet(xfer_id, packet_num, now)?;
+                        circuit.send_confirm_xfer_packet(xfer_id, packet_id.raw(), now)?;
                     }
-                    if is_last && let Some(download) = self.xfer_downloads.remove(&xfer_id) {
+                    if packet_id.is_last()
+                        && let Some(download) = self.xfer_downloads.remove(&xfer_id)
+                    {
                         self.finish_xfer_download(xfer_id, download)?;
                     }
                 }
@@ -7790,47 +7785,23 @@ impl Session {
     }
 
     /// Streams the next chunk of the in-flight outbound `Xfer` upload `xfer_id`
-    /// as a `SendXferPacket`. The first packet (sequence 0) carries a 4-byte
-    /// little-endian total-size prefix before the data; the final packet sets the
-    /// high-bit end-of-file marker in its packet number. A no-op if the upload is
-    /// already gone. Advances the upload's cursor so the next
-    /// `ConfirmXferPacket` sends the following chunk.
+    /// as a `SendXferPacket`, framed by the shared [`sl_wire::xfer`] codec
+    /// (size prefix on sequence 0, EOF flag on the last packet). A no-op if
+    /// the upload is already gone or fully sent. Advances the upload's cursor
+    /// so the next `ConfirmXferPacket` sends the following chunk.
     fn send_next_xfer_upload_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
         let Some(upload) = self.xfer_uploads.get_mut(&xfer_id) else {
             return Ok(());
         };
         let sequence = upload.next_sequence;
-        let is_first = sequence == 0;
-        let remaining = upload.data.len().saturating_sub(upload.sent);
-        let take = remaining.min(XFER_UPLOAD_CHUNK_SIZE);
-        let end = upload.sent.saturating_add(take);
-        let chunk = upload.data.get(upload.sent..end).unwrap_or(&[]);
-        // The first packet is prefixed with the total file size (little-endian
-        // u32), matching the reference viewer's `LLXfer::sendPacket`.
-        let mut payload = Vec::with_capacity(take.saturating_add(4));
-        if is_first {
-            #[expect(
-                clippy::little_endian_bytes,
-                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
-            )]
-            let total_le = u32::try_from(upload.data.len())
-                .unwrap_or(u32::MAX)
-                .to_le_bytes();
-            payload.extend_from_slice(&total_le);
-        }
-        payload.extend_from_slice(chunk);
-        upload.sent = end;
-        let is_last = upload.sent >= upload.data.len();
-        upload.last_sent = is_last;
-        upload.next_sequence = sequence.wrapping_add(1);
-        // The high bit of the packet number marks the final packet.
-        let packet = if is_last {
-            sequence | 0x8000_0000
-        } else {
-            sequence
+        let Some(packet) = next_xfer_chunk(&upload.data, upload.sent, sequence) else {
+            return Ok(());
         };
+        upload.sent = packet.sent;
+        upload.last_sent = packet.id.is_last();
+        upload.next_sequence = sequence.wrapping_add(1);
         if let Some(circuit) = self.circuit.as_mut() {
-            circuit.send_xfer_packet(xfer_id, packet, &payload, now)?;
+            circuit.send_xfer_packet(xfer_id, packet.id.raw(), &packet.payload, now)?;
         }
         Ok(())
     }

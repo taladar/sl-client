@@ -873,13 +873,6 @@ struct XferDownload {
     buffer: Vec<u8>,
 }
 
-/// The maximum number of file bytes carried in a single outbound
-/// `SendXferPacket`, matching the reference viewer's default `LL_XFER_CHUNK_SIZE`
-/// (the small-payload size used when the `RequestXfer` did not ask for big
-/// packets, as OpenSim's terrain upload does not). The first packet additionally
-/// carries a 4-byte length prefix on top of this.
-pub(crate) const XFER_UPLOAD_CHUNK_SIZE: usize = 1000;
-
 /// An in-flight outbound `Xfer` file upload: the file bytes and how far we have
 /// streamed them. Registered by a `RequestXfer` the simulator sends in answer to
 /// a client trigger (today only `EstateOwnerMessage`/`terrain`

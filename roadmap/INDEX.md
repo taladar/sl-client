@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 265 |
+| ready | 264 |
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 846 |
+| done | 847 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1351** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (265)
+## ready (264)
 
 ### protocol
 
@@ -830,11 +830,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out
 
-### idiomatic
-
-- [`idiomatic-xfer-framing-codec`](ready/idiomatic-xfer-framing-codec.md) —
-  Shared sl-wire Xfer framing codec + explicit Xfer/Transfer edge cases
-
 ### test
 
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
@@ -1157,7 +1152,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (846)
+## done (847)
 
 ### protocol
 
@@ -2479,6 +2474,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Second pass — completeness sweep (2026-06-24)
 - [`idiomatic-p8-01`](done/idiomatic-p8-01-convert-plain-string-url-fields-to-url-url-from-the-url-crat.md)
   — Convert plain String URL fields to url::Url from the url crate (use ur
+- [`idiomatic-xfer-framing-codec`](done/idiomatic-xfer-framing-codec.md) —
+  Shared sl-wire Xfer framing codec + explicit Xfer/Transfer edge cases
 
 ### chat
 

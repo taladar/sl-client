@@ -40,6 +40,7 @@ mod transfer;
 mod url;
 mod user_info;
 mod voice;
+mod xfer;
 pub mod xmlrpc;
 mod zerocode;
 
@@ -202,8 +203,8 @@ pub use sl_lsl::{
 };
 pub use transfer::{
     ESTATE_ASSET_COVENANT, TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_ASSET,
-    TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsEstate,
-    TransferSourceParamsInvItem,
+    TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsAsset,
+    TransferSourceParamsEstate, TransferSourceParamsInvItem,
 };
 pub use url::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};
 pub use user_info::{
@@ -216,6 +217,10 @@ pub use voice::{
     build_parcel_voice_info_response, build_provision_voice_account_request,
     build_provision_voice_account_response, build_voice_signaling_request,
     parse_provision_voice_account_request, parse_voice_signaling_request,
+};
+pub use xfer::{
+    XFER_CHUNK_SIZE, XFER_EOF_FLAG, XferChunk, XferOutgoingPacket, XferPacketId, decode_xfer_chunk,
+    encode_xfer_chunk, next_xfer_chunk,
 };
 pub use zerocode::{decode as zero_decode, encode as zero_encode};
 

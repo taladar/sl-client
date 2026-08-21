@@ -38,9 +38,9 @@ mod test {
         ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId,
         SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem,
         TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource, TransferStatus,
-        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource,
+        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -5267,6 +5267,29 @@ mod test {
             )),
             "expected the client abort on the sim, got {server_events:?}"
         );
+
+        // Aborting an id that is no longer (or never was) in flight is an
+        // observable error and sends nothing — a driver typo must not pass
+        // silently.
+        while sim.poll_transmit().is_some() {}
+        assert!(
+            matches!(
+                sim.abort_xfer(second, 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "aborting an already-aborted xfer is UnknownXfer"
+        );
+        assert!(
+            matches!(
+                sim.abort_xfer(XferId::new(0xFFFF), 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "aborting a never-started xfer is UnknownXfer"
+        );
+        assert!(
+            sim.poll_transmit().is_none(),
+            "an UnknownXfer abort sends nothing"
+        );
         Ok(())
     }
 
@@ -5440,14 +5463,21 @@ mod test {
             Err(sl_proto::Error::UnknownTransfer)
         ));
 
-        // Legacy plain-asset source: auto-refused, no server event surfaced.
+        // Legacy plain-asset source: auto-refused with an unknown-source
+        // `TransferInfo` (never a `TransferRequested`), but surfaced as the
+        // typed refusal so a driver can log what the client tried.
+        let legacy_id = uuid::Uuid::from_u128(0xDEAD);
+        let legacy_params = sl_wire::TransferSourceParamsAsset {
+            asset_id: asset.uuid(),
+            asset_type: AssetType::ScriptText.to_code(),
+        };
         let legacy = AnyMessage::TransferRequest(TransferRequest {
             transfer_info: TransferRequestTransferInfoBlock {
-                transfer_id: uuid::Uuid::from_u128(0xDEAD),
+                transfer_id: legacy_id,
                 channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
                 source_type: sl_wire::TRANSFER_SOURCE_ASSET,
                 priority: 100.0,
-                params: asset.uuid().as_bytes().to_vec(),
+                params: legacy_params.encode(),
             },
         });
         sim.handle_datagram(client_addr(), &client_datagram(&legacy, 9100, false)?, now)?;
@@ -5457,6 +5487,43 @@ mod test {
                 .iter()
                 .any(|e| matches!(e, ServerEvent::TransferRequested { .. })),
             "a legacy plain-asset request must not surface, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::LegacyAssetTransferRefused {
+                    transfer_id: TransferId::new(legacy_id),
+                    params: Some(legacy_params),
+                }),
+            "expected LegacyAssetTransferRefused, got {server_events:?}"
+        );
+        let refusal = sim
+            .poll_transmit()
+            .ok_or("expected the unknown-source TransferInfo")?;
+        assert!(
+            matches!(
+                decode(&refusal)?,
+                AnyMessage::TransferInfo(info)
+                    if info.transfer_info.transfer_id == legacy_id
+                        && info.transfer_info.status == TransferStatus::UnknownSource.to_code()
+            ),
+            "expected an UnknownSource TransferInfo"
+        );
+
+        // A garbage source type is refused silently.
+        let garbage = AnyMessage::TransferRequest(TransferRequest {
+            transfer_info: TransferRequestTransferInfoBlock {
+                transfer_id: uuid::Uuid::from_u128(0xBEEF),
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                source_type: 99,
+                priority: 100.0,
+                params: Vec::new(),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&garbage, 9101, false)?, now)?;
+        assert_eq!(
+            drain_server(&mut sim),
+            Vec::new(),
+            "garbage source surfaces nothing"
         );
         Ok(())
     }

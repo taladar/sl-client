@@ -213,8 +213,9 @@ use sl_wire::{
     UpdateScriptTaskRequest,
 };
 use sl_wire::{
-    TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM,
-    TransferSourceParamsEstate, TransferSourceParamsInvItem,
+    TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_ASSET, TRANSFER_SOURCE_SIM_ESTATE,
+    TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsAsset, TransferSourceParamsEstate,
+    TransferSourceParamsInvItem, XferPacketId, decode_xfer_chunk, next_xfer_chunk,
 };
 
 /// Decodes a [`RestoreItem`] from one of the field-identical inventory-item
@@ -1772,6 +1773,17 @@ pub enum ServerEvent {
         priority: f32,
         /// The decoded request source.
         source: TransferRequestSource,
+    },
+    /// A client sent a `TransferRequest` for the plain asset-by-id source
+    /// (`LLTST_ASSET`), the path superseded by the `ViewerAsset` capability on
+    /// both grids. It was refused with an unknown-source `TransferInfo` per the
+    /// legacy-skip rule; the decoded params (`None` if malformed) say what the
+    /// client wanted so a driver can log it.
+    LegacyAssetTransferRefused {
+        /// The client's transfer id.
+        transfer_id: TransferId,
+        /// The requested asset id and type, if the params blob decoded.
+        params: Option<TransferSourceParamsAsset>,
     },
     /// The client cancelled an in-flight asset Transfer (`TransferAbort`).
     /// The inverse of the client's
@@ -5968,14 +5980,18 @@ impl SimSession {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
-    /// if the message fails to encode.
+    /// Returns [`Error::NoCircuit`] if the circuit is not open,
+    /// [`Error::UnknownXfer`] if no send or receive with that id is in flight
+    /// (nothing is sent), or a wire error if the message fails to encode.
     pub fn abort_xfer(&mut self, xfer_id: XferId, result: i32, now: Instant) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let _send = self.xfer_sends.remove(&xfer_id);
-        let _receive = self.xfer_receives.remove(&xfer_id);
+        let send = self.xfer_sends.remove(&xfer_id);
+        let receive = self.xfer_receives.remove(&xfer_id);
+        if send.is_none() && receive.is_none() {
+            return Err(Error::UnknownXfer);
+        }
         let message = AnyMessage::AbortXfer(AbortXfer {
             xfer_id: AbortXferXferIDBlock {
                 id: xfer_id.get(),
@@ -5996,47 +6012,33 @@ impl SimSession {
 
     /// Streams the next chunk of the outbound `Xfer` send `xfer_id` as a
     /// `SendXferPacket` — the server side of the strictly one-packet-in-flight
-    /// pacing, the mirror of the client's `send_next_xfer_upload_packet`. The
-    /// first packet (sequence 0) carries a 4-byte little-endian total-size
-    /// prefix before the data; the final packet sets the high-bit end-of-file
-    /// marker in its packet number. A no-op if the send is already gone.
+    /// pacing, the mirror of the client's `send_next_xfer_upload_packet`,
+    /// framed by the shared [`sl_wire::xfer`] codec (size prefix on sequence
+    /// 0, EOF flag on the last packet). A fully-sent send is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownXfer`] if no send with that id is in flight, or
+    /// a wire error if the message fails to encode.
     fn send_next_xfer_send_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
         let Some(send) = self.xfer_sends.get_mut(&xfer_id) else {
-            return Ok(());
+            return Err(Error::UnknownXfer);
         };
         let sequence = send.next_sequence;
-        let is_first = sequence == 0;
-        let remaining = send.data.len().saturating_sub(send.sent);
-        let take = remaining.min(crate::session::XFER_UPLOAD_CHUNK_SIZE);
-        let end = send.sent.saturating_add(take);
-        let chunk = send.data.get(send.sent..end).unwrap_or(&[]);
-        let mut payload = Vec::with_capacity(take.saturating_add(4));
-        if is_first {
-            #[expect(
-                clippy::little_endian_bytes,
-                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
-            )]
-            let total_le = u32::try_from(send.data.len())
-                .unwrap_or(u32::MAX)
-                .to_le_bytes();
-            payload.extend_from_slice(&total_le);
-        }
-        payload.extend_from_slice(chunk);
-        send.sent = end;
-        let is_last = send.sent >= send.data.len();
-        send.last_sent = is_last;
-        send.next_sequence = sequence.wrapping_add(1);
-        let packet = if is_last {
-            sequence | 0x8000_0000
-        } else {
-            sequence
+        let Some(packet) = next_xfer_chunk(&send.data, send.sent, sequence) else {
+            return Ok(());
         };
+        send.sent = packet.sent;
+        send.last_sent = packet.id.is_last();
+        send.next_sequence = sequence.wrapping_add(1);
         let message = AnyMessage::SendXferPacket(SendXferPacket {
             xfer_id: SendXferPacketXferIDBlock {
                 id: xfer_id.get(),
-                packet,
+                packet: packet.id.raw(),
             },
-            data_packet: SendXferPacketDataPacketBlock { data: payload },
+            data_packet: SendXferPacketDataPacketBlock {
+                data: packet.payload,
+            },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -7832,26 +7834,22 @@ impl SimSession {
                 // the seq-0 length prefix, confirm every packet, finish on the
                 // high-bit end-of-file marker.
                 let xfer_id = XferId(packet.xfer_id.id);
-                let packet_num = packet.xfer_id.packet;
-                let is_last = packet_num & 0x8000_0000 != 0;
-                let sequence = packet_num & 0x7fff_ffff;
+                let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
                 if self.xfer_receives.contains_key(&xfer_id) {
-                    let chunk: &[u8] = if sequence == 0 {
-                        packet.data_packet.data.get(4..).unwrap_or(&[])
-                    } else {
-                        &packet.data_packet.data
-                    };
+                    let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
                     if let Some(receive) = self.xfer_receives.get_mut(&xfer_id) {
-                        receive.buffer.extend_from_slice(chunk);
+                        receive.buffer.extend_from_slice(chunk.payload);
                     }
                     let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
                         xfer_id: ConfirmXferPacketXferIDBlock {
                             id: xfer_id.get(),
-                            packet: packet_num,
+                            packet: packet_id.raw(),
                         },
                     });
                     self.send(&confirm, Reliability::Reliable, now)?;
-                    if is_last && let Some(receive) = self.xfer_receives.remove(&xfer_id) {
+                    if packet_id.is_last()
+                        && let Some(receive) = self.xfer_receives.remove(&xfer_id)
+                    {
                         self.send_asset_upload_complete(
                             receive.asset_id,
                             receive.asset_type,
@@ -7883,21 +7881,31 @@ impl SimSession {
             AnyMessage::TransferRequest(request) => {
                 // A legacy UDP asset Transfer download. Only the two source
                 // types with no HTTP alternative on either grid are served
-                // (task-inventory item asset, estate asset); anything else —
-                // including the ViewerAsset-superseded plain asset source — is
-                // auto-refused as unknown, per the legacy-skip rule.
+                // (task-inventory item asset, estate asset). The plain
+                // asset-by-id source is the ViewerAsset-superseded legacy path:
+                // refused as unknown per the legacy-skip rule, but surfaced so
+                // a driver can see a client still trying it. Garbage sources
+                // are refused silently.
                 let block = &request.transfer_info;
                 let transfer_id = TransferId::new(block.transfer_id);
-                let source = if block.source_type == TRANSFER_SOURCE_SIM_INV_ITEM {
-                    TransferSourceParamsInvItem::decode(&block.params)
+                let source = match block.source_type {
+                    TRANSFER_SOURCE_SIM_INV_ITEM => {
+                        TransferSourceParamsInvItem::decode(&block.params)
+                            .ok()
+                            .map(TransferRequestSource::TaskInventoryItem)
+                    }
+                    TRANSFER_SOURCE_SIM_ESTATE => TransferSourceParamsEstate::decode(&block.params)
                         .ok()
-                        .map(TransferRequestSource::TaskInventoryItem)
-                } else if block.source_type == TRANSFER_SOURCE_SIM_ESTATE {
-                    TransferSourceParamsEstate::decode(&block.params)
-                        .ok()
-                        .map(TransferRequestSource::Estate)
-                } else {
-                    None
+                        .map(TransferRequestSource::Estate),
+                    TRANSFER_SOURCE_ASSET => {
+                        self.events
+                            .push_back(ServerEvent::LegacyAssetTransferRefused {
+                                transfer_id,
+                                params: TransferSourceParamsAsset::decode(&block.params).ok(),
+                            });
+                        None
+                    }
+                    _unknown => None,
                 };
                 if let Some(source) = source {
                     let _prev = self

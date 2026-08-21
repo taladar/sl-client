@@ -220,7 +220,11 @@ The simulator half of every exchange above lives in the sans-I/O
 
 The sequencing rules are exactly the client's, mirrored: seq-0 length
 prefix, high-bit EOF marker, strictly one packet in flight, `AbortXfer`
-honoured in both directions.
+honoured in both directions. Both halves frame their packets through the
+one sans-I/O codec in `sl-wire` (`XferPacketId`, `next_xfer_chunk`,
+`decode_xfer_chunk`), so neither side masks the EOF bit or writes the
+length prefix by hand. Aborting or pacing an xfer id that is not in
+flight is an `Error::UnknownXfer`, not a silent no-op.
 
 ---
 
@@ -234,6 +238,10 @@ honoured in both directions.
 > - Low-level sends (`RequestXfer` / `ConfirmXferPacket` / `SendXferPacket` /
 >   `AssetUploadRequest`) are in `sl-proto/src/session/circuit.rs`; `XferId`
 >   is in `sl-proto/src/bookkeeping_ids.rs`.
+> - The packet framing (`XFER_CHUNK_SIZE`, `XFER_EOF_FLAG`, `XferPacketId`,
+>   `encode_xfer_chunk` / `decode_xfer_chunk` / `next_xfer_chunk`) is the
+>   byte-pinned codec in `sl-wire/src/xfer.rs`, shared by the client's
+>   download handler and upload sender and the server's send and receive.
 > - Public API: `Session::request_xfer` (→ `Event::XferDownloaded`),
 >   `Session::request_mute_list` (→ `Event::MuteList`),
 >   `Session::fetch_task_inventory` (→ `Event::TaskInventoryContents`),

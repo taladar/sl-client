@@ -51,4 +51,9 @@ pub enum Error {
     /// cancelled by the client. Nothing was sent.
     #[error("no transfer with that id is awaiting an answer")]
     UnknownTransfer,
+    /// A [`SimSession`](crate::SimSession) `Xfer` operation named an xfer id
+    /// with no send or receive in flight — never started, already finished,
+    /// or aborted by the client. Nothing was sent.
+    #[error("no xfer with that id is in flight")]
+    UnknownXfer,
 }

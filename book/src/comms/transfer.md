@@ -72,9 +72,10 @@ non-`Ok` `TransferInfo` surfaces as a typed failure instead of silence.
 The server side stashes the request params (to echo, as real simulators
 do), surfaces a typed request event, and leaves the *decision* to the
 driver: answer with the asset bytes, or refuse with a status. A request
-for any other source type — including the legacy plain-asset source — is
-auto-refused as `UnknownSource` without surfacing an event, per the
-legacy-skip rule.
+for the legacy plain-asset source is auto-refused as `UnknownSource` per
+the legacy-skip rule, but surfaced as a typed refusal (with the decoded
+asset id and type) so a driver can log a client still trying the old
+path; any other source type is refused silently.
 
 ---
 
@@ -94,7 +95,9 @@ legacy-skip rule.
 >   `sl-client-tokio` and `sl-client-bevy` (REPL tokens
 >   `fetch_task_item_asset`, `fetch_estate_covenant_asset`).
 > - Server: `ServerEvent::TransferRequested { source:
->   TransferRequestSource, .. }` and `ServerEvent::TransferAborted`,
+>   TransferRequestSource, .. }`, `ServerEvent::TransferAborted`, and
+>   `ServerEvent::LegacyAssetTransferRefused` (params decoded by
+>   `sl_wire::TransferSourceParamsAsset`),
 >   answered by `SimSession::send_transfer_asset` /
 >   `SimSession::send_transfer_fail` (`sl-proto/src/sim_session.rs`);
 >   loopback tests in `sl-proto/tests/sim_session.rs`.
