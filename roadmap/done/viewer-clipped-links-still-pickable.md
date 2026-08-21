@@ -2,7 +2,7 @@
 id: viewer-clipped-links-still-pickable
 title: Scrolled-out chat links still hover and click, above the floater
 topic: viewer
-status: bugs
+status: done
 origin: seen on aditi while live-checking [[viewer-conference-start-ui]]
   (2026-08-21)
 refs: [viewer-url-linkification, viewer-social-im-conversations,
@@ -93,6 +93,28 @@ floater's clip — see `menu.rs`, `ui_combo.rs`).
 A viewer-side workaround exists but is worse: flattening the transcript so each
 line is a direct child of the scroll node would fix chat alone and leave every
 other nested list wrong.
+
+## Fixed (2026-08-21)
+
+Fixed upstream in the fork, at `55d00a73b` (the `rev` all 65 `bevy_*` lines
+pin). The two conditions are split: the walk goes to the parent **whether or
+not that parent clips**, and rejects only when a clipping ancestor excludes the
+point. `OverrideClip` still ends the walk — it is a filter on the child-of
+query, not part of the clip test, so a menu popover escaping a floater's clip
+is unaffected.
+
+Two tests came with it (`bevy_ui`'s `focus.rs`, which had none): a clipping
+grandparent still clips through a non-clipping column, and an `OverrideClip`
+node still escapes. The first was checked against the *old* body and fails
+there, so it pins the regression rather than merely passing.
+
+**Verified live on aditi**: scrolled-out chat links no longer hover or activate
+above the floater, and menus / combo popovers — the `OverrideClip` consumers
+this could have broken — still open and pick normally. One contact-sets combo
+misbehaviour was seen on the same build and investigated: the next run's
+`ui_combo=debug` showed the healthy path on every press, so it is the standing
+intermittent [[viewer-combo-stops-opening]], which has gained this occurrence
+and a sharper capture plan.
 
 ## How to verify
 

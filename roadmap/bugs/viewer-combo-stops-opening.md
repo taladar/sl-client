@@ -39,6 +39,24 @@ Also ruled out by reading:
 - The combo's value text and arrow are both `Pickable::IGNORE`, so a press
   anywhere on the combo targets the anchor.
 
+## Second sighting (2026-08-21)
+
+Seen again on the contact-sets chooser, on aditi — on the build that fixed
+[[viewer-clipped-links-still-pickable]], which made the picking clip walk
+*stricter*, so that change was the immediate suspect: a control that overflows
+its pane used to stay clickable and would now be correctly clipped out of
+reach. The very next run, with `ui_combo=debug` on, the chooser opened on every
+one of four presses — `disabled=false`, `open_popovers=0`, `mine_open=false`,
+`options=4`, and a `building a combo popover rows=4` each time. The healthy
+path again, and the failing occurrence itself was never under logging.
+
+So the clip walk is **not** implicated by any evidence — but it is not cleared
+either, and it sharpens the leading hypothesis below: if the press really never
+arrives, a chooser row that overflows its pane is now a *sufficient* cause,
+where before it was only a suspicious one. The next capture should therefore
+also dump the anchor's global rect against each clipping ancestor's clip rect,
+not just the `combo press` line.
+
 ## How to capture it next time
 
 Run with `RUST_LOG=sl_client_bevy_viewer::ui_combo=debug` and reproduce. The

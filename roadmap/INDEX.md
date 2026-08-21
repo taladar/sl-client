@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 263 |
 | blocked | 68 |
 | in-progress | 17 |
-| bugs | 34 |
-| done | 850 |
+| bugs | 33 |
+| done | 851 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1361** |
@@ -1081,7 +1081,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (34)
+## bugs (33)
 
 ### protocol
 
@@ -1106,8 +1106,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Unit tests open real audio devices on the developer's machine
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
-- [`viewer-clipped-links-still-pickable`](bugs/viewer-clipped-links-still-pickable.md)
-  — Scrolled-out chat links still hover and click, above the floater
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1165,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (850)
+## done (851)
 
 ### protocol
 
@@ -1434,6 +1432,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-url-linkification` (done))
 - [`viewer-clickable-name-widgets`](done/viewer-clickable-name-widgets.md) —
   Reusable clickable avatar-name / group-name widgets
+- [`viewer-clipped-links-still-pickable`](done/viewer-clipped-links-still-pickable.md)
+  — Scrolled-out chat links still hover and click, above the floater
 - [`viewer-clouds-sun-occlusion-horizon-contact`](done/viewer-clouds-sun-occlusion-horizon-contact.md)
   — Clouds wrong in front of the sun, and touch the water at the horizon
 - [`viewer-command-despawned-entity-warnings`](done/viewer-command-despawned-entity-warnings.md)
