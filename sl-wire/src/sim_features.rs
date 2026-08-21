@@ -76,6 +76,10 @@ pub struct OpenSimExtras {
     pub grid_url: Option<url::Url>,
     /// The currency symbol the grid displays (`currency`), e.g. `"OS$"`.
     pub currency: Option<String>,
+    /// The economy helper base URI (`currency-base-uri`): where the viewer's
+    /// buy-L$ / buy-land flows POST their XML-RPC helper calls
+    /// (the `economy_helper` builders such as [`build_currency_quote_request`](crate::build_currency_quote_request)).
+    pub currency_base_uri: Option<url::Url>,
     /// The `llSay`/normal chat range in metres (`say-range`; viewer default 20).
     pub say_range: Option<i32>,
     /// The `llShout` range in metres (`shout-range`; viewer default 100).
@@ -193,6 +197,7 @@ impl OpenSimExtras {
             avatar_picker_url: url_field("avatar-picker-url")?,
             grid_url: url_field("GridURL")?,
             currency: map.field_str("currency", "currency")?.map(str::to_owned),
+            currency_base_uri: url_field("currency-base-uri")?,
             say_range: map.field_i32("say-range", "say-range")?,
             shout_range: map.field_i32("shout-range", "shout-range")?,
             whisper_range: map.field_i32("whisper-range", "whisper-range")?,
@@ -234,6 +239,9 @@ impl OpenSimExtras {
         }
         if let Some(value) = &self.currency {
             put("currency", Llsd::String(value.clone()));
+        }
+        if let Some(value) = &self.currency_base_uri {
+            put("currency-base-uri", Llsd::String(crate::url_to_wire(value)));
         }
         if let Some(value) = self.say_range {
             put("say-range", Llsd::Integer(value));
@@ -511,6 +519,9 @@ mod tests {
                 ),
                 grid_url: Some(url::Url::parse("http://grid.example/").map_err(|e| e.to_string())?),
                 currency: Some("OS$".to_owned()),
+                currency_base_uri: Some(
+                    url::Url::parse("http://economy.example/").map_err(|e| e.to_string())?,
+                ),
                 say_range: Some(20),
                 shout_range: Some(100),
                 whisper_range: Some(10),

@@ -7,19 +7,52 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
+use bytes::Bytes;
 use sl_proto::{
-    DEFAULT_TERRAIN_DETAIL_TEXTURES, Maturity, ProductType, RegionHandle, RegionIdentity,
-    RegionTerrainComposition, SimSession, Uuid, region_name_from_wire,
+    DEFAULT_TERRAIN_DETAIL_TEXTURES, Maturity, OpenSimExtras, ProductType, RegionHandle,
+    RegionIdentity, RegionTerrainComposition, SimSession, SimulatorFeatures, Uuid,
+    region_name_from_wire,
 };
 use sl_types::key::AgentKey;
-use sl_wire::{LoginGates, LoginSuccess, SkeletonFolder};
+use sl_wire::{
+    GridInfo, KEY_ECONOMY, KEY_GRIDNAME, KEY_GRIDNICK, KEY_LOGIN, KEY_MESSAGE, KEY_PLATFORM,
+    LoginGates, LoginSuccess, MapTileRef, SkeletonFolder,
+};
 use tokio::net::{TcpListener, UdpSocket};
 use tokio::sync::{Mutex, broadcast, watch};
 
 use crate::accounts::{Account, AccountConfig};
 use crate::driver::{SharedSim, SimState, new_shared_sim, run_timer, run_udp_pump};
+use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
+use crate::map_tiles::MapTileStore;
 use crate::scenario::Scenario;
+
+/// How the grid describes itself in `get_grid_info` and the login message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GridIdentity {
+    /// The human-readable grid name (`gridname`).
+    pub name: String,
+    /// The short nickname (`gridnick`).
+    pub nick: String,
+    /// The message of the day (`message`, also the login response message).
+    pub message: String,
+    /// The platform name (`platform`); `OpenSim` makes Firestorm's grid
+    /// manager treat the grid as an OpenSim one.
+    pub platform: String,
+}
+
+impl Default for GridIdentity {
+    /// "Fake Grid" / `fakegrid`, platform `OpenSim`.
+    fn default() -> Self {
+        Self {
+            name: "Fake Grid".to_owned(),
+            nick: "fakegrid".to_owned(),
+            message: "Welcome to the fake grid".to_owned(),
+            platform: "OpenSim".to_owned(),
+        }
+    }
+}
 
 /// One region a [`FakeGridBuilder`] defines.
 #[derive(Debug, Clone)]
@@ -141,6 +174,14 @@ pub(crate) struct GridCore {
     pub(crate) http_port: u16,
     /// The login URI (`http://127.0.0.1:<port>/`), parsed once at start.
     login_uri: url::Url,
+    /// The grid's self-description.
+    pub(crate) identity: GridIdentity,
+    /// The `get_grid_info` document, derived once at start.
+    pub(crate) grid_info: GridInfo,
+    /// The economy helper policy.
+    pub(crate) economy: EconomyConfig,
+    /// The world-map tiles served under the login URI.
+    pub(crate) map_tiles: MapTileStore,
     /// Live sessions by sequence number.
     pub(crate) sessions: Mutex<HashMap<u64, SharedSim>>,
     /// Mints session sequence numbers.
@@ -149,6 +190,8 @@ pub(crate) struct GridCore {
     pub(crate) shutdown_tx: watch::Sender<bool>,
     /// Publishes successful logins.
     pub(crate) logins_tx: broadcast::Sender<LoginNotice>,
+    /// Publishes accepted economy-helper purchases.
+    pub(crate) economy_tx: broadcast::Sender<EconomyEvent>,
 }
 
 /// Everything a successful login mints before the response is built. The
@@ -191,6 +234,12 @@ impl GridCore {
         sim.set_secure_session_id(secure_session_id);
         sim.set_region_id(region.region_id);
         (region.scenario.setup)(&mut sim);
+        if *sim.simulator_features() == SimulatorFeatures::default() {
+            // The scenario left the feature document untouched: advertise
+            // the grid-wide URLs (map tiles, currency helper) the way an
+            // OpenSim region does through `OpenSimExtras`.
+            sim.set_simulator_features(self.simulator_features());
+        }
 
         let base_url: url::Url =
             format!("http://127.0.0.1:{}/sim/{seq}", self.http_port).parse()?;
@@ -209,6 +258,9 @@ impl GridCore {
             seed_url,
         ));
         enrich_success(&mut success, account, region, &sim);
+        success.message = Some(self.identity.message.clone());
+        success.map_server_url = Some(self.login_uri.clone());
+        success.currency = Some(self.economy.currency_symbol.clone());
 
         let state = SimState {
             sim,
@@ -243,6 +295,37 @@ impl GridCore {
     pub(crate) async fn session(&self, seq: u64) -> Option<SharedSim> {
         self.sessions.lock().await.get(&seq).cloned()
     }
+
+    /// The stock `SimulatorFeatures` document: mesh enabled plus the
+    /// `OpenSimExtras` URLs pointing back at this grid.
+    fn simulator_features(&self) -> SimulatorFeatures {
+        SimulatorFeatures {
+            mesh_rez_enabled: Some(true),
+            mesh_upload_enabled: Some(true),
+            open_sim_extras: Some(OpenSimExtras {
+                map_server_url: Some(self.login_uri.clone()),
+                currency: Some(self.economy.currency_symbol.clone()),
+                currency_base_uri: Some(self.login_uri.clone()),
+                say_range: Some(20),
+                shout_range: Some(100),
+                whisper_range: Some(10),
+                ..OpenSimExtras::default()
+            }),
+            ..SimulatorFeatures::default()
+        }
+    }
+}
+
+/// Derives the `get_grid_info` document: the login URI doubles as the
+/// economy helper URI (the helper scripts live next to the login endpoint).
+fn grid_info_of(identity: &GridIdentity, login_uri: &url::Url) -> GridInfo {
+    GridInfo::new()
+        .with(KEY_PLATFORM, identity.platform.clone())
+        .with(KEY_LOGIN, login_uri.as_str())
+        .with(KEY_GRIDNAME, identity.name.clone())
+        .with(KEY_GRIDNICK, identity.nick.clone())
+        .with(KEY_ECONOMY, login_uri.as_str())
+        .with(KEY_MESSAGE, identity.message.clone())
 }
 
 /// Mints a random non-zero circuit code.
@@ -270,7 +353,6 @@ fn enrich_success(
     success.agent_access = Some("M".to_owned());
     success.agent_access_max = Some("A".to_owned());
     success.start_location = Some("last".to_owned());
-    success.message = Some("Welcome to the fake grid".to_owned());
     success.seconds_since_epoch = Some(now_epoch_seconds());
 
     let (roots, skeleton) = skeleton_of(sim.agent_inventory());
@@ -329,6 +411,12 @@ pub struct FakeGridBuilder {
     eq_hold: Duration,
     /// The TCP port to bind, `0` for an ephemeral one.
     http_port: u16,
+    /// The grid's self-description.
+    identity: GridIdentity,
+    /// The economy helper policy.
+    economy: EconomyConfig,
+    /// Builder-registered map tiles.
+    map_tiles: MapTileStore,
 }
 
 impl Default for FakeGridBuilder {
@@ -350,6 +438,9 @@ impl FakeGridBuilder {
             honor_options: false,
             eq_hold: Duration::from_secs(30),
             http_port: 0,
+            identity: GridIdentity::default(),
+            economy: EconomyConfig::default(),
+            map_tiles: MapTileStore::default(),
         }
     }
 
@@ -404,6 +495,30 @@ impl FakeGridBuilder {
         self
     }
 
+    /// Sets how the grid describes itself in `get_grid_info`.
+    #[must_use]
+    pub fn grid_identity(mut self, identity: GridIdentity) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets the economy helper policy (currency symbol, price, site state,
+    /// upgrade requirements, confirm token).
+    #[must_use]
+    pub fn economy(mut self, economy: EconomyConfig) -> Self {
+        self.economy = economy;
+        self
+    }
+
+    /// Registers a world-map tile served at `map-<zoom>-<x>-<y>-objects.jpg`
+    /// under the login URI. Every configured region gets a stock zoom-1 tile
+    /// unless one is registered here.
+    #[must_use]
+    pub fn map_tile(mut self, tile: MapTileRef, jpeg: impl Into<Bytes>) -> Self {
+        self.map_tiles.insert(tile, jpeg.into());
+        self
+    }
+
     /// Starts the grid: binds the HTTP listener, registers accounts and
     /// regions, and spawns the accept loop.
     ///
@@ -433,6 +548,12 @@ impl FakeGridBuilder {
         let login_uri: url::Url = format!("http://127.0.0.1:{http_port}/").parse()?;
         let (shutdown_tx, _) = watch::channel(false);
         let (logins_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
+        let (economy_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
+        let mut map_tiles = self.map_tiles;
+        for region in &self.regions {
+            map_tiles.seed_region(region.grid_x, region.grid_y);
+        }
+        let grid_info = grid_info_of(&self.identity, &login_uri);
 
         let regions = self
             .regions
@@ -458,10 +579,15 @@ impl FakeGridBuilder {
             eq_hold: self.eq_hold,
             http_port,
             login_uri,
+            identity: self.identity,
+            grid_info,
+            economy: self.economy,
+            map_tiles,
             sessions: Mutex::new(HashMap::new()),
             next_session: AtomicU64::new(1),
             shutdown_tx,
             logins_tx,
+            economy_tx,
         });
         tokio::spawn(crate::http_service::run_http(Arc::clone(&core), listener));
         Ok(FakeGrid { core })
@@ -530,6 +656,24 @@ impl FakeGrid {
     #[must_use]
     pub fn logins(&self) -> broadcast::Receiver<LoginNotice> {
         self.core.logins_tx.subscribe()
+    }
+
+    /// Subscribes to accepted economy-helper purchases.
+    #[must_use]
+    pub fn economy_events(&self) -> broadcast::Receiver<EconomyEvent> {
+        self.core.economy_tx.subscribe()
+    }
+
+    /// The `get_grid_info` document the grid serves.
+    #[must_use]
+    pub fn grid_info(&self) -> &GridInfo {
+        &self.core.grid_info
+    }
+
+    /// How the grid describes itself.
+    #[must_use]
+    pub fn identity(&self) -> &GridIdentity {
+        &self.core.identity
     }
 
     /// The live session handle for a login notice.

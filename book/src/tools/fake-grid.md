@@ -17,7 +17,10 @@ only the I/O those cores deliberately leave to a runtime:
   `SimSession::handle_datagram` with the machine's own `poll_timeout`
   deadlines driven by a timer task (acks, resends, pings, inactivity);
 - scriptable content fixtures — a `Scenario` seeds each fresh session's
-  stores (inventory, parcels, features, …) and greets arriving avatars.
+  stores (inventory, parcels, features, …) and greets arriving avatars;
+- the niche non-CAPS HTTP surfaces a grid manager and the world map
+  expect next to the login URI (see below): `get_grid_info`, the
+  map-tile files, and the economy helper scripts.
 
 There is deliberately **no world authority**: no physics, no persistence,
 no inter-client broadcast beyond what a test scripts. The fake grid is
@@ -72,6 +75,41 @@ logs `fake grid ready: login URI http://127.0.0.1:9100/`. Point this
 workspace's clients at it (`SL_LOGIN_URI=http://127.0.0.1:9100/`), or
 add it to Firestorm's grid manager as a grid with that login URI. With
 no `--account` it creates `Test User` / `password`.
+
+## The non-CAPS HTTP surfaces
+
+Besides login and CAPS, a real login host answers three more things a
+viewer asks for, all served from the same loopback port (the sans-I/O
+codecs live in `sl-wire`: `grid_info`, `map_tile`, `economy_helper`,
+over a small generic `xmlrpc` module):
+
+- **`GET /get_grid_info`** — the `<gridinfo>` document Firestorm's grid
+  manager fetches before it even shows the login screen (it resolves the
+  grid's name, nickname, platform, and helper URI from it). The same
+  entries answer the XML-RPC method `get_grid_info` POSTed to `/`, as
+  OpenSim does. `FakeGridBuilder::grid_identity` / `--grid-name` /
+  `--grid-nick` set the name and nickname; the `economy` (helper URI)
+  entry is the login URI itself.
+- **`GET /map-<zoom>-<x>-<y>-objects.jpg`** — world-map tiles, in the
+  file-name shape `sl-map-apis` and the viewer's world map request. The
+  login response's `map-server-url` and the stock `SimulatorFeatures`
+  `OpenSimExtras` both point at the login URI, so a viewer's world map
+  loads tiles from the fake grid. Every configured region gets a stock
+  zoom-1 tile (an embedded JPEG); `FakeGridBuilder::map_tile` registers
+  others. Absent tiles are 404; tiles carry `Cache-Control`/`ETag` so the
+  viewer's disk cache holds them.
+- **`POST /currency.php`** and **`POST /landtool.php`** — the XML-RPC
+  economy helpers behind the buy-L$ and buy-land floaters
+  (`getCurrencyQuote`/`buyCurrency`, `preflightBuyLandPrep`/`buyLandPrep`).
+  `EconomyConfig` sets the currency symbol, the price (US cents per
+  1000 L$), whether the "site" is up, and whether land purchases demand
+  a membership / land-use upgrade; a quote hands out a `confirm` token
+  the commit must echo. Nothing moves a balance — an accepted purchase
+  is published on `FakeGrid::economy_events` for tests to assert.
+
+The legacy UDP asset paths (Xfer, `TransferRequest`) are implemented in
+`SimSession` but the fake grid does not yet script content for them — see
+the `viewer-fake-grid-udp-assets` roadmap task.
 
 The stock `Scenario` is intentionally small (an inventory skeleton, a
 library, one parcel, a chat greeting). A real viewer will ask for much

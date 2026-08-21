@@ -1,5 +1,8 @@
 //! The hyper HTTP service: one loopback listener serving the login endpoint
-//! at `/` and every session's CAPS surface under `/sim/<seq>/…`.
+//! at `/` (also the XML-RPC `get_grid_info` method), `GET /get_grid_info`,
+//! the economy helper scripts (`/currency.php`, `/landtool.php`), the
+//! world-map tiles (`/map-<zoom>-<x>-<y>-objects.jpg`), and every session's
+//! CAPS surface under `/sim/<seq>/…`.
 //!
 //! Connections are served one spawned task each, so a held `EventQueueGet`
 //! long-poll never starves other requests (the client's HTTP stack pools
@@ -18,8 +21,13 @@ use sl_proto::CapsResponse;
 use tokio::net::TcpListener;
 
 use crate::caps_endpoint::dispatch_caps;
+use crate::economy_endpoint::{handle_helper, is_helper_path};
+use crate::http_answer::HttpAnswer;
 use crate::login_endpoint::handle_login;
 use crate::runtime::GridCore;
+
+/// The XML-RPC content type.
+const XML_RPC_CONTENT_TYPE: &str = "text/xml";
 
 /// The largest request body accepted, uploads included.
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
@@ -59,8 +67,10 @@ pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
     }
 }
 
-/// Routes one request: `POST /` → login, `/sim/<seq>/…` → that session's
-/// CAPS surface, anything else → 404.
+/// Routes one request: `POST /` → login (or the XML-RPC `get_grid_info`
+/// method), `GET /get_grid_info` → the grid-info XML, the helper scripts →
+/// the economy endpoint, tile paths → the map-tile store, `/sim/<seq>/…` →
+/// that session's CAPS surface, anything else → 404.
 async fn handle_request(
     core: Arc<GridCore>,
     request: Request<Incoming>,
@@ -80,8 +90,41 @@ async fn handle_request(
         if method != "POST" {
             return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
         }
+        // Real login hosts serve `get_grid_info` as an XML-RPC method on the
+        // login URL too; anything else (including LLSD) is a login.
+        if std::str::from_utf8(&body)
+            .ok()
+            .and_then(sl_wire::xmlrpc::method_name)
+            .is_some_and(|name| name == sl_wire::GRID_INFO_METHOD)
+        {
+            return Ok(answer_response(HttpAnswer::ok(
+                XML_RPC_CONTENT_TYPE,
+                sl_wire::build_grid_info_xmlrpc_response(&core.grid_info),
+            )));
+        }
         let answer = handle_login(&core, content_type.as_deref().unwrap_or(""), &body).await;
-        return Ok(login_response(&answer));
+        return Ok(answer_response(answer));
+    }
+
+    if path.strip_prefix('/') == Some(sl_wire::GRID_INFO_PATH) {
+        if method != "GET" {
+            return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
+        }
+        return Ok(answer_response(HttpAnswer::ok(
+            XML_RPC_CONTENT_TYPE,
+            sl_wire::build_grid_info_xml(&core.grid_info),
+        )));
+    }
+
+    if is_helper_path(&path) {
+        if method != "POST" {
+            return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
+        }
+        return Ok(answer_response(handle_helper(&core, &path, &body)));
+    }
+
+    if let Some(answer) = core.map_tiles.answer(&method, &path) {
+        return Ok(answer_response(answer));
     }
 
     if let Some(seq) = session_seq(&path) {
@@ -143,12 +186,22 @@ fn plain_status(status: HttpStatusCode) -> Response<Full<Bytes>> {
     response
 }
 
-/// Builds the hyper response for a login answer.
-fn login_response(answer: &crate::login_endpoint::LoginHttpAnswer) -> Response<Full<Bytes>> {
-    let mut response = Response::new(Full::new(Bytes::from(answer.body.clone())));
+/// Builds the hyper response for a non-CAPS endpoint answer.
+fn answer_response(answer: HttpAnswer) -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(answer.body));
     *response.status_mut() =
         HttpStatusCode::from_u16(answer.status).unwrap_or(HttpStatusCode::INTERNAL_SERVER_ERROR);
-    set_content_type(&mut response, answer.content_type);
+    if !answer.content_type.is_empty() {
+        set_content_type(&mut response, answer.content_type);
+    }
+    for (name, value) in answer.headers {
+        if let (Ok(name), Ok(value)) = (
+            http::header::HeaderName::from_bytes(name.as_bytes()),
+            http::header::HeaderValue::from_str(&value),
+        ) {
+            response.headers_mut().insert(name, value);
+        }
+    }
     response
 }
 

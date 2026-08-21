@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 263 |
+| ready | 265 |
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 845 |
+| done | 846 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1348** |
+| **total** | **1351** |
 
 ## ideas (93)
 
@@ -217,12 +217,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (263)
+## ready (265)
 
 ### protocol
 
-- [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
-  server channels — grid info, map tiles, helper URIs
+- [`protocol-sim-terrain-raw-flows`](ready/protocol-sim-terrain-raw-flows.md) —
+  Server-side terrain RAW download/upload — InitiateDownload + Xfer pull
 - [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
   Server-side voice provisioning and WebRTC signalling stub (blocked by
   `protocol-sim-caps-framework` (done))
@@ -408,6 +408,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-fake-grid-login-smoke`](ready/viewer-fake-grid-login-smoke.md) — The
   real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
+- [`viewer-fake-grid-udp-assets`](ready/viewer-fake-grid-udp-assets.md) — Fake
+  grid answers the legacy UDP asset paths — Xfer, Transfer, task inventory
+  (blocked by `viewer-fake-grid` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -827,6 +830,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out
 
+### idiomatic
+
+- [`idiomatic-xfer-framing-codec`](ready/idiomatic-xfer-framing-codec.md) —
+  Shared sl-wire Xfer framing codec + explicit Xfer/Transfer edge cases
+
 ### test
 
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
@@ -1149,7 +1157,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (845)
+## done (846)
 
 ### protocol
 
@@ -1293,6 +1301,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-sim-caps-region-info`](done/protocol-sim-caps-region-info.md) —
   Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
   (done))
+- [`protocol-sim-http-misc`](done/protocol-sim-http-misc.md) — Niche non-CAPS
+  server channels — grid info, map tiles, helper URIs
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
 - [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state

@@ -101,6 +101,45 @@ a test harness) can serve an unmodified viewer:
   `options` list applies `LoginSuccess::filter_options` first; OpenSim
   ignores the list and sends everything.
 
+## The login host's siblings: grid info, map tiles, helper URIs
+
+A login URI is more than the login method. A viewer's grid manager
+(Firestorm's, or this workspace's future login screen) first fetches
+`<login-uri>/get_grid_info`, a flat `<gridinfo><key>value</key>…</gridinfo>`
+document, to learn the grid's `gridname`, `gridnick`, `platform`, welcome /
+help / register pages, and the `economy` helper URI (`helperuri` is an
+alias; `economy` wins when both appear). OpenSim also answers the same
+entries as the XML-RPC method `get_grid_info` on the login URL. The set
+of keys is whatever the grid configured, so the model keeps an ordered
+list of string entries with typed accessors for the known ones.
+
+Two more surfaces hang off values the login response (or `get_grid_info`)
+hands out:
+
+- `map-server-url` (login response; a region's `SimulatorFeatures`
+  `OpenSimExtras` may override it) is the base under which the world map
+  fetches `map-<zoom>-<x>-<y>-objects.jpg` tiles — zoom 1 is one region
+  per tile, each level doubles the span, `x`/`y` are the tile's lower-left
+  region coordinates.
+- The helper URI hosts two XML-RPC scripts: `currency.php`
+  (`getCurrencyQuote` → `buyCurrency`) and `landtool.php`
+  (`preflightBuyLandPrep` → `buyLandPrep`). Each quote/preflight returns a
+  `confirm` token the commit echoes; every response carries `success`
+  plus `errorMessage`/`errorURI` on failure. OpenSim regions advertise the
+  helper base as the `currency-base-uri` `OpenSimExtras` key.
+
+> **In this codebase**
+>
+> - `sl-wire/src/xmlrpc.rs` is the generic XML-RPC codec (calls,
+>   responses, faults over `Llsd` values) the login codec shares.
+> - `sl-wire/src/grid_info.rs`: `GridInfo`, `build_grid_info_xml` /
+>   `parse_grid_info_xml`, and the XML-RPC pair.
+> - `sl-wire/src/map_tile.rs`: `MapTileRef` (file-name build/parse).
+> - `sl-wire/src/economy_helper.rs`: typed request/response builders and
+>   parsers for all four helper methods, both directions.
+> - `sl-fake-grid` serves all of them next to its login endpoint — see
+>   [The fake grid](../tools/fake-grid.md).
+
 ## Why XML-RPC — and the LLSD variant
 
 Login predates CAPS, which is why its primary codec is XML-RPC rather than

@@ -2816,7 +2816,8 @@ impl SimSession {
     }
 
     /// The feature document the `SimulatorFeatures` capability serves.
-    pub(crate) const fn simulator_features(&self) -> &SimulatorFeatures {
+    #[must_use]
+    pub const fn simulator_features(&self) -> &SimulatorFeatures {
         &self.simulator_features
     }
 

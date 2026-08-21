@@ -467,6 +467,15 @@ impl Client {
         self.session.circuit_code()
     }
 
+    /// The grid's world-map tile base URL from the login response
+    /// (`map-server-url`), available once logged in. A region's
+    /// `SimulatorFeatures` `OpenSimExtras` may override it once fetched;
+    /// consumers should prefer that where present.
+    #[must_use]
+    pub const fn map_server_url(&self) -> Option<&url::Url> {
+        self.session.map_server_url()
+    }
+
     /// The region's seed capability URL, available once logged in. A REPL driver
     /// can seed its placeholder context with it before [`Client::run`] consumes
     /// the client.

@@ -5,17 +5,20 @@ mod agent_preferences;
 mod circuit_code;
 mod control_flags;
 mod display_name;
+mod economy_helper;
 mod endian;
 mod error;
 mod experience;
 mod field;
 mod geometry;
+mod grid_info;
 mod header;
 mod inventory;
 mod llsd;
 mod login;
 mod login_llsd;
 mod lsl_syntax;
+mod map_tile;
 mod material;
 mod message;
 /// Generated LLUDP message types and their (de)serialization, produced at build
@@ -37,6 +40,7 @@ mod transfer;
 mod url;
 mod user_info;
 mod voice;
+pub mod xmlrpc;
 mod zerocode;
 
 pub use abuse_report::{
@@ -51,6 +55,18 @@ pub use control_flags::ControlFlags;
 pub use display_name::{
     DisplayName, build_display_names_response, display_names_query, parse_display_names,
     parse_display_names_query,
+};
+pub use economy_helper::{
+    BUY_CURRENCY_METHOD, BUY_LAND_PREP_METHOD, BuyCurrencyRequest, CURRENCY_HELPER_PATH,
+    CurrencyQuote, CurrencyQuoteRequest, GET_CURRENCY_QUOTE_METHOD, HelperFailure, HelperOutcome,
+    LAND_TOOL_HELPER_PATH, LandPrep, LandPrepRequest, LandUseRequirement, MembershipLevel,
+    MembershipRequirement, PREFLIGHT_BUY_LAND_PREP_METHOD, ViewerVersionInfo,
+    build_buy_currency_request, build_buy_currency_response, build_buy_land_prep_request,
+    build_buy_land_prep_response, build_currency_quote_request, build_currency_quote_response,
+    build_preflight_land_prep_request, build_preflight_land_prep_response,
+    parse_buy_currency_request, parse_buy_currency_response, parse_buy_land_prep_request,
+    parse_buy_land_prep_response, parse_currency_quote_request, parse_currency_quote_response,
+    parse_preflight_land_prep_request, parse_preflight_land_prep_response,
 };
 pub use error::WireError;
 pub use experience::{
@@ -70,6 +86,13 @@ pub use experience::{
 };
 pub use field::{Reader, Writer};
 pub use geometry::{Direction, GlobalCoordinates};
+pub use grid_info::{
+    GRID_INFO_METHOD, GRID_INFO_PATH, GridInfo, KEY_ABOUT, KEY_ECONOMY, KEY_GATEKEEPER,
+    KEY_GRIDNAME, KEY_GRIDNICK, KEY_HELP, KEY_HELPERURI, KEY_LOGIN, KEY_MESSAGE, KEY_PASSWORD,
+    KEY_PLATFORM, KEY_PROFILEURI, KEY_REGISTER, KEY_SEARCH, KEY_UAS, KEY_WEB_PROFILE_URL,
+    KEY_WELCOME, build_grid_info_xml, build_grid_info_xmlrpc_response, parse_grid_info_xml,
+    parse_grid_info_xmlrpc_response,
+};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use inventory::{
     AIS_MAX_FOLDER_DEPTH, AisCategoryCreate, AisItemUpdate, AisLinkCreate, AisUpdate,
@@ -120,6 +143,7 @@ pub use login_llsd::{
     parse_login_response_llsd,
 };
 pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
+pub use map_tile::{MAP_TILE_CONTENT_TYPE, MAP_TILE_MAX_ZOOM, MAP_TILE_MIN_ZOOM, MapTileRef};
 pub use material::{
     FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,
     MaterialOverrideUpdate, RenderMaterialEntry, build_gltf_material_override,
@@ -165,6 +189,10 @@ pub use sequence_number::SequenceNumber;
 pub use sim_features::{
     AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
     build_simulator_features_response, parse_simulator_features,
+};
+pub use xmlrpc::{
+    XmlRpcCall, XmlRpcError, XmlRpcResponse, build_fault, build_method_call, build_method_response,
+    parse_method_call, parse_method_response,
 };
 // Re-export the `sl-lsl` symbol-table types the `LSLSyntax` decoder produces, so
 // a consumer of `sl-wire` reaches them the same way it reaches `SimulatorFeatures`.

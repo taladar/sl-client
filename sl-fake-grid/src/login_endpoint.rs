@@ -10,36 +10,24 @@ use sl_wire::{
     build_login_response_llsd, parse_login_request, parse_login_request_llsd,
 };
 
+use crate::http_answer::HttpAnswer;
 use crate::runtime::{GridCore, LoginNotice};
-
-/// A finished login answer for the HTTP layer to send.
-pub(crate) struct LoginHttpAnswer {
-    /// The HTTP status (200 even for protocol-level failures, per XML-RPC;
-    /// 400 only when the body cannot be parsed at all).
-    pub(crate) status: u16,
-    /// The response content type (mirrors the request codec).
-    pub(crate) content_type: &'static str,
-    /// The serialized response document.
-    pub(crate) body: String,
-}
 
 /// The XML-RPC login content type.
 const XML_RPC_CONTENT_TYPE: &str = "text/xml";
 /// The LLSD login content type.
 const LLSD_CONTENT_TYPE: &str = "application/llsd+xml";
 
-/// Serves one `POST /` login request body.
+/// Serves one `POST /` login request body. The status is 200 even for
+/// protocol-level failures, per XML-RPC; 400 only when the body cannot be
+/// parsed at all.
 pub(crate) async fn handle_login(
     core: &Arc<GridCore>,
     content_type: &str,
     body: &[u8],
-) -> LoginHttpAnswer {
+) -> HttpAnswer {
     let Ok(text) = std::str::from_utf8(body) else {
-        return LoginHttpAnswer {
-            status: 400,
-            content_type: XML_RPC_CONTENT_TYPE,
-            body: String::new(),
-        };
+        return HttpAnswer::with_status(400, XML_RPC_CONTENT_TYPE, "");
     };
     // Real grids serve both codecs at one URL, keyed on the request's
     // Content-Type; parameters (e.g. `; charset=utf-8`) are tolerated.
@@ -51,38 +39,22 @@ pub(crate) async fn handle_login(
         match parse_login_request_llsd(text) {
             Ok(parsed) => {
                 let response = respond(core, &parsed).await;
-                LoginHttpAnswer {
-                    status: 200,
-                    content_type: LLSD_CONTENT_TYPE,
-                    body: build_login_response_llsd(&response),
-                }
+                HttpAnswer::ok(LLSD_CONTENT_TYPE, build_login_response_llsd(&response))
             }
             Err(error) => {
                 tracing::debug!("unparsable LLSD login request: {error}");
-                LoginHttpAnswer {
-                    status: 400,
-                    content_type: LLSD_CONTENT_TYPE,
-                    body: String::new(),
-                }
+                HttpAnswer::with_status(400, LLSD_CONTENT_TYPE, "")
             }
         }
     } else {
         match parse_login_request(text) {
             Ok(parsed) => {
                 let response = respond(core, &parsed).await;
-                LoginHttpAnswer {
-                    status: 200,
-                    content_type: XML_RPC_CONTENT_TYPE,
-                    body: build_login_response(&response),
-                }
+                HttpAnswer::ok(XML_RPC_CONTENT_TYPE, build_login_response(&response))
             }
             Err(error) => {
                 tracing::debug!("unparsable XML-RPC login request: {error}");
-                LoginHttpAnswer {
-                    status: 400,
-                    content_type: XML_RPC_CONTENT_TYPE,
-                    body: String::new(),
-                }
+                HttpAnswer::with_status(400, XML_RPC_CONTENT_TYPE, "")
             }
         }
     }

@@ -2,10 +2,11 @@
 //! unmodified viewer (this workspace's or Firestorm) can log into.
 //!
 //! Point the viewer's grid manager / `SL_LOGIN_URI` at the printed login
-//! URI (`http://127.0.0.1:<port>/`).
+//! URI (`http://127.0.0.1:<port>/`). The same host also serves
+//! `get_grid_info`, the world-map tiles, and the economy helper scripts.
 
 use clap::Parser;
-use sl_fake_grid::{AccountConfig, FakeGridBuilder, RegionConfig};
+use sl_fake_grid::{AccountConfig, FakeGridBuilder, GridIdentity, RegionConfig};
 
 /// Command-line options.
 #[derive(Debug, Parser)]
@@ -22,6 +23,14 @@ struct Options {
     /// The region name.
     #[arg(long, default_value = "Fake Region")]
     region: String,
+
+    /// The grid name reported by `get_grid_info` (`gridname`).
+    #[arg(long, default_value = "Fake Grid")]
+    grid_name: String,
+
+    /// The grid nickname reported by `get_grid_info` (`gridnick`).
+    #[arg(long, default_value = "fakegrid")]
+    grid_nick: String,
 
     /// How long an empty EventQueueGet poll is held before the 502
     /// re-poll answer, in seconds.
@@ -51,6 +60,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut builder = FakeGridBuilder::new()
         .http_port(options.http_port)
         .event_queue_hold(std::time::Duration::from_secs(options.hold_secs))
+        .grid_identity(GridIdentity {
+            name: options.grid_name.clone(),
+            nick: options.grid_nick.clone(),
+            ..GridIdentity::default()
+        })
         .region(RegionConfig {
             name: options.region.clone(),
             ..RegionConfig::default()
@@ -75,7 +89,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let grid = builder.start().await?;
-    tracing::info!("fake grid ready: login URI {}", grid.login_uri());
+    tracing::info!(
+        "fake grid ready: login URI {} (also get_grid_info, map tiles, currency.php/landtool.php)",
+        grid.login_uri()
+    );
 
     let mut logins = grid.logins();
     loop {

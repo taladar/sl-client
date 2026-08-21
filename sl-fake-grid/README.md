@@ -21,4 +21,11 @@ Two consumers by design:
   log into at `http://127.0.0.1:<port>/` — the highest-fidelity offline
   test target this workspace has short of a real grid.
 
+Next to login and CAPS the port also serves the non-CAPS surfaces a grid
+manager and the world map expect: `GET /get_grid_info` (and the XML-RPC
+`get_grid_info` method on `/`), world-map tiles at
+`/map-<zoom>-<x>-<y>-objects.jpg` (the login response's `map-server-url`
+points back at the grid), and the economy helper scripts
+`/currency.php` + `/landtool.php` for the buy-L$ / buy-land flows.
+
 See the book chapter "The fake grid" for architecture and usage.

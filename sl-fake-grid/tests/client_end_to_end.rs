@@ -49,9 +49,11 @@ mod test {
 
     #[tokio::test]
     async fn full_stack_login_chat_and_event_queue() -> Result<(), TestError> {
-        let (_grid, client, agent) = connect().await?;
+        let (grid, client, agent) = connect().await?;
         let expected_agent = agent.agent_id();
         assert_eq!(client.agent_id(), Some(expected_agent));
+        // The login response advertises the grid itself as the tile server.
+        assert_eq!(client.map_server_url(), Some(&grid.login_uri()));
 
         let server_events = agent.events();
         let (event_tx, mut event_rx) = mpsc::channel::<Event>(256);
@@ -63,7 +65,8 @@ mod test {
         // region handshake and the scenario's greeting line.
         let mut greeted = false;
         let mut handshaken = false;
-        while !(greeted && handshaken) {
+        let mut features_seen = false;
+        while !(greeted && handshaken && features_seen) {
             let event = tokio::time::timeout(WAIT, event_rx.recv())
                 .await?
                 .ok_or("client event stream ended early")?;
@@ -73,6 +76,18 @@ mod test {
                     if message.message.contains("Welcome to the fake grid") =>
                 {
                     greeted = true;
+                }
+                // The stock SimulatorFeatures carry the grid's OpenSimExtras
+                // URLs (tile server, currency helper) — fetched over real CAPS.
+                Event::SimulatorFeatures(features) => {
+                    let extras = features
+                        .open_sim_extras
+                        .as_ref()
+                        .ok_or("SimulatorFeatures without OpenSimExtras")?;
+                    assert_eq!(extras.map_server_url.as_ref(), Some(&grid.login_uri()));
+                    assert_eq!(extras.currency_base_uri.as_ref(), Some(&grid.login_uri()));
+                    assert_eq!(extras.currency.as_deref(), Some("L$"));
+                    features_seen = true;
                 }
                 _other => {}
             }
