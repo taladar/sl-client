@@ -81,6 +81,14 @@ const PRESENCE_AUTORESPOND: &str = "presence-autorespond-on";
 /// See [`PRESENCE_AWAY`].
 const PRESENCE_AUTORESPOND_NON_FRIENDS: &str = "presence-autorespond-non-friends-on";
 
+/// The condition keys that hold while each auto-reject mode is on — they drive
+/// the check marks on the same submenu ([`crate::auto_reject`]).
+const REJECT_TELEPORT_OFFERS: &str = "reject-teleport-offers-on";
+/// See [`REJECT_TELEPORT_OFFERS`].
+const REJECT_GROUP_INVITES: &str = "reject-group-invites-on";
+/// See [`REJECT_TELEPORT_OFFERS`].
+const REJECT_FRIENDSHIP_REQUESTS: &str = "reject-friendship-requests-on";
+
 /// The condition key that holds while the Experiences floater is open — drives the
 /// check mark on the Avatar ▸ Experiences entry.
 const EXPERIENCES_OPEN: &str = "experiences-open";
@@ -192,9 +200,8 @@ static AVATAR_MENU: MenuDef = MenuDef {
 
 /// The Comm ▸ **Online Status** submenu — the presence modes
 /// ([`crate::presence`]), in the reference's order and with its labels (Do Not
-/// Disturb shows as *Unavailable*, the name other residents see on the tag).
-/// The reference's reject-teleport / group-invite / friendship entries belong
-/// to the separate auto-reject task and join this submenu when it lands.
+/// Disturb shows as *Unavailable*, the name other residents see on the tag),
+/// followed by the three standing auto-reject modes ([`crate::auto_reject`]).
 static ONLINE_STATUS_MENU: MenuDef = MenuDef {
     label: "Online Status",
     items: &[
@@ -213,6 +220,24 @@ static ONLINE_STATUS_MENU: MenuDef = MenuDef {
                 "presence-autorespond-non-friends",
             )
             .checked_when(PRESENCE_AUTORESPOND_NON_FRIENDS),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new(
+                "Reject teleport offers and requests",
+                "reject-teleport-offers",
+            )
+            .checked_when(REJECT_TELEPORT_OFFERS),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Reject all group invites", "reject-group-invites")
+                .checked_when(REJECT_GROUP_INVITES),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new(
+                "Reject all friendship requests",
+                "reject-friendship-requests",
+            )
+            .checked_when(REJECT_FRIENDSHIP_REQUESTS),
         ),
     ],
 };
@@ -653,6 +678,25 @@ fn update_top_menu_conditions(
     {
         wanted.push(PRESENCE_AUTORESPOND_NON_FRIENDS);
     }
+    // The three auto-reject check marks, likewise from their persisted flags.
+    for (setting, condition) in [
+        (
+            crate::auto_reject::SETTING_REJECT_TELEPORT_OFFERS,
+            REJECT_TELEPORT_OFFERS,
+        ),
+        (
+            crate::auto_reject::SETTING_REJECT_ALL_GROUP_INVITES,
+            REJECT_GROUP_INVITES,
+        ),
+        (
+            crate::auto_reject::SETTING_REJECT_FRIENDSHIP_REQUESTS,
+            REJECT_FRIENDSHIP_REQUESTS,
+        ),
+    ] {
+        if settings.store().get_bool(setting).unwrap_or(false) {
+            wanted.push(condition);
+        }
+    }
     // The World ▸ Property Lines check mark, from the in-world property-lines
     // setting (default on).
     if settings
@@ -767,6 +811,11 @@ fn handle_top_menu_actions(
                 &mut notify,
             )
         {
+            continue;
+        }
+        // The three auto-reject picks on the same submenu — pure settings, so
+        // they need no session state at all.
+        if crate::auto_reject::toggle_reject_mode(action.action, &mut settings, &mut notify) {
             continue;
         }
         match action.action {

@@ -292,6 +292,7 @@ impl ViewerSettings {
         crate::preferences_graphics::register_settings(&mut settings);
         crate::preferences_network_cache::register_settings(&mut settings);
         crate::presence::register_settings(&mut settings);
+        crate::auto_reject::register_settings(&mut settings);
         crate::skin_colors::register_settings(&mut settings);
         crate::session::register_settings(&mut settings);
         crate::render_priority::register_settings(&mut settings);

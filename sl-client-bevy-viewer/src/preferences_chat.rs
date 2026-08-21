@@ -23,9 +23,15 @@
 //!   few-frame window). The log *path* stays with the network & cache tab; the
 //!   12/24-hour clock style has no reference setting and stays 24-hour.
 //! - The **automatic replies** are account-scoped texts *consumed* by the
-//!   do-not-disturb / away mode machinery (`viewer-do-not-disturb-away`),
-//!   which is not built yet; the keys keep their original names, so nothing
-//!   persisted changes by the move here.
+//!   do-not-disturb / away mode machinery ([`crate::presence`]); the keys keep
+//!   their original names, so nothing persisted changed by the move here.
+//! - The **automatic rejection** section is the settings half of the standing
+//!   auto-reject modes ([`crate::auto_reject`]): the three mode toggles (also on
+//!   Comm ▸ Online Status, where the reference keeps them), their canned
+//!   replies, the two friends exemptions, and the two narrower suppressions
+//!   (already-joined group invitations, ad-hoc conferences). The autoresponse
+//!   item sits with the replies it is sent alongside, as its item id — an item's
+//!   own context menu is what sets it.
 //! - The **privacy** pair is server state, not a local setting: the values
 //!   live on the grid (`UserInfo` capability, legacy `UserInfoRequest` /
 //!   `UpdateUserInfo` UDP on OpenSim), so both are **transient** settings —
@@ -406,6 +412,80 @@ pub(crate) fn build_chat_tab(commands: &mut Commands, panel: Entity) {
         SettingBinding::account(crate::presence::SETTING_MUTED_RESPONSE),
         TextInputKind::Multiline,
         REPLY_FIELD_LINES,
+    );
+    // The item every mode reply carries along, as its inventory id — set from an
+    // item's own context menu ("Send with Autoresponses"), shown here so it can
+    // be read back and cleared.
+    spawn_pref_text(
+        commands,
+        panel,
+        "preferences-row-autoresponse-item",
+        SettingBinding::account(crate::auto_reject::SETTING_AUTORESPONSE_ITEM),
+        TextInputKind::Line,
+        1.0,
+    );
+
+    // The standing auto-reject modes (`crate::auto_reject`). The three mode
+    // toggles are also on Comm ▸ Online Status, where the reference keeps them;
+    // their replies and exemptions live only here.
+    spawn_pref_section(commands, panel, "preferences-section-auto-reject");
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-reject-teleport-offers",
+        SettingBinding::account(crate::auto_reject::SETTING_REJECT_TELEPORT_OFFERS),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-dont-reject-teleport-from-friends",
+        SettingBinding::account(crate::auto_reject::SETTING_DONT_REJECT_TELEPORT_FROM_FRIENDS),
+    );
+    spawn_pref_text(
+        commands,
+        panel,
+        "preferences-row-reject-teleport-response",
+        SettingBinding::account(crate::auto_reject::SETTING_REJECT_TELEPORT_RESPONSE),
+        TextInputKind::Multiline,
+        REPLY_FIELD_LINES,
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-reject-friendship-requests",
+        SettingBinding::account(crate::auto_reject::SETTING_REJECT_FRIENDSHIP_REQUESTS),
+    );
+    spawn_pref_text(
+        commands,
+        panel,
+        "preferences-row-reject-friendship-response",
+        SettingBinding::account(crate::auto_reject::SETTING_REJECT_FRIENDSHIP_RESPONSE),
+        TextInputKind::Multiline,
+        REPLY_FIELD_LINES,
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-reject-group-invites",
+        SettingBinding::account(crate::auto_reject::SETTING_REJECT_ALL_GROUP_INVITES),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-show-joined-group-invitations",
+        SettingBinding::account(crate::auto_reject::SETTING_SHOW_JOINED_GROUP_INVITATIONS),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-ignore-ad-hoc-sessions",
+        SettingBinding::account(crate::auto_reject::SETTING_IGNORE_AD_HOC_SESSIONS),
+    );
+    spawn_pref_checkbox(
+        commands,
+        panel,
+        "preferences-row-dont-ignore-ad-hoc-from-friends",
+        SettingBinding::account(crate::auto_reject::SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS),
     );
 
     spawn_pref_section(commands, panel, "preferences-section-privacy");

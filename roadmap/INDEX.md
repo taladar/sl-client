@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 264 |
+| ready | 263 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 31 |
-| done | 844 |
+| done | 845 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1351** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (264)
+## ready (263)
 
 ### protocol
 
@@ -269,9 +269,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
-- [`viewer-auto-reject-offers`](ready/viewer-auto-reject-offers.md) —
-  Auto-decline teleport/friendship/group-invite modes (blocked by
-  `viewer-dialog-offers-invites` (done))
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -1158,7 +1155,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (844)
+## done (845)
 
 ### protocol
 
@@ -1335,6 +1332,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
+  Auto-decline teleport/friendship/group-invite modes (blocked by
+  `viewer-dialog-offers-invites` (done))
 - [`viewer-avatar-complexity-limit`](done/viewer-avatar-complexity-limit.md) —
   Avatar complexity limiting (jellydoll)
 - [`viewer-avatar-context-menu`](done/viewer-avatar-context-menu.md) — Avatar

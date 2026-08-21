@@ -59,6 +59,12 @@
 //! that way; the away and blocked replies are statements about the user, not
 //! about the sender, and the reference gives them no per-set layer either.
 //!
+//! A mode reply can also **carry an inventory item**
+//! ([`SETTING_AUTORESPONSE_ITEM`](crate::auto_reject::SETTING_AUTORESPONSE_ITEM),
+//! the reference's `FSAutoresponseItemUUID`) — a landmark or a notecard saying
+//! more than a line of text can. The blocked-sender reply never sends it: that
+//! reply exists to tell someone they are blocked, not to give them a present.
+//!
 //! A **blocked** sender is handled first and separately: with
 //! [`SETTING_SEND_MUTED_RESPONSE`] on they get the "you are blocked" reply and
 //! nothing else, and with it off they get no reply at all, whatever mode is on.
@@ -531,9 +537,10 @@ fn apply_sit_on_away(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its dependencies: the event stream, the presence \
               state, the settings the replies come from, the friend and block lists the \
-              decision reads, the contact sets a per-set reply comes from, the conversation \
-              model that says whether a session is already open, and the two streams it writes \
-              (the wire reply and the transcript notice)"
+              decision reads, the contact sets a per-set reply comes from, the inventory the \
+              optional autoresponse item is resolved in, the conversation model that says \
+              whether a session is already open, and the two streams it writes (the wire reply \
+              and the transcript notice)"
 )]
 fn auto_respond_to_ims(
     mut events: MessageReader<SlEvent>,
@@ -542,6 +549,7 @@ fn auto_respond_to_ims(
     friends: Option<Res<crate::people::FriendsModel>>,
     mutes: Option<Res<crate::mutes::MuteModel>>,
     sets: Option<Res<ContactSets>>,
+    inventory: Res<crate::inventory::InventoryModel>,
     conversations: Res<ConversationModel>,
     identity: Res<SlIdentity>,
     mut commands: MessageWriter<SlCommand>,
@@ -602,7 +610,55 @@ fn auto_respond_to_ims(
             key,
             body: format!("Autoresponse sent: {message}"),
         });
+        // The reference's `FSAutoresponseItemUUID`: an autoresponse can carry an
+        // inventory item along with the text (a landmark, a notecard saying more
+        // than the reply has room for). Only the *mode* replies send it — the
+        // blocked-sender reply exists to tell someone they are blocked, and
+        // handing them a gift with it would be absurd.
+        if mode != ReplyMode::Muted
+            && let Some((item, command)) =
+                autoresponse_item(settings.as_deref(), &inventory, im.from_agent_id)
+        {
+            commands.write(SlCommand(command));
+            notices.write(ConversationNotice {
+                key,
+                body: format!("Autoresponse item sent: {item}"),
+            });
+        }
     }
+}
+
+/// The optional inventory item an autoresponse carries
+/// ([`SETTING_AUTORESPONSE_ITEM`](crate::auto_reject::SETTING_AUTORESPONSE_ITEM)),
+/// as its name and the give command for it. `None` when no item is configured,
+/// the setting does not parse as an id, or the item is not in the (loaded)
+/// inventory — a stale configured id is silently skipped rather than sending a
+/// give for something that no longer exists.
+fn autoresponse_item(
+    settings: Option<&ViewerSettings>,
+    inventory: &crate::inventory::InventoryModel,
+    to_agent_id: sl_client_bevy::AgentKey,
+) -> Option<(String, Command)> {
+    let configured = settings?
+        .store()
+        .get_str(crate::auto_reject::SETTING_AUTORESPONSE_ITEM)
+        .ok()?;
+    if configured.is_empty() {
+        return None;
+    }
+    let item_id =
+        sl_client_bevy::InventoryKey::from(configured.parse::<sl_client_bevy::Uuid>().ok()?);
+    let item = inventory.find_item(item_id)?;
+    Some((
+        item.name.clone(),
+        Command::GiveInventory {
+            to_agent_id,
+            item_id,
+            asset_type: item.asset_type,
+            item_name: item.name.clone(),
+            transaction_id: sl_client_bevy::TransactionId::from(sl_client_bevy::Uuid::new_v4()),
+        },
+    ))
 }
 
 /// A boolean setting, defaulting to off when the store has no answer.

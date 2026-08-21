@@ -1671,10 +1671,17 @@ fn ingest_conversation_notices(
 /// Fold every relevant inbound event into the model: chat / IM / group /
 /// conference lines, typing notifications, invites, and the name caches behind
 /// the tab titles.
+///
+/// One inbound event can be refused outright here: an **ad-hoc conference**
+/// invitation under the ignore-conferences mode ([`crate::auto_reject`]) is
+/// declined on the wire and never given a tab.
 pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
     identity: Res<SlIdentity>,
+    settings: Option<Res<crate::settings::ViewerSettings>>,
+    friends: Option<Res<crate::people::FriendsModel>>,
+    mut sl: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {
         match &event.0 {
@@ -1761,6 +1768,7 @@ pub(crate) fn ingest_conversation_events(
             // invite* — Accept / Decline in the pane — before any message arrives.
             SlSessionEvent::ConferenceInvited {
                 session_id,
+                from_agent_id,
                 from_group,
                 session_name,
                 ..
@@ -1771,6 +1779,22 @@ pub(crate) fn ingest_conversation_events(
                     model.mark_invite(ConversationKey::Group(group));
                 } else {
                     let id = ImSessionId::from(*session_id);
+                    // The ignore-conferences mode: decline the invitation and
+                    // open no tab. Only ad-hoc conferences are refused — a
+                    // group IM invitation is a group the user chose to be in.
+                    let is_friend = friends
+                        .as_deref()
+                        .is_some_and(|friends| friends.is_friend(*from_agent_id));
+                    if crate::auto_reject::ignores_ad_hoc(settings.as_deref(), is_friend) {
+                        info!(
+                            "conversations: ignoring ad-hoc conference invite from {from_agent_id}"
+                        );
+                        sl.write(SlCommand(Command::DeclineChatInvite {
+                            session_id: id,
+                            from_group: false,
+                        }));
+                        continue;
+                    }
                     model.note_conference_name(id, session_name);
                     model.mark_invite(ConversationKey::Conference(id));
                 }

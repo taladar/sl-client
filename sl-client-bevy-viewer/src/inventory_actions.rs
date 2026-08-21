@@ -156,6 +156,12 @@ pub(crate) const CAN_OPEN: &str = "can-open";
 /// reference's `canCopyAssetID` gate, sans the creator-override).
 pub(crate) const CAN_COPY_UUID: &str = "can-copy-uuid";
 
+/// The target item may be made the **autoresponse item**
+/// ([`crate::auto_reject::SETTING_AUTORESPONSE_ITEM`]) — it must be copyable and
+/// transferable, since the autoresponse gives it away again and again (the
+/// reference's preferences drop target accepts copy+transfer items only).
+pub(crate) const CAN_AUTORESPOND_WITH: &str = "can-autorespond-with";
+
 /// New-item entries (New Folder / Script / Notecard / Gesture) apply — the
 /// target folder is writable.
 pub(crate) const CAN_CREATE: &str = "can-create";
@@ -442,6 +448,10 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
         MenuItemDef::Command(
             MenuCommand::new("Copy Asset UUID", "copy-asset-uuid").enabled_when(CAN_COPY_UUID),
+        ),
+        MenuItemDef::Command(
+            MenuCommand::new("Send with Autoresponses", "set-autoresponse-item")
+                .enabled_when(CAN_AUTORESPOND_WITH),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(CAN_COPY)),
@@ -744,6 +754,15 @@ pub(crate) fn item_conditions(item: &ItemInfo, facts: ItemMenuFacts) -> Vec<&'st
         .contains(Permissions::MODIFY | Permissions::COPY | Permissions::TRANSFER)
     {
         held.push(CAN_COPY_UUID);
+    }
+    // An autoresponse hands the item out again and again, so only a
+    // copy-and-transfer item may be chosen for it.
+    if item
+        .permissions
+        .owner
+        .contains(Permissions::COPY | Permissions::TRANSFER)
+    {
+        held.push(CAN_AUTORESPOND_WITH);
     }
     if facts.clipboard_has_entry && mutable {
         held.push(CAN_PASTE);
@@ -1638,6 +1657,7 @@ fn handle_inventory_menu_actions(
         ResMut<crate::inventory::PendingReveal>,
     ),
     library: Option<Res<crate::avatar_assets::AvatarAssetLibrary>>,
+    mut settings: ResMut<crate::settings::ViewerSettings>,
     mut system_clipboard: Option<ResMut<bevy::clipboard::Clipboard>>,
     outputs: (
         MessageWriter<crate::inventory::InventoryUiAction>,
@@ -1739,6 +1759,18 @@ fn handle_inventory_menu_actions(
                 {
                     // A failed clipboard write (headless run) is dropped.
                     let _set = clipboard.set_text(item.asset_id.to_string());
+                }
+            }
+            "set-autoresponse-item" => {
+                // Make this the item every autoresponse carries
+                // ([`crate::auto_reject::SETTING_AUTORESPONSE_ITEM`]); the chat
+                // preferences tab shows and clears it.
+                if let MenuTarget::Item(item) = &menu_target {
+                    settings.set_account(
+                        crate::auto_reject::SETTING_AUTORESPONSE_ITEM,
+                        sl_settings::SettingValue::String(item.item_id.to_string()),
+                    );
+                    settings.save_async();
                 }
             }
             "rename" => {
@@ -2905,6 +2937,7 @@ mod tests {
             ("Show in Main view", "show-in-main"),
             ("Rename", "rename"),
             ("Copy Asset UUID", "copy-asset-uuid"),
+            ("Send with Autoresponses", "set-autoresponse-item"),
             ("Copy", "copy"),
             ("Cut", "cut"),
             ("Paste", "paste"),

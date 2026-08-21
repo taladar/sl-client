@@ -35,6 +35,17 @@
 //! offline re-arrives as a fresh offline IM at login (drained by the session), so
 //! nothing is lost by keeping the toast session-local.
 //!
+//! # What never reaches a card
+//!
+//! Two filters sit in front of the cards. The alerts-tab auto-accept
+//! ([`SETTING_AUTO_ACCEPT_INVENTORY`]) files an inventory offer silently, and
+//! the standing **auto-reject modes** ([`crate::auto_reject`]) answer a whole
+//! class of offer — every teleport offer, every friendship request, every group
+//! invitation — with the mode's canned reply plus the ordinary wire decline, so
+//! the sender is answered and nothing is left pending on the simulator. Both run
+//! ahead of the Do Not Disturb deferral: an offer that is being answered
+//! automatically has nothing to defer.
+//!
 //! # The protocol replies
 //!
 //! Each button writes the reply [`Command`] the offer's protocol already models:
@@ -244,8 +255,9 @@ struct DeferredOffers {
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources: the event stream, the \
               shared channel + manager, i18n, the auto-accept setting with the inventory model \
-              + command writer it files through, the do-not-disturb state and its deferral \
-              queue, and the commands the cards spawn with"
+              + command writer it files through, the friend and group models the auto-reject \
+              policy reads, the do-not-disturb state and its deferral queue, and the commands \
+              the cards spawn with"
 )]
 fn ingest_offers_invites(
     mut events: MessageReader<SlEvent>,
@@ -254,6 +266,8 @@ fn ingest_offers_invites(
     translator: Translator,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     presence: Option<Res<crate::presence::PresenceState>>,
+    friends: Option<Res<crate::people::FriendsModel>>,
+    groups: Option<Res<crate::groups::GroupsModel>>,
     mut deferred: ResMut<DeferredOffers>,
     inventory: Res<InventoryModel>,
     mut sl: MessageWriter<SlCommand>,
@@ -271,6 +285,7 @@ fn ingest_offers_invites(
                 .ok()
         })
         .unwrap_or(false);
+    let policy = crate::auto_reject::RejectPolicy::from_settings(settings.as_deref());
     // Do Not Disturb defers the cards and replays them on the way out, so this
     // frame's work is the fresh offers plus, on the falling edge, the held ones.
     let busy = presence.is_some_and(|presence| presence.is_do_not_disturb());
@@ -296,6 +311,7 @@ fn ingest_offers_invites(
             ImDialog::InventoryOffered
                 | ImDialog::TaskInventoryOffered
                 | ImDialog::LureUser
+                | ImDialog::TeleportRequest
                 | ImDialog::FriendshipOffered
                 | ImDialog::GroupInvitation
         ) {
@@ -303,6 +319,25 @@ fn ingest_offers_invites(
         }
     }
     for im in &pending {
+        // The standing auto-reject modes (`crate::auto_reject`) answer a whole
+        // class of offer before it can raise a card: the canned reply goes out,
+        // the offer is declined on the wire, and nothing reaches the screen.
+        if let Some(class) = offer_class(im.dialog) {
+            let is_friend = friends
+                .as_deref()
+                .is_some_and(|friends| friends.is_friend(im.from_agent_id));
+            let already_member = im.group_invitation().is_some_and(|invite| {
+                groups
+                    .as_deref()
+                    .is_some_and(|groups| groups.is_member(invite.group_id))
+            });
+            if let Some(kind) =
+                crate::auto_reject::reject_for(policy, class, is_friend, already_member)
+            {
+                auto_reject_offer(im, kind, settings.as_deref(), &mut sl);
+                continue;
+            }
+        }
         match im.dialog {
             ImDialog::InventoryOffered | ImDialog::TaskInventoryOffered => {
                 // The alerts-tab auto-accept (the reference
@@ -345,6 +380,78 @@ fn ingest_offers_invites(
             _ => {}
         }
     }
+}
+
+/// The auto-reject class an offer dialog falls under, or `None` for one no
+/// reject mode covers (an inventory offer — the reject family is about *people*
+/// reaching for the user's attention, and an item can simply be auto-filed or
+/// left on screen).
+const fn offer_class(dialog: ImDialog) -> Option<crate::auto_reject::OfferClass> {
+    match dialog {
+        ImDialog::LureUser | ImDialog::TeleportRequest => {
+            Some(crate::auto_reject::OfferClass::Teleport)
+        }
+        ImDialog::FriendshipOffered => Some(crate::auto_reject::OfferClass::Friendship),
+        ImDialog::GroupInvitation => Some(crate::auto_reject::OfferClass::GroupInvite),
+        _other => None,
+    }
+}
+
+/// Answer an auto-rejected offer: send the mode's canned reply (when it has one
+/// and the user has not blanked it), then decline it on the wire so nothing is
+/// left pending on the simulator, and log what was swallowed — a mode that eats
+/// offers invisibly should at least leave a trail.
+fn auto_reject_offer(
+    im: &InstantMessage,
+    kind: crate::auto_reject::RejectKind,
+    settings: Option<&crate::settings::ViewerSettings>,
+    sl: &mut MessageWriter<SlCommand>,
+) {
+    info!(
+        "offers: auto-rejecting {:?} from {} ({:?})",
+        im.dialog, im.from_agent_name, kind
+    );
+    if let Some(message) = crate::auto_reject::response_text(settings, kind) {
+        sl.write(SlCommand(Command::AutoResponse {
+            to_agent_id: im.from_agent_id,
+            message,
+        }));
+    }
+    if let Some(decline) = decline_command(im, kind) {
+        sl.write(SlCommand(decline));
+    }
+}
+
+/// The wire decline an auto-rejected offer sends — the same reply the user's own
+/// Decline button would have written. A teleport *request* has none: it carries
+/// no lure to decline, so the canned reply is the whole answer.
+fn decline_command(im: &InstantMessage, kind: crate::auto_reject::RejectKind) -> Option<Command> {
+    use crate::auto_reject::RejectKind;
+    match kind {
+        RejectKind::Teleport if im.dialog == ImDialog::LureUser => {
+            Some(Command::DeclineTeleportLure {
+                from_agent_id: im.from_agent_id,
+                lure_id: LureId::from(im.id),
+            })
+        }
+        RejectKind::Teleport => None,
+        RejectKind::Friendship => Some(Command::DeclineFriendship(TransactionId::from(im.id))),
+        RejectKind::GroupInvite | RejectKind::AlreadyJoinedGroup => {
+            let invite = im.group_invitation()?;
+            Some(Command::DeclineGroupInvitation {
+                group_id: invite.group_id,
+                transaction_id: TransactionId::from(invite.transaction_id),
+                use_offline_cap: uses_offline_cap(im),
+            })
+        }
+    }
+}
+
+/// The reference `use_offline_cap`: an invitation delivered while the agent was
+/// offline carries a null session id (transaction id) and must be answered over
+/// the offline cap, since a nil id cannot be echoed back over UDP.
+const fn uses_offline_cap(im: &InstantMessage) -> bool {
+    im.id.is_nil() && im.offline
 }
 
 /// The resolved content of one offer / invite card, ready to render — the live
@@ -867,10 +974,7 @@ fn spawn_group_invite_card(
     let root = card.root;
     let group_id = invite.group_id;
     let transaction_id = TransactionId::from(invite.transaction_id);
-    // The reference `use_offline_cap`: an invitation delivered while the agent was
-    // offline carries a null session id (transaction id) and must be answered over
-    // the offline cap, since a nil id cannot be echoed back over UDP.
-    let use_offline_cap = im.id.is_nil() && im.offline;
+    let use_offline_cap = uses_offline_cap(im);
 
     // Accept: join the group.
     commands.entity(card.accept).observe(
@@ -1125,6 +1229,149 @@ fn wire_specimen_actions(commands: &mut Commands, card: &OfferCard, element: &'s
             move |_activate: On<Activate>, mut actions: MessageWriter<UiAction>| {
                 actions.write(UiAction { element, action });
             },
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decline_command, offer_class, uses_offline_cap};
+    use crate::auto_reject::{OfferClass, RejectKind};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{
+        AgentKey, Command, GroupKey, ImDialog, InstantMessage, RegionCoordinates, TransactionId,
+        Uuid,
+    };
+
+    /// An offer IM of the given dialog, from `from`, carrying `id` as its
+    /// dialog-dependent id (a lure id / transaction id) — the shape the reject
+    /// path reads.
+    fn offer(dialog: ImDialog, from: Uuid, id: Uuid) -> InstantMessage {
+        InstantMessage {
+            from_agent_id: AgentKey::from(from),
+            from_agent_name: "Someone Resident".to_owned(),
+            to_agent_id: AgentKey::from(Uuid::from_u128(0xffff)),
+            dialog,
+            from_group: false,
+            region_id: None,
+            position: RegionCoordinates::new(0.0, 0.0, 0.0),
+            offline: false,
+            timestamp: None,
+            id,
+            parent_estate_id: 0,
+            message: "come over".to_owned(),
+            binary_bucket: Vec::new(),
+        }
+    }
+
+    /// Every offer dialog a reject mode covers maps to its class; an inventory
+    /// offer maps to none, so the modes never touch it.
+    #[test]
+    fn only_the_covered_dialogs_have_a_class() {
+        assert_eq!(offer_class(ImDialog::LureUser), Some(OfferClass::Teleport));
+        assert_eq!(
+            offer_class(ImDialog::TeleportRequest),
+            Some(OfferClass::Teleport)
+        );
+        assert_eq!(
+            offer_class(ImDialog::FriendshipOffered),
+            Some(OfferClass::Friendship)
+        );
+        assert_eq!(
+            offer_class(ImDialog::GroupInvitation),
+            Some(OfferClass::GroupInvite)
+        );
+        assert_eq!(offer_class(ImDialog::InventoryOffered), None);
+        assert_eq!(offer_class(ImDialog::Message), None);
+    }
+
+    /// A rejected lure is declined with its own lure id, so the offerer's
+    /// pending teleport is actually cleared rather than left hanging.
+    #[test]
+    fn a_rejected_lure_is_declined_by_id() {
+        let from = Uuid::from_u128(0x11);
+        let lure = Uuid::from_u128(0x22);
+        let command = decline_command(&offer(ImDialog::LureUser, from, lure), RejectKind::Teleport);
+        assert!(
+            matches!(
+                command,
+                Some(Command::DeclineTeleportLure {
+                    from_agent_id,
+                    lure_id,
+                }) if from_agent_id == AgentKey::from(from) && lure_id.get() == lure
+            ),
+            "expected the lure decline for this offerer and lure id"
+        );
+    }
+
+    /// A teleport *request* carries no lure, so the canned reply is the whole
+    /// answer — there is nothing to decline.
+    #[test]
+    fn a_rejected_teleport_request_declines_nothing() {
+        let im = offer(
+            ImDialog::TeleportRequest,
+            Uuid::from_u128(0x11),
+            Uuid::from_u128(0x22),
+        );
+        assert!(
+            decline_command(&im, RejectKind::Teleport).is_none(),
+            "a teleport request carries no lure to decline"
+        );
+    }
+
+    /// A rejected friendship request is declined under the offer's transaction
+    /// id.
+    #[test]
+    fn a_rejected_friendship_is_declined_by_transaction() {
+        let transaction = Uuid::from_u128(0x33);
+        let im = offer(
+            ImDialog::FriendshipOffered,
+            Uuid::from_u128(0x11),
+            transaction,
+        );
+        assert!(
+            matches!(
+                decline_command(&im, RejectKind::Friendship),
+                Some(Command::DeclineFriendship(id)) if id == TransactionId::from(transaction)
+            ),
+            "expected the friendship decline under the offer's transaction id"
+        );
+    }
+
+    /// A rejected group invitation is declined for the inviting group, and an
+    /// invitation that arrived while offline is answered over the offline cap
+    /// (its nil transaction id cannot be echoed back over UDP).
+    #[test]
+    fn a_rejected_group_invite_is_declined_for_its_group() {
+        let group = Uuid::from_u128(0x44);
+        let im = offer(ImDialog::GroupInvitation, group, Uuid::from_u128(0x55));
+        assert!(
+            matches!(
+                decline_command(&im, RejectKind::GroupInvite),
+                Some(Command::DeclineGroupInvitation {
+                    group_id,
+                    transaction_id,
+                    use_offline_cap,
+                }) if group_id == GroupKey::from(group)
+                    && transaction_id == TransactionId::from(Uuid::from_u128(0x55))
+                    && !use_offline_cap
+            ),
+            "expected the invitation declined for its group, over UDP"
+        );
+        // The same invitation, stored and forwarded: nil id + offline.
+        let mut offline = offer(ImDialog::GroupInvitation, group, Uuid::nil());
+        offline.offline = true;
+        assert!(uses_offline_cap(&offline));
+        assert!(
+            matches!(
+                decline_command(&offline, RejectKind::AlreadyJoinedGroup),
+                Some(Command::DeclineGroupInvitation {
+                    group_id,
+                    use_offline_cap,
+                    ..
+                }) if group_id == GroupKey::from(group) && use_offline_cap
+            ),
+            "an offline invitation is answered over the cap"
         );
     }
 }

@@ -40,6 +40,7 @@ mod asset_budget;
 mod asset_retry;
 mod attachment_menu;
 mod audio;
+mod auto_reject;
 mod avatar_assets;
 mod avatar_complexity;
 mod avatar_dump;
