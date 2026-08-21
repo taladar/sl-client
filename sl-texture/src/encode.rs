@@ -177,8 +177,10 @@ mod tests {
         assert!(
             decoded
                 .pixels
-                .chunks_exact(4)
-                .all(|px| px.get(3) == Some(&u8::MAX))
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|&[_r, _g, _b, a]| a == u8::MAX)
         );
         Ok(())
     }

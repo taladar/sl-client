@@ -401,12 +401,14 @@ fn dequantize_positions(bytes: &[u8], min: [f32; 3], max: [f32; 3]) -> Vec<[f32;
     let [min_x, min_y, min_z] = min;
     let [max_x, max_y, max_z] = max;
     bytes
-        .chunks_exact(6)
-        .map(|chunk| {
+        .as_chunks::<6>()
+        .0
+        .iter()
+        .map(|&[x0, x1, y0, y1, z0, z1]| {
             [
-                dequantize(u16_at(chunk, 0), min_x, max_x),
-                dequantize(u16_at(chunk, 2), min_y, max_y),
-                dequantize(u16_at(chunk, 4), min_z, max_z),
+                dequantize(u16_le(x0, x1), min_x, max_x),
+                dequantize(u16_le(y0, y1), min_y, max_y),
+                dequantize(u16_le(z0, z1), min_z, max_z),
             ]
         })
         .collect()
@@ -415,12 +417,14 @@ fn dequantize_positions(bytes: &[u8], min: [f32; 3], max: [f32; 3]) -> Vec<[f32;
 /// Dequantizes a `u16×3`-per-vertex normal blob to `[-1, 1]` per component.
 fn dequantize_normals(bytes: &[u8]) -> Vec<[f32; 3]> {
     bytes
-        .chunks_exact(6)
-        .map(|chunk| {
+        .as_chunks::<6>()
+        .0
+        .iter()
+        .map(|&[x0, x1, y0, y1, z0, z1]| {
             [
-                dequantize(u16_at(chunk, 0), -1.0, 1.0),
-                dequantize(u16_at(chunk, 2), -1.0, 1.0),
-                dequantize(u16_at(chunk, 4), -1.0, 1.0),
+                dequantize(u16_le(x0, x1), -1.0, 1.0),
+                dequantize(u16_le(y0, y1), -1.0, 1.0),
+                dequantize(u16_le(z0, z1), -1.0, 1.0),
             ]
         })
         .collect()
@@ -431,11 +435,13 @@ fn dequantize_uvs(bytes: &[u8], min: [f32; 2], max: [f32; 2]) -> Vec<[f32; 2]> {
     let [min_u, min_v] = min;
     let [max_u, max_v] = max;
     bytes
-        .chunks_exact(4)
-        .map(|chunk| {
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&[u0, u1, v0, v1]| {
             [
-                dequantize(u16_at(chunk, 0), min_u, max_u),
-                dequantize(u16_at(chunk, 2), min_v, max_v),
+                dequantize(u16_le(u0, u1), min_u, max_u),
+                dequantize(u16_le(v0, v1), min_v, max_v),
             ]
         })
         .collect()
@@ -445,8 +451,10 @@ fn dequantize_uvs(bytes: &[u8], min: [f32; 2], max: [f32; 2]) -> Vec<[f32; 2]> {
 /// indices that do not complete a triangle.
 fn decode_indices(bytes: &[u8]) -> Vec<u32> {
     let mut indices: Vec<u32> = bytes
-        .chunks_exact(2)
-        .map(|chunk| u32::from(u16_at(chunk, 0)))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[low, high]| u32::from(u16_le(low, high)))
         .collect();
     let remainder = indices.len().checked_rem(3).unwrap_or(0);
     let keep = indices.len().saturating_sub(remainder);
@@ -621,12 +629,14 @@ fn inflate(compressed: &[u8]) -> Result<Vec<u8>, MeshDecodeError> {
 /// Reads a little-endian `u16` at byte offset `at` in `chunk` (0 if out of
 /// range), assembled with explicit shifts to satisfy the endian-byte lint.
 fn u16_at(chunk: &[u8], at: usize) -> u16 {
-    let low = chunk.get(at).copied().map_or(0_u16, u16::from);
-    let high = chunk
-        .get(at.saturating_add(1))
-        .copied()
-        .map_or(0_u16, u16::from);
-    low | (high << 8_u16)
+    let low = chunk.get(at).copied().unwrap_or(0);
+    let high = chunk.get(at.saturating_add(1)).copied().unwrap_or(0);
+    u16_le(low, high)
+}
+
+/// Assembles a `u16` from its little-endian `low` and `high` bytes.
+fn u16_le(low: u8, high: u8) -> u16 {
+    u16::from(low) | (u16::from(high) << 8_u16)
 }
 
 /// Dequantizes a `u16` sample to `[min, max]`: `min + (sample / 65535) *

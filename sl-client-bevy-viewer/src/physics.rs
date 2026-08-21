@@ -1872,25 +1872,21 @@ fn extents_differ(a: [f32; 3], b: [f32; 3]) -> bool {
 fn append_triangles(out: &mut Vec<[u32; 3]>, indices: &Indices, base: u32) {
     match indices {
         Indices::U16(values) => {
-            for tri in values.chunks_exact(3) {
-                if let [a, b, c] = tri {
-                    out.push([
-                        base.saturating_add(u32::from(*a)),
-                        base.saturating_add(u32::from(*b)),
-                        base.saturating_add(u32::from(*c)),
-                    ]);
-                }
+            for &[a, b, c] in values.as_chunks::<3>().0 {
+                out.push([
+                    base.saturating_add(u32::from(a)),
+                    base.saturating_add(u32::from(b)),
+                    base.saturating_add(u32::from(c)),
+                ]);
             }
         }
         Indices::U32(values) => {
-            for tri in values.chunks_exact(3) {
-                if let [a, b, c] = tri {
-                    out.push([
-                        base.saturating_add(*a),
-                        base.saturating_add(*b),
-                        base.saturating_add(*c),
-                    ]);
-                }
+            for &[a, b, c] in values.as_chunks::<3>().0 {
+                out.push([
+                    base.saturating_add(a),
+                    base.saturating_add(b),
+                    base.saturating_add(c),
+                ]);
             }
         }
     }
@@ -2133,14 +2129,12 @@ fn submesh_trimesh(submeshes: &[Submesh], scale: [f32; 3]) -> (Vec<Vec3>, Vec<[u
         for &[x, y, z] in &submesh.positions {
             points.push(Vec3::new(x * sx, y * sy, z * sz));
         }
-        for tri in submesh.indices.chunks_exact(3) {
-            if let [a, b, c] = tri {
-                indices.push([
-                    base.saturating_add(*a),
-                    base.saturating_add(*b),
-                    base.saturating_add(*c),
-                ]);
-            }
+        for &[a, b, c] in submesh.indices.as_chunks::<3>().0 {
+            indices.push([
+                base.saturating_add(a),
+                base.saturating_add(b),
+                base.saturating_add(c),
+            ]);
         }
     }
     (points, indices)
@@ -2916,7 +2910,7 @@ mod tests {
         // Stalled but still inside the start window: full strength.
         assert!((phase_out_factor(1.0, 0.0, false, true) - 1.0).abs() < 1.0e-9);
         // Halfway between start (2 s) and max (3 s): half strength.
-        let mid = 0.5 * (PHASE_OUT_START_SECS + MAX_INTERP_SECS);
+        let mid = f64::midpoint(PHASE_OUT_START_SECS, MAX_INTERP_SECS);
         assert!((phase_out_factor(mid, 0.0, false, true) - 0.5).abs() < 1.0e-9);
         // Past the max window: fully stopped.
         assert!(phase_out_factor(MAX_INTERP_SECS + 1.0, 0.0, false, true).abs() < 1.0e-9);

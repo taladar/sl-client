@@ -339,7 +339,6 @@ impl Plugin for PreferencesColorsSkinsPlugin {
 
 #[cfg(test)]
 mod tests {
-    use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_settings::SettingsStore;
 

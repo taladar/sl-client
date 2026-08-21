@@ -586,8 +586,8 @@ fn mat_at(bytes: &[u8], index: usize) -> Option<[f32; 16]> {
     let start = index.checked_mul(MAT4_BYTES)?;
     let slice = bytes.get(start..start.checked_add(MAT4_BYTES)?)?;
     let mut out = [0.0_f32; 16];
-    for (component, chunk) in out.iter_mut().zip(slice.chunks_exact(4)) {
-        *component = f32::from_ne_bytes(chunk.try_into().ok()?);
+    for (component, &chunk) in out.iter_mut().zip(slice.as_chunks::<4>().0) {
+        *component = f32::from_ne_bytes(chunk);
     }
     Some(out)
 }
@@ -1016,8 +1016,10 @@ mod tests {
     /// Reinterpret readback bytes as the `f32`s the GPU wrote (native
     /// endianness, which is what the GPU shares with the host).
     fn floats(data: &[u8]) -> Vec<f32> {
-        data.chunks_exact(4)
-            .map(|chunk| chunk.try_into().map_or(0.0, f32::from_ne_bytes))
+        data.as_chunks::<4>()
+            .0
+            .iter()
+            .map(|&chunk| f32::from_ne_bytes(chunk))
             .collect()
     }
 

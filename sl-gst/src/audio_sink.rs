@@ -204,8 +204,10 @@ fn push_sample(sample: &gstreamer::Sample, state: &SharedAudioSink) {
     // order, so `from_ne_bytes` is the correct, endianness-agnostic read).
     let samples: Vec<f32> = map
         .as_slice()
-        .chunks_exact(4)
-        .map(|bytes| f32::from_ne_bytes(<[u8; 4]>::try_from(bytes).unwrap_or([0; 4])))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|bytes| f32::from_ne_bytes(*bytes))
         .collect();
 
     let mut guard = match state.lock() {

@@ -882,7 +882,7 @@ pub(crate) fn submit_gpu_picks(
     submission.active = false;
     submission.items.clear();
 
-    let requests: Vec<(Vec2, PickPurpose)> = picker.requests.drain(..).collect();
+    let requests: Vec<(Vec2, PickPurpose)> = std::mem::take(&mut picker.requests);
     if !requests.is_empty()
         && let Ok((camera, camera_transform)) = camera.single()
         && let Some(viewport) = camera.logical_viewport_size()
@@ -1267,7 +1267,7 @@ mod tests {
             .mul_vec4(world_point.extend(1.0));
         let ndc = Vec3::new(clip.x / clip.w, clip.y / clip.w, clip.z / clip.w);
         let cursor = Vec2::new(
-            (ndc.x + 1.0) * 0.5 * viewport.x,
+            f32::midpoint(ndc.x, 1.0) * viewport.x,
             (1.0 - ndc.y) * 0.5 * viewport.y,
         );
         let cropped = crop_clip_from_world(clip_from_view, view_from_world, cursor, viewport);

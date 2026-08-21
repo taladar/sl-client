@@ -495,10 +495,10 @@ fn dump_media_frame(
         return;
     };
     let mut out = format!("P6\n{} {}\n255\n", slot.size.x, slot.size.y).into_bytes();
-    for pixel in data.chunks_exact(4) {
-        out.push(pixel.get(2).copied().unwrap_or(0));
-        out.push(pixel.get(1).copied().unwrap_or(0));
-        out.push(pixel.first().copied().unwrap_or(0));
+    for &[b, g, r, _] in data.as_chunks::<4>().0 {
+        out.push(r);
+        out.push(g);
+        out.push(b);
     }
     let _created = fs_err::create_dir_all(dir);
     let _written = fs_err::write(dir.join(format!("media-surface-{id:?}.ppm")), &out);

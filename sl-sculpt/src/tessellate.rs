@@ -365,15 +365,8 @@ fn placeholder_position(u: f32, v: f32) -> [f32; 3] {
 /// extra seam wrapping.
 fn smooth_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0_f32; 3]; positions.len()];
-    for triangle in indices.chunks_exact(3) {
-        let [i0, i1, i2] = match triangle {
-            [i0, i1, i2] => [
-                usize_from_u32(*i0),
-                usize_from_u32(*i1),
-                usize_from_u32(*i2),
-            ],
-            _short => continue,
-        };
+    for &[i0, i1, i2] in indices.as_chunks::<3>().0 {
+        let [i0, i1, i2] = [usize_from_u32(i0), usize_from_u32(i1), usize_from_u32(i2)];
         let (Some(p0), Some(p1), Some(p2)) = (
             positions.get(i0).copied(),
             positions.get(i1).copied(),
@@ -559,11 +552,7 @@ mod tests {
     /// the surface is inside out.
     fn signed_volume(face: &sl_prim::PrimFace) -> f32 {
         let mut volume = 0.0_f32;
-        for triangle in face.indices.chunks_exact(3) {
-            let [i0, i1, i2] = match triangle {
-                [i0, i1, i2] => [*i0, *i1, *i2],
-                _short => continue,
-            };
+        for &[i0, i1, i2] in face.indices.as_chunks::<3>().0 {
             let point = |index: u32| {
                 face.positions
                     .get(usize::try_from(index).unwrap_or(usize::MAX))
@@ -617,10 +606,8 @@ mod tests {
                 "index {index} within {count} vertices"
             );
         }
-        for triangle in face.indices.chunks_exact(3) {
-            if let [i, j, k] = triangle {
-                assert!(i != j && j != k && k != i, "no degenerate triangle");
-            }
+        for &[i, j, k] in face.indices.as_chunks::<3>().0 {
+            assert!(i != j && j != k && k != i, "no degenerate triangle");
         }
         for normal in &face.normals {
             let length =

@@ -293,20 +293,16 @@ fn to_rgba8(data: &jpeg2k::ImagePixelData) -> Vec<u8> {
             .flat_map(|&l| [l, l, l, OPAQUE_ALPHA])
             .collect(),
         ImagePixelData::La8(values) => values
-            .chunks_exact(2)
-            .filter_map(|la| match (la.first(), la.get(1)) {
-                (Some(&l), Some(&a)) => Some([l, l, l, a]),
-                _other => None,
-            })
-            .flatten()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .flat_map(|&[l, a]| [l, l, l, a])
             .collect(),
         ImagePixelData::Rgb8(values) => values
-            .chunks_exact(3)
-            .filter_map(|rgb| match (rgb.first(), rgb.get(1), rgb.get(2)) {
-                (Some(&r), Some(&g), Some(&b)) => Some([r, g, b, OPAQUE_ALPHA]),
-                _other => None,
-            })
-            .flatten()
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b]| [r, g, b, OPAQUE_ALPHA])
             .collect(),
         ImagePixelData::Rgba8(values) => values.clone(),
         ImagePixelData::L16(values) => values
@@ -317,37 +313,25 @@ fn to_rgba8(data: &jpeg2k::ImagePixelData) -> Vec<u8> {
             })
             .collect(),
         ImagePixelData::La16(values) => values
-            .chunks_exact(2)
-            .filter_map(|la| match (la.first(), la.get(1)) {
-                (Some(&l), Some(&a)) => {
-                    let l = narrow(l);
-                    Some([l, l, l, narrow(a)])
-                }
-                _other => None,
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .flat_map(|&[l, a]| {
+                let l = narrow(l);
+                [l, l, l, narrow(a)]
             })
-            .flatten()
             .collect(),
         ImagePixelData::Rgb16(values) => values
-            .chunks_exact(3)
-            .filter_map(|rgb| match (rgb.first(), rgb.get(1), rgb.get(2)) {
-                (Some(&r), Some(&g), Some(&b)) => {
-                    Some([narrow(r), narrow(g), narrow(b), OPAQUE_ALPHA])
-                }
-                _other => None,
-            })
-            .flatten()
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b]| [narrow(r), narrow(g), narrow(b), OPAQUE_ALPHA])
             .collect(),
         ImagePixelData::Rgba16(values) => values
-            .chunks_exact(4)
-            .filter_map(
-                |rgba| match (rgba.first(), rgba.get(1), rgba.get(2), rgba.get(3)) {
-                    (Some(&r), Some(&g), Some(&b), Some(&a)) => {
-                        Some([narrow(r), narrow(g), narrow(b), narrow(a)])
-                    }
-                    _other => None,
-                },
-            )
-            .flatten()
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|&[r, g, b, a]| [narrow(r), narrow(g), narrow(b), narrow(a)])
             .collect(),
     }
 }

@@ -581,12 +581,10 @@ impl NotationParser<'_> {
 /// nibble (mirroring the reference's tolerant `b16` reader).
 fn decode_hex(text: &str) -> Vec<u8> {
     let digits: Vec<u8> = text.bytes().filter_map(hex_value).collect();
-    digits
-        .chunks_exact(2)
-        .filter_map(|pair| match pair {
-            [high, low] => Some(high.wrapping_shl(4) | *low),
-            _ => None,
-        })
+    let (pairs, _odd_nibble) = digits.as_chunks::<2>();
+    pairs
+        .iter()
+        .map(|[high, low]| high.wrapping_shl(4) | *low)
         .collect()
 }
 

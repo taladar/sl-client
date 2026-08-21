@@ -226,7 +226,9 @@ fn resolutions_for(min_dim: u32) -> i32 {
 fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError> {
     // Opaque images drop their (redundant) alpha plane; transparency keeps it.
     let opaque = pixels
-        .chunks_exact(RGBA_CHANNELS)
+        .as_chunks::<RGBA_CHANNELS>()
+        .0
+        .iter()
         .all(|texel| texel.get(3) == Some(&u8::MAX));
     let numcomps: usize = if opaque { 3 } else { 4 };
 
@@ -270,7 +272,7 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
         let comps = (*image.0).comps;
         for channel in 0..numcomps {
             let data = (*comps.add(channel)).data;
-            for (i, texel) in pixels.chunks_exact(RGBA_CHANNELS).enumerate() {
+            for (i, texel) in pixels.as_chunks::<RGBA_CHANNELS>().0.iter().enumerate() {
                 let sample = texel.get(channel).copied().unwrap_or(0);
                 *data.add(i) = i32::from(sample);
             }
