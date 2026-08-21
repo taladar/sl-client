@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 263 |
+| ready | 264 |
 | blocked | 68 |
 | in-progress | 17 |
 | bugs | 35 |
 | done | 849 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1361** |
+| **total** | **1362** |
 
 ## ideas (93)
 
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (263)
+## ready (264)
 
 ### protocol
 
@@ -241,6 +241,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-split-viewer-crate`](ready/build-split-viewer-crate.md) — Split the
+  viewer crate to regain cross-crate build parallelism
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)

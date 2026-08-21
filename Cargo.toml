@@ -42,7 +42,52 @@ members = [
 resolver = "3"
 
 [profile.release]
+# Line tables, not full DWARF. Profiling here happens on release builds (a debug
+# build is too slow to run) with Tracy and `perf`, plus `gdb -p <pid> -ex
+# "thread apply all bt"` for hung-thread backtraces. All of those need symbol
+# names, file:line and inline frames — which line tables carry in full. `perf
+# --call-graph dwarf` unwinds through `.eh_frame`, which is emitted regardless.
+#
+# What full `debug = 2` adds on top is the variable/type descriptions only a
+# debugger inspecting locals reads: measured on this workspace's viewer binary,
+# `.debug_info` (932 MB) + `.debug_str` (863 MB) + `.debug_loc` (757 MB) out of
+# 2.86 GB of DWARF in a 3.17 GB binary whose `.text` is just 113 MB. Dropping
+# them keeps every profiling workflow intact while cutting the binary, the link
+# time, the link's peak RSS and the build-cache footprint by roughly 10x.
+#
+# Use `--profile release-debug` below on the rare occasion locals are needed.
+debug = "line-tables-only"
+
+# Release plus full DWARF, for the rare debugger session that needs local
+# variables. Its own profile so it builds into `target/release-debug/` and never
+# invalidates the normal release artifacts.
+[profile.release-debug]
+inherits = "release"
 debug = 2
+
+[profile.dev]
+# Same reasoning as release, and more clear-cut: debug builds are not used for
+# debugging here, so full DWARF in them is pure cost. This is also what shrinks
+# `target/debug` and ggh's `target/nextest_check`, both of which build with the
+# dev profile.
+debug = "line-tables-only"
+# Light optimization for our own crates. Bevy's baseline advice leaves these at
+# opt-level 0 on the assumption the engine dominates frame time, but that does
+# not hold here: this workspace carries a lot of performance-sensitive code of
+# its own (the pose driver, culling, UI layout, the parry3d raycast index), and
+# unoptimized it is too slow to run. opt-level 1 keeps most of the runtime win
+# for a small fraction of opt-level 3's compile cost, and leaves debug
+# assertions and overflow checks on.
+opt-level = 1
+
+[profile.dev.package."*"]
+# Optimize every dependency (bevy, wgpu, parry3d, ...) fully even in a dev
+# build. This is Bevy's standard fast-build recommendation: the dependency wall
+# compiles once and is cached, so paying opt-level 3 there is nearly free per
+# iteration, while the crates that actually change between builds sit at
+# opt-level 1 above. Together these are what make a dev build runnable, so
+# iteration no longer has to go through a release build.
+opt-level = 3
 
 [workspace.lints.clippy]
 allow_attributes = "deny"
