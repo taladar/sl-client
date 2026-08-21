@@ -5529,6 +5529,352 @@ pub(crate) fn concatenated_uuids(bytes: &[u8]) -> Vec<Uuid> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Server-direction encoders for the world-state pushes a simulator sends
+// unsolicited (parcel properties, object updates): the inverses of
+// `parcel_info`, `parcel_info_from_llsd`, and `object_from_full_update`.
+// ---------------------------------------------------------------------------
+
+/// Encodes region-local coordinates as a wire [`Vector`].
+const fn region_coords_to_vector(coords: RegionCoordinates) -> Vector {
+    Vector {
+        x: coords.x(),
+        y: coords.y(),
+        z: coords.z(),
+    }
+}
+
+/// Encodes a [`ParcelInfo`] as a UDP `ParcelProperties` message — the exact
+/// inverse of [`parcel_info`]. Strings go out NUL-terminated, absent URLs /
+/// keys as empty strings / nil UUIDs, and the for-sale price as `0` unless the
+/// `FOR_SALE` flag is set (the client reads it back as `None` otherwise).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange)
+/// when an L$ amount or the land area exceeds the signed 32-bit wire field.
+pub(crate) fn parcel_properties_to_wire(
+    info: &ParcelInfo,
+) -> Result<ParcelProperties, sl_wire::WireError> {
+    use sl_wire::messages::{
+        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
+        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
+    };
+    let for_sale = info.flags().contains(sl_wire::ParcelFlags::FOR_SALE);
+    Ok(ParcelProperties {
+        parcel_data: ParcelPropertiesParcelDataBlock {
+            request_result: info.request_result.to_i32(),
+            sequence_id: info.sequence_id,
+            snap_selection: info.snap_selection,
+            self_count: info.self_count,
+            other_count: info.other_count,
+            public_count: info.public_count,
+            local_id: info.local_id.0,
+            owner_id: info.owner.uuid(),
+            is_group_owned: matches!(info.owner, sl_types::key::OwnerKey::Group(_)),
+            auction_id: info.auction_id,
+            claim_date: info.claim_date,
+            claim_price: crate::types::linden_to_wire("ClaimPrice", &info.claim_price)?,
+            rent_price: crate::types::linden_to_wire("RentPrice", &info.rent_price)?,
+            aabb_min: region_coords_to_vector(info.aabb_min),
+            aabb_max: region_coords_to_vector(info.aabb_max),
+            bitmap: info.bitmap.clone(),
+            area: crate::types::land_area_to_wire("Area", &info.area)?,
+            status: u8::try_from(info.status.to_i32()).unwrap_or(u8::MAX),
+            sim_wide_max_prims: info.sim_wide_max_prims,
+            sim_wide_total_prims: info.sim_wide_total_prims,
+            max_prims: info.max_prims,
+            total_prims: info.total_prims,
+            owner_prims: info.owner_prims,
+            group_prims: info.group_prims,
+            other_prims: info.other_prims,
+            selected_prims: info.selected_prims,
+            parcel_prim_bonus: info.parcel_prim_bonus,
+            other_clean_time: info.other_clean_time,
+            parcel_flags: info.raw_parcel_flags,
+            sale_price: crate::types::linden_price_to_wire(
+                "SalePrice",
+                if for_sale {
+                    info.sale_price.as_ref()
+                } else {
+                    None
+                },
+            )?,
+            name: with_nul(&info.name),
+            desc: with_nul(&info.description),
+            music_url: with_nul(&sl_wire::optional_url_to_wire(info.music_url.as_ref())),
+            media_url: with_nul(&sl_wire::optional_url_to_wire(info.media_url.as_ref())),
+            media_id: crate::types::optional_key_to_wire(info.media_id, |k| k.uuid()),
+            media_auto_scale: u8::from(info.media_auto_scale),
+            group_id: crate::types::group_to_wire(info.group),
+            pass_price: crate::types::linden_to_wire("PassPrice", &info.pass_price)?,
+            pass_hours: info.pass_hours,
+            category: info.category.to_u8(),
+            auth_buyer_id: crate::types::optional_key_to_wire(info.auth_buyer_id, |k| k.uuid()),
+            snapshot_id: crate::types::optional_key_to_wire(info.snapshot_id, |k| k.uuid()),
+            user_location: region_coords_to_vector(info.user_location),
+            user_look_at: Vector {
+                x: info.user_look_at.x(),
+                y: info.user_look_at.y(),
+                z: info.user_look_at.z(),
+            },
+            landing_type: info.landing_type.to_u8(),
+            region_push_override: info.region_push_override,
+            region_deny_anonymous: info.region_deny_anonymous,
+            region_deny_identified: info.region_deny_identified,
+            region_deny_transacted: info.region_deny_transacted,
+        },
+        age_verification_block: ParcelPropertiesAgeVerificationBlockBlock {
+            region_deny_age_unverified: info.region_deny_age_unverified,
+        },
+        region_allow_access_block: ParcelPropertiesRegionAllowAccessBlockBlock {
+            region_allow_access_override: info.region_allow_access_override,
+        },
+        parcel_environment_block: ParcelPropertiesParcelEnvironmentBlockBlock {
+            parcel_environment_version: info.parcel_environment_version,
+            region_allow_environment_override: info.region_allow_environment_override,
+        },
+    })
+}
+
+/// Encodes a `u32` as the 4-byte big-endian LLSD binary element OpenSim uses
+/// for `uint` fields (`ParcelFlags`, `AuctionID`); the client's [`llsd_u32`]
+/// reads it back.
+fn llsd_u32_binary(value: u32) -> Llsd {
+    Llsd::Binary(vec![
+        low_byte(value >> 24),
+        low_byte(value >> 16),
+        low_byte(value >> 8),
+        low_byte(value),
+    ])
+}
+
+/// Encodes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body — the
+/// inverse of [`parcel_info_from_llsd`]. The `ParcelData` block and the three
+/// trailing single-blocks are each a one-element array holding a map, as the
+/// event-queue form mirrors the UDP message's block layout. The `uint` fields
+/// go out as big-endian binary (OpenSim's convention), `ClaimDate` as an
+/// integer `time_t` (Second Life's).
+#[must_use]
+pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
+    let for_sale = info.flags().contains(sl_wire::ParcelFlags::FOR_SALE);
+    let linden = |amount: &sl_types::money::LindenAmount| {
+        Llsd::Integer(i32::try_from(amount.0).unwrap_or(i32::MAX))
+    };
+    let optional_key = |uuid: Uuid| Llsd::Uuid(uuid);
+    let data = llsd_map(vec![
+        ("SequenceID", Llsd::Integer(info.sequence_id)),
+        ("RequestResult", Llsd::Integer(info.request_result.to_i32())),
+        ("SnapSelection", Llsd::Boolean(info.snap_selection)),
+        ("SelfCount", Llsd::Integer(info.self_count)),
+        ("OtherCount", Llsd::Integer(info.other_count)),
+        ("PublicCount", Llsd::Integer(info.public_count)),
+        ("LocalID", Llsd::Integer(info.local_id.0)),
+        ("OwnerID", Llsd::Uuid(info.owner.uuid())),
+        (
+            "IsGroupOwned",
+            Llsd::Boolean(matches!(info.owner, sl_types::key::OwnerKey::Group(_))),
+        ),
+        ("AuctionID", llsd_u32_binary(info.auction_id)),
+        ("ClaimDate", Llsd::Integer(info.claim_date)),
+        ("ClaimPrice", linden(&info.claim_price)),
+        ("RentPrice", linden(&info.rent_price)),
+        ("AABBMin", region_coords_to_llsd(info.aabb_min)),
+        ("AABBMax", region_coords_to_llsd(info.aabb_max)),
+        (
+            "Area",
+            Llsd::Integer(i32::try_from(info.area.0).unwrap_or(i32::MAX)),
+        ),
+        ("Bitmap", Llsd::Binary(info.bitmap.clone())),
+        ("Status", Llsd::Integer(info.status.to_i32())),
+        ("Category", Llsd::Integer(i32::from(info.category.to_u8()))),
+        ("MaxPrims", Llsd::Integer(info.max_prims)),
+        ("SimWideMaxPrims", Llsd::Integer(info.sim_wide_max_prims)),
+        (
+            "SimWideTotalPrims",
+            Llsd::Integer(info.sim_wide_total_prims),
+        ),
+        ("TotalPrims", Llsd::Integer(info.total_prims)),
+        ("OwnerPrims", Llsd::Integer(info.owner_prims)),
+        ("GroupPrims", Llsd::Integer(info.group_prims)),
+        ("OtherPrims", Llsd::Integer(info.other_prims)),
+        ("SelectedPrims", Llsd::Integer(info.selected_prims)),
+        (
+            "ParcelPrimBonus",
+            Llsd::Real(f64::from(info.parcel_prim_bonus)),
+        ),
+        ("OtherCleanTime", Llsd::Integer(info.other_clean_time)),
+        ("ParcelFlags", llsd_u32_binary(info.raw_parcel_flags)),
+        (
+            "SalePrice",
+            match (&info.sale_price, for_sale) {
+                (Some(price), true) => linden(price),
+                _ => Llsd::Integer(0),
+            },
+        ),
+        ("Name", Llsd::String(info.name.clone())),
+        ("Desc", Llsd::String(info.description.clone())),
+        (
+            "MusicURL",
+            Llsd::String(sl_wire::optional_url_to_wire(info.music_url.as_ref())),
+        ),
+        (
+            "MediaURL",
+            Llsd::String(sl_wire::optional_url_to_wire(info.media_url.as_ref())),
+        ),
+        (
+            "MediaID",
+            optional_key(crate::types::optional_key_to_wire(info.media_id, |k| {
+                k.uuid()
+            })),
+        ),
+        ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
+        (
+            "GroupID",
+            Llsd::Uuid(crate::types::group_to_wire(info.group)),
+        ),
+        ("PassPrice", linden(&info.pass_price)),
+        ("PassHours", Llsd::Real(f64::from(info.pass_hours))),
+        (
+            "AuthBuyerID",
+            optional_key(crate::types::optional_key_to_wire(
+                info.auth_buyer_id,
+                |k| k.uuid(),
+            )),
+        ),
+        (
+            "SnapshotID",
+            optional_key(crate::types::optional_key_to_wire(info.snapshot_id, |k| {
+                k.uuid()
+            })),
+        ),
+        ("UserLocation", region_coords_to_llsd(info.user_location)),
+        ("UserLookAt", direction_to_llsd(info.user_look_at)),
+        (
+            "LandingType",
+            Llsd::Integer(i32::from(info.landing_type.to_u8())),
+        ),
+        (
+            "RegionPushOverride",
+            Llsd::Boolean(info.region_push_override),
+        ),
+        (
+            "RegionDenyAnonymous",
+            Llsd::Boolean(info.region_deny_anonymous),
+        ),
+        (
+            "RegionDenyIdentified",
+            Llsd::Boolean(info.region_deny_identified),
+        ),
+        (
+            "RegionDenyTransacted",
+            Llsd::Boolean(info.region_deny_transacted),
+        ),
+    ]);
+    llsd_map(vec![
+        ("ParcelData", Llsd::Array(vec![data])),
+        (
+            "AgeVerificationBlock",
+            Llsd::Array(vec![llsd_map(vec![(
+                "RegionDenyAgeUnverified",
+                Llsd::Boolean(info.region_deny_age_unverified),
+            )])]),
+        ),
+        (
+            "RegionAllowAccessBlock",
+            Llsd::Array(vec![llsd_map(vec![(
+                "RegionAllowAccessOverride",
+                Llsd::Boolean(info.region_allow_access_override),
+            )])]),
+        ),
+        (
+            "ParcelEnvironmentBlock",
+            Llsd::Array(vec![llsd_map(vec![
+                (
+                    "ParcelEnvironmentVersion",
+                    Llsd::Integer(info.parcel_environment_version),
+                ),
+                (
+                    "RegionAllowEnvironmentOverride",
+                    Llsd::Boolean(info.region_allow_environment_override),
+                ),
+            ])]),
+        ),
+    ])
+}
+
+/// Encodes an [`Object`] as a full `ObjectUpdate` object-data block — the
+/// inverse of [`object_from_full_update`]. The motion goes through
+/// [`encode_object_motion`](crate::object_update::encode_object_motion); the
+/// raw `texture_entry` / `texture_anim` / `particle_system` / `extra_params`
+/// byte fields are emitted verbatim (they are the wire form the decoder keeps
+/// alongside its typed view); strings are NUL-terminated as a simulator sends
+/// them. The session-side `circuit` and cached `properties` have no wire form
+/// and are dropped.
+#[must_use]
+pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock {
+    let shape = &object.shape;
+    ObjectUpdateObjectDataBlock {
+        id: object.local_id.0,
+        state: object.state,
+        full_id: object.full_id.uuid(),
+        crc: object.crc,
+        p_code: object.pcode,
+        material: object.material,
+        click_action: object.click_action,
+        scale: object.scale.clone(),
+        object_data: crate::object_update::encode_object_motion(&object.motion),
+        parent_id: object.parent_id.0,
+        update_flags: object.update_flags,
+        path_curve: shape.path_curve,
+        profile_curve: shape.profile_curve,
+        path_begin: shape.path_begin,
+        path_end: shape.path_end,
+        path_scale_x: shape.path_scale_x,
+        path_scale_y: shape.path_scale_y,
+        path_shear_x: shape.path_shear_x,
+        path_shear_y: shape.path_shear_y,
+        path_twist: shape.path_twist,
+        path_twist_begin: shape.path_twist_begin,
+        path_radius_offset: shape.path_radius_offset,
+        path_taper_x: shape.path_taper_x,
+        path_taper_y: shape.path_taper_y,
+        path_revolutions: shape.path_revolutions,
+        path_skew: shape.path_skew,
+        profile_begin: shape.profile_begin,
+        profile_end: shape.profile_end,
+        profile_hollow: shape.profile_hollow,
+        texture_entry: object.texture_entry.clone(),
+        texture_anim: object.texture_anim.clone(),
+        name_value: if object.name_value.is_empty() {
+            Vec::new()
+        } else {
+            with_nul(&object.name_value)
+        },
+        data: object.data.clone(),
+        text: if object.text.is_empty() {
+            Vec::new()
+        } else {
+            with_nul(&object.text)
+        },
+        text_color: object.text_color,
+        media_url: match &object.media_url {
+            Some(url) => with_nul(&sl_wire::url_to_wire(url)),
+            None => Vec::new(),
+        },
+        ps_block: object.particle_system.clone(),
+        extra_params: object.extra_params.clone(),
+        sound: object.sound,
+        owner_id: object.owner_id,
+        gain: object.gain,
+        flags: object.sound_flags,
+        radius: object.sound_radius,
+        joint_type: object.joint_type,
+        joint_pivot: object.joint_pivot.clone(),
+        joint_axis_or_anchor: object.joint_axis_or_anchor.clone(),
+    }
+}
+
 #[cfg(test)]
 mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};

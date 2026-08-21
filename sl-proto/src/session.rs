@@ -1472,7 +1472,8 @@ pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
 pub(crate) use chat_session::SERVER_HISTORY_CAP;
 pub(crate) use conversions::{
-    ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, instant_message,
+    ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,
+    instant_message, parcel_properties_to_llsd, parcel_properties_to_wire,
     parse_copy_inventory_from_notecard, region_handshake_message, shape_from_object_shape_block,
     unpack_uuids,
 };

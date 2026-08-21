@@ -158,6 +158,9 @@ mod test {
         commands: mpsc::Sender<Command>,
         /// The run-loop task (aborted on teardown).
         run: tokio::task::JoinHandle<Result<(), sl_client_tokio::Error>>,
+        /// The region name the `RegionHandshake` carried (it precedes
+        /// `RegionHandshakeComplete`, so `start` captures it).
+        region_name: Option<String>,
     }
 
     impl Drop for Running {
@@ -181,16 +184,20 @@ mod test {
             events: event_rx,
             commands: command_tx,
             run,
+            region_name: None,
         };
+        let mut region_name = None;
         running
-            .wait_for(|event| {
-                matches!(
-                    event,
-                    Event::RegionHandshakeComplete | Event::RegionChanged { .. }
-                )
-                .then_some(())
+            .wait_for(|event| match event {
+                Event::RegionInfoHandshake(identity) => {
+                    region_name = identity.sim_name.as_ref().map(ToString::to_string);
+                    None
+                }
+                Event::RegionHandshakeComplete | Event::RegionChanged { .. } => Some(()),
+                _ => None,
             })
             .await?;
+        running.region_name = region_name;
         Ok(running)
     }
 
@@ -209,6 +216,107 @@ mod test {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn arrival_world_burst_reaches_client() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let agent_id = running.agent.agent_id();
+
+        // The stock world burst: own avatar, the overlay (four chunks), the
+        // region-wide parcel, and the scripted object as a visible box.
+        let mut avatar_seen = false;
+        let mut box_seen = false;
+        let mut overlay_chunks = 0_usize;
+        let mut parcel = None;
+        // The handshake goes out on `UseCircuitCode`, so the client (which
+        // drops one arriving after its movement completed) decoded the
+        // region's identity before the movement completed.
+        assert_eq!(running.region_name.as_deref(), Some("Fake Region"));
+        while !(avatar_seen && box_seen && overlay_chunks >= 4 && parcel.is_some()) {
+            running
+                .wait_for(|event| {
+                    match event {
+                        Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                            if object.full_id.uuid() == agent_id.uuid() =>
+                        {
+                            avatar_seen = true;
+                        }
+                        Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                            if object.full_id
+                                == sl_fake_grid::scenario::stock_scripted_object() =>
+                        {
+                            assert_eq!(
+                                object.local_id,
+                                sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID
+                            );
+                            assert_eq!(
+                                object.motion.position,
+                                sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_POSITION
+                            );
+                            box_seen = true;
+                        }
+                        Event::ParcelOverlay(_) => {
+                            overlay_chunks = overlay_chunks.saturating_add(1);
+                        }
+                        Event::ParcelProperties(info) => parcel = Some((**info).clone()),
+                        _other => {}
+                    }
+                    Some(())
+                })
+                .await?;
+        }
+        let parcel = parcel.ok_or("no parcel")?;
+        assert_eq!(parcel.name, sl_fake_grid::scenario::STOCK_PARCEL_NAME);
+        assert_eq!(
+            parcel.local_id,
+            sl_fake_grid::scenario::STOCK_PARCEL_LOCAL_ID
+        );
+        assert!(parcel.allow_fly());
+
+        // A rectangle request is answered from the same fixture, echoing the
+        // sequence id; a refetch re-sends the box.
+        running
+            .commands
+            .send(Command::RequestParcelProperties {
+                west: 10.0,
+                south: 10.0,
+                east: 11.0,
+                north: 11.0,
+                sequence_id: -50_000,
+            })
+            .await?;
+        let echoed = running
+            .wait_for(|event| match event {
+                Event::ParcelProperties(info) if info.sequence_id == -50_000 => {
+                    Some(info.name.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(echoed, sl_fake_grid::scenario::STOCK_PARCEL_NAME);
+
+        let circuit = running.circuit;
+        running
+            .commands
+            .send(Command::RequestObjects {
+                local_ids: vec![sl_client_tokio::ScopedObjectId::new(
+                    circuit,
+                    sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                )],
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.full_id == sl_fake_grid::scenario::stock_scripted_object() =>
+                {
+                    Some(())
+                }
+                _ => None,
+            })
+            .await?;
+        Ok(())
     }
 
     #[tokio::test]

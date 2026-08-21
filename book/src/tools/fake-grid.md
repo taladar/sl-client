@@ -17,7 +17,8 @@ only the I/O those cores deliberately leave to a runtime:
   `SimSession::handle_datagram` with the machine's own `poll_timeout`
   deadlines driven by a timer task (acks, resends, pings, inactivity);
 - scriptable content fixtures — a `Scenario` seeds each fresh session's
-  stores (inventory, parcels, features, …) and greets arriving avatars;
+  stores (inventory, parcels, features, …), pushes the region's world
+  (parcels, objects) at arriving avatars, and greets them;
 - the niche non-CAPS HTTP surfaces a grid manager and the world map
   expect next to the login URI (see below): `get_grid_info`, the
   map-tile files, and the economy helper scripts.
@@ -34,7 +35,8 @@ One logged-in avatar is one `SimSession` + `SimCaps` pair behind one
 async mutex. Every path that mutates the machine — the UDP pump, the
 timer, a CAPS dispatch, a test's `with_sim` call — ends with the same
 flush sequence: drain `poll_event()` into the session's `ServerEvent`
-broadcast (running the automatic `RegionHandshake` on `AgentArrived`),
+broadcast (running the automatic `RegionHandshake` on `CircuitOpened` and
+the arrival world burst on `AgentArrived`),
 collect `poll_transmit()` datagrams, republish the `poll_timeout()`
 deadline, and wake a held event-queue poll if events are queued. Socket
 I/O happens only after the lock is released, so nothing ever awaits
@@ -142,6 +144,75 @@ not cover goes in `Scenario::on_event`, a hook that sees every drained
 `client_end_to_end.rs` drives each of these flows through the real
 `sl-client-tokio` commands.
 
+## The world fixtures
+
+`Scenario::world` (`SceneFixtures`) holds the region's parcels
+(`ParcelInfo`) and objects (`Object`) — the records the client decodes, so
+a test asserts exactly what it seeded. A real simulator pushes a burst of
+world state at an arriving viewer that nothing requested, and the driver
+does the same on `AgentArrived`, right after `AgentMovementComplete`:
+
+1. the agent's **own avatar object** (`pcode` `AVATAR`, the agent id as
+   its full id, `FirstName`/`LastName`/`Title` name-values from the
+   account) at the arrival point — the client's `current_parcel()` /
+   `can_fly()` resolve the agent's parcel from this object's position;
+2. the **parcel overlay** as `ParcelOverlay` chunks (one ownership byte
+   per 4 m cell relative to the arriving agent, with the west/south
+   parcel-edge bits, the way OpenSim's `SendParcelOverlay` builds it);
+3. the **`ParcelProperties`** of the parcel under the arrival point
+   (sequence id `0`, OpenSim's unsolicited-push convention);
+4. one full **`ObjectUpdate`** carrying every fixture object.
+
+Afterwards the same fixtures answer the client's `ParcelPropertiesRequest`
+(by rectangle — answered from the rectangle's centre, echoing the sequence
+id and snap flag) and `ParcelPropertiesRequestByID`, with a
+`ParcelRequestResult::NoData` reply on a miss, and `RequestMultipleObjects`
+with a fresh `ObjectUpdate` of the matching objects. The `SimSession`
+helpers behind this (`send_parcel_properties`, `enqueue_parcel_properties`
+for the CAPS event-queue form Second Life uses, `send_parcel_overlay`,
+`send_object_update`, `send_object_update_compressed`, `send_kill_object`)
+are also what a test's `with_sim` call uses to push world changes at a
+live client. `region_wide_parcel(..)` and `box_prim(..)` build the
+common fixtures.
+
+The stock scenario's world is one region-wide public parcel
+(`STOCK_PARCEL_NAME`, `STOCK_PARCEL_LOCAL_ID`, flying and rezzing
+allowed) and the stock scripted object as a 1 m box at
+`STOCK_SCRIPTED_OBJECT_POSITION` — so the task-inventory fixtures describe
+an object a viewer can actually see and click.
+
+**Ordering matters.** The `RegionHandshake` goes out on `CircuitOpened`
+(`UseCircuitCode`), not on arrival: a viewer waits for the handshake
+before it sends `CompleteAgentMovement`, and this workspace's client
+discards a handshake that arrives after its `AgentMovementComplete`
+already completed the arrival (it only listens while `AwaitingHandshake`).
+The first version of the driver sent it on `AgentArrived` and the tokio
+end-to-end test never noticed — it only waited for
+`RegionHandshakeComplete`, which the movement-complete path also raises;
+the Bevy smoke tier's `SlRegionIdentity` assertion is what caught it.
+
+## The Bevy smoke tier
+
+`sl-client-bevy/tests/fake_grid_login_smoke.rs` logs the real
+`SlClientPlugin` — its socket-owning `sl-session-net` thread, the blocking
+login, retransmission, the CAPS long-poll worker — into an in-process grid
+from a `MinimalPlugins` app the test steps by hand (the grid's tasks run
+on a tokio runtime the test owns; the frame loop never blocks on it, the
+grid-side `ServerEvent` broadcast is drained with `try_recv`). It asserts
+the whole pipeline in order: login → `CircuitEstablished` →
+`RegionHandshakeComplete` → `SlIdentity`; the `maintain_world` state (one
+`SlCurrentRegion` with the stock `SlRegionIdentity`, a complete
+`SlParcelOverlay`, the stock parcel as `SlAgentParcel.current` and as the
+region's `SlParcel` child); the arrival content (greeting, stock prim,
+`SimulatorFeatures` over the Bevy CAPS path, a seed grant with
+`EventQueueGet`); a chat `SlCommand` decoded grid-side; an `ObjectUpdate`
+pushed with `with_sim` arriving as `ObjectAdded` and a `KillObject` as
+`ObjectRemoved`; a CAPS `ParcelProperties` through the real long-poll
+renaming the agent parcel; and a clean `LoggedOut`. A second test runs
+two apps against two grids in one process. The tier is deliberately a
+smoke test — behaviour belongs to the headless interaction/world tiers,
+which stand their world up from `SlEvent` fixtures instead.
+
 ## Voice signalling
 
 The stock scenario speaks **WebRTC voice**: `default_setup` enables the
@@ -165,9 +236,9 @@ exercises. Chat-session channels can be gated with
 `set_channel_credentials(channel, credentials)`.
 
 The stock `Scenario` is intentionally small (an inventory skeleton, a library,
-one parcel, a chat greeting, WebRTC voice signalling). A real viewer will ask
-for much more — terrain, appearance, nearby objects — and renders a login into
-an empty world; growing the default scenario against what a viewer actually
-requests is expected iteration, not a bug. Firestorm's seed-request retries (up
-to 30×) are harmless: the grant is minted once, so every retry gets a
-byte-identical reply.
+one parcel, one box, a chat greeting, WebRTC voice signalling). A real viewer
+will ask for much more — terrain, appearance, textures — and renders a login
+into a nearly empty world; growing the default scenario against what a viewer
+actually requests is expected iteration, not a bug. Firestorm's seed-request
+retries (up to 30×) are harmless: the grant is minted once, so every retry
+gets a byte-identical reply.

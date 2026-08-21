@@ -6,12 +6,14 @@
 //! [`SimSession`] before the login response is built, populating the fixture
 //! stores the CAPS and UDP surfaces serve (inventory, parcels, simulator
 //! features, display names, …); the `on_agent_arrived` closure runs right
-//! after the automatic `RegionHandshake` (content pushed at the arriving
-//! client); the asset store backs the binary asset-delivery caps
+//! after the agent's movement completes and the arrival world burst went
+//! out (content pushed at the arriving client); the asset store backs the binary asset-delivery caps
 //! (`GetTexture`, `GetMesh`, `ViewerAsset`); the [`UdpAssetFixtures`] back
 //! the legacy UDP asset paths (`Xfer`, `Transfer`, task inventory, the
-//! estate terrain RAW file); the `on_event` hook sees every drained
-//! [`ServerEvent`] for behaviour the stock fixtures do not cover.
+//! estate terrain RAW file); the [`SceneFixtures`] are the parcels and
+//! objects pushed at an arriving agent and replayed on request; the
+//! `on_event` hook sees every drained [`ServerEvent`] for behaviour the
+//! stock fixtures do not cover.
 
 use std::sync::Arc;
 
@@ -24,6 +26,7 @@ use sl_proto::{
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
 use crate::udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
+use crate::world::{SceneFixtures, box_prim, region_wide_parcel};
 
 /// A hook run under the session lock against the machine (fixture setup,
 /// on-arrival content pushes).
@@ -38,7 +41,7 @@ pub type SimEventHook = Arc<dyn Fn(&mut SimSession, &ServerEvent) + Send + Sync>
 pub struct Scenario {
     /// Seeds a fresh session's fixture stores before login completes.
     pub setup: SimHook,
-    /// Runs after the automatic region handshake when the agent arrives.
+    /// Runs after the arrival world burst when the agent's movement completes.
     pub on_agent_arrived: Option<SimHook>,
     /// Runs for every drained [`ServerEvent`], after the stock behaviour.
     pub on_event: Option<SimEventHook>,
@@ -46,6 +49,9 @@ pub struct Scenario {
     pub assets: sl_proto::InMemoryAssetSource,
     /// The content behind the legacy UDP asset paths.
     pub udp_assets: UdpAssetFixtures,
+    /// The parcels and objects of the region (pushed on arrival, replayed on
+    /// request).
+    pub world: SceneFixtures,
 }
 
 impl std::fmt::Debug for Scenario {
@@ -58,6 +64,7 @@ impl std::fmt::Debug for Scenario {
             )
             .field("on_event", &self.on_event.as_ref().map(|_| "<closure>"))
             .field("udp_assets", &self.udp_assets)
+            .field("world", &self.world)
             .finish_non_exhaustive()
     }
 }
@@ -72,14 +79,17 @@ impl Scenario {
             on_event: None,
             assets: sl_proto::InMemoryAssetSource::new(),
             udp_assets: UdpAssetFixtures::new(),
+            world: SceneFixtures::new(),
         }
     }
 }
 
 impl Default for Scenario {
     /// The stock scenario: a small standard inventory and library, one
-    /// region-wide parcel, a chat greeting on arrival, and the stock UDP
-    /// asset fixtures ([`default_udp_assets`]).
+    /// region-wide parcel, a chat greeting on arrival, the stock UDP asset
+    /// fixtures ([`default_udp_assets`]), and the stock world
+    /// ([`default_world`]: the region-wide parcel's record and the scripted
+    /// object as a visible box).
     fn default() -> Self {
         Self {
             setup: Arc::new(default_setup),
@@ -87,6 +97,7 @@ impl Default for Scenario {
             on_event: None,
             assets: sl_proto::InMemoryAssetSource::new(),
             udp_assets: default_udp_assets(),
+            world: default_world(),
         }
     }
 }
@@ -185,6 +196,46 @@ pub fn default_udp_assets() -> UdpAssetFixtures {
         )
         .with_estate_covenant(STOCK_COVENANT_BODY)
         .with_terrain_raw(flat_terrain_raw(STOCK_TERRAIN_HEIGHT_M))
+}
+
+/// The stock parcel's name.
+pub const STOCK_PARCEL_NAME: &str = "Fake Grid Parcel";
+/// The stock scripted object's region-local position (a box resting on
+/// the flat stock terrain, a few metres from the arrival point).
+pub const STOCK_SCRIPTED_OBJECT_POSITION: sl_types::lsl::Vector = sl_types::lsl::Vector {
+    x: 132.0,
+    y: 128.0,
+    z: 25.5,
+};
+
+/// The stock world: one region-wide public parcel owned by the fixture
+/// creator ([`STOCK_PARCEL_LOCAL_ID`], [`STOCK_PARCEL_NAME`]) — the same
+/// parcel the stock setup registers for `RemoteParcelRequest` and voice —
+/// and the stock scripted object ([`stock_scripted_object`],
+/// [`STOCK_SCRIPTED_OBJECT_LOCAL_ID`]) rezzed as a 1 m box at
+/// [`STOCK_SCRIPTED_OBJECT_POSITION`], so the task-inventory fixtures
+/// describe an object the viewer can actually see and click.
+#[must_use]
+pub fn default_world() -> SceneFixtures {
+    let creator = AgentKey::from(uuid::Uuid::from_u128(FIXTURE_CREATOR));
+    let mut world = SceneFixtures::new();
+    world.parcels.push(region_wide_parcel(
+        STOCK_PARCEL_LOCAL_ID,
+        OwnerKey::Agent(creator),
+        STOCK_PARCEL_NAME,
+    ));
+    world.objects.push(box_prim(
+        STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+        stock_scripted_object(),
+        creator,
+        STOCK_SCRIPTED_OBJECT_POSITION,
+        sl_types::lsl::Vector {
+            x: 1.0,
+            y: 1.0,
+            z: 1.0,
+        },
+    ));
+    world
 }
 
 /// An [`InventoryFolderKey`] from a small fixture constant.

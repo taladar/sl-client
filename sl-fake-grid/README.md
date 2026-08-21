@@ -8,16 +8,20 @@ an HTTP endpoint serving login and CAPS (including the `EventQueueGet`
 long-poll), one loopback UDP socket per logged-in session, and scriptable
 content fixtures — including the legacy UDP asset paths (named `Xfer`
 files, task inventories, `TransferRequest` sources, the estate terrain RAW
-heightmap). No world authority, no persistence: content is whatever the
-scenario scripts.
+heightmap) and the world burst a simulator pushes on region entry (the
+agent's own avatar, the parcel overlay, the agent's parcel, the region's
+objects), replayed on request. No world authority, no persistence: content
+is whatever the scenario scripts.
 
 Two consumers by design:
 
 - **Integration tests**: `FakeGridBuilder` starts a grid on ephemeral
   ports inside the test process, so tests run in parallel; the returned
   handles (`FakeGrid`, `FakeAgent`) let the test drive the grid side of
-  the conversation (send chat, enqueue CAPS events) and assert on the
-  `ServerEvent` stream.
+  the conversation (send chat, push object updates, enqueue CAPS events)
+  and assert on the `ServerEvent` stream. Both the tokio client and the
+  Bevy plugin (`sl-client-bevy/tests/fake_grid_login_smoke.rs`) log into
+  it in their end-to-end tests.
 - **Manual viewer testing**: the `sl-fake-grid` binary serves a grid an
   unmodified viewer (this workspace's, or Firestorm's grid manager) can
   log into at `http://127.0.0.1:<port>/` — the highest-fidelity offline

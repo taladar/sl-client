@@ -145,10 +145,11 @@ use crate::session::{
     agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
     build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
-    enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, instant_message,
-    nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
-    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
-    sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
+    enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, full_update_block,
+    instant_message, nav_mesh_status_to_llsd, open_region_info_to_llsd, parcel_properties_to_llsd,
+    parcel_properties_to_wire, region_handshake_message, required_voice_version_to_llsd,
+    set_display_name_reply_to_llsd, shape_from_object_shape_block, sim_console_response_to_llsd,
+    teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
 use crate::sim_experiences::SimExperiences;
 use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
@@ -166,15 +167,15 @@ use crate::types::{
     InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
     LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
     MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
-    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    NavMeshStatus, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
     ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
-    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ParcelInfo, ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId,
+    RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
+    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TerraformArea, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -201,6 +202,11 @@ use sl_wire::messages::{
     DisableSimulator, TeleportFailed, TeleportFailedInfoBlock, TeleportLocal,
     TeleportLocalInfoBlock, TeleportProgress, TeleportProgressAgentDataBlock,
     TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock,
+};
+use sl_wire::messages::{
+    KillObject, KillObjectObjectDataBlock, ObjectUpdate, ObjectUpdateCompressed,
+    ObjectUpdateCompressedObjectDataBlock, ObjectUpdateCompressedRegionDataBlock,
+    ObjectUpdateRegionDataBlock, ParcelOverlay, ParcelOverlayParcelDataBlock,
 };
 use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
@@ -528,6 +534,10 @@ pub enum TransferRequestSource {
     /// An estate asset (source `SimEstate`) — the covenant notecard.
     Estate(TransferSourceParamsEstate),
 }
+
+/// The size of one `ParcelOverlay` chunk: a simulator splits the region's
+/// per-4 m-cell ownership map into 1024-byte pieces (four for a 256 m region).
+pub const PARCEL_OVERLAY_CHUNK_BYTES: usize = 1024;
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
@@ -1915,6 +1925,36 @@ pub enum ServerEvent {
         local_id: RegionLocalParcelId,
         /// The query sequence id, echoed back in the reply.
         sequence_id: i32,
+    },
+    /// The client requested the properties of the parcel(s) under a metre
+    /// rectangle (`ParcelPropertiesRequest`). The inverse of the client's
+    /// [`Session::request_parcel_properties`](crate::Session::request_parcel_properties);
+    /// a simulator answers with a `ParcelProperties` per covered parcel (see
+    /// [`SimSession::send_parcel_properties`]).
+    RequestParcelProperties {
+        /// The rectangle's west edge, in metres.
+        west: f32,
+        /// The rectangle's south edge, in metres.
+        south: f32,
+        /// The rectangle's east edge, in metres.
+        east: f32,
+        /// The rectangle's north edge, in metres.
+        north: f32,
+        /// The query sequence id, echoed back in the reply (the viewer uses
+        /// the negative "agent parcel" / "hover parcel" sentinels here).
+        sequence_id: i32,
+        /// Whether the viewer asked for the reply to snap to parcel bounds.
+        snap_selection: bool,
+    },
+    /// The client asked the simulator to (re)send full updates for objects it
+    /// is missing (`RequestMultipleObjects`). The inverse of the client's
+    /// [`Session::request_objects`](crate::Session::request_objects); a
+    /// simulator answers with `ObjectUpdate`s (see
+    /// [`SimSession::send_object_update`]).
+    RequestObjects {
+        /// The requested objects' region-local ids, with the cache-miss kind
+        /// the client reported for each (`0` = full miss, `1` = CRC mismatch).
+        objects: Vec<(RegionLocalObjectId, u8)>,
     },
     /// The client set a parcel's auto-return time for other people's objects
     /// (`ParcelSetOtherCleanTime`). The inverse of the client's
@@ -5097,6 +5137,190 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `ParcelProperties`: one parcel's full record, as a simulator
+    /// pushes it unsolicited when an agent enters a parcel and in answer to a
+    /// client's `ParcelPropertiesRequest` / `ParcelPropertiesRequestByID`
+    /// (surfaced as [`ServerEvent::RequestParcelProperties`] /
+    /// [`ServerEvent::RequestParcelPropertiesById`] — echo the request's
+    /// `sequence_id` into `info.sequence_id`). The inverse of the client's
+    /// [`Event::ParcelProperties`](crate::Event::ParcelProperties) decode.
+    /// Sent reliably. The CAPS event-queue form Second Life uses is
+    /// [`enqueue_parcel_properties`](Self::enqueue_parcel_properties).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if an L$ amount / the land area does not fit its wire field.
+    pub fn send_parcel_properties(&mut self, info: &ParcelInfo, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelProperties(parcel_properties_to_wire(info)?);
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Enqueues a CAPS `ParcelProperties` push — the event-queue form of
+    /// [`send_parcel_properties`](Self::send_parcel_properties) that Second
+    /// Life (and OpenSim) deliver parcel records through.
+    pub fn enqueue_parcel_properties(&mut self, info: &ParcelInfo) {
+        self.enqueue_caps_event("ParcelProperties", parcel_properties_to_llsd(info));
+    }
+
+    /// Sends one `ParcelOverlay` chunk: `sequence_id` is the chunk index, and
+    /// `data` the chunk's per-4 m-cell ownership bytes (a simulator splits the
+    /// region's overlay into [`PARCEL_OVERLAY_CHUNK_BYTES`]-byte chunks; see
+    /// [`send_parcel_overlay`](Self::send_parcel_overlay) for the whole map).
+    /// The inverse of the client's
+    /// [`Event::ParcelOverlay`](crate::Event::ParcelOverlay) decode. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_overlay_chunk(
+        &mut self,
+        sequence_id: i32,
+        data: &[u8],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelOverlay(ParcelOverlay {
+            parcel_data: ParcelOverlayParcelDataBlock {
+                sequence_id,
+                data: data.to_vec(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a whole parcel overlay (one ownership byte per 4 m cell, row-major
+    /// from the south-west corner — 4096 bytes for a 256 m region) as the
+    /// [`PARCEL_OVERLAY_CHUNK_BYTES`]-byte `ParcelOverlay` chunks a simulator
+    /// emits, numbered from `0`. A trailing partial chunk is sent as-is.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if a chunk fails to encode.
+    pub fn send_parcel_overlay(&mut self, overlay: &[u8], now: Instant) -> Result<(), Error> {
+        for (index, chunk) in overlay.chunks(PARCEL_OVERLAY_CHUNK_BYTES).enumerate() {
+            let sequence_id =
+                i32::try_from(index).map_err(|_too_many| sl_wire::WireError::ValueOutOfRange {
+                    field: "SequenceID",
+                    value: i64::try_from(index).unwrap_or(i64::MAX),
+                })?;
+            self.send_parcel_overlay_chunk(sequence_id, chunk, now)?;
+        }
+        Ok(())
+    }
+
+    /// Sends a full `ObjectUpdate` carrying `objects` (every object in this
+    /// session's region, stamped with its handle) — how a simulator rezzes
+    /// prims and avatars into a client's view, answers
+    /// [`ServerEvent::RequestObjects`], and pushes property changes the terse /
+    /// compressed forms cannot carry. The inverse of the client's
+    /// [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
+    /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) decode. Sent
+    /// reliably.
+    ///
+    /// `time_dilation` is the physics time dilation the client reads off the
+    /// region-data block, `0xFFFF` meaning "real time".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_object_update(
+        &mut self,
+        objects: &[Object],
+        time_dilation: u16,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ObjectUpdate(ObjectUpdate {
+            region_data: ObjectUpdateRegionDataBlock {
+                region_handle: self.region_handle.0,
+                time_dilation,
+            },
+            object_data: objects.iter().map(full_update_block).collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `ObjectUpdateCompressed` carrying `objects` — the packed form a
+    /// simulator prefers for bulk rezzing (each object is one
+    /// [`encode_compressed_object`](crate::encode_compressed_object) blob).
+    /// The client decodes it into the same
+    /// [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
+    /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) as the full form.
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_object_update_compressed(
+        &mut self,
+        objects: &[Object],
+        time_dilation: u16,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
+            region_data: ObjectUpdateCompressedRegionDataBlock {
+                region_handle: self.region_handle.0,
+                time_dilation,
+            },
+            object_data: objects
+                .iter()
+                .map(|object| ObjectUpdateCompressedObjectDataBlock {
+                    update_flags: object.update_flags,
+                    data: crate::encode_compressed_object(object),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `KillObject` removing `objects` (by region-local id) from the
+    /// client's view — derez, out-of-interest-list, or an avatar leaving. The
+    /// inverse of the client's
+    /// [`Event::ObjectRemoved`](crate::Event::ObjectRemoved) decode. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_kill_object(
+        &mut self,
+        objects: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::KillObject(KillObject {
+            object_data: objects
+                .iter()
+                .map(|id| KillObjectObjectDataBlock { id: id.0 })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends an `EstateCovenantReply`: the estate covenant summary, in response
     /// to a client's `EstateCovenantRequest` (surfaced as
     /// [`ServerEvent::RequestEstateCovenant`]).
@@ -8270,6 +8494,26 @@ impl SimSession {
                         local_id: RegionLocalParcelId(request.parcel_data.local_id),
                         sequence_id: request.parcel_data.sequence_id,
                     });
+            }
+            AnyMessage::ParcelPropertiesRequest(request) => {
+                let data = &request.parcel_data;
+                self.events.push_back(ServerEvent::RequestParcelProperties {
+                    west: data.west,
+                    south: data.south,
+                    east: data.east,
+                    north: data.north,
+                    sequence_id: data.sequence_id,
+                    snap_selection: data.snap_selection,
+                });
+            }
+            AnyMessage::RequestMultipleObjects(request) => {
+                self.events.push_back(ServerEvent::RequestObjects {
+                    objects: request
+                        .object_data
+                        .iter()
+                        .map(|block| (RegionLocalObjectId(block.id), block.cache_miss_type))
+                        .collect(),
+                });
             }
             AnyMessage::ParcelSetOtherCleanTime(set) => {
                 let minutes = u64::try_from(set.parcel_data.other_clean_time).unwrap_or(0);

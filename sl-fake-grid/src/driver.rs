@@ -15,6 +15,7 @@ use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 use crate::scenario::{SimEventHook, SimHook};
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
+use crate::world::{AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world};
 
 /// The lockable state of one logged-in session: the protocol machine, its
 /// CAPS surface, and the pieces the driver's auto-behaviours need.
@@ -25,16 +26,22 @@ pub(crate) struct SimState {
     pub(crate) caps: SimCaps,
     /// The binary asset store served by the session-free asset caps.
     pub(crate) assets: InMemoryAssetSource,
-    /// The region identity sent in the automatic `RegionHandshake` greeting.
+    /// The region identity sent in the automatic `RegionHandshake` greeting
+    /// (on `UseCircuitCode`, before the agent's movement completes).
     pub(crate) identity: RegionIdentity,
-    /// Scenario hook run right after the automatic region handshake when the
-    /// agent completes its movement into the region.
+    /// Scenario hook run right after the arrival world burst when the agent
+    /// completes its movement into the region.
     pub(crate) on_agent_arrived: Option<SimHook>,
     /// Scenario hook run for every drained event after the stock behaviour.
     pub(crate) on_event: Option<SimEventHook>,
     /// This session's copy of the legacy UDP asset fixtures (a terrain
     /// upload replaces only this session's heightmap).
     pub(crate) udp_assets: UdpAssetFixtures,
+    /// The region's parcels and objects (pushed on arrival, replayed on
+    /// request).
+    pub(crate) world: SceneFixtures,
+    /// Who the agent is, for its own avatar object.
+    pub(crate) avatar: AvatarIdentity,
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -86,8 +93,8 @@ impl SharedSim {
     }
 
     /// The under-the-lock half of the flush rule: run the auto-behaviours
-    /// (arrival handshake, the UDP asset fixtures, the scenario's event
-    /// hook), drain queued [`ServerEvent`]s into the broadcast, collect
+    /// (arrival handshake + world burst, the UDP asset and world fixtures,
+    /// the scenario's event hook), drain queued [`ServerEvent`]s into the broadcast, collect
     /// queued transmits, publish the next timer deadline, and note whether a
     /// held event-queue poll should be woken.
     ///
@@ -97,10 +104,17 @@ impl SharedSim {
     pub(crate) fn flush_locked(&self, state: &mut SimState) -> FlushOutcome {
         while let Some(event) = state.sim.poll_event() {
             let now = Instant::now();
+            // The greeting goes out as soon as the circuit is open, as a real
+            // simulator does on `UseCircuitCode`: the viewer waits for the
+            // `RegionHandshake` before it sends `CompleteAgentMovement`, and
+            // the client discards a handshake that arrives after its
+            // `AgentMovementComplete` already completed the arrival.
+            if matches!(event, ServerEvent::CircuitOpened { .. })
+                && let Err(error) = state.sim.send_region_handshake(&state.identity, now)
+            {
+                tracing::warn!("auto region handshake failed: {error}");
+            }
             if matches!(event, ServerEvent::AgentArrived) {
-                if let Err(error) = state.sim.send_region_handshake(&state.identity, now) {
-                    tracing::warn!("auto region handshake failed: {error}");
-                }
                 // A voice-enabled region tells the arriving viewer which
                 // backend to load (`RequiredVoiceVersion` over the event
                 // queue, as the simulator does on region entry).
@@ -115,6 +129,10 @@ impl SharedSim {
                             voice_server_type: Some(voice_server_type.to_owned()),
                         });
                 }
+                // The world burst a simulator sends on region entry: the
+                // agent's own avatar, the parcel overlay, its parcel, and
+                // every object in view — before the scenario's own hook.
+                push_arrival_world(&state.world, &state.avatar, &mut state.sim, now);
                 if let Some(hook) = &state.on_agent_arrived {
                     hook(&mut state.sim);
                 }
@@ -126,6 +144,7 @@ impl SharedSim {
                 &event,
                 now,
             );
+            answer_world_request(&state.world, &mut state.sim, &event, now);
             if let Some(hook) = &state.on_event {
                 hook(&mut state.sim, &event);
             }

@@ -274,6 +274,12 @@ impl GridCore {
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
             udp_assets: region.scenario.udp_assets.clone(),
+            world: region.scenario.world.clone(),
+            avatar: crate::world::AvatarIdentity {
+                agent_id: account.agent_id,
+                first_name: account.config.first_name.clone(),
+                last_name: account.config.last_name.clone(),
+            },
         };
         let shared = new_shared_sim(state, socket, self.shutdown_tx.subscribe());
         Ok((

@@ -70,6 +70,10 @@ wgpu-types = { version = "29" }
 [dev-dependencies]
 pretty_assertions = { version = "1.4.1" }
 serde_json = { version = "1.0.145" }
+# The loopback grid the `fake_grid_login_smoke` tier logs the real plugin
+# into; `sync` for its `broadcast` receivers, `rt-multi-thread` to host it.
+sl-fake-grid = { version = "0.1.0", path = "../sl-fake-grid" }
+tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync"] }
 tracing-subscriber = { version = "0.3.19" }
 
 [lints]
