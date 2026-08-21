@@ -195,6 +195,9 @@ contact-sets-action-remove-display-name = Rem DN…
 add-to-contact-set-title = Add to Contact Set
 add-to-contact-set-prompt = Add { $name } to contact set:
 move-to-contact-set-prompt = Move { $name } to contact set:
+# Several residents at once (the minimap's multi-avatar Add to Set): they are
+# counted rather than named, as in the reference.
+add-to-contact-set-prompt-multiple = Add { $count } residents to contact set:
 add-to-contact-set-add = Add
 add-to-contact-set-new = New Set…
 add-to-contact-set-cancel = Cancel
@@ -962,6 +965,8 @@ minimap-tooltip-owner = Owner: { $name }
 minimap-tooltip-sale = For sale: L$ { $price } ({ $area } m²)
 minimap-tooltip-hint-teleport = Double-click to teleport
 minimap-tooltip-hint-map = Double-click to open the world map
+# A View Profiles line for an avatar whose name has not arrived yet.
+minimap-menu-name-loading = (loading)
 
 ## The avatar radar floater (radar.rs, viewer-avatar-radar): the nearby-avatar
 ## table, its enter / leave reports, and the row actions.

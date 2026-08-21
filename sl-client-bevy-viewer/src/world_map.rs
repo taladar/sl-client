@@ -2927,7 +2927,9 @@ mod tests {
                 MenuItemDef::Submenu(submenu) | MenuItemDef::SubmenuWhen(submenu, _) => {
                     collect_actions(submenu, out);
                 }
-                MenuItemDef::Separator => {}
+                // A dynamic submenu's lines carry no action string: a pick
+                // reports its `(slot, index)` instead.
+                MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
             }
         }
     }

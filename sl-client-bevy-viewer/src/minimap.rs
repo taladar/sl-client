@@ -46,11 +46,14 @@ use sl_terrain::TerrainComposition;
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
 use crate::camera::{CameraMode, ViewerCamera};
+use crate::contact_sets_panel::OpenAddToContactSet;
 use crate::conversations::{ConversationKey, OpenConversation};
 use crate::coords::bevy_to_sl_vec;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
+use crate::menu::{
+    MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
+};
 use crate::minimap_math::{
     self, COLOR_AVATAR, COLOR_AVATAR_FRIEND, COLOR_AVATAR_LINDEN, COLOR_AVATAR_SELF,
     COLOR_CHAT_RING, COLOR_FRUSTUM, COLOR_PARCEL_LINE, COLOR_SHOUT_RING, COLOR_TRACK,
@@ -345,8 +348,14 @@ impl ObjectPose {
 struct MenuContext {
     /// The closest avatar dot under the click, if any.
     agent: Option<AgentKey>,
-    /// Every avatar dot within pick radius of the click.
+    /// Every avatar dot within pick radius of the click — the order the
+    /// **View Profiles** lines were filled in, so a pick's index resolves
+    /// against it.
     agents: Vec<AgentKey>,
+    /// Whether a name of one of [`agents`](Self::agents) was still unresolved
+    /// when the menu opened, so the lines are re-labelled as the names land
+    /// ([`refresh_minimap_menu_names`]). Cleared once every name is known.
+    names_pending: bool,
 }
 
 /// The minimap's live state: the view transform inputs, the cached content
@@ -654,7 +663,9 @@ impl Plugin for MinimapPlugin {
                     apply_minimap_surface,
                     layout_minimap_compass,
                     update_minimap_hover,
+                    refresh_minimap_menu_names,
                     handle_minimap_actions,
+                    handle_minimap_profile_picks,
                     apply_minimap_mouselook,
                 )
                     .chain(),
@@ -2640,13 +2651,28 @@ fn on_minimap_scroll(
 
 /// A right-click (secondary press) on the surface opens the context menu,
 /// snapshotting the dot under the cursor and the checked/enabled conditions.
+///
+/// With **several** dots inside the pick radius the menu grows the reference's
+/// multi-avatar shape: the single-avatar entries stand down and a *View
+/// Profiles* list takes their place, one line per avatar, labelled with whatever
+/// name is known now and re-labelled as the rest arrive
+/// ([`refresh_minimap_menu_names`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy observer's parameters are its injected world: the press, the minimap state \
+              it snapshots into, the settings / tracking / names it reads the conditions and \
+              labels from, the floater guard, and the two menu channels one open writes"
+)]
 fn on_minimap_context(
     mut press: On<Pointer<Press>>,
     mut state: ResMut<MinimapState>,
     settings: Res<ViewerSettings>,
     tracking: Res<MapTracking>,
+    mut avatars: ResMut<AvatarState>,
+    translator: Translator,
     ui: Option<Res<MinimapUi>>,
     mut menus: MessageWriter<OpenContextMenu>,
+    mut labels: MessageWriter<SetMenuDynamicLabels>,
 ) {
     if press.button != PointerButton::Secondary {
         return;
@@ -2660,14 +2686,33 @@ fn on_minimap_context(
     let pick_radius =
         minimap_math::dot_radius(ppm) * store.get_f32(SETTING_PICK_SCALE).unwrap_or(3.0);
     let (closest, all) = dots_near(&state.dots, cursor, pick_radius);
+    // The list is only worth having when it says something the single entries
+    // do not: one avatar under the cursor is the plain case.
+    let listed = if all.len() > 1 {
+        all.clone()
+    } else {
+        Vec::new()
+    };
+    let (names, pending) = menu_agent_labels(&listed, &mut avatars, &translator);
     state.menu = MenuContext {
         agent: closest,
         agents: all,
+        names_pending: pending,
     };
+    labels.write(SetMenuDynamicLabels {
+        slot: SLOT_PROFILES,
+        labels: names,
+    });
 
     let mut conditions: Vec<&'static str> = Vec::new();
     if state.menu.agent.is_some() {
         conditions.push(COND_AVATAR);
+    }
+    if state.menu.agents.len() == 1 {
+        conditions.push(COND_ONE_AVATAR);
+    }
+    if state.menu.agents.len() > 1 {
+        conditions.push(COND_MANY_AVATARS);
     }
     if tracking.target.is_some() {
         conditions.push(COND_TRACKING);
@@ -2719,12 +2764,75 @@ fn on_minimap_context(
     press.propagate(false);
 }
 
+/// The labels for the **View Profiles** lines of `agents`, and whether any of
+/// them is still a placeholder.
+///
+/// A name that is not known yet is *asked for* and drawn as the reference's
+/// `LoadingData` placeholder rather than as a UUID: the list exists to say who
+/// is under the cursor, and a key says nothing. The pending flag is what keeps
+/// [`refresh_minimap_menu_names`] running only until the answers arrive.
+fn menu_agent_labels(
+    agents: &[AgentKey],
+    avatars: &mut AvatarState,
+    translator: &Translator,
+) -> (Vec<String>, bool) {
+    let mut pending = false;
+    let labels = agents
+        .iter()
+        .map(|agent| match avatars.shown_name_of(*agent) {
+            Some(name) => name.to_owned(),
+            None => {
+                pending = true;
+                avatars.request_name(*agent);
+                translator.get("minimap-menu-name-loading")
+            }
+        })
+        .collect();
+    (labels, pending)
+}
+
+/// Re-label the open **View Profiles** lines as the names land — the reference's
+/// `LLNetMap::setAvatarProfileLabel`, which writes each item's label from the
+/// name-cache callback rather than leaving the placeholder up.
+///
+/// Runs only while a right-click left names outstanding, and stops the moment
+/// they are all in.
+fn refresh_minimap_menu_names(
+    mut state: ResMut<MinimapState>,
+    mut avatars: ResMut<AvatarState>,
+    translator: Translator,
+    mut labels: MessageWriter<SetMenuDynamicLabels>,
+) {
+    if !state.menu.names_pending {
+        return;
+    }
+    let agents = state.menu.agents.clone();
+    let (names, pending) = menu_agent_labels(&agents, &mut avatars, &translator);
+    state.menu.names_pending = pending;
+    labels.write(SetMenuDynamicLabels {
+        slot: SLOT_PROFILES,
+        labels: names,
+    });
+}
+
 // ---------------------------------------------------------------------------
 // The context menu.
 // ---------------------------------------------------------------------------
 
+/// The dynamic slot the **View Profiles** lines come from — one per avatar
+/// under the right-click, in [`MenuContext::agents`] order.
+const SLOT_PROFILES: &str = "minimap-profiles";
+
 /// Condition: an avatar dot is under the right-click.
 const COND_AVATAR: &str = "minimap-avatar";
+
+/// Condition: exactly one avatar dot is within pick radius — the single-avatar
+/// entries (View Profile, More Options) are the reference's `size() == 1` case.
+const COND_ONE_AVATAR: &str = "minimap-one-avatar";
+
+/// Condition: several avatar dots are within pick radius, so the entries that
+/// act on all of them (Add to Set) take over.
+const COND_MANY_AVATARS: &str = "minimap-many-avatars";
 
 /// Condition: a tracking beacon is active.
 const COND_TRACKING: &str = "minimap-tracking";
@@ -2806,6 +2914,7 @@ static MINIMAP_MORE_MENU: MenuDef = MenuDef {
     items: &[
         MenuItemDef::Command(MenuCommand::new("IM", "im")),
         MenuItemDef::Command(MenuCommand::new("Add Friend", "add-friend")),
+        MenuItemDef::Command(MenuCommand::new("Add to Set", "add-to-set")),
         MenuItemDef::Command(MenuCommand::new("Offer Teleport", "offer-teleport")),
         MenuItemDef::Command(MenuCommand::new("Block", "block")),
     ],
@@ -2886,12 +2995,26 @@ static MINIMAP_RINGS_MENU: MenuDef = MenuDef {
 
 /// The minimap context menu: the avatar group (when a dot is under the
 /// cursor), tracking, then the map controls.
+///
+/// The avatar group has two shapes, as in the reference: with one dot under the
+/// cursor it is *that* avatar's entries; with several it becomes the list — one
+/// **View Profiles** line per avatar, and an **Add to Set** that files all of
+/// them at once. The marks apply to the whole pick radius either way.
 static MINIMAP_MENU: MenuDef = MenuDef {
     label: "Minimap",
     items: &[
-        MenuItemDef::Command(MenuCommand::new("View Profile", "profile").visible_when(COND_AVATAR)),
+        MenuItemDef::Command(
+            MenuCommand::new("View Profile", "profile").visible_when(COND_ONE_AVATAR),
+        ),
+        MenuItemDef::DynamicSubmenu {
+            label: "View Profiles",
+            slot: SLOT_PROFILES,
+        },
+        MenuItemDef::Command(
+            MenuCommand::new("Add to Set", "add-to-set-multiple").visible_when(COND_MANY_AVATARS),
+        ),
         MenuItemDef::SubmenuWhen(&MINIMAP_MARK_MENU, COND_AVATAR),
-        MenuItemDef::SubmenuWhen(&MINIMAP_MORE_MENU, COND_AVATAR),
+        MenuItemDef::SubmenuWhen(&MINIMAP_MORE_MENU, COND_ONE_AVATAR),
         MenuItemDef::Command(
             MenuCommand::new("Start Tracking", "start-tracking").visible_when(COND_AVATAR),
         ),
@@ -2948,6 +3071,7 @@ fn handle_minimap_actions(
     mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
+    mut contact_sets: MessageWriter<OpenAddToContactSet>,
 ) {
     for action in actions.read() {
         if action.element != MINIMAP_ELEMENT {
@@ -2991,6 +3115,25 @@ fn handle_minimap_actions(
                         .unwrap_or_default();
                     blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
                 }
+            }
+            "add-to-set" => {
+                if let Some(agent) = agent {
+                    contact_sets.write(OpenAddToContactSet::one(
+                        agent,
+                        agent_label(&avatars, agent),
+                    ));
+                }
+            }
+            // The multi-avatar entry files everyone under the cursor at once —
+            // the floater asks for the one set, as the reference's does.
+            "add-to-set-multiple" => {
+                let residents = state
+                    .menu
+                    .agents
+                    .iter()
+                    .map(|agent| (*agent, agent_label(&avatars, *agent)))
+                    .collect();
+                contact_sets.write(OpenAddToContactSet::many(residents));
             }
             "start-tracking" => {
                 if let Some(agent) = agent {
@@ -3062,6 +3205,36 @@ fn handle_minimap_actions(
         // Any toggle can change what the composite draws.
         if action.action.starts_with("toggle-") {
             state.last_stamp = None;
+        }
+    }
+}
+
+/// The grid name to file `agent` under — what a contact-set entry is stored
+/// with, so a set outlives everyone's presence (the alias / display name is a
+/// drawing of it, not a record of who it is).
+fn agent_label(avatars: &AvatarState, agent: AgentKey) -> String {
+    avatars
+        .name_of(agent)
+        .map(ToOwned::to_owned)
+        .unwrap_or_default()
+}
+
+/// A pick of one **View Profiles** line: open that avatar's profile.
+///
+/// The line carries only its index; who it means is the snapshot the right-click
+/// kept ([`MenuContext::agents`]), which is exactly how the reference binds the
+/// agent id to each generated item.
+fn handle_minimap_profile_picks(
+    mut picks: MessageReader<MenuDynamicPick>,
+    state: Res<MinimapState>,
+    mut profiles: MessageWriter<OpenAvatarProfile>,
+) {
+    for pick in picks.read() {
+        if pick.element != MINIMAP_ELEMENT || pick.slot != SLOT_PROFILES {
+            continue;
+        }
+        if let Some(agent) = state.menu.agents.get(pick.index) {
+            profiles.write(OpenAvatarProfile { agent: *agent });
         }
     }
 }
@@ -3217,12 +3390,17 @@ pub(crate) fn spawn_minimap_specimen(
 #[cfg(test)]
 mod tests {
     use super::{
-        COMPASS_MINOR, COMPASS_POINTS, MARK_COLORS, MINIMAP_MENU, MenuDef, MenuItemDef,
-        ObjectLayerInput, ObjectPose, ObjectSample, grid_index_at, location_reached, phantom_alpha,
-        range_metres, region_handle_at,
+        COMPASS_MINOR, COMPASS_POINTS, COND_MANY_AVATARS, COND_ONE_AVATAR, MARK_COLORS,
+        MINIMAP_ELEMENT, MINIMAP_MENU, MenuDef, MenuDynamicPick, MenuItemDef, MinimapState,
+        ObjectLayerInput, ObjectPose, ObjectSample, SLOT_PROFILES, grid_index_at,
+        handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
+        region_handle_at,
     };
+    use crate::avatar_profile::OpenAvatarProfile;
     use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
+    use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{AgentKey, Uuid};
 
     /// A tracked location is "reached" only within the arrival radius (3 m),
     /// horizontally — the trigger to clear a double-click-teleport beacon so it
@@ -3246,7 +3424,9 @@ mod tests {
                 MenuItemDef::Submenu(submenu) | MenuItemDef::SubmenuWhen(submenu, _) => {
                     collect_actions(submenu, out);
                 }
-                MenuItemDef::Separator => {}
+                // A dynamic submenu's lines carry no action string: a pick
+                // reports its `(slot, index)` instead.
+                MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
             }
         }
     }
@@ -3256,6 +3436,8 @@ mod tests {
         "profile",
         "im",
         "add-friend",
+        "add-to-set",
+        "add-to-set-multiple",
         "offer-teleport",
         "block",
         "start-tracking",
@@ -3281,6 +3463,72 @@ mod tests {
         "toggle-auto-center",
         "recenter",
     ];
+
+    /// The avatar group has the reference's two shapes: the entries that act on
+    /// *one* avatar appear only with exactly one dot under the cursor, the
+    /// list and the file-them-all entry only with several.
+    #[test]
+    fn the_avatar_entries_split_by_how_many_are_under_the_cursor() {
+        let single: Vec<&str> = MINIMAP_MENU
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItemDef::Command(command) if command.visible_when == Some(COND_ONE_AVATAR) => {
+                    Some(command.action)
+                }
+                MenuItemDef::SubmenuWhen(submenu, COND_ONE_AVATAR) => Some(submenu.label),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            single,
+            vec!["profile", "More Options"],
+            "the single-avatar entries stand down when several are in range"
+        );
+        let many: Vec<&str> = MINIMAP_MENU
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                MenuItemDef::Command(command)
+                    if command.visible_when == Some(COND_MANY_AVATARS) =>
+                {
+                    Some(command.action)
+                }
+                MenuItemDef::DynamicSubmenu { slot, .. } => Some(slot),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            many,
+            vec![SLOT_PROFILES, "add-to-set-multiple"],
+            "the list and the file-them-all entry are the multi-avatar shape"
+        );
+    }
+
+    /// A **View Profiles** pick names its avatar by index into the snapshot the
+    /// right-click kept — the line itself carries no key.
+    #[test]
+    fn a_profile_pick_opens_the_avatar_at_that_index() {
+        let mut app = App::new();
+        app.add_message::<MenuDynamicPick>()
+            .add_message::<OpenAvatarProfile>()
+            .add_systems(Update, handle_minimap_profile_picks);
+        let mut state = MinimapState::default();
+        state.menu.agents = (1..=3)
+            .map(|id| AgentKey::from(Uuid::from_u128(id)))
+            .collect();
+        app.insert_resource(state);
+        app.world_mut().write_message(MenuDynamicPick {
+            element: MINIMAP_ELEMENT,
+            slot: SLOT_PROFILES,
+            index: 2,
+        });
+        app.update();
+        let messages = app.world().resource::<Messages<OpenAvatarProfile>>();
+        let mut cursor = messages.get_cursor();
+        let opened: Vec<AgentKey> = cursor.read(messages).map(|open| open.agent).collect();
+        assert_eq!(opened, vec![AgentKey::from(Uuid::from_u128(3))]);
+    }
 
     #[test]
     fn every_menu_action_has_a_handler() {

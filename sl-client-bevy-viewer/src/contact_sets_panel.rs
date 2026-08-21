@@ -352,14 +352,24 @@ struct AddToSetUi {
 /// Who the open add-to-set floater is about.
 #[derive(Resource, Debug, Default)]
 struct AddToSetTarget {
-    /// The resident to file (`None` when the floater is closed).
-    agent: Option<AgentKey>,
-    /// The best name the opening surface knew for them.
-    name: String,
+    /// The residents to file, with the names they were opened under (empty when
+    /// the floater is closed).
+    agents: Vec<(AgentKey, String)>,
     /// The set to take them out of afterwards — the reference's move mode.
     move_from: Option<String>,
     /// The set the combo currently shows.
     chosen: String,
+}
+
+impl AddToSetTarget {
+    /// The one resident this is about, or `None` when it is about several (or
+    /// none) — what the single-resident prompt and notification need.
+    const fn single(&self) -> Option<&(AgentKey, String)> {
+        match self.agents.as_slice() {
+            [only] => Some(only),
+            _several_or_none => None,
+        }
+    }
 }
 
 /// One per-set autoresponse block in the settings floater: the "use a reply of
@@ -433,9 +443,9 @@ enum PendingAction {
     None,
     /// A new set is being named; file `then_add` under it once it exists.
     Create {
-        /// The resident to file under the new set, if the prompt came from a
-        /// path that was filing someone.
-        then_add: Option<(AgentKey, String)>,
+        /// The residents to file under the new set — empty when the prompt came
+        /// from a path that was not filing anyone (the panel's New Set…).
+        then_add: Vec<(AgentKey, String)>,
         /// The set to take them out of afterwards (the add floater's move mode).
         move_from: Option<String>,
     },
@@ -590,18 +600,45 @@ pub(crate) struct OpenSetPseudonym {
     pub(crate) name: String,
 }
 
-/// Ask for the add-to-set floater, for one resident. The avatar pie's
-/// **Add ▸ Add to Set** and the panel's **Move to Set…** both write this.
+/// Ask for the add-to-set floater. The avatar pie's **Add ▸ Add to Set**, the
+/// panel's **Move to Set…** and the minimap's multi-avatar **Add to Set** all
+/// write this.
 #[derive(Message, Debug, Clone)]
 pub(crate) struct OpenAddToContactSet {
-    /// The resident to file.
-    pub(crate) agent: AgentKey,
-    /// The best name the opening surface knows for them (empty when it knows
-    /// none).
-    pub(crate) name: String,
+    /// The residents to file, each with the best name the opening surface knows
+    /// for them (empty when it knows none). Usually one; the reference's
+    /// multi-avatar entries hand over several, and the floater then asks for one
+    /// set to file the lot under.
+    pub(crate) agents: Vec<(AgentKey, String)>,
     /// The set to take them out of once they are filed — the reference's move
     /// mode. `None` for a plain add.
     pub(crate) move_from: Option<String>,
+}
+
+impl OpenAddToContactSet {
+    /// File one resident.
+    pub(crate) fn one(agent: AgentKey, name: String) -> Self {
+        Self {
+            agents: vec![(agent, name)],
+            move_from: None,
+        }
+    }
+
+    /// File several residents at once.
+    pub(crate) const fn many(agents: Vec<(AgentKey, String)>) -> Self {
+        Self {
+            agents,
+            move_from: None,
+        }
+    }
+
+    /// The same request in the reference's *move* mode: take them out of `set`
+    /// once they are filed.
+    #[must_use]
+    pub(crate) fn moving_from(mut self, set: String) -> Self {
+        self.move_from = Some(set);
+        self
+    }
 }
 
 // --- Plugin ---------------------------------------------------------------
@@ -1596,7 +1633,7 @@ fn on_panel_button_press(
     match button {
         ContactSetsButton::NewSet => {
             *pending = PendingAction::Create {
-                then_add: None,
+                then_add: Vec::new(),
                 move_from: None,
             };
             notifications.write(ShowNotification::new("AddNewContactSet"));
@@ -1623,14 +1660,15 @@ fn on_panel_button_press(
         }
         ContactSetsButton::MoveMember => {
             if let (Some(name), Some(agent)) = (real_set, selected.0) {
-                adds.write(OpenAddToContactSet {
-                    agent,
-                    name: sets
-                        .label_of(agent)
-                        .map(ToOwned::to_owned)
-                        .unwrap_or_default(),
-                    move_from: Some(name),
-                });
+                adds.write(
+                    OpenAddToContactSet::one(
+                        agent,
+                        sets.label_of(agent)
+                            .map(ToOwned::to_owned)
+                            .unwrap_or_default(),
+                    )
+                    .moving_from(name),
+                );
             }
         }
         ContactSetsButton::RemoveMember => {
@@ -1730,23 +1768,34 @@ fn handle_open_add_to_set(
         return;
     };
     for request in requests.read() {
-        let label = if request.name.is_empty() {
-            short_id(request.agent)
-        } else {
-            request.name.clone()
-        };
+        // A resident whose name the opening surface did not know is filed under
+        // a short form of their key rather than an empty line.
+        let residents: Vec<(AgentKey, String)> = request
+            .agents
+            .iter()
+            .map(|(agent, name)| {
+                let label = if name.is_empty() {
+                    short_id(*agent)
+                } else {
+                    name.clone()
+                };
+                (*agent, label)
+            })
+            .collect();
+        if residents.is_empty() {
+            continue;
+        }
         // With no set to file them under, the useful thing is the make-a-set
         // prompt rather than a floater whose only control is empty.
         if sets.set_count() == 0 {
             *pending = PendingAction::Create {
-                then_add: Some((request.agent, label)),
+                then_add: residents,
                 move_from: request.move_from.clone(),
             };
             notifications.write(ShowNotification::new("AddNewContactSet"));
             continue;
         }
-        target.agent = Some(request.agent);
-        target.name.clone_from(&label);
+        target.agents = residents;
         target.move_from.clone_from(&request.move_from);
 
         let labels: Vec<String> = sets.sets().map(|set| set.name().to_owned()).collect();
@@ -1763,14 +1812,25 @@ fn handle_open_add_to_set(
         select_combo_option(&mut selections, ui.chooser, &labels, &target.chosen);
         ui.options = labels;
 
-        let prompt = translator.format(
-            if request.move_from.is_some() {
-                "move-to-contact-set-prompt"
-            } else {
-                "add-to-contact-set-prompt"
-            },
-            &TransArgs::new().text("name", &label),
-        );
+        // The reference's own split: one resident is named in the prompt, several
+        // are counted (the names are on the lines the user just picked from).
+        let prompt = match target.single() {
+            Some((_agent, name)) => translator.format(
+                if request.move_from.is_some() {
+                    "move-to-contact-set-prompt"
+                } else {
+                    "add-to-contact-set-prompt"
+                },
+                &TransArgs::new().text("name", name),
+            ),
+            None => translator.format(
+                "add-to-contact-set-prompt-multiple",
+                &TransArgs::new().int(
+                    "count",
+                    i64::try_from(target.agents.len()).unwrap_or(i64::MAX),
+                ),
+            ),
+        };
         if let Ok(mut text) = texts.get_mut(ui.prompt)
             && text.0 != prompt
         {
@@ -1834,44 +1894,57 @@ fn on_add_to_set_press(
         return;
     };
     press.propagate(false);
-    let Some(agent) = target.agent else {
+    if target.agents.is_empty() {
         return;
-    };
+    }
     match button {
         AddToSetButton::Add => {
             if target.chosen.is_empty() {
                 return;
             }
-            match target.move_from.clone() {
-                Some(from) => requests.write(RequestContactSet::Move {
-                    from,
-                    to: target.chosen.clone(),
-                    agent,
-                }),
-                None => requests.write(RequestContactSet::Add {
-                    set: target.chosen.clone(),
-                    agent,
-                    name: target.name.clone(),
-                }),
-            };
-            notifications.write(
-                ShowNotification::new("AddToContactSetSingleSuccess")
-                    .arg("NAME", target.name.clone())
-                    .arg("SET", target.chosen.clone()),
-            );
+            for (agent, name) in target.agents.clone() {
+                match target.move_from.clone() {
+                    Some(from) => requests.write(RequestContactSet::Move {
+                        from,
+                        to: target.chosen.clone(),
+                        agent,
+                    }),
+                    None => requests.write(RequestContactSet::Add {
+                        set: target.chosen.clone(),
+                        agent,
+                        name,
+                    }),
+                };
+            }
+            notifications.write(add_success_notification(&target));
         }
         AddToSetButton::NewSet => {
             *pending = PendingAction::Create {
-                then_add: Some((agent, target.name.clone())),
+                then_add: target.agents.clone(),
                 move_from: target.move_from.clone(),
             };
             notifications.write(ShowNotification::new("AddNewContactSet"));
         }
         AddToSetButton::Cancel => {}
     }
-    target.agent = None;
+    target.agents.clear();
     if let Ok(mut shown) = panels.get_mut(ui.panel) {
         shown.0 = false;
+    }
+}
+
+/// What the floater says once it has filed its residents.
+///
+/// The reference says it two ways, because a list of eight names is not a
+/// sentence: one resident is named, several are counted.
+fn add_success_notification(target: &AddToSetTarget) -> ShowNotification {
+    match target.single() {
+        Some((_agent, name)) => ShowNotification::new("AddToContactSetSingleSuccess")
+            .arg("NAME", name.clone())
+            .arg("SET", target.chosen.clone()),
+        None => ShowNotification::new("AddToContactSetMultipleSuccess")
+            .arg("COUNT", target.agents.len().to_string())
+            .arg("SET", target.chosen.clone()),
     }
 }
 
@@ -2302,8 +2375,8 @@ fn handle_contact_set_notifications(
                     continue;
                 }
                 requests.write(RequestContactSet::Create { name: name.clone() });
-                if let Some((agent, label)) = then_add {
-                    match move_from {
+                for (agent, label) in then_add {
+                    match move_from.clone() {
                         Some(from) => requests.write(RequestContactSet::Move {
                             from,
                             to: name.clone(),
@@ -2368,7 +2441,10 @@ fn handle_contact_set_notifications(
 
 #[cfg(test)]
 mod tests {
-    use super::{MemberRow, chooser_options, is_real_set, matches_filter, short_id, sort_rows};
+    use super::{
+        AddToSetTarget, MemberRow, add_success_notification, chooser_options, is_real_set,
+        matches_filter, short_id, sort_rows,
+    };
     use crate::contact_sets::{
         ALL_SETS_LABEL, ContactSetRefusal, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY,
     };
@@ -2621,5 +2697,44 @@ mod tests {
         assert_eq!(sets.color_of(agent(1)), Some(Color::srgb(1.0, 0.0, 0.0)));
         assert_eq!(sets.color_of(agent(2)), None);
         Ok(())
+    }
+
+    /// Filing one resident names them; filing several counts them — the
+    /// reference's two success notifications.
+    #[test]
+    fn the_success_notification_follows_the_count() {
+        let one = AddToSetTarget {
+            agents: vec![(agent(1), "Alpha Resident".to_owned())],
+            move_from: None,
+            chosen: "Builders".to_owned(),
+        };
+        let single = add_success_notification(&one);
+        assert_eq!(single.template, "AddToContactSetSingleSuccess");
+        assert_eq!(
+            single.args.pairs(),
+            [
+                ("NAME".to_owned(), "Alpha Resident".to_owned()),
+                ("SET".to_owned(), "Builders".to_owned()),
+            ]
+        );
+
+        let several = AddToSetTarget {
+            agents: vec![
+                (agent(1), "Alpha Resident".to_owned()),
+                (agent(2), "Beta Resident".to_owned()),
+                (agent(3), "Gamma Resident".to_owned()),
+            ],
+            move_from: None,
+            chosen: "Builders".to_owned(),
+        };
+        let multiple = add_success_notification(&several);
+        assert_eq!(multiple.template, "AddToContactSetMultipleSuccess");
+        assert_eq!(
+            multiple.args.pairs(),
+            [
+                ("COUNT".to_owned(), "3".to_owned()),
+                ("SET".to_owned(), "Builders".to_owned()),
+            ]
+        );
     }
 }

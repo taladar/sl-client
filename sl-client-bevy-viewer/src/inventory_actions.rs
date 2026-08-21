@@ -2916,7 +2916,8 @@ mod tests {
                     MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
                         walk(sub, out);
                     }
-                    MenuItemDef::Separator => {}
+                    // A dynamic submenu has no authored entries to walk.
+                    MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
                 }
             }
         }

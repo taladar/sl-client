@@ -2541,14 +2541,13 @@ fn on_profile_action(
             }));
         }
         ProfileAction::AddToContactSet => {
-            contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet {
-                agent: target,
-                name: avatars
+            contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet::one(
+                target,
+                avatars
                     .name_of(target)
                     .map(ToOwned::to_owned)
                     .unwrap_or_default(),
-                move_from: None,
-            });
+            ));
         }
         ProfileAction::CopySlurl => {
             crate::clipboard::copy_to_clipboard(

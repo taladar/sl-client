@@ -1377,14 +1377,13 @@ fn handle_avatar_menu_actions(
             // (`viewer-contact-sets`) — the floater asks which, since the pie
             // cannot grow a slice per set.
             "add-to-set" if action.element == AVATAR_MENU_ELEMENT => {
-                contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet {
+                contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet::one(
                     agent,
-                    name: avatars
+                    avatars
                         .name_of(agent)
                         .map(ToOwned::to_owned)
                         .unwrap_or_default(),
-                    move_from: None,
-                });
+                ));
             }
             // Give this person a name of the user's own
             // (`viewer-contact-set-pseudonyms`) — the prompt is raised where it

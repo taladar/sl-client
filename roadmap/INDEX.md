@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 263 |
+| ready | 265 |
 | blocked | 67 |
 | in-progress | 16 |
 | bugs | 31 |
-| done | 845 |
+| done | 846 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1351** |
+| **total** | **1354** |
 
 ## ideas (93)
 
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (263)
+## ready (265)
 
 ### protocol
 
@@ -275,6 +275,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Face-nearest and avatar fine-alignment tools
 - [`viewer-avatar-debug-tools`](ready/viewer-avatar-debug-tools.md) — Avatar
   debug & maintenance tools (incl. Rebake)
+- [`viewer-avatar-picker-multi-pick`](ready/viewer-avatar-picker-multi-pick.md)
+  — Avatar picker — pick several residents at once
 - [`viewer-avatar-skeleton-recovery`](ready/viewer-avatar-skeleton-recovery.md)
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
@@ -535,9 +537,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
   Minimap context menu — About Land / Place Profile / World Map (blocked by
   `viewer-parcel-options-general` (done), `viewer-world-map-floater` (done))
-- [`viewer-minimap-menu-multi-avatar`](ready/viewer-minimap-menu-multi-avatar.md)
-  — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
-  `viewer-contact-sets` (done))
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -610,6 +609,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Pathfinding floaters — console, characters, linksets (blocked by
   `viewer-ui-widget-scaffold` (done))
 - [`viewer-pbr-terrain`](ready/viewer-pbr-terrain.md) — PBR terrain
+- [`viewer-people-lists-multi-select`](ready/viewer-people-lists-multi-select.md)
+  — Multi-select in the People panel's lists (blocked, contact sets, groups)
 - [`viewer-perf-asset-streaming-frame-spikes`](ready/viewer-perf-asset-streaming-frame-spikes.md)
   — Budget asset upload/prep to kill single-digit-FPS streaming spikes
 - [`viewer-perf-avatar-mesh-lod-screen-size`](ready/viewer-perf-avatar-mesh-lod-screen-size.md)
@@ -684,6 +685,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-r17a`](ready/viewer-r17a-verify-the-shoe-lift-on-a-shod-avatar.md) —
   Verify the shoe lift live on a shod avatar
+- [`viewer-radar-multi-select`](ready/viewer-radar-multi-select.md) — Radar
+  multi-row selection and its multi-avatar menu
 - [`viewer-region-debug-console`](ready/viewer-region-debug-console.md) — Region
   (sim) debug console (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-region-estate-group-picker`](ready/viewer-region-estate-group-picker.md)
@@ -1155,7 +1158,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (845)
+## done (846)
 
 ### protocol
 
@@ -1639,6 +1642,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-minimap` (done))
 - [`viewer-minimap-interactions`](done/viewer-minimap-interactions.md) — Minimap
   interactions — clicks, double-click teleport, context menu
+- [`viewer-minimap-menu-multi-avatar`](done/viewer-minimap-menu-multi-avatar.md)
+  — Minimap context menu — multi-avatar entries (dynamic labels) (blocked by
+  `viewer-contact-sets` (done))
 - [`viewer-minimap-object-layer`](done/viewer-minimap-object-layer.md) — Minimap
   object layer — untextured objects, ownership & depth colours (blocked by
   `viewer-minimap` (done))

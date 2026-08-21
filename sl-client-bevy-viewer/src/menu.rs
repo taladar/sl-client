@@ -163,16 +163,14 @@ impl MenuCommand {
 }
 
 /// One line in a menu: a command, a submenu, or a rule between groups.
+///
+/// The variants differ in width on purpose: a `Command` carries its whole
+/// declaration inline (label, action, three condition keys, an accelerator)
+/// while a `Submenu` is one reference and a `Separator` is empty. The entries
+/// live in `static` arrays authored by hand, where by-value commands read far
+/// better than a forest of separate `static MenuCommand`s referenced by pointer,
+/// and a menu is never large enough for the width to matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[expect(
-    variant_size_differences,
-    reason = "a `Command` carries its whole declaration inline (label, action, \
-              three condition keys, an accelerator) while a `Submenu` is one \
-              reference and a `Separator` is empty; the entries live in `static` \
-              arrays authored by hand, where by-value commands read far better \
-              than a forest of separate `static MenuCommand`s referenced by \
-              pointer, and a menu is never large enough for the width to matter"
-)]
 pub(crate) enum MenuItemDef {
     /// A single command. Greyed if its `enabled_when` fails, absent if its
     /// `visible_when` fails.
@@ -185,6 +183,21 @@ pub(crate) enum MenuItemDef {
     /// item menu's "Attach To" shows only for object rows, the way a
     /// [`MenuCommand`]'s `visible_when` hides a line).
     SubmenuWhen(&'static MenuDef, &'static str),
+    /// A submenu whose entries are **not** authored: their labels come from the
+    /// named slot of the [`MenuDynamicSlots`] the opener snapshotted, one line
+    /// per entry, and a pick reports its *index* in that slot
+    /// ([`MenuDynamicPick`]) rather than an action string. The line is absent
+    /// while the slot is empty.
+    ///
+    /// This is the one thing a `&'static` tree cannot spell: a line per avatar
+    /// under the cursor, labelled with a name that may only arrive after the
+    /// menu is already open ([`SetMenuDynamicLabels`]).
+    DynamicSubmenu {
+        /// The submenu line's own (authored) label.
+        label: &'static str,
+        /// The [`MenuDynamicSlots`] slot its entries come from.
+        slot: &'static str,
+    },
     /// A horizontal rule between two groups of entries.
     Separator,
 }
@@ -235,6 +248,77 @@ impl MenuConditions {
             Some(name) => self.0.contains(&name),
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Dynamic slots — the runtime-labelled entries a static tree cannot spell.
+// ---------------------------------------------------------------------------
+
+/// The runtime entries filling each named dynamic slot, by slot name.
+///
+/// A resource rather than a per-menu component, unlike [`MenuConditions`]: a
+/// slot **name** belongs to one domain (`"minimap-profiles"`), so two open menus
+/// cannot mean different things by it, and the domain that owns a slot is the
+/// only writer — through [`SetMenuDynamicLabels`], the same message that
+/// re-labels it when a name arrives late.
+///
+/// An entry is *only* a label: the identity behind it stays with the domain that
+/// filled the slot, and a pick names the entry by `(slot, index)`
+/// ([`MenuDynamicPick`]) — the same "the opener keeps the snapshot" model the
+/// minimap's right-click already uses for its mark actions. That is what keeps a
+/// menu action a `&'static str` while the *lines* are as many as there are
+/// avatars under the cursor.
+#[derive(Resource, Debug, Clone, Default)]
+pub(crate) struct MenuDynamicSlots(Vec<(&'static str, Vec<String>)>);
+
+impl MenuDynamicSlots {
+    /// The labels filling `slot`, or an empty slice when nothing filled it.
+    pub(crate) fn labels(&self, slot: &'static str) -> &[String] {
+        self.0
+            .iter()
+            .find(|(name, _labels)| *name == slot)
+            .map_or(&[], |(_name, labels)| labels.as_slice())
+    }
+
+    /// Replace `slot`'s labels (adding the slot if it is new).
+    fn set(&mut self, slot: &'static str, labels: Vec<String>) {
+        match self.0.iter_mut().find(|(name, _labels)| *name == slot) {
+            Some((_name, existing)) => *existing = labels,
+            None => self.0.push((slot, labels)),
+        }
+    }
+}
+
+/// A pick of one runtime-filled entry — the dynamic counterpart of [`UiAction`].
+///
+/// It carries no action string because a dynamic entry has none: the domain that
+/// filled the slot resolves `index` against the snapshot it kept (which avatar
+/// the third line under the cursor was).
+#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MenuDynamicPick {
+    /// The `element` the pick is attributed to, as on [`UiAction`].
+    pub(crate) element: &'static str,
+    /// The slot the picked entry came from.
+    pub(crate) slot: &'static str,
+    /// The entry's index in that slot, as the opener filled it.
+    pub(crate) index: usize,
+}
+
+/// Re-label an open menu's dynamic slot **in place** — the asynchronous half.
+///
+/// A menu popup is built once, at open; a name that arrives a moment later would
+/// otherwise leave its line reading "(loading)" for as long as the menu is up.
+/// The reference does exactly this (`LLNetMap::setAvatarProfileLabel` writes the
+/// item's label when the name cache answers), so a domain that opened a slot
+/// with placeholder labels writes this as the real ones land. Entries beyond the
+/// labels the menu was built with are left alone: the line count is fixed at
+/// open, and only the text is refreshed.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct SetMenuDynamicLabels {
+    /// The slot to re-label.
+    pub(crate) slot: &'static str,
+    /// Its labels, in the same order the menu was opened with.
+    pub(crate) labels: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -321,6 +405,9 @@ fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
         MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
             label_matches_filter(sub.label, query) || subtree_matches_filter(sub, query)
         }
+        // A dynamic submenu's entries do not exist until it is opened, so only
+        // its own (authored) label can match a search term.
+        MenuItemDef::DynamicSubmenu { label, .. } => label_matches_filter(label, query),
         MenuItemDef::Separator => false,
     })
 }
@@ -446,12 +533,39 @@ struct MenuEntryAction {
     action: &'static str,
 }
 
-/// A submenu line, marking the [`MenuDef`] it fronts and holding its open child
+/// What a popup's lines come from: an authored menu, or one dynamic slot of the
+/// [`MenuDynamicSlots`] the menu was opened with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MenuSource {
+    /// An authored menu — every popup that is not a dynamic submenu's.
+    Static(&'static MenuDef),
+    /// A [`MenuItemDef::DynamicSubmenu`]'s child list: one line per label in the
+    /// named slot.
+    Dynamic {
+        /// The branch line's label, kept for the popup's `Name`.
+        label: &'static str,
+        /// The slot the lines come from.
+        slot: &'static str,
+    },
+}
+
+impl MenuSource {
+    /// The label this popup drops from — the menu's own, or the dynamic
+    /// branch's.
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Static(def) => def.label,
+            Self::Dynamic { label, .. } => label,
+        }
+    }
+}
+
+/// A submenu line, marking the menu it fronts and holding its open child
 /// list, so [`manage_submenus`] can open and close it on hover.
 #[derive(Component, Debug, Clone, Copy)]
 struct MenuBranch {
     /// The submenu this line opens.
-    def: &'static MenuDef,
+    def: MenuSource,
     /// The `element` its entries' actions are attributed to.
     element: &'static str,
     /// The open child-list popup entity, or `None` while closed.
@@ -467,6 +581,29 @@ struct MenuBranch {
 /// whole menu, closed by a pick, an outside press or `Escape`.
 #[derive(Component)]
 struct FreeContextMenu;
+
+/// A runtime-filled command line: which slot filled it, and where in that slot
+/// it sits. Read by [`emit_dynamic_pick`] and by [`apply_dynamic_labels`].
+#[derive(Component, Debug, Clone, Copy)]
+struct MenuDynamicRow {
+    /// The `element` the pick is attributed to.
+    element: &'static str,
+    /// The slot this line came from.
+    slot: &'static str,
+    /// Its index in that slot.
+    index: usize,
+}
+
+/// Marks a dynamic row's label node, so a late-arriving label
+/// ([`SetMenuDynamicLabels`]) can be written into the open menu without
+/// rebuilding it — the row also carries a check gutter, which is `Text` too.
+#[derive(Component)]
+struct MenuDynamicLabel;
+
+/// The rows a keyboard pick can step to and commit: an authored command line,
+/// or a runtime-filled one. (A submenu branch is navigable too, but it is
+/// matched by its own [`MenuBranch`].)
+type ActivatableRows<'w, 's> = Query<'w, 's, (), Or<(With<MenuEntryAction>, With<MenuDynamicRow>)>>;
 
 /// The keyboard **jump key** (mnemonic) bound to a command / submenu row — the
 /// reference's `LLMenuItemGL::mJumpKey`. Uppercased ASCII, matched against a
@@ -606,6 +743,7 @@ pub(crate) fn spawn_menu_button(
             move |mut press: On<Pointer<Press>>,
                   mut hosts: Query<(Entity, &mut MenuHost)>,
                   conditions: Query<&MenuConditions>,
+                  slots: Res<MenuDynamicSlots>,
                   child_of: Query<&ChildOf>,
                   direction: Res<UiDirection>,
                   filter: Res<MenuFilter>,
@@ -628,6 +766,7 @@ pub(crate) fn spawn_menu_button(
                     host,
                     &mut hosts,
                     &conditions,
+                    &slots,
                     &child_of,
                     *direction,
                     &filter,
@@ -652,10 +791,17 @@ pub(crate) fn spawn_menu_button(
 /// Closing the bar first is what makes clicking straight from one top menu to
 /// the next read as *switching* rather than stacking, and matches the reference
 /// (at most one bar menu is ever down).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the host to toggle plus the world one open reads: the hosts and their conditions, \
+              the dynamic slots and ancestry a popup builds from, the layout direction, the \
+              menu-search filter, and commands"
+)]
 fn toggle_host(
     host: Entity,
     hosts: &mut Query<(Entity, &mut MenuHost)>,
     conditions: &Query<&MenuConditions>,
+    slots: &MenuDynamicSlots,
     child_of: &Query<&ChildOf>,
     direction: UiDirection,
     filter: &MenuFilter,
@@ -666,7 +812,7 @@ fn toggle_host(
     if !was_open {
         let held = conditions_at(host, child_of, conditions);
         if let Ok((_, mut menu)) = hosts.get_mut(host) {
-            open_host(&mut menu, host, held, direction, filter, commands);
+            open_host(&mut menu, host, held, slots, direction, filter, commands);
         }
     }
 }
@@ -689,6 +835,7 @@ fn switch_menu_on_hover(
     child_of: Query<&ChildOf>,
     buttons: Query<&ChildOf, With<MenuBarButton>>,
     conditions: Query<&MenuConditions>,
+    slots: Res<MenuDynamicSlots>,
     direction: Res<UiDirection>,
     filter: Res<MenuFilter>,
     mut hosts: Query<(Entity, &mut MenuHost)>,
@@ -724,6 +871,7 @@ fn switch_menu_on_hover(
             host,
             &mut hosts,
             &conditions,
+            &slots,
             &child_of,
             *direction,
             &filter,
@@ -750,9 +898,16 @@ fn close_all_hosts(hosts: &mut Query<(Entity, &mut MenuHost)>, commands: &mut Co
 /// clearing the term closes it. Runs only on a real filter change
 /// ([`MenuFilter`]'s change detection), so a menu opened or closed by hand while
 /// the term is steady is left alone.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the filter itself, \
+              the conditions and dynamic slots a popup builds from, the ancestry and children \
+              queries, the layout direction, the hosts to (re)open and commands"
+)]
 fn open_filtered_menu(
     filter: Res<MenuFilter>,
     conditions: Query<&MenuConditions>,
+    slots: Res<MenuDynamicSlots>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
     direction: Res<UiDirection>,
@@ -794,6 +949,7 @@ fn open_filtered_menu(
                 &mut menu,
                 host_entity,
                 held,
+                &slots,
                 *direction,
                 &filter,
                 &mut commands,
@@ -807,6 +963,7 @@ fn open_host(
     host_menu: &mut MenuHost,
     host: Entity,
     conditions: Option<&MenuConditions>,
+    slots: &MenuDynamicSlots,
     direction: UiDirection,
     filter: &MenuFilter,
     commands: &mut Commands,
@@ -816,9 +973,10 @@ fn open_host(
     let popup = build_menu_popup(
         commands,
         host,
-        host_menu.def,
+        MenuSource::Static(host_menu.def),
         host_menu.element,
         held,
+        slots,
         DropDirection::Block,
         direction,
         filter.context_for(host_menu.element, host_menu.def),
@@ -904,6 +1062,7 @@ fn assign_jump_keys(items: &[MenuItemDef]) -> Vec<Option<(char, usize)>> {
         let label = match item {
             MenuItemDef::Command(command) => command.label,
             MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => sub.label,
+            MenuItemDef::DynamicSubmenu { label, .. } => label,
             MenuItemDef::Separator => {
                 out.push(None);
                 continue;
@@ -943,23 +1102,26 @@ fn split_label_at(label: &str, offset: usize) -> Option<(&str, &str, &str)> {
 // The drop-down list itself.
 // ---------------------------------------------------------------------------
 
-/// Build a drop-down popup for `def` under `anchor`, and return it.
+/// Build a drop-down popup for `source` under `anchor`, and return it.
 ///
 /// A column of entry rows positioned against `anchor` by [`Popover`], built
 /// fresh on each open so its check / enabled / visible states reflect the
-/// conditions that hold *now*.
+/// conditions that hold *now* — and, for a dynamic slot, the labels it holds
+/// now.
 #[expect(
     clippy::too_many_arguments,
     reason = "the popup builder takes each of the independent inputs its caller supplies: the \
               spawn target, the menu to build, the element its picks are attributed to, the live \
-              conditions, the drop and layout directions, and the optional menu-search filter"
+              conditions and dynamic slots, the drop and layout directions, and the optional \
+              menu-search filter"
 )]
 fn build_menu_popup(
     commands: &mut Commands,
     anchor: Entity,
-    def: &'static MenuDef,
+    source: MenuSource,
     element: &'static str,
     conditions: &MenuConditions,
+    slots: &MenuDynamicSlots,
     drop: DropDirection,
     direction: UiDirection,
     filter: Option<MenuFilterCtx>,
@@ -1002,16 +1164,31 @@ fn build_menu_popup(
             // root; this makes every menu popup uniform.
             OverrideClip,
             ClassList::new_with_classes(["sk-menu"]),
-            Name::new(format!("menu-popup:{}", def.label)),
+            Name::new(format!("menu-popup:{}", source.label())),
             ChildOf(anchor),
         ))
         // Consume a press that lands on the popup's own padding / border, so it
         // does not bubble to the root dismiss observer and close the menu.
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
         .id();
-    // Jump keys are assigned per built list, so each row carries its mnemonic.
-    for (item, jump) in def.items.iter().zip(assign_jump_keys(def.items)) {
-        spawn_menu_line(commands, popup, *item, element, conditions, filter, jump);
+    match source {
+        // Jump keys are assigned per built list, so each row carries its
+        // mnemonic.
+        MenuSource::Static(def) => {
+            for (item, jump) in def.items.iter().zip(assign_jump_keys(def.items)) {
+                spawn_menu_line(
+                    commands, popup, *item, element, conditions, slots, filter, jump,
+                );
+            }
+        }
+        // A dynamic list is as long as the slot the domain filled, and its
+        // labels are data, not authored text: no jump keys (a mnemonic taken
+        // from someone's name is noise, and the reference assigns none either).
+        MenuSource::Dynamic { slot, .. } => {
+            for (index, label) in slots.labels(slot).iter().enumerate() {
+                spawn_dynamic_line(commands, popup, element, slot, index, label);
+            }
+        }
     }
     popup
 }
@@ -1023,12 +1200,19 @@ fn build_menu_popup(
 /// an ancestor menu already matched), drawn highlighted on its own match; a
 /// submenu is shown only if its subtree carries a match; and separators are
 /// dropped, since the groups they divide are being filtered anyway.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "one line's inputs, each independent: where it goes, what it declares, the element \
+              its pick is attributed to, the live conditions and dynamic slots it resolves \
+              against, the menu-search filter, and its jump key"
+)]
 fn spawn_menu_line(
     commands: &mut Commands,
     popup: Entity,
     item: MenuItemDef,
     element: &'static str,
     conditions: &MenuConditions,
+    slots: &MenuDynamicSlots,
     filter: Option<MenuFilterCtx>,
     jump: Option<(char, usize)>,
 ) {
@@ -1052,7 +1236,15 @@ fn spawn_menu_line(
             }
         }
         MenuItemDef::Submenu(sub) => match filter {
-            None => spawn_submenu_line(commands, popup, sub, element, false, false, jump),
+            None => spawn_submenu_line(
+                commands,
+                popup,
+                MenuSource::Static(sub),
+                element,
+                false,
+                false,
+                jump,
+            ),
             Some(ctx) => {
                 let own_match = label_matches_filter(sub.label, ctx.query);
                 let child_parent_matched = ctx.parent_matched || own_match;
@@ -1060,7 +1252,7 @@ fn spawn_menu_line(
                     spawn_submenu_line(
                         commands,
                         popup,
-                        sub,
+                        MenuSource::Static(sub),
                         element,
                         child_parent_matched,
                         own_match,
@@ -1069,6 +1261,33 @@ fn spawn_menu_line(
                 }
             }
         },
+        // A dynamic submenu keeps its line only while something fills its slot:
+        // "one line per avatar under the cursor" has nothing to open when there
+        // is one avatar, and the reference hides its `View Profiles` branch on
+        // exactly that count.
+        MenuItemDef::DynamicSubmenu { label, slot } => {
+            if slots.labels(slot).is_empty() {
+                return;
+            }
+            let source = MenuSource::Dynamic { label, slot };
+            match filter {
+                None => spawn_submenu_line(commands, popup, source, element, false, false, jump),
+                Some(ctx) => {
+                    let own_match = label_matches_filter(label, ctx.query);
+                    if ctx.parent_matched || own_match {
+                        spawn_submenu_line(
+                            commands,
+                            popup,
+                            source,
+                            element,
+                            ctx.parent_matched || own_match,
+                            own_match,
+                            jump,
+                        );
+                    }
+                }
+            }
+        }
         MenuItemDef::SubmenuWhen(sub, when) => {
             if conditions.holds(Some(when)) {
                 spawn_menu_line(
@@ -1077,6 +1296,7 @@ fn spawn_menu_line(
                     MenuItemDef::Submenu(sub),
                     element,
                     conditions,
+                    slots,
                     filter,
                     jump,
                 );
@@ -1145,23 +1365,8 @@ fn spawn_command_line(
     // Emission is a single point — an `Activate` observer — so a press (mouse)
     // and the harness (`activate`) both dispatch the one way. The press also
     // closes the stack.
-    commands.entity(row).observe(emit_menu_action).observe(
-        move |mut press: On<Pointer<Press>>,
-              disabled: Query<Has<InteractionDisabled>>,
-              mut hosts: Query<(Entity, &mut MenuHost)>,
-              free: Query<Entity, With<FreeContextMenu>>,
-              mut commands: Commands| {
-            press.propagate(false);
-            if press.button != PointerButton::Primary {
-                return;
-            }
-            if disabled.get(row).unwrap_or(false) {
-                return;
-            }
-            commands.trigger(Activate { entity: row });
-            dismiss_all(&mut hosts, &free, &mut commands);
-        },
-    );
+    commands.entity(row).observe(emit_menu_action);
+    attach_row_press(commands, row);
     spawn_gutter(
         commands,
         row,
@@ -1187,13 +1392,74 @@ fn spawn_command_line(
     }
 }
 
+/// Attach the press half of a command row: run it (through the one `Activate`
+/// point) and close the whole stack, unless it is disabled.
+///
+/// Shared by the authored ([`spawn_command_line`]) and runtime-filled
+/// ([`spawn_dynamic_line`]) rows, so a picked line behaves the same either way.
+fn attach_row_press(commands: &mut Commands, row: Entity) {
+    commands.entity(row).observe(
+        move |mut press: On<Pointer<Press>>,
+              disabled: Query<Has<InteractionDisabled>>,
+              mut hosts: Query<(Entity, &mut MenuHost)>,
+              free: Query<Entity, With<FreeContextMenu>>,
+              mut commands: Commands| {
+            press.propagate(false);
+            if press.button != PointerButton::Primary {
+                return;
+            }
+            if disabled.get(row).unwrap_or(false) {
+                return;
+            }
+            commands.trigger(Activate { entity: row });
+            dismiss_all(&mut hosts, &free, &mut commands);
+        },
+    );
+}
+
+/// Spawn one runtime-filled line: [gutter] [label], reporting its `(slot, index)`
+/// when picked ([`MenuDynamicPick`]).
+///
+/// It is a command row in every way the rest of the widget cares about — the
+/// hover highlight, the keyboard step and `Enter`, the press-and-dismiss — minus
+/// the things an authored entry has and a data line does not: an action string,
+/// a check, an accelerator, a jump key.
+fn spawn_dynamic_line(
+    commands: &mut Commands,
+    popup: Entity,
+    element: &'static str,
+    slot: &'static str,
+    index: usize,
+    label: &str,
+) {
+    let row = commands
+        .spawn((
+            entry_row_node(),
+            BackgroundColor(ENTRY_BACKGROUND),
+            ClassList::new_with_classes(["sk-menu-item"]),
+            MenuDynamicRow {
+                element,
+                slot,
+                index,
+            },
+            Name::new(format!("menu-item:{slot}#{index}")),
+            ChildOf(popup),
+        ))
+        .observe(emit_dynamic_pick)
+        .id();
+    attach_row_press(commands, row);
+    spawn_gutter(commands, row, "", ENTRY_TEXT);
+    let label_entity = spawn_entry_label(commands, row, label, ENTRY_TEXT, None);
+    commands.entity(label_entity).insert(MenuDynamicLabel);
+}
+
 /// Spawn a submenu line: [gutter] [label] [arrow]. The child list opens lazily
 /// on hover ([`manage_submenus`]); its own press is only consumed, so clicking a
 /// branch does not dismiss the menu.
 fn spawn_submenu_line(
     commands: &mut Commands,
     popup: Entity,
-    sub: &'static MenuDef,
+    sub: MenuSource,
     element: &'static str,
     filter_parent_matched: bool,
     highlight: bool,
@@ -1215,7 +1481,7 @@ fn spawn_submenu_line(
                 open: None,
                 filter_parent_matched,
             },
-            Name::new(format!("menu-submenu:{}", sub.label)),
+            Name::new(format!("menu-submenu:{}", sub.label())),
             ChildOf(popup),
         ))
         .observe(|mut press: On<Pointer<Press>>| press.propagate(false))
@@ -1227,7 +1493,7 @@ fn spawn_submenu_line(
     spawn_entry_label(
         commands,
         row,
-        sub.label,
+        sub.label(),
         label_color,
         jump.map(|(_, off)| off),
     );
@@ -1287,21 +1553,25 @@ fn spawn_gutter(commands: &mut Commands, row: Entity, glyph: &str, color: Color)
 /// three text spans — before / the mnemonic character / after — so
 /// [`toggle_menu_mnemonic_underline`] can underline that one character in place
 /// while keyboard navigation is active. Without one, it is a single `Text`.
+///
+/// Returns the label node, so a caller that has to write it again later (a
+/// dynamic row, whose name may arrive after the menu is open) can keep hold of
+/// it.
 fn spawn_entry_label(
     commands: &mut Commands,
     row: Entity,
     label: &str,
     color: Color,
     mnemonic_offset: Option<usize>,
-) {
+) -> Entity {
     let node = Node {
         flex_grow: 1.0,
         margin: UiRect::right(Val::Px(ACCESSORY_GAP)),
         ..default()
     };
     match mnemonic_offset.and_then(|offset| split_label_at(label, offset)) {
-        None => {
-            commands.spawn((
+        None => commands
+            .spawn((
                 node,
                 Text::new(label.to_owned()),
                 UiFont::Sans.at(ENTRY_FONT),
@@ -1309,8 +1579,8 @@ fn spawn_entry_label(
                 Pickable::IGNORE,
                 Name::new("menu-item-label"),
                 ChildOf(row),
-            ));
-        }
+            ))
+            .id(),
         Some((before, mnemonic, after)) => {
             let label_entity = commands
                 .spawn((
@@ -1336,6 +1606,7 @@ fn spawn_entry_label(
                 TextColor(color),
                 ChildOf(label_entity),
             ));
+            label_entity
         }
     }
 }
@@ -1378,6 +1649,56 @@ fn emit_menu_action(
     }
 }
 
+/// Observer on a runtime-filled entry: report which slot line was picked. The
+/// dynamic counterpart of [`emit_menu_action`], and equally the whole of such a
+/// row's outward wiring.
+fn emit_dynamic_pick(
+    activate: On<Activate>,
+    rows: Query<&MenuDynamicRow>,
+    mut picks: MessageWriter<MenuDynamicPick>,
+) {
+    if let Ok(row) = rows.get(activate.entity) {
+        picks.write(MenuDynamicPick {
+            element: row.element,
+            slot: row.slot,
+            index: row.index,
+        });
+    }
+}
+
+/// Apply [`SetMenuDynamicLabels`]: remember the slot's labels for the next menu
+/// that opens, and write them into the lines of one that is already open.
+///
+/// A line the open menu does not have (the slot grew since) is not added: the
+/// list's length is fixed when the popup is built, and a menu that grew a line
+/// under the pointer would move what the user is about to click.
+fn apply_dynamic_labels(
+    mut updates: MessageReader<SetMenuDynamicLabels>,
+    mut slots: ResMut<MenuDynamicSlots>,
+    rows: Query<(&MenuDynamicRow, &Children)>,
+    labels: Query<(), With<MenuDynamicLabel>>,
+    mut texts: Query<&mut Text>,
+) {
+    for update in updates.read() {
+        slots.set(update.slot, update.labels.clone());
+        for (row, children) in &rows {
+            if row.slot != update.slot {
+                continue;
+            }
+            let Some(label) = update.labels.get(row.index) else {
+                continue;
+            };
+            for child in children.iter().filter(|&child| labels.contains(child)) {
+                if let Ok(mut text) = texts.get_mut(child)
+                    && text.0 != *label
+                {
+                    label.clone_into(&mut text.0);
+                }
+            }
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Submenus — hover-driven.
 // ---------------------------------------------------------------------------
@@ -1400,6 +1721,7 @@ fn manage_submenus(
     keyboard: Res<MenuKeyboard>,
     child_of: Query<&ChildOf>,
     conditions: Query<&MenuConditions>,
+    slots: Res<MenuDynamicSlots>,
     direction: Res<UiDirection>,
     filter: Res<MenuFilter>,
     mut branches: Query<(Entity, &mut MenuBranch)>,
@@ -1429,6 +1751,7 @@ fn manage_submenus(
                     branch_entity,
                     &mut branch,
                     &conditions,
+                    &slots,
                     &child_of,
                     *direction,
                     &filter,
@@ -1446,11 +1769,17 @@ fn manage_submenus(
 /// Build and attach `branch`'s child popup (a no-op if already open) — the shared
 /// submenu-open used by both hover ([`manage_submenus`]) and keyboard
 /// ([`menu_keyboard_nav`]).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "commands and the branch to open plus what its popup is built from: the conditions \
+              and ancestry queries, the dynamic slots, the layout direction and the search filter"
+)]
 fn open_submenu_popup(
     commands: &mut Commands,
     branch_entity: Entity,
     branch: &mut MenuBranch,
     conditions: &Query<&MenuConditions>,
+    slots: &MenuDynamicSlots,
     child_of: &Query<&ChildOf>,
     direction: UiDirection,
     filter: &MenuFilter,
@@ -1466,6 +1795,7 @@ fn open_submenu_popup(
         branch.def,
         branch.element,
         held.unwrap_or(&empty),
+        slots,
         DropDirection::Inline,
         direction,
         filter.context_for_branch(branch.element, branch.filter_parent_matched),
@@ -1514,9 +1844,17 @@ pub(crate) struct OpenContextMenu {
 /// Spawn a popup for each [`OpenContextMenu`] request, anchored to a zero-size
 /// node at the cursor so [`Popover`] positions it against a point. Any previous
 /// free menu is cleared first, so a second right-click moves the menu.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the requests, the \
+              UI root to anchor at, the dynamic slots and layout direction a popup builds from, \
+              the previous menu to clear, the focus and keyboard state one open takes, and \
+              commands"
+)]
 fn open_context_menus(
     mut requests: MessageReader<OpenContextMenu>,
     root: Res<UiRoot>,
+    slots: Res<MenuDynamicSlots>,
     direction: Res<UiDirection>,
     existing: Query<Entity, With<FreeContextMenu>>,
     mut focus: ResMut<InputFocus>,
@@ -1551,9 +1889,10 @@ fn open_context_menus(
         build_menu_popup(
             &mut commands,
             anchor,
-            request.menu,
+            MenuSource::Static(request.menu),
             request.element,
             &MenuConditions(request.conditions.clone()),
+            &slots,
             DropDirection::Block,
             *direction,
             // A context menu is not the searched element, so it is never filtered.
@@ -1752,7 +2091,7 @@ fn current_nav_popup(
 fn navigable_rows(
     popup: Entity,
     children: &Query<&Children>,
-    entries: &Query<(), With<MenuEntryAction>>,
+    entries: &ActivatableRows,
     branches: &Query<&mut MenuBranch>,
     disabled: &Query<Has<InteractionDisabled>>,
 ) -> Vec<Entity> {
@@ -1919,7 +2258,8 @@ fn commit_row(
     keyboard: &mut MenuKeyboard,
     child_of: &Query<&ChildOf>,
     conditions: &Query<&MenuConditions>,
-    entries: &Query<(), With<MenuEntryAction>>,
+    slots: &MenuDynamicSlots,
+    entries: &ActivatableRows,
     free: &Query<Entity, With<FreeContextMenu>>,
     hosts: &mut Query<(Entity, &mut MenuHost)>,
     branches: &mut Query<&mut MenuBranch>,
@@ -1934,6 +2274,7 @@ fn commit_row(
                 row,
                 &mut branch,
                 conditions,
+                slots,
                 child_of,
                 direction,
                 filter,
@@ -1966,6 +2307,7 @@ fn switch_bar_menu(
     child_of: &Query<&ChildOf>,
     children: &Query<&Children>,
     conditions: &Query<&MenuConditions>,
+    slots: &MenuDynamicSlots,
     direction: UiDirection,
     filter: &MenuFilter,
     keyboard: &mut MenuKeyboard,
@@ -2002,7 +2344,7 @@ fn switch_bar_menu(
     }
     let held = conditions_at(target, child_of, conditions);
     if let Ok((_, mut menu)) = hosts.get_mut(target) {
-        open_host(&mut menu, target, held, direction, filter, commands);
+        open_host(&mut menu, target, held, slots, direction, filter, commands);
     }
     keyboard.active = true;
     keyboard.highlighted = None;
@@ -2046,6 +2388,7 @@ fn menu_alt_enter(
     bars: Query<&Children, With<PrimaryMenuBar>>,
     buttons: Query<(), With<MenuBarButton>>,
     conditions: Query<&MenuConditions>,
+    slots: Res<MenuDynamicSlots>,
     children: Query<&Children>,
     child_of: Query<&ChildOf>,
     direction: Res<UiDirection>,
@@ -2086,7 +2429,15 @@ fn menu_alt_enter(
     };
     let held = conditions_at(host, &child_of, &conditions);
     if let Ok((_, mut menu)) = hosts.get_mut(host) {
-        open_host(&mut menu, host, held, *direction, &filter, &mut commands);
+        open_host(
+            &mut menu,
+            host,
+            held,
+            &slots,
+            *direction,
+            &filter,
+            &mut commands,
+        );
         keyboard.active = true;
         keyboard.highlighted = None;
         keyboard.pending_first = Some(host);
@@ -2113,6 +2464,7 @@ fn menu_keyboard_open_focused(
     focus: Res<InputFocus>,
     buttons: Query<&ChildOf, With<MenuBarButton>>,
     conditions: Query<&MenuConditions>,
+    slots: Res<MenuDynamicSlots>,
     child_of: Query<&ChildOf>,
     direction: Res<UiDirection>,
     filter: Res<MenuFilter>,
@@ -2137,7 +2489,15 @@ fn menu_keyboard_open_focused(
     };
     let held = conditions_at(host, &child_of, &conditions);
     if let Ok((_, mut menu)) = hosts.get_mut(host) {
-        open_host(&mut menu, host, held, *direction, &filter, &mut commands);
+        open_host(
+            &mut menu,
+            host,
+            held,
+            &slots,
+            *direction,
+            &filter,
+            &mut commands,
+        );
         keyboard.active = true;
         keyboard.pending_first = Some(host);
         // The same key press must not also activate through `menu_keyboard_nav`
@@ -2167,10 +2527,11 @@ fn menu_keyboard_nav(
     filter: Res<MenuFilter>,
     child_of: Query<&ChildOf>,
     children: Query<&Children>,
-    entries: Query<(), With<MenuEntryAction>>,
+    entries: ActivatableRows,
     disabled: Query<Has<InteractionDisabled>>,
     mnemonics: Query<&MenuMnemonic>,
     conditions: Query<&MenuConditions>,
+    slots: Res<MenuDynamicSlots>,
     free: Query<Entity, With<FreeContextMenu>>,
     mut hosts: Query<(Entity, &mut MenuHost)>,
     mut branches: Query<&mut MenuBranch>,
@@ -2236,6 +2597,7 @@ fn menu_keyboard_nav(
                 &mut keyboard,
                 &child_of,
                 &conditions,
+                &slots,
                 &entries,
                 &free,
                 &mut hosts,
@@ -2252,6 +2614,7 @@ fn menu_keyboard_nav(
                 &child_of,
                 &children,
                 &conditions,
+                &slots,
                 *direction,
                 &filter,
                 &mut keyboard,
@@ -2277,6 +2640,7 @@ fn menu_keyboard_nav(
                     &child_of,
                     &children,
                     &conditions,
+                    &slots,
                     *direction,
                     &filter,
                     &mut keyboard,
@@ -2291,6 +2655,7 @@ fn menu_keyboard_nav(
                 &mut keyboard,
                 &child_of,
                 &conditions,
+                &slots,
                 &entries,
                 &free,
                 &mut hosts,
@@ -2315,6 +2680,7 @@ fn menu_keyboard_nav(
                 &mut keyboard,
                 &child_of,
                 &conditions,
+                &slots,
                 &entries,
                 &free,
                 &mut hosts,
@@ -2378,8 +2744,11 @@ impl Plugin for MenuWidgetPlugin {
         // the viewer; `init_resource` is idempotent, so this only fills them in
         // for the headless test harness (which brings neither).
         app.add_message::<OpenContextMenu>()
+            .add_message::<MenuDynamicPick>()
+            .add_message::<SetMenuDynamicLabels>()
             .init_resource::<MenuFilter>()
             .init_resource::<MenuKeyboard>()
+            .init_resource::<MenuDynamicSlots>()
             .init_resource::<InputFocus>()
             .init_resource::<AccumulatedMouseMotion>()
             .add_systems(
@@ -2389,6 +2758,10 @@ impl Plugin for MenuWidgetPlugin {
             .add_systems(
                 Update,
                 (
+                    // A slot's labels land before a menu that reads them opens,
+                    // so a right-click that fills a slot in the same frame gets
+                    // the lines it just asked for.
+                    apply_dynamic_labels.before(open_context_menus),
                     open_context_menus,
                     open_filtered_menu,
                     dismiss_menus_on_escape,
@@ -2485,12 +2858,14 @@ pub(crate) fn spawn_menu_bar_specimen(
 mod tests {
     use super::{
         CHECK_GLYPH, DropDirection, FIXTURE_AVATAR, FIXTURE_MENU_BAR, FIXTURE_WORLD, MenuBranch,
-        MenuCommand, MenuConditions, MenuDef, MenuEntryAction, MenuHost, MenuItemDef, MenuKeyboard,
-        MnemonicSpan, SUBMENU_ARROW, assign_jump_keys, build_menu_popup, spawn_menu_bar_specimen,
+        MenuCommand, MenuConditions, MenuDef, MenuDynamicPick, MenuDynamicSlots, MenuEntryAction,
+        MenuHost, MenuItemDef, MenuKeyboard, MenuSource, MnemonicSpan, SUBMENU_ARROW,
+        SetMenuDynamicLabels, assign_jump_keys, build_menu_popup, spawn_menu_bar_specimen,
     };
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::picking::hover::HoverMap;
     use bevy::prelude::*;
+    use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
 
     use crate::ui::{UiDirection, UiRoot, UiScaffoldSystems};
@@ -2516,7 +2891,9 @@ mod tests {
                 MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
                     out.extend(action_paths(sub, &here));
                 }
-                MenuItemDef::Separator => {}
+                // A dynamic submenu's lines are data, not actions: there is
+                // nothing to pin here (a pick reports `(slot, index)`).
+                MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
             }
         }
         out
@@ -2572,6 +2949,15 @@ mod tests {
     /// Spawn a drop-down for `menu` under a fresh root, with `conditions` held,
     /// and settle its layout.
     fn popup_app(menu: &'static MenuDef, conditions: &[&'static str]) -> Result<App, TestError> {
+        slotted_popup_app(menu, conditions, MenuDynamicSlots::default())
+    }
+
+    /// [`popup_app`], with the dynamic slots a runtime-filled submenu reads.
+    fn slotted_popup_app(
+        menu: &'static MenuDef,
+        conditions: &[&'static str],
+        slots: MenuDynamicSlots,
+    ) -> Result<App, TestError> {
         let mut app = LayoutTest::new().build();
         enable_action_recording(&mut app);
         let held = MenuConditions(conditions.to_vec());
@@ -2582,9 +2968,10 @@ mod tests {
                 build_menu_popup(
                     &mut commands,
                     anchor,
-                    menu,
+                    MenuSource::Static(menu),
                     "test",
                     &held,
+                    &slots,
                     DropDirection::Block,
                     UiDirection::Ltr,
                     None,
@@ -2614,9 +3001,10 @@ mod tests {
                 build_menu_popup(
                     &mut commands,
                     anchor,
-                    menu,
+                    MenuSource::Static(menu),
                     "test",
                     &MenuConditions::default(),
+                    &MenuDynamicSlots::default(),
                     DropDirection::Block,
                     UiDirection::Ltr,
                     Some(ctx),
@@ -2707,9 +3095,10 @@ mod tests {
                 build_menu_popup(
                     &mut commands,
                     button,
-                    &FIXTURE_AVATAR,
+                    MenuSource::Static(&FIXTURE_AVATAR),
                     "test",
                     &MenuConditions::default(),
+                    &MenuDynamicSlots::default(),
                     DropDirection::Block,
                     UiDirection::Ltr,
                     None,
@@ -2813,7 +3202,7 @@ mod tests {
             .world_mut()
             .query::<&MenuBranch>()
             .iter(app.world())
-            .map(|branch| branch.def.label)
+            .map(|branch| branch.def.label())
             .collect();
         assert_eq!(branches, vec!["Environment"], "one submenu, named");
         let arrows = app
@@ -2843,6 +3232,167 @@ mod tests {
             }],
         );
         Ok(())
+    }
+
+    /// The slot the dynamic-entry tests fill.
+    const TEST_SLOT: &str = "test-people";
+
+    /// A menu with one runtime-filled submenu beside an authored command — the
+    /// minimap's shape (View Profile / View Profiles ▸ …).
+    static FIXTURE_DYNAMIC: MenuDef = MenuDef {
+        label: "People",
+        items: &[
+            MenuItemDef::Command(MenuCommand::new("View Profile", "profile")),
+            MenuItemDef::DynamicSubmenu {
+                label: "View Profiles",
+                slot: TEST_SLOT,
+            },
+        ],
+    };
+
+    /// The slots resource holding `labels` under [`TEST_SLOT`].
+    fn test_slots(labels: &[&str]) -> MenuDynamicSlots {
+        let mut slots = MenuDynamicSlots::default();
+        slots.set(
+            TEST_SLOT,
+            labels.iter().copied().map(ToOwned::to_owned).collect(),
+        );
+        slots
+    }
+
+    /// A dynamic submenu keeps its line only while its slot holds something:
+    /// there is nothing to open when nobody filled it.
+    #[test]
+    fn an_empty_dynamic_slot_drops_its_line() -> Result<(), TestError> {
+        let mut empty = popup_app(&FIXTURE_DYNAMIC, &[])?;
+        assert_eq!(
+            count_named(&mut empty, "menu-submenu:View Profiles"),
+            0,
+            "an unfilled slot shows no submenu line"
+        );
+        let mut filled = slotted_popup_app(&FIXTURE_DYNAMIC, &[], test_slots(&["Ann", "Bo"]))?;
+        assert_eq!(
+            count_named(&mut filled, "menu-submenu:View Profiles"),
+            1,
+            "a filled slot fronts its list"
+        );
+        Ok(())
+    }
+
+    /// The dynamic list is one line per label, in slot order, and a pick reports
+    /// the index the opener filled — the whole of a dynamic row's wiring.
+    #[test]
+    fn a_dynamic_list_reports_the_picked_index() -> Result<(), TestError> {
+        let mut app = dynamic_popup_app(&["Ann", "Bo", "Cy"])?;
+        assert_eq!(
+            dynamic_labels(&mut app),
+            vec!["Ann", "Bo", "Cy"],
+            "one line per slot entry"
+        );
+
+        let second = find_by_name(&mut app, &format!("menu-item:{TEST_SLOT}#1"))
+            .ok_or("the second dynamic row did not spawn")?;
+        // Trigger without settling: an observer runs at once, and a settle would
+        // age the message out of its double buffer before it can be read.
+        app.world_mut().trigger(Activate { entity: second });
+        let messages = app.world().resource::<Messages<MenuDynamicPick>>();
+        let mut cursor = messages.get_cursor();
+        let picks: Vec<MenuDynamicPick> = cursor.read(messages).copied().collect();
+        assert_eq!(
+            picks,
+            vec![MenuDynamicPick {
+                element: "test",
+                slot: TEST_SLOT,
+                index: 1,
+            }],
+        );
+        // A dynamic row carries no action string, so nothing rides the ordinary
+        // action channel.
+        assert!(drain_actions(&mut app).is_empty(), "no UiAction is written");
+        Ok(())
+    }
+
+    /// A label that arrives after the menu opened is written into the open line —
+    /// the reference's `setAvatarProfileLabel`, which is why the placeholder is
+    /// not a lie the user has to close the menu to escape.
+    #[test]
+    fn a_late_label_rewrites_the_open_line() -> Result<(), TestError> {
+        let mut app = dynamic_popup_app(&["(loading)", "Bo"])?;
+        app.world_mut().write_message(SetMenuDynamicLabels {
+            slot: TEST_SLOT,
+            labels: vec!["Ann".to_owned(), "Bo".to_owned()],
+        });
+        settle(&mut app);
+        assert_eq!(
+            dynamic_labels(&mut app),
+            vec!["Ann", "Bo"],
+            "the open line took the new name"
+        );
+        assert_eq!(
+            app.world().resource::<MenuDynamicSlots>().labels(TEST_SLOT),
+            ["Ann".to_owned(), "Bo".to_owned()],
+            "and the slot remembers it for the next open"
+        );
+        Ok(())
+    }
+
+    /// The open dynamic list's drawn labels, in slot order (the ECS iterates
+    /// rows in no particular order, so they are put back in the order the lines
+    /// carry).
+    fn dynamic_labels(app: &mut App) -> Vec<String> {
+        let mut rows: Vec<(usize, String)> = app
+            .world_mut()
+            .query::<(&super::MenuDynamicRow, &Children)>()
+            .iter(app.world())
+            .filter_map(|(row, children)| {
+                let label = children.iter().find_map(|child| {
+                    app.world()
+                        .get::<super::MenuDynamicLabel>(child)
+                        .and_then(|_marker| app.world().get::<Text>(child))
+                })?;
+                Some((row.index, label.0.clone()))
+            })
+            .collect();
+        rows.sort_by_key(|(index, _label)| *index);
+        rows.into_iter().map(|(_index, label)| label).collect()
+    }
+
+    /// Spawn a **dynamic** list popup (the child a `DynamicSubmenu` opens) whose
+    /// slot holds `labels`, with the widget plugin running so the late-label
+    /// message is applied.
+    fn dynamic_popup_app(labels: &[&str]) -> Result<App, TestError> {
+        let mut app = LayoutTest::new().build();
+        enable_action_recording(&mut app);
+        // The pieces of `MenuWidgetPlugin` a bare popup needs — the whole plugin
+        // would also bring its hover / keyboard systems, whose resources this
+        // headless fixture has no window to fill.
+        app.add_message::<MenuDynamicPick>()
+            .add_message::<SetMenuDynamicLabels>()
+            .add_systems(Update, super::apply_dynamic_labels);
+        app.insert_resource(test_slots(labels));
+        app.add_systems(
+            Startup,
+            (move |mut commands: Commands, root: Res<UiRoot>, slots: Res<MenuDynamicSlots>| {
+                let anchor = commands.spawn((Node::default(), ChildOf(root.0))).id();
+                build_menu_popup(
+                    &mut commands,
+                    anchor,
+                    MenuSource::Dynamic {
+                        label: "View Profiles",
+                        slot: TEST_SLOT,
+                    },
+                    "test",
+                    &MenuConditions::default(),
+                    &slots,
+                    DropDirection::Inline,
+                    UiDirection::Ltr,
+                    None,
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        Ok(app)
     }
 
     /// `subtree_matches_filter` sees into submenus and past the never-enabled
