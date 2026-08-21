@@ -1053,27 +1053,21 @@ pub(crate) struct LandmarkAsset {
     pub(crate) position: (f32, f32, f32),
 }
 
-/// Parse a landmark asset body (`Landmark version 2\nregion_id <uuid>\n
-/// local_pos <x> <y> <z>`). `None` when malformed.
+/// Parse a landmark asset body through the shared `sl_wire` codec
+/// (`Landmark version 2\nregion_id <uuid>\nlocal_pos <x> <y> <z>`). `None`
+/// when malformed, or for a legacy version-1 body (a global position with no
+/// region id — nothing here can resolve it).
 pub(crate) fn parse_landmark(text: &str) -> Option<LandmarkAsset> {
-    let mut region_id = None;
-    let mut position = None;
-    for line in text.lines() {
-        let line = line.trim();
-        if let Some(rest) = line.strip_prefix("region_id ") {
-            region_id = rest.trim().parse::<Uuid>().ok();
-        } else if let Some(rest) = line.strip_prefix("local_pos ") {
-            let mut parts = rest.split_whitespace();
-            let x = parts.next()?.parse::<f32>().ok()?;
-            let y = parts.next()?.parse::<f32>().ok()?;
-            let z = parts.next()?.parse::<f32>().ok()?;
-            position = Some((x, y, z));
-        }
+    match sl_client_bevy::parse_landmark(text).ok()? {
+        sl_client_bevy::WireLandmarkAsset::Regional {
+            region_id,
+            position,
+        } => Some(LandmarkAsset {
+            region_id,
+            position: (position.x(), position.y(), position.z()),
+        }),
+        sl_client_bevy::WireLandmarkAsset::Global(_) => None,
     }
-    Some(LandmarkAsset {
-        region_id: region_id?,
-        position: position?,
-    })
 }
 
 /// Swap the texture preview's placeholder for the decoded image once the

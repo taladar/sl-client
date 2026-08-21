@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 852 |
+| done | 853 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1351** |
+| **total** | **1352** |
 
 ## ideas (93)
 
@@ -1140,7 +1140,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (852)
+## done (853)
 
 ### protocol
 
@@ -1476,6 +1476,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-fake-grid-login-smoke`](done/viewer-fake-grid-login-smoke.md) — The
   real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
+- [`viewer-fake-grid-teleport`](done/viewer-fake-grid-teleport.md) — Fake-grid
+  inter-region teleport (teleport_agent + auto-responder)
 - [`viewer-fake-grid-udp-assets`](done/viewer-fake-grid-udp-assets.md) — Fake
   grid answers the legacy UDP asset paths — Xfer, Transfer, task inventory
   (blocked by `viewer-fake-grid` (done))

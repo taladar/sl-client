@@ -118,6 +118,15 @@ pub enum WireError {
         /// The single version this decoder implements.
         expected: i32,
     },
+    /// A landmark asset body declared a `Landmark version` other than the two
+    /// the reference viewer reads (1: global position, 2: region id + local
+    /// position). Refused rather than guessed at, like
+    /// [`UnsupportedLslSyntaxVersion`](WireError::UnsupportedLslSyntaxVersion).
+    #[error("unsupported landmark version {version} (expected 1 or 2)")]
+    UnsupportedLandmarkVersion {
+        /// The version the body declared.
+        version: u32,
+    },
     /// A fault decoding a [`Llsd`](sl_llsd::Llsd) body: a map field read by the
     /// typed `field_*` / `require_*` accessors was absent or of the wrong LLSD
     /// kind, or an LLSD-XML document failed to parse. This wraps the LLSD core's

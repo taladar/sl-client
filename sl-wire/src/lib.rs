@@ -9,11 +9,13 @@ mod economy_helper;
 mod endian;
 mod error;
 mod experience;
+mod fake_parcel_id;
 mod field;
 mod geometry;
 mod grid_info;
 mod header;
 mod inventory;
+mod landmark;
 mod llsd;
 mod login;
 mod login_llsd;
@@ -85,6 +87,7 @@ pub use experience::{
     parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
 };
+pub use fake_parcel_id::FakeParcelId;
 pub use field::{Reader, Writer};
 pub use geometry::{Direction, GlobalCoordinates};
 pub use grid_info::{
@@ -107,6 +110,7 @@ pub use inventory::{
     parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
     parse_ais_update_item_body, parse_create_inventory_category_request,
 };
+pub use landmark::{LandmarkAsset, landmark_to_wire, parse_landmark};
 pub use llsd::{
     AssetUploadResponse, EventQueueEvent, EventQueueRequest, EventQueueResponse,
     FetchInventoryFolderRequest, FetchInventoryItemsRequest, FetchItemRef, Llsd, LlsdError,

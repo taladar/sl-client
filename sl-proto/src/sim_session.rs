@@ -141,9 +141,9 @@ use crate::bookkeeping_ids::{
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
-    SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd,
-    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage, TeleportFinishInfo,
+    agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
     enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, full_update_block,
     instant_message, nav_mesh_status_to_llsd, open_region_info_to_llsd, parcel_properties_to_llsd,
@@ -521,6 +521,66 @@ pub enum AgentPresence {
     Root,
 }
 
+/// Where an agent lands when its movement into the region completes: the
+/// `Position` / `LookAt` of the `AgentMovementComplete` reply.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ArrivalPlacement {
+    /// The landing position within the region.
+    pub position: RegionCoordinates,
+    /// The direction the avatar faces on landing.
+    pub look_at: Vector,
+}
+
+impl Default for ArrivalPlacement {
+    /// The region centre, facing +X — what a login lands at without a
+    /// placement of its own.
+    fn default() -> Self {
+        let center = Camera::region_center().center;
+        Self {
+            position: RegionCoordinates::new(center.x, center.y, center.z),
+            look_at: Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+}
+
+/// The `TeleportProgress` / `TeleportFailed` message **keys** the reference
+/// viewer localises (`teleport_strings.xml`: `process_teleport_progress`
+/// swaps a known key for its translated text and shows an unknown string
+/// raw). A simulator sends the keys, never prose, so every locale reads its
+/// own text — the same contract the reference servers follow.
+pub mod teleport_strings {
+    /// Progress: the destination is being looked up.
+    pub const RESOLVING: &str = "resolving";
+    /// Progress: the destination simulator is being contacted.
+    pub const CONTACTING: &str = "contacting";
+    /// Progress: the agent is being sent to an explicit location.
+    pub const SENDING_DEST: &str = "sending_dest";
+    /// Progress: the agent is being sent home.
+    pub const SENDING_HOME: &str = "sending_home";
+    /// Progress: the agent is being sent to a landmark.
+    pub const SENDING_LANDMARK: &str = "sending_landmark";
+    /// Progress: the handover is underway (the last line before arrival).
+    pub const ARRIVING: &str = "arriving";
+    /// Progress: the teleport is completing.
+    pub const COMPLETING: &str = "completing";
+    /// Failure: the destination region is unknown or not available.
+    pub const INVALID_TPORT: &str = "invalid_tport";
+    /// Failure: the destination refuses (banned / access restricted).
+    pub const NOACCESS_TPORT: &str = "noaccess_tport";
+    /// Failure: the landmark names no usable destination.
+    pub const NOLANDMARK_TPORT: &str = "nolandmark_tport";
+    /// Failure: the destination never confirmed the arrival.
+    pub const TIMEOUT_TPORT: &str = "timeout_tport";
+    /// Failure: the destination simulator is not reachable.
+    pub const NO_HOST: &str = "no_host";
+    /// Failure: the region handoff was refused by the destination.
+    pub const INVALID_REGION_HANDOFF: &str = "invalid_region_handoff";
+}
+
 /// The decoded source of a client `TransferRequest`, surfaced on
 /// [`ServerEvent::TransferRequested`]. Only the two source types that remain
 /// UDP-only on both grids are decoded; a plain asset-by-id request
@@ -693,6 +753,10 @@ pub enum ServerEvent {
     /// The client sent `CompleteAgentMovement`; the simulator has replied with an
     /// `AgentMovementComplete` and the agent is now present in the region.
     AgentArrived,
+    /// The driver retired this circuit ([`SimSession::retire_circuit`]): the
+    /// agent completed a teleport elsewhere, `DisableSimulator` went out, and
+    /// the session is closed.
+    CircuitRetired,
     /// The client acknowledged the region handshake with `RegionHandshakeReply`.
     RegionHandshakeReplied,
     /// The client pinged the link with `StartPingCheck`; the simulator has
@@ -2325,6 +2389,11 @@ pub struct SimSession {
     /// Whether this circuit hosts a child or the root agent: `Child` from
     /// `UseCircuitCode`, promoted to `Root` by `CompleteAgentMovement`.
     agent_presence: AgentPresence,
+    /// Where the agent lands when its movement completes — the position and
+    /// facing the `AgentMovementComplete` reply carries. The region centre
+    /// facing +X unless [`SimSession::set_arrival_position`] placed the
+    /// arrival (a teleport lands where the request asked).
+    arrival: ArrivalPlacement,
     /// The agent's sit state (the server-side mirror of the client's sit
     /// machine).
     sit: SimSitState,
@@ -2604,6 +2673,7 @@ impl SimSession {
             secure_session_id: None,
             transfer_serves: BTreeMap::new(),
             agent_presence: AgentPresence::Child,
+            arrival: ArrivalPlacement::default(),
             sit: SimSitState::NotSitting,
             script_questions: BTreeMap::new(),
             script_grants: BTreeMap::new(),
@@ -6813,6 +6883,46 @@ impl SimSession {
         Ok(())
     }
 
+    /// Retires this circuit after the agent moved on: sends `DisableSimulator`
+    /// so the client tears the (now child) circuit down, and closes the
+    /// session with [`ServerEvent::CircuitRetired`] — the driver's pumps exit
+    /// on [`is_closed`](Self::is_closed) instead of waiting for the inactivity
+    /// timeout. What a source simulator does once the teleport destination
+    /// confirmed the arrival.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode; the session stays open in that case.
+    pub fn retire_circuit(&mut self, now: Instant) -> Result<(), Error> {
+        self.send_disable_simulator(now)?;
+        self.close(ServerEvent::CircuitRetired);
+        Ok(())
+    }
+
+    /// Abandons the session: closes it with [`ServerEvent::Disconnected`]
+    /// without sending anything — for a teleport destination the client never
+    /// reached (the arrival timed out), where there is no circuit to retire.
+    /// A no-op once closed.
+    pub fn abandon(&mut self) {
+        self.close(ServerEvent::Disconnected);
+    }
+
+    /// Places the agent's arrival: the position and facing the
+    /// `AgentMovementComplete` reply carries when the client completes its
+    /// movement into this region. A teleport destination sets this to the
+    /// requested landing spot before the client arrives; unset, the agent
+    /// lands at the region centre facing +X.
+    pub const fn set_arrival_position(&mut self, position: RegionCoordinates, look_at: Vector) {
+        self.arrival = ArrivalPlacement { position, look_at };
+    }
+
+    /// Where the agent lands when its movement completes.
+    #[must_use]
+    pub const fn arrival_position(&self) -> &ArrivalPlacement {
+        &self.arrival
+    }
+
     /// Enqueues a CAPS `EnableSimulator` event — announces a neighbouring (or
     /// teleport-destination) region so the client opens a **child** circuit to
     /// it (the modern event-queue path; the client answers with a
@@ -6820,37 +6930,35 @@ impl SimSession {
     pub fn enqueue_enable_simulator(&mut self, handle: RegionHandle, sim: SocketAddr) {
         self.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(handle.0, sim),
+            enable_simulator_to_caps_llsd(
+                handle.0,
+                sim,
+                (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+            ),
         );
     }
 
     /// Enqueues a CAPS `EstablishAgentCommunication` event — hands the client
     /// the child region's seed capability (this event has **no** UDP form).
     /// The client caches the seed and surfaces it so its driver POSTs it,
-    /// which is what makes a region start streaming to the child agent.
+    /// which is what makes a region start streaming to the child agent. The
+    /// `agent-id` is this circuit's agent (nil before `UseCircuitCode`).
     pub fn enqueue_establish_agent_communication(&mut self, sim: SocketAddr, seed: &str) {
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
         self.enqueue_caps_event(
             "EstablishAgentCommunication",
-            establish_agent_communication_to_llsd(sim, seed),
+            establish_agent_communication_to_llsd(agent_id, sim, seed),
         );
     }
 
     /// Enqueues a CAPS `TeleportFinish` event — completes an **inter-region**
     /// teleport by handing the client the destination simulator's address,
-    /// seed capability, maturity rating and teleport flags. The client sends
-    /// `CompleteAgentMovement` on its (child) circuit to `dest`; the
-    /// destination's `AgentMovementComplete` commits the handover.
-    pub fn enqueue_teleport_finish(
-        &mut self,
-        dest: SocketAddr,
-        seed: &str,
-        sim_access: u8,
-        teleport_flags: u32,
-    ) {
-        self.enqueue_caps_event(
-            "TeleportFinish",
-            teleport_finish_to_llsd(dest, seed, sim_access, teleport_flags),
-        );
+    /// region handle, seed capability, maturity rating and teleport flags
+    /// (the full reference record, see [`TeleportFinishInfo`]). The client
+    /// sends `CompleteAgentMovement` on its (child) circuit to `info.dest`;
+    /// the destination's `AgentMovementComplete` commits the handover.
+    pub fn enqueue_teleport_finish(&mut self, info: &TeleportFinishInfo) {
+        self.enqueue_caps_event("TeleportFinish", teleport_finish_to_llsd(info));
     }
 
     /// Enqueues a CAPS `CrossedRegion` event — the avatar walked over a region
@@ -8798,12 +8906,12 @@ impl SimSession {
                 session_id: self.session_id.unwrap_or_else(Uuid::nil),
             },
             data: AgentMovementCompleteDataBlock {
-                position: Camera::region_center().center,
-                look_at: Vector {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
+                position: Vector {
+                    x: self.arrival.position.x(),
+                    y: self.arrival.position.y(),
+                    z: self.arrival.position.z(),
                 },
+                look_at: self.arrival.look_at.clone(),
                 region_handle: self.region_handle.0,
                 timestamp: 0,
             },

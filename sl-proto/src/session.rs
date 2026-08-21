@@ -1471,13 +1471,8 @@ pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
 pub(crate) use chat_session::SERVER_HISTORY_CAP;
-pub(crate) use conversions::{
-    ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,
-    instant_message, parcel_properties_to_llsd, parcel_properties_to_wire,
-    parse_copy_inventory_from_notecard, region_handshake_message, shape_from_object_shape_block,
-    unpack_uuids,
-};
 pub use conversions::{
+    STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo,
     agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
     ais_category_children_reply_to_llsd, ais_inventory_update_to_llsd, ais_item_reply_to_llsd,
     ais_mutation_reply_to_llsd, build_environment_update_request, build_map_block_reply,
@@ -1492,4 +1487,10 @@ pub use conversions::{
     required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
     set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
     teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
+};
+pub(crate) use conversions::{
+    ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,
+    instant_message, parcel_properties_to_llsd, parcel_properties_to_wire,
+    parse_copy_inventory_from_notecard, region_handshake_message, shape_from_object_shape_block,
+    unpack_uuids,
 };

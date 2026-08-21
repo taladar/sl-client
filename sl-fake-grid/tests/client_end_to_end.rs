@@ -12,6 +12,8 @@ mod test {
     };
     use sl_fake_grid::{AccountConfig, FakeAgent, FakeGrid, FakeGridBuilder, RegionConfig};
     use sl_proto::{ServerEvent, VoiceChannelUri};
+    use sl_types::lsl::Vector;
+    use sl_types::map::RegionCoordinates;
     use tokio::sync::mpsc;
 
     /// A boxed error for terse test signatures.
@@ -23,12 +25,21 @@ mod test {
     /// Starts a grid, connects the real client, and returns both plus the
     /// grid-side agent handle.
     async fn connect() -> Result<(FakeGrid, Client, FakeAgent), TestError> {
-        let grid = FakeGridBuilder::new()
+        connect_to(vec![RegionConfig::default()]).await
+    }
+
+    /// [`connect`] against a grid serving `regions` (the first is the start
+    /// region).
+    async fn connect_to(
+        regions: Vec<RegionConfig>,
+    ) -> Result<(FakeGrid, Client, FakeAgent), TestError> {
+        let mut builder = FakeGridBuilder::new()
             .account(AccountConfig::new("Test", "User", "password"))
-            .region(RegionConfig::default())
-            .event_queue_hold(Duration::from_secs(2))
-            .start()
-            .await?;
+            .event_queue_hold(Duration::from_secs(2));
+        for region in regions {
+            builder = builder.region(region);
+        }
+        let grid = builder.start().await?;
         let mut logins = grid.logins();
         let request = LoginRequest::new(
             "Test",
@@ -171,7 +182,12 @@ mod test {
 
     /// Connects, starts the run loop, and waits for the region handshake.
     async fn start() -> Result<Running, TestError> {
-        let (grid, client, agent) = connect().await?;
+        start_in(vec![RegionConfig::default()]).await
+    }
+
+    /// [`start`] against a grid serving `regions`.
+    async fn start_in(regions: Vec<RegionConfig>) -> Result<Running, TestError> {
+        let (grid, client, agent) = connect_to(regions).await?;
         let circuit = client.root_circuit_id().ok_or("no root circuit")?;
         let (event_tx, event_rx) = mpsc::channel::<Event>(256);
         let (command_tx, command_rx) = mpsc::channel::<Command>(8);
@@ -205,15 +221,24 @@ mod test {
         /// Receives client events until `pick` returns a value.
         async fn wait_for<T>(
             &mut self,
-            mut pick: impl FnMut(&Event) -> Option<T>,
+            pick: impl FnMut(&Event) -> Option<T>,
         ) -> Result<T, TestError> {
-            loop {
-                let event = tokio::time::timeout(WAIT, self.events.recv())
-                    .await?
-                    .ok_or("client event stream ended early")?;
-                if let Some(value) = pick(&event) {
-                    return Ok(value);
-                }
+            wait_on(&mut self.events, pick).await
+        }
+    }
+
+    /// Receives events from `events` until `pick` returns a value (the
+    /// field-level form, for borrowing the grid alongside).
+    async fn wait_on<T>(
+        events: &mut mpsc::Receiver<Event>,
+        mut pick: impl FnMut(&Event) -> Option<T>,
+    ) -> Result<T, TestError> {
+        loop {
+            let event = tokio::time::timeout(WAIT, events.recv())
+                .await?
+                .ok_or("client event stream ended early")?;
+            if let Some(value) = pick(&event) {
+                return Ok(value);
             }
         }
     }
@@ -665,6 +690,534 @@ mod test {
         assert_ne!(first_grid.http_port(), second_grid.http_port());
         assert!(first_client.agent_id().is_some());
         assert!(second_client.agent_id().is_some());
+        Ok(())
+    }
+
+    /// A distant second region for the teleport tests: ten regions east, so
+    /// the hop is a genuine teleport (no neighbour adjacency) rather than a
+    /// crossing.
+    fn east_region() -> RegionConfig {
+        RegionConfig {
+            name: "Fake Region East".to_owned(),
+            grid_x: 1010,
+            grid_y: 1000,
+            ..RegionConfig::default()
+        }
+    }
+
+    /// The full inter-region teleport over the loopback: the client's own
+    /// `TeleportLocationRequest` is answered with the teleport screen, the
+    /// progress keys, the destination's child seed, a `TeleportFinish` naming
+    /// the destination handle, and the arrival — the client lands with a
+    /// world-resetting `RegionChanged`, the destination's handshake and world
+    /// burst follow, and the source session is retired.
+    #[tokio::test]
+    async fn inter_region_teleport_over_loopback() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), east_region()]).await?;
+        let dest_handle = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        let source = running.agent.clone();
+        let mut teleports = running._grid.teleports();
+        let source_seq = source.session_seq().await;
+
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: dest_handle,
+                position: RegionCoordinates::new(64.0, 32.0, 25.0),
+                look_at: Vector {
+                    x: 0.0,
+                    y: 1.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+
+        // The teleport screen, then the progress keys the viewer localises.
+        running
+            .wait_for(|event| matches!(event, Event::TeleportStarted).then_some(()))
+            .await?;
+        // The destination's `RegionHandshake` arrives on the child circuit
+        // (before the finish), so its name is collected across the sequence.
+        let mut handshakes = Vec::new();
+        let mut progress = Vec::new();
+        let dest_sim = running
+            .wait_for(|event| match event {
+                Event::TeleportProgress { message, .. } => {
+                    progress.push(message.clone());
+                    None
+                }
+                Event::RegionInfoHandshake(identity) => {
+                    handshakes.push(identity.sim_name.as_ref().map(ToString::to_string));
+                    None
+                }
+                Event::NeighborSeed { sim, .. } => Some(*sim),
+                _ => None,
+            })
+            .await?;
+        // UDP progress lines may outrun the CAPS seed; the keys are what
+        // matters, in order.
+        assert_eq!(progress.first().map(String::as_str), Some("resolving"));
+        assert_eq!(progress.get(1).map(String::as_str), Some("sending_dest"));
+        assert!(dest_sim.ip().is_loopback());
+
+        let (finished_handle, finished_sim) = running
+            .wait_for(|event| match event {
+                Event::TeleportFinished {
+                    region_handle, sim, ..
+                } => Some((*region_handle, *sim)),
+                Event::RegionInfoHandshake(identity) => {
+                    handshakes.push(identity.sim_name.as_ref().map(ToString::to_string));
+                    None
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(finished_handle, dest_handle);
+        assert_eq!(finished_sim, dest_sim);
+
+        let (changed_handle, world_reset) = running
+            .wait_for(|event| match event {
+                Event::RegionChanged {
+                    region_handle,
+                    world_reset,
+                    ..
+                } => Some((*region_handle, *world_reset)),
+                Event::RegionInfoHandshake(identity) => {
+                    handshakes.push(identity.sim_name.as_ref().map(ToString::to_string));
+                    None
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(changed_handle, dest_handle);
+        // The destination was announced (`EnableSimulator`) before the
+        // finish, so the client already held it as a child circuit and keeps
+        // its scene — distance alone does not reset the world.
+        assert!(!world_reset, "a pre-announced destination keeps the scene");
+
+        // The destination greeted the child circuit with its own handshake,
+        // and the arrival world burst follows the promotion.
+        if !handshakes.contains(&Some("Fake Region East".to_owned())) {
+            running
+                .wait_for(|event| match event {
+                    Event::RegionInfoHandshake(identity)
+                        if identity.sim_name.as_ref().map(ToString::to_string)
+                            == Some("Fake Region East".to_owned()) =>
+                    {
+                        Some(())
+                    }
+                    _ => None,
+                })
+                .await?;
+        }
+        running
+            .wait_for(|event| match event {
+                Event::ParcelProperties(parcel) if parcel.local_id.0 == 1 => Some(()),
+                _ => None,
+            })
+            .await?;
+
+        // The grid reports the move; the source is retired, the destination
+        // handle is live and hosts the root agent.
+        let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
+        assert_eq!(notice.from_seq, source_seq);
+        assert_eq!(notice.region_name, "Fake Region East");
+        assert_eq!(notice.agent_id, source.agent_id());
+        assert!(source.is_closed(), "the source session should be retired");
+        let dest = running
+            ._grid
+            .agent_by_seq(notice.to_seq)
+            .await
+            .ok_or("destination session missing")?;
+        assert!(dest.with_sim(|sim| sim.is_root_agent()).await);
+        assert_eq!(
+            dest.with_sim(|sim| sim.arrival_position().position).await,
+            RegionCoordinates::new(64.0, 32.0, 25.0)
+        );
+
+        // The new session talks: a simulator chat line reaches the client
+        // through the destination circuit.
+        dest.with_sim(|sim| {
+            sim.send_chat_from_simulator(
+                "East",
+                sl_proto::ChatSource::System,
+                sl_proto::Uuid::nil(),
+                ChatType::Normal,
+                1,
+                sl_proto::Camera::region_center().center,
+                "welcome east",
+                std::time::Instant::now(),
+            )
+        })
+        .await?;
+        running
+            .wait_for(|event| match event {
+                Event::ChatReceived(message) if message.message == "welcome east" => Some(()),
+                _ => None,
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// A request naming a region the grid does not serve is refused with the
+    /// `invalid_tport` key, and the client returns to its region intact.
+    #[tokio::test]
+    async fn teleport_to_unknown_region_is_refused() -> Result<(), TestError> {
+        let mut running = start().await?;
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: sl_client_tokio::RegionHandle::from_grid(2000, 2000),
+                position: RegionCoordinates::new(128.0, 128.0, 25.0),
+                look_at: Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        let reason = running
+            .wait_for(|event| match event {
+                Event::TeleportFailed { reason, .. } => Some(reason.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(reason, "invalid_tport");
+        // Still in the source region: a chat line from it arrives.
+        running
+            .agent
+            .with_sim(|sim| {
+                sim.send_chat_from_simulator(
+                    "Home",
+                    sl_proto::ChatSource::System,
+                    sl_proto::Uuid::nil(),
+                    ChatType::Normal,
+                    1,
+                    sl_proto::Camera::region_center().center,
+                    "still here",
+                    std::time::Instant::now(),
+                )
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::ChatReceived(message) if message.message == "still here" => Some(()),
+                _ => None,
+            })
+            .await?;
+        assert!(!running.agent.is_closed());
+        Ok(())
+    }
+
+    /// A request for the agent's own region finishes as a `TeleportLocal`
+    /// at the requested position — no new session.
+    #[tokio::test]
+    async fn same_region_teleport_is_local() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let handle = running
+            ._grid
+            .region_handle("Fake Region")
+            .ok_or("no region")?;
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: handle,
+                position: RegionCoordinates::new(10.0, 20.0, 30.0),
+                look_at: Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        let position = running
+            .wait_for(|event| match event {
+                Event::TeleportLocal { position } => Some(*position),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(position, RegionCoordinates::new(10.0, 20.0, 30.0));
+        assert!(!running.agent.is_closed());
+        Ok(())
+    }
+
+    /// The grid-initiated helper (what a lure or a scripted push does) moves
+    /// the client without any request of its own and hands back the
+    /// destination session.
+    #[tokio::test]
+    async fn grid_initiated_teleport_lands_the_client() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), east_region()]).await?;
+        let source = running.agent.clone();
+        let grid = &running._grid;
+        let teleport = grid.teleport_agent(
+            &source,
+            "Fake Region East",
+            RegionCoordinates::new(100.0, 100.0, 21.0),
+            Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        // The helper resolves only once the client arrived, so the client's
+        // events are drained concurrently.
+        let (dest, landed) = tokio::join!(
+            teleport,
+            wait_on(&mut running.events, |event| match event {
+                Event::RegionChanged { region_handle, .. } => Some(*region_handle),
+                _ => None,
+            })
+        );
+        let dest = dest?;
+        let landed = landed?;
+        assert_eq!(
+            Some(landed),
+            running._grid.region_handle("Fake Region East")
+        );
+        assert!(source.is_closed());
+        assert!(dest.with_sim(|sim| sim.is_root_agent()).await);
+        assert_ne!(dest.session_seq().await, source.session_seq().await);
+        Ok(())
+    }
+
+    /// An unknown region name is refused by the helper before anything goes
+    /// on the wire.
+    #[tokio::test]
+    async fn grid_initiated_teleport_to_unknown_region_errors() -> Result<(), TestError> {
+        let running = start().await?;
+        let result = running
+            ._grid
+            .teleport_agent(
+                &running.agent,
+                "Nowhere",
+                RegionCoordinates::new(1.0, 1.0, 1.0),
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            )
+            .await;
+        assert!(matches!(
+            result,
+            Err(sl_fake_grid::Error::UnknownRegion { .. })
+        ));
+        Ok(())
+    }
+
+    /// A landmark teleport: the landmark asset (a `Landmark version 2` body
+    /// naming the east region's fixed id) is served from the scenario's asset
+    /// store, resolved to the region, and the client lands at the landmark's
+    /// position with the `sending_landmark` progress key.
+    #[tokio::test]
+    async fn landmark_teleport_resolves_the_region_id() -> Result<(), TestError> {
+        let east_id = sl_proto::Uuid::from_u128(0xea57);
+        let landmark_key = sl_client_tokio::AssetKey::from(sl_proto::Uuid::from_u128(0x1a5d));
+        let mut scenario = sl_fake_grid::Scenario::default();
+        scenario.assets.insert(
+            landmark_key,
+            sl_proto::landmark_to_wire(east_id, RegionCoordinates::new(12.0, 34.0, 56.0)),
+        );
+        let east = RegionConfig {
+            region_id: Some(east_id),
+            ..east_region()
+        };
+        let mut running = start_in(vec![
+            RegionConfig {
+                scenario: Some(scenario),
+                ..RegionConfig::default()
+            },
+            east,
+        ])
+        .await?;
+        let mut teleports = running._grid.teleports();
+        running
+            .commands
+            .send(Command::TeleportViaLandmark {
+                landmark: Some(landmark_key),
+            })
+            .await?;
+        let mut progress = Vec::new();
+        let landed = running
+            .wait_for(|event| match event {
+                Event::TeleportProgress { message, .. } => {
+                    progress.push(message.clone());
+                    None
+                }
+                Event::RegionChanged { region_handle, .. } => Some(*region_handle),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            Some(landed),
+            running._grid.region_handle("Fake Region East")
+        );
+        assert!(
+            progress.contains(&"sending_landmark".to_owned()),
+            "{progress:?}"
+        );
+        let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
+        let dest = running
+            ._grid
+            .agent_by_seq(notice.to_seq)
+            .await
+            .ok_or("destination session missing")?;
+        assert_eq!(
+            dest.with_sim(|sim| sim.arrival_position().position).await,
+            RegionCoordinates::new(12.0, 34.0, 56.0)
+        );
+        Ok(())
+    }
+
+    /// A landmark the asset store does not hold is refused with
+    /// `nolandmark_tport`.
+    #[tokio::test]
+    async fn unknown_landmark_is_refused() -> Result<(), TestError> {
+        let mut running = start().await?;
+        running
+            .commands
+            .send(Command::TeleportViaLandmark {
+                landmark: Some(sl_client_tokio::AssetKey::from(sl_proto::Uuid::from_u128(
+                    0xbad,
+                ))),
+            })
+            .await?;
+        let reason = running
+            .wait_for(|event| match event {
+                Event::TeleportFailed { reason, .. } => Some(reason.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(reason, "nolandmark_tport");
+        Ok(())
+    }
+
+    /// "Teleport home" (a landmark request with no landmark) lands the agent
+    /// in its start region — from the east region that is a real move back.
+    #[tokio::test]
+    async fn teleport_home_returns_to_the_start_region() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), east_region()]).await?;
+        let mut teleports = running._grid.teleports();
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+        running
+            .commands
+            .send(Command::Teleport {
+                region_handle: east,
+                position: RegionCoordinates::new(1.0, 2.0, 3.0),
+                look_at: Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            })
+            .await?;
+        running
+            .wait_for(|event| match event {
+                Event::RegionChanged { region_handle, .. } if *region_handle == east => Some(()),
+                _ => None,
+            })
+            .await?;
+        let _first = tokio::time::timeout(WAIT, teleports.recv()).await??;
+
+        running
+            .commands
+            .send(Command::TeleportViaLandmark { landmark: None })
+            .await?;
+        let mut progress = Vec::new();
+        let landed = running
+            .wait_for(|event| match event {
+                Event::TeleportProgress { message, .. } => {
+                    progress.push(message.clone());
+                    None
+                }
+                Event::RegionChanged { region_handle, .. } => Some(*region_handle),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(Some(landed), running._grid.region_handle("Fake Region"));
+        assert!(
+            progress.contains(&"sending_home".to_owned()),
+            "{progress:?}"
+        );
+        let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
+        assert_eq!(notice.region_name, "Fake Region");
+        Ok(())
+    }
+
+    /// Accepting a lure whose id packs the destination the OpenSim way (a
+    /// fake parcel id: handle + position) lands the agent there, with the
+    /// lure flag echoed; an opaque lure id naming nobody online is refused
+    /// with `no_host`.
+    #[tokio::test]
+    async fn lure_acceptance_decodes_the_fake_parcel_id() -> Result<(), TestError> {
+        let mut running = start_in(vec![RegionConfig::default(), east_region()]).await?;
+        let mut teleports = running._grid.teleports();
+        let east = running
+            ._grid
+            .region_handle("Fake Region East")
+            .ok_or("no east region")?;
+
+        let opaque = sl_client_tokio::LureId::from(sl_proto::Uuid::from_u128(
+            0x3b6b_7c62_8f8f_4e34_9c1a_79c2_e2ba_0fd1,
+        ));
+        running
+            .commands
+            .send(Command::AcceptTeleportLure { lure_id: opaque })
+            .await?;
+        let reason = running
+            .wait_for(|event| match event {
+                Event::TeleportFailed { reason, .. } => Some(reason.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(reason, "no_host");
+
+        let place = sl_proto::FakeParcelId {
+            region_handle: east,
+            x: 40,
+            y: 50,
+            z: 60,
+        };
+        running
+            .commands
+            .send(Command::AcceptTeleportLure {
+                lure_id: sl_client_tokio::LureId::from(place.to_uuid()),
+            })
+            .await?;
+        let (landed, flags) = running
+            .wait_for(|event| match event {
+                Event::TeleportFinished {
+                    region_handle,
+                    flags,
+                    ..
+                } => Some((*region_handle, *flags)),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(landed, east);
+        assert_ne!(flags.0 & sl_proto::TeleportFlags::VIA_LURE, 0);
+        running
+            .wait_for(|event| match event {
+                Event::RegionChanged { region_handle, .. } if *region_handle == east => Some(()),
+                _ => None,
+            })
+            .await?;
+        let notice = tokio::time::timeout(WAIT, teleports.recv()).await??;
+        let dest = running
+            ._grid
+            .agent_by_seq(notice.to_seq)
+            .await
+            .ok_or("destination session missing")?;
+        assert_eq!(
+            dest.with_sim(|sim| sim.arrival_position().position).await,
+            RegionCoordinates::new(40.0, 50.0, 60.0)
+        );
         Ok(())
     }
 }

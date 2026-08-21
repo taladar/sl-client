@@ -2438,14 +2438,21 @@ pub(crate) struct CapsTeleportFinish {
     pub(crate) sim_access: u8,
     /// The `TeleportFlags` bitfield.
     pub(crate) teleport_flags: u32,
+    /// The destination region's handle (`RegionHandle`), when the event
+    /// carries one. The reference servers always send it; a lure or landmark
+    /// teleport has no other way to learn where it landed before the
+    /// destination's `AgentMovementComplete`.
+    pub(crate) region_handle: Option<RegionHandle>,
 }
 
-/// Extracts the destination UDP address, seed capability, maturity and teleport
-/// flags from a CAPS `TeleportFinish` event body: `{ "Info": [ { "SimIP":
-/// <binary 4 bytes>, "SimPort": <integer>, "SeedCapability": <string>,
-/// "SimAccess": <integer>, "TeleportFlags": <integer>, … } ] }`. The CAPS
-/// `SimPort` is a plain host-order integer port (unlike the byte-swapped
-/// generated-UDP field).
+/// Extracts the destination UDP address, seed capability, maturity, teleport
+/// flags and (when present) region handle from a CAPS `TeleportFinish` event
+/// body: `{ "Info": [ { "AgentID": <uuid>, "LocationID": <integer>, "SimIP":
+/// <binary 4 bytes>, "SimPort": <integer>, "RegionHandle": <u64 binary>,
+/// "SeedCapability": <string>, "SimAccess": <integer>, "TeleportFlags":
+/// <integer>, "RegionSizeX": <integer>, "RegionSizeY": <integer> } ] }`. The
+/// CAPS `SimPort` is a plain host-order integer port (unlike the byte-swapped
+/// generated-UDP field). A zero or absent `RegionHandle` decodes as `None`.
 pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinish> {
     let info = body.get("Info").and_then(|info| info.index(0))?;
     let octets: [u8; 4] = info
@@ -2472,11 +2479,17 @@ pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinis
     // `TeleportFlags` is a U32 bitfield carried as an LLSD integer (and some
     // grids encode the high U32 fields as binary), so read it tolerantly.
     let teleport_flags = info.get("TeleportFlags").map_or(0, llsd_u32);
+    let region_handle = info
+        .get("RegionHandle")
+        .map(llsd_u64)
+        .filter(|handle| *handle != 0)
+        .map(RegionHandle);
     Some(CapsTeleportFinish {
         dest: SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
         seed,
         sim_access,
         teleport_flags,
+        region_handle,
     })
 }
 
@@ -4155,35 +4168,85 @@ pub(crate) const fn ipv4_octets(addr: SocketAddr) -> [u8; 4] {
     }
 }
 
-/// Serializes a CAPS `TeleportFinish` event body from the destination address,
-/// seed capability, maturity (`SimAccess`) and teleport flags (the
-/// element-by-element inverse of the `teleport_finish_from_llsd` parser, whose
-/// decoded `CapsTeleportFinish` is a private type).
+/// The side length, in metres, of a standard region — the `RegionSizeX` /
+/// `RegionSizeY` a simulator advertises in its event-queue region
+/// announcements unless it hosts a var-region.
+pub const STANDARD_REGION_SIZE_METRES: u32 = 256;
+
+/// The `LocationID` a simulator puts in `TeleportFinish`. The reference
+/// servers always send `4` (OpenSim's `TeleportFinishEvent` hard-codes it and
+/// the viewer ignores the value), so the constant documents the wire rather
+/// than a choice.
+pub const TELEPORT_FINISH_LOCATION_ID: u32 = 4;
+
+/// What a simulator hands the client in a CAPS `TeleportFinish` — the
+/// complete record the reference event-queue builders emit
+/// (OpenSim `EventQueueGetHandlers.TeleportFinishEvent`): the viewer creates
+/// the destination region object from `region_handle` / `region_size`
+/// **before** the destination's own handshake arrives, and ignores the event
+/// when `agent_id` is not its own.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TeleportFinishInfo {
+    /// The teleporting agent (`AgentID`); the viewer drops an event naming
+    /// someone else.
+    pub agent_id: AgentKey,
+    /// The `LocationID` (always [`TELEPORT_FINISH_LOCATION_ID`] on the
+    /// reference servers).
+    pub location_id: u32,
+    /// The destination simulator's UDP address (`SimIP` + `SimPort`).
+    pub dest: SocketAddr,
+    /// The destination region's handle (`RegionHandle`).
+    pub region_handle: RegionHandle,
+    /// The destination region's seed capability URL (`SeedCapability`).
+    pub seed: String,
+    /// The destination region's maturity byte (`SimAccess`).
+    pub sim_access: u8,
+    /// The `TeleportFlags` bitfield (how the teleport happened).
+    pub teleport_flags: u32,
+    /// The destination region's size in metres (`RegionSizeX`, `RegionSizeY`).
+    pub region_size: (u32, u32),
+}
+
+/// Serializes a CAPS `TeleportFinish` event body (the element-by-element
+/// inverse of the `teleport_finish_from_llsd` parser, whose decoded
+/// `CapsTeleportFinish` is a private type — the parser tolerates the
+/// handle/size/agent fields being absent, the builder always emits them as
+/// the reference servers do).
 #[must_use]
-pub fn teleport_finish_to_llsd(
-    dest: SocketAddr,
-    seed: &str,
-    sim_access: u8,
-    teleport_flags: u32,
-) -> Llsd {
+pub fn teleport_finish_to_llsd(info: &TeleportFinishInfo) -> Llsd {
+    let (size_x, size_y) = info.region_size;
     let info = llsd_map(vec![
-        ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
-        ("SimPort", Llsd::Integer(i32::from(dest.port()))),
-        ("SeedCapability", Llsd::String(seed.to_owned())),
-        ("SimAccess", Llsd::Integer(i32::from(sim_access))),
-        ("TeleportFlags", u32_to_llsd(teleport_flags)),
+        ("AgentID", Llsd::Uuid(info.agent_id.uuid())),
+        ("LocationID", u32_to_llsd(info.location_id)),
+        ("SimIP", Llsd::Binary(ipv4_octets(info.dest).to_vec())),
+        ("SimPort", Llsd::Integer(i32::from(info.dest.port()))),
+        ("RegionHandle", u64_to_llsd(info.region_handle.0)),
+        ("SeedCapability", Llsd::String(info.seed.clone())),
+        ("SimAccess", Llsd::Integer(i32::from(info.sim_access))),
+        ("TeleportFlags", u32_to_llsd(info.teleport_flags)),
+        ("RegionSizeX", u32_to_llsd(size_x)),
+        ("RegionSizeY", u32_to_llsd(size_y)),
     ]);
     llsd_map(vec![("Info", Llsd::Array(vec![info]))])
 }
 
-/// Serializes a neighbour's region handle and address as a CAPS
-/// `EnableSimulator` event body (inverse of `enable_simulator_from_caps_llsd`).
+/// Serializes a neighbour's region handle, address and size as a CAPS
+/// `EnableSimulator` event body (inverse of `enable_simulator_from_caps_llsd`,
+/// which reads only the handle and address; the size fields are what the
+/// reference servers send, `region_size` in metres).
 #[must_use]
-pub fn enable_simulator_to_caps_llsd(handle: u64, sim: SocketAddr) -> Llsd {
+pub fn enable_simulator_to_caps_llsd(
+    handle: u64,
+    sim: SocketAddr,
+    region_size: (u32, u32),
+) -> Llsd {
+    let (size_x, size_y) = region_size;
     let info = llsd_map(vec![
         ("Handle", u64_to_llsd(handle)),
         ("IP", Llsd::Binary(ipv4_octets(sim).to_vec())),
         ("Port", Llsd::Integer(i32::from(sim.port()))),
+        ("RegionSizeX", u32_to_llsd(size_x)),
+        ("RegionSizeY", u32_to_llsd(size_y)),
     ]);
     llsd_map(vec![("SimulatorInfo", Llsd::Array(vec![info]))])
 }
@@ -4203,10 +4266,16 @@ pub fn crossed_region_to_caps_llsd(handle: u64, dest: SocketAddr, seed: &str) ->
 
 /// Serializes a child region's address and seed capability as a CAPS
 /// `EstablishAgentCommunication` event body (inverse of
-/// `establish_agent_communication_from_llsd`).
+/// `establish_agent_communication_from_llsd`, which reads only the address and
+/// seed; `agent-id` is what the reference servers send alongside).
 #[must_use]
-pub fn establish_agent_communication_to_llsd(sim: SocketAddr, seed: &str) -> Llsd {
+pub fn establish_agent_communication_to_llsd(
+    agent_id: AgentKey,
+    sim: SocketAddr,
+    seed: &str,
+) -> Llsd {
     llsd_map(vec![
+        ("agent-id", Llsd::Uuid(agent_id.uuid())),
         ("sim-ip-and-port", Llsd::String(sim.to_string())),
         ("seed-capability", Llsd::String(seed.to_owned())),
     ])
@@ -5911,10 +5980,15 @@ mod caps_serializer_tests {
         server_appearance_update_to_llsd, session_history_from_llsd, session_history_to_llsd,
         teleport_finish_from_llsd, teleport_finish_to_llsd,
     };
+    use super::{
+        STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo, ipv4_octets,
+        llsd_map, llsd_u32, u64_to_llsd,
+    };
     use crate::types::{
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
         InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
     };
+    use sl_wire::RegionHandle;
     use sl_wire::{Llsd, Permissions, Permissions5};
 
     /// A V4 socket address for the given octets and port.
@@ -6322,9 +6396,20 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn teleport_finish_round_trips() -> Result<(), url::ParseError> {
+    fn teleport_finish_round_trips() -> Result<(), Box<dyn std::error::Error>> {
         let dest = addr(192, 168, 7, 9, 13_001);
-        let llsd = teleport_finish_to_llsd(dest, "https://seed/tp", 21, 0x8000_00ff);
+        let agent = AgentKey::from(Uuid::from_u128(0x7e1e));
+        let info = TeleportFinishInfo {
+            agent_id: agent,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest,
+            region_handle: RegionHandle(0x0003_ec00_0003_e800),
+            seed: "https://seed/tp".to_owned(),
+            sim_access: 21,
+            teleport_flags: 0x8000_00ff,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        };
+        let llsd = teleport_finish_to_llsd(&info);
         assert_eq!(
             teleport_finish_from_llsd(&llsd),
             Some(CapsTeleportFinish {
@@ -6332,6 +6417,46 @@ mod caps_serializer_tests {
                 seed: "https://seed/tp".parse()?,
                 sim_access: 21,
                 teleport_flags: 0x8000_00ff,
+                region_handle: Some(RegionHandle(0x0003_ec00_0003_e800)),
+            })
+        );
+        // The fields the client does not consume are still on the wire, in the
+        // reference shape (the viewer builds the destination region from them).
+        let record = llsd
+            .get("Info")
+            .and_then(|info| info.index(0))
+            .ok_or("no Info record")?;
+        assert_eq!(
+            record.get("AgentID").and_then(Llsd::as_uuid),
+            Some(agent.uuid())
+        );
+        assert_eq!(record.get("LocationID").map(llsd_u32), Some(4));
+        assert_eq!(record.get("RegionSizeX").map(llsd_u32), Some(256));
+        assert_eq!(record.get("RegionSizeY").map(llsd_u32), Some(256));
+        Ok(())
+    }
+
+    /// A `TeleportFinish` without a `RegionHandle` (older servers) or with a
+    /// zero one decodes with `region_handle: None`, leaving the client to fall
+    /// back on the handle it requested.
+    #[test]
+    fn teleport_finish_without_handle_decodes_none() -> Result<(), url::ParseError> {
+        let dest = addr(192, 168, 7, 9, 13_001);
+        let info = llsd_map(vec![
+            ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
+            ("SimPort", Llsd::Integer(13_001)),
+            ("SeedCapability", Llsd::String("https://seed/tp".to_owned())),
+            ("RegionHandle", u64_to_llsd(0)),
+        ]);
+        let llsd = llsd_map(vec![("Info", Llsd::Array(vec![info]))]);
+        assert_eq!(
+            teleport_finish_from_llsd(&llsd),
+            Some(CapsTeleportFinish {
+                dest,
+                seed: "https://seed/tp".parse()?,
+                sim_access: 0,
+                teleport_flags: 0,
+                region_handle: None,
             })
         );
         Ok(())
@@ -6390,7 +6515,7 @@ mod caps_serializer_tests {
     fn enable_simulator_round_trips() {
         let sim = addr(10, 0, 0, 5, 9000);
         let handle = 0x0003_e800_0003_e800;
-        let llsd = enable_simulator_to_caps_llsd(handle, sim);
+        let llsd = enable_simulator_to_caps_llsd(handle, sim, (256, 256));
         assert_eq!(enable_simulator_from_caps_llsd(&llsd), Some((handle, sim)));
     }
 
@@ -6409,10 +6534,15 @@ mod caps_serializer_tests {
     #[test]
     fn establish_agent_communication_round_trips() -> Result<(), url::ParseError> {
         let sim = addr(10, 0, 0, 7, 9002);
-        let llsd = establish_agent_communication_to_llsd(sim, "https://seed/eac");
+        let agent = AgentKey::from(Uuid::from_u128(0xeac));
+        let llsd = establish_agent_communication_to_llsd(agent, sim, "https://seed/eac");
         assert_eq!(
             establish_agent_communication_from_llsd(&llsd),
             Some((sim, "https://seed/eac".parse()?))
+        );
+        assert_eq!(
+            llsd.get("agent-id").and_then(Llsd::as_uuid),
+            Some(agent.uuid())
         );
         Ok(())
     }

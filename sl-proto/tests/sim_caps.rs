@@ -268,7 +268,7 @@ mod test {
         // A first poll (ack undef) with one queued event delivers batch 1.
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr()),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
         );
         let poll = build_event_queue_request(None, false);
         let (status, body) = respond(&mut caps, &mut sim, &post(&eq_path, &poll))?;
@@ -291,7 +291,7 @@ mod test {
         // A later event releases the next poll as batch 2.
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr()),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
         );
         let (status, body) = respond(&mut caps, &mut sim, &post(&eq_path, &ack_poll))?;
         assert_eq!(status, 200);
@@ -329,7 +329,7 @@ mod test {
         // — even with events queued.
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr()),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
         );
         let poll = build_event_queue_request(None, false);
         let (status, _) = respond(&mut caps, &mut sim, &post(&eq_path, &poll))?;

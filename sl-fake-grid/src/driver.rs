@@ -13,6 +13,7 @@ use sl_proto::{InMemoryAssetSource, RegionIdentity, ServerEvent, SimCaps, SimSes
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, Notify, broadcast, watch};
 
+use crate::runtime::SessionIds;
 use crate::scenario::{SimEventHook, SimHook};
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world};
@@ -42,6 +43,17 @@ pub(crate) struct SimState {
     pub(crate) world: SceneFixtures,
     /// Who the agent is, for its own avatar object.
     pub(crate) avatar: AvatarIdentity,
+    /// This session's sequence number (its CAPS path component and the key
+    /// in the grid's session table).
+    pub(crate) seq: u64,
+    /// The index of the region this session lives in (into the grid's region
+    /// table) — the region handle is fixed at construction, so a teleport is
+    /// always a second session.
+    pub(crate) region: usize,
+    /// The login-minted session identity this circuit shares with every
+    /// other circuit of the same login (a teleport destination reuses it: the
+    /// client opens every circuit with its login `UseCircuitCode` triple).
+    pub(crate) ids: SessionIds,
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -62,6 +74,10 @@ pub(crate) struct SharedSim {
     pub(crate) events_tx: broadcast::Sender<ServerEvent>,
     /// Flipped to `true` when the grid shuts down; tasks exit on it.
     pub(crate) shutdown_rx: watch::Receiver<bool>,
+    /// Flipped to `true` by the flush rule once the machine is closed
+    /// (logout, inactivity, retirement, abandonment), so a pump blocked in
+    /// `recv_from` or a timer with no deadline still exits.
+    pub(crate) closed_tx: watch::Sender<bool>,
 }
 
 /// What a locked flush gathered; applied after the state lock is released so
@@ -156,6 +172,9 @@ impl SharedSim {
             transmits.push(transmit);
         }
         self.timeout_tx.send_replace(state.sim.poll_timeout());
+        if state.sim.is_closed() {
+            self.closed_tx.send_replace(true);
+        }
         FlushOutcome {
             transmits,
             wake_event_queue: state.sim.has_caps_events(),
@@ -188,6 +207,11 @@ impl SharedSim {
     pub(crate) fn subscribe_events(&self) -> broadcast::Receiver<ServerEvent> {
         self.events_tx.subscribe()
     }
+
+    /// Whether the session machine has closed.
+    pub(crate) fn is_closed(&self) -> bool {
+        *self.closed_tx.borrow()
+    }
 }
 
 /// Builds the wake-up channels for a new session around its already-bound
@@ -199,6 +223,7 @@ pub(crate) fn new_shared_sim(
 ) -> SharedSim {
     let (events_tx, _) = broadcast::channel(EVENTS_CHANNEL_CAPACITY);
     let (timeout_tx, _) = watch::channel(state.sim.poll_timeout());
+    let (closed_tx, _) = watch::channel(false);
     SharedSim {
         state: Arc::new(Mutex::new(state)),
         socket,
@@ -206,6 +231,7 @@ pub(crate) fn new_shared_sim(
         timeout_tx,
         events_tx,
         shutdown_rx,
+        closed_tx,
     }
 }
 
@@ -216,9 +242,16 @@ const RECV_BUFFER_BYTES: usize = 64 * 1024;
 /// grid shuts down or the session closes.
 pub(crate) async fn run_udp_pump(shared: SharedSim) {
     let mut shutdown_rx = shared.shutdown_rx.clone();
+    let mut closed_rx = shared.closed_tx.subscribe();
     let mut buffer = vec![0_u8; RECV_BUFFER_BYTES];
     loop {
         tokio::select! {
+            changed = closed_rx.changed() => {
+                if changed.is_err() || *closed_rx.borrow() {
+                    tracing::info!("session closed; UDP pump exiting");
+                    break;
+                }
+            }
             received = shared.socket.recv_from(&mut buffer) => {
                 let (length, from) = match received {
                     Ok(pair) => pair,
@@ -266,10 +299,17 @@ async fn sleep_until_opt(deadline: Option<Instant>) {
 /// timeout), re-arming from the watch channel the flush rule publishes to.
 pub(crate) async fn run_timer(shared: SharedSim) {
     let mut shutdown_rx = shared.shutdown_rx.clone();
+    let mut closed_rx = shared.closed_tx.subscribe();
     let mut timeout_rx = shared.timeout_tx.subscribe();
     loop {
         let deadline = *timeout_rx.borrow_and_update();
         tokio::select! {
+            changed = closed_rx.changed() => {
+                if changed.is_err() || *closed_rx.borrow() {
+                    tracing::info!("session closed; timer task exiting");
+                    break;
+                }
+            }
             () = sleep_until_opt(deadline) => {
                 let closed = {
                     let mut guard = shared.state.lock().await;

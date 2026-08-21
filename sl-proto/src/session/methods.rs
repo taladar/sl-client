@@ -416,10 +416,20 @@ impl Session {
             }
             "TeleportFinish" => {
                 if let Some(finish) = teleport_finish_from_llsd(body) {
-                    let region_handle = match self.teleport {
+                    // A finish without a start: the simulator decided on this
+                    // teleport (see the UDP arm) — enter the teleport now.
+                    if !matches!(self.state, SessionState::Teleporting)
+                        && self.enter_remote_teleport(now)
+                    {
+                        self.events.push_back(Event::TeleportStarted);
+                    }
+                    // The wire handle is authoritative (a lure or landmark
+                    // teleport never knew its target); a server that omits it
+                    // leaves us the handle we asked for, or none.
+                    let region_handle = finish.region_handle.unwrap_or(match self.teleport {
                         TeleportPhase::Requested { target } => target,
                         TeleportPhase::Idle | TeleportPhase::Handover { .. } => RegionHandle(0),
-                    };
+                    });
                     if matches!(self.state, SessionState::Teleporting) {
                         self.events.push_back(Event::TeleportFinished {
                             region_handle,
@@ -3384,18 +3394,21 @@ impl Session {
                 });
             }
             AnyMessage::TeleportStart(_) => {
-                // Only surface a teleport WE requested (state `Teleporting`). A
-                // seamless region **crossing** is a teleport under the hood, and
-                // OpenSim sends `TeleportStart`/`TeleportProgress` for it too — but
-                // it must stay invisible (no progress UI), so a crossing's teleport
-                // messages are ignored here (the crossing runs via
-                // `CrossedRegion` → `promote_child_to_root`). This mirrors the
-                // reference viewer, which only shows the teleport screen for a
-                // teleport it initiated.
-                if matches!(self.state, SessionState::Teleporting) {
+                // A teleport we requested is already `Teleporting`. One we did
+                // not — `llTeleportAgent`, a god/estate "teleport home", a
+                // grid-side push — starts here: the reference viewer enters
+                // `TELEPORT_START` on a remote `TeleportStart` ("Teleport
+                // initiated by remote TeleportStart message"), and the
+                // simulator's `TeleportFinish` that follows would otherwise be
+                // ignored and strand the session in a region it has left.
+                // (A physical crossing never sends `TeleportStart` — OpenSim's
+                // `EntityTransferModule` sends it on its two teleport paths
+                // only — so nothing here misfires for a crossing.)
+                if matches!(self.state, SessionState::Teleporting) || self.enter_remote_teleport(now)
+                {
                     self.events.push_back(Event::TeleportStarted);
                 } else {
-                    tracing::debug!("ignoring TeleportStart outside a requested teleport (crossing)");
+                    tracing::debug!("ignoring TeleportStart in state {:?}", self.state);
                 }
             }
             AnyMessage::TeleportProgress(progress) => {
@@ -3449,8 +3462,12 @@ impl Session {
             AnyMessage::TeleportFinish(finish) => {
                 // The UDP TeleportFinish path (grids without an event queue).
                 // OpenSim normally delivers TeleportFinish over the CAPS event
-                // queue instead; see `handle_caps_event`.
-                if matches!(self.state, SessionState::Teleporting) {
+                // queue instead; see `handle_caps_event`. A finish without a
+                // start (the reference viewer's "Teleport 'finish' message
+                // without 'start'") is a teleport the simulator decided on;
+                // it cannot be ignored, the server already moved us.
+                if matches!(self.state, SessionState::Teleporting) || self.enter_remote_teleport(now)
+                {
                     let info = &finish.info;
                     // IPPORT is big-endian on the wire; the generated decoder
                     // reads it little-endian, so swap back to host order.
@@ -12139,6 +12156,29 @@ impl Session {
         let circuit = self.circuit_for_scope(scope)?;
         circuit.send_redo(&object_ids, now)?;
         Ok(())
+    }
+
+    /// Enters a teleport the **simulator** initiated (a remote `TeleportStart`
+    /// or a `TeleportFinish` with no request of ours): arms the teleport
+    /// timeout and moves to `Teleporting` with an unknown target, so the
+    /// finish that follows is honoured exactly like one we asked for. Only an
+    /// `Active` session (or one whose crossing is still finalizing) can enter;
+    /// returns whether it did.
+    fn enter_remote_teleport(&mut self, now: Instant) -> bool {
+        match self.state {
+            SessionState::Active => {}
+            SessionState::AwaitingHandshake => self.complete_arrival(now),
+            _ => return false,
+        }
+        let Some(circuit) = self.circuit.as_mut() else {
+            return false;
+        };
+        circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
+        self.teleport = TeleportPhase::Requested {
+            target: RegionHandle(0),
+        };
+        self.state = SessionState::Teleporting;
+        true
     }
 
     /// Requests an in-world teleport to `position` (region-local) in the region

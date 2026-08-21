@@ -118,6 +118,7 @@ pub use sl_proto::{
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
+pub use sl_proto::{WireLandmarkAsset, landmark_to_wire, parse_landmark};
 // The `GetTexture` capability name, so a frontend driving the texture store
 // directly (rather than the `Command::FetchTexture` path) can resolve the cap
 // URL from an [`SlCapabilities`] map and hand it to a [`BevyTextureFetcher`].

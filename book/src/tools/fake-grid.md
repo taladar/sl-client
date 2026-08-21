@@ -76,7 +76,10 @@ cargo run -p sl-fake-grid -- --http-port 9100 \
 logs `fake grid ready: login URI http://127.0.0.1:9100/`. Point this
 workspace's clients at it (`SL_LOGIN_URI=http://127.0.0.1:9100/`), or
 add it to Firestorm's grid manager as a grid with that login URI. With
-no `--account` it creates `Test User` / `password`.
+no `--account` it creates `Test User` / `password`. `--region` repeats
+(`Name` or `Name@X,Y` in grid coordinates; the first is the start region,
+unplaced ones are laid out eastwards from 1000,1000), and a viewer can
+teleport between the regions from its map — see below.
 
 ## The non-CAPS HTTP surfaces
 
@@ -190,6 +193,60 @@ The first version of the driver sent it on `AgentArrived` and the tokio
 end-to-end test never noticed — it only waited for
 `RegionHandshakeComplete`, which the movement-complete path also raises;
 the Bevy smoke tier's `SlRegionIdentity` assertion is what caught it.
+
+## Teleporting between regions
+
+A `SimSession` has its region handle fixed at construction, so a teleport
+is always a **second session**: a fresh loopback socket, `SimSession` and
+`SimCaps` in the destination region, seeded with that region's scenario
+under the login's identity (the client opens every circuit with its login
+`UseCircuitCode` triple). `teleport.rs` sequences it the way OpenSim's
+`EntityTransferModule` does:
+
+1. `TeleportStart` and the progress keys on the source (`resolving`, then
+   `sending_dest` / `sending_home` / `sending_landmark`, then `arriving`
+   — the keys of Firestorm's `teleport_strings.xml`, which the viewer
+   localises; `sl_proto::teleport_strings` holds them);
+2. the destination session is prepared, placed (`set_arrival_position`
+   — the `AgentMovementComplete` lands the avatar where the request
+   asked) and **registered before it is announced**, because the client
+   POSTs the destination seed the moment `EstablishAgentCommunication`
+   arrives and an unregistered `/sim/<n>/…` answers 404;
+3. the event-queue trio on the source: `EnableSimulator` (the client
+   opens a child circuit), `EstablishAgentCommunication` (the seed), and
+   `TeleportFinish` — the full reference record (`TeleportFinishInfo`:
+   agent id, region handle, region size, …; Firestorm builds the
+   destination region object from the handle, and the client reports the
+   wire handle rather than the one it requested, which is what a lure or
+   landmark teleport needs);
+4. once the destination sees `AgentArrived`, the source is retired:
+   `DisableSimulator` to the client, the session closed
+   (`ServerEvent::CircuitRetired`, the pumps exit on the per-session
+   closed watch), its CAPS paths forgotten, and a `TeleportNotice` on
+   `FakeGrid::teleports()`. No arrival within `TELEPORT_ARRIVAL_TIMEOUT`
+   fails the teleport with `timeout_tport` and abandons the destination.
+
+Two entry points share the sequence. The **responder task** every session
+runs answers the client's own requests: `TeleportLocationRequest` by
+handle, `TeleportLandmarkRequest` through the landmark asset in the
+scenario's asset store (`sl_wire::parse_landmark`, both on-wire versions;
+resolved by region id, so give a `RegionConfig` a fixed `region_id` for a
+landmark fixture; `None` = home = the account's start region),
+`TeleportLureRequest` through the OpenSim lure-id convention (a
+`FakeParcelId`: handle + position packed into the UUID; an opaque id is
+taken as the offering agent's id). A request that resolves nowhere is
+refused with the matching failure key (`invalid_tport`,
+`nolandmark_tport`, `no_host`), so the viewer's teleport screen never
+hangs; a same-region request finishes as a `TeleportLocal`. The explicit
+`FakeGrid::teleport_agent(&agent, "Region", position, look_at)` is the
+grid-initiated counterpart (what `llTeleportAgent` or a scripted push
+does — no client request at all; the client follows a remote
+`TeleportStart` exactly as the reference viewer does) and hands back the
+destination `FakeAgent`.
+
+The real-client tests in `tests/client_end_to_end.rs` cover each path;
+with the binary, `sl-repl-tokio`'s `teleport <handle> <x,y,z>` (handle =
+`grid_x*256 << 32 | grid_y*256`) shows the whole sequence as events.
 
 ## The Bevy smoke tier
 

@@ -2,18 +2,20 @@
 //! per-login session bring-up shared by the HTTP endpoints.
 
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use sl_proto::{
-    DEFAULT_TERRAIN_DETAIL_TEXTURES, Maturity, OpenSimExtras, ProductType, RegionHandle,
-    RegionIdentity, RegionTerrainComposition, SimSession, SimulatorFeatures, Uuid, VoiceConfig,
-    region_name_from_wire,
+    ArrivalPlacement, DEFAULT_TERRAIN_DETAIL_TEXTURES, Maturity, OpenSimExtras, ProductType,
+    RegionHandle, RegionIdentity, RegionTerrainComposition, SimSession, SimulatorFeatures, Uuid,
+    VoiceConfig, region_name_from_wire,
 };
 use sl_types::key::AgentKey;
+use sl_types::lsl::Vector;
+use sl_types::map::RegionCoordinates;
 use sl_wire::{
     GridInfo, KEY_ECONOMY, KEY_GRIDNAME, KEY_GRIDNICK, KEY_LOGIN, KEY_MESSAGE, KEY_PLATFORM,
     LoginGates, LoginSuccess, MapTileRef, SkeletonFolder,
@@ -94,16 +96,16 @@ impl Default for RegionConfig {
 /// effective scenario.
 pub(crate) struct RegionEntry {
     /// The builder-supplied region data.
-    config: RegionConfig,
+    pub(crate) config: RegionConfig,
     /// The region id (fixed or minted once at start).
-    region_id: Uuid,
+    pub(crate) region_id: Uuid,
     /// The scenario sessions in this region are seeded with.
     scenario: Scenario,
 }
 
 impl RegionEntry {
     /// The region handle derived from the grid coordinates.
-    fn handle(&self) -> RegionHandle {
+    pub(crate) fn handle(&self) -> RegionHandle {
         RegionHandle::from_grid(self.config.grid_x, self.config.grid_y)
     }
 
@@ -140,6 +142,46 @@ impl RegionEntry {
             },
         }
     }
+}
+
+/// The identity a login mints once and every circuit of that login shares:
+/// the client opens each circuit (the login region, a teleport destination)
+/// with the same `UseCircuitCode` triple, and the legacy asset upload path
+/// derives asset ids from the secure session id.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SessionIds {
+    /// The session id the client echoes in every message.
+    pub(crate) session_id: Uuid,
+    /// The secure session id (asset-upload entropy).
+    pub(crate) secure_session_id: Uuid,
+    /// The circuit code.
+    pub(crate) circuit_code: sl_wire::CircuitCode,
+}
+
+impl SessionIds {
+    /// Mints a fresh identity for a login.
+    fn mint() -> Self {
+        Self {
+            session_id: Uuid::new_v4(),
+            secure_session_id: Uuid::new_v4(),
+            circuit_code: sl_wire::CircuitCode(rand_circuit_code()),
+        }
+    }
+}
+
+/// A record of one completed inter-region teleport, published on
+/// [`FakeGrid::teleports`]: the agent now lives in session `to_seq`, and
+/// session `from_seq` has been retired.
+#[derive(Debug, Clone)]
+pub struct TeleportNotice {
+    /// The teleported agent.
+    pub agent_id: AgentKey,
+    /// The retired source session's sequence number.
+    pub from_seq: u64,
+    /// The destination session's sequence number.
+    pub to_seq: u64,
+    /// The destination region's name.
+    pub region_name: String,
 }
 
 /// A record of one successful login, published on
@@ -192,6 +234,8 @@ pub(crate) struct GridCore {
     pub(crate) logins_tx: broadcast::Sender<LoginNotice>,
     /// Publishes accepted economy-helper purchases.
     pub(crate) economy_tx: broadcast::Sender<EconomyEvent>,
+    /// Publishes completed inter-region teleports.
+    pub(crate) teleports_tx: broadcast::Sender<TeleportNotice>,
 }
 
 /// Everything a successful login mints before the response is built. The
@@ -202,37 +246,117 @@ pub(crate) struct PreparedSession {
     pub(crate) seq: u64,
     /// The shared driver handle (not yet registered or pumped).
     pub(crate) shared: SharedSim,
-    /// The region logged into (for the login notice).
+    /// The region the session lives in (for the notices).
     pub(crate) region_name: String,
+    /// The session's seed capability URL.
+    pub(crate) seed_url: url::Url,
+    /// The session's loopback UDP address.
+    pub(crate) udp_addr: SocketAddr,
 }
 
 impl GridCore {
-    /// The region an account starts in.
-    pub(crate) fn start_region(&self, account: &Account) -> Option<&RegionEntry> {
+    /// The index of the region an account starts in.
+    pub(crate) fn start_region(&self, account: &Account) -> Option<usize> {
         match &account.config.start_region {
-            Some(name) => self.regions.iter().find(|entry| entry.config.name == *name),
-            None => self.regions.first(),
+            Some(name) => self.region_by_name(name),
+            None => (!self.regions.is_empty()).then_some(0),
         }
     }
 
-    /// Creates the session machinery for a login: binds the session's UDP
-    /// socket, seeds a fresh [`SimSession`] with the region's scenario, and
-    /// builds the enriched [`LoginSuccess`]. Nothing is registered yet — the
-    /// caller only activates the session when the login server actually
-    /// answers success.
+    /// The region at `index` (indices come from the lookups below and from
+    /// [`SimState::region`]).
+    pub(crate) fn region(&self, index: usize) -> Option<&RegionEntry> {
+        self.regions.get(index)
+    }
+
+    /// The index of the region called `name`.
+    pub(crate) fn region_by_name(&self, name: &str) -> Option<usize> {
+        self.regions
+            .iter()
+            .position(|entry| entry.config.name == name)
+    }
+
+    /// The index of the region with the given handle.
+    pub(crate) fn region_by_handle(&self, handle: RegionHandle) -> Option<usize> {
+        self.regions
+            .iter()
+            .position(|entry| entry.handle() == handle)
+    }
+
+    /// The index of the region with the given id.
+    pub(crate) fn region_by_id(&self, region_id: Uuid) -> Option<usize> {
+        self.regions
+            .iter()
+            .position(|entry| entry.region_id == region_id)
+    }
+
+    /// The registered account owning `agent_id`.
+    pub(crate) fn account_by_agent(&self, agent_id: AgentKey) -> Option<&Account> {
+        self.accounts
+            .iter()
+            .find(|account| account.agent_id == agent_id)
+    }
+
+    /// Creates the session machinery for a login: a fresh identity, the
+    /// region session, and the enriched [`LoginSuccess`]. Nothing is
+    /// registered yet — the caller only activates the session when the login
+    /// server actually answers success.
     pub(crate) async fn prepare_session(
         self: &Arc<Self>,
         account: &Account,
-        region: &RegionEntry,
+        region_index: usize,
     ) -> Result<(PreparedSession, Box<LoginSuccess>), Error> {
+        let ids = SessionIds::mint();
+        let region = self.region(region_index).ok_or(Error::UnknownRegion {
+            region: region_index.to_string(),
+        })?;
+        let prepared = self
+            .prepare_region_session(account, region_index, ids, None)
+            .await?;
+        let mut success = Box::new(LoginSuccess::minimal(
+            account.agent_id,
+            ids.session_id,
+            ids.secure_session_id,
+            ids.circuit_code,
+            Ipv4Addr::LOCALHOST,
+            prepared.udp_addr.port(),
+            prepared.seed_url.clone(),
+        ));
+        {
+            let state = prepared.shared.state.lock().await;
+            enrich_success(&mut success, account, region, &state.sim);
+        }
+        success.message = Some(self.identity.message.clone());
+        success.map_server_url = Some(self.login_uri.clone());
+        success.currency = Some(self.economy.currency_symbol.clone());
+        Ok((prepared, success))
+    }
+
+    /// Creates one region session for an agent: binds the session's UDP
+    /// socket, seeds a fresh [`SimSession`] with the region's scenario under
+    /// the login's identity, and mints its CAPS surface. Shared by the login
+    /// (the start region) and a teleport (the destination, with the arrival
+    /// placed where the teleport asked). Nothing is registered yet.
+    pub(crate) async fn prepare_region_session(
+        self: &Arc<Self>,
+        account: &Account,
+        region_index: usize,
+        ids: SessionIds,
+        arrival: Option<ArrivalPlacement>,
+    ) -> Result<PreparedSession, Error> {
+        let region = self.region(region_index).ok_or(Error::UnknownRegion {
+            region: region_index.to_string(),
+        })?;
         let socket = Arc::new(UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?);
-        let udp_port = socket.local_addr()?.port();
+        let udp_addr = socket.local_addr()?;
         let seq = self.next_session.fetch_add(1, Ordering::Relaxed);
 
         let mut sim = SimSession::new(region.handle(), Instant::now());
-        let secure_session_id = Uuid::new_v4();
-        sim.set_secure_session_id(secure_session_id);
+        sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
+        if let Some(arrival) = arrival {
+            sim.set_arrival_position(arrival.position, arrival.look_at);
+        }
         (region.scenario.setup)(&mut sim);
         region.scenario.udp_assets.register_xfer_files(&mut sim);
         if *sim.simulator_features() == SimulatorFeatures::default() {
@@ -250,22 +374,6 @@ impl GridCore {
         let caps = sl_proto::SimCaps::new(base_url, Uuid::new_v4(), Uuid::new_v4);
         let seed_url = caps.seed_url();
 
-        let session_id = Uuid::new_v4();
-        let circuit_code = sl_wire::CircuitCode(rand_circuit_code());
-        let mut success = Box::new(LoginSuccess::minimal(
-            account.agent_id,
-            session_id,
-            secure_session_id,
-            circuit_code,
-            Ipv4Addr::LOCALHOST,
-            udp_port,
-            seed_url,
-        ));
-        enrich_success(&mut success, account, region, &sim);
-        success.message = Some(self.identity.message.clone());
-        success.map_server_url = Some(self.login_uri.clone());
-        success.currency = Some(self.economy.currency_symbol.clone());
-
         let state = SimState {
             sim,
             caps,
@@ -280,32 +388,59 @@ impl GridCore {
                 first_name: account.config.first_name.clone(),
                 last_name: account.config.last_name.clone(),
             },
+            seq,
+            region: region_index,
+            ids,
         };
         let shared = new_shared_sim(state, socket, self.shutdown_tx.subscribe());
-        Ok((
-            PreparedSession {
-                seq,
-                shared,
-                region_name: region.config.name.clone(),
-            },
-            success,
-        ))
+        Ok(PreparedSession {
+            seq,
+            shared,
+            region_name: region.config.name.clone(),
+            seed_url,
+            udp_addr,
+        })
     }
 
-    /// Registers a prepared session and starts its pump and timer tasks —
-    /// called only once the login server answered success.
-    pub(crate) async fn activate_session(&self, prepared: &PreparedSession) {
+    /// Registers a prepared session and starts its pump, timer and teleport
+    /// responder tasks — called only once the login server answered success
+    /// (or a teleport destination is about to be announced).
+    pub(crate) async fn activate_session(self: &Arc<Self>, prepared: &PreparedSession) {
         self.sessions
             .lock()
             .await
             .insert(prepared.seq, prepared.shared.clone());
         tokio::spawn(run_udp_pump(prepared.shared.clone()));
         tokio::spawn(run_timer(prepared.shared.clone()));
+        tokio::spawn(crate::teleport::run_teleport_responder(
+            Arc::clone(self),
+            prepared.shared.clone(),
+        ));
     }
 
     /// Looks a live session up by its sequence number.
     pub(crate) async fn session(&self, seq: u64) -> Option<SharedSim> {
         self.sessions.lock().await.get(&seq).cloned()
+    }
+
+    /// Forgets a session (its CAPS paths stop resolving); the pumps exit on
+    /// the machine's own closed state.
+    pub(crate) async fn remove_session(&self, seq: u64) {
+        self.sessions.lock().await.remove(&seq);
+    }
+
+    /// The live **root** session of `agent_id` — where the avatar currently
+    /// is — if it is logged in.
+    pub(crate) async fn root_session_of(&self, agent_id: AgentKey) -> Option<SharedSim> {
+        let sessions: Vec<SharedSim> = self.sessions.lock().await.values().cloned().collect();
+        for shared in sessions {
+            let state = shared.state.lock().await;
+            if state.avatar.agent_id == agent_id && state.sim.is_root_agent() {
+                drop(state);
+                return Some(shared);
+            }
+        }
+        None
     }
 
     /// The stock `SimulatorFeatures` document: mesh enabled plus the
@@ -568,6 +703,7 @@ impl FakeGridBuilder {
         let (shutdown_tx, _) = watch::channel(false);
         let (logins_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let (economy_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
+        let (teleports_tx, _) = broadcast::channel(LOGINS_CHANNEL_CAPACITY);
         let mut map_tiles = self.map_tiles;
         for region in &self.regions {
             map_tiles.seed_region(region.grid_x, region.grid_y);
@@ -607,6 +743,7 @@ impl FakeGridBuilder {
             shutdown_tx,
             logins_tx,
             economy_tx,
+            teleports_tx,
         });
         tokio::spawn(crate::http_service::run_http(Arc::clone(&core), listener));
         Ok(FakeGrid { core })
@@ -697,13 +834,93 @@ impl FakeGrid {
 
     /// The live session handle for a login notice.
     pub async fn agent(&self, notice: &LoginNotice) -> Option<FakeAgent> {
+        self.agent_by_seq(notice.session_seq).await
+    }
+
+    /// The live session handle for a session sequence number (a
+    /// [`LoginNotice::session_seq`] or a [`TeleportNotice::to_seq`]).
+    pub async fn agent_by_seq(&self, seq: u64) -> Option<FakeAgent> {
+        let shared = self.core.session(seq).await?;
+        let agent_id = shared.state.lock().await.avatar.agent_id;
+        Some(FakeAgent { shared, agent_id })
+    }
+
+    /// Subscribes to completed inter-region teleports (both the automatic
+    /// answers to client requests and [`FakeGrid::teleport_agent`]).
+    #[must_use]
+    pub fn teleports(&self) -> broadcast::Receiver<TeleportNotice> {
+        self.core.teleports_tx.subscribe()
+    }
+
+    /// The names of the grid's regions, in builder order.
+    #[must_use]
+    pub fn region_names(&self) -> Vec<String> {
         self.core
-            .session(notice.session_seq)
-            .await
-            .map(|shared| FakeAgent {
+            .regions
+            .iter()
+            .map(|entry| entry.config.name.clone())
+            .collect()
+    }
+
+    /// The handle of the region called `name`, if it exists.
+    #[must_use]
+    pub fn region_handle(&self, name: &str) -> Option<RegionHandle> {
+        self.core
+            .region_by_name(name)
+            .and_then(|index| self.core.region(index))
+            .map(RegionEntry::handle)
+    }
+
+    /// The id of the region called `name`, if it exists (what a landmark
+    /// fixture names).
+    #[must_use]
+    pub fn region_id(&self, name: &str) -> Option<Uuid> {
+        self.core
+            .region_by_name(name)
+            .and_then(|index| self.core.region(index))
+            .map(|entry| entry.region_id)
+    }
+
+    /// Teleports a logged-in agent to `region_name` — the grid-initiated
+    /// counterpart of a client request (what a lure or a scripted push does):
+    /// `TeleportStart`, the destination session, the event-queue trio, and
+    /// the source's retirement once the destination confirms the arrival.
+    /// Returns the handle onto the destination session; a same-region request
+    /// finishes as a `TeleportLocal` and returns `agent` itself.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::UnknownRegion`] for a region the grid does not serve,
+    /// [`Error::NotRootAgent`] when the agent has not arrived in its current
+    /// region, [`Error::TeleportTimedOut`] when the client never completed
+    /// its movement into the destination (the client was told
+    /// `timeout_tport`), and socket errors binding the destination.
+    pub async fn teleport_agent(
+        &self,
+        agent: &FakeAgent,
+        region_name: &str,
+        position: RegionCoordinates,
+        look_at: Vector,
+    ) -> Result<FakeAgent, Error> {
+        let region = self
+            .core
+            .region_by_name(region_name)
+            .ok_or_else(|| Error::UnknownRegion {
+                region: region_name.to_owned(),
+            })?;
+        let request = crate::teleport::TeleportRequest {
+            region,
+            arrival: ArrivalPlacement { position, look_at },
+            flags: sl_types::map::TeleportFlags::VIA_LOCATION,
+            progress: sl_proto::teleport_strings::SENDING_DEST,
+        };
+        match crate::teleport::teleport_session(&self.core, &agent.shared, request).await? {
+            crate::teleport::TeleportOutcome::Local => Ok(agent.clone()),
+            crate::teleport::TeleportOutcome::Moved(shared) => Ok(FakeAgent {
                 shared,
-                agent_id: notice.agent_id,
-            })
+                agent_id: agent.agent_id,
+            }),
+        }
     }
 
     /// Shuts the grid down: the accept loop, every session pump, and every
@@ -763,6 +980,18 @@ impl FakeAgent {
     #[must_use]
     pub fn events(&self) -> broadcast::Receiver<sl_proto::ServerEvent> {
         self.shared.subscribe_events()
+    }
+
+    /// This session's sequence number.
+    pub async fn session_seq(&self) -> u64 {
+        self.shared.state.lock().await.seq
+    }
+
+    /// Whether the session has closed (logout, inactivity, or retirement
+    /// after a teleport away).
+    #[must_use]
+    pub fn is_closed(&self) -> bool {
+        self.shared.is_closed()
     }
 }
 

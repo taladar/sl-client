@@ -20,9 +20,12 @@ struct Options {
     #[arg(long = "account", value_name = "FIRST:LAST:PASSWORD")]
     accounts: Vec<String>,
 
-    /// The region name.
-    #[arg(long, default_value = "Fake Region")]
-    region: String,
+    /// A region as `Name` or `Name@X,Y` (grid coordinates; repeatable — the
+    /// first is the start region, and a viewer can teleport between them
+    /// from the map). Default: one "Fake Region" at 1000,1000; unplaced
+    /// regions are laid out eastwards from there.
+    #[arg(long = "region", value_name = "NAME[@X,Y]")]
+    regions: Vec<String>,
 
     /// The grid name reported by `get_grid_info` (`gridname`).
     #[arg(long, default_value = "Fake Grid")]
@@ -36,6 +39,28 @@ struct Options {
     /// re-poll answer, in seconds.
     #[arg(long, default_value_t = 30)]
     hold_secs: u64,
+}
+
+/// Parses one `Name` / `Name@X,Y` region argument; `index` places an
+/// unplaced region east of the default origin.
+fn parse_region(raw: &str, index: u32) -> Option<RegionConfig> {
+    let default = RegionConfig::default();
+    let (name, coordinates) = match raw.split_once('@') {
+        Some((name, coordinates)) => {
+            let (x, y) = coordinates.split_once(',')?;
+            (name, (x.trim().parse().ok()?, y.trim().parse().ok()?))
+        }
+        None => (raw, (default.grid_x.checked_add(index)?, default.grid_y)),
+    };
+    if name.trim().is_empty() {
+        return None;
+    }
+    Some(RegionConfig {
+        name: name.trim().to_owned(),
+        grid_x: coordinates.0,
+        grid_y: coordinates.1,
+        ..default
+    })
 }
 
 /// Parses one `First:Last:password` account argument.
@@ -64,11 +89,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             name: options.grid_name.clone(),
             nick: options.grid_nick.clone(),
             ..GridIdentity::default()
-        })
-        .region(RegionConfig {
-            name: options.region.clone(),
-            ..RegionConfig::default()
         });
+    if options.regions.is_empty() {
+        builder = builder.region(RegionConfig::default());
+    }
+    for (index, raw) in options.regions.iter().enumerate() {
+        match u32::try_from(index)
+            .ok()
+            .and_then(|index| parse_region(raw, index))
+        {
+            Some(region) => {
+                tracing::info!(
+                    "region {:?} at {},{}",
+                    region.name,
+                    region.grid_x,
+                    region.grid_y
+                );
+                builder = builder.region(region);
+            }
+            None => {
+                tracing::error!("unparsable --region {raw:?} (want Name or Name@X,Y)");
+                return Err("bad --region argument".into());
+            }
+        }
+    }
     let mut any_account = false;
     for raw in &options.accounts {
         match parse_account(raw) {
@@ -95,8 +139,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let mut logins = grid.logins();
+    let mut teleports = grid.teleports();
     loop {
         tokio::select! {
+            notice = teleports.recv() => {
+                match notice {
+                    Ok(notice) => tracing::info!(
+                        "avatar {} teleported to {} (session {} -> {})",
+                        notice.agent_id,
+                        notice.region_name,
+                        notice.from_seq,
+                        notice.to_seq
+                    ),
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(missed)) => {
+                        tracing::warn!("missed {missed} teleport notices");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
             notice = logins.recv() => {
                 match notice {
                     Ok(notice) => tracing::info!(

@@ -10,6 +10,9 @@ pub enum Error {
     /// Serving an HTTP connection failed at the protocol level.
     #[error("HTTP connection failed: {0}")]
     Http(#[from] hyper::Error),
+    /// A protocol-level send on a session failed (no circuit, encoding).
+    #[error("session protocol error: {0}")]
+    Proto(#[from] sl_proto::Error),
     /// A URL the grid mints for itself did not parse (a bug, not user input).
     #[error("minted URL did not parse: {0}")]
     Url(#[from] url::ParseError),
@@ -24,6 +27,25 @@ pub enum Error {
         /// The colliding name.
         name: String,
     },
+    /// A teleport named a region the grid does not serve.
+    #[error("unknown region {region:?}")]
+    UnknownRegion {
+        /// The region name (or index) that did not resolve.
+        region: String,
+    },
+    /// A teleport was asked of a session whose agent has not arrived (a
+    /// child circuit, or a login that never completed its movement).
+    #[error("the agent is not the root agent of this session")]
+    NotRootAgent,
+    /// The client never completed its movement into the teleport
+    /// destination; the source was told `timeout_tport` and the destination
+    /// session was abandoned.
+    #[error("the client did not arrive in the teleport destination in time")]
+    TeleportTimedOut,
+    /// The session the teleport started from is not a registered account's
+    /// (cannot happen for a session the grid minted).
+    #[error("no account owns the teleporting agent")]
+    UnknownAccount,
     /// An account referenced a start region the builder never defined.
     #[error("account {account:?} starts in undefined region {region:?}")]
     UnknownStartRegion {

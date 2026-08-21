@@ -50,6 +50,7 @@ mod test {
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
     };
+    use sl_proto::{STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo};
     use sl_wire::messages::{
         AbortXfer, AbortXferXferIDBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
         EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock,
@@ -4329,7 +4330,7 @@ mod test {
         assert!(!sim.has_caps_events());
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr()),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
         );
         assert!(sim.has_caps_events());
 
@@ -6832,15 +6833,28 @@ mod test {
         );
         assert_eq!(dest.agent_presence(), AgentPresence::Child);
 
-        // The source finishes the teleport; the client promotes the child.
-        source.enqueue_teleport_finish(dest_sim_addr(), "http://127.0.0.1:9001/seed", 21, 16);
+        // The source finishes the teleport; the client promotes the child. The
+        // finish carries the destination handle (the reference record), and the
+        // client reports that wire handle rather than the one it requested.
+        let agent_id = source.agent_id().ok_or("source has no agent")?;
+        source.enqueue_teleport_finish(&TeleportFinishInfo {
+            agent_id,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest: dest_sim_addr(),
+            region_handle: RegionHandle(DEST_HANDLE),
+            seed: "http://127.0.0.1:9001/seed".to_owned(),
+            sim_access: 21,
+            teleport_flags: 16,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        });
         let finish_events = deliver_caps(&mut client, &mut source, now)?;
         assert!(
             finish_events.iter().any(|e| matches!(
                 e,
-                Event::TeleportFinished { sim, .. } if *sim == dest_sim_addr()
+                Event::TeleportFinished { sim, region_handle, .. }
+                    if *sim == dest_sim_addr() && *region_handle == RegionHandle(DEST_HANDLE)
             )),
-            "expected TeleportFinished, got {finish_events:?}"
+            "expected TeleportFinished naming the destination, got {finish_events:?}"
         );
         pump_multi(
             &mut client,
@@ -6866,13 +6880,141 @@ mod test {
         );
 
         // The source retires the now-child circuit; the client tears it down
-        // without disturbing the new root.
-        source.send_disable_simulator(now)?;
+        // without disturbing the new root, and the source session is closed
+        // (its driver's pumps exit) with the retirement as the last event.
+        source.retire_circuit(now)?;
         pump_multi(
             &mut client,
             &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
             now,
         )?;
+        assert!(source.is_closed(), "the retired source should be closed");
+        let source_events = drain_server(&mut source);
+        assert!(
+            source_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CircuitRetired)),
+            "expected CircuitRetired, got {source_events:?}"
+        );
+        // The new root is untouched by the retirement.
+        assert!(client.root_circuit_id().is_some());
+        assert!(dest.is_root_agent());
+        Ok(())
+    }
+
+    /// A teleport the **simulator** decides on (`llTeleportAgent`, a god
+    /// "teleport home", a grid-side push): no client request, the source's
+    /// remote `TeleportStart` opens the teleport on the client, the
+    /// event-queue trio lands it in the destination, and the client reports
+    /// the destination handle from the wire (it never knew a target).
+    #[test]
+    fn remote_initiated_teleport_two_sims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut source) = setup(now)?;
+        drain_server(&mut source);
+        drain_client(&mut client);
+        let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+
+        source.send_teleport_start(sl_proto::TeleportFlags::VIA_LOCATION, now)?;
+        source.send_teleport_progress(
+            "sending_dest",
+            sl_proto::TeleportFlags::VIA_LOCATION,
+            now,
+        )?;
+        pump(&mut client, &mut source, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events
+                .iter()
+                .any(|e| matches!(e, Event::TeleportStarted)),
+            "a remote TeleportStart opens the teleport, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportProgress { message, .. } if message == "sending_dest"
+            )),
+            "expected the progress key, got {client_events:?}"
+        );
+
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_establish_agent_communication(
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/child-seed",
+        );
+        let agent_id = source.agent_id().ok_or("source has no agent")?;
+        source.enqueue_teleport_finish(&TeleportFinishInfo {
+            agent_id,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest: dest_sim_addr(),
+            region_handle: RegionHandle(DEST_HANDLE),
+            seed: "http://127.0.0.1:9001/seed".to_owned(),
+            sim_access: 13,
+            teleport_flags: sl_proto::TeleportFlags::VIA_LOCATION,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        });
+        let caps_events = deliver_caps(&mut client, &mut source, now)?;
+        assert!(
+            caps_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFinished { region_handle, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE)
+            )),
+            "expected TeleportFinished with the wire handle, got {caps_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentArrived)),
+            "expected the arrival on the destination, got {dest_events:?}"
+        );
+        assert!(dest.is_root_agent());
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::RegionChanged { region_handle, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE)
+            )),
+            "expected RegionChanged, got {client_events:?}"
+        );
+
+        // A finish with no start at all is honoured the same way: the client
+        // is Active again, a second push lands it back on the source's twin.
+        let mut back = SimSession::new(RegionHandle(REGION_HANDLE), now);
+        let back_addr = SocketAddr::from(([127, 0, 0, 1], 9002));
+        dest.enqueue_teleport_finish(&TeleportFinishInfo {
+            agent_id,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest: back_addr,
+            region_handle: RegionHandle(REGION_HANDLE),
+            seed: "http://127.0.0.1:9002/seed".to_owned(),
+            sim_access: 13,
+            teleport_flags: sl_proto::TeleportFlags::VIA_LOCATION,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        });
+        let caps_events = deliver_caps(&mut client, &mut dest, now)?;
+        assert!(
+            caps_events
+                .iter()
+                .any(|e| matches!(e, Event::TeleportStarted)),
+            "a finish without a start opens the teleport, got {caps_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(dest_sim_addr(), &mut dest), (back_addr, &mut back)],
+            now,
+        )?;
+        assert!(
+            back.is_root_agent(),
+            "the client should have followed the push"
+        );
         Ok(())
     }
 
