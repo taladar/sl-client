@@ -107,9 +107,10 @@ over a small generic `xmlrpc` module):
   the commit must echo. Nothing moves a balance — an accepted purchase
   is published on `FakeGrid::economy_events` for tests to assert.
 
-The legacy UDP asset paths (Xfer, `TransferRequest`) are implemented in
-`SimSession` but the fake grid does not yet script content for them — see
-the `viewer-fake-grid-udp-assets` roadmap task.
+The legacy UDP asset paths (Xfer, `TransferRequest`, the estate terrain
+RAW download/upload) are implemented in `SimSession` but the fake grid
+does not yet script content for them — see the
+`viewer-fake-grid-udp-assets` roadmap task.
 
 The stock `Scenario` is intentionally small (an inventory skeleton, a
 library, one parcel, a chat greeting). A real viewer will ask for much

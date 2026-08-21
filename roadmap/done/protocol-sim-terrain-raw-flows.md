@@ -2,7 +2,7 @@
 id: protocol-sim-terrain-raw-flows
 title: Server-side terrain RAW download/upload — InitiateDownload + Xfer pull
 topic: protocol
-status: ready
+status: done
 origin: protocol-sim-http-misc audit (2026-08-21) — Xfer/Transfer coverage gaps
 points: 3
 refs: [protocol-sim-udp-flows, protocol-sim-http-misc, idiomatic-xfer-framing-codec]
@@ -35,3 +35,28 @@ terrain variant) for the un-special-cased estate methods,
 and offers it), `SimSession::request_xfer_upload(filename)` (a named
 pull feeding a `ServerEvent::XferReceived`), loopback tests driving the
 real client methods, and the two new `SESSION_FLOW_COVERAGE` rows.
+
+**Done (2026-08-21).** Reference behaviour cross-checked against OpenSim's
+`LLClientView` `terrain` dispatch, `EstateManagementModule.HandleTerrainRequest`
+/ `HandleUploadTerrain` and `EstateTerrainXferHandler`.
+
+- `EstateOwnerMessage` is now an unguarded arm: `telehub` and `terrain`
+  decode to typed events (`TerrainDownloadRequested { viewer_filename }`,
+  `TerrainUploadRequested { viewer_filename }`, `TerrainBakeRequested`);
+  every other method — and an unknown sub-command of those two — surfaces
+  as `ServerEvent::EstateOwnerRequest { method, invoice, params }` instead
+  of the `ClientMessage` catch-all.
+- `SimSession::send_initiate_download(sim_filename, viewer_filename, data)`
+  registers the file and sends the `InitiateDownload` (agent id, both
+  names); the client's existing auto-follow completes it.
+- `SimSession::request_xfer_upload(filename) -> XferId` sends the named
+  `RequestXfer` pull (nil `VFileID`, small packets, the
+  `EstateTerrainXferHandler` shape); `SimXferReceive` gained a purpose
+  (`AssetUpload` | `NamedFile`) and a completed named pull surfaces as
+  `ServerEvent::XferReceived { xfer_id, filename, data }`.
+- `SESSION_FLOW_COVERAGE` rows `terrain RAW download` / `terrain RAW upload`
+  (`Mirrored`); loopback tests `terrain_download_round_trips`,
+  `terrain_upload_round_trips` (incl. a client abort mid-pull) and
+  `untyped_estate_owner_message_is_surfaced` drive the real client methods.
+- The fake grid forwards events verbatim, so no driver change; scripting a
+  terrain fixture stays with [[viewer-fake-grid-udp-assets]].

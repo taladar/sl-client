@@ -210,6 +210,15 @@ The simulator half of every exchange above lives in the sans-I/O
   `RequestInventoryFile` text format), registers it under a deterministic
   `inventory_<task>.tmp` name, and sends the `ReplyTaskInventory` — the
   full server half of `Command::FetchTaskInventory`.
+- **Terrain RAW** is the pair above composed: the client's
+  `EstateOwnerMessage`/`terrain` requests surface as
+  `ServerEvent::TerrainDownloadRequested` / `TerrainUploadRequested`; the
+  driver answers a download with `send_initiate_download(sim_name,
+  viewer_name, bytes)` (registers the file and sends the `InitiateDownload`
+  the client auto-follows) and an upload with
+  `request_xfer_upload(viewer_name)` — a named `RequestXfer` pull whose
+  reassembled bytes arrive as `ServerEvent::XferReceived`. Every other
+  estate method surfaces raw as `ServerEvent::EstateOwnerRequest`.
 - **Upload receive** mirrors the wearable in-place save: an inline
   `AssetUploadRequest` completes immediately; an oversized one makes the
   sim issue the `RequestXfer` keyed by the predicted `VFileID`
@@ -260,8 +269,11 @@ flight is an `Error::UnknownXfer`, not a silent no-op.
 >   `InventoryType::from_type_name`/`to_type_name` in
 >   `sl-proto/src/types/asset.rs`.
 > - Server side: `SimSession::{register_xfer_file, serve_task_inventory,
->   abort_xfer, set_secure_session_id}` and the
->   `ServerEvent::{XferRequested, XferServed, XferAborted,
->   AssetUploadRequested, AssetUploaded}` events in
+>   send_initiate_download, request_xfer_upload, abort_xfer,
+>   set_secure_session_id}` and the
+>   `ServerEvent::{XferRequested, XferServed, XferReceived, XferAborted,
+>   AssetUploadRequested, AssetUploaded, TerrainDownloadRequested,
+>   TerrainUploadRequested, TerrainBakeRequested, EstateOwnerRequest}`
+>   events in
 >   `sl-proto/src/sim_session.rs`; loopback tests in
 >   `sl-proto/tests/sim_session.rs`.

@@ -180,8 +180,10 @@ use sl_wire::AbuseReport;
 use sl_wire::combine_uuids;
 use sl_wire::messages::{
     AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
-    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, RequestXfer, RequestXferXferIDBlock,
-    SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, InitiateDownload,
+    InitiateDownloadAgentDataBlock, InitiateDownloadFileDataBlock, RequestXfer,
+    RequestXferXferIDBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+    SendXferPacketXferIDBlock,
 };
 use sl_wire::messages::{
     AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
@@ -389,20 +391,39 @@ struct SimXferSend {
     last_sent: bool,
 }
 
-/// An inbound server-side `Xfer` pull in flight — the byte stream of an
-/// oversized legacy asset upload
-/// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset))
-/// the simulator requested from the client by its predicted `VFileID`.
+/// What an inbound server-side `Xfer` pull becomes once its final packet is
+/// confirmed — the mirror of the client's download purpose tag.
+#[derive(Debug)]
+enum SimXferReceivePurpose {
+    /// The byte stream of an oversized legacy asset upload
+    /// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset))
+    /// the simulator requested from the client by its predicted `VFileID`;
+    /// completes with an `AssetUploadComplete` and
+    /// [`ServerEvent::AssetUploaded`].
+    AssetUpload {
+        /// The predicted stored asset id,
+        /// `combine(transaction_id, secure_session_id)`.
+        asset_id: Uuid,
+        /// The asset type declared by the `AssetUploadRequest`.
+        asset_type: AssetType,
+        /// The upload's transaction id, echoed on
+        /// [`ServerEvent::AssetUploaded`].
+        transaction_id: TransactionId,
+    },
+    /// A named file the simulator pulled from the client
+    /// ([`SimSession::request_xfer_upload`]) — the terrain RAW upload;
+    /// completes with [`ServerEvent::XferReceived`].
+    NamedFile {
+        /// The filename the pull named (the client's viewer-side name).
+        filename: String,
+    },
+}
+
+/// An inbound server-side `Xfer` pull in flight.
 #[derive(Debug)]
 struct SimXferReceive {
-    /// The predicted stored asset id,
-    /// `combine(transaction_id, secure_session_id)`.
-    asset_id: Uuid,
-    /// The asset type declared by the `AssetUploadRequest`.
-    asset_type: AssetType,
-    /// The upload's transaction id, echoed on
-    /// [`ServerEvent::AssetUploaded`].
-    transaction_id: TransactionId,
+    /// What the assembled bytes become.
+    purpose: SimXferReceivePurpose,
     /// The file bytes accumulated so far (the seq-0 length prefix stripped).
     buffer: Vec<u8>,
 }
@@ -452,6 +473,8 @@ pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
     ("object sit", FlowMirrorStatus::Mirrored),
     ("Xfer download", FlowMirrorStatus::Mirrored),
     ("Xfer upload", FlowMirrorStatus::Mirrored),
+    ("terrain RAW download", FlowMirrorStatus::Mirrored),
+    ("terrain RAW upload", FlowMirrorStatus::Mirrored),
     (
         "legacy transaction asset upload",
         FlowMirrorStatus::Mirrored,
@@ -1290,6 +1313,37 @@ pub enum ServerEvent {
         /// The zero-based index of the spawn point to remove.
         spawn_index: u32,
     },
+    /// The client asked to download the region's terrain heightmap as an LL
+    /// RAW file (`EstateOwnerMessage`/`terrain` `download filename`). The
+    /// driver serialises the heightmap and offers it with
+    /// [`SimSession::send_initiate_download`], echoing this viewer filename.
+    TerrainDownloadRequested {
+        /// The filename the viewer wants the download tagged with.
+        viewer_filename: String,
+    },
+    /// The client asked to upload a terrain heightmap RAW file
+    /// (`EstateOwnerMessage`/`terrain` `upload filename`). The driver pulls it
+    /// with [`SimSession::request_xfer_upload`] naming this filename; the
+    /// bytes arrive as [`ServerEvent::XferReceived`].
+    TerrainUploadRequested {
+        /// The viewer-side filename the client will stream on request.
+        viewer_filename: String,
+    },
+    /// The client asked to bake the current terrain as the region's revert
+    /// baseline (`EstateOwnerMessage`/`terrain` `bake`).
+    TerrainBakeRequested,
+    /// An `EstateOwnerMessage` whose method has no typed event of its own
+    /// (the telehub and terrain methods do) — surfaced raw so a driver can
+    /// act on any estate command. The invoice is the client's correlation id
+    /// for a reply.
+    EstateOwnerRequest {
+        /// The estate method name (e.g. `setregioninfo`, `kickestate`).
+        method: String,
+        /// The client's invoice id, echoed on a reply.
+        invoice: Uuid,
+        /// The method's string parameters, in order.
+        params: Vec<String>,
+    },
     /// The client filed an abuse / bug report over the legacy `UserReport` UDP
     /// message (the modern path is the `SendUserReport` capability). The
     /// simulator routes it to the grid's abuse desk; fire-and-forget.
@@ -1714,6 +1768,18 @@ pub enum ServerEvent {
         filename: String,
         /// The number of file bytes streamed.
         byte_count: usize,
+    },
+    /// A named file the simulator pulled from the client with
+    /// [`SimSession::request_xfer_upload`] arrived in full — the server side
+    /// of the client's [`Event::XferUploaded`](crate::Event::XferUploaded)
+    /// (the terrain RAW upload).
+    XferReceived {
+        /// The transfer id the pull was issued under.
+        xfer_id: XferId,
+        /// The filename the pull named.
+        filename: String,
+        /// The assembled file bytes (length prefix stripped).
+        data: Vec<u8>,
     },
     /// The client aborted an in-flight `Xfer` transfer (`AbortXfer`), in
     /// either direction. The inverse of the client's
@@ -5973,6 +6039,89 @@ impl SimSession {
         )
     }
 
+    /// Offers the client a server-produced file: registers `data` under
+    /// `sim_filename` and sends an `InitiateDownload` naming it, echoing
+    /// `viewer_filename` so the client can tag the result. The client follows
+    /// the offer automatically with a `RequestXfer` for `sim_filename` and
+    /// surfaces the bytes as
+    /// [`Event::ServerFileDownloaded`](crate::Event::ServerFileDownloaded) —
+    /// the server half of the estate terrain RAW download
+    /// ([`ServerEvent::TerrainDownloadRequested`]), where a real simulator
+    /// mints a random `sim_filename`. Single-shot: the registered entry is
+    /// consumed by the request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the offer fails to encode.
+    pub fn send_initiate_download(
+        &mut self,
+        sim_filename: impl Into<String>,
+        viewer_filename: &str,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let sim_filename = sim_filename.into();
+        let message = AnyMessage::InitiateDownload(InitiateDownload {
+            agent_data: InitiateDownloadAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
+            },
+            file_data: InitiateDownloadFileDataBlock {
+                sim_filename: with_nul(&sim_filename),
+                viewer_filename: with_nul(viewer_filename),
+            },
+        });
+        self.register_xfer_file(sim_filename, data);
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Pulls a named file from the client: sends a `RequestXfer` for
+    /// `filename` (no `VFileID`, small packets — the shape OpenSim's
+    /// `EstateTerrainXferHandler` uses) and reassembles the client's
+    /// `SendXferPacket` stream, confirming each packet, into
+    /// [`ServerEvent::XferReceived`]. The server half of the client's
+    /// [`Session::request_region_terrain_upload`](crate::Session::request_region_terrain_upload),
+    /// issued in answer to [`ServerEvent::TerrainUploadRequested`]. Returns
+    /// the simulator-minted transfer id (the one a later
+    /// [`abort_xfer`](Self::abort_xfer) names).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the request fails to encode.
+    pub fn request_xfer_upload(&mut self, filename: &str, now: Instant) -> Result<XferId, Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let xfer_id = self.alloc_xfer_id();
+        self.xfer_receives.insert(
+            xfer_id,
+            SimXferReceive {
+                purpose: SimXferReceivePurpose::NamedFile {
+                    filename: filename.to_owned(),
+                },
+                buffer: Vec::new(),
+            },
+        );
+        let pull = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: xfer_id.get(),
+                filename: with_nul(filename),
+                file_path: 0,
+                delete_on_completion: false,
+                use_big_packets: false,
+                v_file_id: Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        self.send(&pull, Reliability::Reliable, now)?;
+        Ok(xfer_id)
+    }
+
     /// Aborts an in-flight `Xfer` transfer (either direction) with the given
     /// result code: drops its state and tells the client (`AbortXfer`), the
     /// inverse of the client's abort handling that surfaces
@@ -7507,12 +7656,27 @@ impl SimSession {
             AnyMessage::EstateCovenantRequest(_) => {
                 self.events.push_back(ServerEvent::RequestEstateCovenant);
             }
-            AnyMessage::EstateOwnerMessage(message)
-                if trimmed_string(&message.method_data.method) == "telehub" =>
-            {
-                if let Some(event) = telehub_server_event(&message.param_list) {
-                    self.events.push_back(event);
-                }
+            AnyMessage::EstateOwnerMessage(message) => {
+                // Estate commands: the telehub and terrain methods decode to
+                // typed events; everything else (and an unknown sub-command
+                // of those two) surfaces raw so no estate command is dropped.
+                let method = trimmed_string(&message.method_data.method);
+                let typed = match method.as_str() {
+                    "telehub" => telehub_server_event(&message.param_list),
+                    "terrain" => terrain_server_event(&message.param_list),
+                    _other => None,
+                };
+                self.events.push_back(typed.unwrap_or_else(|| {
+                    ServerEvent::EstateOwnerRequest {
+                        method,
+                        invoice: message.method_data.invoice,
+                        params: message
+                            .param_list
+                            .iter()
+                            .map(|block| trimmed_string(&block.parameter))
+                            .collect(),
+                    }
+                }));
             }
             AnyMessage::UserReport(report) => {
                 let data = &report.report_data;
@@ -7803,9 +7967,11 @@ impl SimSession {
                         self.xfer_receives.insert(
                             xfer_id,
                             SimXferReceive {
-                                asset_id,
-                                asset_type,
-                                transaction_id,
+                                purpose: SimXferReceivePurpose::AssetUpload {
+                                    asset_id,
+                                    asset_type,
+                                    transaction_id,
+                                },
                                 buffer: Vec::new(),
                             },
                         );
@@ -7850,18 +8016,28 @@ impl SimSession {
                     if packet_id.is_last()
                         && let Some(receive) = self.xfer_receives.remove(&xfer_id)
                     {
-                        self.send_asset_upload_complete(
-                            receive.asset_id,
-                            receive.asset_type,
-                            true,
-                            now,
-                        )?;
-                        self.events.push_back(ServerEvent::AssetUploaded {
-                            asset_id: AssetKey::from(receive.asset_id),
-                            asset_type: receive.asset_type,
-                            transaction_id: receive.transaction_id,
-                            data: receive.buffer,
-                        });
+                        match receive.purpose {
+                            SimXferReceivePurpose::AssetUpload {
+                                asset_id,
+                                asset_type,
+                                transaction_id,
+                            } => {
+                                self.send_asset_upload_complete(asset_id, asset_type, true, now)?;
+                                self.events.push_back(ServerEvent::AssetUploaded {
+                                    asset_id: AssetKey::from(asset_id),
+                                    asset_type,
+                                    transaction_id,
+                                    data: receive.buffer,
+                                });
+                            }
+                            SimXferReceivePurpose::NamedFile { filename } => {
+                                self.events.push_back(ServerEvent::XferReceived {
+                                    xfer_id,
+                                    filename,
+                                    data: receive.buffer,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -8411,6 +8587,26 @@ fn telehub_server_event(params: &[EstateOwnerMessageParamListBlock]) -> Option<S
         },
         "spawnpoint remove" => ServerEvent::RemoveTelehubSpawnPoint {
             spawn_index: param1(),
+        },
+        _ => return None,
+    };
+    Some(event)
+}
+
+/// Maps a `terrain` `EstateOwnerMessage`'s parameter list to a [`ServerEvent`]:
+/// `bake`, `download filename <name>`, `upload filename <name>` (the three
+/// sub-commands `LLClientView` dispatches). Returns `None` for an unknown
+/// sub-command or a missing filename.
+fn terrain_server_event(params: &[EstateOwnerMessageParamListBlock]) -> Option<ServerEvent> {
+    let command = trimmed_string(&params.first()?.parameter);
+    let filename = || params.get(1).map(|block| trimmed_string(&block.parameter));
+    let event = match command.trim() {
+        "bake" => ServerEvent::TerrainBakeRequested,
+        "download filename" => ServerEvent::TerrainDownloadRequested {
+            viewer_filename: filename()?,
+        },
+        "upload filename" => ServerEvent::TerrainUploadRequested {
+            viewer_filename: filename()?,
         },
         _ => return None,
     };

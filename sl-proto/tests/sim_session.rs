@@ -50,12 +50,13 @@ mod test {
         chatterbox_invitation_to_llsd,
     };
     use sl_wire::messages::{
-        AbortXfer, AbortXferXferIDBlock, ImprovedInstantMessage,
-        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-        ImprovedInstantMessageMessageBlockBlock, OfflineNotification,
-        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
-        StartPingCheck, StartPingCheckPingIDBlock, TransferRequest,
-        TransferRequestTransferInfoBlock,
+        AbortXfer, AbortXferXferIDBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock,
+        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+        OnlineNotificationAgentBlockBlock, StartPingCheck, StartPingCheckPingIDBlock,
+        TransferRequest, TransferRequestTransferInfoBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
@@ -5180,6 +5181,219 @@ mod test {
         Ok(())
     }
 
+    /// The estate terrain RAW download round-trips: the client's
+    /// `request_region_terrain_download` surfaces
+    /// [`ServerEvent::TerrainDownloadRequested`]; the driver's
+    /// `send_initiate_download` registers the heightmap and offers it, the
+    /// client follows the `InitiateDownload` automatically over `Xfer` and
+    /// surfaces the exact bytes as [`Event::ServerFileDownloaded`] tagged with
+    /// the viewer filename it asked for.
+    #[test]
+    fn terrain_download_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        client.request_region_terrain_download("terrain.raw", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::TerrainDownloadRequested {
+                    viewer_filename: "terrain.raw".to_owned(),
+                }),
+            "expected TerrainDownloadRequested, got {server_events:?}"
+        );
+
+        // More than two chunks, so the pacing loop is exercised.
+        let heightmap: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 211).unwrap_or(0))
+            .collect();
+        sim.send_initiate_download(
+            "0badc0de-terrain.raw",
+            "terrain.raw",
+            heightmap.clone(),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::ServerFileDownloaded { viewer_filename, data }
+                    if viewer_filename == "terrain.raw" && *data == heightmap
+            )),
+            "expected ServerFileDownloaded, got {client_events:?}"
+        );
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferRequested { filename, served: true, .. }
+                    if filename == "0badc0de-terrain.raw"
+            )),
+            "expected the served XferRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferServed { filename, byte_count, .. }
+                    if filename == "0badc0de-terrain.raw" && *byte_count == heightmap.len()
+            )),
+            "expected XferServed, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The estate terrain RAW upload round-trips: the client's
+    /// `request_region_terrain_upload` surfaces
+    /// [`ServerEvent::TerrainUploadRequested`]; the driver's
+    /// `request_xfer_upload` pulls the named file, the client streams it
+    /// (paced by the sim's confirmations) and reports [`Event::XferUploaded`],
+    /// and the sim surfaces the exact bytes as [`ServerEvent::XferReceived`].
+    /// A client abort mid-pull drops the receive.
+    #[test]
+    fn terrain_upload_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let heightmap: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 223).unwrap_or(0))
+            .collect();
+        client.request_region_terrain_upload("terrain.raw", heightmap.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::TerrainUploadRequested {
+                    viewer_filename: "terrain.raw".to_owned(),
+                }),
+            "expected TerrainUploadRequested, got {server_events:?}"
+        );
+
+        let xfer_id = sim.request_xfer_upload("terrain.raw", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::XferReceived {
+                    xfer_id,
+                    filename: "terrain.raw".to_owned(),
+                    data: heightmap.clone(),
+                }),
+            "expected XferReceived, got {server_events:?}"
+        );
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferUploaded { xfer_id: got, viewer_filename, byte_count }
+                    if *got == xfer_id && viewer_filename == "terrain.raw"
+                        && *byte_count == heightmap.len()
+            )),
+            "expected XferUploaded, got {client_events:?}"
+        );
+        assert!(
+            matches!(
+                sim.abort_xfer(xfer_id, 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "a completed pull is no longer in flight"
+        );
+
+        // Abort mid-pull: deliver only the pull + first packet, then the
+        // client aborts; the sim drops the receive and never completes it.
+        client.request_region_terrain_upload("again.raw", vec![7_u8; 2500], now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        let second = sim.request_xfer_upload("again.raw", now)?;
+        if let Some(transmit) = sim.poll_transmit() {
+            client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+        }
+        while sim.poll_transmit().is_some() {}
+        let abort = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: second.get(),
+                result: -3,
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&abort, 9200, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferAborted { xfer_id: got, result: -3 } if *got == second
+            )),
+            "expected XferAborted, got {server_events:?}"
+        );
+        pump(&mut client, &mut sim, now)?;
+        assert!(
+            !drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::XferReceived { .. })),
+            "an aborted pull must not complete"
+        );
+        Ok(())
+    }
+
+    /// An `EstateOwnerMessage` without a typed event of its own surfaces as
+    /// [`ServerEvent::EstateOwnerRequest`] with its method and parameters
+    /// (never the `ClientMessage` catch-all), and the `terrain` `bake`
+    /// sub-command gets its typed event.
+    #[test]
+    fn untyped_estate_owner_message_is_surfaced() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let target = AgentKey::from(uuid::Uuid::from_u128(0xE57A));
+        client.kick_estate_user(target, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::EstateOwnerRequest { method, params, .. }
+                    if method == "kickestate" && *params == vec![target.uuid().to_string()]
+            )),
+            "expected EstateOwnerRequest, got {server_events:?}"
+        );
+        assert!(
+            !server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::ClientMessage(_))),
+            "an estate command must not fall through to ClientMessage"
+        );
+
+        // No client helper sends `terrain`/`bake` (the viewer's revert
+        // baseline), so inject it as a wire datagram.
+        let bake = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
+            agent_data: EstateOwnerMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::nil(),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: EstateOwnerMessageMethodDataBlock {
+                method: b"terrain\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list: vec![EstateOwnerMessageParamListBlock {
+                parameter: b"bake\0".to_vec(),
+            }],
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&bake, 9300, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.contains(&ServerEvent::TerrainBakeRequested),
+            "expected TerrainBakeRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
     /// A `RequestXfer` for a name that was never registered is refused with an
     /// `AbortXfer`, so the requesting client is not left waiting.
     #[test]
@@ -6406,6 +6620,8 @@ mod test {
             ("object sit", FlowMirrorStatus::Mirrored),
             ("Xfer download", FlowMirrorStatus::Mirrored),
             ("Xfer upload", FlowMirrorStatus::Mirrored),
+            ("terrain RAW download", FlowMirrorStatus::Mirrored),
+            ("terrain RAW upload", FlowMirrorStatus::Mirrored),
             (
                 "legacy transaction asset upload",
                 FlowMirrorStatus::Mirrored,

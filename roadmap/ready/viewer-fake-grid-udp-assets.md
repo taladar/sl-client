@@ -28,3 +28,10 @@ Add to `Scenario`: named Xfer files, per-task inventories (for
 covenant → bytes); teach the driver to answer the three events from those
 fixtures (and `send_transfer_fail` for unknown sources). Cover with
 `client_end_to_end.rs` cases driving the real `sl-client-tokio` methods.
+
+Update (2026-08-21): the server half of the terrain RAW flows now exists
+too ([[protocol-sim-terrain-raw-flows]] — `send_initiate_download`,
+`request_xfer_upload`, `TerrainDownloadRequested` / `TerrainUploadRequested`
+/ `XferReceived`), so a terrain fixture (a RAW heightmap answered on
+`TerrainDownloadRequested`, an uploaded one captured from `XferReceived`)
+belongs in the same `Scenario` growth.

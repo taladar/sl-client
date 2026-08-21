@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 264 |
+| ready | 263 |
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 847 |
+| done | 848 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1351** |
@@ -217,12 +217,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (264)
+## ready (263)
 
 ### protocol
 
-- [`protocol-sim-terrain-raw-flows`](ready/protocol-sim-terrain-raw-flows.md) —
-  Server-side terrain RAW download/upload — InitiateDownload + Xfer pull
 - [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
   Server-side voice provisioning and WebRTC signalling stub (blocked by
   `protocol-sim-caps-framework` (done))
@@ -1152,7 +1150,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (847)
+## done (848)
 
 ### protocol
 
@@ -1300,6 +1298,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   server channels — grid info, map tiles, helper URIs
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
+- [`protocol-sim-terrain-raw-flows`](done/protocol-sim-terrain-raw-flows.md) —
+  Server-side terrain RAW download/upload — InitiateDownload + Xfer pull
 - [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state
   machines for the higher-level LLUDP flows
 - [`protocol-sim-udp-flows-2`](done/protocol-sim-udp-flows-2.md) — Server-side
