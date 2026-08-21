@@ -66,6 +66,29 @@ group chat, an ad-hoc id for a conference):
   `ConferenceSessionParticipant`, and being invited to one arrives as
   `Event::ConferenceInvited`.
 
+Starting a conference has **two wire paths**, and the runtimes pick by
+capability presence: where the region publishes `ChatSessionRequest` they POST
+its `start conference` method (`{ method, session-id, params: [<invitees>] }`,
+the reference's `startConferenceCoro`); on a grid without the cap — OpenSim —
+they send the deprecated `IM_SESSION_CONFERENCE_START` instant message with the
+invitees packed into its binary bucket (`Session::start_conference`). Either way
+the session opens locally under the id the *client* minted.
+
+Adding people to a conference that is already open is a *different* request:
+`Command::InviteToChatSession`, the cap's `invite` method (the reference's
+`LLFloaterIMSession::inviteToSession`). It names a real session, so no start
+reply follows; without the cap it falls back to re-sending the conference-start
+IM, the only invite the legacy path has.
+
+That id is **temporary**. The grid answers over the event queue with a
+`ChatterBoxSessionStartReply` — surfaced as `Event::ChatSessionStarted`, and on
+Second Life it names a *different* session id, which is the one every later
+message, invitation and roster update uses. `Session` re-keys its own registry
+entry onto the real id before the event is surfaced (merging into an entry the
+invitation may already have created), so a driver only has to move what *it*
+keyed by the temporary id — a conversation tab, say. A reply with
+`success: false` drops the session instead.
+
 Much of the multi-party machinery (invitations especially) is delivered through
 the [event queue](../comms/caps.md#the-event-queue-eventqueueget) rather than
 over UDP.
@@ -90,13 +113,20 @@ creates no state, since the simulator is authoritative for membership and the
 driver polices it; a `SessionLeave` (`SessionLeaveRequested`) drops the
 sender from the roster, removing an emptied session.
 
+The modern conference start arrives over the cap instead
+(`ChatSessionRequest`'s `start conference`), and lands on the same
+`ConferenceStartRequested` event — one registry, two doors.
+
 Outbound, the driver relays with `send_session_message` and
 `send_session_participant` (thin wrappers over the IM relay primitive that
 also fold the local roster/history; their `from_group` flag selects whether
 the client folds the traffic as group or conference chat), materialises a
 session on a *peer's* sim with `open_chat_session` (the invitee's region
 never sees the starter's conference-start IM), and delivers the invitation
-itself over the event queue with `enqueue_chatterbox_invitation`.
+itself over the event queue with `enqueue_chatterbox_invitation`. A simulator
+that mints its own session id for a conference tells the starter so with
+`enqueue_chatterbox_session_start_reply`, the inverse of the client's
+`Event::ChatSessionStarted`.
 
 ---
 

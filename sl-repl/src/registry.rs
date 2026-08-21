@@ -5430,6 +5430,20 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "invite_to_chat_session",
+            usage: "<session_id> <invitee,invitee,…>",
+            build: |args, ctx| {
+                Ok(Command::InviteToChatSession {
+                    session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
+                    invitees: args
+                        .vec_uuid(ctx, "invitees", 1)?
+                        .into_iter()
+                        .map(AgentKey::from)
+                        .collect(),
+                })
+            },
+        },
+        CommandSpec {
             name: "send_conference_message",
             usage: "<session_id> <message>",
             build: |args, ctx| {

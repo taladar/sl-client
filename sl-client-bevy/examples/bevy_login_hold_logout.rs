@@ -375,6 +375,7 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
+            | SlSessionEvent::ChatSessionStarted { .. }
             | SlSessionEvent::EstateCovenant(_)
             | SlSessionEvent::TelehubInfo(_)
             | SlSessionEvent::AlertMessage { .. }

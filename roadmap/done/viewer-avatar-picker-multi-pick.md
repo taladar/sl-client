@@ -74,10 +74,10 @@ was simply never updated when the ban path grew its multi-pick — and two
 buttons side by side that answer a modified click differently is worse than the
 divergence. Both are `many` here.
 
-Still to come, and now unblocked: [[viewer-conference-start-ui]] (invite N to
-an ad-hoc conference) and the multi-select People panel lists
-([[viewer-people-lists-multi-select]]), neither of which needs a picker of its
-own any more.
+Then unblocked, since landed: [[viewer-conference-start-ui]] took the picker up
+for its add-participants ✚ (a pane's answer becomes an ad-hoc conference).
+Still to come: the multi-select People panel lists
+([[viewer-people-lists-multi-select]]), which needs no picker of its own.
 
 Tests (six, on the picker's pure state): the single mode never selects more
 than one however the user clicks, the many mode toggles and ranges, a click

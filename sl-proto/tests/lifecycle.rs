@@ -43,8 +43,9 @@ mod test {
         TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
         TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
         UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, chat_session_request_body,
-        decode_texture_entry, group_powers, pcode,
+        WaterSettings, WearableType, avatar_texture, chat_session_agent_params_from_llsd,
+        chat_session_agents_body, chat_session_request_body, decode_texture_entry, group_powers,
+        pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -18164,6 +18165,126 @@ mod test {
         assert_eq!(
             parsed.get("session-id").and_then(Llsd::as_uuid),
             Some(session_id)
+        );
+        Ok(())
+    }
+
+    /// The `"start conference"` POST body carries the method, the temporary
+    /// session id and the invitees in `params` (the shape Firestorm's
+    /// `startConferenceCoro` sends), and parses back to the same invitee list.
+    #[test]
+    fn start_conference_body_carries_the_invitees() -> Result<(), TestError> {
+        let session_id = uuid::Uuid::from_u128(0x66_01);
+        let invitees = [
+            AgentKey::from(uuid::Uuid::from_u128(0x66_0A)),
+            AgentKey::from(uuid::Uuid::from_u128(0x66_0B)),
+        ];
+        let body = chat_session_agents_body("start conference", session_id, &invitees);
+        let parsed = parse_llsd_xml(&body)?;
+        assert_eq!(
+            parsed.get("method").and_then(Llsd::as_str),
+            Some("start conference")
+        );
+        assert_eq!(
+            parsed.get("session-id").and_then(Llsd::as_uuid),
+            Some(session_id)
+        );
+        assert_eq!(
+            chat_session_agent_params_from_llsd(&parsed),
+            invitees.to_vec()
+        );
+        Ok(())
+    }
+
+    /// A `ChatterBoxSessionStartReply` moves the conference we opened under the
+    /// id we minted onto the id the grid answered with — the participants come
+    /// along, the temporary key is gone, and the driver is told both ids.
+    #[test]
+    fn session_start_reply_rekeys_the_conference() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let temp = ImSessionId::from(uuid::Uuid::from_u128(0x67_01));
+        let real = uuid::Uuid::from_u128(0x67_02);
+        let invitee = AgentKey::from(uuid::Uuid::from_u128(0x67_0A));
+        session.start_conference(temp, &[invitee], "hi", now)?;
+        drain(&mut session)?;
+
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{real}</uuid>\
+               <key>temp_session_id</key><uuid>{}</uuid>\
+               <key>success</key><boolean>1</boolean>\
+               <key>session_info</key><map>\
+                 <key>session_name</key><string>Multi-person chat</string>\
+                 <key>voice_enabled</key><boolean>0</boolean>\
+               </map></map></llsd>",
+            temp.get()
+        );
+        session.handle_caps_event("ChatterBoxSessionStartReply", &parse_llsd_xml(&xml)?, now)?;
+
+        let real_kind = ChatSessionKind::Conference {
+            id: ImSessionId::from(real),
+        };
+        let temp_kind = ChatSessionKind::Conference { id: temp };
+        assert!(
+            session
+                .participants(real_kind)
+                .any(|agent| agent == invitee),
+            "the roster moved with the session"
+        );
+        assert_eq!(session.chat_session_lifecycle(temp_kind), None);
+        let events = drain_events(&mut session);
+        let started = events
+            .iter()
+            .find(|event| matches!(event, Event::ChatSessionStarted { .. }));
+        assert!(
+            matches!(
+                started,
+                Some(Event::ChatSessionStarted {
+                    temp_session_id,
+                    session_id,
+                    success: true,
+                    ..
+                }) if *temp_session_id == temp && session_id.get() == real
+            ),
+            "the driver is told which session id replaced which, got {started:?}"
+        );
+        Ok(())
+    }
+
+    /// A **failed** start drops the optimistic session rather than leaving a
+    /// conference nobody is in.
+    #[test]
+    fn a_failed_session_start_drops_the_conference() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let temp = ImSessionId::from(uuid::Uuid::from_u128(0x68_01));
+        session.start_conference(
+            temp,
+            &[AgentKey::from(uuid::Uuid::from_u128(0x68_0A))],
+            "",
+            now,
+        )?;
+        drain(&mut session)?;
+
+        let xml = format!(
+            "<llsd><map>\
+               <key>session_id</key><uuid>{}</uuid>\
+               <key>temp_session_id</key><uuid>{}</uuid>\
+               <key>success</key><boolean>0</boolean>\
+               <key>error</key><string>no such agent</string>\
+               </map></llsd>",
+            temp.get(),
+            temp.get()
+        );
+        session.handle_caps_event("ChatterBoxSessionStartReply", &parse_llsd_xml(&xml)?, now)?;
+        assert_eq!(
+            session.chat_session_lifecycle(ChatSessionKind::Conference { id: temp }),
+            None
         );
         Ok(())
     }

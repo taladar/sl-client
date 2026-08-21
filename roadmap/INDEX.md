@@ -14,12 +14,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ideas | 93 |
 | ready | 263 |
 | blocked | 68 |
-| in-progress | 16 |
-| bugs | 31 |
+| in-progress | 17 |
+| bugs | 36 |
 | done | 848 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1355** |
+| **total** | **1361** |
 
 ## ideas (93)
 
@@ -365,13 +365,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Collision events to nearby chat
 - [`viewer-combat-health-indicator`](ready/viewer-combat-health-indicator.md) —
   Combat health meter (HealthMessage)
-- [`viewer-conference-start-ui`](ready/viewer-conference-start-ui.md) — Start an
-  ad-hoc conference from a multi-selection
 - [`viewer-consolidate-double-click-interval`](ready/viewer-consolidate-double-click-interval.md)
   — Consolidate the per-widget double-click interval constants
 - [`viewer-conversation-log`](ready/viewer-conversation-log.md) — Conversation
   log — browse past conversations (blocked by `viewer-ui-widget-scaffold`
   (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-conversation-pane-toolbar`](ready/viewer-conversation-pane-toolbar.md)
+  — The conversation pane's toolbar, including the participant list
 - [`viewer-crowd-harness-copies-render-grey`](ready/viewer-crowd-harness-copies-render-grey.md)
   — Crowd harness copies render grey (snapshot the template before its bake)
 - [`viewer-debug-consoles`](ready/viewer-debug-consoles.md) — Debug consoles —
@@ -1035,7 +1035,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (16)
+## in-progress (17)
 
 ### viewer
 
@@ -1047,6 +1047,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   position)
 - [`viewer-avatar-ground-from-collision-plane`](in-progress/viewer-avatar-ground-from-collision-plane.md)
   — Avatar ground probe from the simulator's collision plane (drop the raycast)
+- [`viewer-conference-start-ui`](in-progress/viewer-conference-start-ui.md) —
+  Start an ad-hoc conference from a multi-selection
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
@@ -1079,7 +1081,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (31)
+## bugs (36)
 
 ### protocol
 
@@ -1089,6 +1091,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`viewer-add-friend-offers-silently`](bugs/viewer-add-friend-offers-silently.md)
+  — Add Friend sends the offer silently — no message dialog, no feedback
 - [`viewer-animesh-intermittent-render`](bugs/viewer-animesh-intermittent-render.md)
   — Animesh intermittently fails to render (timing race, not deterministic)
 - [`viewer-animesh-transparent-box-shell`](bugs/viewer-animesh-transparent-box-shell.md)
@@ -1102,6 +1106,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Unit tests open real audio devices on the developer's machine
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
+- [`viewer-avatar-picker-search-finds-nothing`](bugs/viewer-avatar-picker-search-finds-nothing.md)
+  — The avatar picker searches over the retired UDP path, so it finds nobody
+- [`viewer-clipped-links-still-pickable`](bugs/viewer-clipped-links-still-pickable.md)
+  — Scrolled-out chat links still hover and click, above the floater
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
   — Check clouds vs the waterline at the horizon against Firestorm
 - [`viewer-combo-stops-opening`](bugs/viewer-combo-stops-opening.md) — A combo
@@ -1113,6 +1121,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
+- [`viewer-im-tab-shows-short-id-not-name`](bugs/viewer-im-tab-shows-short-id-not-name.md)
+  — An IM tab we open ourselves is titled with a short id, never a name
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1139,6 +1149,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
+  — A second resident profile replaces the first instead of opening its own
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
   — render_readback texture-animation test is flaky under load
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)

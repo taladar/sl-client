@@ -759,6 +759,7 @@ impl Survey {
             | Event::ConferenceSessionMessage { .. }
             | Event::ConferenceSessionParticipant { .. }
             | Event::ConferenceInvited { .. }
+            | Event::ChatSessionStarted { .. }
             | Event::AvatarNames(_)
             | Event::GroupNames(_)
             | Event::DisplayNames(_)

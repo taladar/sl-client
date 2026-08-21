@@ -358,6 +358,25 @@ pub const CHAT_SESSION_ACCEPT: &str = "accept invitation";
 /// chat-session invitation, text or voice.
 pub const CHAT_SESSION_DECLINE: &str = "decline invitation";
 
+/// The `ChatSessionRequest` method that **starts an ad-hoc conference** with a
+/// list of invitees — the modern replacement for the deprecated
+/// `IM_SESSION_CONFERENCE_START` instant message
+/// ([`Session::start_conference`](crate::Session::start_conference)), which
+/// Firestorm's `startConferenceCoro` (`llimview.cpp:576`) POSTs whenever the
+/// region publishes the capability. The body carries the invitee ids in
+/// `params` and a **temporary** session id in `session-id`; the session's real
+/// id arrives afterwards over the event queue as a
+/// `ChatterBoxSessionStartReply` ([`Event::ChatSessionStarted`]).
+pub const CHAT_SESSION_START_CONFERENCE: &str = "start conference";
+
+/// The `ChatSessionRequest` method that **invites more agents into an already-
+/// open** multi-agent session — the ad-hoc conference's "add participants"
+/// (Firestorm `LLFloaterIMSession::inviteToSession`,
+/// `llfloaterimsession.cpp:1242`). Same body shape as
+/// [`CHAT_SESSION_START_CONFERENCE`], but the `session-id` is a real session
+/// rather than a minted one, so no `ChatterBoxSessionStartReply` follows.
+pub const CHAT_SESSION_INVITE: &str = "invite";
+
 /// The `ChatSessionRequest` method that declines / leaves a **1:1 P2P** voice
 /// call (a `Direct` session's voice channel), as distinct from the multi-agent
 /// [`CHAT_SESSION_DECLINE`] (Firestorm `llimview.cpp` voice-call teardown).
@@ -1468,15 +1487,16 @@ pub(crate) use conversions::{
 pub use conversions::{
     agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
     ais_inventory_update_to_llsd, build_map_block_reply, build_map_item_reply,
-    build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_request_body,
-    chat_session_request_from_llsd, chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
-    copy_inventory_from_notecard_body, created_category_to_llsd, crossed_region_to_caps_llsd,
-    display_name_update_to_llsd, enable_simulator_to_caps_llsd, environment_asset_from_bytes,
-    environment_to_llsd, establish_agent_communication_to_llsd, group_invite_response_body,
-    group_members_to_caps_llsd, group_memberships_to_caps_llsd, inventory_descendents_to_llsd,
-    nav_mesh_status_to_llsd, offline_messages_to_llsd, open_region_info_to_llsd,
-    parcel_info_to_llsd, required_voice_version_to_llsd, server_appearance_update_to_llsd,
-    session_history_to_llsd, set_display_name_reply_to_llsd, sim_console_response_to_llsd,
-    sky_settings_from_asset, teleport_finish_to_llsd, water_settings_from_asset,
-    windlight_refresh_to_llsd,
+    build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_agent_params_from_llsd,
+    chat_session_agents_body, chat_session_request_body, chat_session_request_from_llsd,
+    chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
+    chatterbox_session_start_reply_to_llsd, copy_inventory_from_notecard_body,
+    created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
+    enable_simulator_to_caps_llsd, environment_asset_from_bytes, environment_to_llsd,
+    establish_agent_communication_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
+    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
+    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
+    required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
+    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
+    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
 };

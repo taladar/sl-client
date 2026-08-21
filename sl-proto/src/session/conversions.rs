@@ -4,6 +4,7 @@
 use super::chat_session::{InviteChannel, ServerHistoryMessage, VoiceChannelInfo};
 use crate::GroupRoleKey;
 use crate::appearance;
+use crate::bookkeeping_ids::ImSessionId;
 use crate::types::{
     ActiveGroup, AssetType, AvatarAppearance, AvatarAttachment, AvatarGroupMembership,
     AvatarInterests, AvatarName, AvatarProperties, ChatAudible, ChatMessage, ChatSource, ChatType,
@@ -3302,6 +3303,113 @@ pub fn chat_session_request_from_llsd(body: &Llsd) -> Option<(String, Uuid)> {
     let method = body.get("method").and_then(Llsd::as_str)?.to_owned();
     let session_id = uuid_member_lenient(body, "session-id");
     Some((method, session_id))
+}
+
+/// Builds a `ChatSessionRequest` capability POST body that names a **list of
+/// agents**: `{ "method": <method>, "session-id": <id>, "params": [<uuids>] }`.
+///
+/// Two methods use this shape:
+/// [`CHAT_SESSION_START_CONFERENCE`](crate::CHAT_SESSION_START_CONFERENCE),
+/// whose `session-id` is the *temporary* one the client minted (Firestorm's
+/// `startConferenceCoro`, `llimview.cpp:576`), and
+/// [`CHAT_SESSION_INVITE`](crate::CHAT_SESSION_INVITE), whose `session-id` is
+/// an already-open session (`LLFloaterIMSession::inviteToSession`,
+/// `llfloaterimsession.cpp:1242`).
+///
+/// The reference's conference start additionally sends an
+/// `alt_params.voice_server_type`; we send no voice preference, so it is
+/// omitted (the grid then uses the region's).
+#[must_use]
+pub fn chat_session_agents_body(method: &str, session_id: Uuid, agents: &[AgentKey]) -> String {
+    let params = agents
+        .iter()
+        .map(|agent| Llsd::Uuid(agent.uuid()))
+        .collect();
+    llsd_map(vec![
+        ("method", Llsd::String(method.to_owned())),
+        ("session-id", Llsd::Uuid(session_id)),
+        ("params", Llsd::Array(params)),
+    ])
+    .to_llsd_xml()
+}
+
+/// Parses the agent list of a `ChatSessionRequest` body's `params` — the
+/// inverse of [`chat_session_agents_body`], for the server side of the cap.
+/// Non-uuid entries are skipped; a body with no `params` at all answers an
+/// empty list (a conference or an invitation of nobody, which the caller
+/// refuses).
+#[must_use]
+pub fn chat_session_agent_params_from_llsd(body: &Llsd) -> Vec<AgentKey> {
+    let Some(Llsd::Array(params)) = body.get("params") else {
+        return Vec::new();
+    };
+    params
+        .iter()
+        .filter_map(Llsd::as_uuid)
+        .map(AgentKey::from)
+        .collect()
+}
+
+/// Decodes a `ChatterBoxSessionStartReply` CAPS event body into an
+/// [`Event::ChatSessionStarted`] — the grid's answer to a session start,
+/// carrying the id the session actually has next to the temporary one we minted
+/// (OpenSim `EventQueueGetHandlers.cs:272`, Firestorm
+/// `LLViewerChatterBoxSessionStartReply::post`). Returns `None` when the body
+/// names no session at all.
+///
+/// The name / voice flag live under `session_info` on a success reply; a failure
+/// reply carries a top-level `error` instead.
+pub(crate) fn chatterbox_session_start_reply_from_llsd(body: &Llsd) -> Option<Event> {
+    let session_id = body.get("session_id")?.as_uuid()?;
+    let success = body.get("success").and_then(Llsd::as_bool).unwrap_or(false);
+    let info = body.get("session_info");
+    Some(Event::ChatSessionStarted {
+        temp_session_id: ImSessionId::from(uuid_member_lenient(body, "temp_session_id")),
+        session_id: ImSessionId::from(session_id),
+        success,
+        session_name: info.map_or_else(String::new, |info| string_member(info, "session_name")),
+        voice_enabled: info
+            .and_then(|info| info.get("voice_enabled"))
+            .and_then(Llsd::as_bool)
+            .unwrap_or(false),
+        error: string_member(body, "error"),
+    })
+}
+
+/// Serializes an [`Event::ChatSessionStarted`] as a `ChatterBoxSessionStartReply`
+/// event body (inverse of `chatterbox_session_start_reply_from_llsd`), matching
+/// the shape OpenSim's event-queue handler writes: the name / voice flag nested
+/// under `session_info` on success, a top-level `error` otherwise.
+#[must_use]
+pub fn chatterbox_session_start_reply_to_llsd(event: &Event) -> Llsd {
+    let Event::ChatSessionStarted {
+        temp_session_id,
+        session_id,
+        success,
+        session_name,
+        voice_enabled,
+        error,
+    } = event
+    else {
+        return Llsd::Undef;
+    };
+    let mut members = vec![
+        ("session_id", Llsd::Uuid(session_id.get())),
+        ("temp_session_id", Llsd::Uuid(temp_session_id.get())),
+        ("success", Llsd::Boolean(*success)),
+    ];
+    if *success {
+        members.push((
+            "session_info",
+            llsd_map(vec![
+                ("session_name", Llsd::String(session_name.clone())),
+                ("voice_enabled", Llsd::Boolean(*voice_enabled)),
+            ]),
+        ));
+    } else {
+        members.push(("error", Llsd::String(error.clone())));
+    }
+    llsd_map(members)
 }
 
 /// The LLSD-XML body of an offline group-invitation response — the `{ "group":

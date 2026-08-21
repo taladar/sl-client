@@ -63,6 +63,8 @@ inventory-collapse-all = Collapse all
 conversations-title = Conversations
 # The always-present first tab: local (nearby) chat.
 conversations-nearby = Nearby Chat
+# The tab title of an ad-hoc conference we started, until the grid names it.
+conversations-conference-title = Multi-person chat
 # The transcript speaker label for our own outbound lines.
 conversations-you = You
 # The "someone is typing" status line under a transcript.

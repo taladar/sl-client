@@ -59,6 +59,7 @@ use sl_client_bevy::{
     MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
+use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::bottom_toolbar::{BOTTOM_BAR_Z, BottomArea};
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
 use crate::floater::{
@@ -176,6 +177,13 @@ const CLOSE_GLYPH_COLOR: Color = Color::srgb(0.72, 0.74, 0.80);
 /// The close-button glyph (a small ✕), on every non-Nearby tab.
 const CLOSE_GLYPH: &str = "\u{2715}";
 
+/// The add-participants glyph (a small ✚), on a one-to-one or conference pane.
+const ADD_PARTICIPANTS_GLYPH: &str = "\u{271A}";
+
+/// The [`crate::avatar_picker::OpenAvatarPicker::requester`] tag the
+/// add-participants button opens the shared picker under.
+const ADD_PARTICIPANTS_REQUESTER: &str = "conversations-add-participants";
+
 /// The panel area's background — the content shade the active tab shares.
 const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
 
@@ -257,6 +265,10 @@ const DOCK_HOST_Z: i32 = BOTTOM_BAR_Z + 1;
 
 /// The Fluent key for the Nearby Chat tab's title.
 const NEARBY_TITLE_KEY: &str = "conversations-nearby";
+
+/// The Fluent key for the title of an ad-hoc conference **we** started — the
+/// reference's `conference-title` string, used until the grid names the session.
+const CONFERENCE_TITLE_KEY: &str = "conversations-conference-title";
 
 /// The Fluent key for the "our own line" speaker label in a transcript.
 const YOU_LABEL_KEY: &str = "conversations-you";
@@ -687,6 +699,42 @@ impl ConversationModel {
         }
     }
 
+    /// Moves a conversation from one key to another, keeping its transcript,
+    /// unread count and active-ness — how a conference we started under the
+    /// session id *we* minted follows the grid's answer onto the id the session
+    /// really has ([`SlSessionEvent::ChatSessionStarted`]).
+    ///
+    /// If a conversation already exists under `to` (the invitation to our own
+    /// conference outran the start reply), the two are merged into it rather
+    /// than left as two tabs for one session. Returns whether anything moved,
+    /// so the caller knows to drop the stale view.
+    fn rekey(&mut self, from: ConversationKey, to: ConversationKey) -> bool {
+        if from == to || from.is_nearby() || to.is_nearby() {
+            return false;
+        }
+        let Some(index) = self.index_of(from) else {
+            return false;
+        };
+        let moved = self.entries.remove(index);
+        match self.index_of(to) {
+            Some(existing) => {
+                if let Some(entry) = self.entries.get_mut(existing) {
+                    entry.lines.extend(moved.lines);
+                    while entry.lines.len() > HISTORY_CAP {
+                        entry.lines.pop_front();
+                    }
+                    entry.unread = entry.unread.saturating_add(moved.unread);
+                    entry.revision = entry.revision.wrapping_add(1);
+                }
+            }
+            None => self.entries.push(Conversation { key: to, ..moved }),
+        }
+        if self.active == from {
+            self.active = to;
+        }
+        true
+    }
+
     /// Removes `key`'s conversation (never the Nearby tab). If it was active, the
     /// selection falls back to Nearby. Returns whether anything was removed.
     fn close(&mut self, key: ConversationKey) -> bool {
@@ -955,6 +1003,49 @@ pub(crate) struct OpenConversation {
     pub(crate) key: ConversationKey,
 }
 
+/// A request to start an **ad-hoc conference** with several residents, or to
+/// invite more people into one that is already open — the reference's
+/// `LLAvatarActions::startConference` (`llavataractions.cpp:423`), and the one
+/// verb every multi-selection of avatars in this viewer routes to: the radar's
+/// multi-row *IM*, the People panel's Friends list, and the inventory's
+/// *Start Conference Chat* on calling cards.
+///
+/// The list is taken as the user picked it — the handler drops our own agent
+/// and any repeats, and a list that leaves **one** resident opens a plain
+/// one-to-one IM instead (what the reference's `Avatar.IM` does by count), so a
+/// caller never has to branch on how many rows are selected.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct StartConference {
+    /// The residents to invite.
+    pub(crate) agents: Vec<AgentKey>,
+    /// The conference to invite them **into**, or `None` to start a new one.
+    /// Inviting into an open conference is the same wire request with the same
+    /// session id (the reference's "Add participants" on an IM floater).
+    pub(crate) into: Option<ImSessionId>,
+}
+
+impl StartConference {
+    /// Start a fresh conference with `agents`.
+    pub(crate) const fn with(agents: Vec<AgentKey>) -> Self {
+        Self { agents, into: None }
+    }
+
+    /// Invite `agents` into the already-open conference `session`.
+    pub(crate) const fn adding(session: ImSessionId, agents: Vec<AgentKey>) -> Self {
+        Self {
+            agents,
+            into: Some(session),
+        }
+    }
+}
+
+/// The conversation whose **add-participants** button opened the shared avatar
+/// picker, so its answer knows what it is adding to. `None` when no such pick is
+/// outstanding. One slot rather than a per-request tag, because the picker
+/// floater is a singleton — the same reason its `requester` is a `&'static str`.
+#[derive(Resource, Debug, Default)]
+struct PendingParticipantPick(Option<ConversationKey>);
+
 /// A viewer-generated system line for the **Nearby Chat transcript** — e.g. a
 /// radar enter / leave report ([`crate::radar`]). This is deliberately a
 /// separate channel from the transient overlay
@@ -1070,10 +1161,12 @@ impl Plugin for ConversationsPlugin {
             .init_resource::<StripFocus>()
             .init_resource::<NearbyRecallState>()
             .init_resource::<KeyedRecallState>()
+            .init_resource::<PendingParticipantPick>()
             .add_message::<SelectConversation>()
             .add_message::<CloseConversation>()
             .add_message::<RespondToInvite>()
             .add_message::<OpenConversation>()
+            .add_message::<StartConference>()
             .add_message::<NearbyChatNotice>()
             .add_message::<ConversationNotice>()
             .add_systems(
@@ -1086,6 +1179,8 @@ impl Plugin for ConversationsPlugin {
                     ingest_conversation_events,
                     ingest_nearby_notices,
                     ingest_conversation_notices,
+                    apply_participant_picks,
+                    start_conferences,
                     open_conversations,
                     apply_conversation_selection,
                     respond_to_invites,
@@ -1470,6 +1565,14 @@ fn spawn_conversation_view(
     // RTL-aware via `LogicalInset`. Nearby Chat cannot be closed, so it gets none.
     if !nearby {
         spawn_pane_close_button(commands, panel, key);
+        // A 1:1 IM and an ad-hoc conference can both grow into a (larger)
+        // conference; a group session cannot (its roster is the group).
+        if matches!(
+            key,
+            ConversationKey::Direct(_) | ConversationKey::Conference(_)
+        ) {
+            spawn_add_participants_button(commands, panel, key);
+        }
     }
 
     ConversationView {
@@ -1527,6 +1630,59 @@ fn spawn_pane_close_button(commands: &mut Commands, panel: Entity, key: Conversa
                 if press.button == PointerButton::Primary {
                     close.write(CloseConversation { key });
                 }
+            },
+        );
+}
+
+/// Spawn a conversation pane's **add-participants** button — a small ✚ beside
+/// the close ✕, the reference's "Add Someone to this Conversation"
+/// (`llfloaterimsession.cpp:573`, which likewise calls `startConference` with
+/// the session it is already in).
+///
+/// It opens the shared avatar picker in its multi mode; the answer becomes a
+/// conference with everyone picked, either a new one (from a 1:1, whose peer
+/// joins the list) or more people invited into this one.
+fn spawn_add_participants_button(commands: &mut Commands, panel: Entity, key: ConversationKey) {
+    commands
+        .spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                padding: UiRect::axes(Val::Px(6.0), Val::Px(2.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            LogicalInset(LogicalRect {
+                block_start: Val::Px(2.0),
+                inline_end: Val::Px(26.0),
+                ..LogicalRect::AUTO
+            }),
+            BackgroundColor(PANEL_BACKGROUND),
+            Pickable {
+                should_block_lower: true,
+                is_hoverable: true,
+            },
+            Name::new("conversations-pane-add-participants"),
+            ChildOf(panel),
+        ))
+        .with_child((
+            Text::new(ADD_PARTICIPANTS_GLYPH.to_owned()),
+            UiFont::Sans.at(CHROME_FONT_SIZE),
+            TextColor(CLOSE_GLYPH_COLOR),
+            Pickable::IGNORE,
+        ))
+        .observe(
+            move |mut press: On<Pointer<Press>>,
+                  mut pending: ResMut<PendingParticipantPick>,
+                  mut pickers: MessageWriter<OpenAvatarPicker>| {
+                press.propagate(false);
+                if press.button != PointerButton::Primary {
+                    return;
+                }
+                // Only one picker is open at a time, so the conversation that
+                // asked is a single slot rather than a per-request tag.
+                pending.0 = Some(key);
+                pickers.write(OpenAvatarPicker::many(ADD_PARTICIPANTS_REQUESTER));
             },
         );
 }
@@ -1799,6 +1955,27 @@ pub(crate) fn ingest_conversation_events(
                     model.mark_invite(ConversationKey::Conference(id));
                 }
             }
+            // The grid's answer to a conference we started: the session id we
+            // minted was temporary, so the tab moves onto the one the session
+            // really has (a failed start closes it instead). The runtime has
+            // already moved its own registry entry.
+            SlSessionEvent::ChatSessionStarted {
+                temp_session_id,
+                session_id,
+                success,
+                session_name,
+                error,
+                ..
+            } => {
+                let from = ConversationKey::Conference(*temp_session_id);
+                if *success {
+                    model.note_conference_name(*session_id, session_name);
+                    let _moved = model.rekey(from, ConversationKey::Conference(*session_id));
+                } else {
+                    info!("conversations: conference start refused: {error}");
+                    let _closed = model.close(from);
+                }
+            }
             // Harvest group names so a group tab is titled for the group, not a
             // raw id (mirrors the chat-log's name harvesting).
             SlSessionEvent::GroupMemberships(memberships) => {
@@ -2003,6 +2180,148 @@ fn open_conversations(
     }
 }
 
+/// Start ad-hoc conferences (or invite more people into an open one) — the
+/// [`StartConference`] verb every multi-selection of avatars routes to.
+///
+/// The list is cleaned first: our own agent is not an invitee (the grid puts us
+/// in the session it creates for us), and a repeated id would invite the same
+/// person twice. What is left decides the shape:
+///
+/// - **nobody** — nothing happens, rather than a conference of one;
+/// - **one resident**, for a *new* conference — a plain one-to-one IM tab, the
+///   count branch the reference's `Avatar.IM` makes so a caller does not have
+///   to;
+/// - **several** — one `StartConference` command under a freshly minted session
+///   id, and the tab for it. The id is **temporary**: the grid answers with the
+///   session's real id ([`SlSessionEvent::ChatSessionStarted`]), and
+///   [`ingest_conversation_events`] moves the tab across.
+///
+/// Inviting into an *existing* conference keeps its session id, so one resident
+/// is a perfectly good request there.
+fn start_conferences(
+    mut requests: MessageReader<StartConference>,
+    identity: Res<SlIdentity>,
+    translator: Translator,
+    mut model: ResMut<ConversationModel>,
+    mut commands: MessageWriter<SlCommand>,
+    mut opens: MessageWriter<OpenConversation>,
+) {
+    for request in requests.read() {
+        match conference_plan(&request.agents, identity.agent_id, request.into) {
+            None => {}
+            Some(ConferencePlan::Im(peer)) => {
+                opens.write(OpenConversation {
+                    key: ConversationKey::Direct(peer),
+                });
+            }
+            Some(ConferencePlan::Conference { session, invitees }) => {
+                // Two different requests: a conference that does not exist yet
+                // is *started* under a freshly minted (temporary) id; one that
+                // does is *invited into*, keeping the id it already has.
+                let session_id = match session {
+                    Some(open) => {
+                        commands.write(SlCommand(Command::InviteToChatSession {
+                            session_id: open,
+                            invitees,
+                        }));
+                        open
+                    }
+                    None => {
+                        let fresh = ImSessionId::from(Uuid::new_v4());
+                        commands.write(SlCommand(Command::StartConference {
+                            session_id: fresh,
+                            invitees,
+                            message: String::new(),
+                        }));
+                        // Name the tab the way the reference names a conference
+                        // it started — its own `conference-title` string —
+                        // until the start reply (or an invitation) supplies the
+                        // session's real name.
+                        model.note_conference_name(fresh, &translator.get(CONFERENCE_TITLE_KEY));
+                        fresh
+                    }
+                };
+                opens.write(OpenConversation {
+                    key: ConversationKey::Conference(session_id),
+                });
+            }
+        }
+    }
+}
+
+/// What a [`StartConference`] request turns into — the pure half of
+/// [`start_conferences`], so the count branch and the cleaning of the list are
+/// testable without a grid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ConferencePlan {
+    /// One resident, and no session to add them to: a one-to-one IM.
+    Im(AgentKey),
+    /// A conference of `invitees` — `session` names the one to invite them
+    /// into, or `None` to mint a fresh (temporary) id for a new one.
+    Conference {
+        /// The conference to invite into, or `None` for a new one.
+        session: Option<ImSessionId>,
+        /// Everyone to invite, in the order they were given.
+        invitees: Vec<AgentKey>,
+    },
+}
+
+/// Decide what a conference request means. Our own agent is dropped (the grid
+/// puts us in the session it makes for us) and repeats are dropped (nobody is
+/// invited twice); an empty result is no request at all.
+fn conference_plan(
+    agents: &[AgentKey],
+    own: Option<AgentKey>,
+    into: Option<ImSessionId>,
+) -> Option<ConferencePlan> {
+    let mut invitees: Vec<AgentKey> = Vec::new();
+    for agent in agents {
+        if own == Some(*agent) || invitees.contains(agent) {
+            continue;
+        }
+        invitees.push(*agent);
+    }
+    let first = invitees.first().copied()?;
+    if into.is_none() && invitees.len() == 1 {
+        return Some(ConferencePlan::Im(first));
+    }
+    Some(ConferencePlan::Conference {
+        session: into,
+        invitees,
+    })
+}
+
+/// Turn the avatar picker's answer to an **add-participants** press into a
+/// conference: from a one-to-one that is the peer plus everyone picked (a new
+/// ad-hoc session — the reference makes a fresh one too), and from a conference
+/// it is an invitation of the picked into the session already open.
+fn apply_participant_picks(
+    mut picks: MessageReader<AvatarPicked>,
+    mut pending: ResMut<PendingParticipantPick>,
+    mut conferences: MessageWriter<StartConference>,
+) {
+    for pick in picks.read() {
+        if pick.requester != ADD_PARTICIPANTS_REQUESTER {
+            continue;
+        }
+        let Some(key) = pending.0.take() else {
+            continue;
+        };
+        let picked = pick.picks.iter().map(|picked| picked.agent);
+        match key {
+            ConversationKey::Direct(peer) => {
+                conferences.write(StartConference::with(
+                    std::iter::once(peer).chain(picked).collect(),
+                ));
+            }
+            ConversationKey::Conference(session) => {
+                conferences.write(StartConference::adding(session, picked.collect()));
+            }
+            ConversationKey::Nearby | ConversationKey::Group(_) => {}
+        }
+    }
+}
+
 /// Apply the pending tab selections to the model. Selecting a conversation tab
 /// also hands the strip back from any external pane ([`StripFocus`]), so its pane
 /// shows and the external one is suppressed.
@@ -2058,7 +2377,15 @@ fn close_conversations(
 }
 
 /// Spawn a view for any model conversation that does not have one yet (a newly
-/// discovered IM / group / conference). Nearby is seeded at startup.
+/// discovered IM / group / conference), and drop the view of any conversation
+/// the model no longer has. Nearby is seeded at startup.
+///
+/// The pruning half is what lets a conversation **move** keys
+/// ([`ConversationModel::rekey`], when the grid renames the session we started):
+/// the tab's press observer captured its key, so the stale view is despawned and
+/// a fresh one spawned under the new key rather than re-labelled in place. Every
+/// other removal goes through [`close_conversations`], which drops both halves
+/// itself, so this normally finds nothing.
 fn spawn_conversation_tabs(
     mut commands: Commands,
     model: Res<ConversationModel>,
@@ -2067,6 +2394,18 @@ fn spawn_conversation_tabs(
     let Some(ui) = ui.as_deref_mut() else {
         return;
     };
+    let stale: Vec<ConversationKey> = ui
+        .views
+        .keys()
+        .copied()
+        .filter(|key| model.index_of(*key).is_none())
+        .collect();
+    for key in stale {
+        if let Some(view) = ui.views.remove(&key) {
+            commands.entity(view.tab_button).despawn();
+            commands.entity(view.panel).despawn();
+        }
+    }
     let (strip, panel_area) = (ui.strip, ui.panel_area);
     for entry in &model.entries {
         if ui.views.contains_key(&entry.key) {
@@ -2475,8 +2814,9 @@ fn position_conversations_dock_host(
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, ConversationKey, ConversationModel, ConversationTitle, SpeakerLink,
-        TranscriptLine, command_for, invite_command, line_text, tab_label, transcript_line_color,
+        Command, ConferencePlan, ConversationKey, ConversationModel, ConversationTitle,
+        SpeakerLink, TranscriptLine, command_for, conference_plan, invite_command, line_text,
+        tab_label, transcript_line_color,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, ChatSource, GroupKey, ImSessionId, ObjectKey, Uuid};
@@ -2851,6 +3191,96 @@ mod tests {
                 "live line".to_owned()
             ])
         );
+    }
+
+    /// What a multi-selection of residents means: nobody is nothing, one
+    /// resident is a plain IM (the count branch the reference's `Avatar.IM`
+    /// makes), several are one conference — with our own agent and any repeat
+    /// dropped, since the grid seats us itself and nobody is invited twice.
+    #[test]
+    fn a_selection_becomes_an_im_or_a_conference_by_count() {
+        let own = AgentKey::from(Uuid::from_u128(0xB0));
+        let one = AgentKey::from(Uuid::from_u128(0xB1));
+        let two = AgentKey::from(Uuid::from_u128(0xB2));
+
+        assert_eq!(conference_plan(&[], Some(own), None), None);
+        assert_eq!(conference_plan(&[own], Some(own), None), None);
+        assert_eq!(
+            conference_plan(&[one], Some(own), None),
+            Some(ConferencePlan::Im(one))
+        );
+        assert_eq!(
+            conference_plan(&[one, two, one, own], Some(own), None),
+            Some(ConferencePlan::Conference {
+                session: None,
+                invitees: vec![one, two],
+            }),
+            "our own id and the repeat are dropped, the order is kept"
+        );
+
+        // Adding to an open conference is the same request with its id, and
+        // one resident is a perfectly good thing to add.
+        let session = ImSessionId::from(Uuid::from_u128(0xB3));
+        assert_eq!(
+            conference_plan(&[one], Some(own), Some(session)),
+            Some(ConferencePlan::Conference {
+                session: Some(session),
+                invitees: vec![one],
+            })
+        );
+    }
+
+    /// A conference we started under our own minted id follows the grid's
+    /// answer onto the id the session really has, transcript and all — and if
+    /// an invitation to our own conference beat the reply there, the two tabs
+    /// become one rather than staying two views of one session.
+    #[test]
+    fn a_started_conference_follows_the_grid_s_session_id() {
+        let mut model = ConversationModel::default();
+        let temp = ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC1)));
+        let real = ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC2)));
+        let speaker = AgentKey::from(Uuid::from_u128(0xC3));
+        model.push_remote(temp, speaker, "Avatar One", "before the reply");
+        model.select(temp);
+
+        assert!(model.rekey(temp, real), "the conversation moved");
+        assert!(!model.has_conversation(temp), "the temporary tab is gone");
+        assert_eq!(model.active_key(), real, "and it stayed the active tab");
+        assert_eq!(
+            get(&model, real).map(|entry| entry
+                .lines
+                .iter()
+                .map(|line| line.body.clone())
+                .collect::<Vec<_>>()),
+            Some(vec!["before the reply".to_owned()]),
+            "the transcript came along"
+        );
+
+        // The merge case: a second start onto a key that already exists.
+        let second = ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC4)));
+        model.push_remote(second, speaker, "Avatar One", "from the invitation");
+        assert!(model.rekey(real, second));
+        assert_eq!(
+            get(&model, second).map(|entry| entry.lines.len()),
+            Some(2),
+            "both transcripts ended up in the one surviving tab"
+        );
+        assert!(!model.has_conversation(real));
+    }
+
+    /// A re-key that names the Nearby tab, or goes nowhere, does nothing — the
+    /// singleton local-chat tab is not a session and cannot move.
+    #[test]
+    fn rekey_refuses_nearby_and_no_ops() {
+        let mut model = ConversationModel::default();
+        let conference = ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC5)));
+        assert!(!model.rekey(ConversationKey::Nearby, conference));
+        assert!(!model.rekey(conference, ConversationKey::Nearby));
+        assert!(!model.rekey(conference, conference));
+        assert!(!model.rekey(
+            conference,
+            ConversationKey::Conference(ImSessionId::from(Uuid::from_u128(0xC6)))
+        ));
     }
 
     /// The unread badge shows only on an inactive tab with unread lines.

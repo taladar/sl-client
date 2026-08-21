@@ -278,6 +278,7 @@ fn on_events(
             | SlSessionEvent::ConferenceSessionMessage { .. }
             | SlSessionEvent::ConferenceSessionParticipant { .. }
             | SlSessionEvent::ConferenceInvited { .. }
+            | SlSessionEvent::ChatSessionStarted { .. }
             | SlSessionEvent::AvatarNames(_)
             | SlSessionEvent::GroupNames(_)
             | SlSessionEvent::DisplayNames(_)

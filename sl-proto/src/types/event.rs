@@ -27,6 +27,7 @@ use super::{
     SoundFlags, SoundPreload, TaskInventoryItem, TaskInventoryReply, TelehubInfo, TeleportFlags,
     TerrainPatch, Texture, TransferStatus, UserInfo, ViewerEffect, Wearable,
 };
+use crate::bookkeeping_ids::ImSessionId;
 use crate::marketplace::{
     Listing, ListingId, MarketplaceApiError, MarketplaceOperation, MerchantStatus,
 };
@@ -1003,6 +1004,39 @@ pub enum Event {
         /// group/session name used to label the session; empty for an ordinary
         /// conference invite.
         binary_bucket: Vec<u8>,
+    },
+    /// The simulator's answer to a session **start** we requested — the CAPS
+    /// event-queue `ChatterBoxSessionStartReply`, sent after a
+    /// [`Session::start_conference`](crate::Session::start_conference) (or its
+    /// modern `ChatSessionRequest` `"start conference"` equivalent) and after a
+    /// [`Session::start_group_session`](crate::Session::start_group_session).
+    ///
+    /// The session id we minted is a **temporary** one: the grid answers with
+    /// the id the session actually has, and the two differ for an ad-hoc
+    /// conference on Second Life. The session registry is re-keyed onto
+    /// [`session_id`](Self::ChatSessionStarted::session_id) before this event is
+    /// surfaced, so a driver only has to move whatever *it* keyed by the
+    /// temporary id (an open conversation tab, say). A group session's reply
+    /// names the group id it already had, so the re-key is then a no-op.
+    ChatSessionStarted {
+        /// The session id **we** minted and sent the start with.
+        temp_session_id: ImSessionId,
+        /// The session id the grid gave the session — what every later message,
+        /// invite and roster update names it by. Equal to
+        /// [`temp_session_id`](Self::ChatSessionStarted::temp_session_id) on a
+        /// grid that keeps the client's id (OpenSim's group sessions).
+        session_id: ImSessionId,
+        /// Whether the session started. On `false` the session was **not**
+        /// created and the registry entry for the temporary id is dropped;
+        /// [`error`](Self::ChatSessionStarted::error) says why.
+        success: bool,
+        /// The session's human-readable name from the reply's `session_info`
+        /// (empty when the reply carries none, as a failure reply does).
+        session_name: String,
+        /// Whether the reply's `session_info` advertises a voice channel.
+        voice_enabled: bool,
+        /// The grid's failure reason (empty on success).
+        error: String,
     },
     /// The result of a [`Session::create_group`](crate::Session::create_group)
     /// (`CreateGroupReply`).

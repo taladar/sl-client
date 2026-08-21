@@ -106,14 +106,15 @@ sets `LLNetMap`'s marks too), and **Render Settings** (the standing per-avatar
 exception from [[viewer-avatar-render-settings-manager]]), plus **Remove
 Friend**.
 
-Two entries of the reference's multi menu are **not** here, both because the
-feature behind them does not exist yet, and both now written down where they
-will be picked up:
+Two entries of the reference's multi menu were **not** here when this landed,
+both because the feature behind them did not exist yet, and both written down
+where they would be picked up:
 
-- *Start a conference* — [[viewer-conference-start-ui]], which has gained a note
-  that the radar is its first waiting consumer. Until then *IM* on several rows
-  opens several direct conversations rather than one conference; that arm
-  becomes the conference verb when the task lands.
+- *Start a conference* — [[viewer-conference-start-ui]], which named the radar
+  its first waiting consumer. Its code is in: the `"im"` arm now writes one
+  `StartConference` for the whole selection (an IM for one row, a conference
+  for several), so the divergence this file recorded is gone — though that
+  task is still open on live verification.
 - *Freeze / Parcel Eject / Estate Kick / Teleport Home / Estate Ban* — no viewer
   surface offers these per avatar yet (the avatar pie holds them as disabled
   placeholders, and the estate tab acts on a typed name), so they are now

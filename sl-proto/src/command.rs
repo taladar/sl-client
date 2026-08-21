@@ -2466,16 +2466,40 @@ pub enum Command {
         /// The trash folder the simulator routes the declined item to.
         trash_folder_id: InventoryFolderKey,
     },
-    /// Start (or add invitees to) an ad-hoc conference IM session
-    /// (`IM_SESSION_CONFERENCE_START`). Messages arrive as
+    /// Start an ad-hoc conference IM session. Where the `ChatSessionRequest`
+    /// capability is present (Second Life) the runtimes POST its
+    /// [`start conference`](crate::CHAT_SESSION_START_CONFERENCE) method;
+    /// otherwise they send the deprecated `IM_SESSION_CONFERENCE_START` instant
+    /// message ([`Session::start_conference`](crate::Session::start_conference)).
+    /// Messages arrive as
     /// [`Event::ConferenceSessionMessage`](crate::Event::ConferenceSessionMessage).
+    ///
+    /// `session_id` is a fresh, caller-chosen **temporary** id: the grid answers
+    /// with the session's real one as
+    /// [`Event::ChatSessionStarted`](crate::Event::ChatSessionStarted). To add
+    /// people to a session that is already open, use
+    /// [`Command::InviteToChatSession`] instead.
     StartConference {
-        /// A fresh, caller-chosen session id naming the conference.
+        /// A fresh, caller-chosen temporary session id naming the conference.
         session_id: ImSessionId,
         /// The agents to invite.
         invitees: Vec<AgentKey>,
-        /// The opening message.
+        /// The opening message (the deprecated IM path only — the capability
+        /// carries no message).
         message: String,
+    },
+    /// Invite more agents into an **already-open** multi-agent session — the
+    /// conference's "add participants", the `ChatSessionRequest` capability's
+    /// [`invite`](crate::CHAT_SESSION_INVITE) method. Unlike
+    /// [`Command::StartConference`] this names a real session, so no start
+    /// reply follows. On a grid without the capability the runtimes fall back
+    /// to re-sending the conference-start instant message with the same session
+    /// id, which is the only invite the legacy path has.
+    InviteToChatSession {
+        /// The open session to invite into.
+        session_id: ImSessionId,
+        /// The agents to invite.
+        invitees: Vec<AgentKey>,
     },
     /// Send a message into a conference / ad-hoc IM session (`IM_SESSION_SEND`).
     SendConferenceMessage {

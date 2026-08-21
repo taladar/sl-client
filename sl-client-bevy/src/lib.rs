@@ -26,27 +26,28 @@ use sl_proto::{
     CAP_SEND_USER_REPORT, CAP_SEND_USER_REPORT_WITH_SCREENSHOT, CAP_SIMULATOR_FEATURES,
     CAP_UPDATE_EXPERIENCE, CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_USER_INFO,
     CAP_VOICE_SIGNALING, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE, CHAT_SESSION_DECLINE_P2P_VOICE,
-    CHAT_SESSION_FETCH_HISTORY, Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd,
-    LoginResponse, RECV_BUFFER_SIZE, SelectedCostKind, Session, SessionMessage, UserInfoUpdate,
-    ais_category_children_fetch_url, ais_category_children_url, ais_category_url,
-    ais_create_category_url, ais_item_url, associate_inventory_request,
-    build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
-    build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_render_materials_put_request, build_resource_cost_selected_request,
-    build_send_user_report, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_user_info_update, build_voice_signaling_request, chat_session_request_body,
-    copy_inventory_from_notecard_body, create_listing_request, delete_listing_request,
-    display_names_query, experience_id_query, experience_info_query, find_experience_query,
-    forget_experience_query, group_experiences_query, group_invite_response_body, listing_request,
-    listings_request, merchant_status_request, parse_login_response, update_listing_request,
+    CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE,
+    Event as SessionEvent, INVENTORY_FETCH_MAX_IN_FLIGHT, Llsd, LoginResponse, RECV_BUFFER_SIZE,
+    SelectedCostKind, Session, SessionMessage, UserInfoUpdate, ais_category_children_fetch_url,
+    ais_category_children_url, ais_category_url, ais_create_category_url, ais_item_url,
+    associate_inventory_request, build_agent_preferences_request, build_ais_create_category_body,
+    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_create_inventory_category_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_render_materials_put_request,
+    build_resource_cost_selected_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
+    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
+    create_listing_request, delete_listing_request, display_names_query, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
+    group_invite_response_body, listing_request, listings_request, merchant_status_request,
+    parse_login_response, update_listing_request,
 };
 
 // Re-export the core types a consumer needs to configure the plugin, drive the
@@ -3708,9 +3709,51 @@ fn advance_running(
                 invitees,
                 message,
             } => {
-                session
-                    .start_conference(*session_id, invitees, message, now)
-                    .ok();
+                // The modern start is a `ChatSessionRequest` POST; the
+                // deprecated `IM_SESSION_CONFERENCE_START` instant message is
+                // the fallback for a grid without the cap (OpenSim). Either
+                // way the session opens locally under the id we minted, and
+                // the grid's `ChatterBoxSessionStartReply` moves it onto the
+                // id the session really has.
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+                {
+                    let body = chat_session_agents_body(
+                        CHAT_SESSION_START_CONFERENCE,
+                        session_id.get(),
+                        invitees,
+                    );
+                    session.open_conference(*session_id, invitees, now);
+                    std::thread::spawn(move || {
+                        run_caps_oneway(&url, body);
+                    });
+                } else {
+                    session
+                        .start_conference(*session_id, invitees, message, now)
+                        .ok();
+                }
+            }
+            Command::InviteToChatSession {
+                session_id,
+                invitees,
+            } => {
+                // Adding to a session that already exists is the cap's own
+                // `invite`; the legacy path has only the conference-start IM,
+                // which a simulator without the cap treats as an add.
+                if let Some(caps) = caps.as_ref()
+                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+                {
+                    let body =
+                        chat_session_agents_body(CHAT_SESSION_INVITE, session_id.get(), invitees);
+                    session.open_conference(*session_id, invitees, now);
+                    std::thread::spawn(move || {
+                        run_caps_oneway(&url, body);
+                    });
+                } else {
+                    session
+                        .start_conference(*session_id, invitees, "", now)
+                        .ok();
+                }
             }
             Command::SendConferenceMessage {
                 session_id,

@@ -281,6 +281,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             } => info!(
                 "conference invitation to {session_name:?} ({dialog:?}, from_group={from_group}) from {from_name}: {message}"
             ),
+            Event::ChatSessionStarted {
+                temp_session_id,
+                session_id,
+                success,
+                session_name,
+                ..
+            } => info!(
+                "chat session {temp_session_id:?} started as {session_id:?}                  (success={success}) named {session_name:?}"
+            ),
             Event::ScriptDialog(dialog) => info!(
                 "script dialog from {:?}: {:?} [{}]",
                 dialog.object_name,

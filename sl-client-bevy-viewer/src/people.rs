@@ -61,7 +61,9 @@ use sl_client_bevy::{
 use sl_settings::SettingValue;
 
 use crate::avatar_profile::OpenAvatarProfile;
-use crate::conversations::{ConversationKey, ConversationsUi, OpenConversation, StripFocus};
+use crate::conversations::{
+    ConversationKey, ConversationsUi, OpenConversation, StartConference, StripFocus,
+};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::mutes::RequestBlock;
 use crate::settings::{ViewerSettings, load_account_settings};
@@ -70,7 +72,7 @@ use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_table::{
     TableAlign, TableColumn, TableColumnKind, TableColumnWidth, TableSelectionMode, TableSpec,
-    register_table_settings, spawn_table, spawn_table_row,
+    TableState, register_table_settings, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
@@ -118,9 +120,6 @@ const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
 /// The friends-list scroll surface background — a touch darker, a sunken well.
 const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
-
-/// The background of the currently-selected friend row.
-const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.30, 0.42, 0.62, 0.55);
 
 /// An online friend's presence dot colour — a friendly green.
 const ONLINE_COLOR: Color = Color::srgb(0.40, 0.80, 0.42);
@@ -290,7 +289,7 @@ pub(crate) const SETTING_CONTACT_SET_NOTIFY: &str = "ContactSetsNotificationToas
 /// widths (draggable + persisted), scroll, row pool and selection.
 const FRIENDS_TABLE: TableSpec = TableSpec {
     element: "people-friends",
-    selection: TableSelectionMode::None,
+    selection: TableSelectionMode::Multi,
     columns: &[
         TableColumn {
             header_key: HEADER_NAME_KEY,
@@ -1244,9 +1243,64 @@ pub(crate) struct FriendsView {
     built_revision: u64,
 }
 
-/// The currently-selected friend, which the action bar acts on.
+impl FriendsView {
+    /// The display index of `friend`'s row, or `None` when it is not shown.
+    fn index_of(&self, friend: FriendKey) -> Option<usize> {
+        self.rows.iter().position(|row| row.friend == friend)
+    }
+}
+
+/// The currently-selected friends, which the action bar acts on — **several**,
+/// as the reference's friends list is (`llpanelpeople.cpp:1514`, whose IM button
+/// starts a conference when more than one row is picked).
+///
+/// The click algebra is the table widget's ([`TableSelectionMode::Multi`] —
+/// Ctrl toggles, Shift ranges); this is the mirror of it by [`FriendKey`], the
+/// only terms that survive the list re-sorting and re-filtering under the user.
+/// [`mirror_friend_selection`] reads the widget's answer in, and
+/// [`rebuild_friends_view`] re-projects it back out onto the new row order —
+/// exactly the two-way arrangement the radar uses ([`crate::radar`]).
 #[derive(Resource, Debug, Default)]
-pub(crate) struct SelectedFriend(Option<FriendKey>);
+pub(crate) struct SelectedFriend {
+    /// The selected friends, in the table order they were read at.
+    friends: Vec<FriendKey>,
+    /// The range anchor — whom a `Shift`+click ranges from.
+    anchor: Option<FriendKey>,
+    /// The table selection revision the friends were last read at.
+    read_revision: u64,
+}
+
+impl SelectedFriend {
+    /// The friend a single-friend action means: the first of the selection.
+    fn primary(&self) -> Option<FriendKey> {
+        self.friends.first().copied()
+    }
+
+    /// The whole selection, in table order.
+    fn all(&self) -> &[FriendKey] {
+        &self.friends
+    }
+
+    /// Re-key the selection onto a freshly built row order, returning the
+    /// `(indices, anchor index)` to hand back to the table widget. A friend
+    /// whose row went away drops out — a selection is what the user can see.
+    fn reproject(&mut self, view: &FriendsView) -> (Vec<usize>, Option<usize>) {
+        self.friends
+            .retain(|friend| view.index_of(*friend).is_some());
+        self.anchor = self
+            .anchor
+            .filter(|anchor| view.index_of(*anchor).is_some());
+        let indices = self
+            .friends
+            .iter()
+            .filter_map(|friend| view.index_of(*friend))
+            .collect();
+        (
+            indices,
+            self.anchor.and_then(|anchor| view.index_of(anchor)),
+        )
+    }
+}
 
 /// The last friend-row click, for detecting a double-click (two presses on the
 /// same friend within [`DOUBLE_CLICK_SECS`] open a one-to-one IM, like the IM
@@ -1380,6 +1434,7 @@ impl Plugin for PeoplePlugin {
                     request_friend_names,
                     apply_people_selection,
                     apply_people_sub_tab,
+                    mirror_friend_selection,
                     seed_sort_from_settings.after(load_account_settings),
                     apply_sort,
                     rebuild_friends_view.run_if(crate::floater::floater_shown(
@@ -1905,33 +1960,56 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
                   model: Res<FriendsModel>,
                   mut sl: MessageWriter<SlCommand>,
                   mut blocks: MessageWriter<RequestBlock>,
-                  mut open: MessageWriter<OpenConversation>,
+                  mut conferences: MessageWriter<StartConference>,
                   mut profiles: MessageWriter<OpenAvatarProfile>| {
                 press.propagate(false);
                 if press.button != PointerButton::Primary {
                     return;
                 }
-                let Some(friend) = selected.0 else {
+                let friends = selected.all();
+                let Some(primary) = selected.primary() else {
                     return;
                 };
-                let agent = AgentKey::from(friend);
-                if action == FriendAction::Im {
-                    open.write(OpenConversation {
-                        key: ConversationKey::Direct(agent),
-                    });
-                    return;
-                }
-                if action == FriendAction::Profile {
-                    profiles.write(OpenAvatarProfile { agent });
-                    return;
-                }
-                if action == FriendAction::Block {
-                    let name = model.name_of(agent).unwrap_or_default().to_owned();
-                    blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
-                    return;
-                }
-                if let Some(command) = friend_command(action, friend) {
-                    sl.write(SlCommand(command));
+                match action {
+                    // One row is an IM, several are one ad-hoc conference —
+                    // the reference's own count branch, made by the shared
+                    // verb rather than here.
+                    FriendAction::Im => {
+                        conferences.write(StartConference::with(
+                            friends.iter().copied().map(AgentKey::from).collect(),
+                        ));
+                    }
+                    // A profile is one avatar's window, so it opens for the
+                    // row the selection leads with.
+                    FriendAction::Profile => {
+                        profiles.write(OpenAvatarProfile {
+                            agent: AgentKey::from(primary),
+                        });
+                    }
+                    // Blocking is per resident, and each goes through the
+                    // guarded request (which confirms before muting).
+                    FriendAction::Block => {
+                        for friend in friends {
+                            let agent = AgentKey::from(*friend);
+                            let name = model.name_of(agent).unwrap_or_default().to_owned();
+                            blocks.write(RequestBlock::new(agent.uuid(), name, MuteType::Agent));
+                        }
+                    }
+                    // One offer names everyone — the message's target is
+                    // already a list.
+                    FriendAction::OfferTeleport => {
+                        sl.write(SlCommand(Command::OfferTeleport {
+                            targets: friends.iter().copied().map(AgentKey::from).collect(),
+                            message: String::new(),
+                        }));
+                    }
+                    FriendAction::RemoveFriend => {
+                        for friend in friends {
+                            if let Some(command) = friend_command(action, *friend) {
+                                sl.write(SlCommand(command));
+                            }
+                        }
+                    }
                 }
             },
         );
@@ -2246,19 +2324,63 @@ fn rebuild_friends_view(
     model: Res<FriendsModel>,
     mut view: ResMut<FriendsView>,
     ui: Option<Res<PeopleUi>>,
+    mut selection: ResMut<SelectedFriend>,
     mut lists: Query<&mut VirtualList>,
+    mut tables: Query<&mut TableState>,
 ) {
     if view.built_revision == model.revision {
         return;
     }
     view.built_revision = model.revision;
     view.rows = model.ordered();
-    if let Some(ui) = ui
-        && let Ok(mut list) = lists.get_mut(ui.friends_viewport)
-    {
+    let Some(ui) = ui else {
+        return;
+    };
+    if let Ok(mut list) = lists.get_mut(ui.friends_viewport) {
         list.item_count = view.rows.len();
         list.scroll_to_top();
     }
+    // Put the same people back onto their new row indices. This is deliberately
+    // not read back as a selection *event*: nothing was selected, the rows
+    // moved.
+    if let Ok(mut table) = tables.get_mut(ui.friends_table) {
+        let (indices, anchor) = selection.reproject(&view);
+        table.set_selection(indices, anchor);
+        selection.read_revision = table.selection_revision();
+    }
+}
+
+/// Mirror the table widget's click-driven selection into the friend-keyed one —
+/// the friends list's half of the arrangement [`crate::radar`] documents: the
+/// widget answers in data indices, which mean something only against the row
+/// order they were clicked in, so they are read through into [`FriendKey`]s
+/// before the actions consume them and before the next rebuild re-sorts.
+fn mirror_friend_selection(
+    view: Res<FriendsView>,
+    ui: Option<Res<PeopleUi>>,
+    mut selection: ResMut<SelectedFriend>,
+    tables: Query<&TableState>,
+) {
+    let Some(ui) = ui else {
+        return;
+    };
+    let Ok(table) = tables.get(ui.friends_table) else {
+        return;
+    };
+    if table.selection_revision() == selection.read_revision {
+        return;
+    }
+    selection.read_revision = table.selection_revision();
+    selection.friends = table
+        .selected()
+        .iter()
+        .filter_map(|index| view.rows.get(*index))
+        .map(|row| row.friend)
+        .collect();
+    selection.anchor = table
+        .anchor()
+        .and_then(|index| view.rows.get(index))
+        .map(|row| row.friend);
 }
 
 /// Keep the People surface in step: the tab colours (active while the strip focus
@@ -2572,16 +2694,12 @@ fn drive_grant_confirm(
 }
 
 /// Bind each pooled friend row to the [`FriendRow`] it now points at — on the
-/// frame the view rebuilt, the selection changed, or this row's index changed.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the view / selection, the \
-              row pool and its part queries, and the commands that stamp each row's \
-              drag-and-drop give target"
-)]
+/// frame the view rebuilt or this row's index changed. The row's *selection*
+/// tint is not painted here: the table widget owns it
+/// ([`crate::ui_table`]'s `apply_table_selection_highlight`), since the list
+/// went multi-select.
 fn bind_friend_rows(
     view: Res<FriendsView>,
-    selected: Res<SelectedFriend>,
     ui: Option<Res<PeopleUi>>,
     mut rows: Query<(
         Entity,
@@ -2590,7 +2708,6 @@ fn bind_friend_rows(
         &FriendRowParts,
         &mut BoundFriend,
     )>,
-    mut backgrounds: Query<&mut BackgroundColor>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut checkboxes: Query<(&mut ImageNode, &mut CellFriend)>,
     mut commands: Commands,
@@ -2598,7 +2715,7 @@ fn bind_friend_rows(
     let Some(ui) = ui else {
         return;
     };
-    let refresh_all = view.is_changed() || selected.is_changed();
+    let refresh_all = view.is_changed();
     for (row_entity, row, child_of, parts, mut bound) in &mut rows {
         if child_of.parent() != ui.friends_viewport {
             continue;
@@ -2646,29 +2763,16 @@ fn bind_friend_rows(
                 cell_friend.0 = Some(friend_row.friend);
             }
         }
-        let is_selected = selected.0 == Some(friend_row.friend);
-        if let Ok(mut background) = backgrounds.get_mut(row_entity) {
-            let wanted = if is_selected {
-                SELECTED_ROW_BACKGROUND
-            } else {
-                Color::NONE
-            };
-            if background.0 != wanted {
-                background.0 = wanted;
-            }
-        }
     }
 }
 
-/// A friend row was clicked: focus the list (so the wheel scrolls it), select the
-/// friend it presents, and — on a **double-click** (two presses on the same friend
-/// within [`DOUBLE_CLICK_SECS`]) — open a one-to-one IM, exactly like the IM button.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "an observer's parameters are its injected queries / resources: the picked row, the \
-              viewport to focus, the click clock + tracker for double-click detection, the \
-              selection to set, and the writer a double-click opens the IM through"
-)]
+/// A friend row was clicked: focus the list (so the wheel scrolls it) and — on a
+/// **double-click** (two presses on the same friend within
+/// [`DOUBLE_CLICK_SECS`]) — open a one-to-one IM, exactly like the IM button.
+///
+/// The *selection* is not set here: the table widget's own row observer owns the
+/// Ctrl / Shift click algebra now that the list is multi-select, and
+/// [`mirror_friend_selection`] reads its answer through.
 fn on_friend_row_press(
     press: On<Pointer<Press>>,
     rows: Query<&BoundFriend>,
@@ -2676,7 +2780,6 @@ fn on_friend_row_press(
     time: Res<Time>,
     mut tracker: ResMut<FriendClickTracker>,
     mut focus: ResMut<InputFocus>,
-    mut selected: ResMut<SelectedFriend>,
     mut open: MessageWriter<OpenConversation>,
 ) {
     if press.button != PointerButton::Primary {
@@ -2689,7 +2792,6 @@ fn on_friend_row_press(
     let Some(friend) = bound.0 else {
         return;
     };
-    selected.0 = Some(friend);
     let now = time.elapsed_secs();
     if tracker.friend == Some(friend) && now - tracker.time <= DOUBLE_CLICK_SECS {
         // Second quick click on the same friend: open the one-to-one IM. Clear the
@@ -2719,9 +2821,11 @@ fn set_text(text: &mut Text, value: &str) {
 
 #[cfg(test)]
 mod tests {
-    use super::{Command, FriendAction, FriendsModel, friend_command};
+    use super::{
+        Command, FriendAction, FriendRow, FriendsModel, FriendsView, SelectedFriend, friend_command,
+    };
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{Friend, FriendKey, FriendPresence, FriendRights, Uuid};
+    use sl_client_bevy::{AgentKey, Friend, FriendKey, FriendPresence, FriendRights, Uuid};
 
     /// A friend record with the given id and default (no) rights.
     fn friend(id: u128) -> Friend {
@@ -2730,6 +2834,55 @@ mod tests {
             rights_granted: FriendRights(0),
             rights_received: FriendRights(0),
         }
+    }
+
+    /// A view of the given friends, in that order.
+    fn view_of(friends: &[FriendKey]) -> FriendsView {
+        FriendsView {
+            rows: friends
+                .iter()
+                .map(|friend| FriendRow {
+                    friend: *friend,
+                    agent: AgentKey::from(*friend),
+                    name: String::new(),
+                    online: false,
+                    rights_granted: FriendRights(0),
+                    rights_received: FriendRights(0),
+                })
+                .collect(),
+            built_revision: 0,
+        }
+    }
+
+    /// The selection survives the list re-sorting under it — the same people at
+    /// their new row indices — and someone whose row went away (they were
+    /// filtered out, or the friendship ended) drops out rather than acting
+    /// invisibly from the action bar.
+    #[test]
+    fn the_friend_selection_survives_a_resort() {
+        let (a, b, c) = (
+            FriendKey::from(Uuid::from_u128(1)),
+            FriendKey::from(Uuid::from_u128(2)),
+            FriendKey::from(Uuid::from_u128(3)),
+        );
+        let mut selection = SelectedFriend {
+            friends: vec![a, c],
+            anchor: Some(c),
+            read_revision: 7,
+        };
+
+        // The same three friends, re-sorted.
+        let (indices, anchor) = selection.reproject(&view_of(&[c, b, a]));
+        assert_eq!(indices, vec![2, 0], "the same people, at their new rows");
+        assert_eq!(anchor, Some(0));
+        assert_eq!(selection.all(), &[a, c]);
+
+        // `c` is no longer in the list at all.
+        let (indices, anchor) = selection.reproject(&view_of(&[b, a]));
+        assert_eq!(indices, vec![1]);
+        assert_eq!(anchor, None, "the anchor went with the row");
+        assert_eq!(selection.all(), &[a]);
+        assert_eq!(selection.primary(), Some(a));
     }
 
     /// A login `FriendList` seeds the buddy cache, offline until presence says

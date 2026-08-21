@@ -6,9 +6,10 @@ use super::conversions::{
     ais_inventory_update_from_llsd, ais_updated_category_versions, avatar_animations,
     avatar_appearance, avatar_group, avatar_interests, avatar_names, avatar_properties,
     bulk_update_folder, bulk_update_inventory_from_llsd, bulk_update_item, chat_message,
-    chat_session_roster_from_llsd, chatterbox_invitation_from_llsd, classified_info,
-    created_category_from_llsd, crossed_region_from_caps_llsd, display_name_update_from_llsd,
-    economy_data, enable_simulator_from_caps_llsd, environment_from_llsd,
+    chat_session_roster_from_llsd, chatterbox_invitation_from_llsd,
+    chatterbox_session_start_reply_from_llsd, classified_info, created_category_from_llsd,
+    crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
+    enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
     friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
     group_account_transactions, group_active_proposal_item, group_member,
@@ -970,6 +971,28 @@ impl Session {
                         kind,
                         messages: stored,
                     });
+                }
+            }
+            // The grid's answer to a session start we requested: the session's
+            // real id next to the temporary one we minted. An ad-hoc conference
+            // on Second Life is given a *different* id here, so the registry
+            // entry moves before the event is surfaced (a driver then only has
+            // to move what it keyed by the temporary id). A failed start drops
+            // the optimistic entry entirely.
+            "ChatterBoxSessionStartReply" => {
+                if let Some(event) = chatterbox_session_start_reply_from_llsd(body) {
+                    if let Event::ChatSessionStarted {
+                        temp_session_id,
+                        session_id,
+                        success,
+                        ..
+                    } = &event
+                    {
+                        self.rekey_started_session(*temp_session_id, *session_id, *success, now);
+                    }
+                    self.events.push_back(event);
+                } else {
+                    self.caps_decode_failed(message);
                 }
             }
             // A `ChatterBoxSessionAgentListUpdates` push (#28): the modern voice
@@ -5904,6 +5927,52 @@ impl Session {
         self.chat_sessions.get(&kind)
     }
 
+    /// Moves the optimistic conference entry we opened under the id we minted
+    /// onto the id the grid answered with (`ChatterBoxSessionStartReply`),
+    /// merging into an entry that already exists under the real id — the grid
+    /// can invite us into our own conference before the reply lands. A reply
+    /// whose two ids match (a group session, or a grid that keeps ours) only
+    /// stamps activity; a **failed** start drops the optimistic entry, since no
+    /// such session exists to talk into.
+    fn rekey_started_session(
+        &mut self,
+        temp_session_id: ImSessionId,
+        session_id: ImSessionId,
+        success: bool,
+        now: Instant,
+    ) {
+        let from = ChatSessionKind::Conference {
+            id: temp_session_id,
+        };
+        if !success {
+            let _dropped = self.chat_sessions.remove(&from);
+            return;
+        }
+        let to = ChatSessionKind::Conference { id: session_id };
+        if from == to {
+            let _session = self.chat_session_mut(to, now);
+            return;
+        }
+        let Some(started) = self.chat_sessions.remove(&from) else {
+            return;
+        };
+        match self.chat_sessions.entry(to) {
+            std::collections::btree_map::Entry::Occupied(mut existing) => {
+                // The invitation beat the reply: keep the entry the inbound
+                // traffic built and fold our optimistic side into it.
+                let session = existing.get_mut();
+                session.participants.extend(started.participants);
+                session.last_activity = now;
+                session.lifecycle = ChatSessionLifecycle::Joined;
+            }
+            std::collections::btree_map::Entry::Vacant(slot) => {
+                let session = slot.insert(started);
+                session.last_activity = now;
+                session.lifecycle = ChatSessionLifecycle::Joined;
+            }
+        }
+    }
+
     /// Resolves a wire IM-session uuid to the [`ChatSessionKind`] of an *already-
     /// open* session, by matching each registered session's canonical wire id
     /// against `session_id`. Used by CAPS pushes (the voice agent-list updates)
@@ -7437,9 +7506,31 @@ impl Session {
             },
             now,
         )?;
-        // Starting a conference opens/tracks it (keyed by the minted session id).
-        self.chat_session_mut(ChatSessionKind::Conference { id: session_id }, now);
+        // Starting a conference opens/tracks it (keyed by the minted session id)
+        // with the people we named in it.
+        self.open_conference(session_id, invitees, now);
         Ok(())
+    }
+
+    /// Opens (or re-stamps) the conference session `session_id` **without**
+    /// sending anything — the pure-state half of a conference start driven over
+    /// the modern `ChatSessionRequest` `"start conference"` capability, whose
+    /// POST the runtime makes instead of the deprecated
+    /// [`Self::start_conference`] instant message. `invitees` seed the roster
+    /// optimistically, exactly as the UDP path's binary bucket does.
+    ///
+    /// The id is the **temporary** one; the grid's
+    /// [`Event::ChatSessionStarted`] moves the entry onto the real one.
+    pub fn open_conference(
+        &mut self,
+        session_id: ImSessionId,
+        invitees: &[AgentKey],
+        now: Instant,
+    ) {
+        let session = self.chat_session_mut(ChatSessionKind::Conference { id: session_id }, now);
+        for invitee in invitees {
+            session.participants.insert(*invitee);
+        }
     }
 
     /// Sends a message into an ad-hoc conference / multi-party IM session

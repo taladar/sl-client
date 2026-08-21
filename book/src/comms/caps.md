@@ -190,7 +190,14 @@ agent-communication cluster. Each handler reads and writes `SimSession`
 state and validates its request the same way (wrong HTTP method → `405`,
 non-LLSD or unroutable body → `400`):
 
-- **`ChatSessionRequest`** routes on the body's `method` string. An
+- **`ChatSessionRequest`** routes on the body's `method` string. A
+  `start conference` registers an ad-hoc session holding the starter and
+  the body's `params` invitees, pushes `ConferenceStartRequested` for the
+  driver to relay, and answers the new roster (a body naming no invitee
+  is a `400`). An `invite` adds its `params` to a session that already
+  exists — the modern "add participants" — answering the grown roster
+  and pushing `SessionInviteRequested`; an unknown session is a `400`,
+  since unlike a start it is supposed to exist. An
   `accept invitation` adds this circuit's agent to the session's roster
   (the same registry `SimSession::open_chat_session` and the IM relay
   maintain) and answers the roster as the modern `agent_info` map; an

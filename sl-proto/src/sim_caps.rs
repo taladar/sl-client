@@ -45,8 +45,9 @@ use uuid::Uuid;
 use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
-    chat_session_request_from_llsd, chat_session_roster_to_llsd,
-    parse_copy_inventory_from_notecard, server_appearance_update_to_llsd, session_history_to_llsd,
+    chat_session_agent_params_from_llsd, chat_session_request_from_llsd,
+    chat_session_roster_to_llsd, parse_copy_inventory_from_notecard,
+    server_appearance_update_to_llsd, session_history_to_llsd,
 };
 use crate::sim_session::{CapsUploadMetadata, SimSession};
 use crate::{
@@ -58,8 +59,8 @@ use crate::{
     CAP_UPDATE_NOTECARD_AGENT_INVENTORY, CAP_UPDATE_NOTECARD_TASK_INVENTORY,
     CAP_UPDATE_SCRIPT_AGENT, CAP_UPDATE_SCRIPT_TASK, CAP_UPDATE_SETTINGS_AGENT_INVENTORY,
     CAP_UPLOAD_BAKED_TEXTURE, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
-    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, Event, ServerEvent,
-    offline_messages_to_llsd,
+    CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_INVITE,
+    CHAT_SESSION_START_CONFERENCE, Event, ServerEvent, offline_messages_to_llsd,
 };
 
 /// The LLSD-XML media type CAPS bodies use.
@@ -147,9 +148,9 @@ pub enum CapHandler {
     /// ([`SimSession::enqueue_caps_event`] /
     /// [`SimSession::take_event_queue_response`]).
     EventQueue,
-    /// The `ChatSessionRequest` chat-session lifecycle (accept / decline /
-    /// decline p2p voice / fetch history), served from [`SimSession`]'s
-    /// chat-session registry.
+    /// The `ChatSessionRequest` chat-session lifecycle (start conference /
+    /// invite / accept / decline / decline p2p voice / fetch history), served
+    /// from [`SimSession`]'s chat-session registry.
     ChatSession,
     /// The deliver-once `ReadOfflineMsgs` fetch of messages stored while the
     /// agent was offline ([`SimSession::take_offline_messages`]).
@@ -626,7 +627,12 @@ impl SimCaps {
     }
 
     /// Serves one `ChatSessionRequest` POST: routes on the body's `method`
-    /// member. `"accept invitation"` answers the session's roster (an empty
+    /// member. `"start conference"` registers an ad-hoc conference of the
+    /// body's `params` invitees and answers its roster (`400` when the body
+    /// names none); `"invite"` adds those invitees to a session that already
+    /// exists, answering its grown roster (`400` for an unknown session);
+    /// `"accept invitation"` answers the
+    /// session's roster (an empty
     /// `agent_info` map for an unknown session — tolerant, mirroring
     /// OpenSim's stubbed cap); `"decline invitation"` drops this agent from
     /// the roster and acks with an undefined body; `"decline p2p voice"` is a
@@ -652,6 +658,37 @@ impl SimCaps {
             CHAT_SESSION_DECLINE => {
                 sim.chat_session_decline(session_id);
                 CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned())
+            }
+            CHAT_SESSION_INVITE => {
+                // Adding to a session that exists: the roster grows and the
+                // driver relays the invitations, but no session is minted, so
+                // no start reply follows.
+                let invitees = chat_session_agent_params_from_llsd(&body);
+                if invitees.is_empty() {
+                    return CapsResponse::bad_request();
+                }
+                match sim.chat_session_invite(session_id, &invitees) {
+                    Some(roster) => {
+                        CapsResponse::llsd_xml(chat_session_roster_to_llsd(&roster).to_llsd_xml())
+                    }
+                    None => CapsResponse::bad_request(),
+                }
+            }
+            CHAT_SESSION_START_CONFERENCE => {
+                // The modern conference start: register the session with its
+                // invitees and answer the roster. The real session id — which
+                // a simulator is free to mint itself — is told to the client
+                // afterwards over the event queue
+                // ([`SimSession::enqueue_chatterbox_session_start_reply`]),
+                // which is the driver's call, not the cap's.
+                let invitees = chat_session_agent_params_from_llsd(&body);
+                if invitees.is_empty() {
+                    // A conference of nobody: the body named no `params`, or
+                    // none of them was a uuid.
+                    return CapsResponse::bad_request();
+                }
+                let roster = sim.chat_session_start_conference(session_id, &invitees);
+                CapsResponse::llsd_xml(chat_session_roster_to_llsd(&roster).to_llsd_xml())
             }
             CHAT_SESSION_DECLINE_P2P_VOICE => CapsResponse::llsd_xml(UNDEF_LLSD_BODY.to_owned()),
             CHAT_SESSION_FETCH_HISTORY => {

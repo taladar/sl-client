@@ -54,7 +54,7 @@ use sl_client_bevy::{
 use std::collections::{HashSet, VecDeque};
 
 use crate::avatar_menu::UNIMPLEMENTED;
-use crate::conversations::{ConversationKey, OpenConversation};
+use crate::conversations::{ConversationKey, OpenConversation, StartConference};
 use crate::edit_contents::focus_within;
 use crate::input_context::InputContext;
 use crate::inventory::{
@@ -186,6 +186,11 @@ pub(crate) const FOLDER_HAS_WEARABLES: &str = "folder-has-wearables";
 /// The target folder's (loaded) subtree holds something currently worn —
 /// enabling Remove From Current Outfit.
 pub(crate) const FOLDER_HAS_WORN: &str = "folder-has-worn";
+
+/// The target folder's (loaded) subtree holds calling cards — showing Start
+/// Conference Chat, the reference's `Inventory.BeginIMSession` on a folder
+/// ("everyone" in it).
+pub(crate) const FOLDER_HAS_CALLING_CARDS: &str = "folder-has-calling-cards";
 
 /// The default next-owner permission mask for a freshly created item: modify,
 /// copy and transfer (`PERM_ITEM_UNRESTRICTED`), the reference viewer's default
@@ -415,6 +420,13 @@ pub(crate) static INVENTORY_FOLDER_MENU: MenuDef = MenuDef {
                 .enabled_when(FOLDER_HAS_WORN),
         ),
         MenuItemDef::Separator,
+        // A folder of calling cards is a ready-made guest list — the
+        // reference's "Conference Chat Folder" entry (parameter "everyone").
+        MenuItemDef::Command(
+            MenuCommand::new("Start Conference Chat", "start-conference")
+                .visible_when(FOLDER_HAS_CALLING_CARDS),
+        ),
+        MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Rename", "rename").enabled_when(CAN_RENAME)),
         MenuItemDef::Command(MenuCommand::new("Cut", "cut").enabled_when(CAN_CUT)),
         MenuItemDef::Command(MenuCommand::new("Copy", "copy").enabled_when(CAN_COPY)),
@@ -499,6 +511,12 @@ pub(crate) static INVENTORY_ITEM_MENU: MenuDef = MenuDef {
         // Calling card: IM the person it names (the card's creator).
         MenuItemDef::Command(
             MenuCommand::new("Send Instant Message", "send-im").visible_when(IS_CALLING_CARD),
+        ),
+        // …or, on several cards, one ad-hoc conference with all of them (the
+        // reference's "Start Conference Chat", parameter "selected").
+        MenuItemDef::Command(
+            MenuCommand::new("Start Conference Chat", "start-conference")
+                .visible_when(IS_CALLING_CARD),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Offer Teleport...", "offer-teleport")
@@ -801,6 +819,8 @@ pub(crate) struct FolderMenuFacts {
     pub(crate) has_wearables: bool,
     /// The folder's loaded subtree holds something currently worn.
     pub(crate) has_worn: bool,
+    /// The folder's loaded subtree holds at least one calling card.
+    pub(crate) has_calling_cards: bool,
 }
 
 /// The conditions that hold for a **folder** row's context menu.
@@ -844,6 +864,9 @@ pub(crate) fn folder_conditions(folder: &FolderInfo, facts: FolderMenuFacts) -> 
     }
     if facts.has_worn {
         held.push(FOLDER_HAS_WORN);
+    }
+    if facts.has_calling_cards {
+        held.push(FOLDER_HAS_CALLING_CARDS);
     }
     held
 }
@@ -1381,6 +1404,9 @@ fn resolve_row_target(
                 has_worn: subtree.iter().any(|item| {
                     is_worn(item, model.worn_wearables(), model.cof_items(), &worn.items)
                 }),
+                has_calling_cards: subtree
+                    .iter()
+                    .any(|item| item.inv_type == InventoryType::CallingCard),
             };
             let conditions = folder_conditions(&info, facts);
             Some((MenuTarget::Folder(info), conditions))
@@ -1662,6 +1688,7 @@ fn handle_inventory_menu_actions(
     outputs: (
         MessageWriter<crate::inventory::InventoryUiAction>,
         MessageWriter<OpenConversation>,
+        MessageWriter<StartConference>,
         MessageWriter<crate::avatar_picker::OpenAvatarPicker>,
         MessageWriter<crate::inventory_properties::OpenItemPreview>,
         MessageWriter<crate::inventory_properties::OpenItemProperties>,
@@ -1683,6 +1710,7 @@ fn handle_inventory_menu_actions(
     let (
         mut ui_actions,
         mut conversations,
+        mut conferences,
         mut picker_opens,
         mut previews,
         mut properties,
@@ -1999,6 +2027,29 @@ fn handle_inventory_menu_actions(
                         key: ConversationKey::Direct(item.creator_id),
                     });
                 }
+            }
+            "start-conference" => {
+                // The selected calling cards, or every calling card in the
+                // selected folder's loaded subtree — the reference's two
+                // `Inventory.BeginIMSession` parameters ("selected" and
+                // "everyone"), which are the same verb over a different set.
+                let mut guests: Vec<AgentKey> = Vec::new();
+                for target_row in &targets {
+                    match target_row {
+                        MenuTarget::Item(item) if item.inv_type == InventoryType::CallingCard => {
+                            guests.push(item.creator_id);
+                        }
+                        MenuTarget::Folder(folder) => guests.extend(
+                            model
+                                .subtree_items(folder.folder_id)
+                                .iter()
+                                .filter(|item| item.inv_type == InventoryType::CallingCard)
+                                .map(|item| item.creator_id),
+                        ),
+                        MenuTarget::Item(_other) => {}
+                    }
+                }
+                conferences.write(StartConference::with(guests));
             }
             "activate-gesture" => {
                 let batch: Vec<GestureActivation> = targets
@@ -2861,11 +2912,12 @@ fn inventory_hotkeys(
 mod tests {
     use super::{
         CAN_COPY, CAN_CREATE, CAN_CUT, CAN_DELETE, CAN_PASTE, CAN_PASTE_LINK, CAN_RENAME,
-        CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_WEARABLES, FOLDER_HAS_WORN, FolderMenuFacts,
-        GESTURE_ACTIVE, GESTURE_INACTIVE, IN_TRASH, INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU,
-        IS_CLOTHING, IS_LANDMARK, IS_OBJECT, IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts,
-        MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN, folder_conditions, is_worn, item_conditions,
-        outfit_add_commands, outfit_remove_commands, paste_commands, take_off_set, wear_set,
+        CAN_SHOW_IN_MAIN, ClipboardMode, FOLDER_HAS_CALLING_CARDS, FOLDER_HAS_WEARABLES,
+        FOLDER_HAS_WORN, FolderMenuFacts, GESTURE_ACTIVE, GESTURE_INACTIVE, IN_TRASH,
+        INVENTORY_FOLDER_MENU, INVENTORY_ITEM_MENU, IS_CLOTHING, IS_LANDMARK, IS_OBJECT,
+        IS_TRASH_FOLDER, IS_WEARABLE, ItemMenuFacts, MenuTarget, NOT_IN_TRASH, NOT_WORN, WORN,
+        folder_conditions, is_worn, item_conditions, outfit_add_commands, outfit_remove_commands,
+        paste_commands, take_off_set, wear_set,
     };
     use crate::menu::{MenuDef, MenuItemDef};
     use pretty_assertions::assert_eq;
@@ -2961,6 +3013,7 @@ mod tests {
             ("Play Inworld", "play-inworld"),
             ("Play Locally", "play-locally"),
             ("Send Instant Message", "send-im"),
+            ("Start Conference Chat", "start-conference"),
             ("Offer Teleport...", "offer-teleport"),
             ("Play", "play-gesture"),
             ("Activate", "activate-gesture"),
@@ -3071,6 +3124,7 @@ mod tests {
             ("Replace Current Outfit", "replace-outfit"),
             ("Add To Current Outfit", "add-to-outfit"),
             ("Remove From Current Outfit", "remove-from-outfit"),
+            ("Start Conference Chat", "start-conference"),
             ("Rename", "rename"),
             ("Cut", "cut"),
             ("Copy", "copy"),
@@ -3665,6 +3719,27 @@ mod tests {
         );
         assert!(held.contains(&FOLDER_HAS_WEARABLES));
         assert!(held.contains(&FOLDER_HAS_WORN));
+    }
+
+    /// Start Conference Chat shows on a folder only when its loaded subtree
+    /// actually holds calling cards — a folder of shirts is not a guest list.
+    #[test]
+    fn conference_chat_follows_the_folder_s_calling_cards() {
+        let user = folder(0x81, FolderType::None);
+        assert!(
+            !folder_conditions(&user, FolderMenuFacts::default())
+                .contains(&FOLDER_HAS_CALLING_CARDS)
+        );
+        assert!(
+            folder_conditions(
+                &user,
+                FolderMenuFacts {
+                    has_calling_cards: true,
+                    ..FolderMenuFacts::default()
+                },
+            )
+            .contains(&FOLDER_HAS_CALLING_CARDS)
+        );
     }
 
     /// Add To Current Outfit folds the body wearables into one wear-set (a

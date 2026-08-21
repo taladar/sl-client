@@ -38,13 +38,16 @@ wants several:
 - **Groups sub-tab** — leave several groups at once (lower value; include only
   if it falls out of the same selection work).
 
-The friends list itself is [[viewer-conference-start-ui]]'s: that task already
-owns "multi-select in the people / friends lists" for the conference / invite
-case, so this one covers the *other three* lists and should follow whatever
-selection idiom it settles on.
+The friends list itself was [[viewer-conference-start-ui]]'s, and it landed
+there: the Friends table is multi-select, its `SelectedFriend` keeps the answer
+by `FriendKey`, and its action bar acts on the whole selection (IM starts a
+conference). So this task covers the *other three* lists and should follow the
+idiom that one settled on.
 
 The widget half exists — `ui_table.rs`'s `TableSelectionMode::Multi` with its
-unit-tested Ctrl-toggle / Shift-range `apply_click` — and has **no consumer
-yet**. The work here is adopting it (and keeping a selection keyed by the row's
-identity, not its index, since these tables re-sort and re-filter under the
-user).
+unit-tested Ctrl-toggle / Shift-range `apply_click`, plus the `anchor()` /
+`set_selection` pair a consumer whose rows move needs. There are now **two**
+worked examples to copy: the radar ([[viewer-radar-multi-select]]) and the
+Friends list. The work here is adopting it in the remaining three (keeping a
+selection keyed by the row's identity, not its index, since these tables re-sort
+and re-filter under the user).

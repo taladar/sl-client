@@ -19,13 +19,14 @@ mod test {
         CAP_UPDATE_NOTECARD_TASK_INVENTORY, CAP_UPDATE_SCRIPT_AGENT, CAP_UPLOAD_BAKED_TEXTURE,
         CAP_VIEWER_ASSET, CHAT_SESSION_ACCEPT, CHAT_SESSION_DECLINE,
         CHAT_SESSION_DECLINE_P2P_VOICE, CHAT_SESSION_FETCH_HISTORY, CHAT_SESSION_FETCH_HISTORY_TAG,
-        CapsDispatch, CapsRequest, CapsUploadMetadata, ChatSessionKind, DisplayName, Event,
-        FaceMaterialPut, ImDialog, ImSessionId, InMemoryAssetSource, InstantMessage,
-        InventoryFolderKey, InventoryKey, LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams,
-        MaterialOverrideUpdate, MediaEntry, ObjectKey, ObjectMediaState, REQUESTED_CAPABILITIES,
-        RegionCoordinates, RegionHandle, ServerEvent, ServerHistoryMessage, Session, SimCaps,
-        SimChatSessionKind, SimSession, StartLocation, TextureKey, build_event_queue_request,
-        build_seed_request, chat_session_request_body, copy_inventory_from_notecard_body,
+        CHAT_SESSION_INVITE, CHAT_SESSION_START_CONFERENCE, CapsDispatch, CapsRequest,
+        CapsUploadMetadata, ChatSessionKind, DisplayName, Event, FaceMaterialPut, ImDialog,
+        ImSessionId, InMemoryAssetSource, InstantMessage, InventoryFolderKey, InventoryKey,
+        LLSD_XML_CONTENT_TYPE, LegacyMaterial, LoginParams, MaterialOverrideUpdate, MediaEntry,
+        ObjectKey, ObjectMediaState, REQUESTED_CAPABILITIES, RegionCoordinates, RegionHandle,
+        ServerEvent, ServerHistoryMessage, Session, SimCaps, SimChatSessionKind, SimSession,
+        StartLocation, TextureKey, build_event_queue_request, build_seed_request,
+        chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
         enable_simulator_to_caps_llsd, parse_event_queue_response, parse_seed_response,
     };
     use sl_wire::{
@@ -409,6 +410,107 @@ mod test {
             .find(|info| info.kind == kind)
             .ok_or("expected the accepted conference session on the client")?;
         assert_eq!(info.participants, vec![member_a, member_b]);
+        Ok(())
+    }
+
+    /// A `start conference` registers the ad-hoc session with its invitees,
+    /// tells the driver to relay the invitations, and answers a roster the
+    /// real client folds — and the grid's `ChatterBoxSessionStartReply` then
+    /// moves that client's session onto the id the simulator chose.
+    #[test]
+    fn start_conference_registers_and_then_rekeys() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let mut client = new_client()?;
+        let now = Instant::now();
+
+        let temp = ImSessionId::from(uuid::Uuid::from_u128(0x7301));
+        let real = ImSessionId::from(uuid::Uuid::from_u128(0x7302));
+        let invitee = AgentKey::from(uuid::Uuid::from_u128(0x7303));
+
+        // The client's own optimistic half of the cap path.
+        client.open_conference(temp, &[invitee], now);
+
+        let path = granted_cap_path(&caps, "ChatSessionRequest")?;
+        let body = chat_session_agents_body(CHAT_SESSION_START_CONFERENCE, temp.get(), &[invitee]);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+        let mut relayed = false;
+        while let Some(event) = sim.poll_event() {
+            if let ServerEvent::ConferenceStartRequested {
+                session_id,
+                invitees,
+                ..
+            } = event
+            {
+                relayed = session_id == temp && invitees == vec![invitee];
+            }
+        }
+        assert!(relayed, "the driver is asked to relay the invitations");
+
+        // The simulator minted its own id and says so over the event queue.
+        sim.enqueue_chatterbox_session_start_reply(&Event::ChatSessionStarted {
+            temp_session_id: temp,
+            session_id: real,
+            success: true,
+            session_name: "Multi-person chat".to_owned(),
+            voice_enabled: false,
+            error: String::new(),
+        });
+        let eq_path = granted_event_queue_path(&caps)?;
+        let poll = build_event_queue_request(None, false);
+        let (status, body) = respond(&mut caps, &mut sim, &post(&eq_path, &poll))?;
+        assert_eq!(status, 200);
+        let batch = parse_event_queue_response(&body)?;
+        for event in &batch.events {
+            client.handle_caps_event(&event.message, &event.body, now)?;
+        }
+
+        assert!(
+            client
+                .participants(ChatSessionKind::Conference { id: real })
+                .any(|agent| agent == invitee),
+            "the client's conference moved onto the simulator's id"
+        );
+        Ok(())
+    }
+
+    /// An `invite` grows an open session's roster and asks the driver to relay
+    /// the invitations; naming a session the simulator does not know is a
+    /// `400`, since an invite (unlike a start) is about an existing session.
+    #[test]
+    fn invite_grows_an_open_session() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        let session = ImSessionId::from(uuid::Uuid::from_u128(0x7401));
+        let member = AgentKey::from(uuid::Uuid::from_u128(0x7402));
+        let invitee = AgentKey::from(uuid::Uuid::from_u128(0x7403));
+        sim.open_chat_session(session, SimChatSessionKind::Conference, &[member]);
+
+        let path = granted_cap_path(&caps, "ChatSessionRequest")?;
+        let body = chat_session_agents_body(CHAT_SESSION_INVITE, session.get(), &[invitee]);
+        let (status, reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 200);
+        assert!(
+            reply.contains(&invitee.uuid().to_string()),
+            "the answered roster names the newly invited agent"
+        );
+        let mut relayed = false;
+        while let Some(event) = sim.poll_event() {
+            if let ServerEvent::SessionInviteRequested {
+                session_id,
+                invitees,
+            } = event
+            {
+                relayed = session_id == session && invitees == vec![invitee];
+            }
+        }
+        assert!(relayed, "the driver is asked to relay the invitations");
+
+        let unknown = ImSessionId::from(uuid::Uuid::from_u128(0x7404));
+        let body = chat_session_agents_body(CHAT_SESSION_INVITE, unknown.get(), &[invitee]);
+        let (status, _reply) = respond(&mut caps, &mut sim, &post(&path, &body))?;
+        assert_eq!(status, 400);
         Ok(())
     }
 

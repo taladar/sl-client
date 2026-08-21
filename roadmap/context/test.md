@@ -30,8 +30,9 @@ Three mechanical steps, modelled on the existing cases under
 
 Inside `run()`, drive the live session(s):
 
-- `ctx.primary()` / `ctx.secondary()` (and, once added, `ctx.tertiary()`) yield
-  `Session` handles.
+- `ctx.primary()` / `ctx.secondary()` / `ctx.tertiary()` yield `Session`
+  handles (the runner selects the extra avatars with `--secondary` /
+  `--tertiary`).
 - `session.wait_for_region(timeout).await?` gates on the region handshake.
 - `session.send(Command::...).await?` issues a command.
 - `session.wait_for(timeout, |event| match event { ... })` awaits a typed
@@ -54,7 +55,9 @@ sl-conformance-report                              # green = Current
 ## Legend & conventions
 
 - Grid gating: `[both]`, `[opensim]` (OpenSim only), `[aditi]` (SL only).
-- Account count: `1av`, `2av`, `3av` (see Phase 0 and Phase Z).
+- Account count: `1av`, `2av`, `3av`. `credentials.aditi.toml` carries
+  `primary`, `secondary` and `tertiary`, so all three counts are runnable on
+  aditi.
 - Status: `[ ]` todo, `[x]` done (tick when the live record is committed green).
 - Prefer asserting an observable protocol effect (a field value, a state
   transition) over only timing it. Keep a timing metric anyway — the reporter

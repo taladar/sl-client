@@ -144,11 +144,12 @@ use crate::session::{
     SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd,
     agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
     build_map_item_reply, build_map_layer_reply, build_task_inventory,
-    chatterbox_invitation_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
-    enable_simulator_to_caps_llsd, establish_agent_communication_to_llsd, instant_message,
-    nav_mesh_status_to_llsd, open_region_info_to_llsd, region_handshake_message,
-    required_voice_version_to_llsd, set_display_name_reply_to_llsd, shape_from_object_shape_block,
-    sim_console_response_to_llsd, teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
+    chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
+    crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
+    establish_agent_communication_to_llsd, instant_message, nav_mesh_status_to_llsd,
+    open_region_info_to_llsd, region_handshake_message, required_voice_version_to_llsd,
+    set_display_name_reply_to_llsd, shape_from_object_shape_block, sim_console_response_to_llsd,
+    teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
 use crate::types::directory::category_from_wire;
 use crate::types::{
@@ -701,6 +702,19 @@ pub enum ServerEvent {
         invitees: Vec<AgentKey>,
         /// The accompanying invitation message text.
         message: String,
+    },
+    /// The client invited more agents into a session that is already open
+    /// (the `ChatSessionRequest` `"invite"` method — the modern "add
+    /// participants"). The invitees are already in the session's roster; the
+    /// driver materialises the session on each of their [`SimSession`]s
+    /// ([`SimSession::open_chat_session`]) and delivers the invitation over
+    /// their event queues ([`SimSession::enqueue_chatterbox_invitation`]),
+    /// exactly as for a conference start.
+    SessionInviteRequested {
+        /// The session invited into.
+        session_id: ImSessionId,
+        /// The newly invited agents.
+        invitees: Vec<AgentKey>,
     },
     /// The client sent a message into a group/conference session
     /// (`ImprovedInstantMessage`, `SessionSend`) — the inverse of the
@@ -2358,6 +2372,66 @@ impl SimSession {
             chat_session.participants.insert(agent);
         }
         Some(chat_session.participants.iter().copied().collect())
+    }
+
+    /// Starts an ad-hoc conference on behalf of this circuit's agent (the
+    /// `ChatSessionRequest` `"start conference"` server side, the modern
+    /// counterpart of the [`ImDialog::SessionConferenceStart`] instant message
+    /// this session also accepts): registers the session with the starter and
+    /// the invitees in its roster and pushes a
+    /// [`ServerEvent::ConferenceStartRequested`] so the driver relays the
+    /// invitations, and returns the roster for the cap reply. The starter is
+    /// added when the circuit knows one (it is the same tolerance
+    /// [`SimSession::chat_session_accept`] applies).
+    ///
+    /// The `session_id` is the **temporary** one the client minted; a driver
+    /// that re-keys the session answers with
+    /// [`SimSession::enqueue_chatterbox_session_start_reply`].
+    pub(crate) fn chat_session_start_conference(
+        &mut self,
+        session_id: ImSessionId,
+        invitees: &[AgentKey],
+    ) -> Vec<AgentKey> {
+        let starter = self.agent_id;
+        let chat_session = self
+            .chat_sessions
+            .entry(session_id)
+            .or_insert_with(|| SimChatSession {
+                kind: SimChatSessionKind::Conference,
+                participants: BTreeSet::new(),
+                history: Vec::new(),
+            });
+        chat_session.participants.extend(starter);
+        chat_session.participants.extend(invitees.iter().copied());
+        let roster = chat_session.participants.iter().copied().collect();
+        self.events
+            .push_back(ServerEvent::ConferenceStartRequested {
+                session_id,
+                invitees: invitees.to_vec(),
+                message: String::new(),
+            });
+        roster
+    }
+
+    /// Invites more agents into an already-open session (the
+    /// `ChatSessionRequest` `"invite"` server side): adds them to the roster
+    /// and pushes a [`ServerEvent::SessionInviteRequested`] so the driver
+    /// relays the invitations. Returns the grown roster for the cap reply, or
+    /// `None` for a session this simulator does not know — unlike a start,
+    /// this names a session that is supposed to exist.
+    pub(crate) fn chat_session_invite(
+        &mut self,
+        session_id: ImSessionId,
+        invitees: &[AgentKey],
+    ) -> Option<Vec<AgentKey>> {
+        let chat_session = self.chat_sessions.get_mut(&session_id)?;
+        chat_session.participants.extend(invitees.iter().copied());
+        let roster = chat_session.participants.iter().copied().collect();
+        self.events.push_back(ServerEvent::SessionInviteRequested {
+            session_id,
+            invitees: invitees.to_vec(),
+        });
+        Some(roster)
     }
 
     /// Declines a chat-session invitation on behalf of this circuit's agent
@@ -5602,6 +5676,28 @@ impl SimSession {
         self.enqueue_caps_event(
             "ChatterBoxInvitation",
             chatterbox_invitation_to_llsd(invitation),
+        );
+    }
+
+    /// Queues a `ChatterBoxSessionStartReply` on the event queue — the answer
+    /// to a session start the client requested (an ad-hoc conference over UDP
+    /// or the `"start conference"` capability, or a group session), telling it
+    /// the id the session **actually** has next to the temporary one it minted
+    /// (the inverse of the client's [`Event::ChatSessionStarted`], and the
+    /// shape
+    /// [`chatterbox_session_start_reply_to_llsd`](crate::chatterbox_session_start_reply_to_llsd)
+    /// serializes). Answering with `session_id == temp_session_id` keeps the
+    /// client's id, which is what a simulator that mints none does.
+    ///
+    /// Any other [`Event`] variant enqueues nothing, the same contract as
+    /// [`SimSession::enqueue_chatterbox_invitation`].
+    pub fn enqueue_chatterbox_session_start_reply(&mut self, reply: &Event) {
+        if !matches!(reply, Event::ChatSessionStarted { .. }) {
+            return;
+        }
+        self.enqueue_caps_event(
+            "ChatterBoxSessionStartReply",
+            chatterbox_session_start_reply_to_llsd(reply),
         );
     }
 

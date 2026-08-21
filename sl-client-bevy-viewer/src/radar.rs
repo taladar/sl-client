@@ -37,9 +37,7 @@
 //! parcel / estate moderation entries (Freeze, Parcel Eject, Estate Kick /
 //! Teleport Home / Ban), which no viewer surface offers per avatar yet — they
 //! are `viewer-avatar-moderation-actions`, and light up in the pie, here and
-//! the minimap at once when that shared layer lands; and *IM* on several rows
-//! opens several conversations rather than the reference's ad-hoc conference,
-//! which is `viewer-conference-start-ui`'s to bring.
+//! the minimap at once when that shared layer lands.
 
 use bevy::ecs::system::SystemParam;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -60,7 +58,7 @@ use crate::avatar_render_settings::RequestRenderException;
 use crate::avatars::AvatarState;
 use crate::chat::LocalChatNotice;
 use crate::contact_sets_panel::OpenAddToContactSet;
-use crate::conversations::{ConversationKey, NearbyChatNotice, OpenConversation};
+use crate::conversations::{ConversationKey, NearbyChatNotice, OpenConversation, StartConference};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
@@ -1968,7 +1966,7 @@ fn handle_radar_actions(
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut derenders: MessageWriter<RequestDerender>,
-    mut conversations: MessageWriter<OpenConversation>,
+    mut conferences: MessageWriter<StartConference>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut contact_sets: MessageWriter<OpenAddToContactSet>,
     mut exceptions: MessageWriter<RequestRenderException>,
@@ -1997,14 +1995,10 @@ fn handle_radar_actions(
                 }
             }
             "im" => {
-                // Several selected rows are several conversations, not a
-                // conference: ad-hoc conferences are `viewer-conference-start-ui`,
-                // which is where this entry becomes the reference's one.
-                for agent in agents {
-                    conversations.write(OpenConversation {
-                        key: ConversationKey::Direct(*agent),
-                    });
-                }
+                // One row is a one-to-one IM, several are one ad-hoc
+                // conference — the count branch the reference's `Avatar.IM`
+                // makes, and which the shared verb makes for us.
+                conferences.write(StartConference::with(agents.to_vec()));
             }
             "start-tracking" => {
                 if let Some(agent) = first {
@@ -2138,11 +2132,11 @@ fn handle_radar_actions(
 #[cfg(test)]
 mod tests {
     use super::{
-        AgentKey, AvatarState, ConversationKey, MARK_COLORS, MapTracking, MenuCommand, MenuDef,
-        MenuDynamicPick, MenuItemDef, MinimapMarks, MuteModel, OpenAddToContactSet,
-        OpenAvatarProfile, OpenConversation, PaymentInfo, RADAR_ELEMENT, RADAR_MENU,
-        RADAR_MULTI_MENU, RadarMenuTarget, RadarRow, RadarSelection, RadarState, RadarView,
-        RequestBlock, RequestDerender, RequestRenderException, SLOT_PROFILES, UiAction,
+        AgentKey, AvatarState, MARK_COLORS, MapTracking, MenuCommand, MenuDef, MenuDynamicPick,
+        MenuItemDef, MinimapMarks, MuteModel, OpenAddToContactSet, OpenAvatarProfile,
+        OpenConversation, PaymentInfo, RADAR_ELEMENT, RADAR_MENU, RADAR_MULTI_MENU,
+        RadarMenuTarget, RadarRow, RadarSelection, RadarState, RadarView, RequestBlock,
+        RequestDerender, RequestRenderException, SLOT_PROFILES, StartConference, UiAction,
         handle_radar_actions, handle_radar_profile_picks,
     };
     use bevy::prelude::*;
@@ -2310,6 +2304,7 @@ mod tests {
             .add_message::<RequestBlock>()
             .add_message::<RequestDerender>()
             .add_message::<OpenConversation>()
+            .add_message::<StartConference>()
             .add_message::<OpenAvatarProfile>()
             .add_message::<OpenAddToContactSet>()
             .add_message::<RequestRenderException>()
@@ -2369,14 +2364,15 @@ mod tests {
         );
 
         pick(&mut app, "im");
-        let opened: Vec<AgentKey> = drain::<OpenConversation>(&app)
+        let started: Vec<Vec<AgentKey>> = drain::<StartConference>(&app)
             .into_iter()
-            .filter_map(|open| match open.key {
-                ConversationKey::Direct(agent) => Some(agent),
-                _other => None,
-            })
+            .map(|start| start.agents)
             .collect();
-        assert_eq!(opened, selection, "a conversation per selected row");
+        assert_eq!(
+            started,
+            vec![selection.clone()],
+            "several rows are one conference request naming them all"
+        );
 
         pick(&mut app, "add-to-set");
         let filed: Vec<Vec<AgentKey>> = drain::<OpenAddToContactSet>(&app)
