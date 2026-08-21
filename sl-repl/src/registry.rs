@@ -1695,6 +1695,8 @@ fn build_voice_request(
         jsep_offer_sdp: args.opt_str(ctx, "jsep_offer_sdp", 3)?,
         logout: args.bool_or(ctx, "logout", 4, false)?,
         viewer_session: args.opt_str(ctx, "viewer_session", 5)?,
+        channel: args.opt_str(ctx, "channel", 6)?,
+        credentials: args.opt_str(ctx, "credentials", 7)?,
     })
 }
 
@@ -3136,6 +3138,21 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| {
                 Ok(Command::RequestEnvironment {
                     parcel_id: args.opt_parse(ctx, "parcel_id", 0, "i32")?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_environment",
+            usage: "<day_length> <day_offset> [parcel_id]",
+            build: |args, ctx| {
+                Ok(Command::SetEnvironment {
+                    parcel_id: args.opt_parse(ctx, "parcel_id", 2, "i32")?,
+                    track_no: None,
+                    update: Box::new(sl_proto::EnvironmentUpdate {
+                        day_length: Some(args.req_parse(ctx, "day_length", 0, "i32")?),
+                        day_offset: Some(args.req_parse(ctx, "day_offset", 1, "i32")?),
+                        ..sl_proto::EnvironmentUpdate::default()
+                    }),
                 })
             },
         },
@@ -5170,7 +5187,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_voice_account",
-            usage: "[logout=] [jsep_offer_sdp=] [channel_type=] …",
+            usage: "[logout=] [jsep_offer_sdp=] [channel_type=] [channel=] [credentials=] …",
             build: |args, ctx| {
                 Ok(Command::RequestVoiceAccount {
                     request: build_voice_request(args, ctx)?,

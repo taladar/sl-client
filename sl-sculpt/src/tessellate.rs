@@ -606,7 +606,7 @@ mod tests {
                 "index {index} within {count} vertices"
             );
         }
-        for [i, j, k] in face.indices.as_chunks::<3>().0 {
+        for &[i, j, k] in face.indices.as_chunks::<3>().0 {
             assert!(i != j && j != k && k != i, "no degenerate triangle");
         }
         for normal in &face.normals {

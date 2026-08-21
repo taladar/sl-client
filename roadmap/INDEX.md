@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 263 |
-| blocked | 68 |
+| ready | 256 |
+| blocked | 67 |
 | in-progress | 17 |
 | bugs | 33 |
-| done | 851 |
+| done | 863 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1361** |
+| **total** | **1365** |
 
 ## ideas (93)
 
@@ -217,23 +217,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (263)
+## ready (256)
 
 ### protocol
 
-- [`protocol-sim-caps-experiences`](ready/protocol-sim-caps-experiences.md) —
-  Server-side experience caps (blocked by `protocol-sim-caps-framework` (done))
-- [`protocol-sim-caps-inventory`](ready/protocol-sim-caps-inventory.md) —
-  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
-  `protocol-sim-caps-framework` (done))
-- [`protocol-sim-caps-region-info`](ready/protocol-sim-caps-region-info.md) —
-  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
-  (done))
-- [`protocol-sim-http-misc`](ready/protocol-sim-http-misc.md) — Niche non-CAPS
-  server channels — grid info, map tiles, helper URIs
-- [`protocol-sim-voice-signalling`](ready/protocol-sim-voice-signalling.md) —
-  Server-side voice provisioning and WebRTC signalling stub (blocked by
-  `protocol-sim-caps-framework` (done))
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -406,8 +393,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-fake-grid`](ready/viewer-fake-grid.md) — A loopback fake grid over
-  SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -833,10 +818,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
-  — drive a representative set of messages both ways through SimSession an
 
-## blocked (68)
+## blocked (67)
 
 ### viewer
 
@@ -856,8 +839,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
-- [`viewer-fake-grid-login-smoke`](blocked/viewer-fake-grid-login-smoke.md) —
-  The real client stack against the fake grid (blocked by `viewer-fake-grid`)
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness`, `viewer-floater-registry`)
@@ -1163,7 +1144,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (851)
+## done (863)
 
 ### protocol
 
@@ -1297,14 +1278,29 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-sim-caps-content`](done/protocol-sim-caps-content.md) — Server-side
   content upload/update caps, materials and MOAP (blocked by
   `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-experiences`](done/protocol-sim-caps-experiences.md) —
+  Server-side experience caps (blocked by `protocol-sim-caps-framework` (done))
 - [`protocol-sim-caps-framework`](done/protocol-sim-caps-framework.md) —
   Server-side CAPS core — seed, EventQueueGet, SimCaps dispatch
+- [`protocol-sim-caps-inventory`](done/protocol-sim-caps-inventory.md) —
+  Server-side inventory caps — AISv3 and the legacy fetch caps (blocked by
+  `protocol-sim-caps-framework` (done))
+- [`protocol-sim-caps-region-info`](done/protocol-sim-caps-region-info.md) —
+  Server-side region/object-info caps (blocked by `protocol-sim-caps-framework`
+  (done))
+- [`protocol-sim-http-misc`](done/protocol-sim-http-misc.md) — Niche non-CAPS
+  server channels — grid info, map tiles, helper URIs
 - [`protocol-sim-login`](done/protocol-sim-login.md) — Server-side login surface
   at full fidelity
+- [`protocol-sim-terrain-raw-flows`](done/protocol-sim-terrain-raw-flows.md) —
+  Server-side terrain RAW download/upload — InitiateDownload + Xfer pull
 - [`protocol-sim-udp-flows`](done/protocol-sim-udp-flows.md) — Server-side state
   machines for the higher-level LLUDP flows
 - [`protocol-sim-udp-flows-2`](done/protocol-sim-udp-flows-2.md) — Server-side
   mirrors for the remaining Session flow machines
+- [`protocol-sim-voice-signalling`](done/protocol-sim-voice-signalling.md) —
+  Server-side voice provisioning and WebRTC signalling stub (blocked by
+  `protocol-sim-caps-framework` (done))
 - [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)
@@ -1496,6 +1492,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-prim-texture-editing` (done), `viewer-ui-texture-picker` (done))
 - [`viewer-facelight-too-bright`](done/viewer-facelight-too-bright.md) —
   Facelights render far brighter than in Firestorm
+- [`viewer-fake-grid`](done/viewer-fake-grid.md) — A loopback fake grid over
+  SimSession (blocked by `protocol-sim-caps-framework` (done))
+- [`viewer-fake-grid-login-smoke`](done/viewer-fake-grid-login-smoke.md) — The
+  real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
+- [`viewer-fake-grid-teleport`](done/viewer-fake-grid-teleport.md) — Fake-grid
+  inter-region teleport (teleport_agent + auto-responder)
+- [`viewer-fake-grid-udp-assets`](done/viewer-fake-grid-udp-assets.md) — Fake
+  grid answers the legacy UDP asset paths — Xfer, Transfer, task inventory
+  (blocked by `viewer-fake-grid` (done))
 - [`viewer-flair-style-panic-on-caps-failure-notification`](done/viewer-flair-style-panic-on-caps-failure-notification.md)
   — bevy_flair debug panic — recalculate_style on a freshly spawned
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi
@@ -2496,6 +2501,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Second pass — completeness sweep (2026-06-24)
 - [`idiomatic-p8-01`](done/idiomatic-p8-01-convert-plain-string-url-fields-to-url-url-from-the-url-crat.md)
   — Convert plain String URL fields to url::Url from the url crate (use ur
+- [`idiomatic-xfer-framing-codec`](done/idiomatic-xfer-framing-codec.md) —
+  Shared sl-wire Xfer framing codec + explicit Xfer/Transfer edge cases
 
 ### chat
 
@@ -2887,6 +2894,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — publish appearance (AgentSetAppearance) and query the baked-texture ca
 - [`test-setup-cost-appendix-open`](done/test-setup-cost-appendix-open-setup-cost-appendix-opensim.md)
   — Setup-cost appendix (OpenSim)
+- [`test-simsession-roundtrip`](done/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
+  — drive a representative set of messages both ways through SimSession an
 - [`test-simulator-features`](done/test-simulator-features-request-simulator-features.md)
   — request simulator features
 - [`test-task-inventory`](done/test-task-inventory-request-update-a-prim-s-task-inventory.md)

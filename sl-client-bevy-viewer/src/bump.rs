@@ -348,7 +348,7 @@ pub(crate) fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -
     let w = usize::try_from(width).unwrap_or(1).max(1);
     let h = usize::try_from(height).unwrap_or(1).max(1);
 
-    // Luminance height field (0..1), one sample per RGBA8 texel. `chunks_exact`
+    // Luminance height field (0..1), one sample per RGBA8 texel. `as_chunks`
     // drops any trailing partial texel; a short slice yields fewer samples, which
     // the wrapping fetch below treats as zero height.
     let lum: Vec<f32> = decoded
@@ -356,11 +356,8 @@ pub(crate) fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -
         .as_chunks::<4>()
         .0
         .iter()
-        .map(|&[red, green, blue, _alpha]| {
-            let r = f32::from(red);
-            let g = f32::from(green);
-            let b = f32::from(blue);
-            (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
+        .map(|&[r, g, b, _]| {
+            (0.299 * f32::from(r) + 0.587 * f32::from(g) + 0.114 * f32::from(b)) / 255.0
         })
         .collect();
     // The luminance sample at wrapping coordinates (the face tiles its texture).

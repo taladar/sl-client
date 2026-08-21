@@ -586,8 +586,8 @@ fn mat_at(bytes: &[u8], index: usize) -> Option<[f32; 16]> {
     let start = index.checked_mul(MAT4_BYTES)?;
     let slice = bytes.get(start..start.checked_add(MAT4_BYTES)?)?;
     let mut out = [0.0_f32; 16];
-    for (component, chunk) in out.iter_mut().zip(slice.as_chunks::<4>().0) {
-        *component = f32::from_ne_bytes(*chunk);
+    for (component, &chunk) in out.iter_mut().zip(slice.as_chunks::<4>().0) {
+        *component = f32::from_ne_bytes(chunk);
     }
     Some(out)
 }
@@ -1019,7 +1019,7 @@ mod tests {
         data.as_chunks::<4>()
             .0
             .iter()
-            .map(|chunk| f32::from_ne_bytes(*chunk))
+            .map(|&chunk| f32::from_ne_bytes(chunk))
             .collect()
     }
 

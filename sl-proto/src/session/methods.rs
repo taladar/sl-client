@@ -11,8 +11,8 @@ use super::conversions::{
     crossed_region_from_caps_llsd, display_name_update_from_llsd, economy_data,
     enable_simulator_from_caps_llsd, environment_from_llsd,
     establish_agent_communication_from_llsd, estate_access_from_params, estate_info_from_params,
-    friend, grid_coordinates_from_handle, group_account_details, group_account_summary,
-    group_account_transactions, group_active_proposal_item, group_member,
+    fetch_inventory_items_from_llsd, friend, grid_coordinates_from_handle, group_account_details,
+    group_account_summary, group_account_transactions, group_active_proposal_item, group_member,
     group_members_from_caps_llsd, group_membership, group_memberships_from_caps_llsd, group_names,
     group_notice, group_profile, group_role, group_title, group_vote_history_item, index_into,
     instant_message, inventory_descendents_from_llsd, inventory_folder, inventory_item,
@@ -30,14 +30,15 @@ use super::conversions::{
 use super::{
     AGENT_UPDATE_INTERVAL, AVATAR_PICKER_SEARCH_TAG, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
     CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY,
-    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
-    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
-    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
-    CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
-    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
-    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
-    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM,
+    CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME,
+    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
+    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
+    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
+    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
+    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
+    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
+    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory, InventoryOwner,
@@ -45,8 +46,8 @@ use super::{
     PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
     ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
     SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
-    TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo, XFER_UPLOAD_CHUNK_SIZE,
-    XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo, XferDownload,
+    XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -109,7 +110,10 @@ use sl_wire::{
     parse_region_experiences, parse_remote_parcel_reply, parse_resource_cost_selected,
     parse_simulator_features, parse_user_info_reply, zero_decode,
 };
-use sl_wire::{Direction, GlobalCoordinates, combine_uuids};
+use sl_wire::{
+    Direction, GlobalCoordinates, XFER_CHUNK_SIZE, XferPacketId, combine_uuids, decode_xfer_chunk,
+    next_xfer_chunk,
+};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::Instant;
@@ -124,7 +128,7 @@ const UUID_NAMES_PER_REQUEST: usize = 80;
 /// a single `AssetUploadRequest`; a larger asset sends an empty `AssetData` and
 /// streams over `Xfer`. Kept at the `Xfer` chunk size so it comfortably fits one
 /// reliable UDP packet alongside the message header.
-const ASSET_UPLOAD_INLINE_LIMIT: usize = crate::session::XFER_UPLOAD_CHUNK_SIZE;
+const ASSET_UPLOAD_INLINE_LIMIT: usize = XFER_CHUNK_SIZE;
 
 /// Splits a slice of [`ScopedObjectId`]s into the single [`CircuitId`] they all
 /// belong to and the bare region-local ids, ready for a batch request (which
@@ -413,10 +417,20 @@ impl Session {
             }
             "TeleportFinish" => {
                 if let Some(finish) = teleport_finish_from_llsd(body) {
-                    let region_handle = match self.teleport {
+                    // A finish without a start: the simulator decided on this
+                    // teleport (see the UDP arm) — enter the teleport now.
+                    if !matches!(self.state, SessionState::Teleporting)
+                        && self.enter_remote_teleport(now)
+                    {
+                        self.events.push_back(Event::TeleportStarted);
+                    }
+                    // The wire handle is authoritative (a lure or landmark
+                    // teleport never knew its target); a server that omits it
+                    // leaves us the handle we asked for, or none.
+                    let region_handle = finish.region_handle.unwrap_or(match self.teleport {
                         TeleportPhase::Requested { target } => target,
                         TeleportPhase::Idle | TeleportPhase::Handover { .. } => RegionHandle(0),
-                    };
+                    });
                     if matches!(self.state, SessionState::Teleporting) {
                         self.events.push_back(Event::TeleportFinished {
                             region_handle,
@@ -500,6 +514,28 @@ impl Session {
                             .mark_folder_loaded(*folder_id, *version, owner);
                     }
                     self.events.push_back(event);
+                }
+            }
+            // A `FetchInventory2` / `FetchLib2` per-item fetch reply
+            // (`{ agent_id, items }`, the same flat item shape as the
+            // descendents caps). Merge into the matching tree and surface the
+            // items as a bulk update (nil transaction id — the per-item fetch
+            // has no correlating transaction).
+            CAP_FETCH_INVENTORY_ITEM | CAP_FETCH_LIBRARY_ITEM => {
+                let owner = if message == CAP_FETCH_LIBRARY_ITEM {
+                    InventoryOwner::Library
+                } else {
+                    InventoryOwner::Agent
+                };
+                let items = fetch_inventory_items_from_llsd(body);
+                if !items.is_empty() {
+                    self.cache_inventory(&[], &items, owner);
+                    self.events.push_back(Event::InventoryBulkUpdate {
+                        transaction_id: Uuid::nil(),
+                        folders: Vec::new(),
+                        items,
+                        item_callbacks: Vec::new(),
+                    });
                 }
             }
             // A `BulkUpdateInventory` the simulator delivers over the CAPS event
@@ -3405,18 +3441,21 @@ impl Session {
                 });
             }
             AnyMessage::TeleportStart(_) => {
-                // Only surface a teleport WE requested (state `Teleporting`). A
-                // seamless region **crossing** is a teleport under the hood, and
-                // OpenSim sends `TeleportStart`/`TeleportProgress` for it too — but
-                // it must stay invisible (no progress UI), so a crossing's teleport
-                // messages are ignored here (the crossing runs via
-                // `CrossedRegion` → `promote_child_to_root`). This mirrors the
-                // reference viewer, which only shows the teleport screen for a
-                // teleport it initiated.
-                if matches!(self.state, SessionState::Teleporting) {
+                // A teleport we requested is already `Teleporting`. One we did
+                // not — `llTeleportAgent`, a god/estate "teleport home", a
+                // grid-side push — starts here: the reference viewer enters
+                // `TELEPORT_START` on a remote `TeleportStart` ("Teleport
+                // initiated by remote TeleportStart message"), and the
+                // simulator's `TeleportFinish` that follows would otherwise be
+                // ignored and strand the session in a region it has left.
+                // (A physical crossing never sends `TeleportStart` — OpenSim's
+                // `EntityTransferModule` sends it on its two teleport paths
+                // only — so nothing here misfires for a crossing.)
+                if matches!(self.state, SessionState::Teleporting) || self.enter_remote_teleport(now)
+                {
                     self.events.push_back(Event::TeleportStarted);
                 } else {
-                    tracing::debug!("ignoring TeleportStart outside a requested teleport (crossing)");
+                    tracing::debug!("ignoring TeleportStart in state {:?}", self.state);
                 }
             }
             AnyMessage::TeleportProgress(progress) => {
@@ -3470,8 +3509,12 @@ impl Session {
             AnyMessage::TeleportFinish(finish) => {
                 // The UDP TeleportFinish path (grids without an event queue).
                 // OpenSim normally delivers TeleportFinish over the CAPS event
-                // queue instead; see `handle_caps_event`.
-                if matches!(self.state, SessionState::Teleporting) {
+                // queue instead; see `handle_caps_event`. A finish without a
+                // start (the reference viewer's "Teleport 'finish' message
+                // without 'start'") is a teleport the simulator decided on;
+                // it cannot be ignored, the server already moved us.
+                if matches!(self.state, SessionState::Teleporting) || self.enter_remote_teleport(now)
+                {
                     let info = &finish.info;
                     // IPPORT is big-endian on the wire; the generated decoder
                     // reads it little-endian, so swap back to host order.
@@ -3575,26 +3618,18 @@ impl Session {
             }
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
-                let packet_num = packet.xfer_id.packet;
-                // The high bit marks the final packet; the low 31 bits are the
-                // sequence number (the first packet is sequence 0).
-                let is_last = packet_num & 0x8000_0000 != 0;
-                let sequence = packet_num & 0x7fff_ffff;
+                let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
                 if self.xfer_downloads.contains_key(&xfer_id) {
-                    // The first packet carries a 4-byte little-endian length
-                    // prefix before the file data; later packets are raw.
-                    let chunk: &[u8] = if sequence == 0 {
-                        packet.data_packet.data.get(4..).unwrap_or(&[])
-                    } else {
-                        &packet.data_packet.data
-                    };
+                    let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
                     if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
-                        download.buffer.extend_from_slice(chunk);
+                        download.buffer.extend_from_slice(chunk.payload);
                     }
                     if let Some(circuit) = self.circuit.as_mut() {
-                        circuit.send_confirm_xfer_packet(xfer_id, packet_num, now)?;
+                        circuit.send_confirm_xfer_packet(xfer_id, packet_id.raw(), now)?;
                     }
-                    if is_last && let Some(download) = self.xfer_downloads.remove(&xfer_id) {
+                    if packet_id.is_last()
+                        && let Some(download) = self.xfer_downloads.remove(&xfer_id)
+                    {
                         self.finish_xfer_download(xfer_id, download)?;
                     }
                 }
@@ -7926,47 +7961,23 @@ impl Session {
     }
 
     /// Streams the next chunk of the in-flight outbound `Xfer` upload `xfer_id`
-    /// as a `SendXferPacket`. The first packet (sequence 0) carries a 4-byte
-    /// little-endian total-size prefix before the data; the final packet sets the
-    /// high-bit end-of-file marker in its packet number. A no-op if the upload is
-    /// already gone. Advances the upload's cursor so the next
-    /// `ConfirmXferPacket` sends the following chunk.
+    /// as a `SendXferPacket`, framed by the shared [`sl_wire::xfer`] codec
+    /// (size prefix on sequence 0, EOF flag on the last packet). A no-op if
+    /// the upload is already gone or fully sent. Advances the upload's cursor
+    /// so the next `ConfirmXferPacket` sends the following chunk.
     fn send_next_xfer_upload_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
         let Some(upload) = self.xfer_uploads.get_mut(&xfer_id) else {
             return Ok(());
         };
         let sequence = upload.next_sequence;
-        let is_first = sequence == 0;
-        let remaining = upload.data.len().saturating_sub(upload.sent);
-        let take = remaining.min(XFER_UPLOAD_CHUNK_SIZE);
-        let end = upload.sent.saturating_add(take);
-        let chunk = upload.data.get(upload.sent..end).unwrap_or(&[]);
-        // The first packet is prefixed with the total file size (little-endian
-        // u32), matching the reference viewer's `LLXfer::sendPacket`.
-        let mut payload = Vec::with_capacity(take.saturating_add(4));
-        if is_first {
-            #[expect(
-                clippy::little_endian_bytes,
-                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
-            )]
-            let total_le = u32::try_from(upload.data.len())
-                .unwrap_or(u32::MAX)
-                .to_le_bytes();
-            payload.extend_from_slice(&total_le);
-        }
-        payload.extend_from_slice(chunk);
-        upload.sent = end;
-        let is_last = upload.sent >= upload.data.len();
-        upload.last_sent = is_last;
-        upload.next_sequence = sequence.wrapping_add(1);
-        // The high bit of the packet number marks the final packet.
-        let packet = if is_last {
-            sequence | 0x8000_0000
-        } else {
-            sequence
+        let Some(packet) = next_xfer_chunk(&upload.data, upload.sent, sequence) else {
+            return Ok(());
         };
+        upload.sent = packet.sent;
+        upload.last_sent = packet.id.is_last();
+        upload.next_sequence = sequence.wrapping_add(1);
         if let Some(circuit) = self.circuit.as_mut() {
-            circuit.send_xfer_packet(xfer_id, packet, &payload, now)?;
+            circuit.send_xfer_packet(xfer_id, packet.id.raw(), &packet.payload, now)?;
         }
         Ok(())
     }
@@ -12306,6 +12317,29 @@ impl Session {
         let circuit = self.circuit_for_scope(scope)?;
         circuit.send_redo(&object_ids, now)?;
         Ok(())
+    }
+
+    /// Enters a teleport the **simulator** initiated (a remote `TeleportStart`
+    /// or a `TeleportFinish` with no request of ours): arms the teleport
+    /// timeout and moves to `Teleporting` with an unknown target, so the
+    /// finish that follows is honoured exactly like one we asked for. Only an
+    /// `Active` session (or one whose crossing is still finalizing) can enter;
+    /// returns whether it did.
+    fn enter_remote_teleport(&mut self, now: Instant) -> bool {
+        match self.state {
+            SessionState::Active => {}
+            SessionState::AwaitingHandshake => self.complete_arrival(now),
+            _ => return false,
+        }
+        let Some(circuit) = self.circuit.as_mut() else {
+            return false;
+        };
+        circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
+        self.teleport = TeleportPhase::Requested {
+            target: RegionHandle(0),
+        };
+        self.state = SessionState::Teleporting;
+        true
     }
 
     /// Requests an in-world teleport to `position` (region-local) in the region

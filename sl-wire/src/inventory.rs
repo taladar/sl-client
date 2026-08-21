@@ -326,6 +326,66 @@ pub fn parse_ais_update_item_body(xml: &str) -> Result<AisItemUpdate, WireError>
     })
 }
 
+/// A parsed AIS3 create-link record (one `links` array entry of the
+/// [`build_ais_create_link_body`] payload): the inverse element of that
+/// builder.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct AisLinkCreate {
+    /// The inventory object the new link points at.
+    pub linked_id: Uuid,
+    /// The link's asset class (`24` `AT_LINK` for an item link, `25`
+    /// `AT_LINK_FOLDER` for a folder link).
+    pub link_type: i32,
+    /// The linked object's inventory class.
+    pub inv_type: i32,
+    /// The link's name.
+    pub name: String,
+    /// The link's description (the wire key is `desc`).
+    pub description: String,
+}
+
+/// Parses an AIS3 create-link body (`{ links: [ { linked_id, type, inv_type,
+/// name, desc } ] }`) into its records, the inverse of
+/// [`build_ais_create_link_body`] (which emits a single-entry array; the
+/// reference viewer may send several links at once, so the whole array is
+/// returned). Missing scalar fields default leniently like the sibling
+/// parsers; non-map array entries are skipped.
+///
+/// # Errors
+///
+/// Returns [`LlsdError::MalformedField`] if the body is not well-formed XML
+/// or has no `links` array, or if a present field has the wrong LLSD kind.
+pub fn parse_ais_create_link_body(xml: &str) -> Result<Vec<AisLinkCreate>, WireError> {
+    let root = parse_llsd_xml(xml).map_err(|error| LlsdError::MalformedField {
+        field: "AisCreateLink",
+        value: error.to_string(),
+    })?;
+    let links =
+        root.get("links")
+            .and_then(Llsd::as_array)
+            .ok_or_else(|| LlsdError::MalformedField {
+                field: "AisCreateLink",
+                value: "missing links array".to_owned(),
+            })?;
+    let mut parsed = Vec::new();
+    for link in links {
+        if link.as_map().is_none() {
+            continue;
+        }
+        parsed.push(AisLinkCreate {
+            linked_id: link
+                .field_uuid("linked_id", "linked_id")?
+                .unwrap_or_else(Uuid::nil),
+            link_type: link.field_i32("type", "type")?.unwrap_or(-1),
+            inv_type: link.field_i32("inv_type", "inv_type")?.unwrap_or(-1),
+            name: llsd_string(link, "name")?,
+            description: llsd_string(link, "desc")?,
+        });
+    }
+    Ok(parsed)
+}
+
 /// A parsed `CreateInventoryCategory` capability request (`{ folder_id,
 /// parent_id, type, name }`): the inverse of
 /// [`build_create_inventory_category_request`].
@@ -420,6 +480,16 @@ pub struct AisUpdate {
 /// [`Llsd::to_llsd_xml`], so it round-trips through [`parse_llsd_xml`].
 #[must_use]
 pub fn build_ais_update_response(update: &AisUpdate) -> String {
+    ais_update_to_llsd(update).to_llsd_xml()
+}
+
+/// Serializes an [`AisUpdate`] into the "meta" map of an AIS3 mutation reply —
+/// the [`Llsd`]-tree form of [`build_ais_update_response`], exposed separately
+/// so a server can merge the meta keys with an `_embedded` block into one
+/// reply body. Empty change-sets are omitted, exactly as in the string
+/// builder.
+#[must_use]
+pub fn ais_update_to_llsd(update: &AisUpdate) -> Llsd {
     let mut map: HashMap<String, Llsd> = HashMap::new();
     insert_uuid_array(
         &mut map,
@@ -464,7 +534,7 @@ pub fn build_ais_update_response(update: &AisUpdate) -> String {
             .collect();
         let _previous = map.insert("_updated_category_versions".to_owned(), Llsd::Map(versions));
     }
-    Llsd::Map(map).to_llsd_xml()
+    Llsd::Map(map)
 }
 
 /// Inserts `ids` under `key` as an LLSD array of UUIDs, skipping the key
@@ -662,6 +732,41 @@ mod test {
                 description: "a fine hat".to_owned(),
             }
         );
+        Ok(())
+    }
+
+    #[test]
+    fn create_link_body_round_trips() -> Result<(), String> {
+        let linked = uuid!("55555555-5555-5555-5555-555555555555");
+        let body = build_ais_create_link_body(linked, 24, 18, "Shirt & Co", "worn");
+        assert_eq!(
+            parse_ais_create_link_body(&body).map_err(|error| format!("{error:?}"))?,
+            vec![AisLinkCreate {
+                linked_id: linked,
+                link_type: 24,
+                inv_type: 18,
+                name: "Shirt & Co".to_owned(),
+                description: "worn".to_owned(),
+            }]
+        );
+        // A body without a links array is rejected, not silently empty.
+        match parse_ais_create_link_body("<llsd><map /></llsd>") {
+            Err(_) => Ok(()),
+            Ok(parsed) => Err(format!("expected an error, parsed {parsed:?}")),
+        }
+    }
+
+    #[test]
+    fn ais_update_llsd_tree_matches_the_string_builder() -> Result<(), String> {
+        let created = InventoryFolderKey::from(uuid!("77777777-7777-7777-7777-777777777777"));
+        let update = AisUpdate {
+            created_categories: vec![created],
+            updated_category_versions: vec![(created, 7)],
+            ..AisUpdate::default()
+        };
+        let from_string = parse_llsd_xml(&build_ais_update_response(&update))
+            .map_err(|error| format!("{error:?}"))?;
+        assert_eq!(ais_update_to_llsd(&update), from_string);
         Ok(())
     }
 

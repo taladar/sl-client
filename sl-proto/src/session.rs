@@ -76,6 +76,21 @@ pub const CAP_FETCH_INVENTORY: &str = "FetchInventoryDescendents2";
 /// Second-Life capability.
 pub const CAP_FETCH_LIBRARY: &str = "FetchLibDescendents2";
 
+/// The HTTP capability for fetching individual inventory **items** by id (a
+/// POST of `{ agent_id, items: [ { owner_id, item_id } ] }`) — the reference
+/// viewer's per-item fallback when an item is referenced (a worn link, a
+/// gesture) before its containing folder has been listed. The reply is the
+/// same flat item shape as the descendents caps and folds into
+/// [`Event::InventoryBulkUpdate`] via
+/// [`Session::handle_caps_event`].
+pub const CAP_FETCH_INVENTORY_ITEM: &str = "FetchInventory2";
+
+/// The HTTP capability for fetching individual **shared Library** items by id —
+/// the same request/response shape as [`CAP_FETCH_INVENTORY_ITEM`] but with the
+/// Library owner, folding under
+/// [`InventoryOwner::Library`](crate::InventoryOwner).
+pub const CAP_FETCH_LIBRARY_ITEM: &str = "FetchLib2";
+
 /// The HTTP capability for fetching a group's full member roster (a POST of an
 /// LLSD `{ group_id }` map — the modern Second Life path that replaces the UDP
 /// `GroupMembersRequest`/`Reply`). The LLSD response is decoded by
@@ -603,6 +618,8 @@ pub const REQUESTED_CAPABILITIES: &[&str] = &[
     "EventQueueGet",
     CAP_FETCH_INVENTORY,
     CAP_FETCH_LIBRARY,
+    CAP_FETCH_INVENTORY_ITEM,
+    CAP_FETCH_LIBRARY_ITEM,
     CAP_GROUP_MEMBER_DATA,
     CAP_GET_TEXTURE,
     CAP_GET_MESH,
@@ -900,13 +917,6 @@ struct XferDownload {
     /// stripped).
     buffer: Vec<u8>,
 }
-
-/// The maximum number of file bytes carried in a single outbound
-/// `SendXferPacket`, matching the reference viewer's default `LL_XFER_CHUNK_SIZE`
-/// (the small-payload size used when the `RequestXfer` did not ask for big
-/// packets, as OpenSim's terrain upload does not). The first packet additionally
-/// carries a 4-byte length prefix on top of this.
-pub(crate) const XFER_UPLOAD_CHUNK_SIZE: usize = 1000;
 
 /// An in-flight outbound `Xfer` file upload: the file bytes and how far we have
 /// streamed them. Registered by a `RequestXfer` the simulator sends in answer to
@@ -1506,23 +1516,28 @@ pub use inventory::{FolderState, InventoryOwner};
 pub use inventory_cache::INVENTORY_CACHE_VERSION;
 
 pub(crate) use chat_session::SERVER_HISTORY_CAP;
-pub(crate) use conversions::{
-    ZERO_VECTOR, build_task_inventory, instant_message, parse_copy_inventory_from_notecard,
-    region_handshake_message, shape_from_object_shape_block, unpack_uuids,
-};
 pub use conversions::{
+    STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo,
     agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
-    ais_inventory_update_to_llsd, build_map_block_reply, build_map_item_reply,
-    build_map_layer_reply, bulk_update_inventory_to_llsd, chat_session_agent_params_from_llsd,
-    chat_session_agents_body, chat_session_request_body, chat_session_request_from_llsd,
-    chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
+    ais_category_children_reply_to_llsd, ais_inventory_update_to_llsd, ais_item_reply_to_llsd,
+    ais_mutation_reply_to_llsd, build_environment_update_request, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, bulk_update_inventory_to_llsd,
+    chat_session_agent_params_from_llsd, chat_session_agents_body, chat_session_request_body,
+    chat_session_request_from_llsd, chat_session_roster_to_llsd, chatterbox_invitation_to_llsd,
     chatterbox_session_start_reply_to_llsd, copy_inventory_from_notecard_body,
     created_category_to_llsd, crossed_region_to_caps_llsd, display_name_update_to_llsd,
     enable_simulator_to_caps_llsd, environment_asset_from_bytes, environment_to_llsd,
-    establish_agent_communication_to_llsd, group_invite_response_body, group_members_to_caps_llsd,
-    group_memberships_to_caps_llsd, inventory_descendents_to_llsd, nav_mesh_status_to_llsd,
-    offline_messages_to_llsd, open_region_info_to_llsd, parcel_info_to_llsd,
-    required_voice_version_to_llsd, server_appearance_update_to_llsd, session_history_to_llsd,
-    set_display_name_reply_to_llsd, sim_console_response_to_llsd, sky_settings_from_asset,
-    teleport_finish_to_llsd, water_settings_from_asset, windlight_refresh_to_llsd,
+    establish_agent_communication_to_llsd, fetch_inventory_items_to_llsd,
+    group_invite_response_body, group_members_to_caps_llsd, group_memberships_to_caps_llsd,
+    inventory_descendents_to_llsd, nav_mesh_status_to_llsd, offline_messages_to_llsd,
+    open_region_info_to_llsd, parcel_info_to_llsd, required_voice_version_to_llsd,
+    server_appearance_update_to_llsd, session_history_to_llsd, set_display_name_reply_to_llsd,
+    sim_console_response_to_llsd, sky_settings_from_asset, teleport_finish_to_llsd,
+    water_settings_from_asset, windlight_refresh_to_llsd,
+};
+pub(crate) use conversions::{
+    ZERO_VECTOR, build_task_inventory, environment_update_from_llsd, full_update_block,
+    instant_message, parcel_properties_to_llsd, parcel_properties_to_wire,
+    parse_copy_inventory_from_notecard, region_handshake_message, shape_from_object_shape_block,
+    unpack_uuids,
 };

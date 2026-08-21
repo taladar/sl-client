@@ -1203,14 +1203,14 @@ mod tests {
                 face.vertex_count().saturating_sub(2),
                 "hollow cap is an annulus (no centre fan)"
             );
-            for tri in face.indices.as_chunks::<3>().0 {
-                let vertex = |slot: usize| -> [f32; 3] {
-                    tri.get(slot)
-                        .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(0)))
+            for &[t0, t1, t2] in face.indices.as_chunks::<3>().0 {
+                let vertex = |i: u32| -> [f32; 3] {
+                    face.positions
+                        .get(usize::try_from(i).unwrap_or(0))
                         .copied()
                         .unwrap_or([0.0; 3])
                 };
-                let (p0, p1, p2) = (vertex(0), vertex(1), vertex(2));
+                let (p0, p1, p2) = (vertex(t0), vertex(t1), vertex(t2));
                 let normal = super::cross(super::subtract(p1, p0), super::subtract(p2, p0));
                 let z = normal.get(2).copied().unwrap_or(0.0);
                 if want_top {
@@ -1290,14 +1290,14 @@ mod tests {
     /// Assert every triangle of a path cap winds outward (`+Z` top / `-Z`
     /// bottom).
     fn assert_cap_winds(face: &PrimFace, want_top: bool) {
-        for tri in face.indices.as_chunks::<3>().0 {
-            let vertex = |slot: usize| -> [f32; 3] {
-                tri.get(slot)
-                    .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(0)))
+        for &[t0, t1, t2] in face.indices.as_chunks::<3>().0 {
+            let vertex = |i: u32| -> [f32; 3] {
+                face.positions
+                    .get(usize::try_from(i).unwrap_or(0))
                     .copied()
                     .unwrap_or([0.0; 3])
             };
-            let (p0, p1, p2) = (vertex(0), vertex(1), vertex(2));
+            let (p0, p1, p2) = (vertex(t0), vertex(t1), vertex(t2));
             let z = super::cross(super::subtract(p1, p0), super::subtract(p2, p0))
                 .get(2)
                 .copied()
@@ -1347,14 +1347,14 @@ mod tests {
     /// The total area a face's triangles cover.
     fn face_covered_area(face: &PrimFace) -> f32 {
         let mut area = 0.0;
-        for tri in face.indices.as_chunks::<3>().0 {
-            let vertex = |slot: usize| -> [f32; 3] {
-                tri.get(slot)
-                    .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(usize::MAX)))
+        for &[t0, t1, t2] in face.indices.as_chunks::<3>().0 {
+            let vertex = |i: u32| -> [f32; 3] {
+                face.positions
+                    .get(usize::try_from(i).unwrap_or(usize::MAX))
                     .copied()
                     .unwrap_or([0.0; 3])
             };
-            area += triangle_area(vertex(0), vertex(1), vertex(2));
+            area += triangle_area(vertex(t0), vertex(t1), vertex(t2));
         }
         area
     }

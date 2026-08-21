@@ -5,17 +5,22 @@ mod agent_preferences;
 mod circuit_code;
 mod control_flags;
 mod display_name;
+mod economy_helper;
 mod endian;
 mod error;
 mod experience;
+mod fake_parcel_id;
 mod field;
 mod geometry;
+mod grid_info;
 mod header;
 mod inventory;
+mod landmark;
 mod llsd;
 mod login;
 mod login_llsd;
 mod lsl_syntax;
+mod map_tile;
 mod material;
 mod message;
 /// Generated LLUDP message types and their (de)serialization, produced at build
@@ -37,6 +42,8 @@ mod transfer;
 mod url;
 mod user_info;
 mod voice;
+mod xfer;
+pub mod xmlrpc;
 mod zerocode;
 
 pub use abuse_report::{
@@ -54,6 +61,18 @@ pub use display_name::{
     parse_avatar_picker_search, parse_avatar_picker_search_query, parse_display_names,
     parse_display_names_query,
 };
+pub use economy_helper::{
+    BUY_CURRENCY_METHOD, BUY_LAND_PREP_METHOD, BuyCurrencyRequest, CURRENCY_HELPER_PATH,
+    CurrencyQuote, CurrencyQuoteRequest, GET_CURRENCY_QUOTE_METHOD, HelperFailure, HelperOutcome,
+    LAND_TOOL_HELPER_PATH, LandPrep, LandPrepRequest, LandUseRequirement, MembershipLevel,
+    MembershipRequirement, PREFLIGHT_BUY_LAND_PREP_METHOD, ViewerVersionInfo,
+    build_buy_currency_request, build_buy_currency_response, build_buy_land_prep_request,
+    build_buy_land_prep_response, build_currency_quote_request, build_currency_quote_response,
+    build_preflight_land_prep_request, build_preflight_land_prep_response,
+    parse_buy_currency_request, parse_buy_currency_response, parse_buy_land_prep_request,
+    parse_buy_land_prep_response, parse_currency_quote_request, parse_currency_quote_response,
+    parse_preflight_land_prep_request, parse_preflight_land_prep_response,
+};
 pub use error::WireError;
 pub use experience::{
     ExperienceInfo, ExperiencePermission, ExperienceProperties, ExperienceUpdate,
@@ -70,36 +89,47 @@ pub use experience::{
     parse_region_experiences, parse_region_experiences_request,
     parse_set_experience_permission_request, parse_update_experience_request,
 };
+pub use fake_parcel_id::FakeParcelId;
 pub use field::{Reader, Writer};
 pub use geometry::{Direction, GlobalCoordinates};
+pub use grid_info::{
+    GRID_INFO_METHOD, GRID_INFO_PATH, GridInfo, KEY_ABOUT, KEY_ECONOMY, KEY_GATEKEEPER,
+    KEY_GRIDNAME, KEY_GRIDNICK, KEY_HELP, KEY_HELPERURI, KEY_LOGIN, KEY_MESSAGE, KEY_PASSWORD,
+    KEY_PLATFORM, KEY_PROFILEURI, KEY_REGISTER, KEY_SEARCH, KEY_UAS, KEY_WEB_PROFILE_URL,
+    KEY_WELCOME, build_grid_info_xml, build_grid_info_xmlrpc_response, parse_grid_info_xml,
+    parse_grid_info_xmlrpc_response,
+};
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use inventory::{
-    AIS_MAX_FOLDER_DEPTH, AisCategoryCreate, AisItemUpdate, AisUpdate,
+    AIS_MAX_FOLDER_DEPTH, AisCategoryCreate, AisItemUpdate, AisLinkCreate, AisUpdate,
     CreateInventoryCategoryRequest, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, build_ais_create_category_body,
-    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
-    build_ais_update_item_body, build_ais_update_response, build_create_inventory_category_request,
-    build_create_inventory_category_response, parse_ais_category_children_fetch_url,
-    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
-    parse_ais_create_category_url, parse_ais_item_url, parse_ais_move_body,
-    parse_ais_rename_category_body, parse_ais_update_item_body,
-    parse_create_inventory_category_request,
+    ais_category_url, ais_create_category_url, ais_item_url, ais_update_to_llsd,
+    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
+    build_ais_rename_category_body, build_ais_update_item_body, build_ais_update_response,
+    build_create_inventory_category_request, build_create_inventory_category_response,
+    parse_ais_category_children_fetch_url, parse_ais_category_children_url, parse_ais_category_url,
+    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
+    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
+    parse_ais_update_item_body, parse_create_inventory_category_request,
 };
+pub use landmark::{LandmarkAsset, landmark_to_wire, parse_landmark};
 pub use llsd::{
-    AssetUploadResponse, EventQueueEvent, EventQueueRequest, EventQueueResponse, Llsd, LlsdError,
+    AssetUploadResponse, EventQueueEvent, EventQueueRequest, EventQueueResponse,
+    FetchInventoryFolderRequest, FetchInventoryItemsRequest, FetchItemRef, Llsd, LlsdError,
     MEDIA_PERM_ALL, MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER,
     MediaEntry, NewFileAgentInventoryRequest, ObjectMediaNavigateRequest, ObjectMediaRequest,
     ObjectMediaResponse, UpdateScriptAgentRequest, UpdateScriptTaskRequest,
     UpdateTaskItemAssetRequest, build_asset_upload_response, build_event_queue_request,
-    build_event_queue_response, build_fetch_inventory_request, build_group_member_data_request,
-    build_group_notice_bucket, build_new_file_agent_inventory_request,
-    build_object_media_get_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_seed_request, build_seed_response,
-    build_update_avatar_appearance_request, build_update_item_asset_request,
+    build_event_queue_response, build_fetch_inventory_items_request, build_fetch_inventory_request,
+    build_group_member_data_request, build_group_notice_bucket,
+    build_new_file_agent_inventory_request, build_object_media_get_request,
+    build_object_media_navigate_request, build_object_media_update_request, build_seed_request,
+    build_seed_response, build_update_avatar_appearance_request, build_update_item_asset_request,
     build_update_script_agent_request, build_update_script_task_request,
     build_update_task_item_asset_request, build_upload_baked_texture_request,
     parse_asset_upload_response, parse_event_queue_request, parse_event_queue_response,
-    parse_llsd_binary, parse_llsd_binary_prefix, parse_llsd_notation, parse_llsd_xml,
+    parse_fetch_inventory_items_request, parse_fetch_inventory_request, parse_llsd_binary,
+    parse_llsd_binary_prefix, parse_llsd_notation, parse_llsd_xml,
     parse_new_file_agent_inventory_request, parse_object_media_navigate_request,
     parse_object_media_request, parse_seed_request, parse_seed_response,
     parse_update_avatar_appearance_request, parse_update_item_asset_request,
@@ -120,6 +150,7 @@ pub use login_llsd::{
     parse_login_response_llsd,
 };
 pub use lsl_syntax::{build_lsl_syntax_document, parse_lsl_syntax};
+pub use map_tile::{MAP_TILE_CONTENT_TYPE, MAP_TILE_MAX_ZOOM, MAP_TILE_MIN_ZOOM, MapTileRef};
 pub use material::{
     FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,
     MaterialOverrideUpdate, RenderMaterialEntry, build_gltf_material_override,
@@ -134,8 +165,8 @@ pub use messages::{AnyMessage, message_name};
 pub use object_cost::{
     ObjectCost, SelectedCostKind, SelectedResourceCost, build_get_object_cost_request,
     build_get_object_cost_response, build_resource_cost_selected_request,
-    build_resource_cost_selected_response, parse_get_object_cost, parse_resource_cost_selected,
-    parse_resource_cost_selected_request,
+    build_resource_cost_selected_response, parse_get_object_cost, parse_get_object_cost_request,
+    parse_resource_cost_selected, parse_resource_cost_selected_request,
 };
 pub use object_physics::{
     ObjectPhysicsData, PhysicsShapeType, build_get_object_physics_data_request,
@@ -166,6 +197,10 @@ pub use sim_features::{
     AnimatedObjects, OpenSimExtras, PhysicsShapeTypes, SimulatorFeatures,
     build_simulator_features_response, parse_simulator_features,
 };
+pub use xmlrpc::{
+    XmlRpcCall, XmlRpcError, XmlRpcResponse, build_fault, build_method_call, build_method_response,
+    parse_method_call, parse_method_response,
+};
 // Re-export the `sl-lsl` symbol-table types the `LSLSyntax` decoder produces, so
 // a consumer of `sl-wire` reaches them the same way it reaches `SimulatorFeatures`.
 pub use sl_lsl::{
@@ -174,8 +209,8 @@ pub use sl_lsl::{
 };
 pub use transfer::{
     ESTATE_ASSET_COVENANT, TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_ASSET,
-    TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsEstate,
-    TransferSourceParamsInvItem,
+    TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsAsset,
+    TransferSourceParamsEstate, TransferSourceParamsInvItem,
 };
 pub use url::{optional_url_from_wire, optional_url_to_wire, url_from_wire, url_to_wire};
 pub use user_info::{
@@ -183,11 +218,16 @@ pub use user_info::{
     build_user_info_update, parse_user_info_reply, parse_user_info_update,
 };
 pub use voice::{
-    IceCandidate, ParcelVoiceInfo, VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC,
-    VoiceAccountInfo, VoiceProvisionRequest, build_parcel_voice_info_request,
-    build_parcel_voice_info_response, build_provision_voice_account_request,
-    build_provision_voice_account_response, build_voice_signaling_request,
-    parse_provision_voice_account_request, parse_voice_signaling_request,
+    IceCandidate, ParcelVoiceInfo, VOICE_CHANNEL_TYPE_LOCAL, VOICE_CHANNEL_TYPE_MULTIAGENT,
+    VOICE_SERVER_TYPE_VIVOX, VOICE_SERVER_TYPE_WEBRTC, VoiceAccountInfo, VoiceChannelUri,
+    VoiceProvisionRequest, build_parcel_voice_info_request, build_parcel_voice_info_response,
+    build_provision_voice_account_request, build_provision_voice_account_response,
+    build_voice_signaling_request, parse_provision_voice_account_request,
+    parse_voice_signaling_request,
+};
+pub use xfer::{
+    XFER_CHUNK_SIZE, XFER_EOF_FLAG, XferChunk, XferOutgoingPacket, XferPacketId, decode_xfer_chunk,
+    encode_xfer_chunk, next_xfer_chunk,
 };
 pub use zerocode::{decode as zero_decode, encode as zero_encode};
 

@@ -260,4 +260,7 @@ usable later by a real simulator). Conventions:
 - **Boundary unchanged.** Protocol surface is in scope; the
   world-authority grid — persistence, physics, multi-client broadcast,
   socket/event-loop I/O — remains the consumer's job (the `sl-fake-grid`
-  test crate is one such consumer).
+  test crate is one such consumer). The niche non-CAPS HTTP surfaces a
+  login host serves — `get_grid_info`, map tiles, the economy helper
+  XML-RPC — are in scope as sans-I/O codecs (`sl-wire`'s `grid_info`,
+  `map_tile`, `economy_helper`, over the generic `xmlrpc` module).

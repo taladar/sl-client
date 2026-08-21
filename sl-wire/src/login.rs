@@ -11,6 +11,8 @@ use std::str::FromStr;
 use crate::geometry::Direction;
 use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
+use crate::xmlrpc::{array_value_nodes, push_member, push_value, value_to_llsd};
+use sl_llsd::push_escaped;
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, TextureKey};
 use sl_types::map::RegionCoordinates;
 use thiserror::Error;
@@ -346,20 +348,6 @@ fn push_string_array_member(out: &mut String, name: &str, values: &[String]) {
         out.push_str("</string></value>\n");
     }
     out.push_str("</data></array></value></member>\n");
-}
-
-/// Appends `value` to `out`, escaping the XML metacharacters.
-fn push_escaped(out: &mut String, value: &str) {
-    for ch in value.chars() {
-        match ch {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&apos;"),
-            other => out.push(other),
-        }
-    }
 }
 
 /// A parsed login response: success, a multi-factor challenge, a redirect to
@@ -1235,9 +1223,8 @@ pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError>
             .and_then(|f| f.trim().parse().ok()),
         account_type: members.get("account_type").cloned(),
         account_level_benefits: member_value_node(response_struct, "account_level_benefits")
-            .map(xmlrpc_value_to_llsd),
-        premium_packages: member_value_node(response_struct, "premium_packages")
-            .map(xmlrpc_value_to_llsd),
+            .map(value_to_llsd),
+        premium_packages: member_value_node(response_struct, "premium_packages").map(value_to_llsd),
     })))
 }
 
@@ -1546,7 +1533,7 @@ fn parse_event_notifications(response_struct: roxmltree::Node<'_, '_>) -> Vec<Ll
     let Some(value) = member_value_node(response_struct, "event_notifications") else {
         return Vec::new();
     };
-    array_value_nodes(value).map(xmlrpc_value_to_llsd).collect()
+    array_value_nodes(value).map(value_to_llsd).collect()
 }
 
 /// Extracts the `tutorial_setting` entries, skipping ones without a URL.
@@ -1562,125 +1549,6 @@ fn parse_tutorial_settings(response_struct: roxmltree::Node<'_, '_>) -> Vec<Tuto
             })
         })
         .collect()
-}
-
-/// Converts a free-form XML-RPC `<value>` tree into an [`Llsd`] value, for the
-/// login response fields whose shape is grid-defined (`account_level_benefits`,
-/// `premium_packages`, `event_notifications`). Structs become maps, arrays
-/// become arrays, `i4`/`int` integers, `boolean` booleans, `double` reals,
-/// `base64` binary; everything else (including `dateTime.iso8601`) is kept as
-/// its string text, so no value is ever dropped.
-fn xmlrpc_value_to_llsd(value_node: roxmltree::Node<'_, '_>) -> Llsd {
-    let Some(element) = value_node.children().find(roxmltree::Node::is_element) else {
-        return Llsd::String(value_node.text().unwrap_or_default().to_owned());
-    };
-    let text = || element.text().unwrap_or_default().to_owned();
-    match element.tag_name().name() {
-        "struct" => Llsd::Map(
-            element
-                .children()
-                .filter(|n| n.has_tag_name("member"))
-                .filter_map(|member| {
-                    let name = member
-                        .children()
-                        .find(|n| n.has_tag_name("name"))
-                        .and_then(|n| n.text())?;
-                    let value = member.children().find(|n| n.has_tag_name("value"))?;
-                    Some((name.to_owned(), xmlrpc_value_to_llsd(value)))
-                })
-                .collect(),
-        ),
-        "array" => Llsd::Array(
-            array_value_nodes(value_node)
-                .map(xmlrpc_value_to_llsd)
-                .collect(),
-        ),
-        "i4" | "int" => element
-            .text()
-            .and_then(|t| t.trim().parse().ok())
-            .map_or_else(|| Llsd::String(text()), Llsd::Integer),
-        "boolean" => Llsd::Boolean(matches!(element.text().map(str::trim), Some("1" | "true"))),
-        "double" => element
-            .text()
-            .and_then(|t| t.trim().parse().ok())
-            .map_or_else(|| Llsd::String(text()), Llsd::Real),
-        "base64" => {
-            use base64::Engine as _;
-            base64::engine::general_purpose::STANDARD
-                .decode(text().trim())
-                .map_or_else(|_error| Llsd::String(text()), Llsd::Binary)
-        }
-        _other => Llsd::String(text()),
-    }
-}
-
-/// Appends an XML-RPC `<member>` holding a free-form [`Llsd`] value, the
-/// emitting inverse of [`xmlrpc_value_to_llsd`].
-fn push_llsd_member(out: &mut String, name: &str, value: &Llsd) {
-    out.push_str("<member><name>");
-    out.push_str(name);
-    out.push_str("</name>");
-    push_llsd_value(out, value);
-    out.push_str("</member>\n");
-}
-
-/// Appends a free-form [`Llsd`] value as an XML-RPC `<value>` tree. Maps
-/// become structs, arrays arrays, integers `<i4>`, booleans `<boolean>`,
-/// reals `<double>`, binary `<base64>`; strings, UUIDs, dates, URIs, and the
-/// undefined value are written as `<string>` (the string-degrading subset
-/// [`xmlrpc_value_to_llsd`] parses back, so values round-trip).
-fn push_llsd_value(out: &mut String, value: &Llsd) {
-    out.push_str("<value>");
-    match value {
-        Llsd::Map(map) => {
-            out.push_str("<struct>");
-            for (key, entry) in map {
-                push_llsd_member(out, key, entry);
-            }
-            out.push_str("</struct>");
-        }
-        Llsd::Array(items) => {
-            out.push_str("<array><data>\n");
-            for item in items {
-                push_llsd_value(out, item);
-                out.push('\n');
-            }
-            out.push_str("</data></array>");
-        }
-        Llsd::Integer(value) => {
-            out.push_str("<i4>");
-            out.push_str(&value.to_string());
-            out.push_str("</i4>");
-        }
-        Llsd::Boolean(value) => {
-            out.push_str("<boolean>");
-            out.push_str(if *value { "1" } else { "0" });
-            out.push_str("</boolean>");
-        }
-        Llsd::Real(value) => {
-            out.push_str("<double>");
-            out.push_str(&value.to_string());
-            out.push_str("</double>");
-        }
-        Llsd::Binary(bytes) => {
-            use base64::Engine as _;
-            out.push_str("<base64>");
-            out.push_str(&base64::engine::general_purpose::STANDARD.encode(bytes));
-            out.push_str("</base64>");
-        }
-        Llsd::String(value) | Llsd::Date(value) | Llsd::Uri(value) => {
-            out.push_str("<string>");
-            push_escaped(out, value);
-            out.push_str("</string>");
-        }
-        Llsd::Uuid(value) => {
-            out.push_str("<string>");
-            out.push_str(&value.to_string());
-            out.push_str("</string>");
-        }
-        Llsd::Undef => out.push_str("<string></string>"),
-    }
-    out.push_str("</value>");
 }
 
 /// Finds the `<value>` node of the named `<member>` directly under a `<struct>`.
@@ -1699,19 +1567,6 @@ fn member_value_node<'a>(
                 == Some(name)
         })
         .and_then(|member| member.children().find(|n| n.has_tag_name("value")))
-}
-
-/// Iterates the element `<value>` nodes inside an array `<value>` (`value →
-/// array → data → value`).
-fn array_value_nodes<'a>(
-    value_node: roxmltree::Node<'a, 'a>,
-) -> impl Iterator<Item = roxmltree::Node<'a, 'a>> {
-    value_node
-        .children()
-        .find(|n| n.has_tag_name("array"))
-        .and_then(|array| array.children().find(|n| n.has_tag_name("data")))
-        .into_iter()
-        .flat_map(|data| data.children().filter(|n| n.has_tag_name("value")))
 }
 
 /// Iterates the `<struct>` nodes inside an array `<value>` (`value → array →
@@ -2115,6 +1970,14 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     );
     push_opt_string_member(
         out,
+        "agent_appearance_service",
+        success
+            .agent_appearance_service
+            .as_ref()
+            .map(url::Url::as_str),
+    );
+    push_opt_string_member(
+        out,
         "openid_url",
         success.openid_url.as_ref().map(url::Url::as_str),
     );
@@ -2218,7 +2081,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     if !success.event_notifications.is_empty() {
         out.push_str("<member><name>event_notifications</name><value><array><data>\n");
         for entry in &success.event_notifications {
-            push_llsd_value(out, entry);
+            push_value(out, entry);
             out.push('\n');
         }
         out.push_str("</data></array></value></member>\n");
@@ -2266,10 +2129,10 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     }
     push_opt_string_member(out, "account_type", success.account_type.as_deref());
     if let Some(benefits) = &success.account_level_benefits {
-        push_llsd_member(out, "account_level_benefits", benefits);
+        push_member(out, "account_level_benefits", benefits);
     }
     if let Some(packages) = &success.premium_packages {
-        push_llsd_member(out, "premium_packages", packages);
+        push_member(out, "premium_packages", packages);
     }
 }
 

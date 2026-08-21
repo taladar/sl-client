@@ -180,7 +180,7 @@ mod tests {
                 .as_chunks::<4>()
                 .0
                 .iter()
-                .all(|px| px.get(3) == Some(&u8::MAX))
+                .all(|&[_r, _g, _b, a]| a == u8::MAX)
         );
         Ok(())
     }

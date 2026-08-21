@@ -76,6 +76,10 @@ pub struct OpenSimExtras {
     pub grid_url: Option<url::Url>,
     /// The currency symbol the grid displays (`currency`), e.g. `"OS$"`.
     pub currency: Option<String>,
+    /// The economy helper base URI (`currency-base-uri`): where the viewer's
+    /// buy-L$ / buy-land flows POST their XML-RPC helper calls
+    /// (the `economy_helper` builders such as [`build_currency_quote_request`](crate::build_currency_quote_request)).
+    pub currency_base_uri: Option<url::Url>,
     /// The `llSay`/normal chat range in metres (`say-range`; viewer default 20).
     pub say_range: Option<i32>,
     /// The `llShout` range in metres (`shout-range`; viewer default 100).
@@ -132,6 +136,12 @@ pub struct SimulatorFeatures {
     pub gltf_enabled: Option<bool>,
     /// The asset id of the LSL syntax definition for this simulator (`LSLSyntaxId`).
     pub lsl_syntax_id: Option<Uuid>,
+    /// The voice backend the region speaks (`VoiceServerType`: `"webrtc"` or
+    /// `"vivox"`). The viewer selects its spatial-voice module from this field
+    /// (Firestorm `llvoiceclient.cpp`, `LLVoiceClient::onSimulatorFeaturesReceived`);
+    /// [`None`] when the region did not advertise one (older grids — the viewer
+    /// then falls back to the login response's `voice-config`).
+    pub voice_server_type: Option<String>,
     /// The OpenSim-only grid extras, or [`None`] on grids omitting them.
     pub open_sim_extras: Option<OpenSimExtras>,
 }
@@ -193,6 +203,7 @@ impl OpenSimExtras {
             avatar_picker_url: url_field("avatar-picker-url")?,
             grid_url: url_field("GridURL")?,
             currency: map.field_str("currency", "currency")?.map(str::to_owned),
+            currency_base_uri: url_field("currency-base-uri")?,
             say_range: map.field_i32("say-range", "say-range")?,
             shout_range: map.field_i32("shout-range", "shout-range")?,
             whisper_range: map.field_i32("whisper-range", "whisper-range")?,
@@ -234,6 +245,9 @@ impl OpenSimExtras {
         }
         if let Some(value) = &self.currency {
             put("currency", Llsd::String(value.clone()));
+        }
+        if let Some(value) = &self.currency_base_uri {
+            put("currency-base-uri", Llsd::String(crate::url_to_wire(value)));
         }
         if let Some(value) = self.say_range {
             put("say-range", Llsd::Integer(value));
@@ -316,6 +330,9 @@ pub fn parse_simulator_features(body: &Llsd) -> Result<SimulatorFeatures, WireEr
         pbr_terrain_enabled: body.field_bool("PBRTerrainEnabled", "PBRTerrainEnabled")?,
         gltf_enabled: body.field_bool("GLTFEnabled", "GLTFEnabled")?,
         lsl_syntax_id: body.field_uuid("LSLSyntaxId", "LSLSyntaxId")?,
+        voice_server_type: body
+            .field_str("VoiceServerType", "VoiceServerType")?
+            .map(str::to_owned),
         open_sim_extras: match body.get("OpenSimExtras") {
             None | Some(Llsd::Undef) => None,
             Some(map @ Llsd::Map(_)) => Some(OpenSimExtras::from_llsd(map)?),
@@ -407,6 +424,9 @@ pub fn build_simulator_features_response(features: &SimulatorFeatures) -> String
     if let Some(value) = features.lsl_syntax_id {
         put("LSLSyntaxId", Llsd::Uuid(value));
     }
+    if let Some(value) = &features.voice_server_type {
+        put("VoiceServerType", Llsd::String(value.clone()));
+    }
     if let Some(extras) = &features.open_sim_extras {
         put("OpenSimExtras", extras.to_llsd());
     }
@@ -495,6 +515,7 @@ mod tests {
                 Uuid::parse_str("11111111-1111-1111-1111-111111111111")
                     .map_err(|error| error.to_string())?,
             ),
+            voice_server_type: Some("webrtc".to_owned()),
             open_sim_extras: Some(OpenSimExtras {
                 export_supported: Some(true),
                 map_server_url: Some(
@@ -511,6 +532,9 @@ mod tests {
                 ),
                 grid_url: Some(url::Url::parse("http://grid.example/").map_err(|e| e.to_string())?),
                 currency: Some("OS$".to_owned()),
+                currency_base_uri: Some(
+                    url::Url::parse("http://economy.example/").map_err(|e| e.to_string())?,
+                ),
                 say_range: Some(20),
                 shout_range: Some(100),
                 whisper_range: Some(10),

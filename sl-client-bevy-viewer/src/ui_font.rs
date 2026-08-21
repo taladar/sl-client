@@ -751,8 +751,7 @@ mod tests {
             .0
             .iter()
             .take(count)
-            .filter_map(|record| record.get(0..4))
-            .filter_map(|tag| <[u8; 4]>::try_from(tag).ok())
+            .map(|&[a, b, c, d, ..]| [a, b, c, d])
             .collect()
     }
 }

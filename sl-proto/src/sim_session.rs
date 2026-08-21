@@ -25,8 +25,8 @@ use std::time::{Duration, Instant};
 
 use sl_types::chat::ChatChannel;
 use sl_types::key::{
-    AgentKey, FriendKey, GroupKey, GroupRoleKey, InventoryFolderKey, InventoryItemOrFolderKey,
-    InventoryKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
+    AgentKey, ExperienceKey, FriendKey, GroupKey, GroupRoleKey, InventoryFolderKey,
+    InventoryItemOrFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey, TextureKey,
 };
 use sl_types::lsl::{Rotation, Vector};
 use sl_types::map::{GridCoordinates, RegionCoordinates};
@@ -126,10 +126,10 @@ use sl_wire::messages::{
     TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock,
 };
 use sl_wire::{
-    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, GlobalCoordinates, Llsd, MessageId,
-    PacketFlags, Permissions, Permissions5, Reader, RegionHandle, RegionLocalObjectId,
-    RegionLocalParcelId, SequenceNumber, WireError, Writer, build_event_queue_response,
-    encode_datagram, parse_datagram, zero_decode,
+    AnyMessage, CircuitCode, ControlFlags, EventQueueEvent, ExperienceInfo, ExperiencePermission,
+    ExperienceUpdate, GlobalCoordinates, Llsd, MessageId, PacketFlags, Permissions, Permissions5,
+    Reader, RegionHandle, RegionLocalObjectId, RegionLocalParcelId, SequenceNumber, WireError,
+    Writer, build_event_queue_response, encode_datagram, parse_datagram, zero_decode,
 };
 use uuid::Uuid;
 
@@ -141,45 +141,52 @@ use crate::bookkeeping_ids::{
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
-    SERVER_HISTORY_CAP, ServerHistoryMessage, agent_drop_group_to_llsd,
-    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
-    build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage, TeleportFinishInfo,
+    agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
+    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
-    establish_agent_communication_to_llsd, instant_message, nav_mesh_status_to_llsd,
-    open_region_info_to_llsd, region_handshake_message, required_voice_version_to_llsd,
+    establish_agent_communication_to_llsd, full_update_block, instant_message,
+    nav_mesh_status_to_llsd, open_region_info_to_llsd, parcel_properties_to_llsd,
+    parcel_properties_to_wire, region_handshake_message, required_voice_version_to_llsd,
     set_display_name_reply_to_llsd, shape_from_object_shape_block, sim_console_response_to_llsd,
     teleport_finish_to_llsd, unpack_uuids, windlight_refresh_to_llsd,
 };
+use crate::sim_experiences::SimExperiences;
+use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
+use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
-    ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DetachOrder, DirClassifiedResult,
-    DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
-    DirectoryVisibility, DisplayNameUpdate, EjectAction, EstateCovenant, EventInfo,
-    FeatureDisabled, FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage,
-    GenericStreamingMessage, GestureActivation, GodRegionUpdate, GroupAccountDetails,
-    GroupAccountSummary, GroupAccountTransactions, GroupActiveProposalItem, GroupName,
-    GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryItemMove, InventoryType, Kick,
+    ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DayCycle, DetachOrder,
+    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+    DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EjectAction,
+    EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo, FeatureDisabled,
+    FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
+    GestureActivation, GodRegionUpdate, GroupAccountDetails, GroupAccountSummary,
+    GroupAccountTransactions, GroupActiveProposalItem, GroupName, GroupVoteHistoryItem, ImDialog,
+    InstantMessage, InventoryFolder, InventoryItem, InventoryItemMove, InventoryType, Kick,
     LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem, LandStatReportType,
     MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
-    NavMeshStatus, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+    NavMeshStatus, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
     ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId, RegionIdentity,
-    RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment, RezObjectParams,
-    RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest, ScriptPermissions,
-    ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime, StartLocationSlot,
-    TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-    TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-    ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ParcelInfo, ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId,
+    RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
+    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
+    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
+    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
+    TerraformArea, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
 use sl_wire::combine_uuids;
 use sl_wire::messages::{
     AbortXfer, AbortXferXferIDBlock, AssetUploadComplete, AssetUploadCompleteAssetBlockBlock,
-    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, RequestXfer, RequestXferXferIDBlock,
-    SendXferPacket, SendXferPacketDataPacketBlock, SendXferPacketXferIDBlock,
+    ConfirmXferPacket, ConfirmXferPacketXferIDBlock, InitiateDownload,
+    InitiateDownloadAgentDataBlock, InitiateDownloadFileDataBlock, RequestXfer,
+    RequestXferXferIDBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+    SendXferPacketXferIDBlock,
 };
 use sl_wire::messages::{
     AvatarSitResponse, AvatarSitResponseSitObjectBlock, AvatarSitResponseSitTransformBlock,
@@ -198,17 +205,28 @@ use sl_wire::messages::{
     TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock,
 };
 use sl_wire::messages::{
+    KillObject, KillObjectObjectDataBlock, ObjectUpdate, ObjectUpdateCompressed,
+    ObjectUpdateCompressedObjectDataBlock, ObjectUpdateCompressedRegionDataBlock,
+    ObjectUpdateRegionDataBlock, ParcelOverlay, ParcelOverlayParcelDataBlock,
+};
+use sl_wire::messages::{
     TransferInfo, TransferInfoTransferInfoBlock, TransferPacket, TransferPacketTransferDataBlock,
 };
 use sl_wire::{AgentPreferences, DisplayName, ObjectPermMasks};
+use sl_wire::{
+    AttachmentResourcesReport, LslSyntax, ObjectCost, ObjectPhysicsData, ParcelScriptResources,
+    RemoteParcelRequest, ResourceSummary, SelectedResourceCost, SimulatorFeatures,
+};
 use sl_wire::{
     FaceMaterialPut, LegacyMaterial, MaterialOverrideUpdate, MediaEntry,
     NewFileAgentInventoryRequest, RenderMaterialEntry, UpdateScriptAgentRequest,
     UpdateScriptTaskRequest,
 };
+use sl_wire::{IceCandidate, ParcelVoiceInfo, VoiceAccountInfo, VoiceProvisionRequest};
 use sl_wire::{
-    TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_SIM_ESTATE, TRANSFER_SOURCE_SIM_INV_ITEM,
-    TransferSourceParamsEstate, TransferSourceParamsInvItem,
+    TRANSFER_CHANNEL_ASSET, TRANSFER_SOURCE_ASSET, TRANSFER_SOURCE_SIM_ESTATE,
+    TRANSFER_SOURCE_SIM_INV_ITEM, TransferSourceParamsAsset, TransferSourceParamsEstate,
+    TransferSourceParamsInvItem, XferPacketId, decode_xfer_chunk, next_xfer_chunk,
 };
 
 /// Decodes a [`RestoreItem`] from one of the field-identical inventory-item
@@ -382,20 +400,39 @@ struct SimXferSend {
     last_sent: bool,
 }
 
-/// An inbound server-side `Xfer` pull in flight — the byte stream of an
-/// oversized legacy asset upload
-/// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset))
-/// the simulator requested from the client by its predicted `VFileID`.
+/// What an inbound server-side `Xfer` pull becomes once its final packet is
+/// confirmed — the mirror of the client's download purpose tag.
+#[derive(Debug)]
+enum SimXferReceivePurpose {
+    /// The byte stream of an oversized legacy asset upload
+    /// ([`Session::save_inventory_asset`](crate::Session::save_inventory_asset))
+    /// the simulator requested from the client by its predicted `VFileID`;
+    /// completes with an `AssetUploadComplete` and
+    /// [`ServerEvent::AssetUploaded`].
+    AssetUpload {
+        /// The predicted stored asset id,
+        /// `combine(transaction_id, secure_session_id)`.
+        asset_id: Uuid,
+        /// The asset type declared by the `AssetUploadRequest`.
+        asset_type: AssetType,
+        /// The upload's transaction id, echoed on
+        /// [`ServerEvent::AssetUploaded`].
+        transaction_id: TransactionId,
+    },
+    /// A named file the simulator pulled from the client
+    /// ([`SimSession::request_xfer_upload`]) — the terrain RAW upload;
+    /// completes with [`ServerEvent::XferReceived`].
+    NamedFile {
+        /// The filename the pull named (the client's viewer-side name).
+        filename: String,
+    },
+}
+
+/// An inbound server-side `Xfer` pull in flight.
 #[derive(Debug)]
 struct SimXferReceive {
-    /// The predicted stored asset id,
-    /// `combine(transaction_id, secure_session_id)`.
-    asset_id: Uuid,
-    /// The asset type declared by the `AssetUploadRequest`.
-    asset_type: AssetType,
-    /// The upload's transaction id, echoed on
-    /// [`ServerEvent::AssetUploaded`].
-    transaction_id: TransactionId,
+    /// What the assembled bytes become.
+    purpose: SimXferReceivePurpose,
     /// The file bytes accumulated so far (the seq-0 length prefix stripped).
     buffer: Vec<u8>,
 }
@@ -445,6 +482,8 @@ pub const SESSION_FLOW_COVERAGE: &[(&str, FlowMirrorStatus)] = &[
     ("object sit", FlowMirrorStatus::Mirrored),
     ("Xfer download", FlowMirrorStatus::Mirrored),
     ("Xfer upload", FlowMirrorStatus::Mirrored),
+    ("terrain RAW download", FlowMirrorStatus::Mirrored),
+    ("terrain RAW upload", FlowMirrorStatus::Mirrored),
     (
         "legacy transaction asset upload",
         FlowMirrorStatus::Mirrored,
@@ -483,6 +522,66 @@ pub enum AgentPresence {
     Root,
 }
 
+/// Where an agent lands when its movement into the region completes: the
+/// `Position` / `LookAt` of the `AgentMovementComplete` reply.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ArrivalPlacement {
+    /// The landing position within the region.
+    pub position: RegionCoordinates,
+    /// The direction the avatar faces on landing.
+    pub look_at: Vector,
+}
+
+impl Default for ArrivalPlacement {
+    /// The region centre, facing +X — what a login lands at without a
+    /// placement of its own.
+    fn default() -> Self {
+        let center = Camera::region_center().center;
+        Self {
+            position: RegionCoordinates::new(center.x, center.y, center.z),
+            look_at: Vector {
+                x: 1.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        }
+    }
+}
+
+/// The `TeleportProgress` / `TeleportFailed` message **keys** the reference
+/// viewer localises (`teleport_strings.xml`: `process_teleport_progress`
+/// swaps a known key for its translated text and shows an unknown string
+/// raw). A simulator sends the keys, never prose, so every locale reads its
+/// own text — the same contract the reference servers follow.
+pub mod teleport_strings {
+    /// Progress: the destination is being looked up.
+    pub const RESOLVING: &str = "resolving";
+    /// Progress: the destination simulator is being contacted.
+    pub const CONTACTING: &str = "contacting";
+    /// Progress: the agent is being sent to an explicit location.
+    pub const SENDING_DEST: &str = "sending_dest";
+    /// Progress: the agent is being sent home.
+    pub const SENDING_HOME: &str = "sending_home";
+    /// Progress: the agent is being sent to a landmark.
+    pub const SENDING_LANDMARK: &str = "sending_landmark";
+    /// Progress: the handover is underway (the last line before arrival).
+    pub const ARRIVING: &str = "arriving";
+    /// Progress: the teleport is completing.
+    pub const COMPLETING: &str = "completing";
+    /// Failure: the destination region is unknown or not available.
+    pub const INVALID_TPORT: &str = "invalid_tport";
+    /// Failure: the destination refuses (banned / access restricted).
+    pub const NOACCESS_TPORT: &str = "noaccess_tport";
+    /// Failure: the landmark names no usable destination.
+    pub const NOLANDMARK_TPORT: &str = "nolandmark_tport";
+    /// Failure: the destination never confirmed the arrival.
+    pub const TIMEOUT_TPORT: &str = "timeout_tport";
+    /// Failure: the destination simulator is not reachable.
+    pub const NO_HOST: &str = "no_host";
+    /// Failure: the region handoff was refused by the destination.
+    pub const INVALID_REGION_HANDOFF: &str = "invalid_region_handoff";
+}
+
 /// The decoded source of a client `TransferRequest`, surfaced on
 /// [`ServerEvent::TransferRequested`]. Only the two source types that remain
 /// UDP-only on both grids are decoded; a plain asset-by-id request
@@ -496,6 +595,10 @@ pub enum TransferRequestSource {
     /// An estate asset (source `SimEstate`) — the covenant notecard.
     Estate(TransferSourceParamsEstate),
 }
+
+/// The size of one `ParcelOverlay` chunk: a simulator splits the region's
+/// per-4 m-cell ownership map into 1024-byte pieces (four for a 256 m region).
+pub const PARCEL_OVERLAY_CHUNK_BYTES: usize = 1024;
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
@@ -651,6 +754,10 @@ pub enum ServerEvent {
     /// The client sent `CompleteAgentMovement`; the simulator has replied with an
     /// `AgentMovementComplete` and the agent is now present in the region.
     AgentArrived,
+    /// The driver retired this circuit ([`SimSession::retire_circuit`]): the
+    /// agent completed a teleport elsewhere, `DisableSimulator` went out, and
+    /// the session is closed.
+    CircuitRetired,
     /// The client acknowledged the region handshake with `RegionHandshakeReply`.
     RegionHandshakeReplied,
     /// The client pinged the link with `StartPingCheck`; the simulator has
@@ -1296,6 +1403,37 @@ pub enum ServerEvent {
         /// The zero-based index of the spawn point to remove.
         spawn_index: u32,
     },
+    /// The client asked to download the region's terrain heightmap as an LL
+    /// RAW file (`EstateOwnerMessage`/`terrain` `download filename`). The
+    /// driver serialises the heightmap and offers it with
+    /// [`SimSession::send_initiate_download`], echoing this viewer filename.
+    TerrainDownloadRequested {
+        /// The filename the viewer wants the download tagged with.
+        viewer_filename: String,
+    },
+    /// The client asked to upload a terrain heightmap RAW file
+    /// (`EstateOwnerMessage`/`terrain` `upload filename`). The driver pulls it
+    /// with [`SimSession::request_xfer_upload`] naming this filename; the
+    /// bytes arrive as [`ServerEvent::XferReceived`].
+    TerrainUploadRequested {
+        /// The viewer-side filename the client will stream on request.
+        viewer_filename: String,
+    },
+    /// The client asked to bake the current terrain as the region's revert
+    /// baseline (`EstateOwnerMessage`/`terrain` `bake`).
+    TerrainBakeRequested,
+    /// An `EstateOwnerMessage` whose method has no typed event of its own
+    /// (the telehub and terrain methods do) — surfaced raw so a driver can
+    /// act on any estate command. The invoice is the client's correlation id
+    /// for a reply.
+    EstateOwnerRequest {
+        /// The estate method name (e.g. `setregioninfo`, `kickestate`).
+        method: String,
+        /// The client's invoice id, echoed on a reply.
+        invoice: Uuid,
+        /// The method's string parameters, in order.
+        params: Vec<String>,
+    },
     /// The client filed an abuse / bug report over the legacy `UserReport` UDP
     /// message (the modern path is the `SendUserReport` capability). The
     /// simulator routes it to the grid's abuse desk; fire-and-forget.
@@ -1384,6 +1522,165 @@ pub enum ServerEvent {
         face: u8,
         /// The URL the face was navigated to.
         url: String,
+    },
+    /// The client published environment settings (`ExtEnvironment` PUT). The
+    /// update is already applied to the serving store
+    /// ([`SimSession::set_environment`]); fire-and-forget for a driver
+    /// persisting environments or notifying other clients (e.g. via
+    /// [`SimSession::enqueue_windlight_refresh`]).
+    EnvironmentUpdated {
+        /// The updated parcel's region-local id, or `-1` for the region.
+        parcel_id: i32,
+        /// The single sky track the client scoped the update to, if any (the
+        /// serving store applies the update wholesale either way).
+        track_no: Option<i32>,
+        /// The parsed update the store merged.
+        update: Box<EnvironmentUpdate>,
+    },
+    /// The client created an inventory folder over the `InventoryAPIv3`
+    /// create verb or the `CreateInventoryCategory` capability. The folder is
+    /// already applied to the session's serving tree
+    /// ([`SimSession::agent_inventory`]); fire-and-forget for a driver
+    /// persisting inventory.
+    InventoryCategoryCreated {
+        /// The created folder as stored (version 1, parent set).
+        folder: Box<InventoryFolder>,
+    },
+    /// The client created inventory links (`InventoryAPIv3` create with a
+    /// `links` payload — the Current Outfit Folder wear path). Applied to the
+    /// serving tree; fire-and-forget.
+    InventoryLinksCreated {
+        /// The created link items as stored.
+        links: Vec<InventoryItem>,
+    },
+    /// The client renamed an inventory folder (`InventoryAPIv3`
+    /// `PATCH /category/<id>` with `{ name }`). Applied to the serving tree.
+    InventoryCategoryRenamed {
+        /// The renamed folder.
+        folder_id: InventoryFolderKey,
+        /// Its new name.
+        name: String,
+    },
+    /// The client moved an inventory folder (`InventoryAPIv3`
+    /// `PATCH /category/<id>` with `{ parent_id }`). Applied to the serving
+    /// tree.
+    InventoryCategoryMoved {
+        /// The moved folder.
+        folder_id: InventoryFolderKey,
+        /// Its new parent.
+        parent_id: InventoryFolderKey,
+    },
+    /// The client updated an inventory item's name/description
+    /// (`InventoryAPIv3` `PATCH /item/<id>`). Applied to the serving tree.
+    InventoryItemUpdated {
+        /// The updated item.
+        item_id: InventoryKey,
+        /// Its new name.
+        name: String,
+        /// Its new description.
+        description: String,
+    },
+    /// The client moved an inventory item (`InventoryAPIv3` `PATCH
+    /// /item/<id>` with `{ parent_id }`). Applied to the serving tree.
+    InventoryItemMoved {
+        /// The moved item.
+        item_id: InventoryKey,
+        /// The folder it now sits in.
+        folder_id: InventoryFolderKey,
+    },
+    /// The client deleted an inventory folder (`InventoryAPIv3`
+    /// `DELETE /category/<id>`). The whole subtree is already removed from
+    /// the serving tree.
+    InventoryCategoryRemoved {
+        /// The deleted folder.
+        folder_id: InventoryFolderKey,
+        /// Every folder removed (the subtree, `folder_id` included).
+        removed_folders: Vec<InventoryFolderKey>,
+        /// Every item that was inside the subtree.
+        removed_items: Vec<InventoryKey>,
+    },
+    /// The client emptied an inventory folder (`InventoryAPIv3`
+    /// `DELETE /category/<id>/children`). The children are removed from the
+    /// serving tree; the folder itself remains.
+    InventoryCategoryPurged {
+        /// The emptied folder (still present).
+        folder_id: InventoryFolderKey,
+        /// The removed child-folder subtrees.
+        removed_folders: Vec<InventoryFolderKey>,
+        /// Every removed item (direct and in removed subtrees).
+        removed_items: Vec<InventoryKey>,
+    },
+    /// The client deleted an inventory item (`InventoryAPIv3`
+    /// `DELETE /item/<id>`). Already removed from the serving tree.
+    InventoryItemRemoved {
+        /// The deleted item.
+        item_id: InventoryKey,
+    },
+    /// The client set (or forgot) a per-experience preference
+    /// (`ExperiencePreferences` PUT / DELETE). Already applied to the
+    /// serving store ([`SimSession::experiences`]); fire-and-forget for a
+    /// driver persisting agent preferences.
+    ExperiencePermissionSet {
+        /// The experience the preference addresses.
+        experience_id: ExperienceKey,
+        /// `Allow` / `Block` from the PUT body; `Forget` for the DELETE
+        /// form.
+        permission: ExperiencePermission,
+    },
+    /// The client edited an experience's metadata (`UpdateExperience`
+    /// POST). Already applied to the serving store's record; fire-and-forget
+    /// for a driver persisting experience profiles.
+    ExperienceUpdated {
+        /// The parsed edit the store applied (editable fields only — owner,
+        /// quota and expiration are server-controlled and untouched).
+        update: Box<ExperienceUpdate>,
+    },
+    /// The client replaced the region's experience lists
+    /// (`RegionExperiences` POST). Already applied wholesale to the serving
+    /// store; fire-and-forget for a driver persisting region settings.
+    RegionExperiencesSet {
+        /// The region's new allowed list.
+        allowed: Vec<ExperienceKey>,
+        /// The region's new blocked list.
+        blocked: Vec<ExperienceKey>,
+        /// The region's new trusted list.
+        trusted: Vec<ExperienceKey>,
+    },
+    /// The client POSTed a `ProvisionVoiceAccountRequest` — a WebRTC offer
+    /// (spatial or chat-session channel), a WebRTC logout, or a Vivox
+    /// account request. Already answered from the voice stub
+    /// ([`SimSession::voice`]); the `outcome` says how (an opened
+    /// connection carries its minted `viewer_session`). Informational for a
+    /// driver — a world-authority grid would hand the connection to its
+    /// media server here.
+    VoiceProvisionRequested {
+        /// The decoded request, verbatim (the offer SDP included).
+        request: Box<VoiceProvisionRequest>,
+        /// What the stub did with it.
+        outcome: VoiceProvisionOutcome,
+    },
+    /// The client trickled ICE candidates (or end-of-gathering) over
+    /// `VoiceSignalingRequest`. Already recorded on the connection when
+    /// `known`; a trickle for a `viewer_session` the stub never provisioned
+    /// answers `404` and is surfaced with `known: false`.
+    VoiceSignalingReceived {
+        /// The connection the trickle belongs to.
+        viewer_session: String,
+        /// The candidates in this batch (empty for the end-of-gathering form).
+        candidates: Vec<IceCandidate>,
+        /// Whether this batch signalled end-of-gathering.
+        completed: bool,
+        /// Whether the `viewer_session` is a live connection.
+        known: bool,
+    },
+    /// The client asked for its parcel's voice channel
+    /// (`ParcelVoiceInfoRequest`). Already answered from the stub's parcel
+    /// table for the agent's recorded parcel; informational.
+    ParcelVoiceInfoRequested {
+        /// The parcel the reply described (`-1` when unknown).
+        parcel_local_id: RegionLocalParcelId,
+        /// Whether the reply carried a channel (`false` = "no voice here").
+        enabled: bool,
     },
     /// The client emailed a snapshot postcard (`SendPostcard`). The simulator
     /// renders and sends the email; fire-and-forget.
@@ -1598,6 +1895,18 @@ pub enum ServerEvent {
         /// The number of file bytes streamed.
         byte_count: usize,
     },
+    /// A named file the simulator pulled from the client with
+    /// [`SimSession::request_xfer_upload`] arrived in full — the server side
+    /// of the client's [`Event::XferUploaded`](crate::Event::XferUploaded)
+    /// (the terrain RAW upload).
+    XferReceived {
+        /// The transfer id the pull was issued under.
+        xfer_id: XferId,
+        /// The filename the pull named.
+        filename: String,
+        /// The assembled file bytes (length prefix stripped).
+        data: Vec<u8>,
+    },
     /// The client aborted an in-flight `Xfer` transfer (`AbortXfer`), in
     /// either direction. The inverse of the client's
     /// [`Event::XferAborted`](crate::Event::XferAborted).
@@ -1657,6 +1966,17 @@ pub enum ServerEvent {
         /// The decoded request source.
         source: TransferRequestSource,
     },
+    /// A client sent a `TransferRequest` for the plain asset-by-id source
+    /// (`LLTST_ASSET`), the path superseded by the `ViewerAsset` capability on
+    /// both grids. It was refused with an unknown-source `TransferInfo` per the
+    /// legacy-skip rule; the decoded params (`None` if malformed) say what the
+    /// client wanted so a driver can log it.
+    LegacyAssetTransferRefused {
+        /// The client's transfer id.
+        transfer_id: TransferId,
+        /// The requested asset id and type, if the params blob decoded.
+        params: Option<TransferSourceParamsAsset>,
+    },
     /// The client cancelled an in-flight asset Transfer (`TransferAbort`).
     /// The inverse of the client's
     /// [`Session::abort_transfer`](crate::Session::abort_transfer).
@@ -1683,6 +2003,36 @@ pub enum ServerEvent {
         local_id: RegionLocalParcelId,
         /// The query sequence id, echoed back in the reply.
         sequence_id: i32,
+    },
+    /// The client requested the properties of the parcel(s) under a metre
+    /// rectangle (`ParcelPropertiesRequest`). The inverse of the client's
+    /// [`Session::request_parcel_properties`](crate::Session::request_parcel_properties);
+    /// a simulator answers with a `ParcelProperties` per covered parcel (see
+    /// [`SimSession::send_parcel_properties`]).
+    RequestParcelProperties {
+        /// The rectangle's west edge, in metres.
+        west: f32,
+        /// The rectangle's south edge, in metres.
+        south: f32,
+        /// The rectangle's east edge, in metres.
+        east: f32,
+        /// The rectangle's north edge, in metres.
+        north: f32,
+        /// The query sequence id, echoed back in the reply (the viewer uses
+        /// the negative "agent parcel" / "hover parcel" sentinels here).
+        sequence_id: i32,
+        /// Whether the viewer asked for the reply to snap to parcel bounds.
+        snap_selection: bool,
+    },
+    /// The client asked the simulator to (re)send full updates for objects it
+    /// is missing (`RequestMultipleObjects`). The inverse of the client's
+    /// [`Session::request_objects`](crate::Session::request_objects); a
+    /// simulator answers with `ObjectUpdate`s (see
+    /// [`SimSession::send_object_update`]).
+    RequestObjects {
+        /// The requested objects' region-local ids, with the cache-miss kind
+        /// the client reported for each (`0` = full miss, `1` = CRC mismatch).
+        objects: Vec<(RegionLocalObjectId, u8)>,
     },
     /// The client set a parcel's auto-return time for other people's objects
     /// (`ParcelSetOtherCleanTime`). The inverse of the client's
@@ -2053,6 +2403,11 @@ pub struct SimSession {
     /// Whether this circuit hosts a child or the root agent: `Child` from
     /// `UseCircuitCode`, promoted to `Root` by `CompleteAgentMovement`.
     agent_presence: AgentPresence,
+    /// Where the agent lands when its movement completes — the position and
+    /// facing the `AgentMovementComplete` reply carries. The region centre
+    /// facing +X unless [`SimSession::set_arrival_position`] placed the
+    /// arrival (a teleport lands where the request asked).
+    arrival: ArrivalPlacement,
     /// The agent's sit state (the server-side mirror of the client's sit
     /// machine).
     sit: SimSitState,
@@ -2102,8 +2457,95 @@ pub struct SimSession {
     /// The per-object media the `ObjectMedia` GET serves, keyed by object
     /// ([`SimSession::set_object_media`]). Driver-populated.
     object_media: BTreeMap<ObjectKey, ObjectMediaState>,
+    /// The agent's inventory tree the inventory capabilities
+    /// (`FetchInventoryDescendents2`, `FetchInventory2`, `InventoryAPIv3`,
+    /// `CreateInventoryCategory`) serve from. Driver-populated
+    /// ([`SimSession::agent_inventory_mut`]) like
+    /// [`display_names`](Self::display_names), but the AIS3 mutations apply
+    /// to it — fixture state, not world authority — so follow-up fetches
+    /// observe them.
+    agent_inventory: SimInventoryTree,
+    /// The read-only shared-Library tree the `FetchLibDescendents2` /
+    /// `FetchLib2` / `LibraryAPIv3` capabilities serve from.
+    /// Driver-populated ([`SimSession::library_inventory_mut`]); the
+    /// mutation caps never touch it (`LibraryAPIv3` is GET-only).
+    library_inventory: SimInventoryTree,
+    /// The feature document the `SimulatorFeatures` capability serves.
+    /// Driver-populated ([`SimSession::set_simulator_features`]); its
+    /// `lsl_syntax_id` is owned by [`SimSession::set_lsl_syntax`] so the
+    /// advertised id always matches the served `LSLSyntax` document.
+    simulator_features: SimulatorFeatures,
+    /// The LSL syntax document the `LSLSyntax` capability serves.
+    /// Driver-populated ([`SimSession::set_lsl_syntax`]).
+    lsl_syntax: LslSyntax,
+    /// The environment settings the `ExtEnvironment` capability serves and
+    /// updates, keyed by parcel id (`-1` = the region entry, seeded at
+    /// construction and never removed; a parcel without its own entry falls
+    /// back to the region's — SL parcels inherit the region environment).
+    environments: BTreeMap<i32, EnvironmentSettings>,
+    /// The per-object costs the `GetObjectCost` capability serves, keyed by
+    /// object ([`SimSession::set_object_cost`]). Driver-populated.
+    object_costs: BTreeMap<ObjectKey, ObjectCost>,
+    /// The per-object physics data the `GetObjectPhysicsData` capability
+    /// serves, keyed by object ([`SimSession::set_object_physics`]).
+    /// Driver-populated.
+    object_physics: BTreeMap<ObjectKey, ObjectPhysicsData>,
+    /// The per-object selection costs the `ResourceCostSelected` capability
+    /// sums over, keyed by object ([`SimSession::set_selection_cost`]).
+    /// Driver-populated; the request's roots/prims distinction validates the
+    /// body but does not change the arithmetic — the driver stores whichever
+    /// contributions it wants summed.
+    selection_costs: BTreeMap<ObjectKey, SelectedResourceCost>,
+    /// This region's id, matched against `RemoteParcelRequest` lookups (and
+    /// useful to seed [`EnvironmentSettings::region_id`]). Nil until the
+    /// driver sets it ([`SimSession::set_region_id`]).
+    region_id: Uuid,
+    /// The parcel-cover rectangles the `RemoteParcelRequest` capability
+    /// resolves locations against ([`SimSession::add_parcel`]).
+    /// Driver-populated, first containing rectangle wins.
+    parcels: Vec<SimParcel>,
+    /// The agent's scripted-attachment report the `AttachmentResources`
+    /// capability serves ([`SimSession::set_attachment_resources`]).
+    /// Driver-populated.
+    attachment_resources: AttachmentResourcesReport,
+    /// The parcel script-resource summary the `LandResources` follow-up
+    /// summary GET serves ([`SimSession::set_land_resource_summary`]).
+    /// Driver-populated; the POST's parcel id is validated but the stored
+    /// report is served as-is — its scope is the driver's choice.
+    land_resource_summary: ResourceSummary,
+    /// The per-parcel script-resource details the `LandResources` follow-up
+    /// details GET serves ([`SimSession::set_land_resource_details`]).
+    /// Driver-populated.
+    land_resource_details: Vec<ParcelScriptResources>,
+    /// The experience fixture set the twelve experience capabilities serve
+    /// from. Driver-populated ([`SimSession::experiences_mut`]) like
+    /// [`display_names`](Self::display_names), but the three mutating caps
+    /// (`ExperiencePreferences`, `UpdateExperience`, the
+    /// `RegionExperiences` POST) apply to it — fixture state, not world
+    /// authority — so follow-up reads observe them.
+    experiences: SimExperiences,
+    /// The voice signalling stub the three voice capabilities serve from
+    /// ([`SimSession::voice_mut`] to enable a backend and seed parcel
+    /// channels; the live WebRTC connections are its mutable state).
+    voice: SimVoice,
     /// Pending events for the driver.
     events: VecDeque<ServerEvent>,
+}
+
+/// One parcel-cover rectangle the `RemoteParcelRequest` lookup resolves
+/// against: `[west, east) × [south, north)`, in region-local metres.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SimParcel {
+    /// The parcel's id, answered on a hit.
+    pub parcel_id: ParcelKey,
+    /// The rectangle's west edge (inclusive), in metres.
+    pub west: f32,
+    /// The rectangle's south edge (inclusive), in metres.
+    pub south: f32,
+    /// The rectangle's east edge (exclusive), in metres.
+    pub east: f32,
+    /// The rectangle's north edge (exclusive), in metres.
+    pub north: f32,
 }
 
 /// The parsed step-1 metadata of a two-stage CAPS upload, parked in
@@ -2170,6 +2612,29 @@ pub struct ObjectMediaState {
     pub faces: Vec<Option<MediaEntry>>,
 }
 
+/// The environment a fresh session's region entry starts from: SL's stock
+/// four-hour day (`day_length` 14400 s, `day_offset` 57600 s), version 1, the
+/// default sky-track altitude breakpoints, and an empty day cycle (both codec
+/// directions tolerate empty tracks/frames) named "Default Daycycle".
+fn default_region_environment() -> EnvironmentSettings {
+    EnvironmentSettings {
+        parcel_id: -1,
+        region_id: Uuid::nil(),
+        day_length: 14400,
+        day_offset: 57600,
+        flags: 0,
+        env_version: 1,
+        track_altitudes: [1000.0, 2000.0, 3000.0],
+        day_cycle: DayCycle {
+            name: "Default Daycycle".to_owned(),
+            water_track: Vec::new(),
+            sky_tracks: Vec::new(),
+            sky_frames: BTreeMap::new(),
+            water_frames: BTreeMap::new(),
+        },
+    }
+}
+
 /// The `AgentPreferences` set a fresh session starts from — OpenSim's stored
 /// defaults (`IAgentPreferencesService.cs`): hover height `0.0`, zero default
 /// permission masks, access ceiling `"M"`, language `"en-us"` marked public,
@@ -2222,6 +2687,7 @@ impl SimSession {
             secure_session_id: None,
             transfer_serves: BTreeMap::new(),
             agent_presence: AgentPresence::Child,
+            arrival: ArrivalPlacement::default(),
             sit: SimSitState::NotSitting,
             script_questions: BTreeMap::new(),
             script_grants: BTreeMap::new(),
@@ -2234,6 +2700,21 @@ impl SimSession {
             next_sim_serial: 0,
             region_materials: BTreeMap::new(),
             object_media: BTreeMap::new(),
+            agent_inventory: SimInventoryTree::default(),
+            library_inventory: SimInventoryTree::default(),
+            simulator_features: SimulatorFeatures::default(),
+            lsl_syntax: LslSyntax::default(),
+            environments: BTreeMap::from([(-1, default_region_environment())]),
+            object_costs: BTreeMap::new(),
+            object_physics: BTreeMap::new(),
+            selection_costs: BTreeMap::new(),
+            region_id: Uuid::nil(),
+            parcels: Vec::new(),
+            attachment_resources: AttachmentResourcesReport::default(),
+            land_resource_summary: ResourceSummary::default(),
+            land_resource_details: Vec::new(),
+            experiences: SimExperiences::default(),
+            voice: SimVoice::default(),
             events: VecDeque::new(),
         }
     }
@@ -2664,12 +3145,620 @@ impl SimSession {
         format!("x-mv:{serial:010}/{}", object_id.uuid())
     }
 
+    /// Replaces the feature document the `SimulatorFeatures` capability
+    /// serves. `lsl_syntax_id` is subsequently overwritten by
+    /// [`SimSession::set_lsl_syntax`], which owns the consistency invariant
+    /// between the advertised id and the served `LSLSyntax` document.
+    pub fn set_simulator_features(&mut self, features: SimulatorFeatures) {
+        self.simulator_features = features;
+    }
+
+    /// The feature document the `SimulatorFeatures` capability serves.
+    #[must_use]
+    pub const fn simulator_features(&self) -> &SimulatorFeatures {
+        &self.simulator_features
+    }
+
+    /// Replaces the LSL syntax document the `LSLSyntax` capability serves and
+    /// advertises its id in the feature document's `lsl_syntax_id`, keeping
+    /// the two capabilities consistent (the client re-fetches `LSLSyntax`
+    /// keyed on that id).
+    pub fn set_lsl_syntax(&mut self, syntax_id: Uuid, syntax: LslSyntax) {
+        self.simulator_features.lsl_syntax_id = Some(syntax_id);
+        self.lsl_syntax = syntax;
+    }
+
+    /// The LSL syntax document the `LSLSyntax` capability serves.
+    pub(crate) const fn lsl_syntax(&self) -> &LslSyntax {
+        &self.lsl_syntax
+    }
+
+    /// Stores (or replaces) the environment served for
+    /// `environment.parcel_id` (`-1` = the region entry) — the driver API the
+    /// `ExtEnvironment` GET serves from.
+    pub fn set_environment(&mut self, environment: EnvironmentSettings) {
+        self.environments.insert(environment.parcel_id, environment);
+    }
+
+    /// The environment served for `parcel_id`: its own entry when the driver
+    /// stored one, else the region entry (parcels inherit the region
+    /// environment). The region entry is seeded at construction and never
+    /// removed; the final fallback only fires if a driver somehow displaced
+    /// it, and serves a fresh default rather than panicking.
+    pub(crate) fn environment(&self, parcel_id: i32) -> EnvironmentSettings {
+        self.environments
+            .get(&parcel_id)
+            .or_else(|| self.environments.get(&-1))
+            .cloned()
+            .unwrap_or_else(default_region_environment)
+    }
+
+    /// Applies an `ExtEnvironment` PUT to the store: merges the update's
+    /// `Some` fields over the effective settings for `parcel_id` (a wholesale
+    /// day-cycle replacement — `track_no` scopes nothing here and is only
+    /// forwarded to the driver), bumps `env_version`, stores the result under
+    /// `parcel_id`, surfaces [`ServerEvent::EnvironmentUpdated`], and returns
+    /// the stored value for the handler to serialize.
+    pub(crate) fn apply_environment_update(
+        &mut self,
+        parcel_id: i32,
+        track_no: Option<i32>,
+        update: EnvironmentUpdate,
+    ) -> EnvironmentSettings {
+        let mut environment = self.environment(parcel_id);
+        environment.parcel_id = parcel_id;
+        if let Some(day_length) = update.day_length {
+            environment.day_length = day_length;
+        }
+        if let Some(day_offset) = update.day_offset {
+            environment.day_offset = day_offset;
+        }
+        if let Some(track_altitudes) = update.track_altitudes {
+            environment.track_altitudes = track_altitudes;
+        }
+        if let Some(day_cycle) = &update.day_cycle {
+            environment.day_cycle = day_cycle.clone();
+        }
+        environment.flags = update.flags;
+        environment.env_version = environment.env_version.saturating_add(1);
+        self.environments.insert(parcel_id, environment.clone());
+        self.events.push_back(ServerEvent::EnvironmentUpdated {
+            parcel_id,
+            track_no,
+            update: Box::new(update),
+        });
+        environment
+    }
+
+    /// Stores (or replaces) an object's `GetObjectCost` record — the driver
+    /// API the cost capability serves from.
+    pub fn set_object_cost(&mut self, object_id: ObjectKey, cost: ObjectCost) {
+        self.object_costs.insert(object_id, cost);
+    }
+
+    /// The stored costs for the requested objects, in id order. Unknown ids
+    /// are omitted — the capability's "no such object" signal.
+    pub(crate) fn object_costs(&self, ids: &[ObjectKey]) -> Vec<(ObjectKey, ObjectCost)> {
+        ids.iter()
+            .filter_map(|id| self.object_costs.get(id).map(|cost| (*id, cost.clone())))
+            .collect()
+    }
+
+    /// Stores (or replaces) an object's `GetObjectPhysicsData` record — the
+    /// driver API the physics-data capability serves from.
+    pub fn set_object_physics(&mut self, object_id: ObjectKey, data: ObjectPhysicsData) {
+        self.object_physics.insert(object_id, data);
+    }
+
+    /// The stored physics data for the requested objects, in id order.
+    /// Unknown ids are omitted — the capability's "no such object" signal.
+    pub(crate) fn object_physics(&self, ids: &[ObjectKey]) -> Vec<(ObjectKey, ObjectPhysicsData)> {
+        ids.iter()
+            .filter_map(|id| self.object_physics.get(id).map(|data| (*id, *data)))
+            .collect()
+    }
+
+    /// Stores (or replaces) an object's `ResourceCostSelected` contribution —
+    /// the driver API the selection-cost capability sums over.
+    pub fn set_selection_cost(&mut self, object_id: ObjectKey, cost: SelectedResourceCost) {
+        self.selection_costs.insert(object_id, cost);
+    }
+
+    /// The component-wise sum of the stored selection costs of the requested
+    /// objects; unknown ids contribute zero.
+    pub(crate) fn selection_cost(&self, ids: &[ObjectKey]) -> SelectedResourceCost {
+        ids.iter()
+            .filter_map(|id| self.selection_costs.get(id))
+            .fold(SelectedResourceCost::default(), |sum, cost| {
+                SelectedResourceCost {
+                    physics: sum.physics + cost.physics,
+                    streaming: sum.streaming + cost.streaming,
+                    simulation: sum.simulation + cost.simulation,
+                }
+            })
+    }
+
+    /// Sets this region's id, matched against `RemoteParcelRequest` lookups
+    /// (and the WebRTC estate voice channel id a scenario seeds).
+    pub const fn set_region_id(&mut self, region_id: Uuid) {
+        self.region_id = region_id;
+    }
+
+    /// This region's id ([`set_region_id`](Self::set_region_id)); nil until
+    /// set.
+    #[must_use]
+    pub const fn region_id(&self) -> Uuid {
+        self.region_id
+    }
+
+    /// Adds a parcel-cover rectangle to the `RemoteParcelRequest` lookup
+    /// store. Rectangles are checked in insertion order; the first containing
+    /// one wins.
+    pub fn add_parcel(&mut self, parcel: SimParcel) {
+        self.parcels.push(parcel);
+    }
+
+    /// Resolves a `RemoteParcelRequest` against the parcel-cover store: the
+    /// request targets this region iff its non-nil region id matches
+    /// [`SimSession::set_region_id`]'s or its non-zero region handle matches
+    /// the session's; a hit is the first stored rectangle containing the
+    /// requested location. A miss answers `None` (the handler replies with an
+    /// empty map, the "could not resolve" signal).
+    pub(crate) fn resolve_remote_parcel(&self, request: &RemoteParcelRequest) -> Option<ParcelKey> {
+        let by_id = !request.region_id.is_nil() && request.region_id == self.region_id;
+        let by_handle =
+            request.region_handle.get() != 0 && request.region_handle == self.region_handle;
+        if !by_id && !by_handle {
+            return None;
+        }
+        let x = request.location.x();
+        let y = request.location.y();
+        self.parcels
+            .iter()
+            .find(|parcel| {
+                parcel.west <= x && x < parcel.east && parcel.south <= y && y < parcel.north
+            })
+            .map(|parcel| parcel.parcel_id)
+    }
+
+    /// Replaces the agent's scripted-attachment report the
+    /// `AttachmentResources` capability serves.
+    pub fn set_attachment_resources(&mut self, report: AttachmentResourcesReport) {
+        self.attachment_resources = report;
+    }
+
+    /// The stored `AttachmentResources` report.
+    pub(crate) const fn attachment_resources(&self) -> &AttachmentResourcesReport {
+        &self.attachment_resources
+    }
+
+    /// Replaces the script-resource summary the `LandResources` follow-up
+    /// summary GET serves.
+    pub fn set_land_resource_summary(&mut self, summary: ResourceSummary) {
+        self.land_resource_summary = summary;
+    }
+
+    /// The stored `LandResources` summary report.
+    pub(crate) const fn land_resource_summary(&self) -> &ResourceSummary {
+        &self.land_resource_summary
+    }
+
+    /// Replaces the per-parcel script-resource details the `LandResources`
+    /// follow-up details GET serves.
+    pub fn set_land_resource_details(&mut self, parcels: Vec<ParcelScriptResources>) {
+        self.land_resource_details = parcels;
+    }
+
+    /// The stored `LandResources` per-parcel detail reports.
+    pub(crate) fn land_resource_details(&self) -> &[ParcelScriptResources] {
+        &self.land_resource_details
+    }
+
+    /// The experience serving store — read access for the experience
+    /// capability handlers and for tests asserting post-mutation state.
+    #[must_use]
+    pub const fn experiences(&self) -> &SimExperiences {
+        &self.experiences
+    }
+
+    /// Mutable access to the experience serving store — the driver/test
+    /// population API ([`SimExperiences::insert`] and the `set_*` list
+    /// setters).
+    pub const fn experiences_mut(&mut self) -> &mut SimExperiences {
+        &mut self.experiences
+    }
+
+    /// The voice signalling stub — read access for the voice capability
+    /// handlers and for tests asserting the live connections.
+    #[must_use]
+    pub const fn voice(&self) -> &SimVoice {
+        &self.voice
+    }
+
+    /// Mutable access to the voice signalling stub — the driver/test
+    /// population API ([`SimVoice::enable_webrtc`],
+    /// [`SimVoice::set_vivox_account`], [`SimVoice::set_parcel_voice_info`],
+    /// [`SimVoice::set_agent_parcel`], [`SimVoice::set_channel_credentials`]).
+    pub const fn voice_mut(&mut self) -> &mut SimVoice {
+        &mut self.voice
+    }
+
+    /// Serves one `ProvisionVoiceAccountRequest` from the voice stub and
+    /// surfaces [`ServerEvent::VoiceProvisionRequested`] with the outcome.
+    /// Returns the reply body on success or the refusal (which the cap maps
+    /// to a status code).
+    pub(crate) fn provision_voice(
+        &mut self,
+        request: VoiceProvisionRequest,
+    ) -> Result<VoiceAccountInfo, VoiceProvisionRefusal> {
+        let (result, outcome) = self.voice.provision(&request);
+        self.events.push_back(ServerEvent::VoiceProvisionRequested {
+            request: Box::new(request),
+            outcome,
+        });
+        result
+    }
+
+    /// Records one `VoiceSignalingRequest` trickle on its connection and
+    /// surfaces [`ServerEvent::VoiceSignalingReceived`]. Returns whether the
+    /// `viewer_session` was a live connection.
+    pub(crate) fn record_voice_signaling(
+        &mut self,
+        viewer_session: String,
+        candidates: Vec<IceCandidate>,
+        completed: bool,
+    ) -> bool {
+        let known = self
+            .voice
+            .record_signaling(&viewer_session, &candidates, completed);
+        self.events.push_back(ServerEvent::VoiceSignalingReceived {
+            viewer_session,
+            candidates,
+            completed,
+            known,
+        });
+        known
+    }
+
+    /// Serves one `ParcelVoiceInfoRequest` from the voice stub's parcel
+    /// table and surfaces [`ServerEvent::ParcelVoiceInfoRequested`].
+    pub(crate) fn parcel_voice_info(&mut self) -> ParcelVoiceInfo {
+        let info = self.voice.parcel_voice_info();
+        self.events
+            .push_back(ServerEvent::ParcelVoiceInfoRequested {
+                parcel_local_id: info.parcel_local_id,
+                enabled: info.channel_uri.is_some(),
+            });
+        info
+    }
+
+    /// Applies one `ExperiencePreferences` mutation to the serving store
+    /// and surfaces [`ServerEvent::ExperiencePermissionSet`]. Returns the
+    /// post-mutation `(allowed, blocked)` lists — the reply payload both
+    /// the PUT and DELETE forms echo.
+    pub(crate) fn set_experience_preference(
+        &mut self,
+        experience_id: ExperienceKey,
+        permission: ExperiencePermission,
+    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>) {
+        self.experiences.set_preference(experience_id, permission);
+        self.events.push_back(ServerEvent::ExperiencePermissionSet {
+            experience_id,
+            permission,
+        });
+        self.experiences.agent_permissions()
+    }
+
+    /// Applies one `UpdateExperience` edit to the serving store's record
+    /// and surfaces [`ServerEvent::ExperienceUpdated`]. Returns the updated
+    /// record for the reply, or `None` when the id is unknown (→ `404`, no
+    /// event).
+    pub(crate) fn apply_experience_update(
+        &mut self,
+        update: ExperienceUpdate,
+    ) -> Option<ExperienceInfo> {
+        let updated = self.experiences.apply_update(&update)?;
+        self.events.push_back(ServerEvent::ExperienceUpdated {
+            update: Box::new(update),
+        });
+        Some(updated)
+    }
+
+    /// Replaces the region's experience lists wholesale (the
+    /// `RegionExperiences` POST) and surfaces
+    /// [`ServerEvent::RegionExperiencesSet`]. Returns the stored triple for
+    /// the reply's echo.
+    pub(crate) fn apply_region_experiences(
+        &mut self,
+        allowed: Vec<ExperienceKey>,
+        blocked: Vec<ExperienceKey>,
+        trusted: Vec<ExperienceKey>,
+    ) -> (Vec<ExperienceKey>, Vec<ExperienceKey>, Vec<ExperienceKey>) {
+        let stored =
+            self.experiences
+                .apply_region_lists(allowed.clone(), blocked.clone(), trusted.clone());
+        self.events.push_back(ServerEvent::RegionExperiencesSet {
+            allowed,
+            blocked,
+            trusted,
+        });
+        stored
+    }
+
     /// Routes a fire-and-forget server event to the driver. Used by the CAPS
     /// content handlers whose only side effect is surfacing a world mutation
     /// (appearance bake, notecard copy, materials set) the world authority —
     /// out of scope here — would apply.
     pub(crate) fn push_content_event(&mut self, event: ServerEvent) {
         self.events.push_back(event);
+    }
+
+    /// The agent's inventory serving tree — read access for the fetch
+    /// handlers and for tests asserting post-mutation state.
+    #[must_use]
+    pub const fn agent_inventory(&self) -> &SimInventoryTree {
+        &self.agent_inventory
+    }
+
+    /// Mutable access to the agent's inventory serving tree — the driver/test
+    /// population API ([`SimInventoryTree::insert_folder`] /
+    /// [`SimInventoryTree::insert_item`]).
+    pub const fn agent_inventory_mut(&mut self) -> &mut SimInventoryTree {
+        &mut self.agent_inventory
+    }
+
+    /// The read-only shared-Library serving tree.
+    #[must_use]
+    pub const fn library_inventory(&self) -> &SimInventoryTree {
+        &self.library_inventory
+    }
+
+    /// Mutable access to the Library serving tree — the driver/test
+    /// population API (the capabilities themselves never mutate it).
+    pub const fn library_inventory_mut(&mut self) -> &mut SimInventoryTree {
+        &mut self.library_inventory
+    }
+
+    /// Creates an inventory folder for an AIS3 `POST /category/<parent>`:
+    /// mints the folder id from the deterministic sim serial, applies it to
+    /// the agent tree (bumping the parent version), and surfaces
+    /// [`ServerEvent::InventoryCategoryCreated`]. Returns the change-set and
+    /// the stored folder (for the reply's `_embedded` block).
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the parent does not exist.
+    pub(crate) fn ais_create_category(
+        &mut self,
+        parent: InventoryFolderKey,
+        create: &sl_wire::AisCategoryCreate,
+    ) -> Result<(sl_wire::AisUpdate, InventoryFolder), SimInventoryError> {
+        let folder = InventoryFolder {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(self.next_serial())),
+            parent_id: Some(parent),
+            name: create.name.clone(),
+            folder_type: i8::try_from(create.folder_type).unwrap_or(-1),
+            version: 1,
+        };
+        let update = self.agent_inventory.create_category(folder.clone())?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryCreated {
+                folder: Box::new(folder.clone()),
+            });
+        Ok((update, folder))
+    }
+
+    /// Creates inventory links for an AIS3 `POST /category/<parent>` carrying
+    /// a `links` payload: mints the item ids, stores each link (its
+    /// `asset_id` is the linked object's id, per the link convention),
+    /// bumps the parent version, and surfaces
+    /// [`ServerEvent::InventoryLinksCreated`]. Returns the change-set and the
+    /// stored links (for the reply's `_embedded` block).
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the parent does not exist.
+    pub(crate) fn ais_create_links(
+        &mut self,
+        parent: InventoryFolderKey,
+        links: &[sl_wire::AisLinkCreate],
+    ) -> Result<(sl_wire::AisUpdate, Vec<InventoryItem>), SimInventoryError> {
+        let owner_id = self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid());
+        let items: Vec<InventoryItem> = links
+            .iter()
+            .map(|link| InventoryItem {
+                item_id: InventoryKey::from(Uuid::from_u128(self.next_serial())),
+                folder_id: parent,
+                name: link.name.clone(),
+                description: link.description.clone(),
+                asset_id: link.linked_id,
+                item_type: i8::try_from(link.link_type).unwrap_or(-1),
+                inv_type: i8::try_from(link.inv_type).unwrap_or(-1),
+                flags: 0,
+                sale_type: 0,
+                sale_price: None,
+                creation_date: 0,
+                owner: OwnerKey::Agent(AgentKey::from(owner_id)),
+                last_owner_id: Uuid::nil(),
+                creator_id: AgentKey::from(owner_id),
+                group: None,
+                permissions: Permissions5::default(),
+            })
+            .collect();
+        let update = self.agent_inventory.create_links(parent, items.clone())?;
+        self.events.push_back(ServerEvent::InventoryLinksCreated {
+            links: items.clone(),
+        });
+        Ok((update, items))
+    }
+
+    /// Renames an inventory folder for an AIS3 `PATCH /category/<id>`,
+    /// surfacing [`ServerEvent::InventoryCategoryRenamed`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_rename_category(
+        &mut self,
+        id: InventoryFolderKey,
+        name: String,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.rename_category(id, name.clone())?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryRenamed {
+                folder_id: id,
+                name,
+            });
+        Ok(update)
+    }
+
+    /// Moves an inventory folder for an AIS3 `PATCH /category/<id>` with
+    /// `{ parent_id }`, surfacing [`ServerEvent::InventoryCategoryMoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist;
+    /// [`SimInventoryError::InvalidParent`] on an unknown new parent or a
+    /// cycle-creating move.
+    pub(crate) fn ais_move_category(
+        &mut self,
+        id: InventoryFolderKey,
+        parent: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.move_category(id, parent)?;
+        self.events.push_back(ServerEvent::InventoryCategoryMoved {
+            folder_id: id,
+            parent_id: parent,
+        });
+        Ok(update)
+    }
+
+    /// Moves an inventory item for an AIS3 `PATCH /item/<id>` with
+    /// `{ parent_id }`, surfacing [`ServerEvent::InventoryItemMoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the item does not exist;
+    /// [`SimInventoryError::InvalidParent`] on an unknown destination folder.
+    pub(crate) fn ais_move_item(
+        &mut self,
+        id: InventoryKey,
+        parent: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.move_item(id, parent)?;
+        self.events.push_back(ServerEvent::InventoryItemMoved {
+            item_id: id,
+            folder_id: parent,
+        });
+        Ok(update)
+    }
+
+    /// Updates an inventory item's name/description for an AIS3
+    /// `PATCH /item/<id>`, surfacing [`ServerEvent::InventoryItemUpdated`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the item does not exist.
+    pub(crate) fn ais_update_item(
+        &mut self,
+        id: InventoryKey,
+        update_fields: &sl_wire::AisItemUpdate,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.update_item(
+            id,
+            update_fields.name.clone(),
+            update_fields.description.clone(),
+        )?;
+        self.events.push_back(ServerEvent::InventoryItemUpdated {
+            item_id: id,
+            name: update_fields.name.clone(),
+            description: update_fields.description.clone(),
+        });
+        Ok(update)
+    }
+
+    /// Deletes an inventory folder (and its subtree) for an AIS3
+    /// `DELETE /category/<id>`, surfacing
+    /// [`ServerEvent::InventoryCategoryRemoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_remove_category(
+        &mut self,
+        id: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.remove_category(id)?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryRemoved {
+                folder_id: id,
+                removed_folders: update.categories_removed.clone(),
+                removed_items: update.category_items_removed.clone(),
+            });
+        Ok(update)
+    }
+
+    /// Empties an inventory folder for an AIS3
+    /// `DELETE /category/<id>/children`, surfacing
+    /// [`ServerEvent::InventoryCategoryPurged`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the folder does not exist.
+    pub(crate) fn ais_purge_category(
+        &mut self,
+        id: InventoryFolderKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.purge_category(id)?;
+        self.events.push_back(ServerEvent::InventoryCategoryPurged {
+            folder_id: id,
+            removed_folders: update.categories_removed.clone(),
+            removed_items: update.category_items_removed.clone(),
+        });
+        Ok(update)
+    }
+
+    /// Deletes an inventory item for an AIS3 `DELETE /item/<id>`, surfacing
+    /// [`ServerEvent::InventoryItemRemoved`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the item does not exist.
+    pub(crate) fn ais_remove_item(
+        &mut self,
+        id: InventoryKey,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let update = self.agent_inventory.remove_item(id)?;
+        self.events
+            .push_back(ServerEvent::InventoryItemRemoved { item_id: id });
+        Ok(update)
+    }
+
+    /// Creates an inventory folder for the plain `CreateInventoryCategory`
+    /// capability (client-chosen folder id, unlike the AIS3 create), applying
+    /// it to the agent tree and surfacing
+    /// [`ServerEvent::InventoryCategoryCreated`].
+    ///
+    /// # Errors
+    ///
+    /// [`SimInventoryError::UnknownTarget`] when the parent does not exist.
+    pub(crate) fn create_inventory_category(
+        &mut self,
+        request: &sl_wire::CreateInventoryCategoryRequest,
+    ) -> Result<sl_wire::AisUpdate, SimInventoryError> {
+        let folder = InventoryFolder {
+            folder_id: request.folder_id,
+            parent_id: Some(request.parent_id),
+            name: request.name.clone(),
+            folder_type: i8::try_from(request.folder_type).unwrap_or(-1),
+            version: 1,
+        };
+        let update = self.agent_inventory.create_category(folder.clone())?;
+        self.events
+            .push_back(ServerEvent::InventoryCategoryCreated {
+                folder: Box::new(folder),
+            });
+        Ok(update)
     }
 
     /// The agent id once the circuit is open.
@@ -4225,6 +5314,190 @@ impl SimSession {
         Ok(())
     }
 
+    /// Sends a `ParcelProperties`: one parcel's full record, as a simulator
+    /// pushes it unsolicited when an agent enters a parcel and in answer to a
+    /// client's `ParcelPropertiesRequest` / `ParcelPropertiesRequestByID`
+    /// (surfaced as [`ServerEvent::RequestParcelProperties`] /
+    /// [`ServerEvent::RequestParcelPropertiesById`] — echo the request's
+    /// `sequence_id` into `info.sequence_id`). The inverse of the client's
+    /// [`Event::ParcelProperties`](crate::Event::ParcelProperties) decode.
+    /// Sent reliably. The CAPS event-queue form Second Life uses is
+    /// [`enqueue_parcel_properties`](Self::enqueue_parcel_properties).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if an L$ amount / the land area does not fit its wire field.
+    pub fn send_parcel_properties(&mut self, info: &ParcelInfo, now: Instant) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelProperties(parcel_properties_to_wire(info)?);
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Enqueues a CAPS `ParcelProperties` push — the event-queue form of
+    /// [`send_parcel_properties`](Self::send_parcel_properties) that Second
+    /// Life (and OpenSim) deliver parcel records through.
+    pub fn enqueue_parcel_properties(&mut self, info: &ParcelInfo) {
+        self.enqueue_caps_event("ParcelProperties", parcel_properties_to_llsd(info));
+    }
+
+    /// Sends one `ParcelOverlay` chunk: `sequence_id` is the chunk index, and
+    /// `data` the chunk's per-4 m-cell ownership bytes (a simulator splits the
+    /// region's overlay into [`PARCEL_OVERLAY_CHUNK_BYTES`]-byte chunks; see
+    /// [`send_parcel_overlay`](Self::send_parcel_overlay) for the whole map).
+    /// The inverse of the client's
+    /// [`Event::ParcelOverlay`](crate::Event::ParcelOverlay) decode. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_parcel_overlay_chunk(
+        &mut self,
+        sequence_id: i32,
+        data: &[u8],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ParcelOverlay(ParcelOverlay {
+            parcel_data: ParcelOverlayParcelDataBlock {
+                sequence_id,
+                data: data.to_vec(),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a whole parcel overlay (one ownership byte per 4 m cell, row-major
+    /// from the south-west corner — 4096 bytes for a 256 m region) as the
+    /// [`PARCEL_OVERLAY_CHUNK_BYTES`]-byte `ParcelOverlay` chunks a simulator
+    /// emits, numbered from `0`. A trailing partial chunk is sent as-is.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if a chunk fails to encode.
+    pub fn send_parcel_overlay(&mut self, overlay: &[u8], now: Instant) -> Result<(), Error> {
+        for (index, chunk) in overlay.chunks(PARCEL_OVERLAY_CHUNK_BYTES).enumerate() {
+            let sequence_id =
+                i32::try_from(index).map_err(|_too_many| sl_wire::WireError::ValueOutOfRange {
+                    field: "SequenceID",
+                    value: i64::try_from(index).unwrap_or(i64::MAX),
+                })?;
+            self.send_parcel_overlay_chunk(sequence_id, chunk, now)?;
+        }
+        Ok(())
+    }
+
+    /// Sends a full `ObjectUpdate` carrying `objects` (every object in this
+    /// session's region, stamped with its handle) — how a simulator rezzes
+    /// prims and avatars into a client's view, answers
+    /// [`ServerEvent::RequestObjects`], and pushes property changes the terse /
+    /// compressed forms cannot carry. The inverse of the client's
+    /// [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
+    /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) decode. Sent
+    /// reliably.
+    ///
+    /// `time_dilation` is the physics time dilation the client reads off the
+    /// region-data block, `0xFFFF` meaning "real time".
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_object_update(
+        &mut self,
+        objects: &[Object],
+        time_dilation: u16,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ObjectUpdate(ObjectUpdate {
+            region_data: ObjectUpdateRegionDataBlock {
+                region_handle: self.region_handle.0,
+                time_dilation,
+            },
+            object_data: objects.iter().map(full_update_block).collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `ObjectUpdateCompressed` carrying `objects` — the packed form a
+    /// simulator prefers for bulk rezzing (each object is one
+    /// [`encode_compressed_object`](crate::encode_compressed_object) blob).
+    /// The client decodes it into the same
+    /// [`Event::ObjectAdded`](crate::Event::ObjectAdded) /
+    /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated) as the full form.
+    /// Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_object_update_compressed(
+        &mut self,
+        objects: &[Object],
+        time_dilation: u16,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ObjectUpdateCompressed(ObjectUpdateCompressed {
+            region_data: ObjectUpdateCompressedRegionDataBlock {
+                region_handle: self.region_handle.0,
+                time_dilation,
+            },
+            object_data: objects
+                .iter()
+                .map(|object| ObjectUpdateCompressedObjectDataBlock {
+                    update_flags: object.update_flags,
+                    data: crate::encode_compressed_object(object),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a `KillObject` removing `objects` (by region-local id) from the
+    /// client's view — derez, out-of-interest-list, or an avatar leaving. The
+    /// inverse of the client's
+    /// [`Event::ObjectRemoved`](crate::Event::ObjectRemoved) decode. Sent
+    /// reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_kill_object(
+        &mut self,
+        objects: &[RegionLocalObjectId],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::KillObject(KillObject {
+            object_data: objects
+                .iter()
+                .map(|id| KillObjectObjectDataBlock { id: id.0 })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
     /// Sends an `EstateCovenantReply`: the estate covenant summary, in response
     /// to a client's `EstateCovenantRequest` (surfaced as
     /// [`ServerEvent::RequestEstateCovenant`]).
@@ -5282,6 +6555,89 @@ impl SimSession {
         )
     }
 
+    /// Offers the client a server-produced file: registers `data` under
+    /// `sim_filename` and sends an `InitiateDownload` naming it, echoing
+    /// `viewer_filename` so the client can tag the result. The client follows
+    /// the offer automatically with a `RequestXfer` for `sim_filename` and
+    /// surfaces the bytes as
+    /// [`Event::ServerFileDownloaded`](crate::Event::ServerFileDownloaded) —
+    /// the server half of the estate terrain RAW download
+    /// ([`ServerEvent::TerrainDownloadRequested`]), where a real simulator
+    /// mints a random `sim_filename`. Single-shot: the registered entry is
+    /// consumed by the request.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the offer fails to encode.
+    pub fn send_initiate_download(
+        &mut self,
+        sim_filename: impl Into<String>,
+        viewer_filename: &str,
+        data: Vec<u8>,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let sim_filename = sim_filename.into();
+        let message = AnyMessage::InitiateDownload(InitiateDownload {
+            agent_data: InitiateDownloadAgentDataBlock {
+                agent_id: self.agent_id.map_or_else(Uuid::nil, |agent| agent.uuid()),
+            },
+            file_data: InitiateDownloadFileDataBlock {
+                sim_filename: with_nul(&sim_filename),
+                viewer_filename: with_nul(viewer_filename),
+            },
+        });
+        self.register_xfer_file(sim_filename, data);
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Pulls a named file from the client: sends a `RequestXfer` for
+    /// `filename` (no `VFileID`, small packets — the shape OpenSim's
+    /// `EstateTerrainXferHandler` uses) and reassembles the client's
+    /// `SendXferPacket` stream, confirming each packet, into
+    /// [`ServerEvent::XferReceived`]. The server half of the client's
+    /// [`Session::request_region_terrain_upload`](crate::Session::request_region_terrain_upload),
+    /// issued in answer to [`ServerEvent::TerrainUploadRequested`]. Returns
+    /// the simulator-minted transfer id (the one a later
+    /// [`abort_xfer`](Self::abort_xfer) names).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the request fails to encode.
+    pub fn request_xfer_upload(&mut self, filename: &str, now: Instant) -> Result<XferId, Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let xfer_id = self.alloc_xfer_id();
+        self.xfer_receives.insert(
+            xfer_id,
+            SimXferReceive {
+                purpose: SimXferReceivePurpose::NamedFile {
+                    filename: filename.to_owned(),
+                },
+                buffer: Vec::new(),
+            },
+        );
+        let pull = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: xfer_id.get(),
+                filename: with_nul(filename),
+                file_path: 0,
+                delete_on_completion: false,
+                use_big_packets: false,
+                v_file_id: Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        self.send(&pull, Reliability::Reliable, now)?;
+        Ok(xfer_id)
+    }
+
     /// Aborts an in-flight `Xfer` transfer (either direction) with the given
     /// result code: drops its state and tells the client (`AbortXfer`), the
     /// inverse of the client's abort handling that surfaces
@@ -5289,14 +6645,18 @@ impl SimSession {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
-    /// if the message fails to encode.
+    /// Returns [`Error::NoCircuit`] if the circuit is not open,
+    /// [`Error::UnknownXfer`] if no send or receive with that id is in flight
+    /// (nothing is sent), or a wire error if the message fails to encode.
     pub fn abort_xfer(&mut self, xfer_id: XferId, result: i32, now: Instant) -> Result<(), Error> {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let _send = self.xfer_sends.remove(&xfer_id);
-        let _receive = self.xfer_receives.remove(&xfer_id);
+        let send = self.xfer_sends.remove(&xfer_id);
+        let receive = self.xfer_receives.remove(&xfer_id);
+        if send.is_none() && receive.is_none() {
+            return Err(Error::UnknownXfer);
+        }
         let message = AnyMessage::AbortXfer(AbortXfer {
             xfer_id: AbortXferXferIDBlock {
                 id: xfer_id.get(),
@@ -5317,47 +6677,33 @@ impl SimSession {
 
     /// Streams the next chunk of the outbound `Xfer` send `xfer_id` as a
     /// `SendXferPacket` — the server side of the strictly one-packet-in-flight
-    /// pacing, the mirror of the client's `send_next_xfer_upload_packet`. The
-    /// first packet (sequence 0) carries a 4-byte little-endian total-size
-    /// prefix before the data; the final packet sets the high-bit end-of-file
-    /// marker in its packet number. A no-op if the send is already gone.
+    /// pacing, the mirror of the client's `send_next_xfer_upload_packet`,
+    /// framed by the shared [`sl_wire::xfer`] codec (size prefix on sequence
+    /// 0, EOF flag on the last packet). A fully-sent send is a no-op.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::UnknownXfer`] if no send with that id is in flight, or
+    /// a wire error if the message fails to encode.
     fn send_next_xfer_send_packet(&mut self, xfer_id: XferId, now: Instant) -> Result<(), Error> {
         let Some(send) = self.xfer_sends.get_mut(&xfer_id) else {
-            return Ok(());
+            return Err(Error::UnknownXfer);
         };
         let sequence = send.next_sequence;
-        let is_first = sequence == 0;
-        let remaining = send.data.len().saturating_sub(send.sent);
-        let take = remaining.min(crate::session::XFER_UPLOAD_CHUNK_SIZE);
-        let end = send.sent.saturating_add(take);
-        let chunk = send.data.get(send.sent..end).unwrap_or(&[]);
-        let mut payload = Vec::with_capacity(take.saturating_add(4));
-        if is_first {
-            #[expect(
-                clippy::little_endian_bytes,
-                reason = "the Xfer first-packet size prefix is wire-defined little-endian"
-            )]
-            let total_le = u32::try_from(send.data.len())
-                .unwrap_or(u32::MAX)
-                .to_le_bytes();
-            payload.extend_from_slice(&total_le);
-        }
-        payload.extend_from_slice(chunk);
-        send.sent = end;
-        let is_last = send.sent >= send.data.len();
-        send.last_sent = is_last;
-        send.next_sequence = sequence.wrapping_add(1);
-        let packet = if is_last {
-            sequence | 0x8000_0000
-        } else {
-            sequence
+        let Some(packet) = next_xfer_chunk(&send.data, send.sent, sequence) else {
+            return Ok(());
         };
+        send.sent = packet.sent;
+        send.last_sent = packet.id.is_last();
+        send.next_sequence = sequence.wrapping_add(1);
         let message = AnyMessage::SendXferPacket(SendXferPacket {
             xfer_id: SendXferPacketXferIDBlock {
                 id: xfer_id.get(),
-                packet,
+                packet: packet.id.raw(),
             },
-            data_packet: SendXferPacketDataPacketBlock { data: payload },
+            data_packet: SendXferPacketDataPacketBlock {
+                data: packet.payload,
+            },
         });
         self.send(&message, Reliability::Reliable, now)?;
         Ok(())
@@ -5644,6 +6990,46 @@ impl SimSession {
         Ok(())
     }
 
+    /// Retires this circuit after the agent moved on: sends `DisableSimulator`
+    /// so the client tears the (now child) circuit down, and closes the
+    /// session with [`ServerEvent::CircuitRetired`] — the driver's pumps exit
+    /// on [`is_closed`](Self::is_closed) instead of waiting for the inactivity
+    /// timeout. What a source simulator does once the teleport destination
+    /// confirmed the arrival.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode; the session stays open in that case.
+    pub fn retire_circuit(&mut self, now: Instant) -> Result<(), Error> {
+        self.send_disable_simulator(now)?;
+        self.close(ServerEvent::CircuitRetired);
+        Ok(())
+    }
+
+    /// Abandons the session: closes it with [`ServerEvent::Disconnected`]
+    /// without sending anything — for a teleport destination the client never
+    /// reached (the arrival timed out), where there is no circuit to retire.
+    /// A no-op once closed.
+    pub fn abandon(&mut self) {
+        self.close(ServerEvent::Disconnected);
+    }
+
+    /// Places the agent's arrival: the position and facing the
+    /// `AgentMovementComplete` reply carries when the client completes its
+    /// movement into this region. A teleport destination sets this to the
+    /// requested landing spot before the client arrives; unset, the agent
+    /// lands at the region centre facing +X.
+    pub const fn set_arrival_position(&mut self, position: RegionCoordinates, look_at: Vector) {
+        self.arrival = ArrivalPlacement { position, look_at };
+    }
+
+    /// Where the agent lands when its movement completes.
+    #[must_use]
+    pub const fn arrival_position(&self) -> &ArrivalPlacement {
+        &self.arrival
+    }
+
     /// Enqueues a CAPS `EnableSimulator` event — announces a neighbouring (or
     /// teleport-destination) region so the client opens a **child** circuit to
     /// it (the modern event-queue path; the client answers with a
@@ -5651,37 +7037,35 @@ impl SimSession {
     pub fn enqueue_enable_simulator(&mut self, handle: RegionHandle, sim: SocketAddr) {
         self.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(handle.0, sim),
+            enable_simulator_to_caps_llsd(
+                handle.0,
+                sim,
+                (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+            ),
         );
     }
 
     /// Enqueues a CAPS `EstablishAgentCommunication` event — hands the client
     /// the child region's seed capability (this event has **no** UDP form).
     /// The client caches the seed and surfaces it so its driver POSTs it,
-    /// which is what makes a region start streaming to the child agent.
+    /// which is what makes a region start streaming to the child agent. The
+    /// `agent-id` is this circuit's agent (nil before `UseCircuitCode`).
     pub fn enqueue_establish_agent_communication(&mut self, sim: SocketAddr, seed: &str) {
+        let agent_id = self.agent_id.unwrap_or_else(|| AgentKey::from(Uuid::nil()));
         self.enqueue_caps_event(
             "EstablishAgentCommunication",
-            establish_agent_communication_to_llsd(sim, seed),
+            establish_agent_communication_to_llsd(agent_id, sim, seed),
         );
     }
 
     /// Enqueues a CAPS `TeleportFinish` event — completes an **inter-region**
     /// teleport by handing the client the destination simulator's address,
-    /// seed capability, maturity rating and teleport flags. The client sends
-    /// `CompleteAgentMovement` on its (child) circuit to `dest`; the
-    /// destination's `AgentMovementComplete` commits the handover.
-    pub fn enqueue_teleport_finish(
-        &mut self,
-        dest: SocketAddr,
-        seed: &str,
-        sim_access: u8,
-        teleport_flags: u32,
-    ) {
-        self.enqueue_caps_event(
-            "TeleportFinish",
-            teleport_finish_to_llsd(dest, seed, sim_access, teleport_flags),
-        );
+    /// region handle, seed capability, maturity rating and teleport flags
+    /// (the full reference record, see [`TeleportFinishInfo`]). The client
+    /// sends `CompleteAgentMovement` on its (child) circuit to `info.dest`;
+    /// the destination's `AgentMovementComplete` commits the handover.
+    pub fn enqueue_teleport_finish(&mut self, info: &TeleportFinishInfo) {
+        self.enqueue_caps_event("TeleportFinish", teleport_finish_to_llsd(info));
     }
 
     /// Enqueues a CAPS `CrossedRegion` event — the avatar walked over a region
@@ -6848,12 +8232,27 @@ impl SimSession {
             AnyMessage::EstateCovenantRequest(_) => {
                 self.events.push_back(ServerEvent::RequestEstateCovenant);
             }
-            AnyMessage::EstateOwnerMessage(message)
-                if trimmed_string(&message.method_data.method) == "telehub" =>
-            {
-                if let Some(event) = telehub_server_event(&message.param_list) {
-                    self.events.push_back(event);
-                }
+            AnyMessage::EstateOwnerMessage(message) => {
+                // Estate commands: the telehub and terrain methods decode to
+                // typed events; everything else (and an unknown sub-command
+                // of those two) surfaces raw so no estate command is dropped.
+                let method = trimmed_string(&message.method_data.method);
+                let typed = match method.as_str() {
+                    "telehub" => telehub_server_event(&message.param_list),
+                    "terrain" => terrain_server_event(&message.param_list),
+                    _other => None,
+                };
+                self.events.push_back(typed.unwrap_or_else(|| {
+                    ServerEvent::EstateOwnerRequest {
+                        method,
+                        invoice: message.method_data.invoice,
+                        params: message
+                            .param_list
+                            .iter()
+                            .map(|block| trimmed_string(&block.parameter))
+                            .collect(),
+                    }
+                }));
             }
             AnyMessage::UserReport(report) => {
                 let data = &report.report_data;
@@ -7144,9 +8543,11 @@ impl SimSession {
                         self.xfer_receives.insert(
                             xfer_id,
                             SimXferReceive {
-                                asset_id,
-                                asset_type,
-                                transaction_id,
+                                purpose: SimXferReceivePurpose::AssetUpload {
+                                    asset_id,
+                                    asset_type,
+                                    transaction_id,
+                                },
                                 buffer: Vec::new(),
                             },
                         );
@@ -7175,38 +8576,44 @@ impl SimSession {
                 // the seq-0 length prefix, confirm every packet, finish on the
                 // high-bit end-of-file marker.
                 let xfer_id = XferId(packet.xfer_id.id);
-                let packet_num = packet.xfer_id.packet;
-                let is_last = packet_num & 0x8000_0000 != 0;
-                let sequence = packet_num & 0x7fff_ffff;
+                let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
                 if self.xfer_receives.contains_key(&xfer_id) {
-                    let chunk: &[u8] = if sequence == 0 {
-                        packet.data_packet.data.get(4..).unwrap_or(&[])
-                    } else {
-                        &packet.data_packet.data
-                    };
+                    let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
                     if let Some(receive) = self.xfer_receives.get_mut(&xfer_id) {
-                        receive.buffer.extend_from_slice(chunk);
+                        receive.buffer.extend_from_slice(chunk.payload);
                     }
                     let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
                         xfer_id: ConfirmXferPacketXferIDBlock {
                             id: xfer_id.get(),
-                            packet: packet_num,
+                            packet: packet_id.raw(),
                         },
                     });
                     self.send(&confirm, Reliability::Reliable, now)?;
-                    if is_last && let Some(receive) = self.xfer_receives.remove(&xfer_id) {
-                        self.send_asset_upload_complete(
-                            receive.asset_id,
-                            receive.asset_type,
-                            true,
-                            now,
-                        )?;
-                        self.events.push_back(ServerEvent::AssetUploaded {
-                            asset_id: AssetKey::from(receive.asset_id),
-                            asset_type: receive.asset_type,
-                            transaction_id: receive.transaction_id,
-                            data: receive.buffer,
-                        });
+                    if packet_id.is_last()
+                        && let Some(receive) = self.xfer_receives.remove(&xfer_id)
+                    {
+                        match receive.purpose {
+                            SimXferReceivePurpose::AssetUpload {
+                                asset_id,
+                                asset_type,
+                                transaction_id,
+                            } => {
+                                self.send_asset_upload_complete(asset_id, asset_type, true, now)?;
+                                self.events.push_back(ServerEvent::AssetUploaded {
+                                    asset_id: AssetKey::from(asset_id),
+                                    asset_type,
+                                    transaction_id,
+                                    data: receive.buffer,
+                                });
+                            }
+                            SimXferReceivePurpose::NamedFile { filename } => {
+                                self.events.push_back(ServerEvent::XferReceived {
+                                    xfer_id,
+                                    filename,
+                                    data: receive.buffer,
+                                });
+                            }
+                        }
                     }
                 }
             }
@@ -7226,21 +8633,31 @@ impl SimSession {
             AnyMessage::TransferRequest(request) => {
                 // A legacy UDP asset Transfer download. Only the two source
                 // types with no HTTP alternative on either grid are served
-                // (task-inventory item asset, estate asset); anything else —
-                // including the ViewerAsset-superseded plain asset source — is
-                // auto-refused as unknown, per the legacy-skip rule.
+                // (task-inventory item asset, estate asset). The plain
+                // asset-by-id source is the ViewerAsset-superseded legacy path:
+                // refused as unknown per the legacy-skip rule, but surfaced so
+                // a driver can see a client still trying it. Garbage sources
+                // are refused silently.
                 let block = &request.transfer_info;
                 let transfer_id = TransferId::new(block.transfer_id);
-                let source = if block.source_type == TRANSFER_SOURCE_SIM_INV_ITEM {
-                    TransferSourceParamsInvItem::decode(&block.params)
+                let source = match block.source_type {
+                    TRANSFER_SOURCE_SIM_INV_ITEM => {
+                        TransferSourceParamsInvItem::decode(&block.params)
+                            .ok()
+                            .map(TransferRequestSource::TaskInventoryItem)
+                    }
+                    TRANSFER_SOURCE_SIM_ESTATE => TransferSourceParamsEstate::decode(&block.params)
                         .ok()
-                        .map(TransferRequestSource::TaskInventoryItem)
-                } else if block.source_type == TRANSFER_SOURCE_SIM_ESTATE {
-                    TransferSourceParamsEstate::decode(&block.params)
-                        .ok()
-                        .map(TransferRequestSource::Estate)
-                } else {
-                    None
+                        .map(TransferRequestSource::Estate),
+                    TRANSFER_SOURCE_ASSET => {
+                        self.events
+                            .push_back(ServerEvent::LegacyAssetTransferRefused {
+                                transfer_id,
+                                params: TransferSourceParamsAsset::decode(&block.params).ok(),
+                            });
+                        None
+                    }
+                    _unknown => None,
                 };
                 if let Some(source) = source {
                     let _prev = self
@@ -7314,6 +8731,26 @@ impl SimSession {
                         local_id: RegionLocalParcelId(request.parcel_data.local_id),
                         sequence_id: request.parcel_data.sequence_id,
                     });
+            }
+            AnyMessage::ParcelPropertiesRequest(request) => {
+                let data = &request.parcel_data;
+                self.events.push_back(ServerEvent::RequestParcelProperties {
+                    west: data.west,
+                    south: data.south,
+                    east: data.east,
+                    north: data.north,
+                    sequence_id: data.sequence_id,
+                    snap_selection: data.snap_selection,
+                });
+            }
+            AnyMessage::RequestMultipleObjects(request) => {
+                self.events.push_back(ServerEvent::RequestObjects {
+                    objects: request
+                        .object_data
+                        .iter()
+                        .map(|block| (RegionLocalObjectId(block.id), block.cache_miss_type))
+                        .collect(),
+                });
             }
             AnyMessage::ParcelSetOtherCleanTime(set) => {
                 let minutes = u64::try_from(set.parcel_data.other_clean_time).unwrap_or(0);
@@ -7598,12 +9035,12 @@ impl SimSession {
                 session_id: self.session_id.unwrap_or_else(Uuid::nil),
             },
             data: AgentMovementCompleteDataBlock {
-                position: Camera::region_center().center,
-                look_at: Vector {
-                    x: 1.0,
-                    y: 0.0,
-                    z: 0.0,
+                position: Vector {
+                    x: self.arrival.position.x(),
+                    y: self.arrival.position.y(),
+                    z: self.arrival.position.z(),
                 },
+                look_at: self.arrival.look_at.clone(),
                 region_handle: self.region_handle.0,
                 timestamp: 0,
             },
@@ -7746,6 +9183,26 @@ fn telehub_server_event(params: &[EstateOwnerMessageParamListBlock]) -> Option<S
         },
         "spawnpoint remove" => ServerEvent::RemoveTelehubSpawnPoint {
             spawn_index: param1(),
+        },
+        _ => return None,
+    };
+    Some(event)
+}
+
+/// Maps a `terrain` `EstateOwnerMessage`'s parameter list to a [`ServerEvent`]:
+/// `bake`, `download filename <name>`, `upload filename <name>` (the three
+/// sub-commands `LLClientView` dispatches). Returns `None` for an unknown
+/// sub-command or a missing filename.
+fn terrain_server_event(params: &[EstateOwnerMessageParamListBlock]) -> Option<ServerEvent> {
+    let command = trimmed_string(&params.first()?.parameter);
+    let filename = || params.get(1).map(|block| trimmed_string(&block.parameter));
+    let event = match command.trim() {
+        "bake" => ServerEvent::TerrainBakeRequested,
+        "download filename" => ServerEvent::TerrainDownloadRequested {
+            viewer_filename: filename()?,
+        },
+        "upload filename" => ServerEvent::TerrainUploadRequested {
+            viewer_filename: filename()?,
         },
         _ => return None,
     };

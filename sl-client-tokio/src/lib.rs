@@ -34,12 +34,13 @@ use sl_proto::{
     ais_create_category_url, ais_item_url, associate_inventory_request, avatar_picker_search_query,
     build_agent_preferences_request, build_ais_create_category_body, build_ais_create_link_body,
     build_ais_move_body, build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_new_file_agent_inventory_request, build_object_media_navigate_request,
-    build_object_media_update_request, build_parcel_voice_info_request,
-    build_provision_voice_account_request, build_region_experiences_request,
-    build_remote_parcel_request, build_resource_cost_selected_request, build_send_user_report,
+    build_create_inventory_category_request, build_environment_update_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_new_file_agent_inventory_request,
+    build_object_media_navigate_request, build_object_media_update_request,
+    build_parcel_voice_info_request, build_provision_voice_account_request,
+    build_region_experiences_request, build_remote_parcel_request,
+    build_resource_cost_selected_request, build_send_user_report,
     build_set_experience_permission_request, build_update_experience_request,
     build_update_item_asset_request, build_update_script_agent_request,
     build_update_script_task_request, build_update_task_item_asset_request,
@@ -466,6 +467,15 @@ impl Client {
     #[must_use]
     pub const fn circuit_code(&self) -> Option<CircuitCode> {
         self.session.circuit_code()
+    }
+
+    /// The grid's world-map tile base URL from the login response
+    /// (`map-server-url`), available once logged in. A region's
+    /// `SimulatorFeatures` `OpenSimExtras` may override it once fetched;
+    /// consumers should prefer that where present.
+    #[must_use]
+    pub const fn map_server_url(&self) -> Option<&url::Url> {
+        self.session.map_server_url()
     }
 
     /// The region's seed capability URL, available once logged in. A REPL driver
@@ -1337,6 +1347,25 @@ impl Client {
                                 let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
                                 tokio::spawn(get_caps_llsd(
                                     url,
+                                    CAP_EXT_ENVIRONMENT,
+                                    http.clone(),
+                                    caps_tx.clone(),
+                                ));
+                            }
+                        }
+                        Some(Command::SetEnvironment { parcel_id, track_no, update }) => {
+                            if let Some(base) = caps.get(CAP_EXT_ENVIRONMENT).cloned() {
+                                let parcel_id = parcel_id.unwrap_or(-1);
+                                let url = match track_no {
+                                    Some(track_no) => {
+                                        format!("{base}?parcelid={parcel_id}&trackno={track_no}")
+                                    }
+                                    None => format!("{base}?parcelid={parcel_id}"),
+                                };
+                                let body = build_environment_update_request(&update);
+                                tokio::spawn(put_caps_llsd(
+                                    url,
+                                    body,
                                     CAP_EXT_ENVIRONMENT,
                                     http.clone(),
                                     caps_tx.clone(),

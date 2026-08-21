@@ -33,20 +33,20 @@ use sl_proto::{
     associate_inventory_request, avatar_picker_search_query, build_agent_preferences_request,
     build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
     build_ais_rename_category_body, build_ais_update_item_body,
-    build_create_inventory_category_request, build_get_object_cost_request,
-    build_get_object_physics_data_request, build_modify_material_params_request,
-    build_object_media_navigate_request, build_object_media_update_request,
-    build_parcel_voice_info_request, build_provision_voice_account_request,
-    build_region_experiences_request, build_remote_parcel_request,
-    build_render_materials_put_request, build_resource_cost_selected_request,
-    build_send_user_report, build_set_experience_permission_request,
-    build_update_experience_request, build_update_item_asset_request,
-    build_update_script_agent_request, build_update_script_task_request,
-    build_update_task_item_asset_request, build_upload_baked_texture_request,
-    build_user_info_update, build_voice_signaling_request, chat_session_agents_body,
-    chat_session_request_body, copy_inventory_from_notecard_body, create_listing_request,
-    delete_listing_request, display_names_query, experience_id_query, experience_info_query,
-    find_experience_query, forget_experience_query, group_experiences_query,
+    build_create_inventory_category_request, build_environment_update_request,
+    build_get_object_cost_request, build_get_object_physics_data_request,
+    build_modify_material_params_request, build_object_media_navigate_request,
+    build_object_media_update_request, build_parcel_voice_info_request,
+    build_provision_voice_account_request, build_region_experiences_request,
+    build_remote_parcel_request, build_render_materials_put_request,
+    build_resource_cost_selected_request, build_send_user_report,
+    build_set_experience_permission_request, build_update_experience_request,
+    build_update_item_asset_request, build_update_script_agent_request,
+    build_update_script_task_request, build_update_task_item_asset_request,
+    build_upload_baked_texture_request, build_user_info_update, build_voice_signaling_request,
+    chat_session_agents_body, chat_session_request_body, copy_inventory_from_notecard_body,
+    create_listing_request, delete_listing_request, display_names_query, experience_id_query,
+    experience_info_query, find_experience_query, forget_experience_query, group_experiences_query,
     group_invite_response_body, listing_request, listings_request, merchant_status_request,
     parse_login_response, update_listing_request,
 };
@@ -119,6 +119,7 @@ pub use sl_proto::{
 };
 #[doc(no_inline)]
 pub use sl_proto::{Asset, AssetType, ImageCodec, Texture, TransferStatus};
+pub use sl_proto::{WireLandmarkAsset, landmark_to_wire, parse_landmark};
 // The `GetTexture` capability name, so a frontend driving the texture store
 // directly (rather than the `Command::FetchTexture` path) can resolve the cap
 // URL from an [`SlCapabilities`] map and hand it to a [`BevyTextureFetcher`].
@@ -2216,6 +2217,28 @@ fn advance_running(
                         target: "sl_client_bevy::environment",
                         "RequestEnvironment: no CAPS available yet; environment not requested"
                     );
+                }
+            }
+            Command::SetEnvironment {
+                parcel_id,
+                track_no,
+                update,
+            } => {
+                if let Some(caps) = caps.as_ref()
+                    && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
+                {
+                    let events_tx = caps.events_tx.clone();
+                    let parcel_id = parcel_id.unwrap_or(-1);
+                    let url = match track_no {
+                        Some(track_no) => {
+                            format!("{base}?parcelid={parcel_id}&trackno={track_no}")
+                        }
+                        None => format!("{base}?parcelid={parcel_id}"),
+                    };
+                    let body = build_environment_update_request(update);
+                    std::thread::spawn(move || {
+                        run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, &events_tx);
+                    });
                 }
             }
             Command::RequestMoneyBalance => {

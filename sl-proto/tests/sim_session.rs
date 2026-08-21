@@ -24,12 +24,13 @@ mod test {
         GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolderKey, InventoryItem,
         InventoryItemMove, InventoryItemOrFolderKey, InventoryKey, InventoryType, InvoiceId, Kick,
         LandArea, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatItem,
-        LandStatReportType, LightData, LindenAmount, LindenBalance, LoginParams, MAX_FACES,
-        MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity, MeanCollision,
-        MeanCollisionType, MovementMode, NavMeshBuildStatus, NavMeshStatus, NewInventoryLink,
-        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey, ObjectPlayingAnimation,
-        ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory, ParcelDetails, ParcelKey,
-        ParcelObjectOwner, ParcelReturnType, Permissions, Permissions5, PingId, PlacesResult,
+        LandStatReportType, LandingType, LightData, LindenAmount, LindenBalance, LoginParams,
+        MAX_FACES, MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, Maturity,
+        MeanCollision, MeanCollisionType, MovementMode, NavMeshBuildStatus, NavMeshStatus,
+        NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectKey,
+        ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, OwnerKey, ParcelCategory,
+        ParcelDetails, ParcelInfo, ParcelKey, ParcelObjectOwner, ParcelRequestResult,
+        ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId, PlacesResult,
         PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
         RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
         RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
@@ -38,9 +39,9 @@ mod test {
         ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId,
         SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem,
         TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, TransferRequestSource, TransferStatus,
-        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        TextureFace, TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource,
+        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -49,13 +50,15 @@ mod test {
         ChatLifecycleView, ChatSessionKind, ImSessionId, InviteChannel, Reliability,
         chatterbox_invitation_to_llsd,
     };
+    use sl_proto::{STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo};
     use sl_wire::messages::{
-        AbortXfer, AbortXferXferIDBlock, ImprovedInstantMessage,
-        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
-        ImprovedInstantMessageMessageBlockBlock, OfflineNotification,
-        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
-        StartPingCheck, StartPingCheckPingIDBlock, TransferRequest,
-        TransferRequestTransferInfoBlock,
+        AbortXfer, AbortXferXferIDBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
+        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock,
+        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
+        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
+        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
+        OnlineNotificationAgentBlockBlock, StartPingCheck, StartPingCheckPingIDBlock,
+        TransferRequest, TransferRequestTransferInfoBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
@@ -4329,7 +4332,7 @@ mod test {
         assert!(!sim.has_caps_events());
         sim.enqueue_caps_event(
             "EnableSimulator",
-            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr()),
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
         );
         assert!(sim.has_caps_events());
 
@@ -5182,6 +5185,219 @@ mod test {
         Ok(())
     }
 
+    /// The estate terrain RAW download round-trips: the client's
+    /// `request_region_terrain_download` surfaces
+    /// [`ServerEvent::TerrainDownloadRequested`]; the driver's
+    /// `send_initiate_download` registers the heightmap and offers it, the
+    /// client follows the `InitiateDownload` automatically over `Xfer` and
+    /// surfaces the exact bytes as [`Event::ServerFileDownloaded`] tagged with
+    /// the viewer filename it asked for.
+    #[test]
+    fn terrain_download_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        client.request_region_terrain_download("terrain.raw", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::TerrainDownloadRequested {
+                    viewer_filename: "terrain.raw".to_owned(),
+                }),
+            "expected TerrainDownloadRequested, got {server_events:?}"
+        );
+
+        // More than two chunks, so the pacing loop is exercised.
+        let heightmap: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 211).unwrap_or(0))
+            .collect();
+        sim.send_initiate_download(
+            "0badc0de-terrain.raw",
+            "terrain.raw",
+            heightmap.clone(),
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::ServerFileDownloaded { viewer_filename, data }
+                    if viewer_filename == "terrain.raw" && *data == heightmap
+            )),
+            "expected ServerFileDownloaded, got {client_events:?}"
+        );
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferRequested { filename, served: true, .. }
+                    if filename == "0badc0de-terrain.raw"
+            )),
+            "expected the served XferRequested, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferServed { filename, byte_count, .. }
+                    if filename == "0badc0de-terrain.raw" && *byte_count == heightmap.len()
+            )),
+            "expected XferServed, got {server_events:?}"
+        );
+        Ok(())
+    }
+
+    /// The estate terrain RAW upload round-trips: the client's
+    /// `request_region_terrain_upload` surfaces
+    /// [`ServerEvent::TerrainUploadRequested`]; the driver's
+    /// `request_xfer_upload` pulls the named file, the client streams it
+    /// (paced by the sim's confirmations) and reports [`Event::XferUploaded`],
+    /// and the sim surfaces the exact bytes as [`ServerEvent::XferReceived`].
+    /// A client abort mid-pull drops the receive.
+    #[test]
+    fn terrain_upload_round_trips() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let heightmap: Vec<u8> = (0..2500_u32)
+            .map(|i| u8::try_from(i % 223).unwrap_or(0))
+            .collect();
+        client.request_region_terrain_upload("terrain.raw", heightmap.clone(), now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::TerrainUploadRequested {
+                    viewer_filename: "terrain.raw".to_owned(),
+                }),
+            "expected TerrainUploadRequested, got {server_events:?}"
+        );
+
+        let xfer_id = sim.request_xfer_upload("terrain.raw", now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::XferReceived {
+                    xfer_id,
+                    filename: "terrain.raw".to_owned(),
+                    data: heightmap.clone(),
+                }),
+            "expected XferReceived, got {server_events:?}"
+        );
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::XferUploaded { xfer_id: got, viewer_filename, byte_count }
+                    if *got == xfer_id && viewer_filename == "terrain.raw"
+                        && *byte_count == heightmap.len()
+            )),
+            "expected XferUploaded, got {client_events:?}"
+        );
+        assert!(
+            matches!(
+                sim.abort_xfer(xfer_id, 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "a completed pull is no longer in flight"
+        );
+
+        // Abort mid-pull: deliver only the pull + first packet, then the
+        // client aborts; the sim drops the receive and never completes it.
+        client.request_region_terrain_upload("again.raw", vec![7_u8; 2500], now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        let second = sim.request_xfer_upload("again.raw", now)?;
+        if let Some(transmit) = sim.poll_transmit() {
+            client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+        }
+        while sim.poll_transmit().is_some() {}
+        let abort = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: second.get(),
+                result: -3,
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&abort, 9200, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::XferAborted { xfer_id: got, result: -3 } if *got == second
+            )),
+            "expected XferAborted, got {server_events:?}"
+        );
+        pump(&mut client, &mut sim, now)?;
+        assert!(
+            !drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::XferReceived { .. })),
+            "an aborted pull must not complete"
+        );
+        Ok(())
+    }
+
+    /// An `EstateOwnerMessage` without a typed event of its own surfaces as
+    /// [`ServerEvent::EstateOwnerRequest`] with its method and parameters
+    /// (never the `ClientMessage` catch-all), and the `terrain` `bake`
+    /// sub-command gets its typed event.
+    #[test]
+    fn untyped_estate_owner_message_is_surfaced() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let target = AgentKey::from(uuid::Uuid::from_u128(0xE57A));
+        client.kick_estate_user(target, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::EstateOwnerRequest { method, params, .. }
+                    if method == "kickestate" && *params == vec![target.uuid().to_string()]
+            )),
+            "expected EstateOwnerRequest, got {server_events:?}"
+        );
+        assert!(
+            !server_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::ClientMessage(_))),
+            "an estate command must not fall through to ClientMessage"
+        );
+
+        // No client helper sends `terrain`/`bake` (the viewer's revert
+        // baseline), so inject it as a wire datagram.
+        let bake = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
+            agent_data: EstateOwnerMessageAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::nil(),
+                transaction_id: uuid::Uuid::nil(),
+            },
+            method_data: EstateOwnerMessageMethodDataBlock {
+                method: b"terrain\0".to_vec(),
+                invoice: uuid::Uuid::nil(),
+            },
+            param_list: vec![EstateOwnerMessageParamListBlock {
+                parameter: b"bake\0".to_vec(),
+            }],
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&bake, 9300, false)?, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.contains(&ServerEvent::TerrainBakeRequested),
+            "expected TerrainBakeRequested, got {server_events:?}"
+        );
+        Ok(())
+    }
+
     /// A `RequestXfer` for a name that was never registered is refused with an
     /// `AbortXfer`, so the requesting client is not left waiting.
     #[test]
@@ -5268,6 +5484,29 @@ mod test {
                 ServerEvent::XferAborted { xfer_id: got, result: -7 } if *got == second
             )),
             "expected the client abort on the sim, got {server_events:?}"
+        );
+
+        // Aborting an id that is no longer (or never was) in flight is an
+        // observable error and sends nothing — a driver typo must not pass
+        // silently.
+        while sim.poll_transmit().is_some() {}
+        assert!(
+            matches!(
+                sim.abort_xfer(second, 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "aborting an already-aborted xfer is UnknownXfer"
+        );
+        assert!(
+            matches!(
+                sim.abort_xfer(XferId::new(0xFFFF), 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "aborting a never-started xfer is UnknownXfer"
+        );
+        assert!(
+            sim.poll_transmit().is_none(),
+            "an UnknownXfer abort sends nothing"
         );
         Ok(())
     }
@@ -5442,14 +5681,21 @@ mod test {
             Err(sl_proto::Error::UnknownTransfer)
         ));
 
-        // Legacy plain-asset source: auto-refused, no server event surfaced.
+        // Legacy plain-asset source: auto-refused with an unknown-source
+        // `TransferInfo` (never a `TransferRequested`), but surfaced as the
+        // typed refusal so a driver can log what the client tried.
+        let legacy_id = uuid::Uuid::from_u128(0xDEAD);
+        let legacy_params = sl_wire::TransferSourceParamsAsset {
+            asset_id: asset.uuid(),
+            asset_type: AssetType::ScriptText.to_code(),
+        };
         let legacy = AnyMessage::TransferRequest(TransferRequest {
             transfer_info: TransferRequestTransferInfoBlock {
-                transfer_id: uuid::Uuid::from_u128(0xDEAD),
+                transfer_id: legacy_id,
                 channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
                 source_type: sl_wire::TRANSFER_SOURCE_ASSET,
                 priority: 100.0,
-                params: asset.uuid().as_bytes().to_vec(),
+                params: legacy_params.encode(),
             },
         });
         sim.handle_datagram(client_addr(), &client_datagram(&legacy, 9100, false)?, now)?;
@@ -5459,6 +5705,43 @@ mod test {
                 .iter()
                 .any(|e| matches!(e, ServerEvent::TransferRequested { .. })),
             "a legacy plain-asset request must not surface, got {server_events:?}"
+        );
+        assert!(
+            server_events.iter().any(|e| *e
+                == ServerEvent::LegacyAssetTransferRefused {
+                    transfer_id: TransferId::new(legacy_id),
+                    params: Some(legacy_params),
+                }),
+            "expected LegacyAssetTransferRefused, got {server_events:?}"
+        );
+        let refusal = sim
+            .poll_transmit()
+            .ok_or("expected the unknown-source TransferInfo")?;
+        assert!(
+            matches!(
+                decode(&refusal)?,
+                AnyMessage::TransferInfo(info)
+                    if info.transfer_info.transfer_id == legacy_id
+                        && info.transfer_info.status == TransferStatus::UnknownSource.to_code()
+            ),
+            "expected an UnknownSource TransferInfo"
+        );
+
+        // A garbage source type is refused silently.
+        let garbage = AnyMessage::TransferRequest(TransferRequest {
+            transfer_info: TransferRequestTransferInfoBlock {
+                transfer_id: uuid::Uuid::from_u128(0xBEEF),
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                source_type: 99,
+                priority: 100.0,
+                params: Vec::new(),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&garbage, 9101, false)?, now)?;
+        assert_eq!(
+            drain_server(&mut sim),
+            Vec::new(),
+            "garbage source surfaces nothing"
         );
         Ok(())
     }
@@ -6341,6 +6624,8 @@ mod test {
             ("object sit", FlowMirrorStatus::Mirrored),
             ("Xfer download", FlowMirrorStatus::Mirrored),
             ("Xfer upload", FlowMirrorStatus::Mirrored),
+            ("terrain RAW download", FlowMirrorStatus::Mirrored),
+            ("terrain RAW upload", FlowMirrorStatus::Mirrored),
             (
                 "legacy transaction asset upload",
                 FlowMirrorStatus::Mirrored,
@@ -6550,15 +6835,28 @@ mod test {
         );
         assert_eq!(dest.agent_presence(), AgentPresence::Child);
 
-        // The source finishes the teleport; the client promotes the child.
-        source.enqueue_teleport_finish(dest_sim_addr(), "http://127.0.0.1:9001/seed", 21, 16);
+        // The source finishes the teleport; the client promotes the child. The
+        // finish carries the destination handle (the reference record), and the
+        // client reports that wire handle rather than the one it requested.
+        let agent_id = source.agent_id().ok_or("source has no agent")?;
+        source.enqueue_teleport_finish(&TeleportFinishInfo {
+            agent_id,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest: dest_sim_addr(),
+            region_handle: RegionHandle(DEST_HANDLE),
+            seed: "http://127.0.0.1:9001/seed".to_owned(),
+            sim_access: 21,
+            teleport_flags: 16,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        });
         let finish_events = deliver_caps(&mut client, &mut source, now)?;
         assert!(
             finish_events.iter().any(|e| matches!(
                 e,
-                Event::TeleportFinished { sim, .. } if *sim == dest_sim_addr()
+                Event::TeleportFinished { sim, region_handle, .. }
+                    if *sim == dest_sim_addr() && *region_handle == RegionHandle(DEST_HANDLE)
             )),
-            "expected TeleportFinished, got {finish_events:?}"
+            "expected TeleportFinished naming the destination, got {finish_events:?}"
         );
         pump_multi(
             &mut client,
@@ -6584,13 +6882,141 @@ mod test {
         );
 
         // The source retires the now-child circuit; the client tears it down
-        // without disturbing the new root.
-        source.send_disable_simulator(now)?;
+        // without disturbing the new root, and the source session is closed
+        // (its driver's pumps exit) with the retirement as the last event.
+        source.retire_circuit(now)?;
         pump_multi(
             &mut client,
             &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
             now,
         )?;
+        assert!(source.is_closed(), "the retired source should be closed");
+        let source_events = drain_server(&mut source);
+        assert!(
+            source_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CircuitRetired)),
+            "expected CircuitRetired, got {source_events:?}"
+        );
+        // The new root is untouched by the retirement.
+        assert!(client.root_circuit_id().is_some());
+        assert!(dest.is_root_agent());
+        Ok(())
+    }
+
+    /// A teleport the **simulator** decides on (`llTeleportAgent`, a god
+    /// "teleport home", a grid-side push): no client request, the source's
+    /// remote `TeleportStart` opens the teleport on the client, the
+    /// event-queue trio lands it in the destination, and the client reports
+    /// the destination handle from the wire (it never knew a target).
+    #[test]
+    fn remote_initiated_teleport_two_sims() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut source) = setup(now)?;
+        drain_server(&mut source);
+        drain_client(&mut client);
+        let mut dest = SimSession::new(RegionHandle(DEST_HANDLE), now);
+
+        source.send_teleport_start(sl_proto::TeleportFlags::VIA_LOCATION, now)?;
+        source.send_teleport_progress(
+            "sending_dest",
+            sl_proto::TeleportFlags::VIA_LOCATION,
+            now,
+        )?;
+        pump(&mut client, &mut source, now)?;
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events
+                .iter()
+                .any(|e| matches!(e, Event::TeleportStarted)),
+            "a remote TeleportStart opens the teleport, got {client_events:?}"
+        );
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportProgress { message, .. } if message == "sending_dest"
+            )),
+            "expected the progress key, got {client_events:?}"
+        );
+
+        source.enqueue_enable_simulator(RegionHandle(DEST_HANDLE), dest_sim_addr());
+        source.enqueue_establish_agent_communication(
+            dest_sim_addr(),
+            "http://127.0.0.1:9001/child-seed",
+        );
+        let agent_id = source.agent_id().ok_or("source has no agent")?;
+        source.enqueue_teleport_finish(&TeleportFinishInfo {
+            agent_id,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest: dest_sim_addr(),
+            region_handle: RegionHandle(DEST_HANDLE),
+            seed: "http://127.0.0.1:9001/seed".to_owned(),
+            sim_access: 13,
+            teleport_flags: sl_proto::TeleportFlags::VIA_LOCATION,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        });
+        let caps_events = deliver_caps(&mut client, &mut source, now)?;
+        assert!(
+            caps_events.iter().any(|e| matches!(
+                e,
+                Event::TeleportFinished { region_handle, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE)
+            )),
+            "expected TeleportFinished with the wire handle, got {caps_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(sim_addr(), &mut source), (dest_sim_addr(), &mut dest)],
+            now,
+        )?;
+        let dest_events = drain_server(&mut dest);
+        assert!(
+            dest_events
+                .iter()
+                .any(|e| matches!(e, ServerEvent::AgentArrived)),
+            "expected the arrival on the destination, got {dest_events:?}"
+        );
+        assert!(dest.is_root_agent());
+        let client_events = drain_client(&mut client);
+        assert!(
+            client_events.iter().any(|e| matches!(
+                e,
+                Event::RegionChanged { region_handle, .. }
+                    if *region_handle == RegionHandle(DEST_HANDLE)
+            )),
+            "expected RegionChanged, got {client_events:?}"
+        );
+
+        // A finish with no start at all is honoured the same way: the client
+        // is Active again, a second push lands it back on the source's twin.
+        let mut back = SimSession::new(RegionHandle(REGION_HANDLE), now);
+        let back_addr = SocketAddr::from(([127, 0, 0, 1], 9002));
+        dest.enqueue_teleport_finish(&TeleportFinishInfo {
+            agent_id,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest: back_addr,
+            region_handle: RegionHandle(REGION_HANDLE),
+            seed: "http://127.0.0.1:9002/seed".to_owned(),
+            sim_access: 13,
+            teleport_flags: sl_proto::TeleportFlags::VIA_LOCATION,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        });
+        let caps_events = deliver_caps(&mut client, &mut dest, now)?;
+        assert!(
+            caps_events
+                .iter()
+                .any(|e| matches!(e, Event::TeleportStarted)),
+            "a finish without a start opens the teleport, got {caps_events:?}"
+        );
+        pump_multi(
+            &mut client,
+            &mut [(dest_sim_addr(), &mut dest), (back_addr, &mut back)],
+            now,
+        )?;
+        assert!(
+            back.is_root_agent(),
+            "the client should have followed the push"
+        );
         Ok(())
     }
 
@@ -6695,6 +7121,306 @@ mod test {
                     if *got == task && *parsed == items
             )),
             "expected the parsed task inventory, got {client_events:?}"
+        );
+        Ok(())
+    }
+
+    /// A full region-wide public parcel record, as a simulator would push on
+    /// region entry (bitmap all ones: 64×64 blocks of a 256 m region).
+    fn region_wide_parcel(sequence_id: i32) -> Result<ParcelInfo, TestError> {
+        Ok(ParcelInfo {
+            sequence_id,
+            request_result: ParcelRequestResult::Single,
+            snap_selection: false,
+            self_count: 1,
+            other_count: 2,
+            public_count: 3,
+            local_id: RegionLocalParcelId(1),
+            owner: OwnerKey::Agent(AgentKey::from(uuid::Uuid::from_u128(0xA11))),
+            group: Some(GroupKey::from(uuid::Uuid::from_u128(0x6))),
+            auction_id: 0x8000_0001,
+            claim_date: 1_700_000_000,
+            claim_price: LindenAmount(10),
+            rent_price: LindenAmount(20),
+            aabb_min: RegionCoordinates::new(0.0, 0.0, 0.0),
+            aabb_max: RegionCoordinates::new(256.0, 256.0, 0.0),
+            area: LandArea(0x0001_0000),
+            bitmap: vec![0xFF; 512],
+            status: ParcelStatus::Leased,
+            category: ParcelCategory::Residential,
+            max_prims: 15_000,
+            sim_wide_max_prims: 15_000,
+            sim_wide_total_prims: 12,
+            total_prims: 12,
+            owner_prims: 10,
+            group_prims: 1,
+            other_prims: 1,
+            selected_prims: 0,
+            parcel_prim_bonus: 1.5,
+            other_clean_time: 30,
+            raw_parcel_flags: sl_wire::ParcelFlags::ALLOW_FLY
+                .union(sl_wire::ParcelFlags::CREATE_OBJECTS)
+                .union(sl_wire::ParcelFlags::FOR_SALE)
+                .bits(),
+            sale_price: Some(LindenAmount(4_200)),
+            name: "Fake Grid Parcel".to_owned(),
+            description: "Region-wide public land".to_owned(),
+            music_url: Some("http://stream.example/radio".parse()?),
+            media_url: None,
+            media_id: Some(TextureKey::from(uuid::Uuid::from_u128(0xBEEF))),
+            media_auto_scale: true,
+            auth_buyer_id: None,
+            snapshot_id: Some(TextureKey::from(uuid::Uuid::from_u128(0x5A9))),
+            pass_price: LindenAmount(0),
+            pass_hours: 0.5,
+            user_location: RegionCoordinates::new(128.0, 128.0, 25.0),
+            user_look_at: sl_proto::Direction::new(1.0, 0.0, 0.0),
+            landing_type: LandingType::LandingPoint,
+            region_push_override: false,
+            region_deny_anonymous: true,
+            region_deny_identified: false,
+            region_deny_transacted: false,
+            region_deny_age_unverified: true,
+            region_allow_access_override: true,
+            parcel_environment_version: 3,
+            region_allow_environment_override: true,
+            see_avs: None,
+            any_av_sounds: None,
+            group_av_sounds: None,
+        })
+    }
+
+    /// A unit box prim at `position` — the minimal `Object` a full
+    /// `ObjectUpdate` can carry.
+    fn box_prim(local_id: u32, full_id: u128, position: sl_proto::Vector) -> sl_proto::Object {
+        let zero = sl_proto::Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.0,
+        };
+        sl_proto::Object {
+            region_handle: RegionHandle(0),
+            local_id: RegionLocalObjectId(local_id),
+            circuit: sl_proto::CircuitId::default(),
+            full_id: ObjectKey::from(uuid::Uuid::from_u128(full_id)),
+            parent_id: RegionLocalObjectId(0),
+            pcode: sl_proto::pcode::PRIMITIVE,
+            state: 0,
+            crc: 7,
+            material: 3,
+            click_action: 0,
+            update_flags: 0,
+            scale: sl_proto::Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+            motion: sl_proto::ObjectMotion {
+                position,
+                velocity: zero.clone(),
+                acceleration: zero.clone(),
+                rotation: sl_proto::Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+                angular_velocity: zero.clone(),
+                collision_plane: None,
+            },
+            owner_id: uuid::Uuid::from_u128(0xA11),
+            sound: uuid::Uuid::nil(),
+            gain: 0.0,
+            sound_flags: 0,
+            sound_radius: 0.0,
+            text: "hover".to_owned(),
+            text_color: [255, 0, 0, 255],
+            name_value: String::new(),
+            media_url: None,
+            texture_entry: Vec::new(),
+            texture_anim: Vec::new(),
+            texture_animation: None,
+            shape: PrimShapeParams {
+                path_curve: 16,
+                profile_curve: 1,
+                path_scale_x: 100,
+                path_scale_y: 100,
+                ..PrimShapeParams::default()
+            },
+            particle_system: Vec::new(),
+            particles: None,
+            data: Vec::new(),
+            extra_params: Vec::new(),
+            extra: ObjectExtraParams::default(),
+            properties: None,
+            joint_type: 0,
+            joint_pivot: zero.clone(),
+            joint_axis_or_anchor: zero,
+        }
+    }
+
+    #[test]
+    fn server_parcel_properties_round_trip_udp_and_caps() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // The client's rectangle request decodes server-side.
+        client.request_parcel_properties(4.0, 8.0, 12.0, 16.0, -50_000, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::RequestParcelProperties { west, north, sequence_id: -50_000, snap_selection: false, .. }
+                    if west.to_bits() == 4.0_f32.to_bits() && north.to_bits() == 16.0_f32.to_bits()
+            )),
+            "expected RequestParcelProperties, got {server_events:?}"
+        );
+
+        // UDP: the record survives field-for-field.
+        let parcel = region_wide_parcel(-50_000)?;
+        sim.send_parcel_properties(&parcel, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let udp = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(info) => Some(*info),
+                _ => None,
+            })
+            .ok_or("expected a UDP ParcelProperties event")?;
+        assert_eq!(udp, parcel);
+
+        // CAPS event queue: the same record through the long-poll body.
+        let renamed = ParcelInfo {
+            name: "Renamed Parcel".to_owned(),
+            sequence_id: 9,
+            ..parcel
+        };
+        sim.enqueue_parcel_properties(&renamed);
+        let caps = deliver_caps(&mut client, &mut sim, now)?
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ParcelProperties(info) => Some(*info),
+                _ => None,
+            })
+            .ok_or("expected a CAPS ParcelProperties event")?;
+        assert_eq!(caps, renamed);
+        Ok(())
+    }
+
+    #[test]
+    fn server_parcel_overlay_chunks_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        let overlay: Vec<u8> = (0..4096_u32)
+            .map(|i| u8::try_from(i % 251).unwrap_or(0))
+            .collect();
+        sim.send_parcel_overlay(&overlay, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let chunks: Vec<(i32, Vec<u8>)> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::ParcelOverlay(info) => Some((info.sequence_id, info.data)),
+                _ => None,
+            })
+            .collect();
+        let expected: Vec<(i32, Vec<u8>)> = overlay
+            .chunks(sl_proto::PARCEL_OVERLAY_CHUNK_BYTES)
+            .enumerate()
+            .map(|(i, chunk)| (i32::try_from(i).unwrap_or(-1), chunk.to_vec()))
+            .collect();
+        assert_eq!(chunks.len(), 4);
+        assert_eq!(chunks, expected);
+        Ok(())
+    }
+
+    #[test]
+    fn server_object_updates_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+        let circuit = client.root_circuit_id().ok_or("no circuit")?;
+
+        // The client's cache-miss refetch decodes server-side.
+        client.request_objects(
+            &[
+                ScopedObjectId::new(circuit, RegionLocalObjectId(0x10)),
+                ScopedObjectId::new(circuit, RegionLocalObjectId(0x11)),
+            ],
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        let server_events = drain_server(&mut sim);
+        assert!(
+            server_events.iter().any(|e| matches!(
+                e,
+                ServerEvent::RequestObjects { objects }
+                    if objects.iter().map(|(id, _)| *id).collect::<Vec<_>>()
+                        == vec![RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)]
+            )),
+            "expected RequestObjects, got {server_events:?}"
+        );
+
+        // Full form: the prim arrives with its geometry, text, and scale.
+        let position = sl_proto::Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let prim = box_prim(0x10, 0x1010, position.clone());
+        sim.send_object_update(std::slice::from_ref(&prim), 0xFFFF, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let added = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ObjectAdded(object) => Some(*object),
+                _ => None,
+            })
+            .ok_or("expected ObjectAdded for the full update")?;
+        assert_eq!(added.local_id, prim.local_id);
+        assert_eq!(added.full_id, prim.full_id);
+        assert_eq!(added.motion.position, position);
+        assert_eq!(added.scale, prim.scale);
+        assert_eq!(added.shape, prim.shape);
+        assert_eq!(added.text, "hover");
+        assert_eq!(added.text_color, [255, 0, 0, 255]);
+        assert_eq!(added.pcode, sl_proto::pcode::PRIMITIVE);
+
+        // Compressed form: a second prim through the packed encoder.
+        let second = box_prim(0x11, 0x1111, position.clone());
+        sim.send_object_update_compressed(std::slice::from_ref(&second), 0xFFFF, now)?;
+        pump(&mut client, &mut sim, now)?;
+        let added = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ObjectAdded(object) => Some(*object),
+                _ => None,
+            })
+            .ok_or("expected ObjectAdded for the compressed update")?;
+        assert_eq!(added.local_id, second.local_id);
+        assert_eq!(added.full_id, second.full_id);
+        assert_eq!(added.motion.position, position);
+        assert_eq!(added.scale, second.scale);
+
+        // KillObject removes both.
+        sim.send_kill_object(&[RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)], now)?;
+        pump(&mut client, &mut sim, now)?;
+        let removed: Vec<RegionLocalObjectId> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::ObjectRemoved { local_id, .. } => Some(local_id.id()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            removed,
+            vec![RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)]
         );
         Ok(())
     }

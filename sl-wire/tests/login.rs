@@ -669,7 +669,7 @@ mod test {
                 8,
                 1,
             )?],
-            agent_appearance_service: None,
+            agent_appearance_service: Some(url::Url::parse("https://appearance.example/")?),
             map_server_url: Some(url::Url::parse("http://127.0.0.1:9000/")?),
             openid_url: Some(url::Url::parse("https://id.secondlife.com/openid/webkit")?),
             openid_token: Some("open-id-token-blob".to_owned()),
@@ -803,6 +803,10 @@ mod test {
         assert_eq!(parsed.library_owner, success.library_owner);
         assert_eq!(parsed.library_skeleton, success.library_skeleton);
         assert_eq!(parsed.map_server_url, success.map_server_url);
+        assert_eq!(
+            parsed.agent_appearance_service,
+            success.agent_appearance_service
+        );
         assert_eq!(parsed.openid_url, success.openid_url);
         assert_eq!(parsed.openid_token, success.openid_token);
         assert_eq!(parsed.first_name, success.first_name);

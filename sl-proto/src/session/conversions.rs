@@ -10,8 +10,8 @@ use crate::types::{
     AvatarInterests, AvatarName, AvatarPickerResult, AvatarProperties, ChatAudible, ChatMessage,
     ChatSource, ChatType, ClassifiedCategory, ClassifiedInfo, CloudPosDensity, Color, ColorAlpha,
     DayCycle, DayCycleFrame, DisplayNameUpdate, EconomyData, EnvironmentAsset, EnvironmentSettings,
-    EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow, GroupAccountDetails,
-    GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
+    EnvironmentUpdate, EstateAccessKind, EstateInfo, Event, Friend, FriendRights, Glow,
+    GroupAccountDetails, GroupAccountDetailsEntry, GroupAccountSummary, GroupAccountTransaction,
     GroupAccountTransactions, GroupActiveProposalItem, GroupMember, GroupMembership, GroupName,
     GroupNotice, GroupNoticeKey, GroupProfile, GroupRole, GroupTitle, GroupVote,
     GroupVoteHistoryItem, ImDialog, InstantMessage, InventoryFolder, InventoryItem, InventoryType,
@@ -762,6 +762,33 @@ pub(crate) fn environment_from_llsd(body: &Llsd) -> Option<EnvironmentSettings> 
         env_version: i32_member(env, "env_version"),
         track_altitudes: [altitude(0), altitude(1), altitude(2)],
         day_cycle: day_cycle_from_llsd(env.get("day_cycle")),
+    })
+}
+
+/// Parses an `ExtEnvironment` PUT body (the reference viewer's
+/// `coroUpdateEnvironment` shape) into an [`EnvironmentUpdate`] — the inverse of
+/// [`build_environment_update_request`] (server side). Each optional field is
+/// `Some` only when the client sent it. Returns `None` if the `environment`
+/// envelope is absent (a malformed request).
+pub(crate) fn environment_update_from_llsd(body: &Llsd) -> Option<EnvironmentUpdate> {
+    let env = body.get("environment")?;
+    let track_altitudes = env.get("track_altitudes").map(|alt| {
+        let altitude = |index: usize| alt.index(index).and_then(Llsd::as_f32).unwrap_or(0.0);
+        [altitude(0), altitude(1), altitude(2)]
+    });
+    Some(EnvironmentUpdate {
+        day_length: env.get("day_length").and_then(Llsd::as_i32),
+        day_offset: env.get("day_offset").and_then(Llsd::as_i32),
+        track_altitudes,
+        day_cycle: env
+            .get("day_cycle")
+            .map(|cycle| day_cycle_from_llsd(Some(cycle))),
+        day_asset: env.get("day_asset").and_then(Llsd::as_uuid),
+        day_name: env
+            .get("day_name")
+            .and_then(Llsd::as_str)
+            .map(str::to_owned),
+        flags: u32_member(env, "flags"),
     })
 }
 
@@ -2412,14 +2439,21 @@ pub(crate) struct CapsTeleportFinish {
     pub(crate) sim_access: u8,
     /// The `TeleportFlags` bitfield.
     pub(crate) teleport_flags: u32,
+    /// The destination region's handle (`RegionHandle`), when the event
+    /// carries one. The reference servers always send it; a lure or landmark
+    /// teleport has no other way to learn where it landed before the
+    /// destination's `AgentMovementComplete`.
+    pub(crate) region_handle: Option<RegionHandle>,
 }
 
-/// Extracts the destination UDP address, seed capability, maturity and teleport
-/// flags from a CAPS `TeleportFinish` event body: `{ "Info": [ { "SimIP":
-/// <binary 4 bytes>, "SimPort": <integer>, "SeedCapability": <string>,
-/// "SimAccess": <integer>, "TeleportFlags": <integer>, … } ] }`. The CAPS
-/// `SimPort` is a plain host-order integer port (unlike the byte-swapped
-/// generated-UDP field).
+/// Extracts the destination UDP address, seed capability, maturity, teleport
+/// flags and (when present) region handle from a CAPS `TeleportFinish` event
+/// body: `{ "Info": [ { "AgentID": <uuid>, "LocationID": <integer>, "SimIP":
+/// <binary 4 bytes>, "SimPort": <integer>, "RegionHandle": <u64 binary>,
+/// "SeedCapability": <string>, "SimAccess": <integer>, "TeleportFlags":
+/// <integer>, "RegionSizeX": <integer>, "RegionSizeY": <integer> } ] }`. The
+/// CAPS `SimPort` is a plain host-order integer port (unlike the byte-swapped
+/// generated-UDP field). A zero or absent `RegionHandle` decodes as `None`.
 pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinish> {
     let info = body.get("Info").and_then(|info| info.index(0))?;
     let octets: [u8; 4] = info
@@ -2446,11 +2480,17 @@ pub(crate) fn teleport_finish_from_llsd(body: &Llsd) -> Option<CapsTeleportFinis
     // `TeleportFlags` is a U32 bitfield carried as an LLSD integer (and some
     // grids encode the high U32 fields as binary), so read it tolerantly.
     let teleport_flags = info.get("TeleportFlags").map_or(0, llsd_u32);
+    let region_handle = info
+        .get("RegionHandle")
+        .map(llsd_u64)
+        .filter(|handle| *handle != 0)
+        .map(RegionHandle);
     Some(CapsTeleportFinish {
         dest: SocketAddr::new(IpAddr::V4(Ipv4Addr::from(octets)), port),
         seed,
         sim_access,
         teleport_flags,
+        region_handle,
     })
 }
 
@@ -3653,8 +3693,9 @@ fn optional_string_member(map: &Llsd, key: &str) -> Option<String> {
 
 /// Decodes a [`VoiceChannelInfo`] from a session-voice LLSD map — either an
 /// invitation's `voice` body or the `ChatSessionRequest "accept invitation"`
-/// reply's `voice_channel_info` block. Reads the room `channel_uri` (a non-empty,
-/// parseable uri; an empty/garbled uri decodes to `None`), the optional
+/// reply's `voice_channel_info` block. Reads the room `channel_uri` (a non-empty
+/// `sip:` uri or a bare WebRTC channel id; an empty/garbled uri decodes to
+/// `None`), the optional
 /// per-channel `channel_credentials`, the `voice_server_type` backend tag, and the
 /// SL `session_handle`. A map with none of these decodes to an empty
 /// [`VoiceChannelInfo`] (the channel exists but its coordinates are not yet
@@ -3663,8 +3704,8 @@ pub(crate) fn voice_channel_info_from_llsd(map: &Llsd) -> VoiceChannelInfo {
     let channel_uri = map
         .get("channel_uri")
         .and_then(Llsd::as_str)
-        .filter(|uri| !uri.is_empty())
-        .and_then(|uri| url::Url::parse(uri).ok());
+        .and_then(|uri| sl_wire::VoiceChannelUri::from_wire("channel_uri", uri).ok())
+        .flatten();
     VoiceChannelInfo {
         channel_uri,
         channel_credentials: optional_string_member(map, "channel_credentials"),
@@ -4249,35 +4290,85 @@ pub(crate) const fn ipv4_octets(addr: SocketAddr) -> [u8; 4] {
     }
 }
 
-/// Serializes a CAPS `TeleportFinish` event body from the destination address,
-/// seed capability, maturity (`SimAccess`) and teleport flags (the
-/// element-by-element inverse of the `teleport_finish_from_llsd` parser, whose
-/// decoded `CapsTeleportFinish` is a private type).
+/// The side length, in metres, of a standard region — the `RegionSizeX` /
+/// `RegionSizeY` a simulator advertises in its event-queue region
+/// announcements unless it hosts a var-region.
+pub const STANDARD_REGION_SIZE_METRES: u32 = 256;
+
+/// The `LocationID` a simulator puts in `TeleportFinish`. The reference
+/// servers always send `4` (OpenSim's `TeleportFinishEvent` hard-codes it and
+/// the viewer ignores the value), so the constant documents the wire rather
+/// than a choice.
+pub const TELEPORT_FINISH_LOCATION_ID: u32 = 4;
+
+/// What a simulator hands the client in a CAPS `TeleportFinish` — the
+/// complete record the reference event-queue builders emit
+/// (OpenSim `EventQueueGetHandlers.TeleportFinishEvent`): the viewer creates
+/// the destination region object from `region_handle` / `region_size`
+/// **before** the destination's own handshake arrives, and ignores the event
+/// when `agent_id` is not its own.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct TeleportFinishInfo {
+    /// The teleporting agent (`AgentID`); the viewer drops an event naming
+    /// someone else.
+    pub agent_id: AgentKey,
+    /// The `LocationID` (always [`TELEPORT_FINISH_LOCATION_ID`] on the
+    /// reference servers).
+    pub location_id: u32,
+    /// The destination simulator's UDP address (`SimIP` + `SimPort`).
+    pub dest: SocketAddr,
+    /// The destination region's handle (`RegionHandle`).
+    pub region_handle: RegionHandle,
+    /// The destination region's seed capability URL (`SeedCapability`).
+    pub seed: String,
+    /// The destination region's maturity byte (`SimAccess`).
+    pub sim_access: u8,
+    /// The `TeleportFlags` bitfield (how the teleport happened).
+    pub teleport_flags: u32,
+    /// The destination region's size in metres (`RegionSizeX`, `RegionSizeY`).
+    pub region_size: (u32, u32),
+}
+
+/// Serializes a CAPS `TeleportFinish` event body (the element-by-element
+/// inverse of the `teleport_finish_from_llsd` parser, whose decoded
+/// `CapsTeleportFinish` is a private type — the parser tolerates the
+/// handle/size/agent fields being absent, the builder always emits them as
+/// the reference servers do).
 #[must_use]
-pub fn teleport_finish_to_llsd(
-    dest: SocketAddr,
-    seed: &str,
-    sim_access: u8,
-    teleport_flags: u32,
-) -> Llsd {
+pub fn teleport_finish_to_llsd(info: &TeleportFinishInfo) -> Llsd {
+    let (size_x, size_y) = info.region_size;
     let info = llsd_map(vec![
-        ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
-        ("SimPort", Llsd::Integer(i32::from(dest.port()))),
-        ("SeedCapability", Llsd::String(seed.to_owned())),
-        ("SimAccess", Llsd::Integer(i32::from(sim_access))),
-        ("TeleportFlags", u32_to_llsd(teleport_flags)),
+        ("AgentID", Llsd::Uuid(info.agent_id.uuid())),
+        ("LocationID", u32_to_llsd(info.location_id)),
+        ("SimIP", Llsd::Binary(ipv4_octets(info.dest).to_vec())),
+        ("SimPort", Llsd::Integer(i32::from(info.dest.port()))),
+        ("RegionHandle", u64_to_llsd(info.region_handle.0)),
+        ("SeedCapability", Llsd::String(info.seed.clone())),
+        ("SimAccess", Llsd::Integer(i32::from(info.sim_access))),
+        ("TeleportFlags", u32_to_llsd(info.teleport_flags)),
+        ("RegionSizeX", u32_to_llsd(size_x)),
+        ("RegionSizeY", u32_to_llsd(size_y)),
     ]);
     llsd_map(vec![("Info", Llsd::Array(vec![info]))])
 }
 
-/// Serializes a neighbour's region handle and address as a CAPS
-/// `EnableSimulator` event body (inverse of `enable_simulator_from_caps_llsd`).
+/// Serializes a neighbour's region handle, address and size as a CAPS
+/// `EnableSimulator` event body (inverse of `enable_simulator_from_caps_llsd`,
+/// which reads only the handle and address; the size fields are what the
+/// reference servers send, `region_size` in metres).
 #[must_use]
-pub fn enable_simulator_to_caps_llsd(handle: u64, sim: SocketAddr) -> Llsd {
+pub fn enable_simulator_to_caps_llsd(
+    handle: u64,
+    sim: SocketAddr,
+    region_size: (u32, u32),
+) -> Llsd {
+    let (size_x, size_y) = region_size;
     let info = llsd_map(vec![
         ("Handle", u64_to_llsd(handle)),
         ("IP", Llsd::Binary(ipv4_octets(sim).to_vec())),
         ("Port", Llsd::Integer(i32::from(sim.port()))),
+        ("RegionSizeX", u32_to_llsd(size_x)),
+        ("RegionSizeY", u32_to_llsd(size_y)),
     ]);
     llsd_map(vec![("SimulatorInfo", Llsd::Array(vec![info]))])
 }
@@ -4297,10 +4388,16 @@ pub fn crossed_region_to_caps_llsd(handle: u64, dest: SocketAddr, seed: &str) ->
 
 /// Serializes a child region's address and seed capability as a CAPS
 /// `EstablishAgentCommunication` event body (inverse of
-/// `establish_agent_communication_from_llsd`).
+/// `establish_agent_communication_from_llsd`, which reads only the address and
+/// seed; `agent-id` is what the reference servers send alongside).
 #[must_use]
-pub fn establish_agent_communication_to_llsd(sim: SocketAddr, seed: &str) -> Llsd {
+pub fn establish_agent_communication_to_llsd(
+    agent_id: AgentKey,
+    sim: SocketAddr,
+    seed: &str,
+) -> Llsd {
     llsd_map(vec![
+        ("agent-id", Llsd::Uuid(agent_id.uuid())),
         ("sim-ip-and-port", Llsd::String(sim.to_string())),
         ("seed-capability", Llsd::String(seed.to_owned())),
     ])
@@ -4688,6 +4785,36 @@ pub fn environment_to_llsd(env: &EnvironmentSettings) -> Llsd {
         ("parcel_id", Llsd::Integer(env.parcel_id)),
         ("success", Llsd::Boolean(true)),
     ])
+}
+
+/// Builds an `ExtEnvironment` PUT body (the reference viewer's
+/// `coroUpdateEnvironment` shape) from an [`EnvironmentUpdate`]: an
+/// `environment` envelope carrying each optional field only when `Some`, plus
+/// the flags. The inverse is the crate-private `environment_update_from_llsd`
+/// (server side).
+#[must_use]
+pub fn build_environment_update_request(update: &EnvironmentUpdate) -> String {
+    let mut entries: Vec<(&str, Llsd)> = Vec::new();
+    if let Some(day_length) = update.day_length {
+        entries.push(("day_length", Llsd::Integer(day_length)));
+    }
+    if let Some(day_offset) = update.day_offset {
+        entries.push(("day_offset", Llsd::Integer(day_offset)));
+    }
+    if let Some(track_altitudes) = update.track_altitudes {
+        entries.push(("track_altitudes", reals_to_llsd(&track_altitudes)));
+    }
+    if let Some(day_cycle) = &update.day_cycle {
+        entries.push(("day_cycle", day_cycle_to_llsd(day_cycle)));
+    }
+    if let Some(day_asset) = update.day_asset {
+        entries.push(("day_asset", Llsd::Uuid(day_asset)));
+    }
+    if let Some(day_name) = &update.day_name {
+        entries.push(("day_name", Llsd::String(day_name.clone())));
+    }
+    entries.push(("flags", u32_to_llsd(update.flags)));
+    llsd_map(vec![("environment", llsd_map(entries))]).to_llsd_xml()
 }
 
 /// Serializes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body (inverse
@@ -5214,6 +5341,118 @@ pub fn created_category_to_llsd(folder: &InventoryFolder) -> Llsd {
     ])
 }
 
+/// Serializes a `FetchInventory2` / `FetchLib2` per-item fetch reply
+/// (`{ agent_id, items: [ … ] }`, each item in the flat `InventoryItemBase`
+/// shape `inventory_item_to_llsd` emits) — the server counterpart of
+/// `fetch_inventory_items_from_llsd`. The reply never carries an `error`
+/// key: the reference viewer treats any `error` member as a failed fetch, so
+/// unknown items are simply omitted (OpenSim's tolerance).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn fetch_inventory_items_to_llsd(
+    agent_id: Uuid,
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let items_llsd = items
+        .iter()
+        .map(inventory_item_to_llsd)
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(llsd_map(vec![
+        ("agent_id", Llsd::Uuid(agent_id)),
+        ("items", Llsd::Array(items_llsd)),
+    ]))
+}
+
+/// Parses a `FetchInventory2` / `FetchLib2` per-item fetch reply
+/// (`{ agent_id, items: [ … ] }`) into its items — the client counterpart of
+/// [`fetch_inventory_items_to_llsd`]. Nil-id placeholders and non-item
+/// entries are skipped, matching the descendents fold.
+pub(crate) fn fetch_inventory_items_from_llsd(body: &Llsd) -> Vec<InventoryItem> {
+    body.get("items")
+        .and_then(Llsd::as_array)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(inventory_item_from_llsd)
+        .filter(|item| !item.item_id.uuid().is_nil())
+        .collect()
+}
+
+/// Serializes an AIS3 mutation reply: the [`AisUpdate`](sl_wire::AisUpdate) "meta" change-set
+/// (via [`sl_wire::ais_update_to_llsd`]) merged with the affected objects
+/// embedded under `_embedded` (the [`ais_inventory_update_to_llsd`] shape).
+/// The `_embedded` block is omitted entirely when both slices are empty,
+/// matching the grid's meta-only delete replies.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_mutation_reply_to_llsd(
+    update: &sl_wire::AisUpdate,
+    folders: &[InventoryFolder],
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let mut reply = sl_wire::ais_update_to_llsd(update);
+    if folders.is_empty() && items.is_empty() {
+        return Ok(reply);
+    }
+    let embedded = ais_inventory_update_to_llsd(folders, items)?;
+    if let (Llsd::Map(reply_map), Some(embedded_block)) = (&mut reply, embedded.get("_embedded")) {
+        let _previous = reply_map.insert("_embedded".to_owned(), embedded_block.clone());
+    }
+    Ok(reply)
+}
+
+/// Serializes an AIS3 `GET /category/<id>/children` reply: the fetched
+/// category's own fields at the top level (the `inventory_folder_to_llsd`
+/// shape, which the client's top-level `category_id` probe picks up) plus the
+/// listed descendants under `_embedded`.
+///
+/// The real AIS service nests `_embedded` recursively per depth level; our
+/// client parser gathers only the top-level `_embedded` maps, so the whole
+/// subtree is served **flattened** into them — a deliberate, documented
+/// divergence that is information-equivalent (the maps are uuid-keyed and
+/// every entry carries its `parent_id`).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_category_children_reply_to_llsd(
+    folder: &InventoryFolder,
+    folders: &[InventoryFolder],
+    items: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let mut reply = inventory_folder_to_llsd(folder);
+    if folders.is_empty() && items.is_empty() {
+        return Ok(reply);
+    }
+    let embedded = ais_inventory_update_to_llsd(folders, items)?;
+    if let (Llsd::Map(reply_map), Some(embedded_block)) = (&mut reply, embedded.get("_embedded")) {
+        let _previous = reply_map.insert("_embedded".to_owned(), embedded_block.clone());
+    }
+    Ok(reply)
+}
+
+/// Serializes an AIS3 `GET /item/<id>` reply: the item at the top level (the
+/// `inventory_item_to_llsd` shape), which the client's top-level `item_id`
+/// probe in `ais_inventory_update_from_llsd` picks up.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// the item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_item_reply_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_wire::WireError> {
+    inventory_item_to_llsd(item)
+}
+
 /// Serializes an [`InventoryFolder`] as an AIS-shaped `categories` entry (inverse
 /// of [`inventory_folder_from_llsd`]).
 pub(crate) fn inventory_folder_to_llsd(folder: &InventoryFolder) -> Llsd {
@@ -5481,6 +5720,352 @@ pub(crate) fn concatenated_uuids(bytes: &[u8]) -> Vec<Uuid> {
         .collect()
 }
 
+// ---------------------------------------------------------------------------
+// Server-direction encoders for the world-state pushes a simulator sends
+// unsolicited (parcel properties, object updates): the inverses of
+// `parcel_info`, `parcel_info_from_llsd`, and `object_from_full_update`.
+// ---------------------------------------------------------------------------
+
+/// Encodes region-local coordinates as a wire [`Vector`].
+const fn region_coords_to_vector(coords: RegionCoordinates) -> Vector {
+    Vector {
+        x: coords.x(),
+        y: coords.y(),
+        z: coords.z(),
+    }
+}
+
+/// Encodes a [`ParcelInfo`] as a UDP `ParcelProperties` message — the exact
+/// inverse of [`parcel_info`]. Strings go out NUL-terminated, absent URLs /
+/// keys as empty strings / nil UUIDs, and the for-sale price as `0` unless the
+/// `FOR_SALE` flag is set (the client reads it back as `None` otherwise).
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange)
+/// when an L$ amount or the land area exceeds the signed 32-bit wire field.
+pub(crate) fn parcel_properties_to_wire(
+    info: &ParcelInfo,
+) -> Result<ParcelProperties, sl_wire::WireError> {
+    use sl_wire::messages::{
+        ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
+        ParcelPropertiesParcelEnvironmentBlockBlock, ParcelPropertiesRegionAllowAccessBlockBlock,
+    };
+    let for_sale = info.flags().contains(sl_wire::ParcelFlags::FOR_SALE);
+    Ok(ParcelProperties {
+        parcel_data: ParcelPropertiesParcelDataBlock {
+            request_result: info.request_result.to_i32(),
+            sequence_id: info.sequence_id,
+            snap_selection: info.snap_selection,
+            self_count: info.self_count,
+            other_count: info.other_count,
+            public_count: info.public_count,
+            local_id: info.local_id.0,
+            owner_id: info.owner.uuid(),
+            is_group_owned: matches!(info.owner, sl_types::key::OwnerKey::Group(_)),
+            auction_id: info.auction_id,
+            claim_date: info.claim_date,
+            claim_price: crate::types::linden_to_wire("ClaimPrice", &info.claim_price)?,
+            rent_price: crate::types::linden_to_wire("RentPrice", &info.rent_price)?,
+            aabb_min: region_coords_to_vector(info.aabb_min),
+            aabb_max: region_coords_to_vector(info.aabb_max),
+            bitmap: info.bitmap.clone(),
+            area: crate::types::land_area_to_wire("Area", &info.area)?,
+            status: u8::try_from(info.status.to_i32()).unwrap_or(u8::MAX),
+            sim_wide_max_prims: info.sim_wide_max_prims,
+            sim_wide_total_prims: info.sim_wide_total_prims,
+            max_prims: info.max_prims,
+            total_prims: info.total_prims,
+            owner_prims: info.owner_prims,
+            group_prims: info.group_prims,
+            other_prims: info.other_prims,
+            selected_prims: info.selected_prims,
+            parcel_prim_bonus: info.parcel_prim_bonus,
+            other_clean_time: info.other_clean_time,
+            parcel_flags: info.raw_parcel_flags,
+            sale_price: crate::types::linden_price_to_wire(
+                "SalePrice",
+                if for_sale {
+                    info.sale_price.as_ref()
+                } else {
+                    None
+                },
+            )?,
+            name: with_nul(&info.name),
+            desc: with_nul(&info.description),
+            music_url: with_nul(&sl_wire::optional_url_to_wire(info.music_url.as_ref())),
+            media_url: with_nul(&sl_wire::optional_url_to_wire(info.media_url.as_ref())),
+            media_id: crate::types::optional_key_to_wire(info.media_id, |k| k.uuid()),
+            media_auto_scale: u8::from(info.media_auto_scale),
+            group_id: crate::types::group_to_wire(info.group),
+            pass_price: crate::types::linden_to_wire("PassPrice", &info.pass_price)?,
+            pass_hours: info.pass_hours,
+            category: info.category.to_u8(),
+            auth_buyer_id: crate::types::optional_key_to_wire(info.auth_buyer_id, |k| k.uuid()),
+            snapshot_id: crate::types::optional_key_to_wire(info.snapshot_id, |k| k.uuid()),
+            user_location: region_coords_to_vector(info.user_location),
+            user_look_at: Vector {
+                x: info.user_look_at.x(),
+                y: info.user_look_at.y(),
+                z: info.user_look_at.z(),
+            },
+            landing_type: info.landing_type.to_u8(),
+            region_push_override: info.region_push_override,
+            region_deny_anonymous: info.region_deny_anonymous,
+            region_deny_identified: info.region_deny_identified,
+            region_deny_transacted: info.region_deny_transacted,
+        },
+        age_verification_block: ParcelPropertiesAgeVerificationBlockBlock {
+            region_deny_age_unverified: info.region_deny_age_unverified,
+        },
+        region_allow_access_block: ParcelPropertiesRegionAllowAccessBlockBlock {
+            region_allow_access_override: info.region_allow_access_override,
+        },
+        parcel_environment_block: ParcelPropertiesParcelEnvironmentBlockBlock {
+            parcel_environment_version: info.parcel_environment_version,
+            region_allow_environment_override: info.region_allow_environment_override,
+        },
+    })
+}
+
+/// Encodes a `u32` as the 4-byte big-endian LLSD binary element OpenSim uses
+/// for `uint` fields (`ParcelFlags`, `AuctionID`); the client's [`llsd_u32`]
+/// reads it back.
+fn llsd_u32_binary(value: u32) -> Llsd {
+    Llsd::Binary(vec![
+        low_byte(value >> 24),
+        low_byte(value >> 16),
+        low_byte(value >> 8),
+        low_byte(value),
+    ])
+}
+
+/// Encodes a [`ParcelInfo`] as a CAPS `ParcelProperties` event body — the
+/// inverse of [`parcel_info_from_llsd`]. The `ParcelData` block and the three
+/// trailing single-blocks are each a one-element array holding a map, as the
+/// event-queue form mirrors the UDP message's block layout. The `uint` fields
+/// go out as big-endian binary (OpenSim's convention), `ClaimDate` as an
+/// integer `time_t` (Second Life's).
+#[must_use]
+pub(crate) fn parcel_properties_to_llsd(info: &ParcelInfo) -> Llsd {
+    let for_sale = info.flags().contains(sl_wire::ParcelFlags::FOR_SALE);
+    let linden = |amount: &sl_types::money::LindenAmount| {
+        Llsd::Integer(i32::try_from(amount.0).unwrap_or(i32::MAX))
+    };
+    let optional_key = |uuid: Uuid| Llsd::Uuid(uuid);
+    let data = llsd_map(vec![
+        ("SequenceID", Llsd::Integer(info.sequence_id)),
+        ("RequestResult", Llsd::Integer(info.request_result.to_i32())),
+        ("SnapSelection", Llsd::Boolean(info.snap_selection)),
+        ("SelfCount", Llsd::Integer(info.self_count)),
+        ("OtherCount", Llsd::Integer(info.other_count)),
+        ("PublicCount", Llsd::Integer(info.public_count)),
+        ("LocalID", Llsd::Integer(info.local_id.0)),
+        ("OwnerID", Llsd::Uuid(info.owner.uuid())),
+        (
+            "IsGroupOwned",
+            Llsd::Boolean(matches!(info.owner, sl_types::key::OwnerKey::Group(_))),
+        ),
+        ("AuctionID", llsd_u32_binary(info.auction_id)),
+        ("ClaimDate", Llsd::Integer(info.claim_date)),
+        ("ClaimPrice", linden(&info.claim_price)),
+        ("RentPrice", linden(&info.rent_price)),
+        ("AABBMin", region_coords_to_llsd(info.aabb_min)),
+        ("AABBMax", region_coords_to_llsd(info.aabb_max)),
+        (
+            "Area",
+            Llsd::Integer(i32::try_from(info.area.0).unwrap_or(i32::MAX)),
+        ),
+        ("Bitmap", Llsd::Binary(info.bitmap.clone())),
+        ("Status", Llsd::Integer(info.status.to_i32())),
+        ("Category", Llsd::Integer(i32::from(info.category.to_u8()))),
+        ("MaxPrims", Llsd::Integer(info.max_prims)),
+        ("SimWideMaxPrims", Llsd::Integer(info.sim_wide_max_prims)),
+        (
+            "SimWideTotalPrims",
+            Llsd::Integer(info.sim_wide_total_prims),
+        ),
+        ("TotalPrims", Llsd::Integer(info.total_prims)),
+        ("OwnerPrims", Llsd::Integer(info.owner_prims)),
+        ("GroupPrims", Llsd::Integer(info.group_prims)),
+        ("OtherPrims", Llsd::Integer(info.other_prims)),
+        ("SelectedPrims", Llsd::Integer(info.selected_prims)),
+        (
+            "ParcelPrimBonus",
+            Llsd::Real(f64::from(info.parcel_prim_bonus)),
+        ),
+        ("OtherCleanTime", Llsd::Integer(info.other_clean_time)),
+        ("ParcelFlags", llsd_u32_binary(info.raw_parcel_flags)),
+        (
+            "SalePrice",
+            match (&info.sale_price, for_sale) {
+                (Some(price), true) => linden(price),
+                _ => Llsd::Integer(0),
+            },
+        ),
+        ("Name", Llsd::String(info.name.clone())),
+        ("Desc", Llsd::String(info.description.clone())),
+        (
+            "MusicURL",
+            Llsd::String(sl_wire::optional_url_to_wire(info.music_url.as_ref())),
+        ),
+        (
+            "MediaURL",
+            Llsd::String(sl_wire::optional_url_to_wire(info.media_url.as_ref())),
+        ),
+        (
+            "MediaID",
+            optional_key(crate::types::optional_key_to_wire(info.media_id, |k| {
+                k.uuid()
+            })),
+        ),
+        ("MediaAutoScale", Llsd::Boolean(info.media_auto_scale)),
+        (
+            "GroupID",
+            Llsd::Uuid(crate::types::group_to_wire(info.group)),
+        ),
+        ("PassPrice", linden(&info.pass_price)),
+        ("PassHours", Llsd::Real(f64::from(info.pass_hours))),
+        (
+            "AuthBuyerID",
+            optional_key(crate::types::optional_key_to_wire(
+                info.auth_buyer_id,
+                |k| k.uuid(),
+            )),
+        ),
+        (
+            "SnapshotID",
+            optional_key(crate::types::optional_key_to_wire(info.snapshot_id, |k| {
+                k.uuid()
+            })),
+        ),
+        ("UserLocation", region_coords_to_llsd(info.user_location)),
+        ("UserLookAt", direction_to_llsd(info.user_look_at)),
+        (
+            "LandingType",
+            Llsd::Integer(i32::from(info.landing_type.to_u8())),
+        ),
+        (
+            "RegionPushOverride",
+            Llsd::Boolean(info.region_push_override),
+        ),
+        (
+            "RegionDenyAnonymous",
+            Llsd::Boolean(info.region_deny_anonymous),
+        ),
+        (
+            "RegionDenyIdentified",
+            Llsd::Boolean(info.region_deny_identified),
+        ),
+        (
+            "RegionDenyTransacted",
+            Llsd::Boolean(info.region_deny_transacted),
+        ),
+    ]);
+    llsd_map(vec![
+        ("ParcelData", Llsd::Array(vec![data])),
+        (
+            "AgeVerificationBlock",
+            Llsd::Array(vec![llsd_map(vec![(
+                "RegionDenyAgeUnverified",
+                Llsd::Boolean(info.region_deny_age_unverified),
+            )])]),
+        ),
+        (
+            "RegionAllowAccessBlock",
+            Llsd::Array(vec![llsd_map(vec![(
+                "RegionAllowAccessOverride",
+                Llsd::Boolean(info.region_allow_access_override),
+            )])]),
+        ),
+        (
+            "ParcelEnvironmentBlock",
+            Llsd::Array(vec![llsd_map(vec![
+                (
+                    "ParcelEnvironmentVersion",
+                    Llsd::Integer(info.parcel_environment_version),
+                ),
+                (
+                    "RegionAllowEnvironmentOverride",
+                    Llsd::Boolean(info.region_allow_environment_override),
+                ),
+            ])]),
+        ),
+    ])
+}
+
+/// Encodes an [`Object`] as a full `ObjectUpdate` object-data block — the
+/// inverse of [`object_from_full_update`]. The motion goes through
+/// [`encode_object_motion`](crate::object_update::encode_object_motion); the
+/// raw `texture_entry` / `texture_anim` / `particle_system` / `extra_params`
+/// byte fields are emitted verbatim (they are the wire form the decoder keeps
+/// alongside its typed view); strings are NUL-terminated as a simulator sends
+/// them. The session-side `circuit` and cached `properties` have no wire form
+/// and are dropped.
+#[must_use]
+pub(crate) fn full_update_block(object: &Object) -> ObjectUpdateObjectDataBlock {
+    let shape = &object.shape;
+    ObjectUpdateObjectDataBlock {
+        id: object.local_id.0,
+        state: object.state,
+        full_id: object.full_id.uuid(),
+        crc: object.crc,
+        p_code: object.pcode,
+        material: object.material,
+        click_action: object.click_action,
+        scale: object.scale.clone(),
+        object_data: crate::object_update::encode_object_motion(&object.motion),
+        parent_id: object.parent_id.0,
+        update_flags: object.update_flags,
+        path_curve: shape.path_curve,
+        profile_curve: shape.profile_curve,
+        path_begin: shape.path_begin,
+        path_end: shape.path_end,
+        path_scale_x: shape.path_scale_x,
+        path_scale_y: shape.path_scale_y,
+        path_shear_x: shape.path_shear_x,
+        path_shear_y: shape.path_shear_y,
+        path_twist: shape.path_twist,
+        path_twist_begin: shape.path_twist_begin,
+        path_radius_offset: shape.path_radius_offset,
+        path_taper_x: shape.path_taper_x,
+        path_taper_y: shape.path_taper_y,
+        path_revolutions: shape.path_revolutions,
+        path_skew: shape.path_skew,
+        profile_begin: shape.profile_begin,
+        profile_end: shape.profile_end,
+        profile_hollow: shape.profile_hollow,
+        texture_entry: object.texture_entry.clone(),
+        texture_anim: object.texture_anim.clone(),
+        name_value: if object.name_value.is_empty() {
+            Vec::new()
+        } else {
+            with_nul(&object.name_value)
+        },
+        data: object.data.clone(),
+        text: if object.text.is_empty() {
+            Vec::new()
+        } else {
+            with_nul(&object.text)
+        },
+        text_color: object.text_color,
+        media_url: match &object.media_url {
+            Some(url) => with_nul(&sl_wire::url_to_wire(url)),
+            None => Vec::new(),
+        },
+        ps_block: object.particle_system.clone(),
+        extra_params: object.extra_params.clone(),
+        sound: object.sound,
+        owner_id: object.owner_id,
+        gain: object.gain,
+        flags: object.sound_flags,
+        radius: object.sound_radius,
+        joint_type: object.joint_type,
+        joint_pivot: object.joint_pivot.clone(),
+        joint_axis_or_anchor: object.joint_axis_or_anchor.clone(),
+    }
+}
+
 #[cfg(test)]
 mod caps_serializer_tests {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -5517,10 +6102,15 @@ mod caps_serializer_tests {
         server_appearance_update_to_llsd, session_history_from_llsd, session_history_to_llsd,
         teleport_finish_from_llsd, teleport_finish_to_llsd,
     };
+    use super::{
+        STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo, ipv4_octets,
+        llsd_map, llsd_u32, u64_to_llsd,
+    };
     use crate::types::{
         Event, GroupMember, GroupMembership, ImDialog, InstantMessage, InventoryFolder,
         InventoryItem, LandingType, ParcelCategory, ParcelInfo, ParcelRequestResult, ParcelStatus,
     };
+    use sl_wire::RegionHandle;
     use sl_wire::{Llsd, Permissions, Permissions5};
 
     /// A V4 socket address for the given octets and port.
@@ -5928,9 +6518,20 @@ mod caps_serializer_tests {
     }
 
     #[test]
-    fn teleport_finish_round_trips() -> Result<(), url::ParseError> {
+    fn teleport_finish_round_trips() -> Result<(), Box<dyn std::error::Error>> {
         let dest = addr(192, 168, 7, 9, 13_001);
-        let llsd = teleport_finish_to_llsd(dest, "https://seed/tp", 21, 0x8000_00ff);
+        let agent = AgentKey::from(Uuid::from_u128(0x7e1e));
+        let info = TeleportFinishInfo {
+            agent_id: agent,
+            location_id: TELEPORT_FINISH_LOCATION_ID,
+            dest,
+            region_handle: RegionHandle(0x0003_ec00_0003_e800),
+            seed: "https://seed/tp".to_owned(),
+            sim_access: 21,
+            teleport_flags: 0x8000_00ff,
+            region_size: (STANDARD_REGION_SIZE_METRES, STANDARD_REGION_SIZE_METRES),
+        };
+        let llsd = teleport_finish_to_llsd(&info);
         assert_eq!(
             teleport_finish_from_llsd(&llsd),
             Some(CapsTeleportFinish {
@@ -5938,6 +6539,46 @@ mod caps_serializer_tests {
                 seed: "https://seed/tp".parse()?,
                 sim_access: 21,
                 teleport_flags: 0x8000_00ff,
+                region_handle: Some(RegionHandle(0x0003_ec00_0003_e800)),
+            })
+        );
+        // The fields the client does not consume are still on the wire, in the
+        // reference shape (the viewer builds the destination region from them).
+        let record = llsd
+            .get("Info")
+            .and_then(|info| info.index(0))
+            .ok_or("no Info record")?;
+        assert_eq!(
+            record.get("AgentID").and_then(Llsd::as_uuid),
+            Some(agent.uuid())
+        );
+        assert_eq!(record.get("LocationID").map(llsd_u32), Some(4));
+        assert_eq!(record.get("RegionSizeX").map(llsd_u32), Some(256));
+        assert_eq!(record.get("RegionSizeY").map(llsd_u32), Some(256));
+        Ok(())
+    }
+
+    /// A `TeleportFinish` without a `RegionHandle` (older servers) or with a
+    /// zero one decodes with `region_handle: None`, leaving the client to fall
+    /// back on the handle it requested.
+    #[test]
+    fn teleport_finish_without_handle_decodes_none() -> Result<(), url::ParseError> {
+        let dest = addr(192, 168, 7, 9, 13_001);
+        let info = llsd_map(vec![
+            ("SimIP", Llsd::Binary(ipv4_octets(dest).to_vec())),
+            ("SimPort", Llsd::Integer(13_001)),
+            ("SeedCapability", Llsd::String("https://seed/tp".to_owned())),
+            ("RegionHandle", u64_to_llsd(0)),
+        ]);
+        let llsd = llsd_map(vec![("Info", Llsd::Array(vec![info]))]);
+        assert_eq!(
+            teleport_finish_from_llsd(&llsd),
+            Some(CapsTeleportFinish {
+                dest,
+                seed: "https://seed/tp".parse()?,
+                sim_access: 0,
+                teleport_flags: 0,
+                region_handle: None,
             })
         );
         Ok(())
@@ -5996,7 +6637,7 @@ mod caps_serializer_tests {
     fn enable_simulator_round_trips() {
         let sim = addr(10, 0, 0, 5, 9000);
         let handle = 0x0003_e800_0003_e800;
-        let llsd = enable_simulator_to_caps_llsd(handle, sim);
+        let llsd = enable_simulator_to_caps_llsd(handle, sim, (256, 256));
         assert_eq!(enable_simulator_from_caps_llsd(&llsd), Some((handle, sim)));
     }
 
@@ -6015,10 +6656,15 @@ mod caps_serializer_tests {
     #[test]
     fn establish_agent_communication_round_trips() -> Result<(), url::ParseError> {
         let sim = addr(10, 0, 0, 7, 9002);
-        let llsd = establish_agent_communication_to_llsd(sim, "https://seed/eac");
+        let agent = AgentKey::from(Uuid::from_u128(0xeac));
+        let llsd = establish_agent_communication_to_llsd(agent, sim, "https://seed/eac");
         assert_eq!(
             establish_agent_communication_from_llsd(&llsd),
             Some((sim, "https://seed/eac".parse()?))
+        );
+        assert_eq!(
+            llsd.get("agent-id").and_then(Llsd::as_uuid),
+            Some(agent.uuid())
         );
         Ok(())
     }
@@ -6476,5 +7122,50 @@ mod caps_serializer_tests {
             created_category_from_llsd(&created_category_to_llsd(&folder)),
             Some(folder)
         );
+    }
+
+    /// The `ExtEnvironment` PUT body round-trips: every field the client
+    /// builder emits comes back out of the server parser, and fields the
+    /// client did not send stay `None` (an all-absent body parses as the
+    /// default update).
+    #[test]
+    fn environment_update_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+        let full = crate::types::EnvironmentUpdate {
+            day_length: Some(14400),
+            day_offset: Some(3600),
+            track_altitudes: Some([500.0, 1500.0, 2500.0]),
+            day_cycle: Some(crate::types::DayCycle {
+                name: "Cycle".to_owned(),
+                water_track: vec![crate::types::DayCycleFrame {
+                    keyframe: 0.0,
+                    name: "Water".to_owned(),
+                }],
+                sky_tracks: Vec::new(),
+                sky_frames: std::collections::BTreeMap::new(),
+                water_frames: std::collections::BTreeMap::new(),
+            }),
+            day_asset: Some(Uuid::from_u128(0xda)),
+            day_name: Some("A Preset".to_owned()),
+            flags: 3,
+        };
+        let body = sl_wire::parse_llsd_xml(&super::build_environment_update_request(&full))?;
+        // The empty day cycle's frame maps decode as empty; the water track
+        // survives, so compare piecewise where the wholesale comparison would
+        // be distorted by nothing — the shapes match exactly here.
+        assert_eq!(super::environment_update_from_llsd(&body), Some(full));
+
+        let sparse = crate::types::EnvironmentUpdate {
+            flags: 1,
+            ..crate::types::EnvironmentUpdate::default()
+        };
+        let body = sl_wire::parse_llsd_xml(&super::build_environment_update_request(&sparse))?;
+        assert_eq!(super::environment_update_from_llsd(&body), Some(sparse));
+
+        // A body without the `environment` envelope is a malformed request.
+        assert_eq!(
+            super::environment_update_from_llsd(&sl_wire::parse_llsd_xml("<llsd><map/></llsd>")?),
+            None
+        );
+        Ok(())
     }
 }

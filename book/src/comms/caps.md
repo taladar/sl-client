@@ -50,13 +50,18 @@ There are dozens. A non-exhaustive sense of the range:
 
 - **Bulk asset access** — `GetTexture`, `GetMesh2`, `ViewerAsset` (generic
   assets by class, e.g. `?sound_id=`/`?bodypart_id=`).
-- **Inventory** — `FetchInventoryDescendents2`, `InventoryAPIv3`,
+- **Inventory** — `FetchInventoryDescendents2`, the per-item
+  `FetchInventory2`/`FetchLib2`, `InventoryAPIv3`,
   `CreateInventoryCategory`. See [Inventory](../content/inventory.md).
 - **Appearance** — `UpdateAvatarAppearance`, `UploadBakedTexture`. See
   [Appearance](../content/appearance.md).
 - **Media & materials** — `ObjectMedia`, `RenderMaterials`,
   `ModifyMaterialParams`. See [Materials](../content/materials.md) and
   [Sound, Music & Media](../content/sound-media.md).
+- **Region & object info** — `SimulatorFeatures`, `LSLSyntax`,
+  `ExtEnvironment` (EEP), `RemoteParcelRequest`, the object cost/physics
+  reports (`GetObjectCost`, `GetObjectPhysicsData`, `ResourceCostSelected`)
+  and the script-resource reports (`AttachmentResources`, `LandResources`).
 - **Voice** — `ProvisionVoiceAccountRequest`, `ParcelVoiceInfoRequest`,
   `VoiceSignalingRequest`.
 - **Groups** — `GroupMemberData`.
@@ -383,6 +388,302 @@ shared `build_asset_upload_response`, `server_appearance_update_to_llsd`,
 already existed; this cluster wired them into the dispatch. Loopback coverage is
 in `sl-proto/tests/sim_caps.rs`.
 
+### The inventory handlers
+
+The inventory cluster serves the modern AIS3 REST surface and the legacy
+fetch caps from an **in-memory inventory tree** (`SimInventoryTree`), two of
+which live on `SimSession` as driver-populated serving stores: the agent's
+tree and the read-only shared Library. Unlike the purely-read stores, the
+AIS3 mutations *apply* to the agent tree — it is fixture state, not world
+authority — so a follow-up fetch observes the create/rename/move/delete a
+test (or the fake grid) just performed, and every affected folder's
+`version` bumps exactly as the real service's `_updated_category_versions`
+reports it. Each mutation also surfaces a `ServerEvent`
+(`InventoryCategoryCreated`, `InventoryLinksCreated`, `…Renamed`, `…Moved`,
+`InventoryItemUpdated`/`Moved`/`Removed`, `…Removed`, `…Purged`) for a
+driver persisting inventory.
+
+- **`FetchInventoryDescendents2` / `FetchLibDescendents2`** parse the
+  `folders` batch (`parse_fetch_inventory_request`, the inverse of
+  `build_fetch_inventory_request`) and answer one entry per **known**
+  folder — direct children only, honouring `fetch_folders` /
+  `fetch_items` / `sort_order` — via the existing
+  `inventory_descendents_to_llsd`. Unknown folders are skipped tolerantly,
+  matching OpenSim.
+- **`FetchInventory2` / `FetchLib2`** are the per-item legacy fetches the
+  reference viewer falls back to for items referenced before their folder
+  was listed. Both directions were net-new: the request
+  (`build_fetch_inventory_items_request` /
+  `parse_fetch_inventory_items_request`, body
+  `{ agent_id, items: [ { owner_id, item_id } ] }`) and the reply envelope
+  (`fetch_inventory_items_to_llsd` / `fetch_inventory_items_from_llsd`,
+  `{ agent_id, items }` over the same flat item shape the descendents
+  caps use). Unknown ids are omitted (OpenSim-identical) and the reply
+  never carries an `error` member — the viewer treats one as a failed
+  fetch. The client now requests both caps and folds their replies into
+  `Event::InventoryBulkUpdate`. Note the real cap name is `FetchLib2`,
+  not "FetchLibrary2".
+- **`InventoryAPIv3` / `LibraryAPIv3`** route on HTTP verb × URL sub-path
+  exactly as the client builders lay the URLs out: `POST
+  /category/<parent>?tid=` creates a folder — or **links**, when the body
+  carries a `links` array (the Current Outfit Folder wear path; the link
+  items' `asset_id` is the linked object's id); `PATCH /category/<id>`
+  renames or (with `{ parent_id }`) moves; `DELETE /category/<id>` removes
+  a subtree, `DELETE /category/<id>/children` empties a folder; `GET
+  /category/<id>/children?depth=` lists a subtree; `GET`/`PATCH`/`DELETE
+  /item/<id>` fetch / update-or-move / remove an item. Mutation replies
+  carry the `AisUpdate` change-set meta (`_created_categories`,
+  `_updated_category_versions`, …) with the affected objects under
+  `_embedded` (`ais_mutation_reply_to_llsd`); deletes answer meta only.
+  `LibraryAPIv3` is read-only: its `GET`s serve the Library tree and every
+  mutating verb answers `405`. One deliberate divergence: the real AIS
+  nests `_embedded` recursively per depth level, but our client parser
+  reads only the top level, so a children fetch serves the subtree
+  **flattened** into the top-level `_embedded` — information-equivalent
+  (uuid-keyed maps, every entry carries its `parent_id`).
+- **`CreateInventoryCategory`** (served by OpenSim too, unlike AIS3)
+  applies the client-chosen folder id and echoes the request fields via
+  `build_create_inventory_category_response`.
+
+The status contract adds one deliberate exception to the tolerant-empty
+stance: an unknown **AIS3 target id** answers `404` (the REST convention),
+and an invalid move — an unknown new parent, or a folder moved under
+itself/its own descendant — answers `400`; the batch fetch caps keep
+skipping unknown ids silently. A fixture value the wire shape cannot carry
+(an out-of-range L$ sale price) answers `500` rather than disguising a
+server-data fault as a client error.
+
+The inverses added for this cluster: `parse_fetch_inventory_request`,
+`build_fetch_inventory_items_request` / `parse_fetch_inventory_items_request`
+(`sl-wire/src/llsd.rs`), `parse_ais_create_link_body` with its
+`AisLinkCreate` records and the `ais_update_to_llsd` tree form of
+`build_ais_update_response` (`sl-wire/src/inventory.rs`), and
+`fetch_inventory_items_to_llsd` / `ais_mutation_reply_to_llsd` /
+`ais_category_children_reply_to_llsd` / `ais_item_reply_to_llsd`
+(`sl-proto/src/session/conversions.rs`). The AIS3 URL/body codec both
+directions already existed (Tier-F #61); this cluster wired it into the
+dispatch, over the new tree.
+
+### The region-information handlers
+
+The region/object-information cluster serves nine caps from small
+driver-populated stores on `SimSession` (the `display_names` stance): a
+`SimulatorFeatures` document, an `LslSyntax` document, a per-parcel
+environment map, three per-object maps (cost, physics, selection cost), a
+region id + parcel-cover rectangle list, and the attachment/land resource
+reports. One cap mutates: an `ExtEnvironment` PUT applies to the environment
+store and surfaces `ServerEvent::EnvironmentUpdated` for a driver persisting
+environments (which can then push `enqueue_windlight_refresh` so other
+clients re-fetch).
+
+- **`SimulatorFeatures`** (bodyless GET) serves the stored feature document
+  via `build_simulator_features_response`. Its `lsl_syntax_id` is owned by
+  `SimSession::set_lsl_syntax`, which stores the syntax document **and**
+  advertises its id — the two caps can never drift apart (the client keys
+  its `LSLSyntax` re-fetch on that id).
+- **`LSLSyntax`** (bodyless GET) serves the stored language document via
+  `build_lsl_syntax_document`, stamped with the schema version the client's
+  parser insists on.
+- **`ExtEnvironment`** routes on method. GET answers the stored
+  `EnvironmentSettings` for the `?parcelid=` query (absent or `-1` = the
+  region entry, seeded at construction; a parcel without its own entry
+  inherits the region's) via `environment_to_llsd`. PUT parses the
+  reference viewer's `coroUpdateEnvironment` body
+  (`environment_update_from_llsd`, optional `?trackno=` scope), merges the
+  `Some` fields wholesale (per-track splicing is deferred), bumps
+  `env_version`, and echoes the stored result — the same
+  `{ environment, success: true }` envelope the GET serves, which the
+  client folds into `Event::Environment` unchanged. A `day_asset`-only
+  update answers the reference's graceful failure,
+  `200 { success: false, message }` — the fixture has no settings-asset
+  store to resolve the id against. The reference's DELETE reset is out of
+  scope (the task covers get/put) and answers `405`.
+- **`RemoteParcelRequest`** (POST) resolves the requested region +
+  location against the parcel-cover store (`SimParcel` rectangles,
+  first-hit-wins): the request targets this region iff its non-nil region
+  id or non-zero region handle matches the session's. A hit answers the
+  parcel id (`build_remote_parcel_response`); a miss answers a `200`
+  empty map — the "could not resolve" signal the client's `Ok(None)` fold
+  reports as a decode failure rather than a typed event. (OpenSim instead
+  synthesizes an id from handle + location so every lookup "succeeds";
+  the store-driven miss is a deliberate divergence.)
+- **`GetObjectCost` / `GetObjectPhysicsData`** (POST `{ object_ids }`)
+  serve the stored per-object records in id order; unknown ids are
+  omitted — the "no such object" signal, matching the batch-fetch
+  tolerance stance.
+- **`ResourceCostSelected`** (POST `selected_roots`/`selected_prims`)
+  answers the component-wise **sum** of the stored per-object selection
+  costs; unknown ids contribute zero, and the roots/prims kind validates
+  the body without changing the arithmetic.
+- **`AttachmentResources`** (bodyless GET) serves the stored
+  agent-scoped report via `build_attachment_resources_response`.
+- **`LandResources`** is the cluster's only two-stage cap: the
+  `{ parcel_id }` POST (validated, but the stored reports are served
+  as-is — their scope is the driver's choice) answers the
+  `ScriptResourceSummary` / `ScriptResourceDetails` follow-up URLs,
+  minted as the cap's own `summary` / `detail` sub-paths (the
+  screenshot-uploader pattern — `resolve` routes on the token and the
+  handler on the sub-path). The follow-up GETs serve the stored reports,
+  which the client runtimes fold under the `LAND_RESOURCE_SUMMARY_TAG` /
+  `LAND_RESOURCE_DETAIL_TAG` pseudo-cap names.
+
+The status contract is the house standard — wrong method `405`, malformed
+body or query (a non-integer `?parcelid=`/`?trackno=`) `400`, unknown
+`LandResources` sub-path `404` — plus two deliberate soft failures: the EEP
+`day_asset` case and the unresolved `RemoteParcelRequest` both answer `200`
+with a body the client reads as "no result", never an HTTP error, because
+that is what the reference stacks do.
+
+The inverses added for this cluster: `parse_get_object_cost_request`
+(`sl-wire/src/object_cost.rs`) and the net-new `ExtEnvironment` PUT pair —
+`build_environment_update_request` / `environment_update_from_llsd` over the
+new `EnvironmentUpdate` type (`sl-proto/src/session/conversions.rs`,
+`sl-proto/src/types/environment.rs`) — driven client-side by the new
+`Command::SetEnvironment` (both runtimes, repl command `set_environment`).
+Everything else already existed client-paired
+(`build_simulator_features_response`, `build_lsl_syntax_document`, the
+`remote_parcel` / `object_cost` / `object_physics` / `resource_report`
+codecs); this cluster wired them into dispatch over the new stores.
+
+### The experience handlers
+
+The experience cluster serves the twelve experience caps from one new
+driver-populated fixture set, `SimExperiences`
+(`sl-proto/src/sim_experiences.rs`, held as `SimSession::experiences[_mut]`):
+metadata records keyed by public id, the agent's allowed/blocked
+preference lists, the agent's owned/admin/creator id lists, per-group id
+lists, and the region's allowed/blocked/trusted triple. Three caps
+mutate — `ExperiencePreferences`, `UpdateExperience` and the
+`RegionExperiences` POST — and their edits apply to the fixture (so
+follow-up reads observe them), each surfacing a `ServerEvent`
+(`ExperiencePermissionSet`, `ExperienceUpdated`, `RegionExperiencesSet`).
+
+- **`GetExperienceInfo`** (GET, the `/id/?public_id=…` sub-path + query
+  form) serves the stored record per requested id via
+  `build_experience_infos_response`; unknown ids come back as `error_ids`
+  entries, which the client folds into `missing` placeholders.
+- **`FindExperienceByName`** (GET `?page=…&query=…`) answers a 1-based
+  `SEARCH_PAGE_SIZE` page of records whose name contains the
+  percent-decoded text case-insensitively, hiding invalid and
+  `PROPERTY_PRIVATE` records (the grid's search lists public experiences
+  only), sorted by name with an id tie-break.
+- **`GetExperiences`** (bodyless GET) serves the agent's
+  allowed/blocked lists via `build_experience_permissions_response`.
+- **`ExperiencePreferences`** routes on method: PUT parses the
+  `{ "<id>": { permission } }` body and applies `Allow`/`Block` (moving
+  the id between the two lists); DELETE parses the `?<id>` query and
+  forgets the preference. Both echo the full post-mutation lists — the
+  same shape as `GetExperiences`, which is how the client folds them.
+  Any id is accepted without a record lookup: a preference is the
+  agent's own keyed entry (viewers block ids they never resolved).
+- **`AgentExperiences` / `GetAdminExperiences` /
+  `GetCreatorExperiences` / `GroupExperiences`** (bodyless GETs; the
+  group form takes a bare `?<group_id>` query) are name-routed through
+  one handler to the owned / admin / creator / per-group lists, each
+  answered via `build_experience_ids_response`. An unknown group answers
+  an empty list. The reply carries no group id, so the client runtimes
+  parse it out-of-band and echo the queried id themselves.
+- **`IsExperienceAdmin` / `IsExperienceContributor`** (GET
+  `?experience_id=…`) answer `{ status }` from admin- / creator-list
+  membership ("contributor" is the reference viewer's name for the
+  creator list — it files `GetCreatorExperiences` under its Contributor
+  tab). An unknown id answers `{ status: false }`, never an error; these
+  replies are also parsed out-of-band by the runtimes.
+- **`UpdateExperience`** (POST) applies the editable fields (name,
+  description, maturity, properties, SLURL, extended metadata) to the
+  stored record — owner, quota and expiration are server-controlled and
+  untouched, matching the fields the reference viewer strips from the
+  POST — and echoes the updated record in the wrapped
+  `{ experience_keys }` form, whose first record the client folds into
+  `Event::ExperienceUpdated`.
+- **`RegionExperiences`** routes on method: GET serves the stored
+  triple, POST parses the same-shaped `{ allowed, blocked, trusted }`
+  body, replaces the lists wholesale and echoes the stored result, both
+  via `build_region_experiences_response`.
+
+The status contract is the house standard — wrong method `405`,
+malformed body or query `400`, an `UpdateExperience` targeting an
+unknown record `404` — plus two deliberate exceptions:
+`GetExperienceInfo` with an empty or absent query answers `200` with no
+records (the parser is lenient by design), and `ExperiencePreferences`
+never 404s on an unknown id (see above).
+
+No new codecs: the whole server-direction surface
+(`parse_experience_info_query` … `parse_region_experiences_request`,
+`build_experience_infos_response` … `build_experience_status_response`
+in `sl-wire/src/experience/server.rs`) already existed inverse-paired
+from the experience service-pairing task; this cluster wired it into
+dispatch over the new fixture. The AIS-style `ais_suffix` helper
+reconstructs the URL suffix those parsers consume (the `/id/` sub-path
+and the bare-query forms both round-trip through it).
+
+### The voice handlers
+
+The voice cluster serves the three voice caps from a signalling **stub**,
+`SimVoice` (`sl-proto/src/sim_voice.rs`, held as `SimSession::voice[_mut]`).
+Its fixtures say which backends the region speaks — a `WebRtcStub` (the
+ICE/DTLS identity every JSEP answer advertises; `Default` is a
+deterministic loopback identity) and/or a Vivox `VoiceAccountInfo` — plus
+a per-parcel `ParcelVoiceInfo` table with the agent's current parcel and
+optional per-channel credentials for chat-session channels. Its live state
+is the WebRTC connections the client provisioned (`VoiceConnection`:
+channel, offer, minted answer, trickled ICE candidates, end-of-gathering
+flag), keyed by the `viewer_session` the stub mints serially. There is
+**no media plane**: nothing listens on the advertised candidate, so the
+stub drives a client's signalling state machine end to end without ever
+carrying audio.
+
+- **`ProvisionVoiceAccountRequest`** (POST) routes on the request:
+  `voice_server_type: "webrtc"` with a JSEP offer opens a connection —
+  `channel_type: "local"` binds the spatial channel (with the optional
+  `parcel_local_id`), `"multiagent"` binds a chat session's `channel`
+  and must present its registered `credentials` — and answers
+  `{ viewer_session, jsep: { type: "answer", sdp } }`, the SDP derived
+  from the offer by `WebRtcStub::answer_for` (media sections mirrored,
+  `a=setup:passive`, the offer's ICE/DTLS lines replaced by ours, our
+  candidates inline plus `a=end-of-candidates`). `logout: true` tears the
+  `viewer_session` down. `"vivox"` (or no server type) hands out the
+  Vivox fixture. Every request surfaces `ServerEvent::VoiceProvisionRequested`
+  with its `VoiceProvisionOutcome`.
+- **`ParcelVoiceInfoRequest`** (POST, body ignored — the viewer sends
+  `undef`) answers the agent's recorded parcel: its stored entry, or the
+  empty-`channel_uri` "no voice here" form. A Second Life WebRTC
+  `channel_uri` is a bare UUID (the region id for the estate-wide
+  channel), which is why `ParcelVoiceInfo` / `VoiceChannelInfo` carry a
+  `VoiceChannelUri` (`Uri(sip:…)` | `Id(uuid)`) rather than a URL.
+  Surfaces `ServerEvent::ParcelVoiceInfoRequested`.
+- **`VoiceSignalingRequest`** (POST) records the ICE trickle
+  (`candidates` batch or `candidate.completed`) on its connection and
+  acks with an undefined body — the viewer only looks at the status (a
+  non-2xx restarts its voice session). Surfaces
+  `ServerEvent::VoiceSignalingReceived` (with `known: false` for a
+  session the stub never provisioned).
+
+The status contract: wrong method `405`, malformed body `400`, an
+unavailable backend / missing offer / unknown channel type `400`, a
+logout or trickle for an unknown `viewer_session` `404`, and mismatched
+channel credentials `401` — the code the reference viewer reports as
+"channel locked" (`409` would be "channel full"; the stub has no capacity
+limit).
+
+Two protocol facts worth knowing: the server's own ICE candidates ride
+**inside the JSEP answer** — the viewer has no inbound ICE-trickle path,
+so there is no server→client signalling event to serve; and the backend
+is advertised three ways, all of which the fake grid derives from the
+stub (`SimVoice::advertised_server_type`): the login response's
+`voice-config`, `SimulatorFeatures.VoiceServerType` (the field the viewer
+picks its spatial voice module from), and the `RequiredVoiceVersion`
+event-queue push on region entry.
+
+No new wire codecs beyond two gaps the cluster closed:
+`SimulatorFeatures.voice_server_type`, and the multi-agent form's
+`channel` / `credentials` on `VoiceProvisionRequest`
+(`VoiceProvisionRequest::webrtc_channel`). The parsers and builders
+(`parse_provision_voice_account_request`, `parse_voice_signaling_request`,
+`build_provision_voice_account_response`,
+`build_parcel_voice_info_response` in `sl-wire/src/voice.rs`) already
+existed inverse-paired from the voice service-pairing task.
+
 ---
 
 > **In this codebase**
@@ -436,3 +737,33 @@ in `sl-proto/tests/sim_caps.rs`.
 >   `sl-client-tokio` (`src/assets.rs`, `tests/asset_caps_roundtrip.rs`).
 >   The coverage table's predicate consults both `SimCaps::handler_for`
 >   and `AssetCaps::handler_for`.
+> - The inventory serving fixture (`SimInventoryTree`) is
+>   `sl-proto/src/sim_inventory.rs`, held twice on `SimSession`
+>   (`agent_inventory[_mut]` / `library_inventory[_mut]`). The per-item
+>   fetch caps' constants are `CAP_FETCH_INVENTORY_ITEM`
+>   (`"FetchInventory2"`) and `CAP_FETCH_LIBRARY_ITEM` (`"FetchLib2"`) in
+>   `sl-proto/src/session.rs`, requested alongside the descendents caps.
+> - The region/object-information serving stores are inline `SimSession`
+>   fields with `set_*` driver setters (`set_simulator_features`,
+>   `set_lsl_syntax`, `set_environment`, `set_object_cost`,
+>   `set_object_physics`, `set_selection_cost`, `set_region_id` +
+>   `add_parcel` (`SimParcel`), `set_attachment_resources`,
+>   `set_land_resource_summary`, `set_land_resource_details`) in
+>   `sl-proto/src/sim_session.rs`. The client-side EEP **write** path is
+>   `Command::SetEnvironment` → `build_environment_update_request` →
+>   an `ExtEnvironment` PUT (`put_caps_llsd` / `run_put_caps_llsd`),
+>   folded back through the ordinary `Event::Environment`.
+> - The experience serving fixture (`SimExperiences`) is
+>   `sl-proto/src/sim_experiences.rs`, held as
+>   `SimSession::experiences[_mut]`; the three mutating caps go through
+>   the session wrappers `set_experience_preference`,
+>   `apply_experience_update` and `apply_region_experiences`, which push
+>   the `ExperiencePermissionSet` / `ExperienceUpdated` /
+>   `RegionExperiencesSet` server events.
+> - The voice signalling stub (`SimVoice`, `WebRtcStub`,
+>   `VoiceConnection`, `VoiceChannel`, `VoiceProvisionOutcome` /
+>   `VoiceProvisionRefusal`) is `sl-proto/src/sim_voice.rs`, held as
+>   `SimSession::voice[_mut]`; the caps go through the session wrappers
+>   `provision_voice`, `record_voice_signaling` and `parcel_voice_info`,
+>   which push the `VoiceProvisionRequested` / `VoiceSignalingReceived` /
+>   `ParcelVoiceInfoRequested` server events.
