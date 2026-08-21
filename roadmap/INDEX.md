@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 260 |
+| ready | 259 |
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 851 |
+| done | 852 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1351** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (260)
+## ready (259)
 
 ### protocol
 
@@ -827,8 +827,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
-- [`test-simsession-roundtrip`](ready/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
-  — drive a representative set of messages both ways through SimSession an
 
 ## blocked (66)
 
@@ -1142,7 +1140,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (851)
+## done (852)
 
 ### protocol
 
@@ -2867,6 +2865,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — publish appearance (AgentSetAppearance) and query the baked-texture ca
 - [`test-setup-cost-appendix-open`](done/test-setup-cost-appendix-open-setup-cost-appendix-opensim.md)
   — Setup-cost appendix (OpenSim)
+- [`test-simsession-roundtrip`](done/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
+  — drive a representative set of messages both ways through SimSession an
 - [`test-simulator-features`](done/test-simulator-features-request-simulator-features.md)
   — request simulator features
 - [`test-task-inventory`](done/test-task-inventory-request-update-a-prim-s-task-inventory.md)
