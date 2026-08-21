@@ -8,16 +8,29 @@
 //! features, display names, …); the `on_agent_arrived` closure runs right
 //! after the automatic `RegionHandshake` (content pushed at the arriving
 //! client); the asset store backs the binary asset-delivery caps
-//! (`GetTexture`, `GetMesh`, `ViewerAsset`).
+//! (`GetTexture`, `GetMesh`, `ViewerAsset`); the [`UdpAssetFixtures`] back
+//! the legacy UDP asset paths (`Xfer`, `Transfer`, task inventory, the
+//! estate terrain RAW file); the `on_event` hook sees every drained
+//! [`ServerEvent`] for behaviour the stock fixtures do not cover.
 
 use std::sync::Arc;
 
-use sl_proto::{ChatSource, ChatType, InventoryFolder, InventoryItem, SimSession};
-use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, OwnerKey, ParcelKey};
+use sl_proto::{
+    AssetKey, AssetType, ChatSource, ChatType, InventoryFolder, InventoryItem, InventoryType,
+    LindenAmount, Permissions, Permissions5, RegionLocalObjectId, SaleType, ServerEvent,
+    SimSession, TaskInventoryItem,
+};
+use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
+
+use crate::udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
 
 /// A hook run under the session lock against the machine (fixture setup,
 /// on-arrival content pushes).
 pub type SimHook = Arc<dyn Fn(&mut SimSession) + Send + Sync>;
+
+/// A hook run under the session lock for every drained [`ServerEvent`],
+/// after the stock fixture behaviour answered it.
+pub type SimEventHook = Arc<dyn Fn(&mut SimSession, &ServerEvent) + Send + Sync>;
 
 /// The scripted content for one region.
 #[derive(Clone)]
@@ -26,8 +39,12 @@ pub struct Scenario {
     pub setup: SimHook,
     /// Runs after the automatic region handshake when the agent arrives.
     pub on_agent_arrived: Option<SimHook>,
+    /// Runs for every drained [`ServerEvent`], after the stock behaviour.
+    pub on_event: Option<SimEventHook>,
     /// The binary assets served by the asset-delivery caps.
     pub assets: sl_proto::InMemoryAssetSource,
+    /// The content behind the legacy UDP asset paths.
+    pub udp_assets: UdpAssetFixtures,
 }
 
 impl std::fmt::Debug for Scenario {
@@ -38,6 +55,8 @@ impl std::fmt::Debug for Scenario {
                 "on_agent_arrived",
                 &self.on_agent_arrived.as_ref().map(|_| "<closure>"),
             )
+            .field("on_event", &self.on_event.as_ref().map(|_| "<closure>"))
+            .field("udp_assets", &self.udp_assets)
             .finish_non_exhaustive()
     }
 }
@@ -49,19 +68,24 @@ impl Scenario {
         Self {
             setup: Arc::new(|_| {}),
             on_agent_arrived: None,
+            on_event: None,
             assets: sl_proto::InMemoryAssetSource::new(),
+            udp_assets: UdpAssetFixtures::new(),
         }
     }
 }
 
 impl Default for Scenario {
     /// The stock scenario: a small standard inventory and library, one
-    /// region-wide parcel, and a chat greeting on arrival.
+    /// region-wide parcel, a chat greeting on arrival, and the stock UDP
+    /// asset fixtures ([`default_udp_assets`]).
     fn default() -> Self {
         Self {
             setup: Arc::new(default_setup),
             on_agent_arrived: Some(Arc::new(default_arrival)),
+            on_event: None,
             assets: sl_proto::InMemoryAssetSource::new(),
+            udp_assets: default_udp_assets(),
         }
     }
 }
@@ -80,6 +104,87 @@ const LIB_TEXTURE: u128 = 0xFB11;
 const PARCEL: u128 = 0xFC01;
 /// The stock creator/owner agent id used for fixture items.
 const FIXTURE_CREATOR: u128 = 0xFD01;
+/// The stock scripted object's full key.
+const SCRIPTED_OBJECT: u128 = 0xFE01;
+/// The stock scripted object's region-local id.
+pub const STOCK_SCRIPTED_OBJECT_LOCAL_ID: RegionLocalObjectId = RegionLocalObjectId(0xF0);
+/// The stock script item inside the scripted object.
+const SCRIPT_ITEM: u128 = 0xFE11;
+/// The stock script item's asset id.
+const SCRIPT_ASSET: u128 = 0xFE21;
+/// The stock task-inventory serial.
+const SCRIPTED_OBJECT_SERIAL: i16 = 1;
+/// The stock named `Xfer` file.
+pub const STOCK_XFER_FILE: &str = "motd.txt";
+/// The stock named `Xfer` file's contents.
+pub const STOCK_XFER_FILE_BODY: &[u8] = b"Welcome to the fake grid.\n";
+/// The stock script item's source text.
+pub const STOCK_SCRIPT_BODY: &[u8] =
+    b"default\n{\n    state_entry()\n    {\n        llSay(0, \"Hello, fake grid!\");\n    }\n}\n";
+/// The stock estate covenant notecard body.
+pub const STOCK_COVENANT_BODY: &[u8] = b"Fake grid covenant: be excellent to each other.\n";
+/// The stock flat terrain height, in metres.
+pub const STOCK_TERRAIN_HEIGHT_M: u8 = 25;
+
+/// The stock scripted object's key.
+#[must_use]
+pub fn stock_scripted_object() -> ObjectKey {
+    ObjectKey::from(uuid::Uuid::from_u128(SCRIPTED_OBJECT))
+}
+
+/// The stock script item (the one entry of the scripted object's task
+/// inventory, whose source is [`STOCK_SCRIPT_BODY`]).
+#[must_use]
+pub fn stock_script_item() -> TaskInventoryItem {
+    let creator = AgentKey::from(uuid::Uuid::from_u128(FIXTURE_CREATOR));
+    TaskInventoryItem {
+        item_id: InventoryKey::from(uuid::Uuid::from_u128(SCRIPT_ITEM)),
+        parent_task: stock_scripted_object(),
+        permissions: Permissions5 {
+            base: Permissions::from_bits(0x7fff_ffff),
+            owner: Permissions::from_bits(0x7fff_ffff),
+            group: Permissions::from_bits(0),
+            everyone: Permissions::from_bits(0),
+            next_owner: Permissions::from_bits(0x0008_e000),
+        },
+        creator_id: creator,
+        last_owner_id: creator,
+        owner: OwnerKey::Agent(creator),
+        group: None,
+        group_owned: false,
+        asset_id: Some(AssetKey::from(uuid::Uuid::from_u128(SCRIPT_ASSET))),
+        asset_type: AssetType::ScriptText,
+        inv_type: InventoryType::Script,
+        flags: 0,
+        sale_type: SaleType::NotForSale,
+        sale_price: LindenAmount(0),
+        name: "Hello Script".to_owned(),
+        description: String::new(),
+        creation_date: 1_700_000_000,
+    }
+}
+
+/// The stock UDP asset fixtures: the `motd.txt` `Xfer` file, one scripted
+/// object ([`STOCK_SCRIPTED_OBJECT_LOCAL_ID`]) whose task inventory holds
+/// [`stock_script_item`] with [`STOCK_SCRIPT_BODY`] as its asset, the
+/// covenant notecard, and a flat terrain RAW heightmap.
+#[must_use]
+pub fn default_udp_assets() -> UdpAssetFixtures {
+    let script = stock_script_item();
+    UdpAssetFixtures::new()
+        .with_xfer_file(STOCK_XFER_FILE, STOCK_XFER_FILE_BODY)
+        .with_task_item_asset(stock_scripted_object(), script.item_id, STOCK_SCRIPT_BODY)
+        .with_task_inventory(
+            STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+            TaskInventoryFixture {
+                task: stock_scripted_object(),
+                serial: SCRIPTED_OBJECT_SERIAL,
+                items: vec![script],
+            },
+        )
+        .with_estate_covenant(STOCK_COVENANT_BODY)
+        .with_terrain_raw(flat_terrain_raw(STOCK_TERRAIN_HEIGHT_M))
+}
 
 /// An [`InventoryFolderKey`] from a small fixture constant.
 fn folder_key(id: u128) -> InventoryFolderKey {

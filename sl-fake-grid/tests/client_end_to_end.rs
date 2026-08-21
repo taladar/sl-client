@@ -142,6 +142,272 @@ mod test {
         Ok(())
     }
 
+    /// A connected client whose run loop is live and whose circuit has
+    /// completed the region handshake.
+    struct Running {
+        /// The grid (dropping it shuts everything down).
+        _grid: FakeGrid,
+        /// The grid-side handle onto the session.
+        agent: FakeAgent,
+        /// The client's root circuit id (for scoped ids).
+        circuit: sl_client_tokio::CircuitId,
+        /// The client event stream.
+        events: mpsc::Receiver<Event>,
+        /// The client command channel.
+        commands: mpsc::Sender<Command>,
+        /// The run-loop task (aborted on teardown).
+        run: tokio::task::JoinHandle<Result<(), sl_client_tokio::Error>>,
+    }
+
+    impl Drop for Running {
+        fn drop(&mut self) {
+            self.run.abort();
+        }
+    }
+
+    /// Connects, starts the run loop, and waits for the region handshake.
+    async fn start() -> Result<Running, TestError> {
+        let (grid, client, agent) = connect().await?;
+        let circuit = client.root_circuit_id().ok_or("no root circuit")?;
+        let (event_tx, event_rx) = mpsc::channel::<Event>(256);
+        let (command_tx, command_rx) = mpsc::channel::<Command>(8);
+        let (diag_tx, _diag_rx) = mpsc::channel(16);
+        let run = tokio::spawn(client.run(event_tx, diag_tx, command_rx));
+        let mut running = Running {
+            _grid: grid,
+            agent,
+            circuit,
+            events: event_rx,
+            commands: command_tx,
+            run,
+        };
+        running
+            .wait_for(|event| {
+                matches!(
+                    event,
+                    Event::RegionHandshakeComplete | Event::RegionChanged { .. }
+                )
+                .then_some(())
+            })
+            .await?;
+        Ok(running)
+    }
+
+    impl Running {
+        /// Receives client events until `pick` returns a value.
+        async fn wait_for<T>(
+            &mut self,
+            mut pick: impl FnMut(&Event) -> Option<T>,
+        ) -> Result<T, TestError> {
+            loop {
+                let event = tokio::time::timeout(WAIT, self.events.recv())
+                    .await?
+                    .ok_or("client event stream ended early")?;
+                if let Some(value) = pick(&event) {
+                    return Ok(value);
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn named_xfer_file_downloads_and_re_arms() -> Result<(), TestError> {
+        let mut running = start().await?;
+        for _round in 0..2 {
+            running
+                .commands
+                .send(Command::RequestXfer {
+                    filename: sl_fake_grid::scenario::STOCK_XFER_FILE.to_owned(),
+                })
+                .await?;
+            let data = running
+                .wait_for(|event| match event {
+                    Event::XferDownloaded { data, .. } => Some(data.clone()),
+                    _ => None,
+                })
+                .await?;
+            assert_eq!(data, sl_fake_grid::scenario::STOCK_XFER_FILE_BODY);
+        }
+        // An unknown name is refused with an abort, not a hang.
+        running
+            .commands
+            .send(Command::RequestXfer {
+                filename: "missing.txt".to_owned(),
+            })
+            .await?;
+        let result = running
+            .wait_for(|event| match event {
+                Event::XferAborted { result, .. } => Some(*result),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(result, -1);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn task_inventory_and_item_asset_round_trip() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let task = sl_fake_grid::scenario::stock_scripted_object();
+        let script = sl_fake_grid::scenario::stock_script_item();
+
+        running
+            .commands
+            .send(Command::FetchTaskInventory {
+                target: sl_client_tokio::ScopedObjectId::new(
+                    running.circuit,
+                    sl_fake_grid::scenario::STOCK_SCRIPTED_OBJECT_LOCAL_ID,
+                ),
+            })
+            .await?;
+        let (serial, items) = running
+            .wait_for(|event| match event {
+                Event::TaskInventoryContents {
+                    task: got,
+                    serial,
+                    items,
+                } if *got == task => Some((*serial, items.clone())),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(serial, 1);
+        assert_eq!(items, vec![script.clone()]);
+
+        let asset_id = script.asset_id.ok_or("stock script has no asset id")?;
+        running
+            .commands
+            .send(Command::FetchTaskItemAsset {
+                task,
+                item_id: script.item_id,
+                asset_id,
+                asset_type: script.asset_type,
+            })
+            .await?;
+        let data = running
+            .wait_for(|event| match event {
+                Event::TaskItemAssetReceived {
+                    task: got_task,
+                    item,
+                    data,
+                    ..
+                } if *got_task == task && *item == script.item_id => Some(data.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(data, sl_fake_grid::scenario::STOCK_SCRIPT_BODY);
+
+        // An item the fixtures do not hold is refused as an unknown source.
+        running
+            .commands
+            .send(Command::FetchTaskItemAsset {
+                task,
+                item_id: sl_types::key::InventoryKey::from(uuid::Uuid::from_u128(0xBAD)),
+                asset_id,
+                asset_type: script.asset_type,
+            })
+            .await?;
+        let status = running
+            .wait_for(|event| match event {
+                Event::TransferFailed { status, .. } => Some(*status),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(status, sl_proto::TransferStatus::UnknownSource);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn estate_covenant_round_trips() -> Result<(), TestError> {
+        let mut running = start().await?;
+        running
+            .commands
+            .send(Command::FetchEstateCovenantAsset)
+            .await?;
+        let data = running
+            .wait_for(|event| match event {
+                Event::EstateCovenantAssetReceived { data, .. } => Some(data.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(data, sl_fake_grid::scenario::STOCK_COVENANT_BODY);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn terrain_raw_download_and_upload_round_trip() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let mut server_events = running.agent.events();
+
+        running
+            .commands
+            .send(Command::RequestRegionTerrainDownload {
+                viewer_filename: "terrain.raw".to_owned(),
+            })
+            .await?;
+        let data = running
+            .wait_for(|event| match event {
+                Event::ServerFileDownloaded {
+                    viewer_filename,
+                    data,
+                } if viewer_filename == "terrain.raw" => Some(data.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            data,
+            sl_fake_grid::flat_terrain_raw(sl_fake_grid::scenario::STOCK_TERRAIN_HEIGHT_M)
+        );
+
+        // Upload a different heightmap; the grid pulls it and keeps it.
+        let uploaded = sl_fake_grid::flat_terrain_raw(42);
+        running
+            .commands
+            .send(Command::RequestRegionTerrainUpload {
+                viewer_filename: "new.raw".to_owned(),
+                data: uploaded.clone(),
+            })
+            .await?;
+        let byte_count = running
+            .wait_for(|event| match event {
+                Event::XferUploaded {
+                    viewer_filename,
+                    byte_count,
+                    ..
+                } if viewer_filename == "new.raw" => Some(*byte_count),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(byte_count, uploaded.len());
+        loop {
+            let event = tokio::time::timeout(WAIT, server_events.recv()).await??;
+            if let ServerEvent::XferReceived { filename, data, .. } = &event
+                && filename == "new.raw"
+            {
+                assert_eq!(*data, uploaded);
+                break;
+            }
+        }
+
+        // A following download returns the uploaded bytes.
+        running
+            .commands
+            .send(Command::RequestRegionTerrainDownload {
+                viewer_filename: "again.raw".to_owned(),
+            })
+            .await?;
+        let data = running
+            .wait_for(|event| match event {
+                Event::ServerFileDownloaded {
+                    viewer_filename,
+                    data,
+                } if viewer_filename == "again.raw" => Some(data.clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(data, uploaded);
+        Ok(())
+    }
+
     #[tokio::test]
     async fn two_grids_run_in_parallel() -> Result<(), TestError> {
         let (first_grid, first_client, _first_agent) = connect().await?;

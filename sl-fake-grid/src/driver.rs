@@ -13,7 +13,8 @@ use sl_proto::{InMemoryAssetSource, RegionIdentity, ServerEvent, SimCaps, SimSes
 use tokio::net::UdpSocket;
 use tokio::sync::{Mutex, Notify, broadcast, watch};
 
-use crate::scenario::SimHook;
+use crate::scenario::{SimEventHook, SimHook};
+use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 
 /// The lockable state of one logged-in session: the protocol machine, its
 /// CAPS surface, and the pieces the driver's auto-behaviours need.
@@ -29,6 +30,11 @@ pub(crate) struct SimState {
     /// Scenario hook run right after the automatic region handshake when the
     /// agent completes its movement into the region.
     pub(crate) on_agent_arrived: Option<SimHook>,
+    /// Scenario hook run for every drained event after the stock behaviour.
+    pub(crate) on_event: Option<SimEventHook>,
+    /// This session's copy of the legacy UDP asset fixtures (a terrain
+    /// upload replaces only this session's heightmap).
+    pub(crate) udp_assets: UdpAssetFixtures,
 }
 
 /// One live session's shared handle: the lockable state plus its I/O anchors
@@ -79,20 +85,35 @@ impl SharedSim {
         result
     }
 
-    /// The under-the-lock half of the flush rule: run the arrival
-    /// auto-behaviour, drain queued [`ServerEvent`]s into the broadcast,
-    /// collect queued transmits, publish the next timer deadline, and note
-    /// whether a held event-queue poll should be woken.
+    /// The under-the-lock half of the flush rule: run the auto-behaviours
+    /// (arrival handshake, the UDP asset fixtures, the scenario's event
+    /// hook), drain queued [`ServerEvent`]s into the broadcast, collect
+    /// queued transmits, publish the next timer deadline, and note whether a
+    /// held event-queue poll should be woken.
+    ///
+    /// Answering an event may queue further events (a served task inventory
+    /// surfaces its own `XferRequested`); the loop keeps draining until the
+    /// machine is quiet.
     pub(crate) fn flush_locked(&self, state: &mut SimState) -> FlushOutcome {
         while let Some(event) = state.sim.poll_event() {
+            let now = Instant::now();
             if matches!(event, ServerEvent::AgentArrived) {
-                let now = Instant::now();
                 if let Err(error) = state.sim.send_region_handshake(&state.identity, now) {
                     tracing::warn!("auto region handshake failed: {error}");
                 }
                 if let Some(hook) = &state.on_agent_arrived {
                     hook(&mut state.sim);
                 }
+            }
+            answer_from_fixtures(
+                &mut state.udp_assets,
+                &mut state.sim,
+                state.identity.region_id,
+                &event,
+                now,
+            );
+            if let Some(hook) = &state.on_event {
+                hook(&mut state.sim, &event);
             }
             // Only lagging subscribers error; the driver never stalls on them.
             drop(self.events_tx.send(event));

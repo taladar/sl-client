@@ -6,8 +6,10 @@ workspace's sans-I/O server machinery: `sl-wire`'s login server,
 `SimCaps` (the capability dispatch). This crate adds only the I/O glue —
 an HTTP endpoint serving login and CAPS (including the `EventQueueGet`
 long-poll), one loopback UDP socket per logged-in session, and scriptable
-content fixtures. No world authority, no persistence: content is whatever
-the scenario scripts.
+content fixtures — including the legacy UDP asset paths (named `Xfer`
+files, task inventories, `TransferRequest` sources, the estate terrain RAW
+heightmap). No world authority, no persistence: content is whatever the
+scenario scripts.
 
 Two consumers by design:
 

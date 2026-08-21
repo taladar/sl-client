@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 263 |
+| ready | 262 |
 | blocked | 66 |
 | in-progress | 16 |
 | bugs | 29 |
-| done | 848 |
+| done | 849 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1351** |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (263)
+## ready (262)
 
 ### protocol
 
@@ -406,9 +406,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-fake-grid-login-smoke`](ready/viewer-fake-grid-login-smoke.md) — The
   real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
-- [`viewer-fake-grid-udp-assets`](ready/viewer-fake-grid-udp-assets.md) — Fake
-  grid answers the legacy UDP asset paths — Xfer, Transfer, task inventory
-  (blocked by `viewer-fake-grid` (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -1150,7 +1147,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (848)
+## done (849)
 
 ### protocol
 
@@ -1481,6 +1478,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Facelights render far brighter than in Firestorm
 - [`viewer-fake-grid`](done/viewer-fake-grid.md) — A loopback fake grid over
   SimSession (blocked by `protocol-sim-caps-framework` (done))
+- [`viewer-fake-grid-udp-assets`](done/viewer-fake-grid-udp-assets.md) — Fake
+  grid answers the legacy UDP asset paths — Xfer, Transfer, task inventory
+  (blocked by `viewer-fake-grid` (done))
 - [`viewer-flair-style-panic-on-caps-failure-notification`](done/viewer-flair-style-panic-on-caps-failure-notification.md)
   — bevy_flair debug panic — recalculate_style on a freshly spawned
 - [`viewer-flexi-prim-picking`](done/viewer-flexi-prim-picking.md) — Pick flexi

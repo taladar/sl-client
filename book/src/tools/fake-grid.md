@@ -107,10 +107,40 @@ over a small generic `xmlrpc` module):
   the commit must echo. Nothing moves a balance — an accepted purchase
   is published on `FakeGrid::economy_events` for tests to assert.
 
-The legacy UDP asset paths (Xfer, `TransferRequest`, the estate terrain
-RAW download/upload) are implemented in `SimSession` but the fake grid
-does not yet script content for them — see the
-`viewer-fake-grid-udp-assets` roadmap task.
+## The legacy UDP asset fixtures
+
+`SimSession` implements the server half of the legacy UDP asset paths but
+holds no content; `Scenario::udp_assets` (`UdpAssetFixtures`) is where a
+scenario scripts it, and the driver answers the matching `ServerEvent`s
+from a per-session copy, under the same lock and flush rule as everything
+else:
+
+- **Named `Xfer` files** (`xfer_files`) — registered on every fresh
+  session and re-armed after each serve, since a `SimSession`
+  registration is consumed by the `RequestXfer` that names it. An unknown
+  name gets the machine's own `AbortXfer`.
+- **Task inventories** (`task_inventories`, by region-local object id) —
+  answered with `serve_task_inventory` on `RequestTaskInventory`; an
+  unknown id is ignored, as a real simulator ignores a bogus one.
+- **`TransferRequest` sources** — task-item asset bodies by `(task, item)`
+  (`task_item_assets`) and the estate covenant notecard
+  (`estate_covenant`); a miss is refused with `UnknownSource`, which the
+  client surfaces as `TransferFailed` instead of hanging.
+- **The terrain RAW heightmap** (`terrain_raw`) — offered with
+  `send_initiate_download` on an estate "download filename" request, and
+  *replaced* by a completed upload (`request_xfer_upload` → `XferReceived`),
+  so a download after an upload round-trips the uploaded bytes. A "bake"
+  request is acknowledged as an event only: the fake grid keeps no revert
+  baseline. `flat_terrain_raw(height_m)` builds a flat 256 × 256 RAW32
+  file for fixtures.
+
+The stock scenario ships `motd.txt`, one scripted object
+(`STOCK_SCRIPTED_OBJECT_LOCAL_ID`) whose task inventory holds a script with
+a body, a covenant, and a flat 25 m heightmap. Behaviour the fixtures do
+not cover goes in `Scenario::on_event`, a hook that sees every drained
+`ServerEvent` with the live `SimSession` (after the stock behaviour ran).
+`client_end_to_end.rs` drives each of these flows through the real
+`sl-client-tokio` commands.
 
 The stock `Scenario` is intentionally small (an inventory skeleton, a
 library, one parcel, a chat greeting). A real viewer will ask for much

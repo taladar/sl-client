@@ -234,6 +234,7 @@ impl GridCore {
         sim.set_secure_session_id(secure_session_id);
         sim.set_region_id(region.region_id);
         (region.scenario.setup)(&mut sim);
+        region.scenario.udp_assets.register_xfer_files(&mut sim);
         if *sim.simulator_features() == SimulatorFeatures::default() {
             // The scenario left the feature document untouched: advertise
             // the grid-wide URLs (map tiles, currency helper) the way an
@@ -268,6 +269,8 @@ impl GridCore {
             assets: region.scenario.assets.clone(),
             identity: region.identity(),
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
+            on_event: region.scenario.on_event.clone(),
+            udp_assets: region.scenario.udp_assets.clone(),
         };
         let shared = new_shared_sim(state, socket, self.shutdown_tx.subscribe());
         Ok((

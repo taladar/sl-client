@@ -12,10 +12,12 @@ mod login_endpoint;
 mod map_tiles;
 pub mod runtime;
 pub mod scenario;
+pub mod udp_assets;
 
 pub use accounts::AccountConfig;
 pub use economy_policy::{EconomyConfig, EconomyEvent};
 pub use error::Error;
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use runtime::{FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig};
-pub use scenario::{Scenario, SimHook};
+pub use scenario::{Scenario, SimEventHook, SimHook};
+pub use udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
