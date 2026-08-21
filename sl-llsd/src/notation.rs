@@ -582,11 +582,10 @@ impl NotationParser<'_> {
 fn decode_hex(text: &str) -> Vec<u8> {
     let digits: Vec<u8> = text.bytes().filter_map(hex_value).collect();
     digits
-        .chunks_exact(2)
-        .filter_map(|pair| match pair {
-            [high, low] => Some(high.wrapping_shl(4) | *low),
-            _ => None,
-        })
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|&[high, low]| high.wrapping_shl(4) | low)
         .collect()
 }
 

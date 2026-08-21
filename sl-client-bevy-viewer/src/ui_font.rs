@@ -747,7 +747,9 @@ mod tests {
         let count = usize::from(be_u16_at(font, 4));
         font.get(12..)
             .unwrap_or(&[])
-            .chunks_exact(16)
+            .as_chunks::<16>()
+            .0
+            .iter()
             .take(count)
             .filter_map(|record| record.get(0..4))
             .filter_map(|tag| <[u8; 4]>::try_from(tag).ok())

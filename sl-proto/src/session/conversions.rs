@@ -150,8 +150,10 @@ pub(crate) fn pack_uuids(uuids: &[Uuid]) -> Vec<u8> {
 /// client's `SessionConferenceStart`. A trailing partial chunk is ignored.
 pub(crate) fn unpack_uuids(bucket: &[u8]) -> Vec<Uuid> {
     bucket
-        .chunks_exact(16)
-        .filter_map(|chunk| Uuid::from_slice(chunk).ok())
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .map(|chunk| Uuid::from_bytes(*chunk))
         .collect()
 }
 
@@ -1738,15 +1740,17 @@ pub(crate) fn inventory_folder(data: &InventoryDescendentsFolderDataBlock) -> In
 /// The LL "CRC" of a UUID: its 16 bytes read as four little-endian `u32`s,
 /// summed (wrapping). A faithful port of `LLUUID::getCRC32`.
 pub(crate) fn uuid_crc(id: Uuid) -> u32 {
-    id.as_bytes().chunks_exact(4).fold(0_u32, |acc, chunk| {
-        let b0 = chunk.first().copied().unwrap_or(0);
-        let b1 = chunk.get(1).copied().unwrap_or(0);
-        let b2 = chunk.get(2).copied().unwrap_or(0);
-        let b3 = chunk.get(3).copied().unwrap_or(0);
-        let word =
-            u32::from(b0) | (u32::from(b1) << 8) | (u32::from(b2) << 16) | (u32::from(b3) << 24);
-        acc.wrapping_add(word)
-    })
+    id.as_bytes()
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .fold(0_u32, |acc, &[b0, b1, b2, b3]| {
+            let word = u32::from(b0)
+                | (u32::from(b1) << 8)
+                | (u32::from(b2) << 16)
+                | (u32::from(b3) << 24);
+            acc.wrapping_add(word)
+        })
 }
 
 /// The LL inventory-item "CRC" (a checksum, not a true CRC) carried in
@@ -5348,8 +5352,10 @@ pub(crate) fn object_properties(
 /// ignoring any trailing bytes that do not form a complete UUID.
 pub(crate) fn concatenated_uuids(bytes: &[u8]) -> Vec<Uuid> {
     bytes
-        .chunks_exact(16)
-        .filter_map(|chunk| Uuid::from_slice(chunk).ok())
+        .as_chunks::<16>()
+        .0
+        .iter()
+        .map(|chunk| Uuid::from_bytes(*chunk))
         .collect()
 }
 

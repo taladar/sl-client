@@ -617,7 +617,7 @@ fn update_media_controls(
                     .computed
                     .get(ui.root)
                     .map_or(Vec2::new(300.0, 50.0), |node| node.size());
-                let center_x = (min.x + max.x) * 0.5;
+                let center_x = f32::midpoint(min.x, max.x);
                 let x = (center_x - bar_size.x * 0.5)
                     .clamp(4.0, (window.width() - bar_size.x - 4.0).max(4.0));
                 let y = (min.y - bar_size.y - 6.0)

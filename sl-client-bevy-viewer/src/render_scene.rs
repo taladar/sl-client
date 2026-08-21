@@ -1433,7 +1433,7 @@ pub(crate) fn rigged_strip() -> (Submesh, MeshSkin) {
         for side in [-1.0_f32, 1.0] {
             positions.push([side * 0.125, 0.0, z]);
             normals.push([0.0, -1.0, 0.0]);
-            uvs.push([(side + 1.0) * 0.5, along]);
+            uvs.push([f32::midpoint(side, 1.0), along]);
             // Blend from joint 0 at the bottom to joint 1 at the top — and sum to
             // 0.9, exactly as a quantized wire rig does. See the doc comment.
             weights.push(VertexWeights {

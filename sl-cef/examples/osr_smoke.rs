@@ -53,7 +53,7 @@ fn main() {
         if !status.loading && status.progress >= 1.0 {
             written = surface.with_new_frame(&mut seen_generation, &mut |frame| {
                 let mut out = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
-                for pixel in frame.bgra.chunks_exact(4) {
+                for pixel in frame.bgra.as_chunks::<4>().0 {
                     let (b, g, r) = (
                         pixel.first().copied().unwrap_or(0),
                         pixel.get(1).copied().unwrap_or(0),

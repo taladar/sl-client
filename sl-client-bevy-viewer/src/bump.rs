@@ -353,11 +353,13 @@ pub(crate) fn generate_normal_map(decoded: &Arc<DecodedTexture>, invert: bool) -
     // the wrapping fetch below treats as zero height.
     let lum: Vec<f32> = decoded
         .pixels
-        .chunks_exact(4)
-        .map(|texel| {
-            let r = f32::from(texel.first().copied().unwrap_or(0));
-            let g = f32::from(texel.get(1).copied().unwrap_or(0));
-            let b = f32::from(texel.get(2).copied().unwrap_or(0));
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|&[red, green, blue, _alpha]| {
+            let r = f32::from(red);
+            let g = f32::from(green);
+            let b = f32::from(blue);
             (0.299 * r + 0.587 * g + 0.114 * b) / 255.0
         })
         .collect();

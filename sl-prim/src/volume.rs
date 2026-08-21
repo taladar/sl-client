@@ -822,15 +822,8 @@ fn first_triangle(
 /// accumulation); the result is normalized by the caller.
 fn accumulate_normals(positions: &[[f32; 3]], indices: &[u32]) -> Vec<[f32; 3]> {
     let mut normals = vec![[0.0_f32; 3]; positions.len()];
-    for triangle in indices.chunks_exact(3) {
-        let (i0, i1, i2) = match triangle {
-            [i0, i1, i2] => (
-                usize_from_u32(*i0),
-                usize_from_u32(*i1),
-                usize_from_u32(*i2),
-            ),
-            _short => continue,
-        };
+    for &[i0, i1, i2] in indices.as_chunks::<3>().0 {
+        let (i0, i1, i2) = (usize_from_u32(i0), usize_from_u32(i1), usize_from_u32(i2));
         let (Some(p0), Some(p1), Some(p2)) = (
             positions.get(i0).copied(),
             positions.get(i1).copied(),
@@ -905,9 +898,9 @@ fn bounds_centre(points: &[[f32; 3]]) -> [f32; 3] {
         }
     }
     [
-        (min[0] + max[0]) * 0.5,
-        (min[1] + max[1]) * 0.5,
-        (min[2] + max[2]) * 0.5,
+        f32::midpoint(min[0], max[0]),
+        f32::midpoint(min[1], max[1]),
+        f32::midpoint(min[2], max[2]),
     ]
 }
 
@@ -930,7 +923,7 @@ fn bounds_centre_2d(points: &[[f32; 2]]) -> [f32; 2] {
             }
         }
     }
-    [(min[0] + max[0]) * 0.5, (min[1] + max[1]) * 0.5]
+    [f32::midpoint(min[0], max[0]), f32::midpoint(min[1], max[1])]
 }
 
 /// The flat grid index of profile column `s`, path row `t`, for a `num_s`-wide
@@ -1210,7 +1203,7 @@ mod tests {
                 face.vertex_count().saturating_sub(2),
                 "hollow cap is an annulus (no centre fan)"
             );
-            for tri in face.indices.chunks_exact(3) {
+            for tri in face.indices.as_chunks::<3>().0 {
                 let vertex = |slot: usize| -> [f32; 3] {
                     tri.get(slot)
                         .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(0)))
@@ -1297,7 +1290,7 @@ mod tests {
     /// Assert every triangle of a path cap winds outward (`+Z` top / `-Z`
     /// bottom).
     fn assert_cap_winds(face: &PrimFace, want_top: bool) {
-        for tri in face.indices.chunks_exact(3) {
+        for tri in face.indices.as_chunks::<3>().0 {
             let vertex = |slot: usize| -> [f32; 3] {
                 tri.get(slot)
                     .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(0)))
@@ -1354,7 +1347,7 @@ mod tests {
     /// The total area a face's triangles cover.
     fn face_covered_area(face: &PrimFace) -> f32 {
         let mut area = 0.0;
-        for tri in face.indices.chunks_exact(3) {
+        for tri in face.indices.as_chunks::<3>().0 {
             let vertex = |slot: usize| -> [f32; 3] {
                 tri.get(slot)
                     .and_then(|&i| face.positions.get(usize::try_from(i).unwrap_or(usize::MAX)))

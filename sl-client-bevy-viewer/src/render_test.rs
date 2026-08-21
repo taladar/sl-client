@@ -849,7 +849,7 @@ pub(crate) fn geometry_violations(geometry: &[Geometry]) -> Vec<String> {
 
 /// Each triangle's area, in square metres.
 fn triangle_areas(object: &Geometry) -> impl Iterator<Item = f32> + '_ {
-    object.indices.chunks_exact(3).map(|triangle| {
+    object.indices.as_chunks::<3>().0.iter().map(|triangle| {
         let corners: Vec<Vec3> = triangle
             .iter()
             .filter_map(|&index| object.positions.get(usize::try_from(index).unwrap_or(0)))

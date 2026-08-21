@@ -756,7 +756,7 @@ fn spawn_scale_snap_guide(
     let (lo, hi) = ticks.iter().fold((0.0_f32, 0.0_f32), |(lo, hi), tick| {
         (lo.min(tick.along), hi.max(tick.along))
     });
-    let mid = (lo + hi) * 0.5;
+    let mid = f32::midpoint(lo, hi);
     let span = (hi - lo).max(0.5) + 0.3;
     for side in [-1.0_f32, 1.0_f32] {
         let offset = vscale(perp_sl, snap_offset * side);

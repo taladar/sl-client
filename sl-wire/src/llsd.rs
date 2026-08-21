@@ -204,17 +204,15 @@ pub fn build_new_file_agent_inventory_request(
     push_escaped(&mut out, name);
     out.push_str("</string><key>description</key><string>");
     push_escaped(&mut out, description);
-    out.push_str("</string>");
-    out.push_str(&format!(
-        concat!(
-            "<key>next_owner_mask</key><integer>{}</integer>",
-            "<key>group_mask</key><integer>{}</integer>",
-            "<key>everyone_mask</key><integer>{}</integer>",
-            "<key>expected_upload_cost</key><integer>{}</integer>",
-        ),
-        next_owner_mask, group_mask, everyone_mask, expected_upload_cost,
-    ));
-    out.push_str("</map></llsd>");
+    out.push_str("</string><key>next_owner_mask</key><integer>");
+    out.push_str(&next_owner_mask.to_string());
+    out.push_str("</integer><key>group_mask</key><integer>");
+    out.push_str(&group_mask.to_string());
+    out.push_str("</integer><key>everyone_mask</key><integer>");
+    out.push_str(&everyone_mask.to_string());
+    out.push_str("</integer><key>expected_upload_cost</key><integer>");
+    out.push_str(&expected_upload_cost.to_string());
+    out.push_str("</integer></map></llsd>");
     out
 }
 

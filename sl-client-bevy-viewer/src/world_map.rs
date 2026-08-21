@@ -1715,8 +1715,8 @@ fn layer_toggle_bits(store: &sl_settings::SettingsStore) -> u32 {
 
 /// Fill an RGBA byte buffer with one colour.
 fn fill(data: &mut [u8], color: Rgba) {
-    for texel in data.chunks_exact_mut(4) {
-        texel.copy_from_slice(&color);
+    for texel in data.as_chunks_mut::<4>().0 {
+        *texel = color;
     }
 }
 

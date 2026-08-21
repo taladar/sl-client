@@ -127,11 +127,8 @@ pub fn parse_datagram(datagram: &[u8]) -> Result<ParsedDatagram<'_>, WireError> 
             .get(acks_start..count_index)
             .ok_or(WireError::MalformedAcks)?;
         acks.reserve(count);
-        for chunk in acks_slice.chunks_exact(4) {
-            let id_bytes: [u8; 4] = chunk
-                .try_into()
-                .map_err(|_ignored| WireError::MalformedAcks)?;
-            acks.push(SequenceNumber(endian::u32_from_be(id_bytes)));
+        for id_bytes in acks_slice.as_chunks::<4>().0 {
+            acks.push(SequenceNumber(endian::u32_from_be(*id_bytes)));
         }
         end = acks_start;
     }

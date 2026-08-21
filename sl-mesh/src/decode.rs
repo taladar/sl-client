@@ -401,7 +401,9 @@ fn dequantize_positions(bytes: &[u8], min: [f32; 3], max: [f32; 3]) -> Vec<[f32;
     let [min_x, min_y, min_z] = min;
     let [max_x, max_y, max_z] = max;
     bytes
-        .chunks_exact(6)
+        .as_chunks::<6>()
+        .0
+        .iter()
         .map(|chunk| {
             [
                 dequantize(u16_at(chunk, 0), min_x, max_x),
@@ -415,7 +417,9 @@ fn dequantize_positions(bytes: &[u8], min: [f32; 3], max: [f32; 3]) -> Vec<[f32;
 /// Dequantizes a `u16×3`-per-vertex normal blob to `[-1, 1]` per component.
 fn dequantize_normals(bytes: &[u8]) -> Vec<[f32; 3]> {
     bytes
-        .chunks_exact(6)
+        .as_chunks::<6>()
+        .0
+        .iter()
         .map(|chunk| {
             [
                 dequantize(u16_at(chunk, 0), -1.0, 1.0),
@@ -431,7 +435,9 @@ fn dequantize_uvs(bytes: &[u8], min: [f32; 2], max: [f32; 2]) -> Vec<[f32; 2]> {
     let [min_u, min_v] = min;
     let [max_u, max_v] = max;
     bytes
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|chunk| {
             [
                 dequantize(u16_at(chunk, 0), min_u, max_u),
@@ -445,7 +451,9 @@ fn dequantize_uvs(bytes: &[u8], min: [f32; 2], max: [f32; 2]) -> Vec<[f32; 2]> {
 /// indices that do not complete a triangle.
 fn decode_indices(bytes: &[u8]) -> Vec<u32> {
     let mut indices: Vec<u32> = bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|chunk| u32::from(u16_at(chunk, 0)))
         .collect();
     let remainder = indices.len().checked_rem(3).unwrap_or(0);
