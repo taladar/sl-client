@@ -29,6 +29,13 @@ All three are off by default and cost nothing in a normal build.
 Always profile a **`--release`** build — a debug Bevy runtime is dominated by
 its own overhead.
 
+Release builds carry `debug = "line-tables-only"`, which is what Tracy, `perf`
+and `gdb` backtraces need: symbol names, file/line attribution and inline
+frames, with `perf --call-graph dwarf` unwinding through `.eh_frame`. If you
+ever need a debugger to inspect **local variables**, build with
+`--profile release-debug` instead. See [Build performance &
+memory](build-performance.md) for why the default is set that way.
+
 ### Tracy (frame timeline, per-system call counts)
 
 ```console
