@@ -25,6 +25,15 @@
 //! resolve a peer / group / conference to a readable tab title. It is fed **only**
 //! from the [`SlEvent`] stream (the viewer never reaches into the session),
 //! mirroring [`crate::chat`]'s overlay but keyed per conversation.
+//!
+//! A **resident's** name is the one thing the model does *not* cache: it lives
+//! in the shared avatar cache ([`crate::avatars::AvatarState`]), which every
+//! other surface reads, so a tab shows the same pseudonym / display name a name
+//! tag does. The model contributes to that cache instead — the sender names the
+//! wire stamps on messages and invitations — and asks it for the name of any
+//! one-to-one peer it cannot name yet ([`request_conversation_names`]), which
+//! is what titles a conversation *we* opened from a profile or a radar row
+//! rather than one the peer happened to speak in first.
 //! [`ConversationsUi`] is the parallel ECS side: the floater entities and one
 //! [`ConversationView`] per model entry, spawned lazily as entries appear and
 //! despawned when they close.
@@ -52,6 +61,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
+use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -443,8 +453,6 @@ pub(crate) struct ConversationModel {
     /// The active conversation — keyed (not indexed) so removing a tab never
     /// aliases the selection onto a different conversation.
     active: ConversationKey,
-    /// Last-seen display name per agent, for one-to-one tab titles.
-    agent_names: BTreeMap<AgentKey, String>,
     /// Resolved group names, harvested from membership / name / profile / invite
     /// events, for group tab titles.
     group_names: BTreeMap<GroupKey, String>,
@@ -458,7 +466,6 @@ impl Default for ConversationModel {
             // Seed the always-present Nearby tab as the first, active conversation.
             entries: vec![Conversation::new(ConversationKey::Nearby)],
             active: ConversationKey::Nearby,
-            agent_names: BTreeMap::new(),
             group_names: BTreeMap::new(),
             conference_names: BTreeMap::new(),
         }
@@ -474,6 +481,15 @@ impl ConversationModel {
     /// The index of `key`, or `None` if no such conversation exists yet.
     fn index_of(&self, key: ConversationKey) -> Option<usize> {
         self.entries.iter().position(|entry| entry.key == key)
+    }
+
+    /// The peers of every open one-to-one conversation — who the tab titles
+    /// need names for.
+    fn direct_peers(&self) -> impl Iterator<Item = AgentKey> + '_ {
+        self.entries.iter().filter_map(|entry| match entry.key {
+            ConversationKey::Direct(peer) => Some(peer),
+            _other => None,
+        })
     }
 
     /// Whether a conversation is open for `key` — the reference's
@@ -493,13 +509,6 @@ impl ConversationModel {
         }
         self.entries.push(Conversation::new(key));
         self.entries.len().saturating_sub(1)
-    }
-
-    /// Records a peer's display name (ignoring empty names).
-    fn note_agent_name(&mut self, id: AgentKey, name: &str) {
-        if !name.is_empty() {
-            self.agent_names.insert(id, name.to_owned());
-        }
     }
 
     /// Records a group's display name (ignoring empty names).
@@ -632,15 +641,6 @@ impl ConversationModel {
         }
     }
 
-    /// A peer's display name from the name cache, with the same short-id
-    /// fallback the tab titles use (until an event carries the real name).
-    fn agent_name_or_short_id(&self, id: AgentKey) -> String {
-        self.agent_names
-            .get(&id)
-            .cloned()
-            .unwrap_or_else(|| short_id(id.uuid()))
-    }
-
     /// Sets or clears a typist for `key`. A typing notification for an existing
     /// conversation (or a new one-to-one IM) opens / updates it; a stop just
     /// clears the flag.
@@ -756,12 +756,12 @@ impl ConversationModel {
     fn title(&self, key: ConversationKey) -> ConversationTitle {
         match key {
             ConversationKey::Nearby => ConversationTitle::Nearby,
-            ConversationKey::Direct(id) => ConversationTitle::Named(
-                self.agent_names
-                    .get(&id)
-                    .cloned()
-                    .unwrap_or_else(|| short_id(id.uuid())),
-            ),
+            // A resident's name lives in the one shared cache
+            // ([`crate::avatars::AvatarState`]), not here: the model would
+            // otherwise be a second, poorer copy of it. What the model can say
+            // is the placeholder to show while nothing is known — the view
+            // resolves the name over the top.
+            ConversationKey::Direct(id) => ConversationTitle::Named(short_id(id.uuid())),
             ConversationKey::Group(id) => ConversationTitle::Named(
                 self.group_names
                     .get(&id)
@@ -1179,6 +1179,7 @@ impl Plugin for ConversationsPlugin {
                     ingest_conversation_events,
                     ingest_nearby_notices,
                     ingest_conversation_notices,
+                    request_conversation_names,
                     apply_participant_picks,
                     start_conferences,
                     open_conversations,
@@ -1834,6 +1835,7 @@ fn ingest_conversation_notices(
 pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
+    mut avatars: ResMut<crate::avatars::AvatarState>,
     identity: Res<SlIdentity>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     friends: Option<Res<crate::people::FriendsModel>>,
@@ -1864,7 +1866,7 @@ pub(crate) fn ingest_conversation_events(
             SlSessionEvent::InstantMessageReceived(im)
                 if im.dialog == ImDialog::Message && !im.from_group =>
             {
-                model.note_agent_name(im.from_agent_id, &im.from_agent_name);
+                avatars.note_legacy_name(im.from_agent_id, &im.from_agent_name);
                 model.push_remote(
                     ConversationKey::Direct(im.from_agent_id),
                     im.from_agent_id,
@@ -1879,7 +1881,7 @@ pub(crate) fn ingest_conversation_events(
                 typing,
             } => {
                 let key = model.typing_key(*from_agent_id, *session_id);
-                model.note_agent_name(*from_agent_id, from_agent_name);
+                avatars.note_legacy_name(*from_agent_id, from_agent_name);
                 model.set_typing(key, *from_agent_id, from_agent_name, *typing);
             }
             SlSessionEvent::GroupSessionMessage {
@@ -1893,7 +1895,7 @@ pub(crate) fn ingest_conversation_events(
                 // so drop the self-echo to avoid showing it twice (once as "You:"
                 // and once under our own name).
                 if identity.agent_id != Some(*from_agent_id) {
-                    model.note_agent_name(*from_agent_id, from_name);
+                    avatars.note_legacy_name(*from_agent_id, from_name);
                     model.push_remote(
                         ConversationKey::Group(*group_id),
                         *from_agent_id,
@@ -1911,7 +1913,7 @@ pub(crate) fn ingest_conversation_events(
                 // Same self-echo suppression as group sessions (a conference
                 // session likewise echoes the sender's own line back).
                 if identity.agent_id != Some(*from_agent_id) {
-                    model.note_agent_name(*from_agent_id, from_name);
+                    avatars.note_legacy_name(*from_agent_id, from_name);
                     model.push_remote(
                         ConversationKey::Conference(ImSessionId::from(*session_id)),
                         *from_agent_id,
@@ -2027,7 +2029,7 @@ pub(crate) fn ingest_conversation_events(
                     .iter()
                     .rev()
                     .map(|message| {
-                        transcript_line_for(&model, &identity, message.sender, &message.text)
+                        transcript_line_for(&avatars, &identity, message.sender, &message.text)
                     })
                     .collect();
                 model.set_recall(key, recalled);
@@ -2043,14 +2045,14 @@ pub(crate) fn ingest_conversation_events(
                 let lines: Vec<TranscriptLine> = messages
                     .iter()
                     .map(|message| {
-                        model.note_agent_name(message.sender, &message.sender_name);
+                        avatars.note_legacy_name(message.sender, &message.sender_name);
                         let own = identity.agent_id == Some(message.sender);
                         TranscriptLine {
                             own,
                             speaker: if own {
                                 String::new()
                             } else if message.sender_name.is_empty() {
-                                model.agent_name_or_short_id(message.sender)
+                                speaker_name(&avatars, message.sender)
                             } else {
                                 message.sender_name.clone()
                             },
@@ -2070,12 +2072,21 @@ pub(crate) fn ingest_conversation_events(
     }
 }
 
+/// A speaker's name for a stored transcript line: the shared avatar cache's
+/// *shown* name (pseudonym, else display name, else legacy), with the same
+/// short-id placeholder the tab titles use while nothing has resolved.
+fn speaker_name(avatars: &crate::avatars::AvatarState, sender: AgentKey) -> String {
+    avatars
+        .shown_name_of(sender)
+        .map_or_else(|| short_id(sender.uuid()), ToOwned::to_owned)
+}
+
 /// Build a recalled transcript line for a keyed-session history message: our
 /// own lines render as the localized "You" (no stored name), a remote sender's
-/// name resolves through the model's name cache (short-id fallback) and links
+/// name resolves through the shared avatar cache (short-id fallback) and links
 /// to their profile.
 fn transcript_line_for(
-    model: &ConversationModel,
+    avatars: &crate::avatars::AvatarState,
     identity: &SlIdentity,
     sender: AgentKey,
     text: &str,
@@ -2086,7 +2097,7 @@ fn transcript_line_for(
         speaker: if own {
             String::new()
         } else {
-            model.agent_name_or_short_id(sender)
+            speaker_name(avatars, sender)
         },
         speaker_link: if own {
             SpeakerLink::Own
@@ -2334,6 +2345,29 @@ fn apply_participant_picks(
     }
 }
 
+/// Ask the grid for the name of anyone we have a one-to-one tab with and cannot
+/// name yet — the other half of titling a conversation *we* opened.
+///
+/// The request goes through the shared batched cache
+/// ([`crate::avatars::AvatarState::request_name`]), so it costs one entry in
+/// the frame's `UUIDNameRequest` / `GetDisplayNames` batch and is issued once
+/// per agent however many surfaces ask. Only reached while the model changed,
+/// and the mutable borrow is taken only when something is actually missing, so
+/// an idle conversation list neither re-requests nor marks the cache dirty.
+fn request_conversation_names(
+    model: Res<ConversationModel>,
+    mut avatars: ResMut<crate::avatars::AvatarState>,
+) {
+    if !model.is_changed() {
+        return;
+    }
+    for peer in model.direct_peers() {
+        if avatars.name_record(peer).is_none() {
+            avatars.request_name(peer);
+        }
+    }
+}
+
 /// Apply the pending tab selections to the model. Selecting a conversation tab
 /// also hands the strip back from any external pane ([`StripFocus`]), so its pane
 /// shows and the external one is suppressed.
@@ -2428,6 +2462,19 @@ fn spawn_conversation_tabs(
     }
 }
 
+/// The read-only resources the conversation refresh resolves its labels and
+/// colours against — grouped as one parameter, which also keeps the refresh
+/// inside Bevy's system-parameter arity.
+#[derive(SystemParam)]
+struct RefreshContext<'w> {
+    /// The palette / preference source the transcript colours read.
+    settings: Option<Res<'w, crate::settings::ViewerSettings>>,
+    /// The contact sets, for a member's set colour and its alias revision.
+    sets: Option<Res<'w, crate::contact_sets::ContactSets>>,
+    /// The shared avatar cache, for a one-to-one tab's *shown* name.
+    avatars: Option<Res<'w, crate::avatars::AvatarState>>,
+}
+
 /// Keep the view in step with the model: each tab's label + colours (with the
 /// unread flash), the active pane's visibility, the invite bar, the typing line,
 /// and each transcript node when its revision has advanced.
@@ -2450,12 +2497,16 @@ fn refresh_conversations(
     mut borders: Query<&mut BorderColor>,
     mut nodes: Query<&mut Node>,
     mut scrolls: Query<&mut ScrollPosition>,
-    settings: Option<Res<crate::settings::ViewerSettings>>,
-    sets: Option<Res<crate::contact_sets::ContactSets>>,
+    context: RefreshContext,
     mut last_palette: Local<Option<[Color; 5]>>,
     mut last_alias_revision: Local<Option<u64>>,
     band_colors: Query<&SkinChatBands>,
 ) {
+    let RefreshContext {
+        settings,
+        sets,
+        avatars,
+    } = context;
     let Some(ui) = ui.as_deref_mut() else {
         return;
     };
@@ -2534,10 +2585,20 @@ fn refresh_conversations(
         let is_active = !focus.is_external() && entry.key == active_key;
         let flashing = entry.unread > 0 && !is_active;
 
-        // Tab label: resolved title + unread badge.
+        // Tab label: resolved title + unread badge. A one-to-one prefers the
+        // *shown* name from the shared avatar cache — the user's pseudonym,
+        // else the display name — so a tab agrees with the name tag over the
+        // same avatar's head; the model's own harvested copy is the fallback
+        // for a peer that cache no longer holds.
         let title = match model.title(entry.key) {
             ConversationTitle::Nearby => nearby_title.clone(),
-            ConversationTitle::Named(name) => name,
+            ConversationTitle::Named(name) => match entry.key {
+                ConversationKey::Direct(peer) => avatars
+                    .as_deref()
+                    .and_then(|avatars| avatars.shown_name_of(peer))
+                    .map_or(name, ToOwned::to_owned),
+                _other => name,
+            },
         };
         let label = tab_label(&title, entry.unread, is_active);
         set_text(&mut texts, view.tab_label, &label);
@@ -2901,7 +2962,6 @@ mod tests {
     fn remote_im_creates_tab_and_counts_unread() {
         let mut model = ConversationModel::default();
         let peer = AgentKey::from(Uuid::from_u128(2));
-        model.note_agent_name(peer, "Avatar One");
         model.push_remote(ConversationKey::Direct(peer), peer, "Avatar One", "hi");
         assert_eq!(model.index_of(ConversationKey::Direct(peer)), Some(1));
         assert_eq!(model.entries.get(1).map(|entry| entry.lines.len()), Some(1));
@@ -3203,6 +3263,24 @@ mod tests {
                 "live line".to_owned()
             ])
         );
+    }
+
+    /// A one-to-one's name is **not** the model's to hold: it answers the
+    /// short-id placeholder and the view resolves the resident's name over it
+    /// from the one shared cache. What the model does own is *which* peers have
+    /// a tab, which is what the name requests are made for.
+    #[test]
+    fn a_direct_tab_defers_its_name_to_the_shared_cache() {
+        let mut model = ConversationModel::default();
+        let peer = AgentKey::from(Uuid::from_u128(0xD1));
+        let key = ConversationKey::Direct(peer);
+        model.ensure(key);
+        assert_eq!(
+            model.title(key),
+            ConversationTitle::Named(super::short_id(peer.uuid())),
+            "the placeholder, never a name of its own"
+        );
+        assert_eq!(model.direct_peers().collect::<Vec<_>>(), vec![peer]);
     }
 
     /// What a multi-selection of residents means: nobody is nothing, one

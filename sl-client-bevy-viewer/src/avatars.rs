@@ -1710,6 +1710,24 @@ impl AvatarState {
             .and_then(|record| record.legacy.as_deref())
     }
 
+    /// Record a name learned from **traffic** rather than a name lookup — an
+    /// instant message's sender, a chat-session invitation's inviter, a
+    /// server-history line's speaker. The wire carries these names alongside
+    /// the message, so the person is nameable without asking.
+    ///
+    /// Only fills a name that is **not** already known: a lookup reply (and the
+    /// display-name cap behind it) is the better-defined answer, and this must
+    /// not overwrite it with whatever a message happened to be stamped with.
+    pub(crate) fn note_legacy_name(&mut self, agent: AgentKey, name: &str) {
+        if name.is_empty() {
+            return;
+        }
+        let record = self.name_entry(agent);
+        if record.legacy.is_none() {
+            record.legacy = Some(name.to_owned());
+        }
+    }
+
     /// This agent's full name record, if any of its sources answered yet —
     /// the tag-content composer reads the display name / username / default
     /// flag from it.
@@ -2704,14 +2722,23 @@ impl AvatarState {
             }
         }
         // Retain only the own agent on the per-agent bookkeeping.
+        //
+        // **Names are not scene state and are deliberately kept.** A name is
+        // knowledge about a person, not about a presence: most of the names
+        // this viewer shows are for avatars nowhere near it — group members and
+        // group chat, an object's or parcel's owner and creator, an inventory
+        // item's creator, an open conversation's peer. Dropping the cache
+        // because the *region* changed would re-ask the grid for names it
+        // already knew, and blank every one of those surfaces until the replies
+        // land. It cannot grow enough to matter over a session; if it ever
+        // did, the bound would be least-recently-used, not "is standing near
+        // me". The request bookkeeping stays with it, so a name already
+        // resolved is never re-requested.
         self.coarse_region.retain(|agent, _| keep(agent));
         self.coarse_pos.retain(|agent, _| keep(agent));
         self.attachment_nodes.retain(|agent, _| keep(agent));
         self.head_sockets.retain(|agent, _| keep(agent));
-        self.names.retain(|agent, _| keep(agent));
         self.titles.retain(|agent, _| keep(agent));
-        self.requested.retain(keep);
-        self.pending_name_requests.retain(keep);
         self.appearances.retain(|agent, _| keep(agent));
         self.appearance_dirty.retain(keep);
         self.appearance_pending.retain(|agent, _| keep(agent));

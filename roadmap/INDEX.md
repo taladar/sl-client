@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 263 |
 | blocked | 68 |
 | in-progress | 17 |
-| bugs | 35 |
-| done | 849 |
+| bugs | 34 |
+| done | 850 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1361** |
@@ -1081,7 +1081,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (35)
+## bugs (34)
 
 ### protocol
 
@@ -1119,8 +1119,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
   — update_hover_tooltip spikes to 202 ms on a single frame
-- [`viewer-im-tab-shows-short-id-not-name`](bugs/viewer-im-tab-shows-short-id-not-name.md)
-  — An IM tab we open ourselves is titled with a short id, never a name
 - [`viewer-lsl-semantic-false-positives`](bugs/viewer-lsl-semantic-false-positives.md)
   — LSL semantic pass false-positives on legal scripts (found by the tailslide
   oracle at scale)
@@ -1167,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (849)
+## done (850)
 
 ### protocol
 
@@ -1534,6 +1532,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-i18n-number-datetime-formats`](done/viewer-i18n-number-datetime-formats.md)
   — Locale-aware number, currency & date/time formatting (blocked by
   `viewer-i18n-fluent-scaffold` (done))
+- [`viewer-im-tab-shows-short-id-not-name`](done/viewer-im-tab-shows-short-id-not-name.md)
+  — An IM tab we open ourselves is titled with a short id, never a name
 - [`viewer-in-world-sounds`](done/viewer-in-world-sounds.md) — In-world spatial
   sounds (blocked by `viewer-audio-backend` (done))
 - [`viewer-input-action-map`](done/viewer-input-action-map.md) — Input action
