@@ -34,6 +34,49 @@ mod about_landmark;
 mod about_region;
 mod animations;
 mod animesh;
+/// Every module that declares settings, in registration order.
+///
+/// This list lives here rather than in `settings` because a store that
+/// named its own users would have to depend on all of them — the reason the
+/// settings module could not be a crate of its own before. The binary is the
+/// composition root and already depends on everything, so it is the honest
+/// place for it.
+///
+/// `settings_golden` pins the surface this produces; adding a registrar
+/// without updating that golden file fails the test, and dropping one
+/// silently would otherwise revert a user's saved value to its default.
+pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
+    crate::spacenav::register_settings,
+    crate::minimap::register_settings,
+    crate::double_click_teleport::register_settings,
+    crate::parcel_borders::register_settings,
+    crate::world_map::register_settings,
+    crate::search::register_settings,
+    crate::tonemap::register_settings,
+    crate::glow::register_settings,
+    crate::exposure::register_settings,
+    crate::snapshot_floater::register_settings,
+    crate::i18n::register_settings,
+    crate::avatars::register_settings,
+    crate::hover_text::register_settings,
+    crate::hover_tooltip::register_settings,
+    crate::preferences_camera_move::register_settings,
+    crate::preferences_chat::register_settings,
+    crate::preferences_colors_skins::register_settings,
+    crate::preferences_general::register_settings,
+    crate::preferences_graphics::register_settings,
+    crate::preferences_network_cache::register_settings,
+    crate::presence::register_settings,
+    crate::auto_reject::register_settings,
+    crate::skin_colors::register_settings,
+    crate::session::register_settings,
+    crate::render_priority::register_settings,
+    crate::particles::register_settings,
+    crate::ui_sounds::register_settings,
+    crate::audio::register_settings,
+    crate::debug_settings::register_settings,
+];
+
 // The leaf toolkit (geometry math, render leaves, small models) is its own
 // crate; each module is aliased under its old name so every
 // `crate::<module>::…` path in the viewer still resolves.
@@ -213,8 +256,12 @@ mod script_dialog;
 mod script_permission;
 mod search;
 mod session;
-mod settings;
+// The settings store is its own crate now that it no longer names the
+// features that register with it — that list is `REGISTRARS` above.
+pub(crate) use sl_viewer_settings as settings;
 mod settings_binding;
+#[cfg(test)]
+mod settings_golden;
 pub(crate) use sl_viewer_kit::shadow_visibility;
 mod sit_camera;
 pub(crate) use sl_viewer_kit::sit_offset;
@@ -1714,7 +1761,7 @@ fn run_session(
         // `gSavedSettings`: registers each feature's settings and loads any persisted
         // global overrides (e.g. SpaceNavigator sensitivities). The per-avatar account
         // scope loads at login via `load_account_settings`.
-        .init_resource::<ViewerSettings>()
+        .insert_resource(ViewerSettings::load_with(REGISTRARS))
         // The debug camera override (`--camera-position` / `--camera-look-at` /
         // `--camera-spin`): `setup_scene` reads the start pose, `drive_flycam` reads
         // the spin, and third-person auto-follows when no pose is fixed. The world
@@ -2570,7 +2617,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
     // read from a throwaway store load: the Bevy app — and with it the
     // `ViewerSettings` resource — does not exist yet at login-request time.
     let (start, stored_skin, stored_theme) = {
-        let settings = crate::settings::ViewerSettings::load();
+        let settings = crate::settings::ViewerSettings::load_with(crate::REGISTRARS);
         // The network & cache tab's restart-scoped knobs (cache root and
         // size ceilings, chat-log root, HTTP proxy, a pending clear-cache
         // request) are consumed from this same pre-app load, before any
@@ -2762,7 +2809,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
             selection: {
                 // The persisted skin choice dresses the replay UI too; the
                 // throwaway pre-app load is the `run_viewer` idiom.
-                let settings = crate::settings::ViewerSettings::load();
+                let settings = crate::settings::ViewerSettings::load_with(crate::REGISTRARS);
                 let (stored_skin, stored_theme) =
                     crate::preferences_colors_skins::stored_skin_choice(&settings);
                 crate::skin::SkinSelection::resolve(

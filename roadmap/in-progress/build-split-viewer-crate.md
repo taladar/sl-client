@@ -84,6 +84,14 @@ Landed so far:
   `tracing_tracy` directly, so moving them would put a `profile-tracy` feature
   — and a doubled `cargo hack` matrix — on a new crate to relocate 251 lines
   that compile to nothing by default.
+- **3** — `sl-viewer-settings`: the store, 345 lines. The first step that was
+  not a move. `ViewerSettings::load()` named 28 feature modules, which is why
+  it could not be a crate; it is now `load_with(registrars)` and the list lives
+  at the composition root as `REGISTRARS` in the viewer. A dropped registrar is
+  silent — the setting simply stops being declared and its saved value reverts
+  — so the declared surface (231 settings, their sections, kinds, defaults and
+  flags) is pinned in `tests/settings-golden.txt`, generated before the move
+  and still passing after it.
 
 ## Remaining sequence
 

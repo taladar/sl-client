@@ -10,7 +10,7 @@
 //! `gSavedPerAccountSettings` split:
 //!
 //! - The [`Global`](Scope::Global) scope loads from and saves to the platform
-//!   config directory's `viewer-settings.toml` ([`crate::paths`]).
+//!   config directory's `viewer-settings.toml` (`paths`).
 //! - The [`Account`](Scope::Account) scope is per-avatar: once the agent UUID is
 //!   known at login, [`load_account_settings`] resolves the avatar's directory
 //!   (keyed by grid + avatar name, with rename discovery — [`sl_account_dirs`])
@@ -33,8 +33,8 @@ const ACCOUNT_SETTINGS_FILE: &str = "settings.toml";
 /// The per-avatar account identity resolved from the credentials before login
 /// (grid + readable avatar name) and the accounts root, used to locate the
 /// account settings directory once the agent UUID is known at login.
-#[derive(Resource, Clone)]
-pub(crate) struct AccountContext {
+#[derive(Debug, Resource, Clone)]
+pub struct AccountContext {
     /// The accounts root for settings (`<config>/accounts`), or `None` when the
     /// platform has no config directory (per-avatar settings are then disabled).
     pub accounts_base: Option<PathBuf>,
@@ -45,8 +45,8 @@ pub(crate) struct AccountContext {
 }
 
 /// The viewer's settings store, a Bevy resource.
-#[derive(Resource)]
-pub(crate) struct ViewerSettings {
+#[derive(Debug, Resource)]
+pub struct ViewerSettings {
     /// The underlying typed store (declared defaults + global/account overrides).
     store: SettingsStore,
     /// Where the global scope is persisted (the platform config directory).
@@ -59,7 +59,7 @@ pub(crate) struct ViewerSettings {
 impl ViewerSettings {
     /// A read-only view of the store, for consumers reading their settings.
     #[must_use]
-    pub(crate) const fn store(&self) -> &SettingsStore {
+    pub const fn store(&self) -> &SettingsStore {
         &self.store
     }
 
@@ -76,7 +76,7 @@ impl ViewerSettings {
     /// (e.g. `["spacenav", "flycam"]` → `[spacenav.flycam]`), the pub(crate)
     /// entry a feature module calls from [`FromWorld`]. Pass an empty section to
     /// place the setting at the document root.
-    pub(crate) fn register_in(
+    pub fn register_in(
         &mut self,
         section: &[&str],
         name: &str,
@@ -91,7 +91,7 @@ impl ViewerSettings {
     /// tab splits, table sort orders) that is saved and restored but is not a
     /// knob anyone debugs by hand. The floater / table persistence layers call
     /// this instead of [`register_in`](Self::register_in).
-    pub(crate) fn register_hidden_in(
+    pub fn register_hidden_in(
         &mut self,
         section: &[&str],
         name: &str,
@@ -105,9 +105,9 @@ impl ViewerSettings {
 
     /// Register a runtime-only setting whose overrides are never persisted (the
     /// reference viewer's transient debug settings). The two-way binding demo
-    /// ([`crate::settings_binding`]) uses this so its scratch values write no junk
+    /// (`settings_binding`) uses this so its scratch values write no junk
     /// to the user's config.
-    pub(crate) fn register_transient(&mut self, name: &str, value: SettingValue, comment: &str) {
+    pub fn register_transient(&mut self, name: &str, value: SettingValue, comment: &str) {
         if let Err(error) = self.store.register_transient(name, value, comment) {
             warn!("settings: could not register {name}: {error}");
         }
@@ -117,8 +117,8 @@ impl ViewerSettings {
     /// [`SettingsStore::set_default`](sl_settings::SettingsStore::set_default)),
     /// logging and swallowing a (wrong-type or unregistered) error so a bad
     /// dynamic default can never abort a frame. The skin-colour bridge
-    /// ([`crate::skin_colors`]) feeds the active skin's palette in here.
-    pub(crate) fn set_default(&mut self, name: &str, value: SettingValue) {
+    /// (`skin_colors`) feeds the active skin's palette in here.
+    pub fn set_default(&mut self, name: &str, value: SettingValue) {
         if let Err(error) = self.store.set_default(name, value) {
             warn!("settings: could not set default for {name}: {error}");
         }
@@ -127,17 +127,17 @@ impl ViewerSettings {
     /// Write a value to the per-avatar [`Account`](Scope::Account) scope,
     /// logging and swallowing a (wrong-type or unregistered) error so a bad write
     /// can never abort a frame. The floater-geometry persistence
-    /// ([`crate::floater_persist`]) writes each floater's remembered rect /
+    /// (`floater_persist`) writes each floater's remembered rect /
     /// visibility here as it changes.
-    pub(crate) fn set_account(&mut self, name: &str, value: SettingValue) {
+    pub fn set_account(&mut self, name: &str, value: SettingValue) {
         self.set(Scope::Account, name, value);
     }
 
     /// Write a value to a chosen override scope, logging and swallowing a
     /// (wrong-type or unregistered) error so a bad write can never abort a
-    /// frame. The two-way widget binding ([`crate::settings_binding`]) writes a
+    /// frame. The two-way widget binding (`settings_binding`) writes a
     /// user edit here, at the binding's declared scope.
-    pub(crate) fn set(&mut self, scope: Scope, name: &str, value: SettingValue) {
+    pub fn set(&mut self, scope: Scope, name: &str, value: SettingValue) {
         if let Err(error) = self.store.set(scope, name, value) {
             warn!("settings: could not set {name}: {error}");
         }
@@ -146,8 +146,8 @@ impl ViewerSettings {
     /// Drop a setting's override in one scope, reverting it to the layer below
     /// (see [`SettingsStore::reset`](sl_settings::SettingsStore::reset)). Returns
     /// whether an override was actually present. A bound "reset to default"
-    /// control ([`crate::settings_binding`]) calls this.
-    pub(crate) fn reset(&mut self, scope: Scope, name: &str) -> bool {
+    /// control (`settings_binding`) calls this.
+    pub fn reset(&mut self, scope: Scope, name: &str) -> bool {
         self.store.reset(scope, name)
     }
 
@@ -155,16 +155,16 @@ impl ViewerSettings {
     /// login). Consumers that seed themselves from a saved *account* value wait
     /// for this, since the account overrides are not in the store until then.
     #[must_use]
-    pub(crate) const fn account_loaded(&self) -> bool {
+    pub const fn account_loaded(&self) -> bool {
         self.account_path.is_some()
     }
 
     /// The per-avatar account directory (the parent of the account
     /// `settings.toml`), once resolved at login — where a sibling per-account file
-    /// (the persistent-notification store, [`crate::notification_persist`]) lives.
+    /// (the persistent-notification store, `notification_persist`) lives.
     /// `None` until login, and when the platform has no per-avatar directory.
     #[must_use]
-    pub(crate) fn account_dir(&self) -> Option<&Path> {
+    pub fn account_dir(&self) -> Option<&Path> {
         self.account_path.as_deref().and_then(Path::parent)
     }
 
@@ -197,7 +197,7 @@ impl ViewerSettings {
 
     /// Save the global (and, once resolved, account) overrides to disk
     /// (best-effort; a failure is logged, not fatal). Called on a clean logout.
-    pub(crate) fn save(&self) {
+    pub fn save(&self) {
         if let Err(error) = self.store.save_scope(Scope::Global, &self.global_path) {
             warn!(
                 "settings: could not save {}: {error}",
@@ -218,7 +218,7 @@ impl ViewerSettings {
     /// column widths, preferences apply, list sort changes); the logout / exit
     /// path keeps the synchronous [`save`](Self::save), where a detached write
     /// racing process exit could be lost.
-    pub(crate) fn save_async(&self) {
+    pub fn save_async(&self) {
         let mut writes: Vec<(String, PathBuf)> = vec![(
             self.store.serialize_scope(Scope::Global),
             self.global_path.clone(),
@@ -243,8 +243,13 @@ impl ViewerSettings {
     /// Build a store-backed resource with no persistence paths, for unit tests
     /// that drive the store directly (e.g. the two-way binding tests) without
     /// touching the filesystem.
-    #[cfg(test)]
-    pub(crate) const fn from_store_for_test(store: SettingsStore) -> Self {
+    ///
+    /// Not `#[cfg(test)]`: the viewer's own tests build settings this way, and
+    /// a `cfg(test)` item is not compiled when a *dependent* crate runs its
+    /// tests. The `_for_test` name is the documentation — nothing in a running
+    /// viewer should call it.
+    #[must_use]
+    pub const fn from_store_for_test(store: SettingsStore) -> Self {
         Self {
             store,
             global_path: PathBuf::new(),
@@ -255,59 +260,62 @@ impl ViewerSettings {
     /// Pretend the account scope has loaded (an empty in-memory path), so a
     /// test can exercise a post-login gate ([`Self::account_loaded`], the
     /// preferences floater's account guard) without a filesystem.
-    #[cfg(test)]
-    pub(crate) fn mark_account_loaded_for_test(&mut self) {
+    ///
+    /// Not `#[cfg(test)]`: the viewer's own tests build settings this way, and
+    /// a `cfg(test)` item is not compiled when a *dependent* crate runs its
+    /// tests. The `_for_test` name is the documentation — nothing in a running
+    /// viewer should call it.
+    pub fn mark_account_loaded_for_test(&mut self) {
         self.account_path = Some(PathBuf::new());
     }
 
-    /// Build the store, register every feature's settings, and load any saved
-    /// global overrides. The account scope loads later, at login
-    /// ([`load_account_settings`]). Split out of [`FromWorld`] so pre-app code
-    /// (the login-request construction in `run_viewer`, which needs the stored
-    /// start location before the Bevy [`World`] exists) reads the same store.
-    pub(crate) fn load() -> Self {
-        let mut settings = Self {
+    /// Build the store with no registrations and no file load — the shared
+    /// starting point for [`load_with`](Self::load_with) and for a test that
+    /// wants to inspect what a given set of registrars declares.
+    fn empty(global_path: PathBuf) -> Self {
+        Self {
             store: SettingsStore::new(),
-            global_path: crate::paths::global_settings_file(),
+            global_path,
             account_path: None,
-        };
-        crate::spacenav::register_settings(&mut settings);
-        crate::minimap::register_settings(&mut settings);
-        crate::double_click_teleport::register_settings(&mut settings);
-        crate::parcel_borders::register_settings(&mut settings);
-        crate::world_map::register_settings(&mut settings);
-        crate::search::register_settings(&mut settings);
-        crate::tonemap::register_settings(&mut settings);
-        crate::glow::register_settings(&mut settings);
-        crate::exposure::register_settings(&mut settings);
-        crate::snapshot_floater::register_settings(&mut settings);
-        crate::i18n::register_settings(&mut settings);
-        crate::avatars::register_settings(&mut settings);
-        crate::hover_text::register_settings(&mut settings);
-        crate::hover_tooltip::register_settings(&mut settings);
-        crate::preferences_camera_move::register_settings(&mut settings);
-        crate::preferences_chat::register_settings(&mut settings);
-        crate::preferences_colors_skins::register_settings(&mut settings);
-        crate::preferences_general::register_settings(&mut settings);
-        crate::preferences_graphics::register_settings(&mut settings);
-        crate::preferences_network_cache::register_settings(&mut settings);
-        crate::presence::register_settings(&mut settings);
-        crate::auto_reject::register_settings(&mut settings);
-        crate::skin_colors::register_settings(&mut settings);
-        crate::session::register_settings(&mut settings);
-        crate::render_priority::register_settings(&mut settings);
-        crate::particles::register_settings(&mut settings);
-        crate::ui_sounds::register_settings(&mut settings);
-        crate::audio::register_settings(&mut settings);
-        crate::debug_settings::register_settings(&mut settings);
+        }
+    }
+
+    /// Build the store, run every `registrars` entry, and load any saved global
+    /// overrides. The account scope loads later, at login
+    /// ([`load_account_settings`]).
+    ///
+    /// The registrar list is supplied by the caller rather than named here,
+    /// because this store cannot know the features that use it without
+    /// depending on all of them. The viewer passes its full list; see
+    /// `REGISTRARS` in the binary crate.
+    ///
+    /// Not a [`FromWorld`] initializer, because pre-app code (the login-request
+    /// construction in `run_viewer`, which needs the stored start location
+    /// before the Bevy [`World`] exists) reads the same store.
+    pub fn load_with(registrars: &[fn(&mut Self)]) -> Self {
+        let mut settings = Self::empty(sl_viewer_platform::paths::global_settings_file());
+        settings.run_registrars(registrars);
         settings.load_global();
         settings
     }
-}
-impl FromWorld for ViewerSettings {
-    /// [`ViewerSettings::load`], as the resource initialiser.
-    fn from_world(_world: &mut World) -> Self {
-        Self::load()
+
+    /// Run each registrar against this store, in the order given.
+    pub fn run_registrars(&mut self, registrars: &[fn(&mut Self)]) {
+        for register in registrars {
+            register(self);
+        }
+    }
+
+    /// A store with `registrars` applied and nothing loaded from disk, so a
+    /// test can compare the declared surface without touching the filesystem.
+    /// Not `#[cfg(test)]`: the viewer's own tests build settings this way,
+    /// and a `cfg(test)` item is not compiled when a *dependent* crate runs
+    /// its tests. The `_for_test` name is the documentation — nothing in a
+    /// running viewer should call it.
+    pub fn declared_for_test(registrars: &[fn(&mut Self)]) -> Self {
+        let mut settings = Self::empty(PathBuf::new());
+        settings.run_registrars(registrars);
+        settings
     }
 }
 
@@ -315,7 +323,7 @@ impl FromWorld for ViewerSettings {
 /// directory — keyed by grid + avatar name, renaming it in place if the UUID
 /// shows a name change — and load its account-scope settings. Runs every frame
 /// but does its work exactly once (guarded on `account_path` being unset).
-pub(crate) fn load_account_settings(
+pub fn load_account_settings(
     mut settings: ResMut<ViewerSettings>,
     context: Res<AccountContext>,
     identity: Res<SlIdentity>,

@@ -8524,6 +8524,7 @@ dependencies = [
  "sl-viewer-kit",
  "sl-viewer-notifications",
  "sl-viewer-platform",
+ "sl-viewer-settings",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -9026,6 +9027,20 @@ dependencies = [
  "regex",
  "sl-audio",
  "sl-client-bevy",
+ "tracing",
+]
+
+[[package]]
+name = "sl-viewer-settings"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "fs-err",
+ "pretty_assertions",
+ "sl-account-dirs",
+ "sl-client-bevy",
+ "sl-settings",
+ "sl-viewer-platform",
  "tracing",
 ]
 
