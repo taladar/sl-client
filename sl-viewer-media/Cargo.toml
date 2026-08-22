@@ -1,0 +1,38 @@
+[package]
+name = "sl-viewer-media"
+description = "Media in the Second Life / OpenSim viewer: the CEF and GStreamer backends behind one boundary, plus the browser widget and browser-hosted login"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "media", "browser"]
+categories = ["multimedia", "game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+clap = { workspace = true, features = ["cargo"] }
+crossbeam-channel = { workspace = true }
+fs-err = { workspace = true }
+reqwest = { workspace = true, features = ["blocking", "rustls-tls"] }
+sl-audio = { path = "../sl-audio", version = "0.1.0" }
+sl-cef = { path = "../sl-cef", version = "0.1.0" }
+sl-client-bevy = { workspace = true }
+sl-gst = { path = "../sl-gst", version = "0.1.0" }
+sl-media = { workspace = true }
+sl-viewer-kit = { workspace = true }
+sl-viewer-platform = { workspace = true }
+sl-viewer-ui-core = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

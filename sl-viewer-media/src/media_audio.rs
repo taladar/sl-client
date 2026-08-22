@@ -5,7 +5,7 @@
 //! their own thread and their own clock. This module is the piece that joins
 //! those to the one mixer:
 //!
-//! - [`MixerSink`] implements [`sl_media::AudioSink`] — the object each engine
+//! - `MixerSink` implements [`sl_media::AudioSink`] — the object each engine
 //!   pushes samples into, on whatever thread it produces on. It normalises the
 //!   PCM to stereo and hands it to a mixer input; it holds no mixer or Bevy
 //!   state, only a realtime-safe channel, so it is safe to touch from CEF's
@@ -15,7 +15,7 @@
 //!   (a fresh stream, or a mid-page rate change), closes it when the source
 //!   stops, and — for a prim surface — keeps its spatial position on the prim.
 //!
-//! The two are linked by a shared [`SinkControl`]: the engine thread writes a
+//! The two are linked by a shared `SinkControl`: the engine thread writes a
 //! *pending format* and pushes PCM into a *producer* slot; the viewer thread
 //! reads the pending format, opens the mixer input, and drops the resulting
 //! producer into the slot. Because the resampling channel's input rate is fixed
@@ -37,9 +37,9 @@ struct PcmFormat {
     sample_rate: u32,
 }
 
-/// State shared between a media source's audio thread (through [`MixerSink`]) and
+/// State shared between a media source's audio thread (through `MixerSink`) and
 /// the viewer thread (through [`MixerStream`]).
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct SinkControl {
     /// The mixer input the source pushes into; `None` before the viewer opens it
     /// and during the brief reopen window on a format change (pushes drop then).
@@ -129,8 +129,9 @@ impl AudioSink for MixerSink {
 /// prim. Create it with [`MixerStream::new`], hand the returned [`AudioSink`] to
 /// the media surface / stream player, and call [`service`](Self::service) each
 /// frame with the mixer.
-pub(crate) struct MixerStream {
-    /// State shared with the source's [`MixerSink`].
+#[derive(Debug)]
+pub struct MixerStream {
+    /// State shared with the source's `MixerSink`.
     control: Arc<Mutex<SinkControl>>,
     /// The bus the input plays on (music for the parcel stream, media for
     /// video / page audio).
@@ -151,7 +152,8 @@ impl MixerStream {
     /// Create a mixer input on `bus` (spatial for a prim, 2-D otherwise) and the
     /// [`AudioSink`] to hand the source. The input is not opened until the source
     /// announces a format (see [`service`](Self::service)).
-    pub(crate) fn new(bus: Bus, spatial: bool) -> (Self, Arc<dyn AudioSink>) {
+    #[must_use]
+    pub fn new(bus: Bus, spatial: bool) -> (Self, Arc<dyn AudioSink>) {
         let control = Arc::new(Mutex::new(SinkControl::default()));
         let sink: Arc<dyn AudioSink> = Arc::new(MixerSink {
             control: Arc::clone(&control),
@@ -171,7 +173,7 @@ impl MixerStream {
 
     /// Update a spatial input's world position (a no-op for a 2-D input). Takes
     /// effect on the next [`service`](Self::service).
-    pub(crate) const fn set_position(&mut self, position: Vec3) {
+    pub const fn set_position(&mut self, position: Vec3) {
         if self.spatial {
             self.position = position.to_array();
         }
@@ -180,7 +182,7 @@ impl MixerStream {
     /// Reconcile the mixer input with the source: (re)open it for a newly
     /// announced format, close it when the source stopped, and keep a spatial
     /// input on its prim. Call once per frame with the mixer.
-    pub(crate) fn service(&mut self, mixer: &mut Mixer) {
+    pub fn service(&mut self, mixer: &mut Mixer) {
         if self.closed {
             return;
         }
@@ -222,7 +224,7 @@ impl MixerStream {
     }
 
     /// Close the mixer input for good (the surface / stream is going away).
-    pub(crate) fn close(&mut self, mixer: &mut Mixer) {
+    pub fn close(&mut self, mixer: &mut Mixer) {
         if let Some(id) = self.stream_id.take() {
             mixer.close_stream(id);
         }

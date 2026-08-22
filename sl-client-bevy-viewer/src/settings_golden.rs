@@ -139,8 +139,31 @@ mod test {
                     line.starts_with("pub(crate) fn register_settings(")
                         || line.starts_with("pub fn register_settings(")
                 });
-                if defines && !listed.contains(&format!("crate::{stem}::register_settings")) {
-                    missing.push(stem.to_owned());
+                // A single-module crate puts its module in `lib.rs`, so the
+                // file stem is not the name the viewer refers to it by. The
+                // alias is a choice, so accept either the crate name or its
+                // last segment: `sl-viewer-spacenav` is aliased `spacenav`.
+                let names: Vec<String> = if stem == "lib" {
+                    match path
+                        .parent()
+                        .and_then(std::path::Path::parent)
+                        .and_then(|dir| dir.file_name())
+                        .and_then(|name| name.to_str())
+                    {
+                        Some(dir) => vec![
+                            dir.replace('-', "_"),
+                            dir.rsplit('-').next().unwrap_or(dir).to_owned(),
+                        ],
+                        None => continue,
+                    }
+                } else {
+                    vec![stem.to_owned()]
+                };
+                let wired = names
+                    .iter()
+                    .any(|name| listed.contains(&format!("crate::{name}::register_settings")));
+                if defines && !wired {
+                    missing.push(names.first().cloned().unwrap_or_default());
                 }
             }
         }

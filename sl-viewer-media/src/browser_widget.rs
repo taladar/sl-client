@@ -6,7 +6,7 @@
 //!
 //! Interaction model (the reference's):
 //! - **Click to focus**: a press on the view focuses it (`bevy_input_focus`),
-//!   which suppresses world keys via [`crate::input_context`], and forwards
+//!   which suppresses world keys via `input_context`, and forwards
 //!   the click to the page.
 //! - **Keys while focused** arrive as `FocusedInput<KeyboardInput>` on the
 //!   node: navigation keys travel as portable VK codes
@@ -38,29 +38,29 @@ const MIN_VIEW_PIXELS: f32 = 8.0;
 /// One embedded browser view. Spawn with [`spawn_browser_view`]; the systems
 /// here create its engine surface once the node has a laid-out size.
 #[derive(Component, Debug)]
-pub(crate) struct BrowserView {
+pub struct BrowserView {
     /// The URL the surface loads on creation.
-    pub(crate) initial_url: String,
+    pub initial_url: String,
     /// Whether the surface runs in an isolated request context (in-world /
     /// untrusted content) or the shared one (trusted UI panels, so logins
     /// persist).
-    pub(crate) isolated: bool,
+    pub isolated: bool,
     /// The live engine surface, once created.
-    pub(crate) surface: Option<MediaSurfaceId>,
+    pub surface: Option<MediaSurfaceId>,
 }
 
 /// What [`spawn_browser_view`] needs to know.
 #[derive(Debug, Clone)]
-pub(crate) struct BrowserViewSpec {
+pub struct BrowserViewSpec {
     /// The URL to load.
-    pub(crate) initial_url: String,
+    pub initial_url: String,
     /// Isolated (untrusted) or shared (trusted UI) request context.
-    pub(crate) isolated: bool,
+    pub isolated: bool,
     /// The tab order slot of the view.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// `None`: the view stretches to fill its parent (`flex_grow`). `Some`: a
     /// fixed height in logical pixels (width still fills).
-    pub(crate) fixed_height: Option<f32>,
+    pub fixed_height: Option<f32>,
 }
 
 /// Entity → surface, mirrored into a `Send` resource so the despawn-cleanup
@@ -74,7 +74,8 @@ struct BrowserViewIndex(std::collections::HashMap<Entity, MediaSurfaceId>);
 struct FocusedBrowserView(Option<Entity>);
 
 /// The embedded-browser widget plugin.
-pub(crate) struct BrowserWidgetPlugin;
+#[derive(Debug)]
+pub struct BrowserWidgetPlugin;
 
 impl Plugin for BrowserWidgetPlugin {
     fn build(&self, app: &mut App) {
@@ -97,7 +98,7 @@ impl Plugin for BrowserWidgetPlugin {
 /// Spawn an embedded browser view under `parent`. The engine surface is
 /// created lazily once layout gives the node a size; until then (or with the
 /// engine disabled) the view is a dark placeholder.
-pub(crate) fn spawn_browser_view(
+pub fn spawn_browser_view(
     commands: &mut Commands,
     parent: Entity,
     spec: &BrowserViewSpec,
@@ -155,7 +156,8 @@ fn surface_pixel(relative: &RelativeCursorPosition, size: UVec2) -> Option<(i32,
 }
 
 /// A finite `f32` pixel coordinate as `i32`, saturating.
-pub(crate) fn float_to_pixel(value: f32) -> i32 {
+#[must_use]
+pub fn float_to_pixel(value: f32) -> i32 {
     if value >= 2_147_483_000.0 {
         i32::MAX
     } else if value <= -2_147_483_000.0 {
@@ -468,10 +470,10 @@ fn close_removed_browser_views(
 /// The offline gallery / test specimen: a bordered, fixed-size browser view
 /// on a data URL (no network), or the dark placeholder when the media engine
 /// is not running.
-pub(crate) fn spawn_browser_specimen(
+pub fn spawn_browser_specimen(
     commands: &mut Commands,
     parent: Entity,
-    cx: crate::ui_element::ElementCx,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
 ) -> Entity {
     let frame = commands
         .spawn((
@@ -479,7 +481,7 @@ pub(crate) fn spawn_browser_specimen(
                 width: Val::Px(480.0),
                 height: Val::Px(320.0),
                 border: UiRect::all(Val::Px(1.0)),
-                ..crate::ui::column(Val::Px(0.0))
+                ..sl_viewer_ui_core::ui::column(Val::Px(0.0))
             },
             BorderColor::all(Color::srgb(0.4, 0.4, 0.45)),
             Name::new("browser-view-specimen"),

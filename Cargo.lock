@@ -8490,7 +8490,6 @@ dependencies = [
  "bytes",
  "clap",
  "crossbeam-channel",
- "evdev",
  "fluent",
  "fluent_content",
  "fs-err",
@@ -8511,7 +8510,6 @@ dependencies = [
  "sl-gst",
  "sl-l10n",
  "sl-map-apis",
- "sl-media",
  "sl-mesh",
  "sl-notecard",
  "sl-proto",
@@ -8521,9 +8519,11 @@ dependencies = [
  "sl-texture",
  "sl-types",
  "sl-viewer-kit",
+ "sl-viewer-media",
  "sl-viewer-notifications",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-spacenav",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
@@ -9010,6 +9010,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-media"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "clap",
+ "crossbeam-channel",
+ "fs-err",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "sl-audio",
+ "sl-cef",
+ "sl-client-bevy",
+ "sl-gst",
+ "sl-media",
+ "sl-viewer-kit",
+ "sl-viewer-platform",
+ "sl-viewer-ui-core",
+ "url",
+]
+
+[[package]]
 name = "sl-viewer-notifications"
 version = "0.1.0"
 dependencies = [
@@ -9043,6 +9064,18 @@ dependencies = [
  "sl-client-bevy",
  "sl-settings",
  "sl-viewer-platform",
+ "tracing",
+]
+
+[[package]]
+name = "sl-viewer-spacenav"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "evdev",
+ "pretty_assertions",
+ "sl-settings",
+ "sl-viewer-settings",
  "tracing",
 ]
 

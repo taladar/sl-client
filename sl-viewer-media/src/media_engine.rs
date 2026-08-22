@@ -5,7 +5,7 @@
 //! *surface* per page / stream, pumped once per frame on the main thread,
 //! each surface's BGRA frames mirrored into a Bevy [`Image`] that UI widgets
 //! ([`crate::browser_widget`]) and in-world media faces
-//! ([`crate::media_prim`]) sample. Which engine serves a URL is decided by
+//! (`media_prim`) sample. Which engine serves a URL is decided by
 //! `sl_media::classify_url` (the `mime_types.xml` dispatch); the mirror
 //! path is engine-agnostic.
 //!
@@ -32,32 +32,32 @@ use sl_audio::{Bus, Mixer};
 use sl_cef::chromium::CefMediaBackend;
 use sl_cef::{BackendConfig, MediaBackend, SurfaceConfig, SurfaceStatus};
 
-use crate::face_material::FaceMaterial;
 use crate::media_audio::MixerStream;
+use sl_viewer_kit::face_material::FaceMaterial;
 
 /// System sets ordering the media engine's frame work: consumers that create
 /// or drive surfaces run **after** [`MediaEngineSystems::Pump`], which is when
 /// paints and status changes land.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum MediaEngineSystems {
+pub enum MediaEngineSystems {
     /// Pump CEF's message loop and mirror new frames / status snapshots.
     Pump,
 }
 
 /// A handle to one live media surface in [`MediaSurfaces`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct MediaSurfaceId(u64);
+pub struct MediaSurfaceId(u64);
 
 impl MediaSurfaceId {
     /// The sentinel a consumer holds when the engine refused (or has no)
     /// surface, so creation is not retried every frame. Never present in the
     /// surface table.
-    pub(crate) const PLACEHOLDER: Self = Self(u64::MAX);
+    pub const PLACEHOLDER: Self = Self(u64::MAX);
 }
 
 /// Which engine a surface runs on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum MediaEngineKind {
+pub enum MediaEngineKind {
     /// The web browser engine (CEF).
     #[default]
     Web,
@@ -68,7 +68,7 @@ pub(crate) enum MediaEngineKind {
 /// The global engines (non-send resource): each `None` until initialised,
 /// and again after shutdown or a failed initialisation.
 #[derive(Default)]
-pub(crate) struct MediaEngine {
+pub struct MediaEngine {
     /// The web (CEF) backend, when live.
     backend: Option<Box<dyn MediaBackend>>,
     /// The video / audio playback (GStreamer) backend, when live.
@@ -78,10 +78,22 @@ pub(crate) struct MediaEngine {
     initialized: bool,
     /// Whether the web engine is enabled at all (`--disable-web-media`
     /// clears it).
-    pub(crate) enabled: bool,
+    pub enabled: bool,
     /// Whether the video engine is enabled at all (`--disable-video-media`
     /// clears it).
-    pub(crate) video_enabled: bool,
+    pub video_enabled: bool,
+}
+
+/// Hand-written because the backends are trait objects, which cannot derive
+/// [`Debug`]. What is worth reporting is which of them are live — the innards
+/// belong to CEF and GStreamer.
+impl core::fmt::Debug for MediaEngine {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MediaEngine")
+            .field("backend", &self.backend.is_some())
+            .field("video_backend", &self.video_backend.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 impl MediaEngine {
@@ -94,7 +106,7 @@ impl MediaEngine {
     /// # Errors
     /// Propagates a [`sl_cef::MediaError`] from the engine when the shared
     /// cookie store rejects the cookie.
-    pub(crate) fn set_shared_cookie(
+    pub fn set_shared_cookie(
         &mut self,
         cookie: &sl_cef::SharedCookie,
     ) -> Result<(), sl_cef::MediaError> {
@@ -110,7 +122,7 @@ impl MediaEngine {
     ///
     /// # Errors
     /// Propagates a [`sl_cef::MediaError`] from the engine.
-    pub(crate) fn clear_shared_cookies(&mut self) -> Result<(), sl_cef::MediaError> {
+    pub fn clear_shared_cookies(&mut self) -> Result<(), sl_cef::MediaError> {
         match self.backend.as_mut() {
             Some(backend) => backend.clear_shared_cookies(),
             None => Ok(()),
@@ -120,24 +132,24 @@ impl MediaEngine {
 
 /// One live surface: the engine-side handle plus the Bevy image its frames
 /// are mirrored into.
-pub(crate) struct MediaSlot {
+pub struct MediaSlot {
     /// Which engine the surface runs on (decides the control set the UI
     /// offers: navigation for web, transport for video).
-    pub(crate) kind: MediaEngineKind,
+    pub kind: MediaEngineKind,
     /// The engine surface.
-    pub(crate) surface: Box<dyn sl_cef::MediaSurface>,
+    pub surface: Box<dyn sl_cef::MediaSurface>,
     /// The Bevy image the newest frame lives in (BGRA, sRGB).
-    pub(crate) image: Handle<Image>,
+    pub image: Handle<Image>,
     /// The newest status snapshot (refreshed each pump).
-    pub(crate) status: SurfaceStatus,
+    pub status: SurfaceStatus,
     /// The current image size in pixels.
-    pub(crate) size: UVec2,
+    pub size: UVec2,
     /// Materials sampling [`image`](Self::image) that must be touched when the
     /// frame changes: a `StandardMaterial`'s bind group caches the texture
     /// view and nothing watches `AssetEvent<Image>` for materials (see
-    /// `crate::textures::PrimTextures::materials`), so each new frame marks
+    /// `textures::PrimTextures::materials`), so each new frame marks
     /// these changed.
-    pub(crate) touch_materials: Vec<Handle<FaceMaterial>>,
+    pub touch_materials: Vec<Handle<FaceMaterial>>,
     /// The last frame generation mirrored into [`image`](Self::image).
     seen_frame: u64,
     /// Whether a close was requested; the slot is pruned once the engine
@@ -146,12 +158,23 @@ pub(crate) struct MediaSlot {
     /// The surface's bridge into the shared mixer: the surface pushes its PCM
     /// here (media bus — spatial for a prim, 2-D for a UI panel) instead of
     /// opening its own audio device. `None` only when the mixer never opened.
-    pub(crate) audio: Option<MixerStream>,
+    pub audio: Option<MixerStream>,
+}
+
+/// Hand-written because the surface is a trait object, which cannot derive
+/// [`Debug`]. The kind and the image handle are the identifying parts.
+impl core::fmt::Debug for MediaSlot {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("MediaSlot")
+            .field("kind", &self.kind)
+            .field("image", &self.image)
+            .finish_non_exhaustive()
+    }
 }
 
 /// The table of live surfaces (non-send resource).
-#[derive(Default)]
-pub(crate) struct MediaSurfaces {
+#[derive(Debug, Default)]
+pub struct MediaSurfaces {
     /// The live slots by id.
     slots: HashMap<MediaSurfaceId, MediaSlot>,
     /// The next id to hand out.
@@ -162,7 +185,7 @@ impl MediaSurfaces {
     /// Creates a surface through `engine`'s web (CEF) backend, allocating its
     /// mirror [`Image`] (a 1×1 placeholder until the first paint arrives).
     /// Returns `None` when the engine is not live or refuses the surface.
-    pub(crate) fn create(
+    pub fn create(
         &mut self,
         engine: &mut MediaEngine,
         images: &mut Assets<Image>,
@@ -178,7 +201,7 @@ impl MediaSurfaces {
     /// its shared-mixer audio bridge (`spatial` = positional at a prim, false =
     /// 2-D for a UI panel). Returns `None` when that engine is not live or
     /// refuses the surface.
-    pub(crate) fn create_kind(
+    pub fn create_kind(
         &mut self,
         engine: &mut MediaEngine,
         images: &mut Assets<Image>,
@@ -222,18 +245,19 @@ impl MediaSurfaces {
     }
 
     /// The slot for `id`, if live.
-    pub(crate) fn get(&self, id: MediaSurfaceId) -> Option<&MediaSlot> {
+    #[must_use]
+    pub fn get(&self, id: MediaSurfaceId) -> Option<&MediaSlot> {
         self.slots.get(&id)
     }
 
     /// The mutable slot for `id`, if live.
-    pub(crate) fn get_mut(&mut self, id: MediaSurfaceId) -> Option<&mut MediaSlot> {
+    pub fn get_mut(&mut self, id: MediaSurfaceId) -> Option<&mut MediaSlot> {
         self.slots.get_mut(&id)
     }
 
     /// Requests the surface's close; the slot is pruned once the engine
     /// confirms it.
-    pub(crate) fn close(&mut self, id: MediaSurfaceId) {
+    pub fn close(&mut self, id: MediaSurfaceId) {
         if let Some(slot) = self.slots.get_mut(&id) {
             slot.closing = true;
             slot.surface.request_close();
@@ -260,11 +284,12 @@ fn placeholder_image() -> Image {
 /// `video_enabled: false` (from `--disable-video-media`) register the
 /// resources but never initialise that engine, so its consumers see a
 /// permanently empty surface table.
-pub(crate) struct MediaEnginePlugin {
+#[derive(Debug)]
+pub struct MediaEnginePlugin {
     /// Whether the web (CEF) engine may initialise at all.
-    pub(crate) enabled: bool,
+    pub enabled: bool,
     /// Whether the video (GStreamer) engine may initialise at all.
-    pub(crate) video_enabled: bool,
+    pub video_enabled: bool,
 }
 
 impl Plugin for MediaEnginePlugin {
@@ -318,7 +343,7 @@ fn initialize_media_engine(mut engine: NonSendMut<MediaEngine>) {
         );
         return;
     }
-    let cache_dir = crate::paths::media_engine_cache_dir()
+    let cache_dir = sl_viewer_platform::paths::media_engine_cache_dir()
         .unwrap_or_else(|| PathBuf::from(".sl-viewer-cef-cache"));
     let config = BackendConfig {
         cache_dir,

@@ -2,8 +2,8 @@
 //! URL failed to play.
 //!
 //! Both media engines run on GStreamer (`sl-gst`): the parcel radio stream
-//! ([`crate::parcel_audio`]) and media-on-a-prim video
-//! ([`crate::media_prim`]). When a stream fails at its HTTP **source**,
+//! (`parcel_audio`) and media-on-a-prim video
+//! (`media_prim`). When a stream fails at its HTTP **source**,
 //! GStreamer's `souphttpsrc` swallows the underlying DNS / TCP / TLS /
 //! HTTP-status cause — it logs it only at its own debug level and hands the
 //! pipeline a bare *"Internal data stream error."* / flow-return `-5`. So the
@@ -15,7 +15,7 @@
 //! generic HTTP-source failure, [`MediaDiagnostics::request`] probes the URL
 //! ourselves on a background [`IoTaskPool`] task — resolve, connect, TLS,
 //! GET — and classifies the failure into a readable sentence
-//! ([`diagnose_stream_url`]). Consumers read it back with
+//! (`diagnose_stream_url`). Consumers read it back with
 //! [`MediaDiagnostics::reason`] and show it in place of the generic error.
 //! Results are cached by URL, so a failing stream is probed once, not per
 //! frame.
@@ -45,6 +45,7 @@ const MAX_DIAGNOSES: usize = 64;
 /// One URL's diagnosis: an in-flight probe, or its finished result (`Some`
 /// reason, or `None` when the URL turned out to be reachable and the failure
 /// is downstream of the network).
+#[derive(Debug)]
 enum Diagnosis {
     /// The probe is still running on a background task.
     Pending(Task<Option<String>>),
@@ -54,8 +55,8 @@ enum Diagnosis {
 }
 
 /// The viewer-wide cache of media-stream failure diagnoses, keyed by URL.
-#[derive(Resource, Default)]
-pub(crate) struct MediaDiagnostics {
+#[derive(Debug, Resource, Default)]
+pub struct MediaDiagnostics {
     /// The per-URL diagnosis (probe in flight, or its result).
     entries: HashMap<String, Diagnosis>,
 }
@@ -64,7 +65,7 @@ impl MediaDiagnostics {
     /// Ensure a diagnostic probe exists for a failed stream `url` (idempotent —
     /// a URL already probed or in flight is left alone). Called by a consumer
     /// the moment a stream reports a generic HTTP-source failure.
-    pub(crate) fn request(&mut self, url: &str) {
+    pub fn request(&mut self, url: &str) {
         if self.entries.contains_key(url) || self.entries.len() >= MAX_DIAGNOSES {
             return;
         }
@@ -78,7 +79,8 @@ impl MediaDiagnostics {
     /// The precise failure reason for `url`, once its probe has finished and
     /// found a network cause. [`None`] while the probe is in flight, or when
     /// the URL was reachable (so the caller keeps GStreamer's generic message).
-    pub(crate) fn reason(&self, url: &str) -> Option<&str> {
+    #[must_use]
+    pub fn reason(&self, url: &str) -> Option<&str> {
         match self.entries.get(url) {
             Some(Diagnosis::Done(Some(reason))) => Some(reason.as_str()),
             _pending_or_none => None,
@@ -101,7 +103,8 @@ impl MediaDiagnostics {
 }
 
 /// Registers the [`MediaDiagnostics`] cache and its per-frame probe pump.
-pub(crate) struct MediaDiagnosticsPlugin;
+#[derive(Debug)]
+pub struct MediaDiagnosticsPlugin;
 
 impl Plugin for MediaDiagnosticsPlugin {
     fn build(&self, app: &mut App) {

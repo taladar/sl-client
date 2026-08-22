@@ -24,9 +24,9 @@
 //! memory. The session is cleared at two points so the auth data does not
 //! linger on disk:
 //!
-//! - On a **clean exit** ([`clear_on_exit`]) — the common case, so the store is
+//! - On a **clean exit** (`clear_on_exit`) — the common case, so the store is
 //!   empty after a normal logout / quit.
-//! - Before **each login injects** its cookie ([`apply_web_auth`]) — so a login
+//! - Before **each login injects** its cookie (`apply_web_auth`) — so a login
 //!   is always authoritative: it self-heals a session orphaned by a crash (which
 //!   writes no `AppExit`, so the exit hook never ran) and covers a future
 //!   in-process avatar switch.
@@ -46,6 +46,7 @@ use sl_client_bevy::SlIdentity;
 use crate::media_engine::{MediaEngine, MediaEngineSystems};
 
 /// How the login-time OpenID token POST is progressing.
+#[derive(Debug)]
 enum WebAuthPhase {
     /// Waiting for the login response's OpenID fields (or disabled).
     Idle,
@@ -62,8 +63,8 @@ enum WebAuthPhase {
 }
 
 /// The web auto-login state (a resource, one per session).
-#[derive(Resource)]
-pub(crate) struct WebAuth {
+#[derive(Debug, Resource)]
+pub struct WebAuth {
     /// Whether the auto-login runs at all (`--no-web-auth` / web engine off
     /// clear it).
     enabled: bool,
@@ -72,9 +73,10 @@ pub(crate) struct WebAuth {
 }
 
 /// The Second Life website auto-login plugin.
-pub(crate) struct WebAuthPlugin {
+#[derive(Debug)]
+pub struct WebAuthPlugin {
     /// Whether the auto-login is enabled this session.
-    pub(crate) enabled: bool,
+    pub enabled: bool,
 }
 
 impl Plugin for WebAuthPlugin {

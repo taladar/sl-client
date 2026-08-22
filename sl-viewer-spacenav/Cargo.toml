@@ -1,0 +1,37 @@
+[package]
+name = "sl-viewer-spacenav"
+description = "SpaceNavigator / SpaceMouse 6-DOF input for the Second Life / OpenSim viewer's flycam"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "input", "spacenav"]
+categories = ["hardware-support", "game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[features]
+# Read a real 3Dconnexion device. Off by default here and turned on by the
+# viewer, so a build that does not want an `evdev` dependency simply does not
+# ask for it; the `SpacenavInput` stub keeps consumers `cfg`-free either way.
+default = []
+spacenav = ["dep:evdev"]
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+# Linux-only device read; the cross-platform path is a separate roadmap task.
+evdev = { version = "0.13.2", optional = true }
+sl-settings = { workspace = true }
+sl-viewer-settings = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

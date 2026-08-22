@@ -112,6 +112,12 @@ Landed so far:
   includes crate-local; `.gitattributes` repathed with it. The bundle-content
   tests (Polish `few`/`many`, Arabic `zero`/`two`) moved to the viewer, which
   owns the shipped `.ftl` files.
+- **7** — `sl-viewer-media` (6 modules, 2.2k lines: the CEF and GStreamer
+  backends behind one boundary, the browser widget, the browser-hosted login)
+  and `sl-viewer-spacenav` (852 lines). Both sets were already closed — no
+  upward references at all, the first extraction needing no de-cycling. The
+  `spacenav` feature moves with its crate and the viewer forwards it, so the
+  binary no longer declares `evdev` at all; `sl-media` left with the backends.
 
 ## Remaining sequence
 

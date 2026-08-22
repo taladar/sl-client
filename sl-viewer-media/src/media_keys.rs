@@ -19,7 +19,8 @@ use sl_cef::vk;
     clippy::too_many_lines,
     reason = "a keyboard has this many keys; splitting the table would only obscure it"
 )]
-pub(crate) const fn vk_for_key_code(code: KeyCode) -> Option<i32> {
+#[must_use]
+pub const fn vk_for_key_code(code: KeyCode) -> Option<i32> {
     Some(match code {
         KeyCode::Backspace => vk::BACK,
         KeyCode::Tab => vk::TAB,
@@ -125,7 +126,8 @@ pub(crate) const fn vk_for_key_code(code: KeyCode) -> Option<i32> {
 }
 
 /// The current modifier state as the engine's portable [`sl_cef::Modifiers`].
-pub(crate) fn current_modifiers(
+#[must_use]
+pub fn current_modifiers(
     keyboard: &bevy::input::ButtonInput<KeyCode>,
     mouse: &bevy::input::ButtonInput<bevy::input::mouse::MouseButton>,
 ) -> sl_cef::Modifiers {
@@ -140,7 +142,7 @@ pub(crate) fn current_modifiers(
 /// Whether a committed text string is worth sending to a page as character
 /// input: non-empty and free of control characters (Enter / Backspace / Tab
 /// travel as key events, not text).
-pub(crate) fn is_printable_text(text: &str) -> bool {
+pub fn is_printable_text(text: &str) -> bool {
     !text.is_empty() && !text.chars().any(char::is_control)
 }
 

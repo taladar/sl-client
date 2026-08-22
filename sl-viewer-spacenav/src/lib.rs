@@ -3,7 +3,7 @@
 //! flycam is off — onto the **avatar** (`viewer-input-spacenav-avatar-motion`):
 //! push forward / back walks, twist turns, and lift / press vertically flies up /
 //! down (the same intent PageUp / PageDown express). See [`avatar_nav_drive`] and
-//! its consumer [`crate::movement`].
+//! its consumer `movement`.
 //!
 //! A 3Dconnexion SpaceNavigator / SpaceMouse reports six self-centring analogue
 //! axes — three translation, three rotation. This module reads them off the Linux
@@ -11,7 +11,7 @@
 //! on other platforms / builds), **normalises** each to `[-1, 1]`, maps them into
 //! the reference viewer's six flycam *functions* (forward / strafe / up / roll /
 //! pitch / yaw, in that index order), and publishes them as [`SpacenavInput`].
-//! [`crate::camera::drive_flycam`] then applies the reference's per-axis
+//! `camera::drive_flycam` then applies the reference's per-axis
 //! **dead-zone**, **scale** and **feathering** ([`FlycamAxisSettings`], the
 //! `Flycam*` settings) exactly as `LLViewerJoystick::moveFlycam` does, so the feel
 //! matches Firestorm and a user's own `FlycamAxisScale*` values port straight over.
@@ -31,7 +31,7 @@
 use bevy::prelude::*;
 use sl_settings::SettingValue;
 
-use crate::settings::ViewerSettings;
+use sl_viewer_settings::ViewerSettings;
 
 /// The reference **SpaceNavigator-on-Linux** default per-axis scales, in
 /// flycam-function order `[forward, strafe, up, roll, pitch, yaw]`
@@ -78,27 +78,27 @@ const DEFAULT_AUTO_LEVELING: bool = true;
 /// **before** the dead-zone / scale / feathering the camera applies. Zero when no
 /// device is connected. Always present, so consumers need no `cfg`.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct SpacenavInput {
+pub struct SpacenavInput {
     /// The normalised axes in flycam-function order.
-    pub(crate) axes: [f32; 6],
+    pub axes: [f32; 6],
     /// Set for the one frame the device's first button is pressed — toggles flycam.
-    pub(crate) toggle_flycam: bool,
+    pub toggle_flycam: bool,
 }
 
 /// The per-axis dead-zone / scale plus feathering the flycam applies to the raw
 /// [`SpacenavInput::axes`], refreshed from [`ViewerSettings`] — the reference's
 /// `FlycamAxisDeadZone*` / `FlycamAxisScale*` / `FlycamFeathering`.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct FlycamAxisSettings {
+pub struct FlycamAxisSettings {
     /// Per-axis scale (flycam-function order).
-    pub(crate) scale: [f32; 6],
+    pub scale: [f32; 6],
     /// Per-axis dead-zone (flycam-function order).
-    pub(crate) dead_zone: [f32; 6],
+    pub dead_zone: [f32; 6],
     /// The feathering (input ramp) rate; less is softer.
-    pub(crate) feathering: f32,
+    pub feathering: f32,
     /// Whether the flycam eases its horizon back to level each frame
     /// (`AutoLeveling`).
-    pub(crate) auto_leveling: bool,
+    pub auto_leveling: bool,
 }
 
 impl Default for FlycamAxisSettings {
@@ -117,15 +117,15 @@ impl Default for FlycamAxisSettings {
 /// from [`ViewerSettings`] — the reference's `AvatarAxisDeadZone*` /
 /// `AvatarAxisScale*` / `AvatarFeathering` / `JoystickRunThreshold`.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct AvatarAxisSettings {
+pub struct AvatarAxisSettings {
     /// Per-axis scale (flycam-function order).
-    pub(crate) scale: [f32; 6],
+    pub scale: [f32; 6],
     /// Per-axis dead-zone (flycam-function order).
-    pub(crate) dead_zone: [f32; 6],
+    pub dead_zone: [f32; 6],
     /// The feathering (turn-rate ramp) rate; less is softer.
-    pub(crate) feathering: f32,
+    pub feathering: f32,
     /// The forward-push magnitude past which walking becomes running.
-    pub(crate) run_threshold: f32,
+    pub run_threshold: f32,
 }
 
 impl Default for AvatarAxisSettings {
@@ -144,7 +144,7 @@ impl Default for AvatarAxisSettings {
 /// the run hysteresis ramp (`mJoystickRun`). Translation (forward / up) is a
 /// per-frame sign decision and needs no state.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct AvatarNavSmoothing {
+pub struct AvatarNavSmoothing {
     /// The feathered body-yaw per-frame turn (radians).
     yaw_delta: f32,
     /// The run hysteresis ramp: `0` walk, rising to `2` run (the reference's
@@ -154,22 +154,22 @@ pub(crate) struct AvatarNavSmoothing {
 
 /// The SpaceNavigator's contribution to avatar motion this frame, derived from the
 /// raw axes by the reference `moveAvatar` dead-zone / scale / feathering pipeline
-/// and consumed by [`crate::movement`], which OR-composes it with the keyboard.
+/// and consumed by `movement`, which OR-composes it with the keyboard.
 ///
 /// Only the three requested functions are produced — forward (walk), up (fly up /
 /// down, as PageUp / PageDown do) and yaw (turn) — so the mapping stays the
 /// keyboard-parallel walk / turn / fly, not the reference's fuller strafe / pitch.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct AvatarNavDrive {
+pub struct AvatarNavDrive {
     /// `1` walk forward, `-1` walk back, `0` neither (forward axis, past dead-zone).
-    pub(crate) forward: i8,
+    pub forward: i8,
     /// `1` ascend, `-1` descend, `0` neither (up axis) — the PageUp / PageDown intent.
-    pub(crate) vertical: i8,
+    pub vertical: i8,
     /// The body-yaw turn this frame (radians, twist axis, feathered); positive turns
     /// the body left. Zero when centred.
-    pub(crate) yaw_delta: f32,
+    pub yaw_delta: f32,
     /// Whether the forward push is past the run threshold this frame.
-    pub(crate) run: bool,
+    pub run: bool,
 }
 
 /// Below this feathered per-frame yaw magnitude (radians) a released twist is
@@ -204,7 +204,7 @@ fn dead_zoned(raw: f32, dead_zone: f32) -> f32 {
 /// speed would be discarded. Yaw is **feathered** (ramped) into a per-frame body
 /// turn, and the forward push drives a hysteretic run decision, both matching the
 /// reference. `dt` is the clamped frame time.
-pub(crate) fn avatar_nav_drive(
+pub fn avatar_nav_drive(
     input: &SpacenavInput,
     settings: &AvatarAxisSettings,
     smoothing: &mut AvatarNavSmoothing,
@@ -325,7 +325,7 @@ const RUN_THRESHOLD_SETTING: &str = "JoystickRunThreshold";
 /// Register the flycam-axis settings on the store with the reference defaults, so
 /// the names exist (and persist) whether or not the read half is compiled in, and
 /// a user's Firestorm values port straight over.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     for (index, &scale) in DEFAULT_SCALE.iter().enumerate() {
         settings.register_in(
             FLYCAM_SECTION,
@@ -390,7 +390,7 @@ const AVATAR_SECTION: &[&str] = &["spacenav", "avatar"];
 
 /// Refresh [`FlycamAxisSettings`] from the store each frame (cheap reads), so a
 /// value changed in the (future) settings UI takes effect live.
-pub(crate) fn refresh_flycam_settings(
+pub fn refresh_flycam_settings(
     store: Res<ViewerSettings>,
     mut settings: ResMut<FlycamAxisSettings>,
 ) {
@@ -417,7 +417,7 @@ pub(crate) fn refresh_flycam_settings(
 
 /// Refresh [`AvatarAxisSettings`] from the store each frame (cheap reads), so a
 /// value changed in the (future) settings UI takes effect live.
-pub(crate) fn refresh_avatar_settings(
+pub fn refresh_avatar_settings(
     store: Res<ViewerSettings>,
     mut settings: ResMut<AvatarAxisSettings>,
 ) {
@@ -446,7 +446,7 @@ pub(crate) fn refresh_avatar_settings(
 /// always, and (with the `spacenav` feature on Linux) the device read that fills
 /// the input.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SpacenavPlugin;
+pub struct SpacenavPlugin;
 
 impl Plugin for SpacenavPlugin {
     fn build(&self, app: &mut App) {

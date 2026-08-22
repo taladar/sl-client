@@ -25,7 +25,7 @@ default = ["spacenav"]
 
 # Read a 3Dconnexion SpaceNavigator / SpaceMouse 6-DOF device to drive the flycam
 # (viewer-input-spacenav-device / -camera-mapping). Linux-only for now (evdev).
-spacenav = ["dep:evdev"]
+spacenav = ["sl-viewer-spacenav/spacenav"]
 
 # Profiling (viewer-profiling-logplugin-tracing). The viewer installs its own
 # `tracing` subscriber (`init_tracing`) and disables Bevy's `LogPlugin`, because
@@ -169,7 +169,6 @@ bevy_fluent = { version = "0.15.0" }
 bytes = { workspace = true }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 crossbeam-channel = { workspace = true }
-evdev = { version = "0.13.2", optional = true }
 fluent = { version = "0.16.1" }
 fluent_content = { version = "0.0.5" }
 fs-err = { workspace = true }
@@ -199,7 +198,6 @@ sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
 sl-gst = { path = "../sl-gst", version = "0.1.0" }
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 sl-map-apis = { version = "0.8.0" }
-sl-media = { workspace = true }
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-repl = { workspace = true }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
@@ -209,9 +207,11 @@ sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
 ] }
 sl-types = { workspace = true }
 sl-viewer-kit = { workspace = true }
+sl-viewer-media = { workspace = true }
 sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
+sl-viewer-spacenav = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 thiserror = { workspace = true }
