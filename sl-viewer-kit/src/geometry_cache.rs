@@ -18,7 +18,7 @@
 //! per-face texture placement lives in the material's `uv_transform`, not the
 //! mesh. The one exception is a **planar-texgen** face, whose UV0 is baked
 //! from the object scale
-//! ([`apply_planar_texgen`](crate::objects); see the module docs there): those
+//! (`apply_planar_texgen`; see the module docs there): those
 //! faces are shared per *quantized object scale* instead of unconditionally,
 //! so same-scale copies (the common copy-paste case) still share.
 //!
@@ -51,10 +51,11 @@ use std::time::Duration;
 /// planar-texgen face's scale-dependent UV variant is shared (sub-millimetre
 /// scale differences produce imperceptible planar UV differences, the same
 /// trade the grass spread fingerprint makes).
-pub(crate) type ScaleMm = (i32, i32, i32);
+pub type ScaleMm = (i32, i32, i32);
 
 /// Quantize an object scale (metres per axis) to [`ScaleMm`].
-pub(crate) fn scale_mm(scale: [f32; 3]) -> ScaleMm {
+#[must_use]
+pub fn scale_mm(scale: [f32; 3]) -> ScaleMm {
     #[expect(
         clippy::as_conversions,
         clippy::cast_possible_truncation,
@@ -69,7 +70,7 @@ pub(crate) fn scale_mm(scale: [f32; 3]) -> ScaleMm {
 /// object instance that produces byte-identical vertex data. Texture identity
 /// is deliberately excluded (see the module docs).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum GeometryKey {
+pub enum GeometryKey {
     /// A plain prim: its quantized wire shape parameters at one tessellation
     /// level. `PrimShapeParams` is all-integer, and `sl_prim::tessellate` is a
     /// pure function of the dequantized shape and the level, so equal keys
@@ -109,7 +110,7 @@ pub(crate) enum GeometryKey {
 /// One cached non-empty face of a geometry: its Linden face id and the shared
 /// mesh asset(s) built for it so far.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct FaceSlot {
+pub struct FaceSlot {
     /// The scale-independent variant (the face as tessellated, UVs from the
     /// sweep / decode) — `None` until some shareable (non-planar-texgen)
     /// instance has built it, or after the asset died and was pruned.
@@ -135,7 +136,7 @@ struct GeometryEntry {
 /// and the skin's inverse bindposes are pure functions of the decoded asset,
 /// so every wearer of the same `(mesh, lod)` shares them (the per-wearer
 /// `SkinnedMesh::joints` list is per-entity and never cached).
-pub(crate) type RiggedKey = (MeshKey, MeshLod);
+pub type RiggedKey = (MeshKey, MeshLod);
 
 /// The cached shared skinned assets of one rigged mesh asset at one decoded
 /// level of detail, shared across every wearer.
@@ -152,56 +153,57 @@ struct RiggedEntry {
 
 /// A cumulative snapshot of the cache counters for the pipeline panel.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct GeometryCacheStats {
+pub struct GeometryCacheStats {
     /// Distinct geometry keys currently cached.
-    pub(crate) entries: usize,
+    pub entries: usize,
     /// Spawns that revived every face — no tessellation / conversion ran.
-    pub(crate) hits: u64,
+    pub hits: u64,
     /// Spawns that ran the geometry work but revived at least one shared face.
-    pub(crate) partial_hits: u64,
+    pub partial_hits: u64,
     /// Spawns that found nothing to revive.
-    pub(crate) misses: u64,
+    pub misses: u64,
     /// Distinct rigged `(mesh, lod)` entries currently cached.
-    pub(crate) rigged_entries: usize,
+    pub rigged_entries: usize,
     /// Rigged submesh revives that reused a live shared skinned mesh.
-    pub(crate) rigged_hits: u64,
+    pub rigged_hits: u64,
     /// Rigged submesh revives that found nothing live (the caller converted
     /// and recorded a fresh asset).
-    pub(crate) rigged_misses: u64,
+    pub rigged_misses: u64,
 }
 
 /// One face of a [`GeometryCache::revive`] attempt: the Linden face id and the
 /// revived shared handle, `None` where the cache had no live asset for this
 /// instance's variant (so the caller must build that face itself).
 #[derive(Debug, Clone)]
-pub(crate) struct RevivedFace {
+pub struct RevivedFace {
     /// The Linden face id (the `TextureEntry` slot the face is textured from).
-    pub(crate) face_id: PrimFaceId,
+    pub face_id: PrimFaceId,
     /// The revived strong handle, if the shared asset is still alive.
-    pub(crate) mesh: Option<Handle<Mesh>>,
+    pub mesh: Option<Handle<Mesh>>,
 }
 
 /// The result of a [`GeometryCache::revive`] attempt for one geometry key
 /// (the total face-slot count for texture-entry decoding comes from
 /// [`GeometryCache::cached_face_count`]).
 #[derive(Debug, Clone)]
-pub(crate) struct RevivedGeometry {
+pub struct RevivedGeometry {
     /// One element per non-empty face, in tessellation order.
-    pub(crate) faces: Vec<RevivedFace>,
+    pub faces: Vec<RevivedFace>,
 }
 
 impl RevivedGeometry {
     /// Whether every face revived — the spawn can proceed with zero geometry
     /// work.
-    pub(crate) fn complete(&self) -> bool {
+    #[must_use]
+    pub fn complete(&self) -> bool {
         self.faces.iter().all(|face| face.mesh.is_some())
     }
 }
 
 /// The viewer-wide cross-instance geometry cache resource. See the module docs
-/// for the design; [`crate::objects`] is the only writer.
+/// for the design; `objects` is the only writer.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct GeometryCache {
+pub struct GeometryCache {
     /// The cached geometries by content key.
     entries: HashMap<GeometryKey, GeometryEntry>,
     /// The cached rigged-mesh shared assets by `(mesh, lod)`.
@@ -226,7 +228,7 @@ impl GeometryCache {
     /// Returns `None` when the key has never been recorded (the caller
     /// tessellates and records); otherwise each face carries its revived
     /// strong handle or `None` where the caller must build that face.
-    pub(crate) fn revive(
+    pub fn revive(
         &self,
         key: &GeometryKey,
         scale: ScaleMm,
@@ -255,7 +257,8 @@ impl GeometryCache {
     /// The recorded total face-slot count of `key`, if the key was ever
     /// recorded — what a reviving instance decodes its texture entry against
     /// before any geometry work.
-    pub(crate) fn cached_face_count(&self, key: &GeometryKey) -> Option<usize> {
+    #[must_use]
+    pub fn cached_face_count(&self, key: &GeometryKey) -> Option<usize> {
         self.entries.get(key).map(|entry| entry.face_count)
     }
 
@@ -263,7 +266,7 @@ impl GeometryCache {
     /// geometry with no non-empty faces is still remembered (and a later
     /// identical instance revives to an empty spawn instead of
     /// re-tessellating).
-    pub(crate) fn ensure_entry(&mut self, key: GeometryKey, face_count: usize) {
+    pub fn ensure_entry(&mut self, key: GeometryKey, face_count: usize) {
         let entry = self.entries.entry(key).or_default();
         entry.face_count = face_count;
     }
@@ -272,7 +275,7 @@ impl GeometryCache {
     /// under `planar_scale`'s quantized scale when the face baked planar UVs,
     /// else the scale-independent variant. Creates the face slot (in call
     /// order, which is tessellation order on a fresh entry) when absent.
-    pub(crate) fn record_face(
+    pub fn record_face(
         &mut self,
         key: GeometryKey,
         face_id: PrimFaceId,
@@ -310,7 +313,7 @@ impl GeometryCache {
     /// instanced draw (batching keys on the mesh asset). Counts a rigged hit
     /// or miss; on `None` the caller converts the submesh and records it via
     /// [`record_rigged_submesh`](Self::record_rigged_submesh).
-    pub(crate) fn revive_rigged_submesh(
+    pub fn revive_rigged_submesh(
         &mut self,
         key: RiggedKey,
         submesh_index: usize,
@@ -335,7 +338,7 @@ impl GeometryCache {
 
     /// Record the shared skinned mesh converted for submesh `submesh_index`
     /// of rigged mesh `key`, creating the rigged entry when absent.
-    pub(crate) fn record_rigged_submesh(
+    pub fn record_rigged_submesh(
         &mut self,
         key: RiggedKey,
         submesh_index: usize,
@@ -352,7 +355,7 @@ impl GeometryCache {
     /// with the submesh revives of the same build. On `None` the caller
     /// builds the bindposes and records them via
     /// [`record_rigged_bindposes`](Self::record_rigged_bindposes).
-    pub(crate) fn revive_rigged_bindposes(
+    pub fn revive_rigged_bindposes(
         &self,
         key: RiggedKey,
         bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
@@ -365,7 +368,7 @@ impl GeometryCache {
 
     /// Record the shared inverse bindposes built for rigged mesh `key`,
     /// creating the rigged entry when absent.
-    pub(crate) fn record_rigged_bindposes(
+    pub fn record_rigged_bindposes(
         &mut self,
         key: RiggedKey,
         id: AssetId<SkinnedMeshInverseBindposes>,
@@ -375,22 +378,23 @@ impl GeometryCache {
     }
 
     /// Count a spawn that revived every face (no geometry work ran).
-    pub(crate) const fn note_hit(&mut self) {
+    pub const fn note_hit(&mut self) {
         self.hits = self.hits.saturating_add(1);
     }
 
     /// Count a spawn that ran the geometry work but revived at least one face.
-    pub(crate) const fn note_partial_hit(&mut self) {
+    pub const fn note_partial_hit(&mut self) {
         self.partial_hits = self.partial_hits.saturating_add(1);
     }
 
     /// Count a spawn that found nothing to revive.
-    pub(crate) const fn note_miss(&mut self) {
+    pub const fn note_miss(&mut self) {
         self.misses = self.misses.saturating_add(1);
     }
 
     /// A snapshot of the counters for the pipeline panel.
-    pub(crate) fn stats(&self) -> GeometryCacheStats {
+    #[must_use]
+    pub fn stats(&self) -> GeometryCacheStats {
         GeometryCacheStats {
             entries: self.entries.len(),
             hits: self.hits,
@@ -409,7 +413,7 @@ impl GeometryCache {
     /// which is rare and cheap. The rigged entries are pruned the same way:
     /// a dead submesh or bindposes slot is cleared, and an entry with nothing
     /// live left is dropped (a later wearer rebuilds and re-records it).
-    pub(crate) fn prune(
+    pub fn prune(
         &mut self,
         meshes: &Assets<Mesh>,
         bindposes: &Assets<SkinnedMeshInverseBindposes>,
@@ -443,11 +447,11 @@ impl GeometryCache {
 /// `on_timer` run condition in `main`). Prune latency only delays freeing the
 /// (small) bookkeeping entries — the mesh assets themselves are freed by Bevy
 /// the moment their last face entity despawns — so a lazy cadence is fine.
-pub(crate) const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
+pub const PRUNE_INTERVAL: Duration = Duration::from_secs(30);
 
 /// System: periodically drop cache entries whose shared meshes all died (see
 /// [`GeometryCache::prune`]).
-pub(crate) fn prune_geometry_cache(
+pub fn prune_geometry_cache(
     mut cache: ResMut<GeometryCache>,
     meshes: Res<Assets<Mesh>>,
     bindposes: Res<Assets<SkinnedMeshInverseBindposes>>,

@@ -1,6 +1,6 @@
 //! Pure nearby-avatar radar model — no Bevy, no I/O.
 //!
-//! The radar ([`crate::radar`]) is the Firestorm-style presence tool: a live
+//! The radar (`radar`) is the Firestorm-style presence tool: a live
 //! list of who is nearby with distances, plus enter / leave alerts. This
 //! module holds everything unit-testable about it: the per-sweep set diff and
 //! threshold-crossing detection (the reference's `FSRadar::updateRadarList`
@@ -31,7 +31,7 @@ use sl_client_bevy::{AgentKey, RegionHandle};
 /// Payment-info status from the profile flags (`AVATAR_IDENTIFIED` /
 /// `AVATAR_TRANSACTED`), shown as the reference's `$` / `$$` column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum PaymentInfo {
+pub enum PaymentInfo {
     /// The profile reply has not arrived yet.
     #[default]
     Unknown,
@@ -46,7 +46,8 @@ pub(crate) enum PaymentInfo {
 impl PaymentInfo {
     /// The radar cell text: `$$` = payment info used, `$` = on file, blank
     /// otherwise (the reference's flag column).
-    pub(crate) const fn cell_text(self) -> &'static str {
+    #[must_use]
+    pub const fn cell_text(self) -> &'static str {
         match self {
             Self::Transacted => "$$",
             Self::Identified => "$",
@@ -65,62 +66,62 @@ impl PaymentInfo {
 }
 
 /// One avatar's measurements for a single sweep, sampled from
-/// [`crate::avatars::AvatarState::map_avatars`].
+/// `avatars::AvatarState::map_avatars`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RadarSample {
+pub struct RadarSample {
     /// The avatar's agent id.
-    pub(crate) agent: AgentKey,
+    pub agent: AgentKey,
     /// 3-D metres to the own avatar; `None` = unknown (coarse altitude
     /// sentinel).
-    pub(crate) distance: Option<f32>,
+    pub distance: Option<f32>,
     /// The region the avatar's global position falls in, if on the grid.
-    pub(crate) region: Option<RegionHandle>,
+    pub region: Option<RegionHandle>,
     /// Known only coarsely (no full object streamed).
-    pub(crate) coarse_only: bool,
+    pub coarse_only: bool,
     /// Global position (east, north, up) in metres, for the track /
     /// teleport-to actions; `None` when the altitude is unknown.
-    pub(crate) position: Option<(f64, f64, f32)>,
+    pub position: Option<(f64, f64, f32)>,
 }
 
 /// Thresholds and context for one sweep.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SweepConfig {
+pub struct SweepConfig {
     /// The chat (say) range in metres — the chat-band alert threshold.
-    pub(crate) chat_range: f32,
+    pub chat_range: f32,
     /// The draw distance in metres — the draw-band alert threshold.
-    pub(crate) draw_distance: f32,
+    pub draw_distance: f32,
     /// The own avatar's region, if known; sim enter / leave alerts are
     /// suppressed while it is `None`.
-    pub(crate) own_region: Option<RegionHandle>,
+    pub own_region: Option<RegionHandle>,
     /// The monotonic viewer time of this sweep, in seconds (drives the
     /// "seen" clock).
-    pub(crate) now_seconds: f64,
+    pub now_seconds: f64,
     /// `Some(limit)` arms the young-account alert for accounts of at most
     /// `limit` days.
-    pub(crate) age_alert_days: Option<u32>,
+    pub age_alert_days: Option<u32>,
 }
 
 /// Persistent per-agent state across sweeps (the reference's
 /// `mLastRadarSweep` snapshot plus the `FSRadarEntry` bookkeeping).
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct RadarEntry {
+pub struct RadarEntry {
     /// The sweep time the avatar was first seen (monotonic seconds).
-    pub(crate) first_seen: f64,
+    pub first_seen: f64,
     /// The distance recorded by the previous sweep.
-    pub(crate) last_distance: Option<f32>,
+    pub last_distance: Option<f32>,
     /// The region recorded by the previous sweep.
-    pub(crate) last_region: Option<RegionHandle>,
+    pub last_region: Option<RegionHandle>,
     /// Whether the avatar was known only coarsely at the last sweep.
-    pub(crate) coarse_only: bool,
+    pub coarse_only: bool,
     /// The last known global position (east, north, up), for row actions.
-    pub(crate) position: Option<(f64, f64, f32)>,
+    pub position: Option<(f64, f64, f32)>,
     /// Whether a profile-properties request has been issued for this avatar
     /// (request-once; see [`RadarModel::take_property_requests`]).
-    pub(crate) properties_requested: bool,
+    pub properties_requested: bool,
     /// The account age in days, once the profile reply arrived and parsed.
-    pub(crate) age_days: Option<u32>,
+    pub age_days: Option<u32>,
     /// The payment-info status, once the profile reply arrived.
-    pub(crate) payment: PaymentInfo,
+    pub payment: PaymentInfo,
     /// Whether the young-account alert has already fired for this entry
     /// (fired at most once, reference behaviour).
     age_alerted: bool,
@@ -128,7 +129,7 @@ pub(crate) struct RadarEntry {
 
 /// The kind of one radar alert.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RadarAlertKind {
+pub enum RadarAlertKind {
     /// Entered chat (say) range.
     ChatEnter,
     /// Left chat (say) range.
@@ -147,14 +148,14 @@ pub(crate) enum RadarAlertKind {
 
 /// One alert produced by a sweep.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct RadarAlert {
+pub struct RadarAlert {
     /// The avatar the alert is about.
-    pub(crate) agent: AgentKey,
+    pub agent: AgentKey,
     /// What happened.
-    pub(crate) kind: RadarAlertKind,
+    pub kind: RadarAlertKind,
     /// The distance at the moment of the alert; `None` omits the "(x m)"
     /// suffix (unknown-altitude parity with the reference).
-    pub(crate) distance: Option<f32>,
+    pub distance: Option<f32>,
 }
 
 /// Whether a distance is known and within `threshold` metres (an unknown
@@ -166,7 +167,7 @@ fn within(distance: Option<f32>, threshold: f32) -> bool {
 /// The always-live radar bookkeeping: one [`RadarEntry`] per nearby avatar,
 /// plus a revision stamp the view projection rebuilds against.
 #[derive(Debug, Default)]
-pub(crate) struct RadarModel {
+pub struct RadarModel {
     /// The tracked avatars, keyed by agent id.
     entries: HashMap<AgentKey, RadarEntry>,
     /// Bumped whenever a sweep or a profile reply changes anything the view
@@ -176,24 +177,26 @@ pub(crate) struct RadarModel {
 
 impl RadarModel {
     /// The current revision stamp.
-    pub(crate) const fn revision(&self) -> u64 {
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
         self.revision
     }
 
     /// The entry for `agent`, if it is currently tracked.
-    pub(crate) fn entry(&self, agent: AgentKey) -> Option<&RadarEntry> {
+    #[must_use]
+    pub fn entry(&self, agent: AgentKey) -> Option<&RadarEntry> {
         self.entries.get(&agent)
     }
 
     /// Iterate over all tracked avatars.
-    pub(crate) fn entries(&self) -> impl Iterator<Item = (&AgentKey, &RadarEntry)> {
+    pub fn entries(&self) -> impl Iterator<Item = (&AgentKey, &RadarEntry)> {
         self.entries.iter()
     }
 
     /// Ingest one sweep of samples: reconcile the tracked set, detect band /
     /// region crossings and departures, and return the alerts they produced
     /// (unfiltered — the caller applies the per-kind notification settings).
-    pub(crate) fn sweep(&mut self, samples: &[RadarSample], cfg: &SweepConfig) -> Vec<RadarAlert> {
+    pub fn sweep(&mut self, samples: &[RadarSample], cfg: &SweepConfig) -> Vec<RadarAlert> {
         let mut alerts = Vec::new();
         let mut seen: HashSet<AgentKey> = HashSet::with_capacity(samples.len());
         for sample in samples {
@@ -333,7 +336,7 @@ impl RadarModel {
     /// Record a profile reply for `agent`; returns whether anything changed
     /// (and bumps the revision if so). A reply for an avatar no longer
     /// tracked is ignored.
-    pub(crate) fn set_properties(
+    pub fn set_properties(
         &mut self,
         agent: AgentKey,
         age_days: Option<u32>,
@@ -354,7 +357,7 @@ impl RadarModel {
     /// Up to `limit` tracked avatars whose profile properties have not been
     /// requested yet, marking each as requested (request-once, throttled by
     /// the caller's per-sweep limit).
-    pub(crate) fn take_property_requests(&mut self, limit: usize) -> Vec<AgentKey> {
+    pub fn take_property_requests(&mut self, limit: usize) -> Vec<AgentKey> {
         let mut out = Vec::new();
         for (agent, entry) in &mut self.entries {
             if out.len() >= limit {
@@ -410,51 +413,51 @@ fn crossing(
               coarse / in-region), each its own column or tint — not a disguised state machine"
 )]
 #[derive(Debug, Clone)]
-pub(crate) struct RadarRow {
+pub struct RadarRow {
     /// The avatar's agent id.
-    pub(crate) agent: AgentKey,
+    pub agent: AgentKey,
     /// The primary display label (display name, or the legacy name / a
     /// provisional id fragment while unresolved).
-    pub(crate) name: String,
+    pub name: String,
     /// The `username` line shown after the name; empty when unknown or
     /// redundant.
-    pub(crate) username: String,
+    pub username: String,
     /// The avatar's active group title (may be empty).
-    pub(crate) title: String,
+    pub title: String,
     /// Payment-info status (the `$` column).
-    pub(crate) payment: PaymentInfo,
+    pub payment: PaymentInfo,
     /// Account age in days, when known.
-    pub(crate) age_days: Option<u32>,
+    pub age_days: Option<u32>,
     /// Seconds since the avatar was first seen.
-    pub(crate) seen_seconds: u64,
+    pub seen_seconds: u64,
     /// 3-D metres to the own avatar; `None` = unknown.
-    pub(crate) distance: Option<f32>,
+    pub distance: Option<f32>,
     /// Known only coarsely (hollow region dot).
-    pub(crate) coarse_only: bool,
+    pub coarse_only: bool,
     /// In the own avatar's region.
-    pub(crate) in_own_region: bool,
+    pub in_own_region: bool,
     /// Currently typing in nearby chat.
-    pub(crate) typing: bool,
+    pub typing: bool,
     /// Currently seated.
-    pub(crate) sitting: bool,
+    pub sitting: bool,
     /// Playing the away animation.
-    pub(crate) away: bool,
+    pub away: bool,
     /// A friend of the own avatar.
-    pub(crate) friend: bool,
+    pub friend: bool,
     /// On the own avatar's mute list.
-    pub(crate) muted: bool,
+    pub muted: bool,
     /// The avatar's render cost (ARC), once it has been measured
-    /// ([`crate::avatar_complexity`]); `None` while it has not.
-    pub(crate) complexity: Option<u32>,
+    /// (`avatar_complexity`); `None` while it has not.
+    pub complexity: Option<u32>,
     /// Whether the viewer is currently drawing this avatar as a jellydoll — the
     /// column's whole point is telling "expensive" from "expensive enough that I
     /// stopped drawing them".
-    pub(crate) jellied: bool,
+    pub jellied: bool,
 }
 
 /// The distance band a row falls in, colouring its range cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RangeBand {
+pub enum RangeBand {
     /// Within chat (say) range.
     Chat,
     /// Within shout range.
@@ -466,7 +469,8 @@ pub(crate) enum RangeBand {
 }
 
 /// Classify a distance into its colouring band.
-pub(crate) fn range_band(distance: Option<f32>, chat: f32, shout: f32) -> RangeBand {
+#[must_use]
+pub fn range_band(distance: Option<f32>, chat: f32, shout: f32) -> RangeBand {
     match distance {
         None => RangeBand::Unknown,
         Some(distance) if distance <= chat => RangeBand::Chat,
@@ -477,7 +481,8 @@ pub(crate) fn range_band(distance: Option<f32>, chat: f32, shout: f32) -> RangeB
 
 /// Format a range cell: metres with two decimals, or the reference's
 /// `>draw-distance` form when the distance is unknown.
-pub(crate) fn format_range(distance: Option<f32>, draw_distance: f32) -> String {
+#[must_use]
+pub fn format_range(distance: Option<f32>, draw_distance: f32) -> String {
     match distance {
         Some(distance) => format!("{distance:.2}"),
         None => format!(">{draw_distance:.2}"),
@@ -486,7 +491,8 @@ pub(crate) fn format_range(distance: Option<f32>, draw_distance: f32) -> String 
 
 /// Format the "seen" cell as `H:MM:SS` elapsed (hours unbounded, like the
 /// reference's `%d:%02d:%02d`).
-pub(crate) fn format_seen(elapsed_seconds: u64) -> String {
+#[must_use]
+pub fn format_seen(elapsed_seconds: u64) -> String {
     let hours = elapsed_seconds / 3600;
     let minutes = (elapsed_seconds % 3600) / 60;
     let seconds = elapsed_seconds % 60;
@@ -495,7 +501,8 @@ pub(crate) fn format_seen(elapsed_seconds: u64) -> String {
 
 /// The whole (non-negative) seconds elapsed between two monotonic
 /// timestamps.
-pub(crate) fn elapsed_seconds(now: f64, since: f64) -> u64 {
+#[must_use]
+pub fn elapsed_seconds(now: f64, since: f64) -> u64 {
     #[expect(
         clippy::as_conversions,
         clippy::cast_possible_truncation,
@@ -509,7 +516,8 @@ pub(crate) fn elapsed_seconds(now: f64, since: f64) -> u64 {
 /// Parse a profile `born_on` date — the SL `MM/DD/YYYY` form or an ISO
 /// `YYYY-MM-DD` (OpenSim) — into an account age in days as of `today`.
 /// Unparsable or empty input yields `None`; a future date clamps to `0`.
-pub(crate) fn parse_born_on(born_on: &str, today: jiff::civil::Date) -> Option<u32> {
+#[must_use]
+pub fn parse_born_on(born_on: &str, today: jiff::civil::Date) -> Option<u32> {
     let trimmed = born_on.trim();
     if trimmed.is_empty() {
         return None;
@@ -525,7 +533,8 @@ pub(crate) fn parse_born_on(born_on: &str, today: jiff::civil::Date) -> Option<u
 
 /// Whether a row matches a name filter (case-insensitive substring over the
 /// display name and username; an empty filter matches everything).
-pub(crate) fn matches_filter(row: &RadarRow, filter: &str) -> bool {
+#[must_use]
+pub fn matches_filter(row: &RadarRow, filter: &str) -> bool {
     let needle = filter.trim().to_lowercase();
     if needle.is_empty() {
         return true;
@@ -535,7 +544,8 @@ pub(crate) fn matches_filter(row: &RadarRow, filter: &str) -> bool {
 
 /// Whether a row passes the near-me range limit (`None` = unlimited; an
 /// unknown distance passes, reference parity).
-pub(crate) fn within_limit(row: &RadarRow, limit: Option<f32>) -> bool {
+#[must_use]
+pub fn within_limit(row: &RadarRow, limit: Option<f32>) -> bool {
     match (limit, row.distance) {
         (Some(limit), Some(distance)) => distance <= limit,
         _ => true,
@@ -543,7 +553,8 @@ pub(crate) fn within_limit(row: &RadarRow, limit: Option<f32>) -> bool {
 }
 
 /// The `(total, in region, in chat range)` counts for the header line.
-pub(crate) fn counts(rows: &[RadarRow], chat_range: f32) -> (usize, usize, usize) {
+#[must_use]
+pub fn counts(rows: &[RadarRow], chat_range: f32) -> (usize, usize, usize) {
     let total = rows.len();
     let in_region = rows.iter().filter(|row| row.in_own_region).count();
     let in_chat = rows
@@ -555,7 +566,7 @@ pub(crate) fn counts(rows: &[RadarRow], chat_range: f32) -> (usize, usize, usize
 
 /// A sortable radar column (the table's sortable tokens).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SortColumn {
+pub enum SortColumn {
     /// The name column.
     Name,
     /// The group-title column.
@@ -574,7 +585,8 @@ pub(crate) enum SortColumn {
 
 impl SortColumn {
     /// Resolve a table column token to its sort column.
-    pub(crate) fn from_token(token: &str) -> Option<Self> {
+    #[must_use]
+    pub fn from_token(token: &str) -> Option<Self> {
         match token {
             "name" => Some(Self::Name),
             "title" => Some(Self::Title),
@@ -619,7 +631,7 @@ fn compare_rows(column: SortColumn, a: &RadarRow, b: &RadarRow) -> Ordering {
 
 /// Sort rows by a multi-key order (each key a column plus ascending flag),
 /// tie-breaking by case-folded name and finally agent id for a total order.
-pub(crate) fn sort_rows(rows: &mut [RadarRow], keys: &[(SortColumn, bool)]) {
+pub fn sort_rows(rows: &mut [RadarRow], keys: &[(SortColumn, bool)]) {
     rows.sort_by(|a, b| {
         for (column, ascending) in keys {
             let ordering = compare_rows(*column, a, b);

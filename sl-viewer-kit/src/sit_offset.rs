@@ -28,7 +28,7 @@
 //! the Second Life components packed verbatim (so `q_sl · v` rotates within
 //! Second Life space), and the result is a Second Life [`Vector`]. The caller
 //! converts the Bevy scene data to this space at the boundary
-//! ([`crate::object_menu`]).
+//! (`object_menu`).
 //!
 //! # Deliberate simplification
 //!
@@ -46,8 +46,9 @@ use sl_client_bevy::Vector;
 const MIN_EXTENT: f32 = 0.001;
 
 /// Component-wise vector subtract (`a - b`), avoiding the glam `-` operator the
-/// workspace `arithmetic_side_effects` lint trips on (as [`crate::camera`] does).
-pub(crate) const fn vsub(a: Vec3, b: Vec3) -> Vec3 {
+/// workspace `arithmetic_side_effects` lint trips on (as `camera` does).
+#[must_use]
+pub const fn vsub(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
 }
 
@@ -73,7 +74,8 @@ const fn vscale(v: Vec3, s: f32) -> Vec3 {
 /// - `mouse_dir` — the unit click ray direction (camera → cursor).
 /// - `hit_from_obj` — prim → the ray's surface-hit point.
 /// - `cam_at` — the camera's unit forward (at-axis).
-pub(crate) fn sit_focus_offset(
+#[must_use]
+pub fn sit_focus_offset(
     obj_rotation: Quat,
     extents: Vec3,
     cam_from_obj: Vec3,

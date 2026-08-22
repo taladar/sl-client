@@ -33,7 +33,7 @@ use tracing::warn;
 /// replaces it (an `IMG_USE_BAKED_*` face), and the skirt region renders only
 /// when the avatar's `TEX_SKIRT_BAKED` slot holds a visible bake.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BodyRegion {
+pub enum BodyRegion {
     /// The head (and eyelashes, which the reference viewer hides with the head).
     Head,
     /// The hair.
@@ -52,7 +52,8 @@ impl BodyRegion {
     /// The avatar baked-texture slot this region's visibility keys off — the
     /// eyelashes ride with the head and the eyeballs with the eyes, matching the
     /// reference viewer's `updateMeshVisibility`.
-    pub(crate) const fn baked_slot(self) -> usize {
+    #[must_use]
+    pub const fn baked_slot(self) -> usize {
         match self {
             Self::Head => avatar_texture::HEAD_BAKED,
             Self::Hair => avatar_texture::HAIR_BAKED,
@@ -68,7 +69,8 @@ impl BodyRegion {
     /// masked morphs. Only the head, upper body and lower body carry clothing
     /// morphs; the eyelashes ride with the head region but define no masked morphs
     /// of their own.
-    pub(crate) const fn morph_mask_region(self) -> Option<&'static str> {
+    #[must_use]
+    pub const fn morph_mask_region(self) -> Option<&'static str> {
         match self {
             Self::Head => Some("head"),
             Self::Upper => Some("upper_body"),
@@ -166,13 +168,13 @@ const PELVIS_JOINT: &str = "mPelvis";
 /// A resolved base part: its decoded mesh, how it binds to the skeleton, and
 /// which baked region it belongs to.
 #[derive(Debug)]
-pub(crate) struct LoadedPart {
+pub struct LoadedPart {
     /// The decoded `lod = 0` base mesh (Second Life Z-up space).
-    pub(crate) mesh: BaseMesh,
+    pub mesh: BaseMesh,
     /// How this part attaches to the skeleton.
-    pub(crate) binding: LoadedBinding,
+    pub binding: LoadedBinding,
     /// Which baked region this part belongs to (for P13.5 visibility).
-    pub(crate) region: BodyRegion,
+    pub region: BodyRegion,
 }
 
 /// One attachment point resolved against the loaded skeleton (P16.2): the joint
@@ -181,34 +183,34 @@ pub(crate) struct LoadedPart {
 /// viewer builds a per-avatar attachment-point node at this offset so a worn
 /// rigid attachment seats where the reference viewer places it.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct AttachmentPointInfo {
+pub struct AttachmentPointInfo {
     /// The index (in this library's skeleton) of the joint this point hangs from.
-    pub(crate) joint_index: usize,
+    pub joint_index: usize,
     /// The point's local translation from the joint, in metres (Second Life Z-up).
-    pub(crate) position: [f32; 3],
+    pub position: [f32; 3],
     /// The point's local rotation from the joint, as Second Life Euler XYZ angles
     /// in degrees.
-    pub(crate) rotation_euler_deg: [f32; 3],
+    pub rotation_euler_deg: [f32; 3],
 }
 
 /// One HUD (screen-space) attachment point from `avatar_lad.xml` (P35.1): its
 /// fixed local offset from the `mScreen` pseudo-joint the reference viewer hangs
 /// the HUD points off. Unlike an [`AttachmentPointInfo`] it resolves no skeleton
 /// joint — `mScreen` is not part of the skeleton — so the viewer hangs these off
-/// its own [HUD screen](crate::hud::HudScreen) instead.
+/// its own HUD screen (`hud::HudScreen`) instead.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct HudPointInfo {
+pub struct HudPointInfo {
     /// The point's local translation from the screen, in metres (Second Life Z-up,
     /// so `+y` is screen-left and `+z` screen-up).
-    pub(crate) position: [f32; 3],
+    pub position: [f32; 3],
     /// The point's local rotation from the screen, as Second Life Euler XYZ angles
     /// in degrees.
-    pub(crate) rotation_euler_deg: [f32; 3],
+    pub rotation_euler_deg: [f32; 3],
 }
 
 /// A base part's resolved skeleton binding.
 #[derive(Debug)]
-pub(crate) enum LoadedBinding {
+pub enum LoadedBinding {
     /// A skinned part: its own joint-name table resolved against the skeleton.
     Skinned(BaseMeshSkin),
     /// A rigid part pinned to the skeleton joint at this index.
@@ -217,7 +219,7 @@ pub(crate) enum LoadedBinding {
 
 /// An error loading the `character/` assets from disk.
 #[derive(thiserror::Error, Debug)]
-pub(crate) enum AvatarAssetError {
+pub enum AvatarAssetError {
     /// A `character/` file could not be read (the `fs_err` message already
     /// carries the offending path).
     #[error("reading avatar asset: {0}")]
@@ -242,7 +244,7 @@ pub(crate) enum AvatarAssetError {
 /// visual-param table is loaded here so the morph phases (P13.3 / P13.4) reuse
 /// it without re-reading the files.
 #[derive(Resource, Debug)]
-pub(crate) struct AvatarAssetLibrary {
+pub struct AvatarAssetLibrary {
     /// The avatar skeleton, converted to the Bevy joint-instance data.
     skeleton: BevySkeleton,
     /// The same skeleton as parsed from `avatar_skeleton.xml`, kept because the
@@ -276,7 +278,7 @@ impl AvatarAssetLibrary {
     /// Returns an [`AvatarAssetError`] if the skeleton, visual-param table, or a
     /// base-part mesh cannot be read or parsed. A base part whose skeleton
     /// binding does not resolve is skipped (logged), not an error.
-    pub(crate) fn load(dir: &Path) -> Result<Self, AvatarAssetError> {
+    pub fn load(dir: &Path) -> Result<Self, AvatarAssetError> {
         let character_skeleton =
             Skeleton::from_xml(&fs_err::read_to_string(dir.join("avatar_skeleton.xml"))?)?;
         let mut skeleton = BevySkeleton::from_skeleton(&character_skeleton);
@@ -345,36 +347,42 @@ impl AvatarAssetLibrary {
     /// The decoded static `character/` TGA layer texture of `name`, if it loaded —
     /// the `static_image` source for the client-side bake plan
     /// ([`region_layers`](sl_client_bevy::region_layers)).
-    pub(crate) fn static_texture(&self, name: &str) -> Option<&DecodedTexture> {
+    #[must_use]
+    pub fn static_texture(&self, name: &str) -> Option<&DecodedTexture> {
         self.static_textures.get(name)
     }
 
     /// The Bevy skeleton (joint rest transforms, parents, bind poses).
-    pub(crate) const fn skeleton(&self) -> &BevySkeleton {
+    #[must_use]
+    pub const fn skeleton(&self) -> &BevySkeleton {
         &self.skeleton
     }
 
     /// The `avatar_skeleton.xml` skeleton as parsed — the bone hierarchy with each
     /// bone's collision volumes, which the collision-volume displacement resolver
     /// needs for the skeletal params' scale inheritance (P34.4).
-    pub(crate) const fn character_skeleton(&self) -> &Skeleton {
+    #[must_use]
+    pub const fn character_skeleton(&self) -> &Skeleton {
         &self.character_skeleton
     }
 
     /// The resolved base parts.
-    pub(crate) fn parts(&self) -> &[LoadedPart] {
+    #[must_use]
+    pub fn parts(&self) -> &[LoadedPart] {
         &self.parts
     }
 
     /// The visual-param table, used to resolve an `AvatarAppearance.visual_params`
     /// vector into morph-target weights (P13.3).
-    pub(crate) const fn params(&self) -> &VisualParams {
+    #[must_use]
+    pub const fn params(&self) -> &VisualParams {
         &self.params
     }
 
     /// The `<morph_masks>` table, used to mask the clothing morphs per vertex from
     /// each region's decoded baked texture (P14.5).
-    pub(crate) const fn masks(&self) -> &MorphMasks {
+    #[must_use]
+    pub const fn masks(&self) -> &MorphMasks {
         &self.masks
     }
 
@@ -385,7 +393,8 @@ impl AvatarAssetLibrary {
     /// point whose joint is absent from the skeleton (e.g. a HUD point's `mScreen`
     /// pseudo-joint) is omitted, so a body attachment always resolves to a real
     /// skeleton joint and a HUD point simply does not.
-    pub(crate) fn attachment_points(&self) -> HashMap<u8, AttachmentPointInfo> {
+    #[must_use]
+    pub fn attachment_points(&self) -> HashMap<u8, AttachmentPointInfo> {
         self.attachment_points
             .all()
             .iter()
@@ -411,8 +420,9 @@ impl AvatarAssetLibrary {
     /// Exactly the points [`attachment_points`](Self::attachment_points) omits: a
     /// HUD point hangs off `mScreen`, which is not a skeleton joint, so it resolves
     /// no joint index there. The viewer parents these to its own
-    /// [HUD screen](crate::hud::HudScreen) rather than to an avatar.
-    pub(crate) fn hud_attachment_points(&self) -> HashMap<u8, HudPointInfo> {
+    /// HUD screen (`hud::HudScreen`) rather than to an avatar.
+    #[must_use]
+    pub fn hud_attachment_points(&self) -> HashMap<u8, HudPointInfo> {
         self.attachment_points
             .all()
             .iter()
@@ -432,7 +442,8 @@ impl AvatarAssetLibrary {
     /// The rest height (Second Life Z, metres) of the pelvis joint — the offset
     /// used to plant the body so its pelvis sits at the reported avatar object
     /// position. Falls back to `0.0` if the joint is somehow absent.
-    pub(crate) fn pelvis_height(&self) -> f32 {
+    #[must_use]
+    pub fn pelvis_height(&self) -> f32 {
         self.skeleton
             .find(PELVIS_JOINT)
             .and_then(|index| self.skeleton.local_transforms().get(index))

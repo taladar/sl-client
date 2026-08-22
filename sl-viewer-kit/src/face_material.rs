@@ -51,25 +51,25 @@ const FACE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("6b1f0a92-4c3d-4e18-9f27
 /// holds the `StandardMaterial` fields the face pipeline already sets (tint,
 /// diffuse texture, alpha mode, the four PBR maps, factors); the `.extension` half
 /// holds the per-map UV transforms and the legacy specular workflow.
-pub(crate) type FaceMaterial = ExtendedMaterial<StandardMaterial, SlFaceExt>;
+pub type FaceMaterial = ExtendedMaterial<StandardMaterial, SlFaceExt>;
 
 /// Legacy Blinn-Phong specular mode: the extension adds a specular highlight over
 /// the reused PBR lighting.
-pub(crate) const SL_FACE_MODE_LEGACY: u32 = 1;
+pub const SL_FACE_MODE_LEGACY: u32 = 1;
 /// PBR / plain-diffuse mode: no added highlight (the base material is the whole
 /// surface); per-map UV transforms may still apply via [`SlFaceParams::map_flags`].
-pub(crate) const SL_FACE_MODE_PBR: u32 = 0;
+pub const SL_FACE_MODE_PBR: u32 = 0;
 
-/// [`SlFaceParams::map_flags`] bit: re-sample the normal map at [`uv_normal`](SlFaceParams::uv_normal).
-pub(crate) const MAP_FLAG_NORMAL: u32 = 1 << 0;
+/// [`SlFaceParams::map_flags`] bit: re-sample the normal map at [`uv_normal`](SlFaceParams::uv_normal_mat).
+pub const MAP_FLAG_NORMAL: u32 = 1 << 0;
 /// [`SlFaceParams::map_flags`] bit: re-sample the metallic-roughness (ORM) map at
-/// [`uv_mr`](SlFaceParams::uv_mr).
-pub(crate) const MAP_FLAG_MR: u32 = 1 << 1;
-/// [`SlFaceParams::map_flags`] bit: re-sample the emissive map at [`uv_emissive`](SlFaceParams::uv_emissive).
-pub(crate) const MAP_FLAG_EMISSIVE: u32 = 1 << 2;
+/// [`uv_mr`](SlFaceParams::uv_mr_mat).
+pub const MAP_FLAG_MR: u32 = 1 << 1;
+/// [`SlFaceParams::map_flags`] bit: re-sample the emissive map at [`uv_emissive`](SlFaceParams::uv_emissive_mat).
+pub const MAP_FLAG_EMISSIVE: u32 = 1 << 2;
 /// [`SlFaceParams::map_flags`] bit: sample the legacy specular map (extension slot)
-/// at [`uv_spec`](SlFaceParams::uv_spec).
-pub(crate) const MAP_FLAG_SPEC: u32 = 1 << 3;
+/// at [`uv_spec`](SlFaceParams::uv_spec_mat).
+pub const MAP_FLAG_SPEC: u32 = 1 << 3;
 
 /// The extension's uniform block: the per-map UV transforms (as a packed 2×2
 /// matrix + translation each) and the legacy specular workflow scalars.
@@ -78,62 +78,63 @@ pub(crate) const MAP_FLAG_SPEC: u32 = 1 << 3;
 /// layout the `ShaderType` derive produces matches the `face_material.wgsl`
 /// `SlFaceParams` field-for-field without hand-inserted padding.
 #[derive(Clone, Copy, Debug, ShaderType)]
-pub(crate) struct SlFaceParams {
+pub struct SlFaceParams {
     /// Normal-map UV transform: the 2×2 linear part `(m00, m01, m10, m11)`.
-    pub(crate) uv_normal_mat: Vec4,
+    pub uv_normal_mat: Vec4,
     /// Metallic-roughness UV transform: the 2×2 linear part.
-    pub(crate) uv_mr_mat: Vec4,
+    pub uv_mr_mat: Vec4,
     /// Emissive UV transform: the 2×2 linear part.
-    pub(crate) uv_emissive_mat: Vec4,
+    pub uv_emissive_mat: Vec4,
     /// Legacy specular-map UV transform: the 2×2 linear part.
-    pub(crate) uv_spec_mat: Vec4,
+    pub uv_spec_mat: Vec4,
     /// The legacy specular highlight tint (RGB) and, in `.w`, unused padding to a
     /// `Vec4`; the glossiness lives in [`glossiness`](Self::glossiness).
-    pub(crate) specular_color: Vec4,
+    pub specular_color: Vec4,
     /// The four maps' translations packed two per 16-byte slot:
     /// `(normal.x, normal.y, mr.x, mr.y)`.
-    pub(crate) uv_translations_a: Vec4,
+    pub uv_translations_a: Vec4,
     /// `(emissive.x, emissive.y, spec.x, spec.y)`.
-    pub(crate) uv_translations_b: Vec4,
+    pub uv_translations_b: Vec4,
     /// GPU-driven texture animation (P28.2), timing params: `(rate, start, length,
     /// start_time)`. The shader derives the frame from `globals.time - start_time`,
     /// so the material's UV is animated **on the GPU** and this data is written
     /// **once** (on start / re-parameterisation) rather than every frame — avoiding
     /// a per-frame material re-prepare storm. Inert (`anim_mode == 0`) leaves it
     /// unused.
-    pub(crate) anim_params: Vec4,
+    pub anim_params: Vec4,
     /// Texture-animation fall-back placement — the face's **static** texture-entry
     /// `(rotation, offset_s, offset_t, scale_s)`, used for whichever placement
     /// components the animation does not drive (the port of the reference viewer's
     /// per-face fall-back). `scale_t` lives in [`anim_grid`](Self::anim_grid).
-    pub(crate) anim_static: Vec4,
+    pub anim_static: Vec4,
     /// Texture-animation flip-book grid + `scale_t`: `(size_x, size_y, scale_t,
     /// unused)`. A non-zero `size_x`/`size_y` pages a `size_x × size_y` sprite grid.
-    pub(crate) anim_grid: Vec4,
+    pub anim_grid: Vec4,
     /// Render mode ([`SL_FACE_MODE_PBR`] / [`SL_FACE_MODE_LEGACY`]).
-    pub(crate) mode: u32,
+    pub mode: u32,
     /// Which maps to re-sample at their own UV (the `MAP_FLAG_*` bitset).
-    pub(crate) map_flags: u32,
+    pub map_flags: u32,
     /// Texture-animation mode bits (`texture_anim_mode::*`); `0` = no animation. The
     /// `ON` bit gates the GPU animation path in the shader.
-    pub(crate) anim_mode: u32,
+    pub anim_mode: u32,
     /// Legacy glossiness `0..=1` (`specular_exponent / 255`), scaled per-texel by
     /// the normal-map alpha in the shader.
-    pub(crate) glossiness: f32,
+    pub glossiness: f32,
     /// Legacy environment-reflection intensity `0..=1` (`environment_intensity / 255`).
-    pub(crate) env_intensity: f32,
-    /// The faithful SL glow mask ([`glow`](crate::glow)): the face's glow scalar
+    pub env_intensity: f32,
+    /// The faithful SL glow mask (`glow`): the face's glow scalar
     /// (`0` = no glow), written into the fragment's alpha for an opaque / mask face
     /// so the glow pass blooms it. The shader gates the write on the alpha mode, so
     /// this defaults to `0` (a non-glowing opaque face writes mask `0`) and a blend
     /// face — whose alpha is its coverage — is left alone regardless of this value.
-    pub(crate) glow: f32,
+    pub glow: f32,
 }
 
 impl SlFaceParams {
     /// The inert params: PBR mode, no re-sampling, identity transforms, no legacy
     /// specular — an extension that changes nothing.
-    pub(crate) const fn inert() -> Self {
+    #[must_use]
+    pub const fn inert() -> Self {
         let identity_mat = Vec4::new(1.0, 0.0, 0.0, 1.0);
         Self {
             uv_normal_mat: identity_mat,
@@ -173,7 +174,7 @@ impl SlFaceParams {
     /// each already composed onto the face's diffuse placement, packing their
     /// linear parts and translations into the uniform. The specular translation
     /// (`uv_translations_b.zw`, legacy) is left untouched.
-    pub(crate) fn set_pbr_transforms(&mut self, normal: Affine2, mr: Affine2, emissive: Affine2) {
+    pub fn set_pbr_transforms(&mut self, normal: Affine2, mr: Affine2, emissive: Affine2) {
         self.uv_normal_mat = Self::matrix_of(normal);
         self.uv_mr_mat = Self::matrix_of(mr);
         self.uv_emissive_mat = Self::matrix_of(emissive);
@@ -203,7 +204,7 @@ impl SlFaceParams {
     /// face is never a PBR face), and the specular transform its own
     /// [`uv_spec_mat`](Self::uv_spec_mat) slot. The `map_flags` re-sample bits are
     /// set later, as each map uploads.
-    pub(crate) fn set_legacy(
+    pub fn set_legacy(
         &mut self,
         specular_color: [f32; 3],
         glossiness: f32,
@@ -256,35 +257,35 @@ impl Default for SlFaceParams {
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
 #[data(50, SlFaceParams, binding_array(101))]
 #[bindless(index_table(range(50..59), binding(100)))]
-pub(crate) struct SlFaceExt {
+pub struct SlFaceExt {
     /// The per-map transforms and legacy specular scalars (packed into the bindless
     /// data array at slot 50 via [`From<&SlFaceExt>`](SlFaceParams)).
-    pub(crate) params: SlFaceParams,
+    pub params: SlFaceParams,
     /// The legacy `LLMaterial` specular map (RGB specular colour), or a default
     /// (fallback white) handle when the face carries none. Sampled only when
     /// [`MAP_FLAG_SPEC`] is set.
     #[texture(51)]
     #[sampler(52)]
-    pub(crate) specular_map: Handle<Image>,
-    /// The PBR normal map, sampled at [`uv_normal`](SlFaceParams::uv_normal) when
+    pub specular_map: Handle<Image>,
+    /// The PBR normal map, sampled at [`uv_normal`](SlFaceParams::uv_normal_mat) when
     /// [`MAP_FLAG_NORMAL`] is set. The PBR maps live in the extension (not the base
     /// `StandardMaterial`) so they can be sampled at their own per-map UV transform;
     /// the base then carries only the base-colour texture and the scalar factors,
     /// which the extension multiplies its samples by.
     #[texture(53)]
     #[sampler(54)]
-    pub(crate) normal_map: Handle<Image>,
-    /// The PBR metallic-roughness (ORM) map, sampled at [`uv_mr`](SlFaceParams::uv_mr)
+    pub normal_map: Handle<Image>,
+    /// The PBR metallic-roughness (ORM) map, sampled at [`uv_mr`](SlFaceParams::uv_mr_mat)
     /// when [`MAP_FLAG_MR`] is set (green = roughness, blue = metallic, red =
     /// occlusion).
     #[texture(55)]
     #[sampler(56)]
-    pub(crate) metallic_roughness_map: Handle<Image>,
-    /// The PBR emissive map, sampled at [`uv_emissive`](SlFaceParams::uv_emissive)
+    pub metallic_roughness_map: Handle<Image>,
+    /// The PBR emissive map, sampled at [`uv_emissive`](SlFaceParams::uv_emissive_mat)
     /// when [`MAP_FLAG_EMISSIVE`] is set.
     #[texture(57)]
     #[sampler(58)]
-    pub(crate) emissive_map: Handle<Image>,
+    pub emissive_map: Handle<Image>,
 }
 
 impl From<&SlFaceExt> for SlFaceParams {
@@ -297,7 +298,8 @@ impl From<&SlFaceExt> for SlFaceParams {
 
 impl SlFaceExt {
     /// The inert extension — renders identically to a bare [`StandardMaterial`].
-    pub(crate) fn inert() -> Self {
+    #[must_use]
+    pub fn inert() -> Self {
         Self {
             params: SlFaceParams::inert(),
             specular_map: Handle::default(),
@@ -324,7 +326,7 @@ impl MaterialExtension for SlFaceExt {
     }
 
     /// Keep a **blend** (transparent) face's coverage out of the scene alpha — the
-    /// glow mask ([`crate::glow`]) — so a transparent prim does not bloom under the
+    /// glow mask (`glow`) — so a transparent prim does not bloom under the
     /// glow pass: override the target's **alpha** blend component to `(Zero, One)`
     /// (colour/coverage untouched), like the standalone alpha-blended materials. An
     /// **opaque / mask** face's pipeline has no colour blend, so this is a no-op there
@@ -345,7 +347,8 @@ impl MaterialExtension for SlFaceExt {
 /// place face construction turns a `StandardMaterial` into the face material type,
 /// so the pipeline keeps building `StandardMaterial`s and this adds the do-nothing
 /// extension.
-pub(crate) fn inert_face_material(base: StandardMaterial) -> FaceMaterial {
+#[must_use]
+pub fn inert_face_material(base: StandardMaterial) -> FaceMaterial {
     FaceMaterial {
         base,
         extension: SlFaceExt::inert(),
@@ -355,10 +358,10 @@ pub(crate) fn inert_face_material(base: StandardMaterial) -> FaceMaterial {
 /// Loads the face shader and registers the [`FaceMaterial`]. Add once to the
 /// [`App`] (after `DefaultPlugins`), like the sky / water material plugins.
 #[derive(Debug, Default)]
-pub(crate) struct SlFaceMaterialPlugin;
+pub struct SlFaceMaterialPlugin;
 
 impl Plugin for SlFaceMaterialPlugin {
-    /// Compile `face_material.wgsl` under [`FACE_SHADER_HANDLE`] and add the
+    /// Compile `face_material.wgsl` under `FACE_SHADER_HANDLE` and add the
     /// [`MaterialPlugin`] for the extended face material.
     fn build(&self, app: &mut App) {
         load_internal_asset!(

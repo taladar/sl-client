@@ -13,11 +13,25 @@ use bevy::prelude::*;
 
 /// The kept-alive OS clipboard handle, opened on first use.
 #[derive(Resource, Default)]
-pub(crate) struct ViewerClipboard(Mutex<Option<arboard::Clipboard>>);
+pub struct ViewerClipboard(Mutex<Option<arboard::Clipboard>>);
+
+/// Hand-written because `arboard::Clipboard` is not [`Debug`], and because the
+/// handle itself has nothing worth printing: whether one is open is the only
+/// observable state.
+impl core::fmt::Debug for ViewerClipboard {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let state = match self.0.try_lock() {
+            Ok(guard) if guard.is_some() => "open",
+            Ok(_guard) => "not opened",
+            Err(_error) => "in use",
+        };
+        f.debug_tuple("ViewerClipboard").field(&state).finish()
+    }
+}
 
 /// Copy `text` to the OS clipboard, lazily opening (and keeping) the handle. A
 /// missing / failing clipboard is logged, not fatal.
-pub(crate) fn copy_to_clipboard(clipboard: &ViewerClipboard, text: &str) {
+pub fn copy_to_clipboard(clipboard: &ViewerClipboard, text: &str) {
     let Ok(mut holder) = clipboard.0.lock() else {
         return;
     };
@@ -39,7 +53,7 @@ pub(crate) fn copy_to_clipboard(clipboard: &ViewerClipboard, text: &str) {
 
 /// Registers the shared clipboard resource.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ClipboardPlugin;
+pub struct ClipboardPlugin;
 
 impl Plugin for ClipboardPlugin {
     fn build(&self, app: &mut App) {

@@ -18,7 +18,7 @@
 //!
 //! The solver is *pure*: it takes the chain's current world positions/rotations and
 //! returns the corrected world rotations, so it carries no skeleton, no Bevy state
-//! and no per-frame memory. [`crate::locomotion_ik`] converts between it and the
+//! and no per-frame memory. `locomotion_ik` converts between it and the
 //! viewer's [`AnimationPose`](sl_client_bevy::AnimationPose) locals; a later reach /
 //! aim adjuster (P31.15) reuses it unchanged.
 //!
@@ -47,7 +47,7 @@ const DEGENERATE_CROSS: f32 = 0.001;
 /// solutions that all put `C` on the goal. Set up once (the reference's
 /// `setPoleVector` / `setBAxis` / `setTwist`) and reused every frame.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct JointSolver {
+pub struct JointSolver {
     /// The pole vector in `A`'s **parent's** frame: the chain's solution plane is
     /// rotated so it contains this direction, which is what makes a knee point
     /// forward rather than anywhere on the cone around `A → goal`.
@@ -65,33 +65,33 @@ pub(crate) struct JointSolver {
 /// the avatar-local Second Life frame): where the three joints currently are, where
 /// `C` should end up, and the current world rotations the solver corrects.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Chain {
+pub struct Chain {
     /// World position of `A` (the hip / shoulder).
-    pub(crate) a_pos: Vec3,
+    pub a_pos: Vec3,
     /// World position of `B` (the knee / elbow).
-    pub(crate) b_pos: Vec3,
+    pub b_pos: Vec3,
     /// World position of `C` (the ankle / wrist) — the end effector.
-    pub(crate) c_pos: Vec3,
+    pub c_pos: Vec3,
     /// World position the end effector should reach.
-    pub(crate) goal: Vec3,
+    pub goal: Vec3,
     /// `A`'s current world rotation.
-    pub(crate) a_rot: Quat,
+    pub a_rot: Quat,
     /// `B`'s current world rotation.
-    pub(crate) b_rot: Quat,
+    pub b_rot: Quat,
     /// The world rotation of `A`'s **parent** (the pelvis / chest), which the pole
     /// vector is expressed in.
-    pub(crate) a_parent_rot: Quat,
+    pub a_parent_rot: Quat,
 }
 
 /// The solved world rotations for `A` and `B`. `C` is unchanged — the reference
 /// leaves the end effector's own orientation to the caller (the stand motion
 /// conforms the ankle to the ground normal afterwards).
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Solved {
+pub struct Solved {
     /// `A`'s corrected world rotation.
-    pub(crate) a_rot: Quat,
+    pub a_rot: Quat,
     /// `B`'s corrected world rotation.
-    pub(crate) b_rot: Quat,
+    pub b_rot: Quat,
 }
 
 /// Component-wise vector subtraction (`a - b`), avoiding the glam `-` operator the
@@ -134,7 +134,8 @@ fn shortest_arc(from: Vec3, to: Vec3) -> Quat {
 impl JointSolver {
     /// A solver with the given pole vector (in `A`'s parent's frame) and no bend axis
     /// or twist — the reference's constructor plus `setPoleVector`.
-    pub(crate) fn new(pole_vector: Vec3) -> Self {
+    #[must_use]
+    pub fn new(pole_vector: Vec3) -> Self {
         Self {
             pole_vector: pole_vector.normalize_or_zero(),
             b_axis: None,
@@ -146,20 +147,18 @@ impl JointSolver {
     /// so the chain plane follows the joint's real bend axis rather than one derived
     /// from the (possibly straight) bones.
     #[must_use]
-    pub(crate) fn with_b_axis(mut self, b_axis: Vec3) -> Self {
+    pub fn with_b_axis(mut self, b_axis: Vec3) -> Self {
         self.b_axis = Some(b_axis.normalize_or_zero());
         self
     }
 
     /// Twist the solution about the `A → goal` axis by `twist` radians (the
     /// reference's `setTwist`).
+    ///
+    /// No current caller sets it — the leg IK's stands leave the twist at zero
+    /// — but it is part of the solver the reach / aim adjusters reuse.
     #[must_use]
-    #[expect(
-        dead_code,
-        reason = "the reference's mTwist knob, unused by the leg IK (the stands leave \
-                  it at zero) but part of the solver P31.15's reach/aim adjusters reuse"
-    )]
-    pub(crate) const fn with_twist(mut self, twist: f32) -> Self {
+    pub const fn with_twist(mut self, twist: f32) -> Self {
         self.twist = twist;
         self
     }
@@ -172,7 +171,8 @@ impl JointSolver {
     /// goal all collinear, or the goal direction parallel to the pole vector) the
     /// reference bails out and leaves the joints where they are, and so does this —
     /// the caller keeps the animation's own pose for that frame.
-    pub(crate) fn solve(&self, chain: &Chain) -> Solved {
+    #[must_use]
+    pub fn solve(&self, chain: &Chain) -> Solved {
         let unchanged = Solved {
             a_rot: chain.a_rot,
             b_rot: chain.b_rot,

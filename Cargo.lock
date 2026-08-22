@@ -8484,15 +8484,12 @@ name = "sl-client-bevy-viewer"
 version = "0.1.0"
 dependencies = [
  "arboard",
- "arc-swap",
  "bevy",
  "bevy_flair",
  "bevy_fluent",
- "bytemuck",
  "bytes",
  "clap",
  "crossbeam-channel",
- "directories",
  "evdev",
  "fluent",
  "fluent_content",
@@ -8502,7 +8499,6 @@ dependencies = [
  "parley",
  "parry3d",
  "pretty_assertions",
- "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -8525,7 +8521,9 @@ dependencies = [
  "sl-terrain",
  "sl-texture",
  "sl-types",
+ "sl-viewer-kit",
  "sl-viewer-notifications",
+ "sl-viewer-platform",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -8991,11 +8989,44 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-kit"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "bevy",
+ "bytemuck",
+ "bytes",
+ "fs-err",
+ "image",
+ "jiff",
+ "parry3d",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
 name = "sl-viewer-notifications"
 version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "pretty_assertions",
+]
+
+[[package]]
+name = "sl-viewer-platform"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "bevy",
+ "directories",
+ "fs-err",
+ "pretty_assertions",
+ "regex",
+ "sl-audio",
+ "sl-client-bevy",
+ "tracing",
 ]
 
 [[package]]

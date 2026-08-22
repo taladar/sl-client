@@ -24,7 +24,7 @@ use sl_client_bevy::{RegionHandle, Rotation, Vector};
 /// the `f32` mantissa's exact-integer range. Shared by terrain and coarse-avatar
 /// placement to offset a neighbour region from the scene origin.
 #[must_use]
-pub(crate) fn metres_to_f32(metres: u32) -> f32 {
+pub fn metres_to_f32(metres: u32) -> f32 {
     let high = u16::try_from(metres.checked_shr(16).unwrap_or(0)).unwrap_or(u16::MAX);
     let low = u16::try_from(metres & 0xFFFF).unwrap_or(u16::MAX);
     f32::from(high) * 65_536.0 + f32::from(low)
@@ -34,8 +34,8 @@ pub(crate) fn metres_to_f32(metres: u32) -> f32 {
 /// at `<0,0,0>` — to the south-west corner of `region`. A neighbour region's
 /// **root** objects and full-object avatars are placed at this offset (plus their
 /// region-local position) so they land on the right neighbour terrain, mirroring
-/// the coarse-dot offset ([`crate::avatars`]) and the terrain recenter delta
-/// ([`crate::terrain::recenter_terrain`]).
+/// the coarse-dot offset (`avatars`) and the terrain recenter delta
+/// (`terrain::recenter_terrain`).
 ///
 /// Zero for the origin region itself, and — as a safe fallback before the first
 /// [`Event::RegionChanged`](sl_client_bevy::SlSessionEvent) — when no origin is
@@ -43,7 +43,7 @@ pub(crate) fn metres_to_f32(metres: u32) -> f32 {
 /// is where a fresh login's objects are). The offset is in whole region metres,
 /// so it is exact in `f32` (see [`metres_to_f32`]).
 #[must_use]
-pub(crate) fn region_offset_bevy(region: RegionHandle, origin: Option<RegionHandle>) -> Vec3 {
+pub fn region_offset_bevy(region: RegionHandle, origin: Option<RegionHandle>) -> Vec3 {
     let (region_x, region_y) = region.global_coordinates();
     let (origin_x, origin_y) = origin.unwrap_or(region).global_coordinates();
     sl_to_bevy_vec(&Vector {
@@ -60,7 +60,7 @@ pub(crate) fn region_offset_bevy(region: RegionHandle, origin: Option<RegionHand
 /// entity is translated by **`-shift`** to compensate for the world moving under
 /// it. Equivalent to [`region_offset_bevy(current, Some(previous))`].
 #[must_use]
-pub(crate) fn origin_shift_bevy(previous: RegionHandle, current: RegionHandle) -> Vec3 {
+pub fn origin_shift_bevy(previous: RegionHandle, current: RegionHandle) -> Vec3 {
     region_offset_bevy(current, Some(previous))
 }
 
@@ -70,7 +70,7 @@ pub(crate) fn origin_shift_bevy(previous: RegionHandle, current: RegionHandle) -
 /// Applies the `(x, y, z) -> (x, z, -y)` axis map described in the module
 /// documentation.
 #[must_use]
-pub(crate) fn sl_to_bevy_vec(vector: &Vector) -> Vec3 {
+pub fn sl_to_bevy_vec(vector: &Vector) -> Vec3 {
     Vec3::new(vector.x, vector.z, -vector.y)
 }
 
@@ -81,7 +81,7 @@ pub(crate) fn sl_to_bevy_vec(vector: &Vector) -> Vec3 {
 /// Used at the camera boundary to report the fly-camera's viewpoint back to the
 /// simulator (region-local metres) so its interest list follows the camera.
 #[must_use]
-pub(crate) fn bevy_to_sl_vec(vector: Vec3) -> Vector {
+pub fn bevy_to_sl_vec(vector: Vec3) -> Vector {
     Vector {
         x: vector.x,
         y: -vector.z,
@@ -99,7 +99,7 @@ pub(crate) fn bevy_to_sl_vec(vector: Vec3) -> Vector {
 /// into Bevy's Y-up world. Terrain patches build their geometry relative to the
 /// patch origin in Second Life space and rely on this to orient it.
 #[must_use]
-pub(crate) fn sl_to_bevy_rotation() -> Quat {
+pub fn sl_to_bevy_rotation() -> Quat {
     Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)
 }
 
@@ -112,7 +112,7 @@ pub(crate) fn sl_to_bevy_rotation() -> Quat {
 /// [`sl_to_bevy_rotation`] basis change (so the whole subtree stays in Second
 /// Life space and is converted once at the root).
 #[must_use]
-pub(crate) fn sl_rotation_to_quat(rotation: &Rotation) -> Quat {
+pub fn sl_rotation_to_quat(rotation: &Rotation) -> Quat {
     let quat = Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.s);
     // The wire always carries a unit quaternion, but guard a degenerate (zero /
     // non-finite) one so a bad object update can never poison a `Transform` with
@@ -134,7 +134,7 @@ pub(crate) fn sl_rotation_to_quat(rotation: &Rotation) -> Quat {
 /// the un-changed [`sl_rotation_to_quat`], relying on the parent to carry the
 /// basis change.
 #[must_use]
-pub(crate) fn sl_to_bevy_object_rotation(rotation: &Rotation) -> Quat {
+pub fn sl_to_bevy_object_rotation(rotation: &Rotation) -> Quat {
     // `Quat::mul_quat` rather than the `*` operator to stay clear of the
     // workspace `arithmetic_side_effects` lint.
     sl_to_bevy_rotation().mul_quat(sl_rotation_to_quat(rotation))
@@ -153,7 +153,7 @@ pub(crate) fn sl_to_bevy_object_rotation(rotation: &Rotation) -> Quat {
 /// reference viewer verbatim so a rigid attachment seats exactly where it does
 /// there.
 #[must_use]
-pub(crate) fn sl_euler_deg_to_quat(euler_deg: [f32; 3]) -> Quat {
+pub fn sl_euler_deg_to_quat(euler_deg: [f32; 3]) -> Quat {
     let roll = euler_deg[0].to_radians() * 0.5;
     let pitch = euler_deg[1].to_radians() * 0.5;
     let yaw = euler_deg[2].to_radians() * 0.5;

@@ -14,18 +14,19 @@
 /// given up on. With [`backoff_secs`] this spans roughly half a minute of
 /// retrying — long enough to ride out a transient service blip without hammering a
 /// genuinely-dead endpoint forever.
-pub(crate) const MAX_RETRY_ATTEMPTS: u32 = 6;
+pub const MAX_RETRY_ATTEMPTS: u32 = 6;
 
 /// The first retry's delay; each subsequent retry doubles it.
 const BASE_BACKOFF_SECS: f64 = 0.5;
 
 /// The ceiling on a single retry's delay.
-const MAX_BACKOFF_SECS: f64 = 30.0;
+pub const MAX_BACKOFF_SECS: f64 = 30.0;
 
 /// The delay before the `attempts`-th retry (1-based): `0.5, 1, 2, 4, 8, 16, …`
 /// seconds, doubling each time and capped at [`MAX_BACKOFF_SECS`]. `attempts` of
 /// `0` is treated as the first wait.
-pub(crate) fn backoff_secs(attempts: u32) -> f64 {
+#[must_use]
+pub fn backoff_secs(attempts: u32) -> f64 {
     let steps = attempts.saturating_sub(1).min(16);
     let mut secs = BASE_BACKOFF_SECS;
     for _step in 0..steps {
@@ -38,20 +39,21 @@ pub(crate) fn backoff_secs(attempts: u32) -> f64 {
 }
 
 /// The per-asset retry bookkeeping: how many attempts have failed and when the
-/// next one is due (in monotonic [`Time::elapsed_secs_f64`] seconds).
+/// next one is due (in monotonic [`Time::elapsed_secs_f64`](bevy::time::Time::elapsed_secs_f64) seconds).
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct RetryState {
+pub struct RetryState {
     /// The number of failed attempts so far.
-    pub(crate) attempts: u32,
+    pub attempts: u32,
     /// The monotonic time at which the next retry is due.
-    pub(crate) next_at: f64,
+    pub next_at: f64,
 }
 
 impl RetryState {
     /// The retry state after another failed attempt at `now`, or `None` once the
     /// attempts are exhausted ([`MAX_RETRY_ATTEMPTS`]) and the fetch should be given
     /// up on. `previous` is the id's prior retry state, if it had already failed.
-    pub(crate) fn after_failure(previous: Option<Self>, now: f64) -> Option<Self> {
+    #[must_use]
+    pub fn after_failure(previous: Option<Self>, now: f64) -> Option<Self> {
         let attempts = previous.map_or(0, |state| state.attempts).saturating_add(1);
         if attempts >= MAX_RETRY_ATTEMPTS {
             return None;
@@ -63,7 +65,8 @@ impl RetryState {
     }
 
     /// Whether the next retry is due at `now`.
-    pub(crate) const fn due(&self, now: f64) -> bool {
+    #[must_use]
+    pub const fn due(&self, now: f64) -> bool {
         now >= self.next_at
     }
 
@@ -75,7 +78,8 @@ impl RetryState {
     /// clears it. Without preserving the count here the re-issue path dropped the
     /// retry state entirely, so every failure saw no prior state and reset to
     /// attempt 1 — the backoff looped forever at "retry 1/N" and never gave up.
-    pub(crate) const fn issued(self) -> Self {
+    #[must_use]
+    pub const fn issued(self) -> Self {
         Self {
             attempts: self.attempts,
             next_at: f64::INFINITY,

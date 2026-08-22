@@ -567,7 +567,8 @@ fn flush_shadow_cull_diag(pipeline: &mut ShadowCullPipeline) {
 /// Installs the off-thread sun shadow-caster cull, replacing Bevy's per-frame
 /// `check_dir_light_mesh_visibility`. `SL_VIEWER_SHADOW_CULL=off` keeps stock
 /// Bevy (the A/B baseline); `SL_VIEWER_LOG_SHADOW_CULL` enables the readout.
-pub(crate) struct ShadowVisibilityPlugin;
+#[derive(Debug)]
+pub struct ShadowVisibilityPlugin;
 
 impl Plugin for ShadowVisibilityPlugin {
     fn build(&self, app: &mut App) {

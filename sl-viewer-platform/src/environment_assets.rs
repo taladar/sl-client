@@ -11,7 +11,7 @@
 //! The fetch reuses the generic [`AssetStore`] over the `ViewerAsset` capability —
 //! the same infrastructure the animation / wearable fetches use — with
 //! [`AssetType::Settings`]. Mirrors
-//! [`AnimationManager`](crate::animations::AnimationManager), minus the
+//! `AnimationManager`, minus the
 //! built-in / local-file paths a settings asset never has.
 
 use std::collections::{HashMap, HashSet};
@@ -32,9 +32,9 @@ use sl_client_bevy::{
 /// hand, and the ids known to have no fetchable/decodable asset.
 ///
 /// Backs the World ▸ Environment **Modern** presets (the `KNOWN_SKY_*` library
-/// skies). Mirrors [`AnimationManager`](crate::animations::AnimationManager).
-#[derive(Resource)]
-pub(crate) struct EnvironmentAssetManager {
+/// skies). Mirrors `AnimationManager`.
+#[derive(Debug, Resource)]
+pub struct EnvironmentAssetManager {
     /// The generic-asset store doing the `ViewerAsset` fetch, dedupe, off-thread
     /// work, and on-disk caching of the raw settings bytes.
     store: AssetStore,
@@ -53,7 +53,7 @@ pub(crate) struct EnvironmentAssetManager {
     /// Ids requested before the region's `ViewerAsset` capability was known, held
     /// here so the fetch is not run — and the id not marked permanently
     /// [`unavailable`](Self::unavailable) — until the cap arrives. Drained by
-    /// [`retry_pending`](Self::retry_pending).
+    /// `retry_pending`.
     pending: HashSet<AssetKey>,
 }
 
@@ -77,7 +77,7 @@ impl EnvironmentAssetManager {
     /// already-decoded id, one in flight, or one known unavailable is ignored. If
     /// the `ViewerAsset` capability is not known yet the request is held pending
     /// (not fetched, not marked unavailable) until it arrives. Idempotent.
-    pub(crate) fn request(&mut self, id: AssetKey) {
+    pub fn request(&mut self, id: AssetKey) {
         if id.uuid().is_nil()
             || self.decoded.contains_key(&id)
             || self.inflight.contains_key(&id)
@@ -127,7 +127,8 @@ impl EnvironmentAssetManager {
 
     /// The decoded settings for `id`, once resolved, or `None` while it is still
     /// in flight, failed, or was never requested.
-    pub(crate) fn get(&self, id: AssetKey) -> Option<&Arc<EnvironmentAsset>> {
+    #[must_use]
+    pub fn get(&self, id: AssetKey) -> Option<&Arc<EnvironmentAsset>> {
         self.decoded.get(&id)
     }
 
@@ -135,21 +136,24 @@ impl EnvironmentAssetManager {
     /// the F3 diagnostics overlay: entry counts bucketed by stage plus the
     /// cumulative disk-cache-hit / GC counters. Delegates to the wrapped
     /// [`AssetStore`].
-    pub(crate) fn stats(&self) -> StoreStats {
+    #[must_use]
+    pub fn stats(&self) -> StoreStats {
         self.store.stats()
     }
 
     /// A point-in-time snapshot of the settings store's admission gate: its
     /// concurrency capacity, in-flight slots, and queued waiters.
-    pub(crate) fn gate_stats(&self) -> GateStats {
+    #[must_use]
+    pub fn gate_stats(&self) -> GateStats {
         self.store.gate_stats()
     }
 
     /// How many resolves are parked outside the store's own accounting — held for
     /// the `ViewerAsset` capability that is not up yet (see
-    /// [`pending`](Self::pending)) — so the pipeline overlay does not report
+    /// `pending`) — so the pipeline overlay does not report
     /// "nothing left to load" while such work is still outstanding.
-    pub(crate) fn deferred_count(&self) -> usize {
+    #[must_use]
+    pub fn deferred_count(&self) -> usize {
         self.pending.len()
     }
 
@@ -159,7 +163,7 @@ impl EnvironmentAssetManager {
     }
 
     /// Re-issue any settings resolves parked before the `ViewerAsset` capability
-    /// was known (see [`pending`](Self::pending)), now that it is. A no-op while
+    /// was known (see `pending`), now that it is. A no-op while
     /// the cap is unset or nothing is pending.
     fn retry_pending(&mut self) {
         if self.pending.is_empty() || !self.fetcher.has_cap_url() {
@@ -173,7 +177,7 @@ impl EnvironmentAssetManager {
 
     /// Re-park every settings asset previously marked
     /// [`unavailable`](Self::unavailable) so the next
-    /// [`retry_pending`](Self::retry_pending) re-fetches it. Called on a capability
+    /// `retry_pending` re-fetches it. Called on a capability
     /// refresh (a region cross / reconnect): a settings asset whose fetch failed
     /// transiently would otherwise keep its fallback for the session.
     fn rearm_unavailable(&mut self) {
@@ -232,7 +236,7 @@ fn settings_cache_dir() -> Option<PathBuf> {
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the region's
 /// capability map is (re)discovered, then re-issue any parked resolves.
-pub(crate) fn update_environment_asset_caps(
+pub fn update_environment_asset_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut manager: ResMut<EnvironmentAssetManager>,
 ) {
@@ -251,7 +255,7 @@ pub(crate) fn update_environment_asset_caps(
 
 /// Poll the in-flight settings fetch+decode tasks, moving finished ones into the
 /// decoded map (or marking them unavailable on failure).
-pub(crate) fn poll_environment_assets(mut manager: ResMut<EnvironmentAssetManager>) {
+pub fn poll_environment_assets(mut manager: ResMut<EnvironmentAssetManager>) {
     // Collect the finished ids first — the borrow of the task map cannot overlap
     // the mutation of the decoded / unavailable maps.
     let mut finished: Vec<(AssetKey, Option<EnvironmentAsset>)> = Vec::new();

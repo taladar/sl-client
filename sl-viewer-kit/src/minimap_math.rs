@@ -23,49 +23,49 @@ use bevy::math::Vec2;
 
 /// The width of a (classic) region in metres — the unit [`MapView::scale`] is
 /// expressed against.
-pub(crate) const REGION_WIDTH_METRES: f32 = 256.0;
+pub const REGION_WIDTH_METRES: f32 = 256.0;
 
 /// The smallest allowed map scale, in pixels per region (fully zoomed out).
-pub(crate) const MAP_SCALE_MIN: f32 = 32.0;
+pub const MAP_SCALE_MIN: f32 = 32.0;
 
 /// The largest allowed map scale, in pixels per region (fully zoomed in).
-pub(crate) const MAP_SCALE_MAX: f32 = 4096.0;
+pub const MAP_SCALE_MAX: f32 = 4096.0;
 
 /// The "Very Close" zoom preset (pixels per region).
-pub(crate) const MAP_SCALE_VERY_CLOSE: f32 = 1024.0;
+pub const MAP_SCALE_VERY_CLOSE: f32 = 1024.0;
 
 /// The "Close" zoom preset (pixels per region).
-pub(crate) const MAP_SCALE_CLOSE: f32 = 256.0;
+pub const MAP_SCALE_CLOSE: f32 = 256.0;
 
 /// The "Medium" zoom preset (pixels per region) — the default scale.
-pub(crate) const MAP_SCALE_MEDIUM: f32 = 128.0;
+pub const MAP_SCALE_MEDIUM: f32 = 128.0;
 
 /// The "Far" zoom preset (pixels per region).
-pub(crate) const MAP_SCALE_FAR: f32 = 32.0;
+pub const MAP_SCALE_FAR: f32 = 32.0;
 
 /// The per-notch scroll-wheel zoom factor (4 % per click).
-pub(crate) const MAP_SCALE_ZOOM_FACTOR: f32 = 1.04;
+pub const MAP_SCALE_ZOOM_FACTOR: f32 = 1.04;
 
 /// Avatar dot radius per pixel-per-metre (the reference's `DOT_SCALE`).
-pub(crate) const DOT_SCALE: f32 = 0.75;
+pub const DOT_SCALE: f32 = 0.75;
 
 /// The smallest avatar dot radius, in pixels.
-pub(crate) const MIN_DOT_RADIUS: f32 = 3.5;
+pub const MIN_DOT_RADIUS: f32 = 3.5;
 
 /// Diagonal compass labels hide when their box would cover more than this
 /// fraction of the map's smaller edge (`MAP_MINOR_DIR_THRESHOLD`).
-pub(crate) const MINOR_DIR_THRESHOLD: f32 = 0.07;
+pub const MINOR_DIR_THRESHOLD: f32 = 0.07;
 
 /// The relative-height band (± metres) within which an avatar draws as a level
 /// dot rather than an above / below chevron.
-pub(crate) const HEIGHT_CUE_BAND: f32 = 7.0;
+pub const HEIGHT_CUE_BAND: f32 = 7.0;
 
 /// The coarse-location altitude ceiling in metres: a coarse `z` at (or above)
 /// this — or at zero — means the simulator could not encode the altitude.
-pub(crate) const COARSE_MAX_Z: f32 = 1020.0;
+pub const COARSE_MAX_Z: f32 = 1020.0;
 
 /// One RGBA colour, straight (non-premultiplied) alpha.
-pub(crate) type Rgba = [u8; 4];
+pub type Rgba = [u8; 4];
 
 // ---------------------------------------------------------------------------
 // The world ↔ surface transform.
@@ -74,31 +74,33 @@ pub(crate) type Rgba = [u8; 4];
 /// The minimap's view state: one scale for all instances, the rotation baked
 /// into both transforms, the pan offset, and the surface size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct MapView {
+pub struct MapView {
     /// Pixels per 256 m region (the persisted `MiniMapScale`).
-    pub(crate) scale: f32,
+    pub scale: f32,
     /// The rotation applied to the whole map about its centre, in radians.
     /// `0` = north-up; with rotate-on this is `atan2(at_east, at_north)` of the
     /// camera's at-axis so the camera heading points up.
-    pub(crate) rotation: f32,
+    pub rotation: f32,
     /// The pan offset in surface pixels, `+x` = content shifted toward the
     /// right edge, `+y` = content shifted toward the *top* edge (the
     /// reference's GL-frame `mCurPan`).
-    pub(crate) pan: Vec2,
+    pub pan: Vec2,
     /// The surface size in pixels.
-    pub(crate) size: Vec2,
+    pub size: Vec2,
 }
 
 impl MapView {
     /// Pixels per metre at the current scale.
-    pub(crate) fn pixels_per_metre(&self) -> f32 {
+    #[must_use]
+    pub fn pixels_per_metre(&self) -> f32 {
         self.scale / REGION_WIDTH_METRES
     }
 
     /// A camera-relative world offset (metres east / north) as a surface pixel
     /// position (origin top-left, `y` down) — the reference's
     /// `globalPosToView`.
-    pub(crate) fn view_from_rel(&self, east: f32, north: f32) -> Vec2 {
+    #[must_use]
+    pub fn view_from_rel(&self, east: f32, north: f32) -> Vec2 {
         let ppm = self.pixels_per_metre();
         let px = east * ppm;
         let py = north * ppm;
@@ -114,7 +116,8 @@ impl MapView {
     /// camera-relative world offset in metres — the inverse of
     /// [`view_from_rel`](Self::view_from_rel), the reference's
     /// `viewPosToGlobal`.
-    pub(crate) fn rel_from_view(&self, view: Vec2) -> (f32, f32) {
+    #[must_use]
+    pub fn rel_from_view(&self, view: Vec2) -> (f32, f32) {
         let gl_x = view.x - self.size.x / 2.0 - self.pan.x;
         let gl_y = (self.size.y - view.y) - self.size.y / 2.0 - self.pan.y;
         let (sin, cos) = (-self.rotation).sin_cos();
@@ -128,24 +131,28 @@ impl MapView {
 /// The map rotation for a camera at-axis, in radians: `atan2(at_east,
 /// at_north)`, so that with rotate-on the camera heading points to the top of
 /// the map (the reference's rotation formula).
-pub(crate) fn rotation_for_camera(at_east: f32, at_north: f32) -> f32 {
+#[must_use]
+pub fn rotation_for_camera(at_east: f32, at_north: f32) -> f32 {
     at_east.atan2(at_north)
 }
 
 /// Clamp a requested scale into the allowed range.
-pub(crate) const fn clamp_scale(scale: f32) -> f32 {
+#[must_use]
+pub const fn clamp_scale(scale: f32) -> f32 {
     scale.clamp(MAP_SCALE_MIN, MAP_SCALE_MAX)
 }
 
 /// The new scale after `clicks` scroll-wheel notches (positive clicks zoom
 /// out, matching the reference's reversed sense), clamped.
-pub(crate) fn wheel_scale(scale: f32, clicks: f32) -> f32 {
+#[must_use]
+pub fn wheel_scale(scale: f32, clicks: f32) -> f32 {
     clamp_scale(scale * MAP_SCALE_ZOOM_FACTOR.powf(-clicks))
 }
 
 /// Rescale the pan offset when the scale changes so the view stays anchored
 /// (the reference's `setScale` does `mCurPan *= new / old`).
-pub(crate) fn rescale_pan(pan: Vec2, old_scale: f32, new_scale: f32) -> Vec2 {
+#[must_use]
+pub fn rescale_pan(pan: Vec2, old_scale: f32, new_scale: f32) -> Vec2 {
     if old_scale <= 0.0 {
         return pan;
     }
@@ -156,7 +163,8 @@ pub(crate) fn rescale_pan(pan: Vec2, old_scale: f32, new_scale: f32) -> Vec2 {
 /// The pan adjustment that keeps the point under the cursor fixed across a
 /// zoom, when auto-centring is off. `cursor` is in surface pixels (top-left
 /// origin); returns the *new* pan.
-pub(crate) fn zoom_to_cursor_pan(
+#[must_use]
+pub fn zoom_to_cursor_pan(
     pan_after_rescale: Vec2,
     cursor: Vec2,
     size: Vec2,
@@ -179,7 +187,8 @@ pub(crate) fn zoom_to_cursor_pan(
 /// One auto-centre step: ease the pan back toward zero with an exponential
 /// approach (time-constant feel of the reference's 0.1 interpolant), snapping
 /// to exactly zero once both components are within half a pixel.
-pub(crate) fn auto_center_step(pan: Vec2, dt: f32) -> Vec2 {
+#[must_use]
+pub fn auto_center_step(pan: Vec2, dt: f32) -> Vec2 {
     let t = 1.0 - (-dt / 0.075).exp();
     let eased = Vec2::new(pan.x * (1.0 - t), pan.y * (1.0 - t));
     if eased.x.abs() < 0.5 && eased.y.abs() < 0.5 {
@@ -197,7 +206,8 @@ pub(crate) fn auto_center_step(pan: Vec2, dt: f32) -> Vec2 {
 /// derived from the surface diagonal: the least power of two whose double still
 /// falls short of the diagonal, clamped to 64–512 (the reference's
 /// `createImage`).
-pub(crate) fn layer_raster_size(surface: Vec2) -> u32 {
+#[must_use]
+pub fn layer_raster_size(surface: Vec2) -> u32 {
     let diagonal = surface.length();
     let mut size: u32 = 64;
     while let Some(doubled) = size.checked_mul(2) {
@@ -213,7 +223,8 @@ pub(crate) fn layer_raster_size(surface: Vec2) -> u32 {
 /// Layer texels per metre: the raster spans the surface diagonal's worth of
 /// world, so `texels = raster / (diagonal / scale × 256)` (the reference's
 /// `mObjectMapTPM`).
-pub(crate) fn layer_texels_per_metre(raster_size: u32, surface: Vec2, scale: f32) -> f32 {
+#[must_use]
+pub fn layer_texels_per_metre(raster_size: u32, surface: Vec2, scale: f32) -> f32 {
     let diagonal = surface.length();
     if diagonal <= 0.0 || scale <= 0.0 {
         return 1.0;
@@ -228,16 +239,17 @@ pub(crate) fn layer_texels_per_metre(raster_size: u32, surface: Vec2, scale: f32
 
 /// A square, bottom-up (row 0 = south) RGBA raster a content layer draws into.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct LayerRaster {
+pub struct LayerRaster {
     /// The square side, in texels.
-    pub(crate) size: u32,
+    pub size: u32,
     /// RGBA8 texels, row-major from the south row up.
-    pub(crate) data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl LayerRaster {
     /// A transparent raster of `size` × `size` texels.
-    pub(crate) fn new(size: u32) -> Self {
+    #[must_use]
+    pub fn new(size: u32) -> Self {
         let texels = usize::try_from(size).unwrap_or(0);
         Self {
             size,
@@ -258,7 +270,7 @@ impl LayerRaster {
     }
 
     /// Write one texel (no blending), ignoring out-of-bounds writes.
-    pub(crate) fn put(&mut self, x: i32, y: i32, color: Rgba) {
+    pub fn put(&mut self, x: i32, y: i32, color: Rgba) {
         if let Some(offset) = self.offset(x, y)
             && let Some(slot) = self.data.get_mut(offset..offset.saturating_add(4))
         {
@@ -267,7 +279,8 @@ impl LayerRaster {
     }
 
     /// Read one texel, or transparent when out of bounds.
-    pub(crate) fn get(&self, x: i32, y: i32) -> Rgba {
+    #[must_use]
+    pub fn get(&self, x: i32, y: i32) -> Rgba {
         let Some(offset) = self.offset(x, y) else {
             return [0, 0, 0, 0];
         };
@@ -283,7 +296,8 @@ impl LayerRaster {
 }
 
 /// Round a finite `f32` to the nearest `i32`, clamped to the `i32` range.
-pub(crate) const fn round_i32(value: f32) -> i32 {
+#[must_use]
+pub const fn round_i32(value: f32) -> i32 {
     let clamped = value
         .round()
         .clamp(-2_147_483_000.0_f32, 2_147_483_000.0_f32);
@@ -299,7 +313,7 @@ pub(crate) const fn round_i32(value: f32) -> i32 {
 /// Draw one map point into a layer raster: a filled square for a level point,
 /// or the reference's above-marker (a vertical line capped by a top bar) when
 /// `relative_height` is positive — the exact `LLNetMap::renderPoint` shapes.
-pub(crate) fn render_point(
+pub fn render_point(
     raster: &mut LayerRaster,
     x_offset: i32,
     y_offset: i32,
@@ -344,80 +358,81 @@ pub(crate) fn render_point(
 // ---------------------------------------------------------------------------
 
 /// `PrimFlags` bit: the object is physical (`FLAGS_USE_PHYSICS`).
-pub(crate) const FLAG_USE_PHYSICS: u32 = 1 << 0;
+pub const FLAG_USE_PHYSICS: u32 = 1 << 0;
 
 /// `PrimFlags` bit: the viewer's agent owns the object
 /// (`FLAGS_OBJECT_YOU_OWNER`).
-pub(crate) const FLAG_YOU_OWNER: u32 = 1 << 5;
+pub const FLAG_YOU_OWNER: u32 = 1 << 5;
 
 /// `PrimFlags` bit: the object contains a running script (`FLAGS_SCRIPTED`).
-pub(crate) const FLAG_SCRIPTED: u32 = 1 << 6;
+pub const FLAG_SCRIPTED: u32 = 1 << 6;
 
 /// `PrimFlags` bit: the object is phantom (`FLAGS_PHANTOM`).
-pub(crate) const FLAG_PHANTOM: u32 = 1 << 10;
+pub const FLAG_PHANTOM: u32 = 1 << 10;
 
 /// `PrimFlags` bit: the object is group-owned (`FLAGS_OBJECT_GROUP_OWNED`).
-pub(crate) const FLAG_GROUP_OWNED: u32 = 1 << 18;
+pub const FLAG_GROUP_OWNED: u32 = 1 << 18;
 
 /// `PrimFlags` bit: the object is temporary-on-rez (`FLAGS_TEMPORARY_ON_REZ`).
-pub(crate) const FLAG_TEMP_ON_REZ: u32 = 1 << 29;
+pub const FLAG_TEMP_ON_REZ: u32 = 1 << 29;
 
 /// The scale magnitude above which an unowned object still joins the map
 /// layer (the reference's "large object" membership rule).
-pub(crate) const LARGE_OBJECT_SCALE: f32 = 7.5;
+pub const LARGE_OBJECT_SCALE: f32 = 7.5;
 
 /// Others' objects above water: dark grey (`NetMapOtherOwnAboveWater`).
-pub(crate) const COLOR_OTHER_ABOVE: Rgba = [61, 61, 61, 255];
+pub const COLOR_OTHER_ABOVE: Rgba = [61, 61, 61, 255];
 
 /// Others' objects below water: darker grey (`NetMapOtherOwnBelowWater`).
-pub(crate) const COLOR_OTHER_BELOW: Rgba = [32, 32, 32, 255];
+pub const COLOR_OTHER_BELOW: Rgba = [32, 32, 32, 255];
 
 /// Your objects above water: cyan (`NetMapYouOwnAboveWater`).
-pub(crate) const COLOR_YOU_ABOVE: Rgba = [0, 255, 255, 255];
+pub const COLOR_YOU_ABOVE: Rgba = [0, 255, 255, 255];
 
 /// Your objects below water: darker cyan (`NetMapYouOwnBelowWater`).
-pub(crate) const COLOR_YOU_BELOW: Rgba = [0, 199, 199, 255];
+pub const COLOR_YOU_BELOW: Rgba = [0, 199, 199, 255];
 
 /// Group-owned objects above water: magenta (`NetMapGroupOwnAboveWater`).
-pub(crate) const COLOR_GROUP_ABOVE: Rgba = [255, 0, 255, 255];
+pub const COLOR_GROUP_ABOVE: Rgba = [255, 0, 255, 255];
 
 /// Group-owned objects below water: darker magenta
 /// (`NetMapGroupOwnBelowWater`).
-pub(crate) const COLOR_GROUP_BELOW: Rgba = [199, 0, 199, 255];
+pub const COLOR_GROUP_BELOW: Rgba = [199, 0, 199, 255];
 
 /// Scripted-object accent: orange (`NetMapScripted`).
-pub(crate) const COLOR_SCRIPTED: Rgba = [255, 165, 0, 255];
+pub const COLOR_SCRIPTED: Rgba = [255, 165, 0, 255];
 
 /// Temp-on-rez accent: a deeper orange (`NetMapTempOnRez`).
-pub(crate) const COLOR_TEMP_ON_REZ: Rgba = [255, 128, 0, 255];
+pub const COLOR_TEMP_ON_REZ: Rgba = [255, 128, 0, 255];
 
 /// Physical accent for your own objects: red (`NetMapYouPhysical`).
-pub(crate) const COLOR_YOU_PHYSICAL: Rgba = [255, 0, 0, 255];
+pub const COLOR_YOU_PHYSICAL: Rgba = [255, 0, 0, 255];
 
 /// Physical accent for group-owned objects: green (`NetMapGroupPhysical`).
-pub(crate) const COLOR_GROUP_PHYSICAL: Rgba = [0, 255, 0, 255];
+pub const COLOR_GROUP_PHYSICAL: Rgba = [0, 255, 0, 255];
 
 /// Physical accent for others' objects: green (`NetMapOtherPhysical`).
-pub(crate) const COLOR_OTHER_PHYSICAL: Rgba = [0, 255, 0, 255];
+pub const COLOR_OTHER_PHYSICAL: Rgba = [0, 255, 0, 255];
 
 /// The optional accent classes and their master toggles, as read from the
 /// settings at layer-regeneration time.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ObjectAccents {
+pub struct ObjectAccents {
     /// Highlight physical objects (`NetMapPhysical`).
-    pub(crate) physical: bool,
+    pub physical: bool,
     /// Highlight scripted objects (`NetMapScripted`).
-    pub(crate) scripted: bool,
+    pub scripted: bool,
     /// Highlight temp-on-rez objects (`NetMapTempOnRez`).
-    pub(crate) temp_on_rez: bool,
+    pub temp_on_rez: bool,
     /// Phantom-object dot opacity, `0..=255` (`NetMapPhantomOpacity`).
-    pub(crate) phantom_alpha: u8,
+    pub phantom_alpha: u8,
 }
 
 /// Whether an object belongs on the map layer at all: owned by you, large, or
 /// carrying one of the enabled accent classes — never an attachment (the
 /// caller excludes those before asking).
-pub(crate) fn object_on_map(flags: u32, scale: [f32; 3], accents: ObjectAccents) -> bool {
+#[must_use]
+pub fn object_on_map(flags: u32, scale: [f32; 3], accents: ObjectAccents) -> bool {
     if flags & FLAG_YOU_OWNER != 0 {
         return true;
     }
@@ -433,7 +448,8 @@ pub(crate) fn object_on_map(flags: u32, scale: [f32; 3], accents: ObjectAccents)
 /// The dot radius (metres) an object rasterises at: the reference's
 /// `(scale.x + scale.y) × 0.25 × 1.3` fudge, clamped to `max_radius`, with a
 /// 2 m floor for owned / accented objects so your small things stay visible.
-pub(crate) fn object_map_radius(
+#[must_use]
+pub fn object_map_radius(
     scale: [f32; 3],
     flags: u32,
     accents: ObjectAccents,
@@ -455,11 +471,8 @@ pub(crate) fn object_map_radius(
 /// region water height, with the enabled accent classes overriding in the
 /// reference's order (scripted, then physical, then temp-on-rez) and phantom
 /// objects taking the phantom opacity.
-pub(crate) const fn object_map_color(
-    flags: u32,
-    above_water: bool,
-    accents: ObjectAccents,
-) -> Rgba {
+#[must_use]
+pub const fn object_map_color(flags: u32, above_water: bool, accents: ObjectAccents) -> Rgba {
     let mut color = if flags & FLAG_YOU_OWNER != 0 {
         match (flags & FLAG_GROUP_OWNED != 0, above_water) {
             (true, true) => COLOR_GROUP_ABOVE,
@@ -497,7 +510,7 @@ pub(crate) const fn object_map_color(
 
 /// Rasterise one object into the layer: `east` / `north` are metres relative
 /// to the layer's capture centre, `radius_metres` the [`object_map_radius`].
-pub(crate) fn render_object_point(
+pub fn render_object_point(
     raster: &mut LayerRaster,
     texels_per_metre: f32,
     east: f32,
@@ -517,20 +530,20 @@ pub(crate) fn render_object_point(
 // ---------------------------------------------------------------------------
 
 /// The parcel property-line colour (`MapParcelOutlineColor`).
-pub(crate) const COLOR_PARCEL_LINE: Rgba = [255, 255, 255, 255];
+pub const COLOR_PARCEL_LINE: Rgba = [255, 255, 255, 255];
 
 /// The for-sale parcel fill: pale yellow.
-pub(crate) const COLOR_FOR_SALE: Rgba = [255, 255, 128, 192];
+pub const COLOR_FOR_SALE: Rgba = [255, 255, 128, 192];
 
 /// The auction parcel fill: violet.
-pub(crate) const COLOR_AUCTION: Rgba = [128, 0, 255, 102];
+pub const COLOR_AUCTION: Rgba = [128, 0, 255, 102];
 
 /// The size of one parcel-overlay cell in metres.
-pub(crate) const PARCEL_CELL_METRES: f32 = 4.0;
+pub const PARCEL_CELL_METRES: f32 = 4.0;
 
 /// A parcel-overlay cell's fill class on the minimap.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ParcelFill {
+pub enum ParcelFill {
     /// The cell is for sale: the pale-yellow fill.
     ForSale,
     /// The cell is up for auction: the violet fill.
@@ -539,13 +552,13 @@ pub(crate) enum ParcelFill {
 
 /// One parcel-overlay cell as the parcel-layer rasteriser consumes it.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ParcelCell {
+pub struct ParcelCell {
     /// The cell's fill (for sale / auction), when it has one.
-    pub(crate) fill: Option<ParcelFill>,
+    pub fill: Option<ParcelFill>,
     /// The cell's west edge is a property line.
-    pub(crate) west_line: bool,
+    pub west_line: bool,
     /// The cell's south edge is a property line.
-    pub(crate) south_line: bool,
+    pub south_line: bool,
 }
 
 /// Draw one region's parcel overlay into the parcel layer raster: the region's
@@ -566,7 +579,7 @@ pub(crate) struct ParcelCell {
     reason = "a direct port of the reference rasteriser, which takes exactly this data; bundling \
               into a one-use struct would only rename the arguments"
 )]
-pub(crate) fn render_parcel_region(
+pub fn render_parcel_region(
     raster: &mut LayerRaster,
     texels_per_metre: f32,
     origin_east: f32,
@@ -679,7 +692,8 @@ pub(crate) fn render_parcel_region(
 /// so on); `half_width` / `half_height` are the usable half-extents (map half
 /// size minus label half size minus padding). The label is projected onto the
 /// rect edge along its angle — the reference's `setDirectionPos`.
-pub(crate) fn compass_label_offset(angle: f32, half_width: f32, half_height: f32) -> Vec2 {
+#[must_use]
+pub fn compass_label_offset(angle: f32, half_width: f32, half_height: f32) -> Vec2 {
     let corner_angle = half_height.atan2(half_width);
     // Mirror the angle into the upper-right quadrant to pick the edge.
     let normalized = angle.rem_euclid(core::f32::consts::TAU);
@@ -717,7 +731,8 @@ pub(crate) fn compass_label_offset(angle: f32, half_width: f32, half_height: f32
 
 /// Whether the diagonal compass labels are shown: hidden once a label's box
 /// would cover more than [`MINOR_DIR_THRESHOLD`] of the map's smaller edge.
-pub(crate) fn minor_directions_visible(label_height: f32, surface: Vec2) -> bool {
+#[must_use]
+pub fn minor_directions_visible(label_height: f32, surface: Vec2) -> bool {
     label_height < MINOR_DIR_THRESHOLD * surface.x.min(surface.y)
 }
 
@@ -726,35 +741,35 @@ pub(crate) fn minor_directions_visible(label_height: f32, surface: Vec2) -> bool
 // ---------------------------------------------------------------------------
 
 /// The base avatar dot colour (`MapAvatarColor`): red.
-pub(crate) const COLOR_AVATAR: Rgba = [255, 0, 0, 255];
+pub const COLOR_AVATAR: Rgba = [255, 0, 0, 255];
 
 /// The friend dot colour (`MapAvatarFriendColor`): green.
-pub(crate) const COLOR_AVATAR_FRIEND: Rgba = [0, 255, 0, 255];
+pub const COLOR_AVATAR_FRIEND: Rgba = [0, 255, 0, 255];
 
 /// The self marker colour (`MapAvatarSelfColor`): yellow.
-pub(crate) const COLOR_AVATAR_SELF: Rgba = [255, 255, 0, 255];
+pub const COLOR_AVATAR_SELF: Rgba = [255, 255, 0, 255];
 
 /// The Linden dot colour (`MapAvatarLindenColor`): blue.
-pub(crate) const COLOR_AVATAR_LINDEN: Rgba = [0, 0, 255, 255];
+pub const COLOR_AVATAR_LINDEN: Rgba = [0, 0, 255, 255];
 
 /// The tracking-beacon colour (`MapTrackColor`): red.
-pub(crate) const COLOR_TRACK: Rgba = [255, 0, 0, 255];
+pub const COLOR_TRACK: Rgba = [255, 0, 0, 255];
 
 /// The camera frustum wedge colour: white at 0.1 alpha (`MapFrustumColor`).
-pub(crate) const COLOR_FRUSTUM: Rgba = [255, 255, 255, 26];
+pub const COLOR_FRUSTUM: Rgba = [255, 255, 255, 26];
 
 /// The whisper-range ring colour: blue at 0.3 alpha (`MapWhisperRingColor`).
-pub(crate) const COLOR_WHISPER_RING: Rgba = [0, 0, 255, 77];
+pub const COLOR_WHISPER_RING: Rgba = [0, 0, 255, 77];
 
 /// The chat-range ring colour: yellow at 0.3 alpha (`MapChatRingColor`).
-pub(crate) const COLOR_CHAT_RING: Rgba = [255, 255, 0, 77];
+pub const COLOR_CHAT_RING: Rgba = [255, 255, 0, 77];
 
 /// The shout-range ring colour: red at 0.3 alpha (`MapShoutRingColor`).
-pub(crate) const COLOR_SHOUT_RING: Rgba = [255, 0, 0, 77];
+pub const COLOR_SHOUT_RING: Rgba = [255, 0, 0, 77];
 
 /// The height-cue glyph an avatar dot draws with.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HeightGlyph {
+pub enum HeightGlyph {
     /// Within ±[`HEIGHT_CUE_BAND`] of the camera: a level dot.
     Level,
     /// More than the band above the camera: an up chevron.
@@ -769,7 +784,8 @@ pub(crate) enum HeightGlyph {
 /// camera. `altitude_unknown` marks the coarse-location sentinel; the
 /// reference draws *unknown* only when the camera is itself at or above the
 /// coarse ceiling, and otherwise treats the avatar as far above.
-pub(crate) fn height_glyph(relative_z: f32, altitude_unknown: bool, camera_z: f32) -> HeightGlyph {
+#[must_use]
+pub fn height_glyph(relative_z: f32, altitude_unknown: bool, camera_z: f32) -> HeightGlyph {
     if altitude_unknown {
         if camera_z >= COARSE_MAX_Z {
             return HeightGlyph::Unknown;
@@ -787,12 +803,14 @@ pub(crate) fn height_glyph(relative_z: f32, altitude_unknown: bool, camera_z: f3
 
 /// Whether a coarse-location altitude is the "unknown" sentinel: the encoded
 /// byte saturates at 255 (1020 m) and some simulators send 0 for unknown.
-pub(crate) fn coarse_altitude_unknown(z_metres: f32) -> bool {
+#[must_use]
+pub fn coarse_altitude_unknown(z_metres: f32) -> bool {
     z_metres <= 0.0 || z_metres >= COARSE_MAX_Z
 }
 
 /// The avatar dot radius in surface pixels at the given pixels-per-metre.
-pub(crate) fn dot_radius(pixels_per_metre: f32) -> f32 {
+#[must_use]
+pub fn dot_radius(pixels_per_metre: f32) -> f32 {
     (DOT_SCALE * pixels_per_metre).max(MIN_DOT_RADIUS)
 }
 
@@ -801,13 +819,14 @@ pub(crate) fn dot_radius(pixels_per_metre: f32) -> f32 {
 // ---------------------------------------------------------------------------
 
 /// A mutable view of the composited surface image (row 0 = top).
-pub(crate) struct Surface<'a> {
+#[derive(Debug)]
+pub struct Surface<'a> {
     /// The surface width in pixels.
-    pub(crate) width: u32,
+    pub width: u32,
     /// The surface height in pixels.
-    pub(crate) height: u32,
+    pub height: u32,
     /// RGBA8 pixels, row-major from the top row down.
-    pub(crate) data: &'a mut [u8],
+    pub data: &'a mut [u8],
 }
 
 impl Surface<'_> {
@@ -825,7 +844,7 @@ impl Surface<'_> {
     }
 
     /// Alpha-blend `color` over pixel (`x`, `y`), ignoring out-of-bounds.
-    pub(crate) fn blend(&mut self, x: i32, y: i32, color: Rgba) {
+    pub fn blend(&mut self, x: i32, y: i32, color: Rgba) {
         let Some(offset) = self.offset(x, y) else {
             return;
         };
@@ -840,7 +859,8 @@ impl Surface<'_> {
 
 /// Straight-alpha "source over destination" blending, returning an opaque-ish
 /// result (destination alpha saturates upward).
-pub(crate) fn blend_over(dest: Rgba, src: Rgba) -> Rgba {
+#[must_use]
+pub fn blend_over(dest: Rgba, src: Rgba) -> Rgba {
     let sa = f32::from(src[3]) / 255.0;
     let da = f32::from(dest[3]) / 255.0;
     let out_a = sa + da * (1.0 - sa);
@@ -877,7 +897,7 @@ pub(crate) fn blend_over(dest: Rgba, src: Rgba) -> Rgba {
 /// (`cx`, `cy`) on the surface: radius `radius` pixels, aimed along
 /// `direction` (radians, `0` = up, counter-clockwise positive in the GL frame)
 /// with total angular width `width` radians.
-pub(crate) fn draw_wedge(
+pub fn draw_wedge(
     surface: &mut Surface<'_>,
     cx: f32,
     cy: f32,
@@ -923,7 +943,7 @@ pub(crate) fn draw_wedge(
 
 /// Stroke a circle (a chat-range ring) of `radius` pixels and `thickness`
 /// pixels centred at (`cx`, `cy`).
-pub(crate) fn draw_ring(
+pub fn draw_ring(
     surface: &mut Surface<'_>,
     cx: f32,
     cy: f32,
@@ -953,7 +973,7 @@ pub(crate) fn draw_ring(
 }
 
 /// Fill a solid disc of `radius` pixels centred at (`cx`, `cy`).
-pub(crate) fn draw_disc(surface: &mut Surface<'_>, cx: f32, cy: f32, radius: f32, color: Rgba) {
+pub fn draw_disc(surface: &mut Surface<'_>, cx: f32, cy: f32, radius: f32, color: Rgba) {
     let min_x = round_i32(cx - radius);
     let max_x = round_i32(cx + radius);
     let min_y = round_i32(cy - radius);
@@ -972,7 +992,7 @@ pub(crate) fn draw_disc(surface: &mut Surface<'_>, cx: f32, cy: f32, radius: f32
 /// Draw one avatar glyph at surface position (`cx`, `cy`): a disc for a level
 /// avatar, an up- / down-pointing chevron triangle for above / below, and a
 /// hollow ring for unknown altitude.
-pub(crate) fn draw_avatar_glyph(
+pub fn draw_avatar_glyph(
     surface: &mut Surface<'_>,
     cx: f32,
     cy: f32,
@@ -1011,7 +1031,7 @@ pub(crate) fn draw_avatar_glyph(
 
 /// Draw the tracking beacon: a dot when on the surface, otherwise a small
 /// triangle on the surface edge pointing toward the target.
-pub(crate) fn draw_tracking(surface: &mut Surface<'_>, position: Vec2, color: Rgba) {
+pub fn draw_tracking(surface: &mut Surface<'_>, position: Vec2, color: Rgba) {
     let width = u32_to_f32(surface.width);
     let height = u32_to_f32(surface.height);
     let on_surface =
@@ -1075,7 +1095,7 @@ fn fill_triangle(
 /// grass, mountain, rock) — a legible stand-in for compositing the real detail
 /// textures (which is a follow-up; the reference composites the sim surface
 /// texture on Second Life and world-map tiles on OpenSim).
-pub(crate) const TERRAIN_LAYER_COLORS: [[f32; 3]; 4] = [
+pub const TERRAIN_LAYER_COLORS: [[f32; 3]; 4] = [
     [0.45, 0.36, 0.26],
     [0.30, 0.42, 0.22],
     [0.42, 0.38, 0.34],
@@ -1083,12 +1103,13 @@ pub(crate) const TERRAIN_LAYER_COLORS: [[f32; 3]; 4] = [
 ];
 
 /// The deep-water tint terrain fades toward below the water height.
-pub(crate) const TERRAIN_WATER_COLOR: [f32; 3] = [0.10, 0.22, 0.35];
+pub const TERRAIN_WATER_COLOR: [f32; 3] = [0.10, 0.22, 0.35];
 
 /// Shade one terrain texel: blend the four archetype colours by `weights`,
 /// apply a simple slope-based light (gradient toward the north-west light),
 /// and fade toward the water tint below `water_height`.
-pub(crate) fn terrain_texel_color(
+#[must_use]
+pub fn terrain_texel_color(
     height: f32,
     weights: [f32; 4],
     gradient_east: f32,
@@ -1131,12 +1152,14 @@ fn unit_byte(value: f32) -> u8 {
 }
 
 /// Widen a small (≤ `u16::MAX`) pixel count to `f32`.
-pub(crate) fn u32_to_f32(value: u32) -> f32 {
+#[must_use]
+pub fn u32_to_f32(value: u32) -> f32 {
     f32::from(u16::try_from(value).unwrap_or(u16::MAX))
 }
 
 /// Widen a small (± `i16` range) pixel coordinate to `f32`.
-pub(crate) fn i32_to_f32(value: i32) -> f32 {
+#[must_use]
+pub fn i32_to_f32(value: i32) -> f32 {
     f32::from(
         i16::try_from(value.clamp(i32::from(i16::MIN), i32::from(i16::MAX))).unwrap_or(i16::MAX),
     )
@@ -1148,7 +1171,7 @@ pub(crate) fn i32_to_f32(value: i32) -> f32 {
 
 /// What double-clicking the map does (`NetMapDoubleClickAction`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DoubleClickAction {
+pub enum DoubleClickAction {
     /// Do nothing.
     Nothing,
     /// Open the world map (unlanded today — falls back to nothing).
@@ -1160,7 +1183,8 @@ pub(crate) enum DoubleClickAction {
 impl DoubleClickAction {
     /// Decode the persisted integer setting (`0` none, `1` world map,
     /// `2` teleport — the default), treating anything else as nothing.
-    pub(crate) const fn from_setting(value: i32) -> Self {
+    #[must_use]
+    pub const fn from_setting(value: i32) -> Self {
         match value {
             1 => Self::WorldMap,
             2 => Self::Teleport,

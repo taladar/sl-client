@@ -51,7 +51,7 @@ use bevy::ui::ContentSize;
 /// heights all the way up, so no ancestor is definite on *both* axes — the
 /// fixed-width-plus-clip guarantee is real but only the caller can vouch for it.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct FixedSlotContentSize;
+pub struct FixedSlotContentSize;
 
 /// Run condition for [`bevy::ui::UiSystems::Stack`] (`ui_stack_system`): the
 /// stack — a full-tree walk plus per-level z-sorts, rebuilt from scratch every
@@ -83,7 +83,8 @@ pub(crate) struct FixedSlotContentSize;
     reason = "the Or<> filter IS the documented trigger union; splitting it into named type \
               aliases would only scatter it"
 )]
-pub(crate) fn ui_stack_dirty(
+#[must_use]
+pub fn ui_stack_dirty(
     changed: Query<
         (),
         (
@@ -174,7 +175,7 @@ pub(crate) fn ui_stack_dirty(
               three trigger queries, the ancestor walk, the changed-node probe, the UI-node \
               membership check, and the two removal cursors"
 )]
-pub(crate) fn ui_layout_dirty(
+pub fn ui_layout_dirty(
     changed: Query<
         (Entity, Option<&ChildOf>),
         (
@@ -374,7 +375,8 @@ fn log_layout_skip_rate(
 }
 
 /// Registers the (env-gated) layout-gate cause logger and skip-rate meter.
-pub(crate) struct UiPerfDiagnosticsPlugin;
+#[derive(Debug)]
+pub struct UiPerfDiagnosticsPlugin;
 
 impl Plugin for UiPerfDiagnosticsPlugin {
     fn build(&self, app: &mut App) {

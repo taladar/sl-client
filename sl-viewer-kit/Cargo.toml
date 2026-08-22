@@ -1,0 +1,45 @@
+[package]
+name = "sl-viewer-kit"
+description = "Leaf building blocks for the Second Life / OpenSim viewer: coordinate and geometry math, flexible-prim simulation, the static raycast index, and small render and model helpers"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "geometry", "rendering"]
+categories = ["game-development", "rendering", "mathematics"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Lock-free published snapshot for the static raycast index: the query thread
+# reads the current BVH while a rebuild runs behind it.
+arc-swap = { workspace = true }
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+# Plain-old-data derives for the GPU particle instance record, uploaded verbatim
+# as instance-rate vertex data.
+bytemuck = { version = "1.25.1", features = ["derive"] }
+bytes = { workspace = true }
+fs-err = { workspace = true }
+# TGA decode for the avatar asset directory's baked textures.
+image = { version = "0.25.10", default-features = false, features = ["tga"] }
+# Civil dates, for turning a profile's "born on" string into an age in days.
+jiff = { version = "0.2.35" }
+parry3d = { version = "0.27.0" }
+# `bevy_pbr` for `preserve_glow_mask_alpha`, which the alpha-blended materials
+# here must call in `Material::specialize` or they bloom through the glow pass.
+# Enabled unconditionally rather than behind a forwarding feature: these are
+# render materials, so there is no build of this crate that would not want it.
+sl-client-bevy = { workspace = true, features = ["bevy_pbr"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

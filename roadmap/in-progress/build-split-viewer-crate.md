@@ -76,6 +76,14 @@ Landed so far:
 - **1** — `sl-viewer-notifications`: the 21.7k-line catalogue, zero outgoing
   edges. Moved with `pub(crate) use sl_viewer_notifications as notifications;`
   in the viewer's `lib.rs`, so none of the 21 consumer files changed.
+- **2** — `sl-viewer-platform` (7 modules, 3.2k lines: the XDG layout, on-disk
+  caches, clipboard, URL linkification) and `sl-viewer-kit` (19 modules, 10.6k
+  lines: geometry math, two render materials with their shaders, small models).
+  Named `kit` rather than the plan's `geom` because the set is not all
+  geometry. `tracy_plots` and `net_diagnostics` stayed behind: both import
+  `tracing_tracy` directly, so moving them would put a `profile-tracy` feature
+  — and a doubled `cargo hack` matrix — on a new crate to relocate 251 lines
+  that compile to nothing by default.
 
 ## Remaining sequence
 

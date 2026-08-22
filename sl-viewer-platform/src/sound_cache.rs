@@ -10,7 +10,7 @@
 //! the one [`sl_audio::Mixer`]; nothing decodes a sound twice or opens its own
 //! device.
 //!
-//! It mirrors [`AnimationManager`](crate::animations::AnimationManager): an
+//! It mirrors `AnimationManager`: an
 //! [`AssetStore`] over `ViewerAsset` with an on-disk byte cache, in-flight
 //! resolve tasks on the [`IoTaskPool`], and a *pending* set for ids requested
 //! before the fetch could run — here that means before the `ViewerAsset`
@@ -33,8 +33,8 @@ use sl_client_bevy::{
 
 /// The fetch / decode / cache pipeline for short SL sound assets, shared by every
 /// sound producer.
-#[derive(Resource)]
-pub(crate) struct SoundCache {
+#[derive(Debug, Resource)]
+pub struct SoundCache {
     /// The generic-asset store doing the `ViewerAsset` fetch, dedupe, off-thread
     /// work and on-disk caching of the encoded sound bytes.
     store: AssetStore,
@@ -52,18 +52,26 @@ pub(crate) struct SoundCache {
     unavailable: HashSet<AssetKey>,
     /// Ids requested before the `ViewerAsset` capability or the device sample rate
     /// was known, held (not marked unavailable) until both arrive. Drained by
-    /// [`retry_pending`](Self::retry_pending).
+    /// `retry_pending`.
     pending: HashSet<AssetKey>,
     /// The mixer's device sample rate, the decode target so the sampler never
     /// resamples per play. `None` until the audio device has started.
     sample_rate: Option<NonZeroU32>,
 }
 
+impl Default for SoundCache {
+    /// [`SoundCache::new`] — the cache has no configuration to vary.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SoundCache {
     /// Build the cache over a fresh [`BevyAssetFetcher`], backed by the on-disk
     /// asset cache when a cache directory is available (falling back to an
     /// in-memory-only store).
-    pub(crate) fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
         let store = build_asset_store(&fetcher, sound_cache_dir());
         Self {
@@ -80,10 +88,10 @@ impl SoundCache {
     /// Ensure `id` is being resolved: a nil id, an already-decoded id, one in
     /// flight, or one known unavailable is ignored. If the `ViewerAsset`
     /// capability or the device sample rate is not known yet the id is parked in
-    /// [`pending`](Self::pending) rather than fetched (a fetch without the cap
+    /// `pending` rather than fetched (a fetch without the cap
     /// would fail, and a decode without the rate has no target); it is re-issued
-    /// by [`retry_pending`](Self::retry_pending) once both are set. Idempotent.
-    pub(crate) fn request(&mut self, id: AssetKey) {
+    /// by `retry_pending` once both are set. Idempotent.
+    pub fn request(&mut self, id: AssetKey) {
         if id.uuid().is_nil()
             || self.clips.contains_key(&id)
             || self.inflight.contains_key(&id)
@@ -130,40 +138,46 @@ impl SoundCache {
 
     /// The decoded clip for `id`, once resolved, or `None` if it is still in
     /// flight, has no fetchable asset, or failed decoding.
-    pub(crate) fn clip(&self, id: AssetKey) -> Option<&DecodedClip> {
+    #[must_use]
+    pub fn clip(&self, id: AssetKey) -> Option<&DecodedClip> {
         self.clips.get(&id)
     }
 
     /// Whether `id` is known to have no playable clip (its fetch or decode
     /// failed), so a producer waiting on it can give up rather than wait forever.
-    pub(crate) fn is_unavailable(&self, id: AssetKey) -> bool {
+    #[must_use]
+    pub fn is_unavailable(&self, id: AssetKey) -> bool {
         self.unavailable.contains(&id)
     }
 
     /// The mixer's device sample rate (the decode target), once the audio device
     /// has started. Skin-bundled UI sounds decode their own bytes at this rate.
-    pub(crate) const fn device_sample_rate(&self) -> Option<NonZeroU32> {
+    #[must_use]
+    pub const fn device_sample_rate(&self) -> Option<NonZeroU32> {
         self.sample_rate
     }
 
     /// A point-in-time snapshot of the sound-clip fetch/decode pipeline, for the
     /// F3 diagnostics overlay: entry counts bucketed by stage plus the cumulative
     /// disk-cache-hit / GC counters. Delegates to the wrapped [`AssetStore`].
-    pub(crate) fn stats(&self) -> StoreStats {
+    #[must_use]
+    pub fn stats(&self) -> StoreStats {
         self.store.stats()
     }
 
     /// A point-in-time snapshot of the sound store's admission gate: its
     /// concurrency capacity, in-flight slots, and queued waiters.
-    pub(crate) fn gate_stats(&self) -> GateStats {
+    #[must_use]
+    pub fn gate_stats(&self) -> GateStats {
         self.store.gate_stats()
     }
 
     /// How many resolves are parked outside the store's own accounting — held
     /// until both the `ViewerAsset` capability and the device sample rate are
-    /// known (see [`pending`](Self::pending)) — so the pipeline overlay does not
+    /// known (see `pending`) — so the pipeline overlay does not
     /// report "nothing left to load" while such work is still outstanding.
-    pub(crate) fn deferred_count(&self) -> usize {
+    #[must_use]
+    pub fn deferred_count(&self) -> usize {
         self.pending.len()
     }
 
@@ -181,7 +195,7 @@ impl SoundCache {
     }
 
     /// Re-issue any resolves parked before the capability / sample rate were
-    /// known (see [`pending`](Self::pending)), now that they are. A no-op while
+    /// known (see `pending`), now that they are. A no-op while
     /// either is missing or nothing is pending.
     fn retry_pending(&mut self) {
         if self.pending.is_empty() || self.sample_rate.is_none() || !self.fetcher.has_cap_url() {
@@ -194,7 +208,7 @@ impl SoundCache {
     }
 
     /// Re-park every sound previously marked [`unavailable`](Self::unavailable) so
-    /// the next [`retry_pending`](Self::retry_pending) re-fetches it. Called on a
+    /// the next `retry_pending` re-fetches it. Called on a
     /// capability refresh (a region cross / reconnect): a sound whose fetch failed
     /// transiently would otherwise stay silent for the session.
     fn rearm_unavailable(&mut self) {
@@ -253,7 +267,7 @@ fn sound_cache_dir() -> Option<PathBuf> {
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the
 /// region's capability map is (re)discovered, and re-issue parked requests.
-pub(crate) fn update_sound_caps(
+pub fn update_sound_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut cache: ResMut<SoundCache>,
 ) {
@@ -272,10 +286,7 @@ pub(crate) fn update_sound_caps(
 
 /// Track the mixer's device sample rate into the cache (the decode target) and
 /// drain parked requests once it — and the capability — are known.
-pub(crate) fn track_sound_sample_rate(
-    mixer: Option<NonSend<Mixer>>,
-    mut cache: ResMut<SoundCache>,
-) {
+pub fn track_sound_sample_rate(mixer: Option<NonSend<Mixer>>, mut cache: ResMut<SoundCache>) {
     let rate = mixer.and_then(|mixer| mixer.sample_rate());
     if rate != cache.sample_rate {
         cache.set_sample_rate(rate);
@@ -286,7 +297,7 @@ pub(crate) fn track_sound_sample_rate(
 /// Poll the in-flight fetch+decode tasks; move each completed clip into the
 /// shared cache (a producer reads it the next frame), or record the id
 /// unavailable when the fetch / decode failed.
-pub(crate) fn poll_sound_cache(mut cache: ResMut<SoundCache>) {
+pub fn poll_sound_cache(mut cache: ResMut<SoundCache>) {
     // Collect the finished ids first — the borrow of the task map cannot overlap
     // the mutation of the clips / unavailable maps.
     let mut finished: Vec<(AssetKey, Option<DecodedClip>)> = Vec::new();
@@ -317,7 +328,8 @@ pub(crate) fn poll_sound_cache(mut cache: ResMut<SoundCache>) {
 /// The [`SoundCache`] plugin: insert the resource and wire the cap / sample-rate
 /// tracking and the fetch-task poll. Producers (`world_sounds`, `ui_sounds`) add
 /// their own systems that read [`SoundCache`] and the [`Mixer`].
-pub(crate) struct SoundCachePlugin;
+#[derive(Debug)]
+pub struct SoundCachePlugin;
 
 impl Plugin for SoundCachePlugin {
     fn build(&self, app: &mut App) {

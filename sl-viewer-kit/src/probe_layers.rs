@@ -14,7 +14,7 @@
 //!
 //! The scheme keeps the **main view unchanged** — everything world-visible stays
 //! on the default [`RenderLayers`] layer `0`, which the main camera and the
-//! shadow-casting [`SceneSun`](crate::sky) already use — and *adds* a probe layer
+//! shadow-casting `SceneSun` already use — and *adds* a probe layer
 //! to each renderable so the probe capture cameras (which are **not** on layer 0)
 //! can see it:
 //!
@@ -26,7 +26,7 @@
 //!
 //! The shadow-casting sun stays on layer `0` (so the main view is untouched and
 //! world geometry still casts real shadows there); a **shadow-free mirror sun**
-//! ([`crate::sky`]) sits on the three probe layers so probe captures are still
+//! (`sky`) sits on the three probe layers so probe captures are still
 //! lit by the sun without any cascade being built for their cameras. The default
 //! probe camera renders [`PROBE_ENV_LAYER`] only — the reference's environment-
 //! only ambient probe — while local probe cameras also render
@@ -42,46 +42,49 @@
 use bevy::camera::visibility::RenderLayers;
 
 /// The default [`RenderLayers`] layer every world-visible entity and the main
-/// camera already use. The shadow-casting [`SceneSun`](crate::sky) lives here, so
+/// camera already use. The shadow-casting `SceneSun` lives here, so
 /// leaving the main view on this layer keeps its real-time shadows unchanged.
-pub(crate) const MAIN_LAYER: usize = 0;
+pub const MAIN_LAYER: usize = 0;
 
 /// Render layer for **environment** geometry (sky / WL-sky / water / terrain /
 /// clouds / sun-moon discs / stars) — the only content the reference's default
 /// (ambient) probe captures.
-pub(crate) const PROBE_ENV_LAYER: usize = 4;
+pub const PROBE_ENV_LAYER: usize = 4;
 
 /// Render layer for **static world geometry** (prims / meshes / sculpts / trees /
 /// grass) — captured by local probes but not the environment-only default probe.
-pub(crate) const PROBE_GEOM_LAYER: usize = 5;
+pub const PROBE_GEOM_LAYER: usize = 5;
 
 /// Render layer for **dynamic content** (avatars, particles) whose per-frame
 /// motion makes any probe that includes it re-render constantly. Split out so a
 /// runtime setting can keep it out of local probes.
-pub(crate) const PROBE_DYNAMIC_LAYER: usize = 6;
+pub const PROBE_DYNAMIC_LAYER: usize = 6;
 
 /// Render layer for **water-exclusion surfaces** (the "invisiprim" successor,
-/// [`crate::water_exclusion`]): these faces render **only** here — never on
+/// `water_exclusion`): these faces render **only** here — never on
 /// [`MAIN_LAYER`] or any probe layer — so they are invisible in every ordinary
 /// view and are seen only by the water-exclusion mask camera, which renders this
 /// layer alone into the screen-space mask the water shader samples.
-pub(crate) const WATER_EXCLUSION_LAYER: usize = 7;
+pub const WATER_EXCLUSION_LAYER: usize = 7;
 
 /// Render layers for static world geometry: the main layer plus
 /// [`PROBE_GEOM_LAYER`].
-pub(crate) fn world_geom_render_layers() -> RenderLayers {
+#[must_use]
+pub fn world_geom_render_layers() -> RenderLayers {
     RenderLayers::layer(MAIN_LAYER).with(PROBE_GEOM_LAYER)
 }
 
 /// Render layers for environment geometry: the main layer plus
 /// [`PROBE_ENV_LAYER`].
-pub(crate) fn environment_render_layers() -> RenderLayers {
+#[must_use]
+pub fn environment_render_layers() -> RenderLayers {
     RenderLayers::layer(MAIN_LAYER).with(PROBE_ENV_LAYER)
 }
 
 /// Render layers for dynamic content: the main layer plus
 /// [`PROBE_DYNAMIC_LAYER`].
-pub(crate) fn dynamic_render_layers() -> RenderLayers {
+#[must_use]
+pub fn dynamic_render_layers() -> RenderLayers {
     RenderLayers::layer(MAIN_LAYER).with(PROBE_DYNAMIC_LAYER)
 }
 
@@ -89,7 +92,8 @@ pub(crate) fn dynamic_render_layers() -> RenderLayers {
 /// crucially **not** [`MAIN_LAYER`] — so it lights every probe capture camera but
 /// never the main view (which the real shadow-casting sun already lights), and no
 /// double-lighting results.
-pub(crate) fn mirror_sun_render_layers() -> RenderLayers {
+#[must_use]
+pub fn mirror_sun_render_layers() -> RenderLayers {
     RenderLayers::layer(PROBE_ENV_LAYER)
         .with(PROBE_GEOM_LAYER)
         .with(PROBE_DYNAMIC_LAYER)
@@ -101,7 +105,8 @@ pub(crate) fn mirror_sun_render_layers() -> RenderLayers {
 /// the scene root makes every mesh **and** the scene's own lights visible to (and
 /// lighting) both the main camera and every probe capture camera, replacing the
 /// real viewer's `Propagate` tagging + mirror sun that those harnesses do not run.
-pub(crate) fn all_render_layers() -> RenderLayers {
+#[must_use]
+pub fn all_render_layers() -> RenderLayers {
     RenderLayers::layer(MAIN_LAYER)
         .with(PROBE_ENV_LAYER)
         .with(PROBE_GEOM_LAYER)
@@ -112,14 +117,16 @@ pub(crate) fn all_render_layers() -> RenderLayers {
 /// only, and **not** [`MAIN_LAYER`] (so the shadow sun builds no cascades for
 /// them). Mirrors the reference default probe, which renders only sky / water /
 /// terrain / clouds.
-pub(crate) const fn default_probe_camera_render_layers() -> RenderLayers {
+#[must_use]
+pub const fn default_probe_camera_render_layers() -> RenderLayers {
     RenderLayers::layer(PROBE_ENV_LAYER)
 }
 
 /// Render layers for a **local probe** capture camera: environment plus static
 /// world geometry, and — when `include_dynamic` — dynamic content. Never
 /// [`MAIN_LAYER`], so the shadow sun builds no cascades for these cameras.
-pub(crate) fn local_probe_camera_render_layers(include_dynamic: bool) -> RenderLayers {
+#[must_use]
+pub fn local_probe_camera_render_layers(include_dynamic: bool) -> RenderLayers {
     let layers = RenderLayers::layer(PROBE_ENV_LAYER).with(PROBE_GEOM_LAYER);
     if include_dynamic {
         layers.with(PROBE_DYNAMIC_LAYER)

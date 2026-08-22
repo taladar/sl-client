@@ -26,36 +26,40 @@ use sl_client_bevy::Rotation;
 /// `OS_MIN_PRIM_SCALE` (the most permissive grid; Second Life's own floor is
 /// 0.01 m and its simulator clamps whatever it receives, so requesting the
 /// permissive bound is safe on both).
-pub(crate) const MIN_PRIM_SCALE: f32 = 0.001;
+pub const MIN_PRIM_SCALE: f32 = 0.001;
 
 /// The largest per-axis prim size an edit will request, in metres — OpenSim's
 /// `OS_DEFAULT_MAX_PRIM_SCALE` (Second Life's tighter 64 m cap is enforced by
 /// its simulator).
-pub(crate) const MAX_PRIM_SCALE: f32 = 256.0;
+pub const MAX_PRIM_SCALE: f32 = 256.0;
 
 /// The rotate manipulator's snap increment, in degrees — the reference's
 /// `SNAP_ANGLE_INCREMENT` (360° / 64).
-pub(crate) const SNAP_ANGLE_DEG: f32 = 5.625;
+pub const SNAP_ANGLE_DEG: f32 = 5.625;
 
 /// Component-wise vector addition, avoiding the glam `+` operator the
 /// workspace `arithmetic_side_effects` lint trips on.
-pub(crate) fn vadd(a: Vec3, b: Vec3) -> Vec3 {
+#[must_use]
+pub fn vadd(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.x + b.x, a.y + b.y, a.z + b.z)
 }
 
 /// Component-wise vector subtraction (`a - b`).
-pub(crate) fn vsub(a: Vec3, b: Vec3) -> Vec3 {
+#[must_use]
+pub fn vsub(a: Vec3, b: Vec3) -> Vec3 {
     Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
 }
 
 /// Component-wise vector scaling (`v * s`).
-pub(crate) fn vscale(v: Vec3, s: f32) -> Vec3 {
+#[must_use]
+pub fn vscale(v: Vec3, s: f32) -> Vec3 {
     Vec3::new(v.x * s, v.y * s, v.z * s)
 }
 
 /// A Second Life wire [`Rotation`] as a glam [`Quat`] in the same (Z-up) frame
 /// — no basis change, with a degenerate value guarded to the identity.
-pub(crate) fn rotation_to_quat(rotation: &Rotation) -> Quat {
+#[must_use]
+pub fn rotation_to_quat(rotation: &Rotation) -> Quat {
     let quat = Quat::from_xyzw(rotation.x, rotation.y, rotation.z, rotation.s);
     if quat.length_squared().is_finite() && quat.length_squared() > f32::EPSILON {
         quat.normalize()
@@ -66,7 +70,8 @@ pub(crate) fn rotation_to_quat(rotation: &Rotation) -> Quat {
 
 /// A glam [`Quat`] (in Second Life's Z-up frame) as the wire [`Rotation`] an
 /// object update carries.
-pub(crate) fn quat_to_rotation(quat: Quat) -> Rotation {
+#[must_use]
+pub fn quat_to_rotation(quat: Quat) -> Rotation {
     let quat = quat.normalize();
     Rotation {
         x: quat.x,
@@ -80,7 +85,8 @@ pub(crate) fn quat_to_rotation(quat: Quat) -> Rotation {
 /// with normal `plane_normal`, returning the intersection point — or `None`
 /// when the ray is (near-)parallel to the plane or the hit is behind the ray
 /// origin. The reference's `getMousePointOnPlaneGlobal`.
-pub(crate) fn ray_plane_intersect(
+#[must_use]
+pub fn ray_plane_intersect(
     origin: Vec3,
     dir: Vec3,
     plane_point: Vec3,
@@ -103,7 +109,8 @@ pub(crate) fn ray_plane_intersect(
 /// `LLManip::getManipNormal` (`cross = axis × at; normal = cross × axis`).
 /// `None` when the axis is (near-)parallel to the view direction, where no such
 /// plane is stable.
-pub(crate) fn manip_plane_normal(axis: Vec3, camera_forward: Vec3) -> Option<Vec3> {
+#[must_use]
+pub fn manip_plane_normal(axis: Vec3, camera_forward: Vec3) -> Option<Vec3> {
     let cross = axis.cross(camera_forward);
     if cross.length_squared() < 1.0e-9 {
         return None;
@@ -113,13 +120,15 @@ pub(crate) fn manip_plane_normal(axis: Vec3, camera_forward: Vec3) -> Option<Vec
 
 /// The signed distance the in-plane cursor motion `delta` moves along the unit
 /// `axis` — the axis-constrained half of a translate-arrow drag.
-pub(crate) fn project_onto_axis(delta: Vec3, axis: Vec3) -> f32 {
+#[must_use]
+pub fn project_onto_axis(delta: Vec3, axis: Vec3) -> f32 {
     delta.dot(axis)
 }
 
 /// Snap `value` to the nearest multiple of `grid` (a no-op for a degenerate
 /// grid), the translate / scale grid quantisation.
-pub(crate) fn snap_to_grid(value: f32, grid: f32) -> f32 {
+#[must_use]
+pub fn snap_to_grid(value: f32, grid: f32) -> f32 {
     if grid <= 1.0e-6 || !grid.is_finite() {
         return value;
     }
@@ -130,7 +139,8 @@ pub(crate) fn snap_to_grid(value: f32, grid: f32) -> f32 {
 /// frame is (`axis_a`, `axis_b`), in radians in `(-π, π]` — the reference's
 /// `atan2` cursor angle in `LLManipRotate::dragConstrained`. Measured from
 /// `axis_a` towards `axis_b`.
-pub(crate) fn ring_angle(point_minus_center: Vec3, axis_a: Vec3, axis_b: Vec3) -> f32 {
+#[must_use]
+pub fn ring_angle(point_minus_center: Vec3, axis_a: Vec3, axis_b: Vec3) -> f32 {
     point_minus_center
         .dot(axis_b)
         .atan2(point_minus_center.dot(axis_a))
@@ -140,7 +150,8 @@ pub(crate) fn ring_angle(point_minus_center: Vec3, axis_a: Vec3, axis_b: Vec3) -
 /// keeps an accumulated ring-drag angle continuous across the atan2 seam
 /// (without it the delta jumps by a full turn when the cursor crosses ±180°
 /// from the grab point).
-pub(crate) fn wrap_angle(angle: f32) -> f32 {
+#[must_use]
+pub fn wrap_angle(angle: f32) -> f32 {
     let wrapped =
         (angle + core::f32::consts::PI).rem_euclid(core::f32::consts::TAU) - core::f32::consts::PI;
     if wrapped <= -core::f32::consts::PI {
@@ -156,7 +167,8 @@ pub(crate) fn wrap_angle(angle: f32) -> f32 {
 /// twist, which is what lets the rotate gizmo snap an object's **absolute**
 /// orientation about the ring axis to repeatable detents instead of a
 /// grab-relative delta.
-pub(crate) fn twist_about_axis(quat: Quat, axis: Vec3) -> f32 {
+#[must_use]
+pub fn twist_about_axis(quat: Quat, axis: Vec3) -> f32 {
     let quat = quat.normalize();
     let projected = Vec3::new(quat.x, quat.y, quat.z).dot(axis);
     2.0 * projected.atan2(quat.w)
@@ -169,7 +181,8 @@ pub(crate) fn twist_about_axis(quat: Quat, axis: Vec3) -> f32 {
 /// (`LLManipScale::stretchFace`): the world drag delta divides by the
 /// alignment so the object's world extent along the drag grows by the dragged
 /// amount.
-pub(crate) fn nearest_local_axis(local_dir: Vec3) -> (usize, f32, f32) {
+#[must_use]
+pub fn nearest_local_axis(local_dir: Vec3) -> (usize, f32, f32) {
     let abs = local_dir.abs();
     if abs.x >= abs.y && abs.x >= abs.z {
         (0, local_dir.x.signum(), abs.x)
@@ -182,7 +195,8 @@ pub(crate) fn nearest_local_axis(local_dir: Vec3) -> (usize, f32, f32) {
 
 /// Snap an angle (radians) to the nearest multiple of `increment` (radians), a
 /// no-op for a degenerate increment — the reference's 5.625° rotation detents.
-pub(crate) fn snap_angle(angle: f32, increment: f32) -> f32 {
+#[must_use]
+pub fn snap_angle(angle: f32, increment: f32) -> f32 {
     if increment <= 1.0e-9 || !increment.is_finite() {
         return angle;
     }
@@ -193,7 +207,8 @@ pub(crate) fn snap_angle(angle: f32, increment: f32) -> f32 {
 /// nearest to the ray `ray_origin + s * ray_dir` (`s` unconstrained), or `None`
 /// when the two are (near-)parallel — the reference's
 /// `nearestPointOnLineFromMouse`, which the scale handles slide along.
-pub(crate) fn closest_line_param(
+#[must_use]
+pub fn closest_line_param(
     line_origin: Vec3,
     line_dir: Vec3,
     ray_origin: Vec3,
@@ -221,7 +236,8 @@ pub(crate) fn closest_line_param(
 
 /// Clamp one prim-scale component to the grid-legal range
 /// ([`MIN_PRIM_SCALE`], [`MAX_PRIM_SCALE`]).
-pub(crate) const fn clamp_scale(value: f32) -> f32 {
+#[must_use]
+pub const fn clamp_scale(value: f32) -> f32 {
     value.clamp(MIN_PRIM_SCALE, MAX_PRIM_SCALE)
 }
 
@@ -229,7 +245,8 @@ pub(crate) const fn clamp_scale(value: f32) -> f32 {
 /// on-screen size: at `distance` from a perspective camera with vertical field
 /// of view `fov_y` (radians) rendering `viewport_height` pixels, an object
 /// scaled by the returned factor spans about `target_px` pixels.
-pub(crate) fn constant_screen_scale(
+#[must_use]
+pub fn constant_screen_scale(
     distance: f32,
     fov_y: f32,
     viewport_height: f32,
@@ -246,7 +263,8 @@ pub(crate) fn constant_screen_scale(
 /// a wire [`Rotation`], the reference viewer's `LLQuaternion::setQuat(roll,
 /// pitch, yaw)` composition (the same formula as
 /// [`crate::coords::sl_euler_deg_to_quat`], landing on the wire type).
-pub(crate) fn euler_deg_to_rotation(euler_deg: [f32; 3]) -> Rotation {
+#[must_use]
+pub fn euler_deg_to_rotation(euler_deg: [f32; 3]) -> Rotation {
     let roll = euler_deg[0].to_radians() * 0.5;
     let pitch = euler_deg[1].to_radians() * 0.5;
     let yaw = euler_deg[2].to_radians() * 0.5;
@@ -269,7 +287,8 @@ pub(crate) fn euler_deg_to_rotation(euler_deg: [f32; 3]) -> Rotation {
 /// At the pitch singularity (±90°) the roll is folded into the yaw (gimbal
 /// lock), matching the reference's behaviour of returning *a* consistent
 /// triple rather than failing.
-pub(crate) fn rotation_to_euler_deg(rotation: &Rotation) -> [f32; 3] {
+#[must_use]
+pub fn rotation_to_euler_deg(rotation: &Rotation) -> [f32; 3] {
     let quat = rotation_to_quat(rotation);
     let (x, y, z, w) = (quat.x, quat.y, quat.z, quat.w);
     // `euler_deg_to_rotation` composes `q = qx(roll) · qy(pitch) · qz(yaw)`
@@ -291,7 +310,8 @@ pub(crate) fn rotation_to_euler_deg(rotation: &Rotation) -> [f32; 3] {
 }
 
 /// The screen-space rectangle spanned by two drag corners, as `(min, max)`.
-pub(crate) fn rect_from_corners(a: Vec2, b: Vec2) -> (Vec2, Vec2) {
+#[must_use]
+pub fn rect_from_corners(a: Vec2, b: Vec2) -> (Vec2, Vec2) {
     (a.min(b), a.max(b))
 }
 
@@ -300,7 +320,7 @@ pub(crate) fn rect_from_corners(a: Vec2, b: Vec2) -> (Vec2, Vec2) {
 /// **inclusive** (the reference's default `RectSelectInclusive`) selects on any
 /// overlap; exclusive requires the object's whole bound inside the rectangle.
 /// An empty `points` (nothing projectable — behind the camera) never selects.
-pub(crate) fn rect_selects<I>(min: Vec2, max: Vec2, points: I, inclusive: bool) -> bool
+pub fn rect_selects<I>(min: Vec2, max: Vec2, points: I, inclusive: bool) -> bool
 where
     I: IntoIterator<Item = Vec2>,
 {

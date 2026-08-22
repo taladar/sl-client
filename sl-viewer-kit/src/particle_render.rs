@@ -3,7 +3,7 @@
 //! unit-quad mesh, expanding each billboard camera-facing in the vertex shader and
 //! shading it (textured, per-instance tint, optional PBR lighting) in the fragment.
 //!
-//! **Why.** The Phase 30 render ([`crate::particles`]) was fully CPU-side: every
+//! **Why.** The Phase 30 render (`particles`) was fully CPU-side: every
 //! frame, per source, it rebuilt a five-attribute billboard mesh (`build_cloud_mesh`)
 //! and `meshes.insert`ed it — a full vertex-buffer re-upload per source per frame, plus
 //! the camera-facing quad math on the CPU. This module replaces that with GPU
@@ -28,13 +28,13 @@
 //! sort-adjacent clouds into a single draw and our per-item instance-buffer draw would
 //! then render only the first — so each cloud entity carries
 //! [`NoAutomaticBatching`](bevy::render::batching::NoAutomaticBatching) (see
-//! [`crate::particles`]) to keep its own draw.
+//! `particles`) to keep its own draw.
 //!
 //! Per-view render-layer scoping (a HUD cloud draws only under the HUD camera, a world
-//! cloud only under the fly camera — P35.4) falls out for free: [`queue_particles`]
+//! cloud only under the fly camera — P35.4) falls out for free: `queue_particles`
 //! honours each view's [`RenderVisibleEntities`], which `check_visibility` has already
 //! filtered by [`RenderLayers`](bevy::camera::visibility::RenderLayers) (a
-//! [`NoFrustumCulling`] cloud stays in that list — only the frustum test is skipped).
+//! [`NoFrustumCulling`](bevy::camera::visibility::NoFrustumCulling) cloud stays in that list — only the frustum test is skipped).
 //!
 //! Reference (read-only): `LLVOPartGroup::getGeometry` — the camera-facing billboard the
 //! vertex shader ports; particles are drawn `FULLBRIGHT` only when `EMISSIVE`
@@ -87,33 +87,33 @@ const PARTICLE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2d7f6a10-9c4b-4e33-
 /// [`particle.wgsl`](../particle.wgsl)).
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
 #[repr(C)]
-pub(crate) struct ParticleInstance {
+pub struct ParticleInstance {
     /// The particle centre in **Bevy world space** (Y-up), absolute (the cloud entity is
     /// at the origin). Attribute `@location(3)`.
-    pub(crate) position: [f32; 3],
+    pub position: [f32; 3],
     /// The billboard `(width, height)` in metres. Attribute `@location(4)`.
-    pub(crate) scale: [f32; 2],
+    pub scale: [f32; 2],
     /// The per-instance RGBA tint, `0.0..=1.0`. Attribute `@location(5)`.
-    pub(crate) color: [f32; 4],
+    pub color: [f32; 4],
     /// The world-space velocity, for the `FOLLOW_VELOCITY` billboard re-orientation.
     /// Attribute `@location(6)`.
-    pub(crate) velocity: [f32; 3],
+    pub velocity: [f32; 3],
     /// The per-particle flags (`part_flags::*`), read for `FOLLOW_VELOCITY`. Attribute
     /// `@location(7)`.
-    pub(crate) flags: u32,
+    pub flags: u32,
     /// The per-particle glow (`PSYS_PART_*_GLOW`, `0.0..=1.0`), interpolated over the
     /// particle's life. Fed into the scene alpha (the glow mask) by the **additive**
     /// path so a glowing particle blooms under the glow pass. Attribute `@location(8)`.
-    pub(crate) glow: f32,
+    pub glow: f32,
 }
 
 /// The per-cloud list of live particle instances, rebuilt each frame by
-/// [`drive_particles`](crate::particles::drive_particles) and extracted to the render
-/// world where [`prepare_instance_buffers`] uploads it. A component on the cloud entity.
+/// `drive_particles` and extracted to the render
+/// world where `prepare_instance_buffers` uploads it. A component on the cloud entity.
 #[derive(Component, Clone, Debug, Default)]
-pub(crate) struct ParticleInstances {
+pub struct ParticleInstances {
     /// The live instances (one per live particle).
-    pub(crate) instances: Vec<ParticleInstance>,
+    pub instances: Vec<ParticleInstance>,
 }
 
 impl ExtractComponent for ParticleInstances {
@@ -135,7 +135,7 @@ impl SyncComponent for ParticleInstances {
 /// implies. A whole system shares one blend function (it lives on the particle
 /// template), so one choice per cloud drives the pipeline specialization.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum ParticleBlend {
+pub enum ParticleBlend {
     /// Ordinary source-over alpha blending (`SrcAlpha` / `OneMinusSrcAlpha`).
     Alpha,
     /// Additive blending (destination factor `ONE`) — the glow / fire look.
@@ -144,18 +144,18 @@ pub(crate) enum ParticleBlend {
 
 /// The per-cloud render parameters, extracted to the render world: the diffuse texture,
 /// the blend mode, whether the cloud is drawn unlit, and its sort centre. A component on
-/// the cloud entity, refreshed by [`drive_particles`](crate::particles::drive_particles).
+/// the cloud entity, refreshed by `drive_particles`.
 #[derive(Component, Clone, Debug)]
-pub(crate) struct ParticleDrawParams {
+pub struct ParticleDrawParams {
     /// The resolved diffuse texture (the source's sprite, or the default soft blob).
-    pub(crate) texture: Handle<Image>,
+    pub texture: Handle<Image>,
     /// The blend mode the source's blend function implies.
-    pub(crate) blend: ParticleBlend,
+    pub blend: ParticleBlend,
     /// Whether the cloud renders unlit (emissive / additive / HUD) rather than lit.
-    pub(crate) unlit: bool,
+    pub unlit: bool,
     /// The world-space centroid of the live particles, used as the transparency sort key
     /// (the cloud entity itself sits at the origin, so its transform is no help).
-    pub(crate) sort_center: Vec3,
+    pub sort_center: Vec3,
 }
 
 impl ExtractComponent for ParticleDrawParams {
@@ -176,10 +176,10 @@ impl SyncComponent for ParticleDrawParams {
 /// The one shared unit-quad mesh every particle cloud instances — uploaded once at
 /// startup ([`setup_particle_quad`]) and never rebuilt, replacing the per-source
 /// per-frame dynamic mesh of Phase 30.
-#[derive(Resource)]
-pub(crate) struct ParticleQuad {
+#[derive(Debug, Resource)]
+pub struct ParticleQuad {
     /// The shared quad mesh handle.
-    pub(crate) mesh: Handle<Mesh>,
+    pub mesh: Handle<Mesh>,
 }
 
 /// Build the shared unit quad: a 1×1 square in the local XY plane centred on the origin,
@@ -209,7 +209,7 @@ fn particle_quad_mesh() -> Mesh {
 }
 
 /// Startup: build and upload the shared quad, storing its handle in [`ParticleQuad`].
-pub(crate) fn setup_particle_quad(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
+pub fn setup_particle_quad(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let mesh = meshes.add(particle_quad_mesh());
     commands.insert_resource(ParticleQuad { mesh });
 }
@@ -371,7 +371,7 @@ impl SpecializedMeshPipeline for ParticlePipeline {
                 // `PARTICLE_ADDITIVE` makes the fragment write `glow` (not coverage) to
                 // alpha, and the additive alpha blend `(One, One)` accumulates it into the
                 // scene alpha — the glow mask — so a glowing particle blooms under the
-                // glow pass (`crate::glow`), weighted by particle density.
+                // glow pass (`glow`), weighted by particle density.
                 fragment.shader_defs.push("PARTICLE_ADDITIVE".into());
                 if let Some(Some(target)) = fragment.targets.first_mut() {
                     // Additive (destination `ONE`): the glow / fire look.
@@ -690,7 +690,7 @@ type DrawParticles = (
 /// render app. Add once to the [`App`] (after `DefaultPlugins`), like the other viewer
 /// material plugins.
 #[derive(Debug, Default)]
-pub(crate) struct ParticleRenderPlugin;
+pub struct ParticleRenderPlugin;
 
 impl Plugin for ParticleRenderPlugin {
     /// Compile `particle.wgsl`, register the extract plugins for the per-cloud components,

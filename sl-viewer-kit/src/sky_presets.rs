@@ -3,8 +3,8 @@
 //! turns one into a renderable [`SkySettings`].
 //!
 //! Shared by two consumers: the offline sky render scenes
-//! ([`crate::render_scene`], where the port originated) and the **World ▸
-//! Environment** menu ([`crate::menu_bar`]), whose Sunrise / Midday / Sunset /
+//! (`render_scene`, where the port originated) and the **World ▸
+//! Environment** menu (`menu_bar`), whose Sunrise / Midday / Sunset /
 //! Midnight entries pin the viewer's environment to one of these frames — the
 //! reference viewer's fixed-sky personal lighting
 //! (`LLEnvironment::setEnvironment(ENV_LOCAL, …)` on the same four presets).
@@ -20,7 +20,7 @@ use sl_client_bevy::{
 /// One of the four fixed times of day the World ▸ Environment menu offers —
 /// the reference viewer's Sunrise / Midday / Sunset / Midnight presets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FixedSky {
+pub enum FixedSky {
     /// Linden's `A-6AM` (Sunrise).
     Sunrise,
     /// Linden's `A-12PM` (Midday).
@@ -43,12 +43,14 @@ impl FixedSky {
     }
 
     /// This fixed sky as a renderable frame.
-    pub(crate) fn settings(self) -> SkySettings {
+    #[must_use]
+    pub fn settings(self) -> SkySettings {
         sky_settings_from(self.preset())
     }
 
     /// The frame name the fixed day cycle files this sky under.
-    pub(crate) const fn frame_name(self) -> &'static str {
+    #[must_use]
+    pub const fn frame_name(self) -> &'static str {
         self.preset().label
     }
 
@@ -56,7 +58,8 @@ impl FixedSky {
     /// the region's *own* EEP day cycle — the reference's canonical placement
     /// (`0.25` sunrise, `0.5` midday, `0.75` sunset, `0.0` midnight). Backs the
     /// World ▸ Environment **Day Cycle** presets.
-    pub(crate) const fn day_position(self) -> f32 {
+    #[must_use]
+    pub const fn day_position(self) -> f32 {
         match self {
             Self::Sunrise => 0.25,
             Self::Midday => 0.5,
@@ -70,7 +73,8 @@ impl FixedSky {
     /// (`LLEnvironment::KNOWN_SKY_{SUNRISE,MIDDAY,SUNSET,MIDNIGHT}`). Backs the
     /// **Modern** presets: fetching and rendering this asset gives byte-identical
     /// input to Firestorm, so a renderer comparison isolates the renderer.
-    pub(crate) const fn modern_asset(self) -> Uuid {
+    #[must_use]
+    pub const fn modern_asset(self) -> Uuid {
         match self {
             Self::Sunrise => Uuid::from_u128(0x01e4_1537_ff51_2f1f_8ef7_17e4_df76_0bfb),
             Self::Midday => Uuid::from_u128(0xc462_26b4_0e43_5a56_9708_d27c_a1df_3292),
@@ -92,7 +96,7 @@ impl FixedSky {
 /// position. With this cycle installed, the override's position drives the sun
 /// smoothly through sunrise → midday → sunset → midnight on any grid. The water
 /// schedule is left untouched (the override only moves the sky).
-pub(crate) fn install_preset_day_cycle(settings: &mut EnvironmentSettings) {
+pub fn install_preset_day_cycle(settings: &mut EnvironmentSettings) {
     // Placed one keyframe per quarter-day so the position reads intuitively:
     // 0.25 sunrise, 0.5 noon, 0.75 sunset, 0.0/1.0 midnight.
     let placed: [(f32, &SkyPreset); 4] = [
@@ -137,10 +141,10 @@ pub(crate) fn install_preset_day_cycle(settings: &mut EnvironmentSettings) {
 /// array, `star_brightness` is scaled by 250, and the bodies come from `sun_angle` /
 /// `east_angle` — see [`sky_settings_from`]. Ported as constants rather than read
 /// from disk because a scene that needs an asset is a scene that skips.
-#[derive(Clone, Copy)]
-pub(crate) struct SkyPreset {
+#[derive(Debug, Clone, Copy)]
+pub struct SkyPreset {
     /// How this time names its scene and its entities.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The legacy `sunlight_color` — the one field that makes a night a night.
     sunlight: [f32; 3],
     /// The legacy `ambient`.
@@ -178,7 +182,7 @@ pub(crate) struct SkyPreset {
 }
 
 /// Linden's `A-6AM` preset, ported from `app_settings/windlight/skies/A-6AM.xml`.
-pub(crate) const SUNRISE: SkyPreset = SkyPreset {
+pub const SUNRISE: SkyPreset = SkyPreset {
     label: "sky-sunrise",
     sunlight: [2.37, 2.37, 2.37],
     ambient: [0.81, 0.4629, 0.63],
@@ -200,7 +204,7 @@ pub(crate) const SUNRISE: SkyPreset = SkyPreset {
 };
 
 /// Linden's `A-12PM` preset, ported from `app_settings/windlight/skies/A-12PM.xml`.
-pub(crate) const MIDDAY: SkyPreset = SkyPreset {
+pub const MIDDAY: SkyPreset = SkyPreset {
     label: "sky-midday",
     sunlight: [0.7342, 0.7816, 0.9],
     ambient: [1.05, 1.05, 1.05],
@@ -223,7 +227,7 @@ pub(crate) const MIDDAY: SkyPreset = SkyPreset {
 };
 
 /// Linden's `A-6PM` preset, ported from `app_settings/windlight/skies/A-6PM.xml`.
-pub(crate) const SUNSET: SkyPreset = SkyPreset {
+pub const SUNSET: SkyPreset = SkyPreset {
     label: "sky-sunset",
     sunlight: [2.8386, 2.8386, 2.8386],
     ambient: [1.02, 0.81, 0.81],
@@ -245,7 +249,7 @@ pub(crate) const SUNSET: SkyPreset = SkyPreset {
 };
 
 /// Linden's `A-12AM` preset, ported from `app_settings/windlight/skies/A-12AM.xml`.
-pub(crate) const MIDNIGHT: SkyPreset = SkyPreset {
+pub const MIDNIGHT: SkyPreset = SkyPreset {
     label: "sky-midnight",
     sunlight: [0.3488, 0.3557, 0.66],
     ambient: [0.2041, 0.2425, 0.33],
@@ -283,7 +287,8 @@ pub(crate) const MIDNIGHT: SkyPreset = SkyPreset {
 ///   which the star shader's `star_brightness / 500` turns into a fully visible
 ///   field; `A-12PM`'s `0.0` hides it. So the stars come and go with the time of day
 ///   for free, from the data, rather than from a flag in the fixture.
-pub(crate) fn sky_settings_from(preset: &SkyPreset) -> SkySettings {
+#[must_use]
+pub fn sky_settings_from(preset: &SkyPreset) -> SkySettings {
     let azimuth = -preset.east_angle;
     let altitude = preset.sun_angle;
     let [sun_r, sun_g, sun_b] = preset.sunlight;

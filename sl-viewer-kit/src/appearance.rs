@@ -5,8 +5,8 @@
 //! own avatar is only textured once *we* ask the grid to bake our Current Outfit
 //! Folder (COF): the grid then composites the worn body parts / clothing layers
 //! and broadcasts the resulting baked-texture ids over `AvatarAppearance`, which
-//! [`ingest_avatar_bakes`](crate::avatars::ingest_avatar_bakes) fetches and
-//! [`assign_avatar_bake_materials`](crate::avatars::assign_avatar_bake_materials)
+//! `ingest_avatar_bakes` fetches and
+//! `assign_avatar_bake_materials`
 //! drapes over the system body. Without this our own avatar stays an untextured
 //! "cloud".
 //!
@@ -46,8 +46,8 @@ enum BakeStage {
 }
 
 /// One-shot bookkeeping for triggering our own avatar's server-side bake.
-#[derive(Resource, Default)]
-pub(crate) struct ServerBakeState {
+#[derive(Debug, Resource, Default)]
+pub struct ServerBakeState {
     /// The handshake stage.
     stage: BakeStage,
     /// The COF version last requested, compared against the grid's expected one.
@@ -92,7 +92,7 @@ fn current_outfit_folder(folders: &[FolderInfo]) -> Option<InventoryFolderKey> {
 /// the login-seeded inventory skeleton and POST a bake request, retrying with the
 /// grid's expected version on a mismatch until it is accepted (or the attempt
 /// bound is reached). Inert on grids without central baking (e.g. OpenSim).
-pub(crate) fn drive_server_bake(
+pub fn drive_server_bake(
     mut capabilities: MessageReader<SlCapabilities>,
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ServerBakeState>,

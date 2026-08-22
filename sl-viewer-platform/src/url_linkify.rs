@@ -43,7 +43,7 @@
 //! `LLUrlRegistry::findUrl`.
 //!
 //! What a click then *does* is split: the Bevy widget in
-//! [`crate::linkified_text`] renders the runs, resolves agent / group names in
+//! `linkified_text` renders the runs, resolves agent / group names in
 //! place, shows the **actual target URL** on hover so the user can vet a link
 //! before clicking, and opens `Web` links (embedded browser for trusted SL hosts,
 //! the system browser for external ones). Dispatching a *SLURL* action (teleport,
@@ -70,8 +70,8 @@ use sl_client_bevy::{AgentKey, ExperienceKey, GroupKey, ObjectKey, ParcelKey, Uu
 /// link. [`linkify`] returns these in source order, so concatenating every
 /// segment's source text (`Plain` text or a `Link`'s [`matched`](LinkMatch::matched))
 /// reproduces the original string exactly.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum TextRun {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TextRun {
     /// A run of plain, non-link text (rendered verbatim, no decoration).
     Plain(String),
     /// A recognised link (rendered as a coloured, clickable span).
@@ -83,31 +83,31 @@ pub(crate) enum TextRun {
 /// URL** (for the action and the hover preview) — they differ for a labelled
 /// `[url text]` link, where the source is the whole bracketed run but the URL is
 /// only the part before the label.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct LinkMatch {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkMatch {
     /// The exact substring that matched, as it appeared in the source. Used only
     /// to reconstruct the original string; never shown.
-    pub(crate) matched: String,
+    pub matched: String,
     /// The canonical target URL — what a click opens / dispatches and what the
     /// widget shows on hover so the user can vet the destination before clicking.
-    pub(crate) url: String,
+    pub url: String,
     /// What clicking the link targets — the widget / dispatcher routes this.
-    pub(crate) target: LinkTarget,
+    pub target: LinkTarget,
     /// How the link's visible label is produced (some are fixed at match time,
     /// agent / group / parcel labels resolve against the name caches later).
-    pub(crate) label: LinkLabel,
+    pub label: LinkLabel,
     /// The leading icon the link shows (the reference `LLUrlEntry` `mIcon`).
-    pub(crate) icon: LinkIcon,
+    pub icon: LinkIcon,
     /// The Fluent key of the link's hover-tooltip category line (shown under the
     /// literal URL).
-    pub(crate) tooltip_key: &'static str,
+    pub tooltip_key: &'static str,
 }
 
 /// Which leading icon a link shows, mirroring the reference `LLUrlEntry` `mIcon`:
 /// a person for an agent, a group glyph for a group, a location pin for a SLURL,
 /// or none (plain web / object / parcel links carry no icon).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LinkIcon {
+pub enum LinkIcon {
     /// No leading icon.
     None,
     /// A resident (`Generic_Person`).
@@ -123,8 +123,8 @@ pub(crate) enum LinkIcon {
 /// rendering widget resolves against the live name caches, falling back to
 /// [`LinkLabel::fallback`] until a name arrives — mirroring the reference's
 /// `AvatarNameWaiting` placeholder.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum LinkLabel {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkLabel {
     /// A label known at match time (an `http` URL, a `[url text]` label, an
     /// object name, a `Region (x,y,z)` location, a cross-grid entity URL).
     Fixed(String),
@@ -142,7 +142,8 @@ impl LinkLabel {
     /// The label to show before any name cache has answered — the reference's
     /// short "(Loading...)" placeholder for the resolving kinds, and the fixed
     /// text itself for a fixed label.
-    pub(crate) fn fallback(&self) -> String {
+    #[must_use]
+    pub fn fallback(&self) -> String {
         match self {
             Self::Fixed(text) => text.clone(),
             Self::Agent(..) | Self::Group(_) | Self::Parcel(_) => LOADING_LABEL.to_owned(),
@@ -155,7 +156,7 @@ impl LinkLabel {
 /// entries). All the action suffixes that are not a name request
 /// (`/about`, `/im`, `/mute`, …) show the complete name.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AgentNameStyle {
+pub enum AgentNameStyle {
     /// `Display Name (username)` — the reference `getCompleteName`.
     Complete,
     /// The chosen display name alone.
@@ -167,14 +168,14 @@ pub(crate) enum AgentNameStyle {
 /// The grid a cross-grid link names — the host from a `secondlife://<Grid>/…`,
 /// `hop://<grid>/…` or `x-grid-location-info://<host>/…` link. `None` is the
 /// current grid (the plain `secondlife:///…` / `secondlife://Region/…` forms).
-pub(crate) type Grid = Option<String>;
+pub type Grid = Option<String>;
 
 /// What a recognised link points at. The consumer routes this: the widget opens
 /// [`Web`](LinkTarget::Web) links itself (internal vs. external browser by trust);
 /// [[viewer-slurl-parse-dispatch]] dispatches the SLURL / entity targets. The
 /// agent / group / parcel keys also drive the visible-label resolution.
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum LinkTarget {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LinkTarget {
     /// A plain external URL (its canonical form is [`LinkMatch::url`]).
     Web {
         /// Whether the host is a **trusted** Second Life web host
@@ -268,19 +269,19 @@ pub(crate) enum LinkTarget {
 /// which fills an omitted coordinate with the region-centre default only when the
 /// destination is finally resolved.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) struct LocationCoords {
+pub struct LocationCoords {
     /// The east (X) coordinate, if the URL supplied it.
-    pub(crate) x: Option<i32>,
+    pub x: Option<i32>,
     /// The north (Y) coordinate, if the URL supplied it.
-    pub(crate) y: Option<i32>,
+    pub y: Option<i32>,
     /// The up (Z) coordinate, if the URL supplied it.
-    pub(crate) z: Option<i32>,
+    pub z: Option<i32>,
 }
 
 /// Which SLURL / location form a [`LinkTarget::Location`] matched, so the
 /// dispatcher can route it (a teleport teleports; a world-map link opens the map).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum LocationKind {
+pub enum LocationKind {
     /// A bare or grid-qualified location SLURL (`secondlife://[Grid/]Region/x/y/z`,
     /// `hop://grid/Region/x/y/z`, `x-grid-location-info://host/region/…`).
     Slurl,
@@ -298,7 +299,7 @@ pub(crate) enum LocationKind {
 /// the widget swaps in the localised "(Loading...)" string; this ellipsis is the
 /// ECS-free fallback the pure layer can produce (matching the reference's short
 /// `AvatarNameWaiting` placeholder used for layout while the cache is queried).
-pub(crate) const LOADING_LABEL: &str = "\u{2026}";
+pub const LOADING_LABEL: &str = "\u{2026}";
 
 // ---------------------------------------------------------------------------
 // Tooltip Fluent keys (mirroring the reference `Tooltip*` LLTrans strings).
@@ -329,7 +330,8 @@ const TOOLTIP_GROUP: &str = "link-tooltip-group";
 /// first (leftmost) URL in the remaining text, emit the plain text before it and
 /// the link itself, then continue after the link. Non-matching text between and
 /// after links is emitted as [`TextRun::Plain`].
-pub(crate) fn linkify(text: &str) -> Vec<TextRun> {
+#[must_use]
+pub fn linkify(text: &str) -> Vec<TextRun> {
     let mut runs = Vec::new();
     let mut cursor = 0usize;
     while cursor < text.len() {
@@ -1031,7 +1033,8 @@ mod tests {
         location_label, parse_location_path, query_param, split_app, trim_trailing_punctuation,
         unescape_url,
     };
-    use crate::ui_test::TestError;
+    /// A boxed error so tests use `?` rather than disallowed `unwrap`/`expect`.
+    type TestError = Box<dyn core::error::Error>;
     use pretty_assertions::assert_eq;
 
     /// The single link in `text`, or an error if there is not exactly one — so a

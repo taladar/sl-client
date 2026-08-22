@@ -1,9 +1,9 @@
 //! The **parcel name cache** (`viewer-url-linkification`): a small companion to
-//! the avatar ([`crate::avatars::AvatarState`]) and group
-//! ([`crate::groups::GroupsModel`]) name caches that resolves a grid-wide parcel
+//! the avatar (`avatars::AvatarState`) and group
+//! (`groups::GroupsModel`) name caches that resolves a grid-wide parcel
 //! id ([`ParcelKey`]) to its name.
 //!
-//! A `secondlife:///app/parcel/<uuid>/about` link ([`crate::linkified_text`])
+//! A `secondlife:///app/parcel/<uuid>/about` link (`linkified_text`)
 //! addresses a parcel by its **grid-wide** id, which is looked up with the
 //! `ParcelInfoRequest` / `ParcelInfoReply` "places" listing — distinct from the
 //! region-local `ParcelProperties` the About-Land floater reads. The reply is
@@ -24,14 +24,14 @@ use sl_client_bevy::{Command, ParcelKey, SlCommand, SlEvent, SlSessionEvent};
 /// The parcel-name cache: grid-wide parcel id → resolved name, fed solely from the
 /// `ParcelInfoReply` listing ([`SlSessionEvent::ParcelDetails`]).
 #[derive(Resource, Debug, Default)]
-pub(crate) struct ParcelNames {
+pub struct ParcelNames {
     /// Resolved parcel names, by grid-wide parcel id.
     names: BTreeMap<ParcelKey, String>,
 }
 
 impl ParcelNames {
     /// The resolved name of `parcel`, if a `ParcelInfoReply` has arrived for it.
-    pub(crate) fn name_of(&self, parcel: ParcelKey) -> Option<&str> {
+    pub fn name_of(&self, parcel: ParcelKey) -> Option<&str> {
         self.names.get(&parcel).map(String::as_str)
     }
 
@@ -39,8 +39,8 @@ impl ParcelNames {
     /// cached — the shared resolve path a parcel-name display site uses so the
     /// name fills the cache instead of showing a UUID forever. Call at a discrete
     /// event (a link spawning), not per frame; the reply folds into the cache via
-    /// [`ingest_parcel_names`].
-    pub(crate) fn request(&self, parcel: ParcelKey, commands: &mut MessageWriter<SlCommand>) {
+    /// `ingest_parcel_names`.
+    pub fn request(&self, parcel: ParcelKey, commands: &mut MessageWriter<SlCommand>) {
         if !self.names.contains_key(&parcel) {
             commands.write(SlCommand(Command::RequestParcelInfo { parcel_id: parcel }));
         }
@@ -62,7 +62,7 @@ fn ingest_parcel_names(mut events: MessageReader<SlEvent>, mut model: ResMut<Par
 
 /// Wires the parcel-name cache: the resource and its ingest system.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ParcelNamesPlugin;
+pub struct ParcelNamesPlugin;
 
 impl Plugin for ParcelNamesPlugin {
     fn build(&self, app: &mut App) {

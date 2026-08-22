@@ -19,7 +19,7 @@
 //!   scan.
 //! - When it is dirty, [`rebuild_raycast_index`] spawns an
 //!   [`AsyncComputeTaskPool`] task that rebuilds the [`Bvh`] off-thread and
-//!   returns an [`IndexSnapshot`]; a poll installs it into
+//!   returns an `IndexSnapshot`; a poll installs it into
 //!   [`StaticRaycastIndex`] via an [`ArcSwap`] (lock-free reads).
 //! - [`StaticRaycastIndex::cast_ray`] reads the current snapshot and casts the
 //!   ray through the BVH, doing the precise parry ray-vs-shape test only on the
@@ -69,7 +69,7 @@ fn to_parry_pose(translation: Vec3, rotation: Quat) -> Pose {
 /// whether it is physically collidable (`Solid`) as opposed to merely indexed
 /// (phantom / physics-shape-`None`, which the camera still occludes on but a
 /// physics-layer query filters out).
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct ColliderRecord {
     /// The parry collision shape (object-local, object scale baked in).
     shape: SharedShape,
@@ -85,8 +85,8 @@ struct ColliderRecord {
 /// entity. Mutated only when a collider is added, moved, or removed (change
 /// detection), so its upkeep is O(changes), not O(all prims) — the whole point
 /// of replacing avian's per-step whole-set maintenance.
-#[derive(Resource, Default)]
-pub(crate) struct RaycastIndexColliders {
+#[derive(Debug, Resource, Default)]
+pub struct RaycastIndexColliders {
     /// One record per collidered prim entity.
     records: HashMap<Entity, ColliderRecord>,
     /// Set when `records` changed since the last rebuild, so a rebuild is queued.
@@ -95,7 +95,7 @@ pub(crate) struct RaycastIndexColliders {
 
 impl RaycastIndexColliders {
     /// Insert or replace a prim's collider, marking the set dirty.
-    pub(crate) fn upsert(
+    pub fn upsert(
         &mut self,
         entity: Entity,
         shape: SharedShape,
@@ -117,7 +117,7 @@ impl RaycastIndexColliders {
 
     /// Remove a prim's collider (a derez / a prim that stopped qualifying),
     /// marking the set dirty only if it actually held one.
-    pub(crate) fn remove(&mut self, entity: Entity) {
+    pub fn remove(&mut self, entity: Entity) {
         if self.records.remove(&entity).is_some() {
             self.dirty = true;
         }
@@ -127,6 +127,7 @@ impl RaycastIndexColliders {
 /// An immutable, queryable snapshot of the index: a [`Bvh`] whose leaf data is an
 /// index into `entries`. Published behind an [`ArcSwap`] so a query reads it
 /// without locking while the background task builds the next one.
+#[derive(Debug)]
 struct IndexSnapshot {
     /// The bounding-volume hierarchy over the entries' world AABBs.
     bvh: Bvh,
@@ -134,9 +135,10 @@ struct IndexSnapshot {
     entries: Vec<SnapshotEntry>,
 }
 
-/// One collider inside an [`IndexSnapshot`]: the parry shape at its world pose,
+/// One collider inside an `IndexSnapshot`: the parry shape at its world pose,
 /// plus the source entity and its solidity, so a query can return the hit prim
 /// and honour a solid-only filter.
+#[derive(Debug)]
 struct SnapshotEntry {
     /// The parry collision shape.
     shape: SharedShape,
@@ -216,8 +218,8 @@ impl IndexSnapshot {
 
 /// The published, lock-free raycast index. Read from any main-thread system via
 /// [`cast_ray`](StaticRaycastIndex::cast_ray).
-#[derive(Resource)]
-pub(crate) struct StaticRaycastIndex {
+#[derive(Debug, Resource)]
+pub struct StaticRaycastIndex {
     /// The current snapshot, swapped in by [`rebuild_raycast_index`].
     snapshot: ArcSwap<IndexSnapshot>,
 }
@@ -244,7 +246,7 @@ impl StaticRaycastIndex {
     ///
     /// Returns the distance along the ray to the nearest hit, or `None` on a miss.
     #[must_use]
-    pub(crate) fn cast_ray(
+    pub fn cast_ray(
         &self,
         origin: Vec3,
         direction: Vec3,
@@ -261,7 +263,7 @@ impl StaticRaycastIndex {
 
 /// One moving (physical-prim) collider: rebuilt into [`DynamicColliders`] every
 /// frame, so — unlike the static BVH — it never triggers an off-thread rebuild.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 struct DynamicCollider {
     /// The parry collision shape (object scale baked in).
     shape: SharedShape,
@@ -279,20 +281,20 @@ struct DynamicCollider {
 /// ever a handful, so a linear scan is cheaper than churning the BVH. Serves both
 /// camera collision (cast alongside the static index) and the collision-sound
 /// contact test.
-#[derive(Resource, Default)]
-pub(crate) struct DynamicColliders {
+#[derive(Debug, Resource, Default)]
+pub struct DynamicColliders {
     /// The current frame's moving colliders.
     colliders: Vec<DynamicCollider>,
 }
 
 impl DynamicColliders {
     /// Drop the previous frame's colliders (called before refilling).
-    pub(crate) fn clear(&mut self) {
+    pub fn clear(&mut self) {
         self.colliders.clear();
     }
 
     /// Add a moving collider at its current world pose.
-    pub(crate) fn push(
+    pub fn push(
         &mut self,
         entity: Entity,
         shape: SharedShape,
@@ -311,7 +313,7 @@ impl DynamicColliders {
     /// Cast a ray against the moving colliders, returning the nearest hit distance
     /// (linear — the set is tiny). Arguments mirror [`StaticRaycastIndex::cast_ray`].
     #[must_use]
-    pub(crate) fn cast_ray(
+    pub fn cast_ray(
         &self,
         origin: Vec3,
         direction: Vec3,
@@ -338,7 +340,7 @@ impl DynamicColliders {
     /// distance ≤ 0), with a world-space contact point — the input to the
     /// viewer-synthesised prim–prim collision sounds. O(n²) over a handful.
     #[must_use]
-    pub(crate) fn contact_pairs(&self) -> Vec<(Entity, Entity, Vec3)> {
+    pub fn contact_pairs(&self) -> Vec<(Entity, Entity, Vec3)> {
         let mut pairs = Vec::new();
         for (index, first) in self.colliders.iter().enumerate() {
             if !first.solid {
@@ -366,8 +368,8 @@ impl DynamicColliders {
 
 /// The in-flight off-thread snapshot rebuild, so only one runs at a time and the
 /// poll can install its result.
-#[derive(Resource, Default)]
-pub(crate) struct IndexRebuild {
+#[derive(Debug, Resource, Default)]
+pub struct IndexRebuild {
     /// The running rebuild task, if any.
     task: Option<Task<IndexSnapshot>>,
 }
@@ -379,7 +381,7 @@ pub(crate) struct IndexRebuild {
 /// The heavy BVH construction runs on the [`AsyncComputeTaskPool`], never the
 /// frame thread; the main-thread cost here is one map clone when a rebuild
 /// starts, only on frames where the collider set actually changed.
-pub(crate) fn rebuild_raycast_index(
+pub fn rebuild_raycast_index(
     mut colliders: ResMut<RaycastIndexColliders>,
     mut rebuild: ResMut<IndexRebuild>,
     index: Res<StaticRaycastIndex>,
@@ -407,7 +409,8 @@ pub(crate) fn rebuild_raycast_index(
 }
 
 /// Registers the raycast-index resources and the rebuild system.
-pub(crate) struct RaycastIndexPlugin;
+#[derive(Debug)]
+pub struct RaycastIndexPlugin;
 
 impl Plugin for RaycastIndexPlugin {
     fn build(&self, app: &mut App) {

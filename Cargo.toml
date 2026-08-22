@@ -39,7 +39,9 @@ members = [
   "sl-terrain",
   "sl-texture",
   "sl-tree",
+  "sl-viewer-kit",
   "sl-viewer-notifications",
+  "sl-viewer-platform",
   "sl-wire",
 ]
 
@@ -94,7 +96,9 @@ sl-prim = { path = "sl-prim", version = "0.1.0" }
 sl-proto = { path = "sl-proto", version = "0.1.0" }
 sl-repl = { path = "sl-repl", version = "0.1.0" }
 sl-types = { version = "0.8.0" }
+sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }
+sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }
 sl-wire = { path = "sl-wire", version = "0.1.0" }
 thiserror = { version = "2.0.18" }
 time = { version = "0.3.49" }

@@ -49,7 +49,7 @@ const TORSO_NOISE_SPEED: f32 = 0.2;
 /// pitch about the chest joint's local Y axis, exactly the reference
 /// `LLBreatheMotionRot::onUpdate` (`sinf(rate * time) * strength`, rate = 1).
 #[must_use]
-pub(crate) fn breathe_rotation(time: f32) -> Quat {
+pub fn breathe_rotation(time: f32) -> Quat {
     let breathe_amt = time.sin() * BREATHE_ROT_MOTION_STRENGTH;
     Quat::from_axis_angle(Vec3::Y, breathe_amt)
 }
@@ -85,7 +85,7 @@ fn body_noise_component(t: f32, phase: f32) -> f32 {
 /// low-frequency noise streams, mirroring `LLBodyNoiseMotion::onUpdate`
 /// (`tQn.setQuat(rx, ry, 0)` with `rx`/`ry` from `noise2` along each axis).
 #[must_use]
-pub(crate) fn body_noise_rotation(time: f32) -> Quat {
+pub fn body_noise_rotation(time: f32) -> Quat {
     let amount = TORSO_NOISE_AMOUNT_DEG.to_radians();
     let t = time * TORSO_NOISE_SPEED;
     let rx = amount * body_noise_component(t, 0.0);
@@ -100,7 +100,7 @@ pub(crate) fn body_noise_rotation(time: f32) -> Quat {
 /// motion only shows where the joint is otherwise at rest). `joint_index` maps a
 /// joint name to the skeleton index the pose is keyed by; a joint the skeleton
 /// lacks is skipped.
-pub(crate) fn apply_idle_adjustments(
+pub fn apply_idle_adjustments(
     pose: &mut AnimationPose,
     time: f32,
     joint_index: impl Fn(&str) -> Option<usize>,

@@ -27,39 +27,41 @@ use crate::minimap_math::{REGION_WIDTH_METRES, Rgba, Surface, round_i32};
 
 /// The smallest map scale (pixels per region): the whole-grid overview, one
 /// pixel per region (the reference zoom slider's minimum, `exp2(-8)·256`).
-pub(crate) const WORLD_MAP_SCALE_MIN: f32 = 1.0;
+pub const WORLD_MAP_SCALE_MIN: f32 = 1.0;
 
 /// The largest map scale (pixels per region): the reference zoom slider's
 /// maximum (`exp2(0)·256`).
-pub(crate) const WORLD_MAP_SCALE_MAX: f32 = 256.0;
+pub const WORLD_MAP_SCALE_MAX: f32 = 256.0;
 
 /// The default map scale (the reference `MAP_DEFAULT_SCALE`).
-pub(crate) const WORLD_MAP_SCALE_DEFAULT: f32 = 128.0;
+pub const WORLD_MAP_SCALE_DEFAULT: f32 = 128.0;
 
 /// The "Close" zoom preset (one region fills 256 px).
-pub(crate) const WORLD_MAP_SCALE_CLOSE: f32 = 256.0;
+pub const WORLD_MAP_SCALE_CLOSE: f32 = 256.0;
 
 /// The "Medium" zoom preset.
-pub(crate) const WORLD_MAP_SCALE_MEDIUM: f32 = 128.0;
+pub const WORLD_MAP_SCALE_MEDIUM: f32 = 128.0;
 
 /// The "Far" zoom preset.
-pub(crate) const WORLD_MAP_SCALE_FAR: f32 = 32.0;
+pub const WORLD_MAP_SCALE_FAR: f32 = 32.0;
 
 /// The "Grid" zoom preset: a wide overview (32 regions per 128 px).
-pub(crate) const WORLD_MAP_SCALE_GRID: f32 = 4.0;
+pub const WORLD_MAP_SCALE_GRID: f32 = 4.0;
 
 /// One scroll-wheel notch changes the zoom exponent by this much (the
 /// reference world map moves its zoom slider a quarter step per notch, a
 /// `2^0.25` scale factor).
-pub(crate) const WHEEL_ZOOM_STEP: f32 = 0.25;
+pub const WHEEL_ZOOM_STEP: f32 = 0.25;
 
 /// Clamps a world-map scale to its valid range.
-pub(crate) const fn clamp_world_scale(scale: f32) -> f32 {
+#[must_use]
+pub const fn clamp_world_scale(scale: f32) -> f32 {
     scale.clamp(WORLD_MAP_SCALE_MIN, WORLD_MAP_SCALE_MAX)
 }
 
 /// The scale after `clicks` scroll-wheel notches (positive zooms in).
-pub(crate) fn wheel_world_scale(scale: f32, clicks: f32) -> f32 {
+#[must_use]
+pub fn wheel_world_scale(scale: f32, clicks: f32) -> f32 {
     clamp_world_scale(scale * (clicks * WHEEL_ZOOM_STEP).exp2())
 }
 
@@ -69,21 +71,22 @@ pub(crate) fn wheel_world_scale(scale: f32, clicks: f32) -> f32 {
 
 /// The number of map-tile mipmap levels the map servers render
 /// (`LLWorldMipmap::MAP_LEVELS`).
-pub(crate) const MAX_TILE_LEVEL: u8 = 8;
+pub const MAX_TILE_LEVEL: u8 = 8;
 
 /// The highest (coarsest) tile level at which per-region information (names,
 /// map blocks, item markers) is still requested and drawn — the reference's
 /// `DRAW_SIMINFO_THRESHOLD`.
-pub(crate) const SIM_INFO_MAX_LEVEL: u8 = 3;
+pub const SIM_INFO_MAX_LEVEL: u8 = 3;
 
 /// The smallest scale (pixels per region) at which region-name labels draw
 /// (the reference draws sim names from about this scale up).
-pub(crate) const REGION_NAME_MIN_SCALE: f32 = 96.0;
+pub const REGION_NAME_MIN_SCALE: f32 = 96.0;
 
 /// The tile mipmap level for a map scale (`LLWorldMipmap::scaleToLevel`):
 /// level 1 below one-to-one, one level per halving of the scale, clamped to
 /// `1..=`[`MAX_TILE_LEVEL`].
-pub(crate) fn tile_level(scale: f32) -> u8 {
+#[must_use]
+pub fn tile_level(scale: f32) -> u8 {
     if scale <= f32::EPSILON {
         return MAX_TILE_LEVEL;
     }
@@ -100,18 +103,21 @@ pub(crate) fn tile_level(scale: f32) -> u8 {
 }
 
 /// Whether a scale is in the region-detail regime (per-region info drawn).
-pub(crate) fn detail_regime(scale: f32) -> bool {
+#[must_use]
+pub fn detail_regime(scale: f32) -> bool {
     tile_level(scale) <= SIM_INFO_MAX_LEVEL
 }
 
 /// The regions per tile edge at a level (`2^(level-1)`).
-pub(crate) fn tile_span_regions(level: u8) -> u32 {
+#[must_use]
+pub fn tile_span_regions(level: u8) -> u32 {
     1_u32 << u32::from(level.clamp(1, MAX_TILE_LEVEL).saturating_sub(1))
 }
 
 /// The lower-left grid coordinate of the tile containing a grid coordinate at
 /// a level (coordinates snap down to the tile span).
-pub(crate) fn tile_corner(level: u8, grid_x: u32, grid_y: u32) -> (u32, u32) {
+#[must_use]
+pub fn tile_corner(level: u8, grid_x: u32, grid_y: u32) -> (u32, u32) {
     let span = tile_span_regions(level).max(1);
     (
         grid_x.checked_div(span).unwrap_or(0).saturating_mul(span),
@@ -121,7 +127,8 @@ pub(crate) fn tile_corner(level: u8, grid_x: u32, grid_y: u32) -> (u32, u32) {
 
 /// The distinct tile corners covering an inclusive grid-coordinate rectangle
 /// at a level, capped at `cap` tiles (a runaway guard for huge view rects).
-pub(crate) fn tiles_in_rect(
+#[must_use]
+pub fn tiles_in_rect(
     level: u8,
     min_x: u32,
     max_x: u32,
@@ -156,7 +163,8 @@ pub(crate) fn tiles_in_rect(
 /// Splits an inclusive grid-coordinate rectangle into request chunks of at
 /// most `chunk`×`chunk` regions (the map-block request granularity), capped at
 /// `cap` chunks.
-pub(crate) fn request_chunks(
+#[must_use]
+pub fn request_chunks(
     min_x: u32,
     max_x: u32,
     min_y: u32,
@@ -200,25 +208,27 @@ pub(crate) fn request_chunks(
 /// region, and the surface size in pixels. Always north-up (the reference
 /// world map never rotates).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct WorldMapView {
+pub struct WorldMapView {
     /// The global metres east at the surface centre.
-    pub(crate) center_east: f64,
+    pub center_east: f64,
     /// The global metres north at the surface centre.
-    pub(crate) center_north: f64,
+    pub center_north: f64,
     /// The scale, in pixels per 256 m region.
-    pub(crate) scale: f32,
+    pub scale: f32,
     /// The surface size, in pixels.
-    pub(crate) size: Vec2,
+    pub size: Vec2,
 }
 
 impl WorldMapView {
     /// Pixels per metre at the current scale.
-    pub(crate) fn pixels_per_metre(&self) -> f32 {
+    #[must_use]
+    pub fn pixels_per_metre(&self) -> f32 {
         self.scale / REGION_WIDTH_METRES
     }
 
     /// A global position as a surface pixel (top-left origin, y down).
-    pub(crate) fn view_from_global(&self, east: f64, north: f64) -> Vec2 {
+    #[must_use]
+    pub fn view_from_global(&self, east: f64, north: f64) -> Vec2 {
         let ppm = f64::from(self.pixels_per_metre());
         let x = f64::from(self.size.x) / 2.0 + (east - self.center_east) * ppm;
         let y = f64::from(self.size.y) / 2.0 - (north - self.center_north) * ppm;
@@ -226,7 +236,8 @@ impl WorldMapView {
     }
 
     /// The global position (metres east, north) under a surface pixel.
-    pub(crate) fn global_from_view(&self, view: Vec2) -> (f64, f64) {
+    #[must_use]
+    pub fn global_from_view(&self, view: Vec2) -> (f64, f64) {
         let ppm = f64::from(self.pixels_per_metre());
         let east = self.center_east + (f64::from(view.x) - f64::from(self.size.x) / 2.0) / ppm;
         let north = self.center_north - (f64::from(view.y) - f64::from(self.size.y) / 2.0) / ppm;
@@ -235,7 +246,8 @@ impl WorldMapView {
 
     /// The inclusive grid-coordinate rectangle the surface shows (clamped to
     /// the representable grid).
-    pub(crate) fn visible_grid_rect(&self) -> (u32, u32, u32, u32) {
+    #[must_use]
+    pub fn visible_grid_rect(&self) -> (u32, u32, u32, u32) {
         let (min_east, max_north) = self.global_from_view(Vec2::new(0.0, 0.0));
         let (max_east, min_north) = self.global_from_view(self.size);
         (
@@ -249,7 +261,8 @@ impl WorldMapView {
 
 /// The centre that keeps the global point under `cursor` fixed across a scale
 /// change (zoom-to-cursor).
-pub(crate) fn zoom_center(view: &WorldMapView, cursor: Vec2, new_scale: f32) -> (f64, f64) {
+#[must_use]
+pub fn zoom_center(view: &WorldMapView, cursor: Vec2, new_scale: f32) -> (f64, f64) {
     let (east, north) = view.global_from_view(cursor);
     let ppm = f64::from(new_scale / REGION_WIDTH_METRES);
     let center_east = east - (f64::from(cursor.x) - f64::from(view.size.x) / 2.0) / ppm;
@@ -259,7 +272,8 @@ pub(crate) fn zoom_center(view: &WorldMapView, cursor: Vec2, new_scale: f32) -> 
 
 /// The grid index containing a global metre coordinate, clamped to the
 /// representable grid (negative and non-finite clamp to zero).
-pub(crate) fn grid_index(meters: f64) -> u32 {
+#[must_use]
+pub fn grid_index(meters: f64) -> u32 {
     if !meters.is_finite() || meters <= 0.0 {
         return 0;
     }
@@ -279,7 +293,8 @@ pub(crate) fn grid_index(meters: f64) -> u32 {
 
 /// Narrows an `f64` surface-pixel coordinate to `f32` (surface coordinates are
 /// bounded by the widget size, far inside `f32` precision).
-pub(crate) const fn narrow_f64(value: f64) -> f32 {
+#[must_use]
+pub const fn narrow_f64(value: f64) -> f32 {
     #[expect(
         clippy::as_conversions,
         clippy::cast_possible_truncation,
@@ -297,18 +312,19 @@ pub(crate) const fn narrow_f64(value: f64) -> f32 {
 /// produce), covering `tile_span_regions(level)` regions square from the
 /// tile's lower-left corner.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TileRaster {
+pub struct TileRaster {
     /// The raster width in texels.
-    pub(crate) width: u32,
+    pub width: u32,
     /// The raster height in texels.
-    pub(crate) height: u32,
+    pub height: u32,
     /// RGBA8 texels, top-down rows.
-    pub(crate) data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 impl TileRaster {
     /// The texel at (x, y) (top-down row order), transparent black outside.
-    pub(crate) fn get(&self, x: i32, y: i32) -> Rgba {
+    #[must_use]
+    pub fn get(&self, x: i32, y: i32) -> Rgba {
         if x < 0 || y < 0 {
             return [0, 0, 0, 0];
         }
@@ -332,14 +348,8 @@ impl TileRaster {
     /// Samples the raster at a global position for a tile anchored at grid
     /// corner (`corner_x`, `corner_y`) with the given level's span. Positions
     /// outside the tile clamp to its edge texels.
-    pub(crate) fn sample(
-        &self,
-        level: u8,
-        corner_x: u32,
-        corner_y: u32,
-        east: f64,
-        north: f64,
-    ) -> Rgba {
+    #[must_use]
+    pub fn sample(&self, level: u8, corner_x: u32, corner_y: u32, east: f64, north: f64) -> Rgba {
         let span_metres = f64::from(tile_span_regions(level)) * f64::from(REGION_WIDTH_METRES);
         let east_frac = ((east - f64::from(corner_x) * f64::from(REGION_WIDTH_METRES))
             / span_metres)
@@ -380,37 +390,37 @@ fn i32_from_u32(value: u32) -> i32 {
 // ---------------------------------------------------------------------------
 
 /// The map background where nothing is known (deep off-grid water).
-pub(crate) const COLOR_MAP_VOID: Rgba = [16, 27, 44, 255];
+pub const COLOR_MAP_VOID: Rgba = [16, 27, 44, 255];
 
 /// The region-border grid line drawn in the detail regime.
-pub(crate) const COLOR_MAP_GRID_LINE: Rgba = [255, 255, 255, 26];
+pub const COLOR_MAP_GRID_LINE: Rgba = [255, 255, 255, 26];
 
 /// Avatar ("people") map items.
-pub(crate) const COLOR_MAP_AGENT: Rgba = [0, 228, 0, 255];
+pub const COLOR_MAP_AGENT: Rgba = [0, 228, 0, 255];
 
 /// Telehub / infohub map items.
-pub(crate) const COLOR_MAP_TELEHUB: Rgba = [128, 96, 255, 255];
+pub const COLOR_MAP_TELEHUB: Rgba = [128, 96, 255, 255];
 
 /// Land-for-sale map items.
-pub(crate) const COLOR_MAP_LAND_SALE: Rgba = [255, 231, 100, 255];
+pub const COLOR_MAP_LAND_SALE: Rgba = [255, 231, 100, 255];
 
 /// Adult land-for-sale map items.
-pub(crate) const COLOR_MAP_LAND_SALE_ADULT: Rgba = [255, 128, 64, 255];
+pub const COLOR_MAP_LAND_SALE_ADULT: Rgba = [255, 128, 64, 255];
 
 /// PG event map items.
-pub(crate) const COLOR_MAP_EVENT: Rgba = [255, 128, 200, 255];
+pub const COLOR_MAP_EVENT: Rgba = [255, 128, 200, 255];
 
 /// Mature event map items.
-pub(crate) const COLOR_MAP_EVENT_MATURE: Rgba = [255, 64, 128, 255];
+pub const COLOR_MAP_EVENT_MATURE: Rgba = [255, 64, 128, 255];
 
 /// Adult event map items.
-pub(crate) const COLOR_MAP_EVENT_ADULT: Rgba = [200, 0, 64, 255];
+pub const COLOR_MAP_EVENT_ADULT: Rgba = [200, 0, 64, 255];
 
 /// The own-avatar marker.
-pub(crate) const COLOR_MAP_SELF: Rgba = [255, 255, 0, 255];
+pub const COLOR_MAP_SELF: Rgba = [255, 255, 0, 255];
 
 /// Draws a filled axis-aligned square glyph (the land-for-sale marker shape).
-pub(crate) fn draw_square(surface: &mut Surface<'_>, cx: f32, cy: f32, half: f32, color: Rgba) {
+pub fn draw_square(surface: &mut Surface<'_>, cx: f32, cy: f32, half: f32, color: Rgba) {
     let min_x = round_i32(cx - half);
     let max_x = round_i32(cx + half);
     let min_y = round_i32(cy - half);
@@ -427,7 +437,7 @@ pub(crate) fn draw_square(surface: &mut Surface<'_>, cx: f32, cy: f32, half: f32
 }
 
 /// Draws a 1 px vertical line (a region border in the detail regime).
-pub(crate) fn draw_vline(surface: &mut Surface<'_>, x: f32, color: Rgba) {
+pub fn draw_vline(surface: &mut Surface<'_>, x: f32, color: Rgba) {
     let x = round_i32(x);
     let mut y = 0_i32;
     let height = i32_from_u32(surface.height);
@@ -438,7 +448,7 @@ pub(crate) fn draw_vline(surface: &mut Surface<'_>, x: f32, color: Rgba) {
 }
 
 /// Draws a 1 px horizontal line (a region border in the detail regime).
-pub(crate) fn draw_hline(surface: &mut Surface<'_>, y: f32, color: Rgba) {
+pub fn draw_hline(surface: &mut Surface<'_>, y: f32, color: Rgba) {
     let y = round_i32(y);
     let mut x = 0_i32;
     let width = i32_from_u32(surface.width);

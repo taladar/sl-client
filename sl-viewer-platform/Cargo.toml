@@ -1,0 +1,36 @@
+[package]
+name = "sl-viewer-platform"
+description = "The Second Life / OpenSim viewer's platform layer: XDG directory layout, on-disk caches, clipboard, URL linkification"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "directories", "cache"]
+categories = ["filesystem", "game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# OS clipboard. Default features off: the default `image-data` support drags in
+# the AVIF encoder stack for image clipboards the viewer does not use.
+arboard = { version = "3.6.1", default-features = false, features = [
+  "wayland-data-control",
+] }
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+directories = { version = "6.0.0" }
+fs-err = { workspace = true }
+regex = { version = "1.13.1" }
+sl-audio = { path = "../sl-audio", version = "0.1.0" }
+sl-client-bevy = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

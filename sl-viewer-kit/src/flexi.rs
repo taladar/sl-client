@@ -9,7 +9,7 @@
 //! `LLFlexibleObjectData::unpack` — the four packed tension / drag / gravity /
 //! wind bytes, the two simulate-LOD "softness" bits stashed in their high bits,
 //! and the trailing user-force vector); [`flexi_from_object`] lifts a present
-//! block onto an [`ObjectFlexi`] component that [`apply_object`] attaches to (or
+//! block onto an [`ObjectFlexi`] component that `apply_object` attaches to (or
 //! clears from) each object entity as its updates arrive — ready for the P32.2
 //! CPU chain simulation that will deform / re-tessellate the flexi geometry.
 //!
@@ -19,7 +19,7 @@
 //! system, so the ingest is a straight `Option` lift: present → attach, absent →
 //! remove. A prim toggled flexi on or off in-world flips the extra-param block
 //! present / absent, so refreshing the component on every update (the way
-//! [`apply_light`](crate::lights) / [`apply_particles`](crate::particles) do)
+//! `apply_light` / `apply_particles` do)
 //! tracks that toggle.
 //!
 //! Flexi is mutually exclusive with server physics — the reference forces a flexi
@@ -64,13 +64,12 @@
 //! `Aabb`-managed entities (no `NoFrustumCulling` opt-out): frustum culling
 //! follows the bent geometry, and — because `MeshRayCast` reads the `Aabb`
 //! non-optionally — the world ray-cast picks (left-click touch,
-//! [`crate::object_menu`]'s right-click pie) hit a flexi exactly where it is
+//! `object_menu`'s right-click pie) hit a flexi exactly where it is
 //! drawn. Before this, the opt-out left flexi faces with no `Aabb` at all,
 //! making every flexi prim silently untouchable and un-menu-able.
 //!
 //! [`Aabb`]: bevy::camera::primitives::Aabb
 //!
-//! [`apply_object`]: crate::objects
 //! [`FlexiChain`]: sl_client_bevy::FlexiChain
 //! [`tessellate_with_path`]: sl_client_bevy::tessellate_with_path
 
@@ -85,7 +84,7 @@ use sl_client_bevy::{
 /// profile point count must stay constant between the initial build and the
 /// per-frame deform (the mesh is rewritten in place), so it is fixed rather than
 /// pixel-area managed; flexi prims are thin and few, so a smooth profile is cheap.
-pub(crate) const FLEXI_LOD: PrimLod = PrimLod::High;
+pub const FLEXI_LOD: PrimLod = PrimLod::High;
 
 /// The per-step chain movement (metres) below which a flexi prim's chain is
 /// considered to have **settled** onto its rest pose (`viewer-perf-flexi-settle-lod`).
@@ -100,20 +99,20 @@ pub(crate) const FLEXI_LOD: PrimLod = PrimLod::High;
 /// viewing distance.
 ///
 /// [`FlexiChain::step`]: sl_client_bevy::FlexiChain::step
-const STEP_SETTLE_EPSILON: f32 = 3.0e-4;
+pub const STEP_SETTLE_EPSILON: f32 = 3.0e-4;
 
 /// The squared distance (metres²) the prim's anchor may drift from its settled pose
 /// before a latched flexi prim **wakes** (`viewer-perf-flexi-settle-lod`). One
 /// millimetre: a prim gliding slower than this per frame accumulates against its
 /// recorded rest pose (not the previous frame) and so still wakes once it has moved
 /// a millimetre in total, while true rest never trips it.
-const WAKE_POSITION_EPSILON_SQ: f32 = 1.0e-3 * 1.0e-3;
+pub const WAKE_POSITION_EPSILON_SQ: f32 = 1.0e-3 * 1.0e-3;
 
 /// How far the prim's anchor rotation may turn from its settled orientation (as
 /// `1 - |dot|` of the two quaternions) before a latched flexi prim **wakes**. A spin
 /// changes the chain's hang direction, so it must re-simulate; the sign-independent
 /// `|dot|` treats `q` and `-q` as the same orientation.
-const WAKE_ROTATION_EPSILON: f32 = 1.0e-5;
+pub const WAKE_ROTATION_EPSILON: f32 = 1.0e-5;
 
 /// How far the prim's metre scale may differ per axis from its settled value before a
 /// latched flexi prim **wakes** (`viewer-perf-flexi-settle-lod`). A tenth of a
@@ -128,7 +127,7 @@ const WAKE_SCALE_EPSILON: f32 = 1.0e-4;
 /// entirely — no chain step, no re-tessellation, no GPU upload. Any mismatch (the prim
 /// moved, or a script changed its gravity / force / size) wakes it.
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub(crate) struct FlexiRest {
+pub struct FlexiRest {
     /// The prim's anchor world position (SL Z-up metres) at the latch.
     base_position: [f32; 3],
     /// The prim's anchor world rotation `(x, y, z, w)` at the latch.
@@ -144,19 +143,19 @@ pub(crate) struct FlexiRest {
 /// for P32.2 to drive a CPU chain simulation and deform the prim's path.
 ///
 /// Attached to (and refreshed / cleared on) each object entity by
-/// [`apply_object`](crate::objects) as its updates arrive. See
+/// `apply_object` as its updates arrive. See
 /// [`flexi_from_object`] for the present-vs-absent lift.
 #[derive(Component, Debug, Clone, PartialEq)]
-pub(crate) struct ObjectFlexi {
+pub struct ObjectFlexi {
     /// The decoded flexible-object parameters: the simulate-LOD softness (0–3),
     /// path tension (stiffness), air friction (damping), gravity on the tip, wind
     /// sensitivity, and the constant user force pushing the path.
-    pub(crate) data: FlexibleData,
+    pub data: FlexibleData,
     /// The prim's Second Life metre scale, refreshed every update so a **resized**
     /// flexi prim's chain length and profile size stay correct (P32.2). The chain
     /// bakes this into its metre geometry, so — unlike a rigid prim — the scale is
     /// carried here rather than on an (identity) geometry holder.
-    pub(crate) scale: [f32; 3],
+    pub scale: [f32; 3],
 }
 
 /// Lift an object's flexible-object block onto an [`ObjectFlexi`], or `None` when
@@ -166,7 +165,8 @@ pub(crate) struct ObjectFlexi {
 /// exactly when it carries a flexible-object extra-param block
 /// (`getFlexibleObjectData()`), so this is a straight `Option` lift with no
 /// sentinel to reject (unlike the particle system's zero-CRC "null" form).
-pub(crate) fn flexi_from_object(object: &Object) -> Option<ObjectFlexi> {
+#[must_use]
+pub fn flexi_from_object(object: &Object) -> Option<ObjectFlexi> {
     object.extra.flexible.clone().map(|data| ObjectFlexi {
         data,
         scale: [object.scale.x, object.scale.y, object.scale.z],
@@ -177,9 +177,9 @@ pub(crate) fn flexi_from_object(object: &Object) -> Option<ObjectFlexi> {
 /// flexible-object block: insert / refresh it when the prim is flexi, remove it
 /// when the prim was made rigid in-world (the block dropped) or never was flexi.
 /// Called on both the spawn and update paths so a prim toggled flexi on or off
-/// between updates is tracked, the way [`apply_light`](crate::lights) /
-/// [`apply_particles`](crate::particles) are.
-pub(crate) fn apply_flexi(entity: Entity, flexi: Option<ObjectFlexi>, commands: &mut Commands) {
+/// between updates is tracked, the way `apply_light` /
+/// `apply_particles` are.
+pub fn apply_flexi(entity: Entity, flexi: Option<ObjectFlexi>, commands: &mut Commands) {
     match flexi {
         Some(flexi) => {
             let data = &flexi.data;
@@ -213,34 +213,35 @@ pub(crate) fn apply_flexi(entity: Entity, flexi: Option<ObjectFlexi>, commands: 
 /// chain was built at (to skip a frame if a rebuild for a changed softness is
 /// pending), and the prim's face entities (whose meshes are rewritten in place).
 ///
-/// Created / refreshed by [`apply_object`](crate::objects) on the spawn and shape-
+/// Created / refreshed by `apply_object` on the spawn and shape-
 /// rebuild paths, and removed when a prim is toggled rigid. [`simulate_flexi`]
 /// advances it every frame.
-#[derive(Component)]
-pub(crate) struct FlexiSimState {
+#[derive(Debug, Component)]
+pub struct FlexiSimState {
     /// The chain solver's persistent node state.
-    pub(crate) chain: FlexiChain,
+    pub chain: FlexiChain,
     /// The prim's dequantized shape, re-swept along the deformed path each frame.
-    pub(crate) shape: PrimShapeFloat,
+    pub shape: PrimShapeFloat,
     /// The softness the chain was built at; a live change needs a fresh chain (the
     /// node count changes), so a mismatch skips this frame until the shape rebuild
     /// re-creates the state.
-    pub(crate) softness: u8,
+    pub softness: u8,
     /// The prim's face entities (one per non-empty tessellated face, in order),
     /// whose position / normal attributes are overwritten each frame.
-    pub(crate) face_entities: Vec<Entity>,
+    pub face_entities: Vec<Entity>,
     /// The rest state this prim is **settled** and frozen at, or `None` while its
     /// chain is still moving (`viewer-perf-flexi-settle-lod`). `Some` skips the whole
     /// per-frame cost (chain step, re-tessellation, GPU upload) until the prim's pose,
     /// attributes, or scale change; `None` steps and re-uploads every frame until the
     /// chain settles. Seeded `None` so the first frames drive the chain onto its rest
     /// pose before it latches.
-    pub(crate) rest: Option<FlexiRest>,
+    pub rest: Option<FlexiRest>,
 }
 
 /// Map a decoded [`FlexibleData`] block onto the pure solver's [`FlexiAttributes`]
 /// (the same fields, with the user force flattened to a plain array).
-pub(crate) const fn flexi_attributes(data: &FlexibleData) -> FlexiAttributes {
+#[must_use]
+pub const fn flexi_attributes(data: &FlexibleData) -> FlexiAttributes {
     FlexiAttributes {
         softness: data.softness,
         tension: data.tension,
@@ -304,7 +305,7 @@ fn rotation_settled(current: [f32; 4], rest: [f32; 4]) -> bool {
 }
 
 /// Advance every flexi prim's chain one frame and re-tessellate its geometry
-/// (P32.2) — the flexi counterpart of [`drive_particles`](crate::particles).
+/// (P32.2) — the flexi counterpart of `drive_particles`.
 ///
 /// For each prim carrying a [`FlexiSimState`]: read its live world pose (anchor)
 /// and metre scale, step the chain by the frame's `dt`, read the deformed path out,
@@ -329,7 +330,7 @@ fn rotation_settled(current: [f32; 4], rest: [f32; 4]) -> bool {
 /// culling and ray-cast picking (`viewer-flexi-prim-picking`) still track it.
 ///
 /// [`FlexiChain::step`]: sl_client_bevy::FlexiChain::step
-pub(crate) fn simulate_flexi(
+pub fn simulate_flexi(
     time: Res<Time>,
     mut sims: Query<(&ObjectFlexi, &mut FlexiSimState, &GlobalTransform)>,
     face_meshes: Query<&Mesh3d>,
