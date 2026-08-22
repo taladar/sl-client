@@ -158,7 +158,10 @@ mod nearby_chat_bar;
 mod notecard_render;
 mod notification_host;
 mod notification_persist;
-mod notifications;
+// The notification catalogue is its own crate (~22k lines of declarative data
+// with no dependency on anything else here), aliased under its old module name
+// so every `crate::notifications::…` path in the viewer still resolves.
+pub(crate) use sl_viewer_notifications as notifications;
 mod object_cost;
 mod object_menu;
 mod objects;

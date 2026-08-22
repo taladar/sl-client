@@ -8525,6 +8525,7 @@ dependencies = [
  "sl-terrain",
  "sl-texture",
  "sl-types",
+ "sl-viewer-notifications",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -8987,6 +8988,14 @@ dependencies = [
  "strum",
  "thiserror 2.0.19",
  "uuid",
+]
+
+[[package]]
+name = "sl-viewer-notifications"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "pretty_assertions",
 ]
 
 [[package]]

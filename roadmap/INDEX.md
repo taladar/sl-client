@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 93 |
-| ready | 257 |
+| ready | 256 |
 | blocked | 67 |
-| in-progress | 17 |
+| in-progress | 18 |
 | bugs | 33 |
 | done | 863 |
 | deferred | 23 |
@@ -217,7 +217,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (257)
+## ready (256)
 
 ### protocol
 
@@ -228,8 +228,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`build-split-viewer-crate`](ready/build-split-viewer-crate.md) — Split the
-  viewer crate to regain cross-crate build parallelism
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -1018,10 +1016,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (17)
+## in-progress (18)
 
 ### viewer
 
+- [`build-split-viewer-crate`](in-progress/build-split-viewer-crate.md) — Split
+  the viewer crate to regain cross-crate build parallelism
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)

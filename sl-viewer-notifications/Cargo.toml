@@ -1,0 +1,28 @@
+[package]
+name = "sl-viewer-notifications"
+description = "The Second Life / OpenSim viewer's notification catalogue: the declarative template set, its argument substitution, and the queue a host UI drains"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "notifications", "ui"]
+categories = ["game-development", "internationalization"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Only the ECS, not all of Bevy: the catalogue is data plus a queue, and its
+# whole Bevy surface is the `Message` and `Resource` derives. Depending on
+# `bevy_ecs` alone keeps this crate off the renderer's build path, so it
+# compiles early and in parallel with the rest of the dependency wall rather
+# than waiting behind it.
+bevy_ecs = { version = "0.19.0" }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

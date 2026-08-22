@@ -2,7 +2,7 @@
 id: build-split-viewer-crate
 title: Split the viewer crate to regain cross-crate build parallelism
 topic: viewer
-status: ready
+status: in-progress
 origin: build-performance work (2026-08) — profile/linker tuning landed first
 points: 13
 ---
@@ -46,6 +46,48 @@ That one unit is **34% of the wall clock**, and because it is the leaf every
 binary depends on, it is a near-serial tail: roughly four minutes during which
 23 of 24 cores have nothing to do. Peak RSS for the build was 9.9 GB, and this
 crate's `rustc` is what sets it.
+
+## Progress
+
+Measured against 406 real commits touching `sl-client-bevy-viewer/src`, the
+target shape is 25 crates: feature crates over a four-way `world` split with a
+thin `world-api` types crate beneath them. That last piece is what carries the
+win — mean lines recompiled per commit goes 280k (today) → 200k (feature crates
+over one fat `world`) → 183k (world split four ways) → **125k mean / 78k
+median** once `world-api` exists. A 30-crate variant was measured too and buys
+1.8% for five more manifests, so 25 is the stopping point.
+
+Full-build wall clock is the lesser prize and should not be oversold: the
+dependency wall is ~420-440s of the 705s build and no viewer split touches it,
+so the floor is ~8 min rather than the ~4m30 a lines-based projection suggests.
+
+Landed so far:
+
+- **0a** — every `include!` argument now resolves inside its own crate
+  (`ce64b51d`), so the viewer's sixteen-configuration `cargo hack` check stops
+  re-running on the ~59% of commits that never touch it. Needed a companion
+  change in `global-git-hooks` (`83e0b0f`) so the `OUT_DIR` codegen idiom counts
+  as local, which fixed `sl-wire` too.
+- **0b** — `[workspace.package]` and `[workspace.dependencies]` (`ee65862c`), so
+  a new crate's manifest is a few lines rather than forty, and 35 identical
+  `clippy.toml` files collapsed to one at the root. That consolidation caught
+  three crates calling `std::fs::read_to_string` where the shared rules require
+  `fs_err`.
+- **1** — `sl-viewer-notifications`: the 21.7k-line catalogue, zero outgoing
+  edges. Moved with `pub(crate) use sl_viewer_notifications as notifications;`
+  in the viewer's `lib.rs`, so none of the 21 consumer files changed.
+
+## Remaining sequence
+
+`2` platform + geom (28 leaf modules) · `3` settings (registrar inversion —
+`ViewerSettings::load()` runs before any `App` exists, so aggregation moves up
+into the app crate, not down into plugins) · `4` ui-core · `5` ui-widgets · `6`
+testkit · `7` media + spacenav · `8` world as one crate · `9-17` the nine
+feature crates · `18` world split four ways · `19` `world-api`.
+
+Steps 18-19 are where goal 2 is actually delivered: `world` is touched in 268 of
+406 commits, so stopping before them leaves the mean at 72% of the monolith
+instead of 45%.
 
 ## Approach
 

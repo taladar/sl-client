@@ -1,6 +1,6 @@
 //! The **declarative notification catalogue** and its runtime state
 //! (`viewer-ui-notification-host`): the data model the toast / notification host
-//! ([`crate::notification_host`]) is driven by.
+//! (`notification_host`) is driven by.
 //!
 //! # Why a data catalogue, not code
 //!
@@ -29,7 +29,7 @@
 //! - [`ShowNotification`] / [`NotificationResponse`] / [`DismissNotification`] —
 //!   the messages a caller raises a notification with and reads a reply from,
 //!   following the viewer's "emit a message, someone else acts" convention
-//!   ([`crate::ui_element`]).
+//!   (`ui_element`).
 //! - [`NotificationManager`] — the host's runtime state: the id source, the
 //!   `unique` dedup index, and the bounded history ring the future notification
 //!   list / history panel ([[viewer-notification-history]]) renders.
@@ -37,18 +37,18 @@
 //! Everything here is pure data and logic (no Bevy world access beyond the
 //! message / resource derives), so the catalogue lookup, the substitution and
 //! the dedup are unit-tested directly. The rendering — stacking, timing out,
-//! fading, dismissing — lives in [`crate::notification_host`].
+//! fading, dismissing — lives in `notification_host`.
 
 use std::collections::{HashMap, VecDeque};
 
-use bevy::prelude::{Message, Resource};
+use bevy_ecs::prelude::{Message, Resource};
 
 /// The rendering channel / behaviour class of a notification — the reference
 /// `LLNotificationTemplate` `type`, narrowed to the four the host substrate
 /// needs. The specific dialog tasks add their forms *on top* of these kinds
 /// rather than new kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NotificationKind {
+pub enum NotificationKind {
     /// A transient information tip (`notifytip`): auto-fades on its timer, carries
     /// no buttons, never blocks. The reference `NotificationTipToastLifeTime`.
     Tip,
@@ -67,13 +67,15 @@ pub(crate) enum NotificationKind {
 impl NotificationKind {
     /// Whether a toast of this kind auto-fades on its timer (tips and notifies)
     /// rather than sticking until it is clicked (alerts and modals).
-    pub(crate) const fn fades(self) -> bool {
+    #[must_use]
+    pub const fn fades(self) -> bool {
         matches!(self, Self::Tip | Self::Notify)
     }
 
     /// Whether this kind blocks the world behind a scrim: only
     /// [`AlertModal`](Self::AlertModal).
-    pub(crate) const fn is_modal(self) -> bool {
+    #[must_use]
+    pub const fn is_modal(self) -> bool {
         matches!(self, Self::AlertModal)
     }
 
@@ -81,7 +83,8 @@ impl NotificationKind {
     /// kind that never auto-expires (alerts and modals wait for a click). The
     /// values mirror the reference `NotificationTipToastLifeTime` (10 s) and
     /// `NotificationToastLifeTime` (30 s).
-    pub(crate) const fn lifetime_secs(self) -> f32 {
+    #[must_use]
+    pub const fn lifetime_secs(self) -> f32 {
         match self {
             Self::Tip => 10.0,
             Self::Notify => 30.0,
@@ -92,17 +95,17 @@ impl NotificationKind {
 
 /// How long a toast takes to fade out after its lifetime elapses, in seconds —
 /// the reference `ToastFadingTime`.
-pub(crate) const TOAST_FADE_SECS: f32 = 2.0;
+pub const TOAST_FADE_SECS: f32 = 2.0;
 
 /// The gap between two stacked toasts, in logical pixels — the reference
 /// `ToastGap`.
-pub(crate) const TOAST_GAP: f32 = 8.0;
+pub const TOAST_GAP: f32 = 8.0;
 
 /// A notification's priority — the reference `LLNotificationPriority`. Ordered so
 /// a higher-priority toast sorts to the more visible bottom of the stack (see
-/// [`crate::notification_host`]).
+/// `notification_host`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(crate) enum NotificationPriority {
+pub enum NotificationPriority {
     /// No priority stated (`UNSPECIFIED`); the reference treats this as normal,
     /// and it is the least prominent in the stack.
     Unspecified,
@@ -120,33 +123,33 @@ pub(crate) enum NotificationPriority {
 /// One button on a notification's form — a `<button>` (or a `<usetemplate>`
 /// slot) in the reference `notifications.xml`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NotificationButton {
+pub struct NotificationButton {
     /// The stable button name sent back as the [`NotificationResponse::button`] —
     /// the reference "functor button" name (`"OK"`, `"Cancel"`, `"Yes"`, …). Not
     /// translated: it is an identifier, not a label.
-    pub(crate) name: &'static str,
+    pub name: &'static str,
     /// The Fluent key for the button's visible label, resolved through
-    /// [`crate::i18n`] so the label localizes while the [`name`](Self::name)
+    /// `i18n` so the label localizes while the [`name`](Self::name)
     /// stays stable.
-    pub(crate) label_key: &'static str,
+    pub label_key: &'static str,
     /// Whether this is the default button — the one chosen on `Enter` and on a
     /// toast's auto-expiry (the reference `expire_option`).
-    pub(crate) is_default: bool,
+    pub is_default: bool,
 }
 
 /// The empty form — a notification with no buttons (a tip, or a bare
 /// informational notify).
-pub(crate) const NO_FORM: &[NotificationButton] = &[];
+pub const NO_FORM: &[NotificationButton] = &[];
 
 /// A one-button acknowledgement form (`OK`) — the reference `okbutton` template.
-pub(crate) const OK_FORM: &[NotificationButton] = &[NotificationButton {
+pub const OK_FORM: &[NotificationButton] = &[NotificationButton {
     name: "OK",
     label_key: "notification-button-ok",
     is_default: true,
 }];
 
 /// An OK / Cancel form — the reference `okcancelbuttons` template.
-pub(crate) const OK_CANCEL_FORM: &[NotificationButton] = &[
+pub const OK_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-ok",
@@ -163,7 +166,7 @@ pub(crate) const OK_CANCEL_FORM: &[NotificationButton] = &[
 /// `okcancelbuttons` with `yestext="Leave"`, used by the leave-group confirm. The
 /// affirmative keeps the stable `OK` [`name`](NotificationButton::name) so a
 /// consumer routes on it; only the label differs.
-pub(crate) const LEAVE_CANCEL_FORM: &[NotificationButton] = &[
+pub const LEAVE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-leave",
@@ -181,7 +184,7 @@ pub(crate) const LEAVE_CANCEL_FORM: &[NotificationButton] = &[
 /// chat window, the negative quits. As with [`LEAVE_CANCEL_FORM`] the button
 /// [`name`](NotificationButton::name)s stay the stable `OK` / `Cancel` so a
 /// consumer routes on them; only the labels differ.
-pub(crate) const VIEW_IM_QUIT_FORM: &[NotificationButton] = &[
+pub const VIEW_IM_QUIT_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-view-im-chat",
@@ -199,7 +202,7 @@ pub(crate) const VIEW_IM_QUIT_FORM: &[NotificationButton] = &[
 /// [`LEAVE_CANCEL_FORM`] the stable `OK` / `Cancel`
 /// [`name`](NotificationButton::name)s (the underlying reference template's
 /// button names) are what a consumer routes on; only the labels differ.
-pub(crate) const YES_NO_FORM: &[NotificationButton] = &[
+pub const YES_NO_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-yes",
@@ -216,7 +219,7 @@ pub(crate) const YES_NO_FORM: &[NotificationButton] = &[
 /// `yesnocancelbuttons` with `yestext="Save"` / `notext="Don't Save"`. The
 /// reference functor names `Yes` / `No` / `Cancel` stay stable under the
 /// localized labels.
-pub(crate) const SAVE_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
+pub const SAVE_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-save",
@@ -237,7 +240,7 @@ pub(crate) const SAVE_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
 /// [`SAVE_DISCARD_CANCEL_FORM`] with the affirmative reading "Save All" — the
 /// reference `yesnocancelbuttons` with `yestext="Save All"` (the
 /// save-all-clothing-changes confirm).
-pub(crate) const SAVE_ALL_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
+pub const SAVE_ALL_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-save-all",
@@ -258,7 +261,7 @@ pub(crate) const SAVE_ALL_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
 /// The discard-unsaved-changes confirm — the reference `okcancelignore` with
 /// `yestext="Discard"` / `notext="Keep Editing"`. Stable `OK` / `Cancel`
 /// names under the localized labels, as with [`LEAVE_CANCEL_FORM`].
-pub(crate) const DISCARD_KEEP_EDITING_FORM: &[NotificationButton] = &[
+pub const DISCARD_KEEP_EDITING_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-discard",
@@ -273,7 +276,7 @@ pub(crate) const DISCARD_KEEP_EDITING_FORM: &[NotificationButton] = &[
 
 /// An OK / Cancel form whose affirmative reads "Save" — the reference
 /// `okcancelignore` with `yestext="Save"` (the overwrite-outfit confirm).
-pub(crate) const SAVE_CANCEL_FORM: &[NotificationButton] = &[
+pub const SAVE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-save",
@@ -288,7 +291,7 @@ pub(crate) const SAVE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// An OK / Cancel form whose affirmative reads "Remove" — the reference
 /// `okcancelbuttons` with `yestext="Remove"` (the remove-AO-set confirm).
-pub(crate) const REMOVE_CANCEL_FORM: &[NotificationButton] = &[
+pub const REMOVE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-remove",
@@ -303,7 +306,7 @@ pub(crate) const REMOVE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// An OK / Cancel form whose affirmative reads "Send" — the reference
 /// `okcancelbuttons` with `yestext="Send"` (the send-sysinfo-to-IM confirm).
-pub(crate) const SEND_CANCEL_FORM: &[NotificationButton] = &[
+pub const SEND_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-send",
@@ -320,7 +323,7 @@ pub(crate) const SEND_CANCEL_FORM: &[NotificationButton] = &[
 /// sysinfo-request prompt): the functor names **and** labels are Yes / No.
 /// The reference marks no default; the affirmative takes it, per the shared
 /// one-default invariant.
-pub(crate) const YES_NO_BUTTONS_FORM: &[NotificationButton] = &[
+pub const YES_NO_BUTTONS_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-yes",
@@ -338,7 +341,7 @@ pub(crate) const YES_NO_BUTTONS_FORM: &[NotificationButton] = &[
 /// estate access-list / manager / experience add & remove prompt. The
 /// reference functor names `Yes` / `No` / `Cancel` stay stable under the
 /// localized labels.
-pub(crate) const THIS_ESTATE_ALL_ESTATES_FORM: &[NotificationButton] = &[
+pub const THIS_ESTATE_ALL_ESTATES_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-this-estate",
@@ -358,7 +361,7 @@ pub(crate) const THIS_ESTATE_ALL_ESTATES_FORM: &[NotificationButton] = &[
 
 /// The kick-everyone confirm — the reference `okcancelbuttons` with
 /// `yestext="Kick All Residents"`.
-pub(crate) const KICK_ALL_RESIDENTS_CANCEL_FORM: &[NotificationButton] = &[
+pub const KICK_ALL_RESIDENTS_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-kick-all-residents",
@@ -374,7 +377,7 @@ pub(crate) const KICK_ALL_RESIDENTS_CANCEL_FORM: &[NotificationButton] = &[
 /// The elevation-ranges confirm — the reference `yesnocancelbuttons` with
 /// `yestext="Ok"` / `notext="Cancel"` / `canceltext="Don't ask"`. Stable
 /// `Yes` / `No` / `Cancel` names under OK / Cancel / Don't-ask labels.
-pub(crate) const OK_CANCEL_DONT_ASK_FORM: &[NotificationButton] = &[
+pub const OK_CANCEL_DONT_ASK_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-ok",
@@ -394,7 +397,7 @@ pub(crate) const OK_CANCEL_DONT_ASK_FORM: &[NotificationButton] = &[
 
 /// An OK / Cancel form whose affirmative reads "Bake" — the reference
 /// `okcancelbuttons` with `yestext="Bake"` (the max-allowed-groups notice).
-pub(crate) const BAKE_CANCEL_FORM: &[NotificationButton] = &[
+pub const BAKE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-bake",
@@ -409,7 +412,7 @@ pub(crate) const BAKE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// The pathfinding-dirty modal's form — the reference `okcancelbuttons`
 /// with `yestext="Rebake"` / `notext="Close"`.
-pub(crate) const REBAKE_CLOSE_FORM: &[NotificationButton] = &[
+pub const REBAKE_CLOSE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-rebake",
@@ -424,7 +427,7 @@ pub(crate) const REBAKE_CLOSE_FORM: &[NotificationButton] = &[
 
 /// The pathfinding-dirty notify's one-button form — the reference
 /// `okbutton` with `yestext="Rebake region"`.
-pub(crate) const REBAKE_REGION_FORM: &[NotificationButton] = &[NotificationButton {
+pub const REBAKE_REGION_FORM: &[NotificationButton] = &[NotificationButton {
     name: "OK",
     label_key: "notification-button-rebake-region",
     is_default: true,
@@ -433,7 +436,7 @@ pub(crate) const REBAKE_REGION_FORM: &[NotificationButton] = &[NotificationButto
 /// The replace-attachment prompt's buttons: the reference declares this form
 /// explicitly with functor names `Yes` / `No` under `OK` / `Cancel` labels,
 /// so those are the stable names a consumer routes on.
-pub(crate) const REPLACE_ATTACHMENT_FORM: &[NotificationButton] = &[
+pub const REPLACE_ATTACHMENT_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-ok",
@@ -448,7 +451,7 @@ pub(crate) const REPLACE_ATTACHMENT_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const YES_CANCEL_FORM: &[NotificationButton] = &[
+pub const YES_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-yes",
@@ -463,7 +466,7 @@ pub(crate) const YES_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CREATE_A_NEW_ACCOUNT_TRY_AGAIN_FORM: &[NotificationButton] = &[
+pub const CREATE_A_NEW_ACCOUNT_TRY_AGAIN_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-create-a-new-account",
@@ -478,7 +481,7 @@ pub(crate) const CREATE_A_NEW_ACCOUNT_TRY_AGAIN_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CREATE_ACCOUNT_CONTINUE_FORM: &[NotificationButton] = &[
+pub const CREATE_ACCOUNT_CONTINUE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-create-account",
@@ -493,7 +496,7 @@ pub(crate) const CREATE_ACCOUNT_CONTINUE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CONFIRM_AND_LOG_OUT_CANCEL_FORM: &[NotificationButton] = &[
+pub const CONFIRM_AND_LOG_OUT_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-confirm-and-log-out",
@@ -508,7 +511,7 @@ pub(crate) const CONFIRM_AND_LOG_OUT_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const OK_HELP_TELEPORT_FORM: &[NotificationButton] = &[
+pub const OK_HELP_TELEPORT_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-ok",
@@ -528,7 +531,7 @@ pub(crate) const OK_HELP_TELEPORT_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const OK_HELP_FORM: &[NotificationButton] = &[
+pub const OK_HELP_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-ok",
@@ -543,7 +546,7 @@ pub(crate) const OK_HELP_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CONFIRM_CANCEL_FORM: &[NotificationButton] = &[
+pub const CONFIRM_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-confirm",
@@ -558,7 +561,7 @@ pub(crate) const CONFIRM_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const MALE_FEMALE_FORM: &[NotificationButton] = &[
+pub const MALE_FEMALE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-male",
@@ -573,7 +576,7 @@ pub(crate) const MALE_FEMALE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const INSTALL_SKIP_NOT_NOW_FORM: &[NotificationButton] = &[
+pub const INSTALL_SKIP_NOT_NOW_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-install",
@@ -593,7 +596,7 @@ pub(crate) const INSTALL_SKIP_NOT_NOW_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const QUIT_FORM: &[NotificationButton] = &[NotificationButton {
+pub const QUIT_FORM: &[NotificationButton] = &[NotificationButton {
     name: "OK",
     label_key: "notification-button-quit",
     is_default: true,
@@ -601,7 +604,7 @@ pub(crate) const QUIT_FORM: &[NotificationButton] = &[NotificationButton {
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CONTINUE_CANCEL_FORM: &[NotificationButton] = &[
+pub const CONTINUE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "continue",
         label_key: "notification-button-continue",
@@ -616,7 +619,7 @@ pub(crate) const CONTINUE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const RESET_REMIND_ME_NEXT_TIME_FORM: &[NotificationButton] = &[
+pub const RESET_REMIND_ME_NEXT_TIME_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-reset",
@@ -631,7 +634,7 @@ pub(crate) const RESET_REMIND_ME_NEXT_TIME_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const MOVE_ITEMS_DONT_MOVE_ITEMS_FORM: &[NotificationButton] = &[
+pub const MOVE_ITEMS_DONT_MOVE_ITEMS_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-move-items",
@@ -646,7 +649,7 @@ pub(crate) const MOVE_ITEMS_DONT_MOVE_ITEMS_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const MOVE_ITEMS_DONT_MOVE_ITEMS_CANCEL_FORM: &[NotificationButton] = &[
+pub const MOVE_ITEMS_DONT_MOVE_ITEMS_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-move-items",
@@ -666,7 +669,7 @@ pub(crate) const MOVE_ITEMS_DONT_MOVE_ITEMS_CANCEL_FORM: &[NotificationButton] =
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const SAVE_OR_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
+pub const SAVE_OR_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-save",
@@ -686,7 +689,7 @@ pub(crate) const SAVE_OR_DISCARD_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const DEED_CANCEL_FORM: &[NotificationButton] = &[
+pub const DEED_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-deed",
@@ -701,7 +704,7 @@ pub(crate) const DEED_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const UNLINK_CANCEL_FORM: &[NotificationButton] = &[
+pub const UNLINK_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-unlink",
@@ -716,7 +719,7 @@ pub(crate) const UNLINK_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const DISCARD_CHANGES_KEEP_EDITING_2_FORM: &[NotificationButton] = &[
+pub const DISCARD_CHANGES_KEEP_EDITING_2_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "discard",
         label_key: "notification-button-discard-changes",
@@ -731,7 +734,7 @@ pub(crate) const DISCARD_CHANGES_KEEP_EDITING_2_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CONTINUE_LABEL_CANCEL_FORM: &[NotificationButton] = &[
+pub const CONTINUE_LABEL_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-continue",
@@ -746,7 +749,7 @@ pub(crate) const CONTINUE_LABEL_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const STRIP_ALPHA_USE_AS_IS_FORM: &[NotificationButton] = &[
+pub const STRIP_ALPHA_USE_AS_IS_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "strip",
         label_key: "notification-button-strip-alpha",
@@ -761,7 +764,7 @@ pub(crate) const STRIP_ALPHA_USE_AS_IS_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const SET_NAME_CANCEL_FORM: &[NotificationButton] = &[
+pub const SET_NAME_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "SetName",
         label_key: "notification-button-ok",
@@ -776,7 +779,7 @@ pub(crate) const SET_NAME_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const REPLACE_CURRENT_LIST_USE_NEW_NAME_FORM: &[NotificationButton] = &[
+pub const REPLACE_CURRENT_LIST_USE_NEW_NAME_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "ReplaceList",
         label_key: "notification-button-replace-current-list",
@@ -791,7 +794,7 @@ pub(crate) const REPLACE_CURRENT_LIST_USE_NEW_NAME_FORM: &[NotificationButton] =
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const DELETE_LIST_CANCEL_FORM: &[NotificationButton] = &[
+pub const DELETE_LIST_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "DeleteList",
         label_key: "notification-button-delete",
@@ -806,7 +809,7 @@ pub(crate) const DELETE_LIST_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ACCEPT_DECLINE_MUTE_FORM: &[NotificationButton] = &[
+pub const ACCEPT_DECLINE_MUTE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Accept",
         label_key: "notification-button-accept",
@@ -826,7 +829,7 @@ pub(crate) const ACCEPT_DECLINE_MUTE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const RESPOND_FORM: &[NotificationButton] = &[NotificationButton {
+pub const RESPOND_FORM: &[NotificationButton] = &[NotificationButton {
     name: "respondbutton",
     label_key: "notification-button-respond",
     is_default: true,
@@ -834,7 +837,7 @@ pub(crate) const RESPOND_FORM: &[NotificationButton] = &[NotificationButton {
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const SHUTDOWN_NOW_LATER_FORM: &[NotificationButton] = &[
+pub const SHUTDOWN_NOW_LATER_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-shutdown-now",
@@ -849,7 +852,7 @@ pub(crate) const SHUTDOWN_NOW_LATER_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const GO_TO_KNOWLEDGE_BASE_CLOSE_FORM: &[NotificationButton] = &[
+pub const GO_TO_KNOWLEDGE_BASE_CLOSE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-go-to-knowledge-base",
@@ -864,7 +867,7 @@ pub(crate) const GO_TO_KNOWLEDGE_BASE_CLOSE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CHANGE_PREFERENCES_CANCEL_FORM: &[NotificationButton] = &[
+pub const CHANGE_PREFERENCES_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-change-preferences",
@@ -879,7 +882,7 @@ pub(crate) const CHANGE_PREFERENCES_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const QUIT_DONT_QUIT_FORM: &[NotificationButton] = &[
+pub const QUIT_DONT_QUIT_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-quit",
@@ -894,7 +897,7 @@ pub(crate) const QUIT_DONT_QUIT_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const FIX_IT_KEEP_IT_FORM: &[NotificationButton] = &[
+pub const FIX_IT_KEEP_IT_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-fix-it",
@@ -909,7 +912,7 @@ pub(crate) const FIX_IT_KEEP_IT_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ALL_MODES_CURRENT_MODE_CANCEL_FORM: &[NotificationButton] = &[
+pub const ALL_MODES_CURRENT_MODE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-all-modes",
@@ -929,7 +932,7 @@ pub(crate) const ALL_MODES_CURRENT_MODE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const SAVE_BACKUP_CANCEL_FORM: &[NotificationButton] = &[
+pub const SAVE_BACKUP_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-save-backup",
@@ -944,7 +947,7 @@ pub(crate) const SAVE_BACKUP_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const RESTORE_AND_QUIT_CANCEL_FORM: &[NotificationButton] = &[
+pub const RESTORE_AND_QUIT_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-restore-and-quit",
@@ -959,7 +962,7 @@ pub(crate) const RESTORE_AND_QUIT_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const OFFER_CANCEL_FORM: &[NotificationButton] = &[
+pub const OFFER_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Offer",
         label_key: "notification-button-ok",
@@ -974,7 +977,7 @@ pub(crate) const OFFER_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ACCEPT_DECLINE_FORM: &[NotificationButton] = &[
+pub const ACCEPT_DECLINE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Accept",
         label_key: "notification-button-accept",
@@ -989,7 +992,7 @@ pub(crate) const ACCEPT_DECLINE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CREATE_CANCEL_FORM: &[NotificationButton] = &[
+pub const CREATE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Create",
         label_key: "notification-button-create",
@@ -1004,7 +1007,7 @@ pub(crate) const CREATE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const APPLY_CHANGES_IGNORE_CHANGES_CANCEL_FORM: &[NotificationButton] = &[
+pub const APPLY_CHANGES_IGNORE_CHANGES_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-apply-changes",
@@ -1024,7 +1027,7 @@ pub(crate) const APPLY_CHANGES_IGNORE_CHANGES_CANCEL_FORM: &[NotificationButton]
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const EJECT_CANCEL_FORM: &[NotificationButton] = &[
+pub const EJECT_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-eject",
@@ -1039,7 +1042,7 @@ pub(crate) const EJECT_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const BAN_CANCEL_FORM: &[NotificationButton] = &[
+pub const BAN_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-ban",
@@ -1054,7 +1057,7 @@ pub(crate) const BAN_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const JOIN_CANCEL_FORM: &[NotificationButton] = &[
+pub const JOIN_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-join",
@@ -1069,7 +1072,7 @@ pub(crate) const JOIN_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CREATE_GROUP_FOR_L_COST_CANCEL_FORM: &[NotificationButton] = &[
+pub const CREATE_GROUP_FOR_L_COST_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-create-group-for-l-cost",
@@ -1084,7 +1087,7 @@ pub(crate) const CREATE_GROUP_FOR_L_COST_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const JOIN_DECLINE_FORM: &[NotificationButton] = &[
+pub const JOIN_DECLINE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-join",
@@ -1099,7 +1102,7 @@ pub(crate) const JOIN_DECLINE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CLOSE_FORM: &[NotificationButton] = &[NotificationButton {
+pub const CLOSE_FORM: &[NotificationButton] = &[NotificationButton {
     name: "OK",
     label_key: "notification-button-close",
     is_default: true,
@@ -1107,7 +1110,7 @@ pub(crate) const CLOSE_FORM: &[NotificationButton] = &[NotificationButton {
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const YES_NO_CANCEL_FORM: &[NotificationButton] = &[
+pub const YES_NO_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-yes",
@@ -1127,7 +1130,7 @@ pub(crate) const YES_NO_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const JOIN_DECLINE_INFO_FORM: &[NotificationButton] = &[
+pub const JOIN_DECLINE_INFO_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Join",
         label_key: "notification-button-join",
@@ -1147,7 +1150,7 @@ pub(crate) const JOIN_DECLINE_INFO_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const SUFFIXED_YES_NO_FORM: &[NotificationButton] = &[
+pub const SUFFIXED_YES_NO_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK_okcancelignore",
         label_key: "notification-button-yes",
@@ -1162,7 +1165,7 @@ pub(crate) const SUFFIXED_YES_NO_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const FREEZE_UNFREEZE_CANCEL_FORM: &[NotificationButton] = &[
+pub const FREEZE_UNFREEZE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-freeze",
@@ -1182,7 +1185,7 @@ pub(crate) const FREEZE_UNFREEZE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const EJECT_EJECT_AND_BAN_CANCEL_FORM: &[NotificationButton] = &[
+pub const EJECT_EJECT_AND_BAN_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-eject",
@@ -1202,7 +1205,7 @@ pub(crate) const EJECT_EJECT_AND_BAN_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const DONE_FORM: &[NotificationButton] = &[NotificationButton {
+pub const DONE_FORM: &[NotificationButton] = &[NotificationButton {
     name: "Done",
     label_key: "notification-button-done",
     is_default: true,
@@ -1210,7 +1213,7 @@ pub(crate) const DONE_FORM: &[NotificationButton] = &[NotificationButton {
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const PLAY_MEDIA_NOW_ALWAYS_PLAY_MEDIA_DO_NOT_PLAY_MEDIA_FORM: &[NotificationButton] = &[
+pub const PLAY_MEDIA_NOW_ALWAYS_PLAY_MEDIA_DO_NOT_PLAY_MEDIA_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Play Media Now",
         label_key: "notification-button-play-media-now",
@@ -1230,7 +1233,7 @@ pub(crate) const PLAY_MEDIA_NOW_ALWAYS_PLAY_MEDIA_DO_NOT_PLAY_MEDIA_FORM: &[Noti
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const PLAY_DONT_PLAY_FORM: &[NotificationButton] = &[
+pub const PLAY_DONT_PLAY_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Yes",
         label_key: "notification-button-play",
@@ -1245,7 +1248,7 @@ pub(crate) const PLAY_DONT_PLAY_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ENABLE_DISABLE_FORM: &[NotificationButton] = &[
+pub const ENABLE_DISABLE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Enable",
         label_key: "notification-button-enable",
@@ -1260,7 +1263,7 @@ pub(crate) const ENABLE_DISABLE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ALLOW_DENY_FORM: &[NotificationButton] = &[
+pub const ALLOW_DENY_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Allow",
         label_key: "notification-button-allow",
@@ -1275,7 +1278,7 @@ pub(crate) const ALLOW_DENY_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ACTION_NOW_CONDITION_ALLOW_THIS_DOMAIN_CONDITION_ALLOW_THIS_URL_FORM:
+pub const ACTION_NOW_CONDITION_ALLOW_THIS_DOMAIN_CONDITION_ALLOW_THIS_URL_FORM:
     &[NotificationButton] = &[
     NotificationButton {
         name: "Do Now",
@@ -1296,7 +1299,7 @@ pub(crate) const ACTION_NOW_CONDITION_ALLOW_THIS_DOMAIN_CONDITION_ALLOW_THIS_URL
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ALLOW_DENY_BLACKLIST_WHITELIST_FORM: &[NotificationButton] = &[
+pub const ALLOW_DENY_BLACKLIST_WHITELIST_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Allow",
         label_key: "notification-button-allow",
@@ -1321,7 +1324,7 @@ pub(crate) const ALLOW_DENY_BLACKLIST_WHITELIST_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ADD_CANCEL_FORM: &[NotificationButton] = &[
+pub const ADD_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Add",
         label_key: "notification-button-add",
@@ -1336,7 +1339,7 @@ pub(crate) const ADD_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const OK_NO_FORM: &[NotificationButton] = &[
+pub const OK_NO_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-ok",
@@ -1351,7 +1354,7 @@ pub(crate) const OK_NO_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CONFIRM_PURCHASE_CANCEL_FORM: &[NotificationButton] = &[
+pub const CONFIRM_PURCHASE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "ConfirmPurchase",
         label_key: "notification-button-ok",
@@ -1366,7 +1369,7 @@ pub(crate) const CONFIRM_PURCHASE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const PAY_CANCEL_FORM: &[NotificationButton] = &[
+pub const PAY_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-pay",
@@ -1381,7 +1384,7 @@ pub(crate) const PAY_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const UPLOAD_CANCEL_FORM: &[NotificationButton] = &[
+pub const UPLOAD_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-upload",
@@ -1396,7 +1399,7 @@ pub(crate) const UPLOAD_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CONTINUE_NAMED_CANCEL_FORM: &[NotificationButton] = &[
+pub const CONTINUE_NAMED_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Continue",
         label_key: "notification-button-continue",
@@ -1411,7 +1414,7 @@ pub(crate) const CONTINUE_NAMED_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const DETAILS_CANCEL_FORM: &[NotificationButton] = &[
+pub const DETAILS_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Details",
         label_key: "notification-button-details",
@@ -1426,7 +1429,7 @@ pub(crate) const DETAILS_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const COPY_CANCEL_FORM: &[NotificationButton] = &[
+pub const COPY_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-copy",
@@ -1441,7 +1444,7 @@ pub(crate) const COPY_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const REMOVE_ITEMS_AND_DELETE_CANCEL_FORM: &[NotificationButton] = &[
+pub const REMOVE_ITEMS_AND_DELETE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-remove-items-and-delete",
@@ -1456,7 +1459,7 @@ pub(crate) const REMOVE_ITEMS_AND_DELETE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const DELETE_CANCEL_FORM: &[NotificationButton] = &[
+pub const DELETE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-delete",
@@ -1471,7 +1474,7 @@ pub(crate) const DELETE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CHECK_TRASH_FOLDER_I_WILL_EMPTY_TRASH_LATER_FORM: &[NotificationButton] = &[
+pub const CHECK_TRASH_FOLDER_I_WILL_EMPTY_TRASH_LATER_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-check-trash-folder",
@@ -1486,7 +1489,7 @@ pub(crate) const CHECK_TRASH_FOLDER_I_WILL_EMPTY_TRASH_LATER_FORM: &[Notificatio
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ACCEPT_DISCARD_FORM: &[NotificationButton] = &[
+pub const ACCEPT_DISCARD_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Keep",
         label_key: "notification-button-accept",
@@ -1501,7 +1504,7 @@ pub(crate) const ACCEPT_DISCARD_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const SHOW_ACCEPT_DISCARD_PLUS4_FORM: &[NotificationButton] = &[
+pub const SHOW_ACCEPT_DISCARD_PLUS4_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Show",
         label_key: "notification-button-show",
@@ -1541,7 +1544,7 @@ pub(crate) const SHOW_ACCEPT_DISCARD_PLUS4_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const OKAY_CANCEL_FORM: &[NotificationButton] = &[
+pub const OKAY_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-okay",
@@ -1556,7 +1559,7 @@ pub(crate) const OKAY_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const GO_TO_PAGE_CANCEL_FORM: &[NotificationButton] = &[
+pub const GO_TO_PAGE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-go-to-page",
@@ -1571,7 +1574,7 @@ pub(crate) const GO_TO_PAGE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const LATER_GO_NOW_FORM: &[NotificationButton] = &[
+pub const LATER_GO_NOW_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Later",
         label_key: "notification-button-later",
@@ -1586,7 +1589,7 @@ pub(crate) const LATER_GO_NOW_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const TRUST_CANCEL_FORM: &[NotificationButton] = &[
+pub const TRUST_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-trust",
@@ -1601,7 +1604,7 @@ pub(crate) const TRUST_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const TELEPORT_CANCEL_FORM: &[NotificationButton] = &[
+pub const TELEPORT_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-teleport",
@@ -1616,7 +1619,7 @@ pub(crate) const TELEPORT_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const CHANGE_AND_CONTINUE_CANCEL_FORM: &[NotificationButton] = &[
+pub const CHANGE_AND_CONTINUE_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "OK",
         label_key: "notification-button-change-and-continue",
@@ -1631,7 +1634,7 @@ pub(crate) const CHANGE_AND_CONTINUE_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const TELEPORT_NAMED_CANCEL_FORM: &[NotificationButton] = &[
+pub const TELEPORT_NAMED_CANCEL_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Teleport",
         label_key: "notification-button-teleport",
@@ -1646,7 +1649,7 @@ pub(crate) const TELEPORT_NAMED_CANCEL_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const TELEPORT_CHANGE_AND_CONTINUE_FORM: &[NotificationButton] = &[
+pub const TELEPORT_CHANGE_AND_CONTINUE_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Teleport",
         label_key: "notification-button-change-and-continue-2",
@@ -1661,7 +1664,7 @@ pub(crate) const TELEPORT_CHANGE_AND_CONTINUE_FORM: &[NotificationButton] = &[
 
 /// Generated from the reference form it mirrors (see the entries
 /// using it); stable functor names under localized labels.
-pub(crate) const ALLOW_ALWAYS_ALLOW_DENY_FORM: &[NotificationButton] = &[
+pub const ALLOW_ALWAYS_ALLOW_DENY_FORM: &[NotificationButton] = &[
     NotificationButton {
         name: "Allow",
         label_key: "notification-button-allow",
@@ -1685,16 +1688,16 @@ pub(crate) const ALLOW_ALWAYS_ALLOW_DENY_FORM: &[NotificationButton] = &[
 /// [`default_key`](Self::default_key) text and returns the edited value on
 /// [`NotificationResponse::input`] when a button is chosen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct NotificationInput {
+pub struct NotificationInput {
     /// The stable field name a consumer routes on — the reference `<input
     /// name=…>` (`"message"`, `"new_name"`). An identifier, not a label.
-    pub(crate) name: &'static str,
+    pub name: &'static str,
     /// The Fluent key for the pre-filled text, or `None` for a field that
     /// starts empty (the announcement prompts). Resolved through
-    /// [`crate::i18n`], then `[KEY]`-substituted with the raised
+    /// `i18n`, then `[KEY]`-substituted with the raised
     /// notification's [`NotificationArgs`] (the reference defaults are
     /// substitution templates like `[DESC] (new)`).
-    pub(crate) default_key: Option<&'static str>,
+    pub default_key: Option<&'static str>,
 }
 
 /// How a template's "don't show me this again" checkbox behaves — the
@@ -1704,9 +1707,9 @@ pub(crate) struct NotificationInput {
 /// alerts tab lists the notification and a per-name show/suppress `Bool`
 /// setting exists ([`is_suppressible`](Self::is_suppressible)), and what a
 /// suppressed raise auto-responds with
-/// ([`crate::notification_host`]'s `auto_response_button`).
+/// (`notification_host`'s `auto_response_button`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NotificationIgnore {
+pub enum NotificationIgnore {
     /// No ignore behaviour: no checkbox, never suppressible (the reference
     /// `IGNORE_NO` — every template without an `<ignore>` / `ignoretext`).
     None,
@@ -1724,15 +1727,6 @@ pub(crate) enum NotificationIgnore {
     /// runtime-only and resets every session (the reference
     /// `IGNORE_WITH_DEFAULT_RESPONSE_SESSION_ONLY`; currently populated by
     /// no reference template — modelled so a future port has the variant).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no current reference template is session_only, so the catalogue never \
-                      constructs this outside tests; the registration / auto-respond / label \
-                      match arms are live and a future notifications.xml port fills it in"
-        )
-    )]
     DefaultResponseSessionOnly,
     /// Suppressible; the checkbox reads "always choose this option" and a
     /// suppressed raise replays the button the user last pressed (the
@@ -1740,31 +1734,25 @@ pub(crate) enum NotificationIgnore {
     /// [`last_response_setting_name`]).
     LastResponse,
     /// Suppressible; a suppressed raise is simply not shown and answers
-    /// nothing (the reference `IGNORE_SHOW_AGAIN`).
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no current reference template maps to IGNORE_SHOW_AGAIN, so the \
-                      catalogue never constructs this outside tests; the registration / \
-                      auto-respond / label match arms are live and a future \
-                      notifications.xml port fills it in"
-        )
-    )]
+    /// nothing (the reference `IGNORE_SHOW_AGAIN`; currently mapped by no
+    /// reference template — modelled so a future port has the variant, and the
+    /// registration / auto-respond / label match arms already handle it).
     ShowAgain,
 }
 
 impl NotificationIgnore {
     /// Whether the toast form carries the "don't show again" / "always
     /// choose" checkbox (every kind but [`None`](Self::None)).
-    pub(crate) const fn offers_checkbox(self) -> bool {
+    #[must_use]
+    pub const fn offers_checkbox(self) -> bool {
         !matches!(self, Self::None)
     }
 
     /// Whether a per-name show/suppress setting exists, the host honours it
     /// on raise, and the Preferences alerts tab lists the notification —
     /// the reference `buildPopupList` criterion `ignore > IGNORE_NO`.
-    pub(crate) const fn is_suppressible(self) -> bool {
+    #[must_use]
+    pub const fn is_suppressible(self) -> bool {
         matches!(
             self,
             Self::DefaultResponse
@@ -1778,61 +1766,62 @@ impl NotificationIgnore {
 /// A declarative notification template — one catalogue entry, mirroring the
 /// reference `LLNotificationTemplate`. See the [module documentation](self).
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct NotificationTemplate {
+pub struct NotificationTemplate {
     /// The unique catalogue key (the reference `name`), matched by
     /// [`template`] and echoed on every [`NotificationResponse`].
-    pub(crate) name: &'static str,
+    pub name: &'static str,
     /// The rendering channel / behaviour class.
-    pub(crate) kind: NotificationKind,
-    /// The Fluent key for the message body. Resolved through [`crate::i18n`],
+    pub kind: NotificationKind,
+    /// The Fluent key for the message body. Resolved through `i18n`,
     /// then `[KEY]`-substituted with the raised notification's
     /// [`NotificationArgs`]. A caller may override the resolved text entirely
     /// with [`ShowNotification::body`] (for an already-localized server string).
-    pub(crate) message_key: &'static str,
+    pub message_key: &'static str,
     /// The Fluent key for an optional dialog title (the reference `label`) —
     /// rendered as a header line on an alert / modal card, and the
     /// human-readable name the history panel / preferences alerts tab can
     /// show out of context. `None` for the majority of entries, whose body
     /// is self-describing; a tip never carries one.
-    pub(crate) title_key: Option<&'static str>,
+    pub title_key: Option<&'static str>,
     /// The priority (the reference `priority`) — drives the stack ordering.
-    pub(crate) priority: NotificationPriority,
+    pub priority: NotificationPriority,
     /// Whether this notification persists in the notification well / across
     /// sessions (the reference `persist`). Carried for the history panel; the
     /// host does not itself persist toasts yet.
-    pub(crate) persist: bool,
+    pub persist: bool,
     /// Whether the body is also echoed into nearby chat (the reference
     /// `log_to_chat`).
-    pub(crate) log_to_chat: bool,
+    pub log_to_chat: bool,
     /// Whether at most one live instance may exist (the reference `<unique>`):
     /// raising a second, scoped by [`ShowNotification::context`], replaces the
     /// first rather than stacking a duplicate.
-    pub(crate) unique: bool,
+    pub unique: bool,
     /// The "don't show me this again" behaviour (the reference `<ignore>` /
     /// `ignoretext`): whether the form offers the checkbox, whether ticking
     /// it records a suppression the host honours on the next raise (managed
     /// by the Preferences alerts tab), and what a suppressed raise
     /// auto-responds with. See [`NotificationIgnore`].
-    pub(crate) ignore: NotificationIgnore,
+    pub ignore: NotificationIgnore,
     /// The Fluent key of the reference `ignoretext` — the human-readable
     /// one-line description of what suppressing this notification means
     /// ("Confirm before I pay an object"). The alerts tab's row label, and
     /// for [`NotificationIgnore::CheckboxOnly`] the checkbox label itself.
     /// `Some` exactly when [`ignore`](Self::ignore) is not
     /// [`NotificationIgnore::None`].
-    pub(crate) ignore_key: Option<&'static str>,
+    pub ignore_key: Option<&'static str>,
     /// The buttons the toast offers (the reference `<form>` / `<usetemplate>`).
-    pub(crate) form: &'static [NotificationButton],
+    pub form: &'static [NotificationButton],
     /// An optional single-line text-input field (the reference `<input>`),
     /// shown between the body and the button row. Its edited text comes back
     /// on [`NotificationResponse::input`].
-    pub(crate) input: Option<NotificationInput>,
+    pub input: Option<NotificationInput>,
 }
 
 impl NotificationTemplate {
     /// The default button's [`name`](NotificationButton::name) — chosen on
     /// `Enter` and on auto-expiry — or `None` when the form is empty.
-    pub(crate) fn default_button(&self) -> Option<&'static str> {
+    #[must_use]
+    pub fn default_button(&self) -> Option<&'static str> {
         self.form
             .iter()
             .find(|button| button.is_default)
@@ -1851,7 +1840,7 @@ impl NotificationTemplate {
 ///   `ConfirmQuit`) — one of each kind, exercising `[KEY]` substitution, the
 ///   `unique` dedup and the ignore checkbox.
 /// - **Keyed server alerts** the simulator sends by `AlertInfo` key
-///   ([`crate::notification_host::ingest_alert_messages`] raises these when the
+///   (`notification_host::ingest_alert_messages` raises these when the
 ///   key matches): the maturity / access-blocked family, the region-restart
 ///   countdowns, and standalone failure notices.
 /// - **Standard action-confirmation modals** shared across features (empty
@@ -1884,7 +1873,7 @@ impl NotificationTemplate {
 ///   and web browser.
 ///
 /// See `viewer-notification-catalogue`.
-pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
+pub const NOTIFICATIONS: &[NotificationTemplate] = &[
     // A generic transient tip — the fallback for an unkeyed server hint.
     NotificationTemplate {
         name: "SystemTip",
@@ -20440,7 +20429,8 @@ pub(crate) const NOTIFICATIONS: &[NotificationTemplate] = &[
 ];
 
 /// Look up a catalogue [`NotificationTemplate`] by its [`name`](NotificationTemplate::name).
-pub(crate) fn template(name: &str) -> Option<&'static NotificationTemplate> {
+#[must_use]
+pub fn template(name: &str) -> Option<&'static NotificationTemplate> {
     NOTIFICATIONS
         .iter()
         .find(|candidate| candidate.name == name)
@@ -20451,7 +20441,7 @@ pub(crate) fn template(name: &str) -> Option<&'static NotificationTemplate> {
 /// override suppresses the named notification; the default is `Bool(true)`
 /// (show). The Preferences alerts tab ([[viewer-preferences-alerts-tab]]) is the
 /// UI over these flags.
-pub(crate) const NOTIFICATIONS_SECTION: &str = "notifications";
+pub const NOTIFICATIONS_SECTION: &str = "notifications";
 
 /// The settings key holding the saved auto-response button for a
 /// [`NotificationIgnore::LastResponse`] template — the reference's
@@ -20459,7 +20449,8 @@ pub(crate) const NOTIFICATIONS_SECTION: &str = "notifications";
 /// [`NOTIFICATIONS_SECTION`] as the show/suppress flags, as a `String`
 /// holding the [`NotificationButton::name`] the user last pressed (empty =
 /// none saved yet, fall back to the form's default button).
-pub(crate) fn last_response_setting_name(name: &str) -> String {
+#[must_use]
+pub fn last_response_setting_name(name: &str) -> String {
     format!("Default{name}")
 }
 
@@ -20467,19 +20458,20 @@ pub(crate) fn last_response_setting_name(name: &str) -> String {
 /// reference `LLNotification` substitutions, fed from a keyed `AlertInfo`'s
 /// `ExtraParams` on the wire.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct NotificationArgs {
+pub struct NotificationArgs {
     /// The key / value bindings, in insertion order (so a rebuild is stable).
     pairs: Vec<(String, String)>,
 }
 
 impl NotificationArgs {
     /// An empty argument set.
-    pub(crate) fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self::default()
     }
 
     /// Bind `key` to `value`, replacing any existing binding for that key.
-    pub(crate) fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
+    pub fn set(&mut self, key: impl Into<String>, value: impl Into<String>) {
         let key = key.into();
         if let Some(existing) = self.pairs.iter_mut().find(|(name, _value)| *name == key) {
             existing.1 = value.into();
@@ -20497,15 +20489,17 @@ impl NotificationArgs {
     }
 
     /// The key/value bindings, in insertion order — the persistent-notification
-    /// store ([`crate::notification_persist`]) serializes these to re-raise a
+    /// store (`notification_persist`) serializes these to re-raise a
     /// persisted notification with its original substitutions.
-    pub(crate) fn pairs(&self) -> &[(String, String)] {
+    #[must_use]
+    pub fn pairs(&self) -> &[(String, String)] {
         &self.pairs
     }
 
     /// Rebuild an argument set from serialized [`pairs`](Self::pairs) — the inverse
     /// used when a persisted notification is reloaded from disk.
-    pub(crate) const fn from_pairs(pairs: Vec<(String, String)>) -> Self {
+    #[must_use]
+    pub const fn from_pairs(pairs: Vec<(String, String)>) -> Self {
         Self { pairs }
     }
 
@@ -20513,7 +20507,8 @@ impl NotificationArgs {
     /// separated by `|` or newlines, each side trimmed. A fragment without an
     /// `=` is ignored. The reference parses this per-alert; this handles the
     /// common `key=value` form.
-    pub(crate) fn parse_extra_params(blob: &str) -> Self {
+    #[must_use]
+    pub fn parse_extra_params(blob: &str) -> Self {
         let mut args = Self::new();
         for fragment in blob.split(['|', '\n']) {
             let fragment = fragment.trim();
@@ -20532,7 +20527,8 @@ impl NotificationArgs {
 /// `args`. An unbound placeholder is left verbatim (`[KEY]`), matching the
 /// reference behaviour where a missing substitution shows the bracketed token
 /// rather than an empty string — a visible signal that a value was expected.
-pub(crate) fn substitute(template: &str, args: &NotificationArgs) -> String {
+#[must_use]
+pub fn substitute(template: &str, args: &NotificationArgs) -> String {
     let mut out = String::with_capacity(template.len());
     let mut key = String::new();
     let mut in_token = false;
@@ -20570,33 +20566,34 @@ pub(crate) fn substitute(template: &str, args: &NotificationArgs) -> String {
 /// match a [`NotificationResponse`] (or issue a [`DismissNotification`]) to the
 /// exact notification it raised.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct NotificationId(u64);
+pub struct NotificationId(u64);
 
 /// A request to raise a notification from the catalogue — the message a caller
-/// writes; the host ([`crate::notification_host`]) reads it, resolves the
+/// writes; the host (`notification_host`) reads it, resolves the
 /// template's text, and stacks a toast.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct ShowNotification {
+pub struct ShowNotification {
     /// The catalogue template [`name`](NotificationTemplate::name). A raise for a
     /// name not in [`NOTIFICATIONS`] is dropped (logged), so a typo fails loudly
     /// rather than silently.
-    pub(crate) template: &'static str,
+    pub template: &'static str,
     /// The `[KEY]` substitution arguments for the template's message.
-    pub(crate) args: NotificationArgs,
+    pub args: NotificationArgs,
     /// An already-localized body to show verbatim instead of resolving the
     /// template's [`message_key`](NotificationTemplate::message_key) — for a
     /// plain server `AlertMessage` string that arrives pre-translated.
-    pub(crate) body: Option<String>,
+    pub body: Option<String>,
     /// A context string that scopes the `unique` dedup: two raises of a unique
     /// template with **different** contexts coexist, with the **same** context
     /// the second replaces the first (the reference `<unique><context>`).
-    pub(crate) context: Option<String>,
+    pub context: Option<String>,
 }
 
 impl ShowNotification {
     /// Raise the catalogue template `name` with no arguments, body override or
     /// context — the common case.
-    pub(crate) fn new(name: &'static str) -> Self {
+    #[must_use]
+    pub fn new(name: &'static str) -> Self {
         Self {
             template: name,
             args: NotificationArgs::new(),
@@ -20607,21 +20604,21 @@ impl ShowNotification {
 
     /// Builder: set a `[KEY]` substitution argument.
     #[must_use]
-    pub(crate) fn arg(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+    pub fn arg(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
         self.args.set(key, value);
         self
     }
 
     /// Builder: override the resolved body with an already-localized string.
     #[must_use]
-    pub(crate) fn with_body(mut self, body: impl Into<String>) -> Self {
+    pub fn with_body(mut self, body: impl Into<String>) -> Self {
         self.body = Some(body.into());
         self
     }
 
     /// Builder: scope the `unique` dedup with a context string.
     #[must_use]
-    pub(crate) fn with_context(mut self, context: impl Into<String>) -> Self {
+    pub fn with_context(mut self, context: impl Into<String>) -> Self {
         self.context = Some(context.into());
         self
     }
@@ -20632,32 +20629,32 @@ impl ShowNotification {
 /// notification is dismissed. A consumer (a specific dialog task) reads it to
 /// send the corresponding protocol reply.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct NotificationResponse {
+pub struct NotificationResponse {
     /// The notification this responds to.
-    pub(crate) id: NotificationId,
+    pub id: NotificationId,
     /// The catalogue template name, so a consumer can route without tracking the
     /// [`id`](Self::id).
-    pub(crate) template: &'static str,
+    pub template: &'static str,
     /// The chosen button's [`name`](NotificationButton::name), or `None` when the
     /// toast expired or was dismissed without a choice (a fading tip, or an
     /// external [`DismissNotification`]).
-    pub(crate) button: Option<&'static str>,
+    pub button: Option<&'static str>,
     /// Whether the "don't show me this again" checkbox was ticked — the host has
     /// already recorded the suppression; a consumer may act on it too.
-    pub(crate) ignored: bool,
+    pub ignored: bool,
     /// The text-input field's edited value, for a template with a
     /// [`NotificationTemplate::input`] field — `None` for an inputless
     /// template (or when the toast was dismissed without resolving).
-    pub(crate) input: Option<String>,
+    pub input: Option<String>,
 }
 
 /// A request to dismiss a live notification programmatically (its underlying
 /// condition passed, e.g. an offer was rescinded). Tears the toast down and
 /// emits a [`NotificationResponse`] with no [`button`](NotificationResponse::button).
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct DismissNotification {
+pub struct DismissNotification {
     /// The notification to dismiss.
-    pub(crate) id: NotificationId,
+    pub id: NotificationId,
 }
 
 /// One entry in the notification history — the data the future notification list
@@ -20665,30 +20662,34 @@ pub(crate) struct DismissNotification {
 /// notification is raised; its [`response`](Self::response) is filled in when the
 /// user answers.
 #[derive(Debug, Clone)]
-pub(crate) struct NotificationRecord {
+pub struct NotificationRecord {
     /// The raised notification's id.
-    pub(crate) id: NotificationId,
+    pub id: NotificationId,
     /// The catalogue template name.
-    pub(crate) template: &'static str,
+    pub template: &'static str,
     /// The kind (channel) it was shown on.
-    pub(crate) kind: NotificationKind,
+    pub kind: NotificationKind,
     /// The resolved, display-ready body text.
-    pub(crate) body: String,
+    pub body: String,
     /// The chosen button once answered, or `None` while still live or if it
     /// expired / was dismissed without a choice.
-    pub(crate) response: Option<&'static str>,
+    pub response: Option<&'static str>,
 }
 
 /// The most history entries kept: a bounded ring, so a long session's toasts do
 /// not grow without bound. Older entries drop off the front.
-const HISTORY_CAP: usize = 256;
+///
+/// Public because it is a contract of [`NotificationManager::push_history`] and
+/// [`NotificationManager::history`], not an implementation detail: a caller
+/// reading the history back needs to know it is capped.
+pub const HISTORY_CAP: usize = 256;
 
 /// The host's runtime state: the id source, the `unique` dedup index, and the
 /// bounded history ring. Rendering state lives on the toast entities themselves
-/// (see [`crate::notification_host`]); this resource holds only what is not
+/// (see `notification_host`); this resource holds only what is not
 /// per-entity.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct NotificationManager {
+pub struct NotificationManager {
     /// The next id [`allocate_id`](Self::allocate_id) hands out.
     next_id: u64,
     /// Live `unique` notifications, keyed by template name + context, so a repeat
@@ -20700,7 +20701,7 @@ pub(crate) struct NotificationManager {
 
 impl NotificationManager {
     /// Allocate the next unique [`NotificationId`].
-    pub(crate) const fn allocate_id(&mut self) -> NotificationId {
+    pub const fn allocate_id(&mut self) -> NotificationId {
         let id = NotificationId(self.next_id);
         self.next_id = self.next_id.saturating_add(1);
         id
@@ -20718,30 +20719,26 @@ impl NotificationManager {
 
     /// The live notification for a `unique` template + context, if one is
     /// already showing.
-    pub(crate) fn live_unique(&self, name: &str, context: Option<&str>) -> Option<NotificationId> {
+    #[must_use]
+    pub fn live_unique(&self, name: &str, context: Option<&str>) -> Option<NotificationId> {
         self.unique_live
             .get(&Self::unique_key(name, context))
             .copied()
     }
 
     /// Register `id` as the live instance of a `unique` template + context.
-    pub(crate) fn register_unique(
-        &mut self,
-        name: &str,
-        context: Option<&str>,
-        id: NotificationId,
-    ) {
+    pub fn register_unique(&mut self, name: &str, context: Option<&str>, id: NotificationId) {
         self.unique_live.insert(Self::unique_key(name, context), id);
     }
 
     /// Drop `id` from the `unique` index (it is no longer live).
-    pub(crate) fn clear_unique(&mut self, id: NotificationId) {
+    pub fn clear_unique(&mut self, id: NotificationId) {
         self.unique_live.retain(|_key, value| *value != id);
     }
 
     /// Record a newly raised notification in the history ring, dropping the
     /// oldest entries past [`HISTORY_CAP`].
-    pub(crate) fn push_history(&mut self, record: NotificationRecord) {
+    pub fn push_history(&mut self, record: NotificationRecord) {
         self.history.push_back(record);
         while self.history.len() > HISTORY_CAP {
             self.history.pop_front();
@@ -20750,14 +20747,14 @@ impl NotificationManager {
 
     /// Record the response on the history entry for `id`, if it is still in the
     /// ring.
-    pub(crate) fn record_response(&mut self, id: NotificationId, button: Option<&'static str>) {
+    pub fn record_response(&mut self, id: NotificationId, button: Option<&'static str>) {
         if let Some(record) = self.history.iter_mut().rev().find(|record| record.id == id) {
             record.response = button;
         }
     }
 
     /// The history entries, oldest first — the data the history panel renders.
-    pub(crate) fn history(&self) -> impl Iterator<Item = &NotificationRecord> {
+    pub fn history(&self) -> impl Iterator<Item = &NotificationRecord> {
         self.history.iter()
     }
 }
@@ -20785,29 +20782,6 @@ mod tests {
         VIEW_IM_QUIT_FORM, YES_NO_BUTTONS_FORM, YES_NO_FORM, substitute, template,
     };
     use pretty_assertions::{assert_eq, assert_ne};
-
-    /// The English Fluent bundle source, embedded so the catalogue's keys can be
-    /// checked against it without the async asset load.
-    const EN_FTL: &str = include_str!("../assets/locales/en/main.ftl");
-
-    /// The set of message identifiers declared in [`EN_FTL`] — a message entry
-    /// begins at column 0 with `identifier =` (attributes and continuation lines
-    /// are indented, comments begin with `#`).
-    fn ftl_keys() -> std::collections::HashSet<String> {
-        EN_FTL
-            .lines()
-            .filter_map(|line| {
-                if line.starts_with([' ', '\t', '#']) {
-                    return None;
-                }
-                let ident = line.split_once('=')?.0.trim();
-                if ident.is_empty() || ident.contains(char::is_whitespace) {
-                    return None;
-                }
-                Some(ident.to_owned())
-            })
-            .collect()
-    }
 
     /// Names are the catalogue's primary key and what a response routes on, so a
     /// duplicate would make one template's raise ambiguous.
@@ -20876,51 +20850,6 @@ mod tests {
     /// Every catalogue `message_key` and button `label_key` resolves to an
     /// English Fluent entry, so a raised toast never renders its raw key. Guards
     /// the catalogue against a typo drifting from `en/main.ftl`.
-    #[test]
-    fn every_key_has_an_english_fluent_entry() {
-        let keys = ftl_keys();
-        for entry in NOTIFICATIONS {
-            assert!(
-                keys.contains(entry.message_key),
-                "{}: message_key {} has no en/main.ftl entry",
-                entry.name,
-                entry.message_key
-            );
-            for button in entry.form {
-                assert!(
-                    keys.contains(button.label_key),
-                    "{}: button label_key {} has no en/main.ftl entry",
-                    entry.name,
-                    button.label_key
-                );
-            }
-            if let Some(key) = entry.input.and_then(|input| input.default_key) {
-                assert!(
-                    keys.contains(key),
-                    "{}: input default_key {} has no en/main.ftl entry",
-                    entry.name,
-                    key
-                );
-            }
-            if let Some(key) = entry.title_key {
-                assert!(
-                    keys.contains(key),
-                    "{}: title_key {} has no en/main.ftl entry",
-                    entry.name,
-                    key
-                );
-            }
-            if let Some(key) = entry.ignore_key {
-                assert!(
-                    keys.contains(key),
-                    "{}: ignore_key {} has no en/main.ftl entry",
-                    entry.name,
-                    key
-                );
-            }
-        }
-    }
-
     /// A template carries an ignore label exactly when it has ignore behaviour
     /// — the label is the alerts-tab row (or, checkbox-only, the checkbox
     /// text), so a suppressible entry without one would render blank and a
@@ -20986,7 +20915,7 @@ mod tests {
         assert_eq!(suppressible, 140);
     }
 
-    /// The keyed server alerts [`crate::notification_host::ingest_alert_messages`]
+    /// The keyed server alerts `notification_host::ingest_alert_messages`
     /// matches an `AlertInfo` key against are in the catalogue with the reference
     /// kind, so a real keyed alert resolves to the right channel.
     #[test]

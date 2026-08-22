@@ -68,13 +68,9 @@ profile-chrome = ["bevy/trace", "bevy/trace_chrome", "dep:tracing-chrome"]
 # running under a Wayland compositor without a focused-window handle).
 # Default features off: the default `image-data` support would pull the AVIF
 # encoder stack (rav1e & co.) for image clipboards we do not use — text only.
-arboard = { version = "3.6.1", default-features = false, features = [
-  "wayland-data-control",
-] }
 # Lock-free published snapshot for the custom static raycast index
 # (viewer-perf-custom-static-raycast-index): the query thread reads the current
 # BVH snapshot without blocking the background rebuild.
-arc-swap = { workspace = true }
 # `system_font_discovery` turns on parley/fontique OS font enumeration and
 # fallback, so CJK / Cyrillic / Arabic / emoji text resolves to the host's fonts
 # instead of rendering as tofu (viewer-ui-text-foundation). The colour-emoji
@@ -84,11 +80,6 @@ arc-swap = { workspace = true }
 # feature; it is required for async pipeline compilation
 # (viewer-perf-pipeline-specialization-stalls), so declare it explicitly now that
 # avian is gone.
-bevy = { version = "0.19.0", features = [
-  "multi_threaded",
-  "system_font_discovery",
-  "track_location",
-] }
 # The UI skin / design-token system (viewer-ui-skin-tokens): real CSS
 # (selectors, pseudo-classes, `var()` custom-property tokens, `@import` overlay
 # merge, hot-reloaded `.css`) as the skin language. `src/skin.rs` registers the
@@ -96,7 +87,6 @@ bevy = { version = "0.19.0", features = [
 # `margin-inline-start` etc. (never physical `left`/`right`, which it bans) and
 # the shipped bidi resolver still mirrors the layout. Pinned to `bevy_flair`'s
 # own `bevy 0.19` line so the two unify on one Bevy build.
-bevy_flair = { version = "0.8.0" }
 # The i18n foundation (viewer-i18n-fluent-scaffold): Project Fluent `.ftl`
 # bundles behind Bevy assets, with runtime locale switching. `bevy_fluent`
 # provides the asset loaders, the `Locale` negotiation input and the
@@ -104,96 +94,116 @@ bevy_flair = { version = "0.8.0" }
 # types the lookup API (`src/i18n.rs`) builds typed named arguments with and
 # formats through (never a pre-formatted string); `unic-langid` is the language
 # tag those resources are keyed by.
-bevy_fluent = { version = "0.15.0" }
 # Plain-old-data derives for the GPU particle instance record (`src/particle_render.rs`):
 # `ParticleInstance` is uploaded verbatim as instance-rate vertex data, so it must be
 # `Pod` for `RawBufferVec`.
-bytemuck = { version = "1.25.1", features = ["derive"] }
-bytes = { workspace = true }
-clap = { workspace = true, features = ["cargo", "derive", "env"] }
 # Sync-capable channels between the ECS and the world-map tile worker thread
 # (std mpsc receivers are not `Sync`, so they cannot sit in a resource).
-crossbeam-channel = { workspace = true }
-directories = { version = "6.0.0" }
 # The SpaceNavigator / 6-DOF device read (the `spacenav` feature, Linux-only for
 # now — see the `viewer-input-spacenav-crossplatform` roadmap task).
-evdev = { version = "0.13.2", optional = true }
-fluent = { version = "0.16.1" }
-fluent_content = { version = "0.0.5" }
-fs-err = { workspace = true }
 # `tga` for the sculpt/decode paths; `png` / `jpeg` / `bmp` so the snapshot
 # floater (`src/snapshot_floater.rs`) can encode a saved snapshot in the format
 # the user picks. The formats unify with the set `bevy_image` already turns on,
 # so naming them here only makes the snapshot encoder's requirement explicit.
-image = { version = "0.25.10", default-features = false, features = [
-  "bmp",
-  "jpeg",
-  "png",
-  "tga",
-] }
 # Local (system-timezone) time, for the snapshot floater's human-readable
 # ISO-8601 filenames. Resolving the system zone reads the `TZ` env var, so the
 # zone is captured **once at startup** (before Bevy spawns its task-pool threads)
 # and reused — see `snapshot_floater::LocalTimeZone`.
-jiff = { version = "0.2.35" }
 # A direct dependency purely so the UI font stack (`src/ui_font.rs`) can register
 # the bundled faces under private family names: `bevy_text` wraps parley but does
 # not re-export it, so `Blob` / `FontInfoOverride` / `GenericFamily` are only
 # reachable from parley itself. Kept at `bevy_text`'s own spec so the two unify
 # on one parley build (a second copy would mean a second, unrelated font
 # collection).
-parley = { version = "0.9.0", default-features = false, features = ["std"] }
 # parry3d is the collision-geometry / query backend for the custom raycast index
 # (viewer-perf-custom-static-raycast-index): `Bvh`, `SharedShape`, ray + contact
 # queries. The viewer simulates no physics, so it uses parry directly instead of a
 # whole physics engine — this replaced the avian3d dependency entirely.
-parry3d = "0.27.0"
 # The URL-linkification matcher (viewer-url-linkification) scans chat / notice /
 # profile text for `http(s)` URLs, SLURLs and `secondlife:///app/...` links,
 # faithfully mirroring the reference `llurlregistry` / `llurlentry` regex set.
 # The reference's Perl patterns for the subset we recognise use no lookahead or
 # backreferences, so the linear-time `regex` crate matches them exactly.
-regex = { version = "1.13.1" }
 # The blocking HTTP client for the login-time OpenID token POST
 # (`viewer-web-openid-auth`): a one-shot POST on a worker thread whose
 # `Set-Cookie` primes the embedded browser's shared cookie store. `rustls-tls`
 # matches the rest of the workspace (no system OpenSSL).
-reqwest = { workspace = true, features = [
-  "blocking",
-  "rustls-tls",
-] }
 # The persistent-notification store (viewer-notification-persistence) serializes
 # the open (unacknowledged) toasts to a per-account JSON file, so they re-display
 # on next login exactly as the reference `LLPersistentNotificationStorage` does.
-serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true }
-sl-account-dirs = { workspace = true }
-sl-anim = { workspace = true }
-sl-audio = { path = "../sl-audio", version = "0.1.0" }
 # For `sl_avatar::fixtures`, the shared miniature skeleton / base-body the
 # render harness decodes. Already in the graph via `sl-client-bevy`, so naming
 # it directly costs no extra compilation.
-sl-avatar = { workspace = true }
-sl-cef = { path = "../sl-cef", version = "0.1.0" }
-sl-client-bevy = { workspace = true, features = [
-  "bevy_pbr",
-] }
 # The emoji dataset & lookup layer (viewer-emoji-data): the grouped, searchable
 # glyph list the emoji-picker floater (`src/emoji_picker.rs`) presents.
-sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
-sl-gst = { path = "../sl-gst", version = "0.1.0" }
 # Locale-aware value formatting (viewer-i18n-number-datetime-formats): the CLDR/
 # ICU-backed number, currency and date/time formatters the `Translator` exposes,
 # so a panel writes a grouped balance / coordinate / timestamp for the active
 # locale rather than a bare `to_string()`. The text side is `bevy_fluent`; this
 # is the value side Fluent's `NUMBER()` / `DATETIME()` cannot do.
-sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 # World-map tile fetch / disk cache (`MapTileCache`), shared with the
 # sl-map-tools CLI / web tools so the viewer does not grow a third fetcher.
-sl-map-apis = { version = "0.8.0" }
 # The engine-agnostic media boundary (its `AudioSink` trait), so the viewer can
 # bridge GStreamer / CEF PCM into the shared `sl-audio` mixer (the gst / cef
 # audio-mixer hand-off tasks).
+# Shared SL tool types (`MapTileDescriptor` / `ZoomLevel` / `GridCoordinates`)
+# so the world-map floater speaks the same tile geometry as `sl-map-apis`.
+# Drives the async `sl-map-apis` tile cache on the world-map tile service's
+# dedicated worker thread (a small current-thread runtime, not an app-wide one).
+# Profiling layers wired into our own subscriber (`init_tracing`), behind the
+# `profile-*` features. Pinned to the same versions Bevy's `bevy_log` uses so the
+# transitive `tracy-client` unifies on one build — Tracy captures only work when
+# our `TracyLayer` and Bevy's memory allocator / frame marks share a client.
+# The raw wgpu value types Bevy does not re-export (the GPU pick pass's
+# sequence-carrying clear color) — the same pin `sl-client-bevy` uses.
+arboard = { version = "3.6.1", default-features = false, features = [
+  "wayland-data-control",
+] }
+arc-swap = { workspace = true }
+bevy = { version = "0.19.0", features = [
+  "multi_threaded",
+  "system_font_discovery",
+  "track_location",
+] }
+bevy_flair = { version = "0.8.0" }
+bevy_fluent = { version = "0.15.0" }
+bytemuck = { version = "1.25.1", features = ["derive"] }
+bytes = { workspace = true }
+clap = { workspace = true, features = ["cargo", "derive", "env"] }
+crossbeam-channel = { workspace = true }
+directories = { version = "6.0.0" }
+evdev = { version = "0.13.2", optional = true }
+fluent = { version = "0.16.1" }
+fluent_content = { version = "0.0.5" }
+fs-err = { workspace = true }
+image = { version = "0.25.10", default-features = false, features = [
+  "bmp",
+  "jpeg",
+  "png",
+  "tga",
+] }
+jiff = { version = "0.2.35" }
+parley = { version = "0.9.0", default-features = false, features = ["std"] }
+parry3d = "0.27.0"
+regex = { version = "1.13.1" }
+reqwest = { workspace = true, features = [
+  "blocking",
+  "rustls-tls",
+] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sl-account-dirs = { workspace = true }
+sl-anim = { workspace = true }
+sl-audio = { path = "../sl-audio", version = "0.1.0" }
+sl-avatar = { workspace = true }
+sl-cef = { path = "../sl-cef", version = "0.1.0" }
+sl-client-bevy = { workspace = true, features = [
+  "bevy_pbr",
+] }
+sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
+sl-gst = { path = "../sl-gst", version = "0.1.0" }
+sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
+sl-map-apis = { version = "0.8.0" }
 sl-media = { workspace = true }
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-repl = { workspace = true }
@@ -202,25 +212,16 @@ sl-terrain = { path = "../sl-terrain", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
   "encode",
 ] }
-# Shared SL tool types (`MapTileDescriptor` / `ZoomLevel` / `GridCoordinates`)
-# so the world-map floater speaks the same tile geometry as `sl-map-apis`.
 sl-types = { workspace = true }
+sl-viewer-notifications = { workspace = true }
 thiserror = { workspace = true }
-# Drives the async `sl-map-apis` tile cache on the world-map tile service's
-# dedicated worker thread (a small current-thread runtime, not an app-wide one).
 tokio = { workspace = true, features = ["net", "rt", "time"] }
 tracing = { workspace = true }
-# Profiling layers wired into our own subscriber (`init_tracing`), behind the
-# `profile-*` features. Pinned to the same versions Bevy's `bevy_log` uses so the
-# transitive `tracy-client` unifies on one build — Tracy captures only work when
-# our `TracyLayer` and Bevy's memory allocator / frame marks share a client.
 tracing-chrome = { version = "0.7.0", optional = true }
 tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }
 tracing-tracy = { version = "0.11.4", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { workspace = true }
-# The raw wgpu value types Bevy does not re-export (the GPU pick pass's
-# sequence-carrying clear color) — the same pin `sl-client-bevy` uses.
 wgpu-types = { workspace = true }
 
 [build-dependencies]
