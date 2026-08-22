@@ -1353,14 +1353,14 @@ mod tests {
 
     /// The committed minimal skeleton fixture (four bones: `mPelvis` → `mTorso`
     /// → `mChest`, plus `mHipRight`), reused from `sl-avatar`'s test assets.
-    const MINI_SKELETON: &str = include_str!("../../sl-avatar/tests/fixtures/mini_skeleton.xml");
+    const MINI_SKELETON: &str = sl_avatar::fixtures::MINI_SKELETON;
     /// The committed minimal base-mesh fixture (four vertices, two faces, joints
     /// `mPelvis` / `mTorso`), reused from `sl-avatar`'s test assets.
-    const MINI_BASEMESH: &[u8] = include_bytes!("../../sl-avatar/tests/fixtures/mini_basemesh.llm");
+    const MINI_BASEMESH: &[u8] = sl_avatar::fixtures::MINI_BASEMESH;
     /// The committed minimal `avatar_lad.xml` fixture, whose `<skeleton>` carries a
     /// `Chest` attachment point (joint `mChest`, present), a `Skull` point (joint
     /// `mHead`, absent from the mini skeleton), and a `Center` HUD point.
-    const MINI_LAD: &str = include_str!("../../sl-avatar/tests/fixtures/mini_lad.xml");
+    const MINI_LAD: &str = sl_avatar::fixtures::MINI_LAD;
 
     /// A skeleton with a single 90° yaw (about Z) bone, to check the Euler
     /// conversion in isolation.

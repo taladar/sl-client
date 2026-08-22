@@ -38,6 +38,7 @@
 
 pub mod bakecolor;
 pub mod basemesh;
+pub mod fixtures;
 pub mod masks;
 pub mod morph;
 pub mod params;

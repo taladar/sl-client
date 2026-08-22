@@ -148,11 +148,14 @@ const VIEWER_ASSETS_ENV: &str = "SL_VIEWER_ASSETS";
 /// synthesized ([`BaseMesh`]'s fields are private, so `from_bytes` is the sole
 /// constructor).
 ///
-/// Taken by path from the sibling crate rather than copied here. A copy would be
-/// a second 641-byte binary in review that silently rots when the real one
+/// Named from the sibling crate rather than copied here. A copy would be a
+/// second 641-byte binary in review that silently rots when the real one
 /// changes; this way `sl-avatar` moving or reshaping its fixture breaks *this*
-/// build loudly, which is the correct direction for that failure.
-const MINI_BASEMESH: &[u8] = include_bytes!("../../sl-avatar/tests/fixtures/mini_basemesh.llm");
+/// build loudly, which is the correct direction for that failure. Naming it
+/// rather than reaching for it by relative path also keeps this crate's
+/// `include!` arguments inside this crate, which is what lets the commit hooks
+/// scope its checks to commits that actually touch it.
+const MINI_BASEMESH: &[u8] = sl_avatar::fixtures::MINI_BASEMESH;
 
 /// The mini skeleton the [`MINI_BASEMESH`]'s weights bind against, from the same
 /// fixture set.
@@ -163,7 +166,7 @@ const MINI_BASEMESH: &[u8] = include_bytes!("../../sl-avatar/tests/fixtures/mini
 /// and no `SkinnedMesh` hands the skinned pipeline a model-only bind group, which
 /// is not a wrong picture but a wgpu validation error that kills the process. See
 /// [`avatar_base_part`].
-const MINI_SKELETON: &str = include_str!("../../sl-avatar/tests/fixtures/mini_skeleton.xml");
+const MINI_SKELETON: &str = sl_avatar::fixtures::MINI_SKELETON;
 
 /// What varies across a matrix cell — the render harness's counterpart of
 /// [`ElementCx`](crate::ui_element::ElementCx).

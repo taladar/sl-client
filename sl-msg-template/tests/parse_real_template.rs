@@ -6,13 +6,26 @@ mod test {
     use pretty_assertions::assert_eq;
     use sl_msg_template::{Frequency, parse};
 
-    /// The vendored template that `sl-wire` uses for code generation, embedded
-    /// at compile time so the test needs no filesystem access.
-    const TEMPLATE: &str = include_str!("../../sl-wire/message_template.msg");
+    /// The vendored template that `sl-wire` uses for code generation.
+    ///
+    /// Read at run time rather than embedded with `include_str!`: an
+    /// `include!` argument that leaves this crate's directory makes the whole
+    /// repository relevant to this crate's cached pre-commit checks, so every
+    /// unrelated commit re-runs them. These tests only ever run from the
+    /// workspace, where the sibling file is always present.
+    ///
+    /// # Errors
+    ///
+    /// Returns the I/O error if the vendored template cannot be read.
+    fn template() -> Result<String, Box<dyn std::error::Error>> {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../sl-wire/message_template.msg");
+        Ok(fs_err::read_to_string(path)?)
+    }
 
     #[test]
     fn parses_the_whole_vendored_template() -> Result<(), Box<dyn std::error::Error>> {
-        let template = parse(TEMPLATE)?;
+        let template = parse(&template()?)?;
 
         // The template declares format version 2.0.
         assert_eq!(template.version.as_deref(), Some("2.0"));
@@ -37,7 +50,7 @@ mod test {
 
     #[test]
     fn known_messages_parse_as_expected() -> Result<(), Box<dyn std::error::Error>> {
-        let template = parse(TEMPLATE)?;
+        let template = parse(&template()?)?;
         let find = |name: &str| template.messages.iter().find(|m| m.name == name).cloned();
 
         let use_circuit_code = find("UseCircuitCode").ok_or("UseCircuitCode missing")?;

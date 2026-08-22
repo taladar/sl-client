@@ -8509,6 +8509,7 @@ dependencies = [
  "sl-account-dirs",
  "sl-anim",
  "sl-audio",
+ "sl-avatar",
  "sl-cef",
  "sl-client-bevy",
  "sl-emoji",
@@ -8781,6 +8782,7 @@ dependencies = [
 name = "sl-msg-template"
 version = "0.1.0"
 dependencies = [
+ "fs-err",
  "pretty_assertions",
  "thiserror 2.0.19",
 ]

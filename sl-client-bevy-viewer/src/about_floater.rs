@@ -45,7 +45,12 @@ pub(crate) const ABOUT_FLOATER_ID: &str = "about";
 const THIRD_PARTY_LICENSES: &str = include_str!("../assets/licenses/third-party-licenses.txt");
 
 /// The workspace's own license text (LGPL-2.1-only), the first Licenses entry.
-const PROJECT_LICENSE: &str = include_str!("../../LICENSE");
+///
+/// Read through this crate's `LICENSE`, which is a symlink to the workspace
+/// one — the same bytes, with no second copy to drift, and with the `include!`
+/// argument inside this crate so the commit hooks can scope its checks to
+/// commits that actually touch it.
+const PROJECT_LICENSE: &str = include_str!("../LICENSE");
 
 /// The support-block value shown for session facts that do not exist yet
 /// (before login, or before the grid supplied them).

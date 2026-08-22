@@ -56,7 +56,7 @@ use crate::render_test::TestError;
 /// The four-bone / two-volume test skeleton shared with the `sl-client-bevy`
 /// golden tests (`mPelvis` → `mTorso` (+`BELLY`) → `mChest`, `mHipRight`,
 /// `PELVIS`), whose collision volumes carry authored non-identity rotations.
-const MINI_SKELETON: &str = include_str!("../../../sl-avatar/tests/fixtures/mini_skeleton.xml");
+const MINI_SKELETON: &str = sl_avatar::fixtures::MINI_SKELETON;
 
 /// A visual-param table whose skeletal param scales and offsets `mTorso` —
 /// the parent-local-scale-scales-child-offset branch (`mChest`'s offset rides

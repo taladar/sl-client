@@ -206,6 +206,36 @@ The debuginfo settings do help the cache indirectly: artifacts around a third of
 their former size mean the same store holds correspondingly more entries before
 eviction starts.
 
+## Keep `include!` arguments inside the crate
+
+The commit hooks cache each worktree-level check against the set of files that
+could affect it, and they work that set out per crate by scanning the crate's
+sources for `include!` / `include_str!` / `include_bytes!`. A crate whose
+include argument resolves **outside its own directory** — or is not a plain
+string literal — is classified conservatively, and its relevant-file set
+becomes *the entire repository*. Every commit anywhere then re-runs that
+crate's cached checks.
+
+That is expensive for exactly the crates it is worst for. The viewer's check
+set includes `cargo hack check --feature-powerset`: with four optional features
+that is sixteen full checks of a 283k-line crate, and it used to run on commits
+that touched only, say, `sl-proto`.
+
+So: **do not reach across a crate boundary with an include macro.** Where one
+crate needs another's bytes, the owning crate exposes them as a `pub const`
+whose own include stays local — as `sl-avatar`'s `fixtures` module does for
+the miniature skeleton and base body that `sl-client-bevy` and the viewer's
+render harness both decode. That also keeps exactly one copy of the data, so a
+fixture reshaping breaks its consumers at compile time instead of drifting.
+Where the data has no natural owner to export it, read it at run time in the
+test rather than embedding it.
+
+`sl-wire` is the one crate that cannot comply: its generated message code
+arrives as `include!(concat!(env!("OUT_DIR"), "/messages.rs"))`, and there is
+no string-literal form of `OUT_DIR`. Every build-script codegen crate has this
+shape, so the fix would have to be in the hooks recognising the idiom, not
+here.
+
 ## Measuring a change
 
 ```console

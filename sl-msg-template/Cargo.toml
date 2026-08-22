@@ -19,6 +19,9 @@ exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
 thiserror = { version = "2.0.18" }
 
 [dev-dependencies]
+# The integration test reads the vendored template from `sl-wire` at run time;
+# `clippy.toml` disallows `std::fs` in favour of `fs_err`.
+fs-err = { version = "3.3.0" }
 pretty_assertions = { version = "1.4.1" }
 
 [lints]
