@@ -36,7 +36,6 @@ use sl_client_bevy::{Command, ObjectTransform, Permissions, SlCommand, Vector};
 use crate::chat::LocalChatNotice;
 use crate::edit_math::{clamp_scale, euler_deg_to_rotation, rotation_to_euler_deg};
 use crate::edit_params::set_disabled_class;
-use crate::edit_selection::SelectionSet;
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
@@ -52,6 +51,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::web_floater::set_editor_text;
+use crate::world_api::SelectionSet;
 
 /// The floater's font size, in logical pixels.
 pub(crate) const TOOL_FONT_SIZE: f32 = 13.0;
@@ -913,7 +913,7 @@ fn promote_selection_when_whole_linkset(
     {
         return;
     }
-    selection.promote_to_roots(&objects);
+    crate::edit_selection::promote_selection_to_roots(&mut selection, &objects);
 }
 
 /// Show the linked-part navigation row only in edit-linked-parts mode.

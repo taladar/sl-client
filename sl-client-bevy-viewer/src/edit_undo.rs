@@ -50,11 +50,11 @@
 use bevy::prelude::*;
 use sl_client_bevy::{Command, Permissions, ScopedObjectId, SlCommand};
 
-use crate::edit_selection::{SelectedNode, SelectionSet};
 use crate::edit_tool::EditToolState;
 use crate::input_context::InputContext;
 use crate::menu_bar::TOP_MENU_ELEMENT;
 use crate::ui_element::UiAction;
+use crate::world_api::{SelectedNode, SelectionSet};
 
 /// The Build-menu action string the Undo entry emits.
 pub(crate) const UNDO_ACTION: &str = "undo-objects";
@@ -215,8 +215,8 @@ fn drive_undo_redo(
 #[cfg(test)]
 mod tests {
     use super::{can_redo, can_undo, undo_ids};
-    use crate::edit_selection::SelectionSet;
     use crate::edit_tool::EditToolState;
+    use crate::world_api::SelectionSet;
     use bevy::prelude::Entity;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{CircuitId, ObjectKey, RegionLocalObjectId, ScopedObjectId, Uuid};

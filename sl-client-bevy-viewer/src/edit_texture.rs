@@ -43,7 +43,6 @@ use sl_client_bevy::{
 };
 
 use crate::edit_params::set_disabled_class;
-use crate::edit_selection::SelectionSet;
 use crate::edit_tool::{
     BuildTabPages, CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH,
     VALUE_CLASS, spawn_row_label,
@@ -61,6 +60,7 @@ use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
 use crate::web_floater::set_editor_text;
+use crate::world_api::SelectionSet;
 
 /// The tab index the Texture-tab widgets start their focus order at (well past
 /// the Object / Features tabs' fields).
@@ -1901,7 +1901,7 @@ fn apply_to_selection(
 /// The Linden face indices a selection node's edit hits: its chosen faces, or
 /// every face (0..`face_count`) when the whole object is selected.
 pub(crate) fn node_face_indices(
-    node: &crate::edit_selection::SelectedNode,
+    node: &crate::world_api::SelectedNode,
     face_count: usize,
 ) -> Vec<usize> {
     match &node.faces {

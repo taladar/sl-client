@@ -651,7 +651,7 @@ pub(crate) fn apply_derender_requests(
     identity: Res<SlIdentity>,
     parcel: Res<SlAgentParcel>,
     regions: Query<&SlRegionIdentity, With<SlCurrentRegion>>,
-    mut selection: ResMut<crate::edit_selection::SelectionSet>,
+    mut selection: ResMut<crate::world_api::SelectionSet>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     let own = identity.agent_id.map(|agent| agent.uuid());

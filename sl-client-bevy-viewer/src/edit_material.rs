@@ -47,7 +47,6 @@ use sl_client_bevy::{
 };
 
 use crate::chat::LocalChatNotice;
-use crate::edit_selection::SelectionSet;
 use crate::edit_texture::{
     MatModeState, PbrChannel, PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value,
     primary_face_index, representative_face, spawn_row,
@@ -74,6 +73,7 @@ use crate::ui_texture_picker::{
     spawn_texture_swatch,
 };
 use crate::web_floater::set_editor_text;
+use crate::world_api::SelectionSet;
 
 /// The width, in `"0"`-glyph advances, of a material-channel numeric field
 /// (matching the diffuse fields' width).
@@ -2163,7 +2163,7 @@ fn preview_pbr_material_picked(
 /// only those already carrying a render material — a material can be assigned to a
 /// face that has none, so the live preview must reach those too.
 fn prim_faces_of_node(
-    node: &crate::edit_selection::SelectedNode,
+    node: &crate::world_api::SelectedNode,
     scene: &Query<(), With<crate::objects::SceneObject>>,
     children: &Query<&Children>,
     faces: &Query<(
@@ -2300,7 +2300,7 @@ fn commit_pbr_fields(
 /// the object's [`ObjectRenderMaterials`] holder, or every render-material face
 /// for a whole-object selection.
 fn pbr_faces_of(
-    node: &crate::edit_selection::SelectedNode,
+    node: &crate::world_api::SelectedNode,
     render_materials: &Query<&ObjectRenderMaterials>,
     children: &Query<&Children>,
     scene: &Query<(), With<crate::objects::SceneObject>>,
@@ -2377,7 +2377,7 @@ const fn full_transform_override(transform: GltfTextureTransform) -> TextureTran
 /// The `ModifyMaterialParams` updates that assign material `asset_id` to a
 /// selection node's faces (one per chosen face, or `-1` for the whole object).
 fn pbr_updates_for_node(
-    node: &crate::edit_selection::SelectedNode,
+    node: &crate::world_api::SelectedNode,
     asset_id: Uuid,
 ) -> Vec<MaterialOverrideUpdate> {
     let object_id: ObjectKey = node.full;

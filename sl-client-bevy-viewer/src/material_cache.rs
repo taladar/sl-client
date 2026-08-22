@@ -44,7 +44,6 @@ use sl_client_bevy::{Object, PrimFaceId, Priority, TextureAnimation, TextureFace
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
-use crate::edit_selection::SelectionSet;
 use crate::face_material::FaceMaterial;
 use crate::hud::on_hud_layer;
 use crate::materials::ObjectRenderMaterials;
@@ -53,6 +52,7 @@ use crate::texture_anim::{
     ObjectTextureAnimation, anim_applies_to_face, running_texture_animation,
 };
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, face_material};
+use crate::world_api::SelectionSet;
 
 /// The content key of one internable face material: every input
 /// [`face_material`] composes from, with the float fields stored as their exact

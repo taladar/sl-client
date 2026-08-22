@@ -1042,7 +1042,7 @@ fn handle_object_menu_actions(
     tool: Res<crate::edit_tool::EditToolState>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
     mut panels: Query<&mut crate::ui::UiPanelShown>,
-    mut selection: ResMut<crate::edit_selection::SelectionSet>,
+    mut selection: ResMut<crate::world_api::SelectionSet>,
     state: Res<ObjectState>,
     seat_poses: Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
     seat_cameras: Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,

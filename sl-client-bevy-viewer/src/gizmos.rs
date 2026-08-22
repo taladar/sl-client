@@ -83,10 +83,10 @@ use crate::edit_math::{
     quat_to_rotation, ray_plane_intersect, ring_angle, snap_angle, snap_to_grid, vadd, vscale,
     vsub,
 };
-use crate::edit_selection::SelectionSet;
 use crate::edit_tool::{EditTool, EditToolState, GridFrame};
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::objects::{ObjectCategory, ObjectSlMotion, ObjectState, SceneObject};
+use crate::world_api::SelectionSet;
 
 /// The render layer the gizmo rig (and only it) lives on, drawn by the
 /// overlay camera between the world (order 0) and the HUD (order 2).

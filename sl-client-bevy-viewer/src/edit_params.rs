@@ -8,7 +8,7 @@
 //! # Model
 //!
 //! - Everything reads the **primary selection**
-//!   ([`crate::edit_selection::SelectionSet`]) through
+//!   ([`crate::world_api::SelectionSet`]) through
 //!   [`ObjectState::edit_data`] (shape / flags / material / extra params) and
 //!   the node's `ObjectProperties` (name / description). Widgets rewrite only
 //!   when that snapshot **changes** ([`ShownSnapshot`]), so a just-committed
@@ -54,7 +54,6 @@ use sl_client_bevy::{
 };
 
 use crate::avatars::AvatarState;
-use crate::edit_selection::SelectionSet;
 use crate::edit_tool::{
     BuildTabPages, CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH,
     VALUE_CLASS, spawn_row_label,
@@ -66,6 +65,7 @@ use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::web_floater::set_editor_text;
+use crate::world_api::SelectionSet;
 
 // ---------------------------------------------------------------------------
 // Wire constants (the reference's `llprimitive.cpp` limits, SL variants).

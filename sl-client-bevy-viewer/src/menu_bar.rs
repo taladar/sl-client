@@ -576,7 +576,7 @@ fn spawn_top_menu_bar(mut commands: Commands, root: Res<UiRoot>, asset_server: R
 fn update_top_menu_conditions(
     floaters: Query<(Entity, &crate::floater::Floater)>,
     environment: Option<Res<crate::environment::EnvironmentState>>,
-    selection: Res<crate::edit_selection::SelectionSet>,
+    selection: Res<crate::world_api::SelectionSet>,
     edit_tool: Res<crate::edit_tool::EditToolState>,
     settings: Res<crate::settings::ViewerSettings>,
     presence: Option<Res<crate::presence::PresenceState>>,

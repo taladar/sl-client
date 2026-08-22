@@ -28,9 +28,9 @@ use sl_client_bevy::{
     planar_texgen_uv, tessellate,
 };
 
-use crate::edit_selection::SelectionSet;
 use crate::edit_texture::PrimFaceLookup;
 use crate::objects::ObjectState;
+use crate::world_api::SelectionSet;
 
 /// A face's planar projection frame: the rotation that orients the planar
 /// texture axes and the scale of the projected basis.

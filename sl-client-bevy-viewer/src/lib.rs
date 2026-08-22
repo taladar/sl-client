@@ -140,6 +140,7 @@ mod edit_texture_align;
 mod edit_tool;
 mod edit_undo;
 mod edit_wearable;
+mod world_api;
 // The widgets (floaters, menus, inputs, tabs, tables) are their own crate;
 // each module is aliased under its old name so every `crate::<module>::…`
 // path in the viewer still resolves.

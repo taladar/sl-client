@@ -51,8 +51,8 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    Command, DeRezDestination, FolderType, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId,
-    SlCommand, SlEvent, SlSessionEvent, TransactionId, Uuid, texture_face_uv_transform,
+    Command, DeRezDestination, FolderType, ObjectKey, PrimFaceId, ScopedObjectId, SlCommand,
+    SlEvent, SlSessionEvent, TransactionId, Uuid, texture_face_uv_transform,
 };
 
 use crate::camera::ViewerCamera;
@@ -69,6 +69,7 @@ use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
 };
 use crate::ui::UiRoot;
+use crate::world_api::{SelectedNode, SelectionSet};
 
 /// How far (logical pixels) the cursor may wander between press and release
 /// and still count as a **click**; any further and the gesture is a
@@ -117,328 +118,6 @@ const DROP_FOREIGN_OUTLINE: Color = Color::srgba(1.0, 0.25, 0.2, 0.9);
 /// inverted-hull outline (front faces culled, mesh slightly enlarged) reads as
 /// the reference's silhouette edge glow without porting its edge-walk.
 const OUTLINE_INFLATE: f32 = 1.035;
-
-/// One selected object in the [`SelectionSet`].
-#[derive(Debug, Clone)]
-pub(crate) struct SelectedNode {
-    /// The object's region-scoped id — what the select / deselect / update
-    /// commands address.
-    pub(crate) scoped: ScopedObjectId,
-    /// The object's grid-wide key — what the `ObjectProperties` reply is
-    /// matched back by.
-    pub(crate) full: ObjectKey,
-    /// The object's scene entity (the linkset root when whole-linkset
-    /// selection put it here).
-    pub(crate) entity: Entity,
-    /// The extended properties the simulator returned for the selection —
-    /// permission masks, owner, creator, names — or `None` until the
-    /// `ObjectProperties` reply lands.
-    pub(crate) properties: Option<Box<ObjectProperties>>,
-    /// The **selected faces** of this object, for the Select Face tool
-    /// ([`EditTool::SelectFace`]) and the Texture tab that edits them: `None`
-    /// means the whole object (every face) — the default for an ordinary
-    /// object selection — and `Some(set)` means exactly those Linden face
-    /// indices (the reference's per-`LLSelectNode` texture-entry flags).
-    pub(crate) faces: Option<HashSet<PrimFaceId>>,
-}
-
-impl SelectedNode {
-    /// This node's region-scoped id — what the link / unlink commands address.
-    pub(crate) const fn scoped(&self) -> ScopedObjectId {
-        self.scoped
-    }
-
-    /// The extended properties the simulator returned for this node, or `None`
-    /// until its `ObjectProperties` reply lands.
-    pub(crate) fn properties(&self) -> Option<&ObjectProperties> {
-        self.properties.as_deref()
-    }
-}
-
-/// The maintained selection set — the shared state the edit floater, the
-/// numeric fields, the transform gizmos, and the future linking / per-aspect
-/// editors all read. See the [module documentation](self).
-#[derive(Resource, Debug, Default)]
-pub(crate) struct SelectionSet {
-    /// The selected objects, in selection order; the **primary** is the last.
-    selected: Vec<SelectedNode>,
-    /// The objects a live rubber-band drag currently sweeps (tentative,
-    /// highlight-only until the drag commits).
-    rect_pending: Vec<(ScopedObjectId, Entity)>,
-}
-
-impl SelectionSet {
-    /// Whether `scoped` is in the selection.
-    pub(crate) fn is_selected(&self, scoped: ScopedObjectId) -> bool {
-        self.selected.iter().any(|node| node.scoped == scoped)
-    }
-
-    /// Add an object to the selection (a no-op if already present), making it
-    /// the primary.
-    pub(crate) fn insert(&mut self, scoped: ScopedObjectId, full: ObjectKey, entity: Entity) {
-        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
-            // Re-selecting an already-selected object promotes it to primary.
-            let node = self.selected.remove(index);
-            self.selected.push(node);
-            return;
-        }
-        self.selected.push(SelectedNode {
-            scoped,
-            full,
-            entity,
-            properties: None,
-            faces: None,
-        });
-    }
-
-    /// The Select Face tool's **plain click**: replace the whole selection with
-    /// exactly this one object and its one face (the reference's
-    /// `deselectAll()` + `selectObjectOnly(obj, face)`).
-    pub(crate) fn select_only_face(
-        &mut self,
-        scoped: ScopedObjectId,
-        full: ObjectKey,
-        entity: Entity,
-        face: PrimFaceId,
-    ) {
-        let mut faces = HashSet::new();
-        faces.insert(face);
-        // Keep the object's existing node (its `ObjectProperties` intact) when it
-        // was already selected — only its face set changes — so re-picking a face
-        // on the same object does not blank the floater (see [`select_only`]).
-        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
-            let mut node = self.selected.remove(index);
-            node.faces = Some(faces);
-            self.selected.clear();
-            self.selected.push(node);
-        } else {
-            self.selected.clear();
-            self.selected.push(SelectedNode {
-                scoped,
-                full,
-                entity,
-                properties: None,
-                faces: Some(faces),
-            });
-        }
-    }
-
-    /// Select exactly `scoped`, dropping every other object — the plain-click
-    /// replace of the object-selection tool. Crucially, if the object was
-    /// **already** selected it keeps its existing node (its `ObjectProperties`
-    /// name / owner / permissions intact), so re-clicking the same object does
-    /// not blank the build floater; a re-select of an already-synced object is
-    /// not re-requested on the wire, so a fresh `properties: None` node would
-    /// stay blank forever.
-    pub(crate) fn select_only(&mut self, scoped: ScopedObjectId, full: ObjectKey, entity: Entity) {
-        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
-            let node = self.selected.remove(index);
-            self.selected.clear();
-            self.selected.push(node);
-        } else {
-            self.selected.clear();
-            self.insert(scoped, full, entity);
-        }
-    }
-
-    /// The Select Face tool's **Shift-click**: extend / toggle a face in the set
-    /// (the reference's `addAsIndividual` / `remove`). If the object is not
-    /// selected it is added with just this face; if the object is selected but
-    /// this face is not in its set the face is added; if the face is already in
-    /// the set it is removed — and if that empties the set the object drops out
-    /// of the selection (cleaner than the reference's known no-op-on-last bug).
-    pub(crate) fn toggle_face(
-        &mut self,
-        scoped: ScopedObjectId,
-        full: ObjectKey,
-        entity: Entity,
-        face: PrimFaceId,
-    ) {
-        if let Some(index) = self.selected.iter().position(|node| node.scoped == scoped) {
-            let emptied = {
-                let Some(node) = self.selected.get_mut(index) else {
-                    return;
-                };
-                let set = node.faces.get_or_insert_with(HashSet::new);
-                if !set.remove(&face) {
-                    set.insert(face);
-                }
-                set.is_empty()
-            };
-            if emptied {
-                self.selected.remove(index);
-            } else {
-                // Promote the touched object to primary (the last-clicked object
-                // is the alignment reference the Texture tab reads).
-                let node = self.selected.remove(index);
-                self.selected.push(node);
-            }
-            return;
-        }
-        let mut faces = HashSet::new();
-        faces.insert(face);
-        self.selected.push(SelectedNode {
-            scoped,
-            full,
-            entity,
-            properties: None,
-            faces: Some(faces),
-        });
-    }
-
-    /// The **primary** selection's selected faces: `None` for the whole object
-    /// (every face), else the chosen Linden face indices. The Texture tab reads
-    /// this to decide which faces an `ObjectImage` edit hits.
-    pub(crate) fn primary_faces(&self) -> Option<&HashSet<PrimFaceId>> {
-        self.selected.last().and_then(|node| node.faces.as_ref())
-    }
-
-    /// Remove an object from the selection (a no-op if absent).
-    pub(crate) fn remove(&mut self, scoped: ScopedObjectId) {
-        self.selected.retain(|node| node.scoped != scoped);
-    }
-
-    /// Remove every selected object with the persistent id `id` (a no-op if
-    /// absent) — the derender path (`viewer-derender-blacklist`), which knows a
-    /// full id rather than a region-scoped one, dropping an object it is about
-    /// to despawn out of the selection first (the reference's `stopEditing` on
-    /// a derendered edit target).
-    pub(crate) fn remove_by_full_id(&mut self, id: Uuid) {
-        self.selected.retain(|node| node.full.uuid() != id);
-    }
-
-    /// Promote every selected linked part to its linkset **root** — whole-linkset
-    /// mode's invariant, the reference's `promoteSelectionToRoot`, run when
-    /// *Edit Linked Parts* is switched off. Each node is resolved to its root
-    /// (via [`ObjectState::linkset_root_of`]); duplicates collapse (two parts of
-    /// one linkset become the single root); and selection order — hence the
-    /// primary = last — is preserved, the last-selected part's root becoming the
-    /// primary root. A root the viewer cannot resolve is kept as-is. Returns
-    /// whether anything changed.
-    ///
-    /// A promoted node drops its part's [`ObjectProperties`]; the wire diff
-    /// ([`sync_selection_wire`]) then selects the root and re-requests them.
-    pub(crate) fn promote_to_roots(&mut self, objects: &ObjectState) -> bool {
-        let mut promoted: Vec<SelectedNode> = Vec::new();
-        for node in &self.selected {
-            let root_scoped = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);
-            let promoted_node = if root_scoped == node.scoped {
-                // Already a root (or unresolvable): keep it, properties intact.
-                node.clone()
-            } else if let (Some(full), Some(entity)) = (
-                objects.full_key(&root_scoped),
-                objects.entity_by_scoped(&root_scoped),
-            ) {
-                SelectedNode {
-                    scoped: root_scoped,
-                    full,
-                    entity,
-                    properties: None,
-                    // Promoting to the whole linkset drops any per-face selection.
-                    faces: None,
-                }
-            } else {
-                // Root known but not resolvable to a scene entity: leave as-is.
-                node.clone()
-            };
-            // Dedupe with move-to-end, so the last-selected part's root wins the
-            // primary slot (mirrors `insert`'s promote-on-reselect).
-            if let Some(pos) = promoted
-                .iter()
-                .position(|existing| existing.scoped == promoted_node.scoped)
-            {
-                let existing = promoted.remove(pos);
-                promoted.push(existing);
-            } else {
-                promoted.push(promoted_node);
-            }
-        }
-        let changed = promoted.len() != self.selected.len()
-            || promoted
-                .iter()
-                .zip(&self.selected)
-                .any(|(new, old)| new.scoped != old.scoped);
-        if changed {
-            self.selected = promoted;
-        }
-        changed
-    }
-
-    /// Empty the selection (both committed and tentative).
-    pub(crate) fn clear(&mut self) {
-        self.selected.clear();
-        self.rect_pending.clear();
-    }
-
-    /// The selected objects, in selection order.
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &SelectedNode> {
-        self.selected.iter()
-    }
-
-    /// The **primary** selection — the most recently selected object; the one
-    /// the numeric fields display and the local grid frame follows.
-    pub(crate) fn primary(&self) -> Option<&SelectedNode> {
-        self.selected.last()
-    }
-
-    /// How many objects are selected.
-    pub(crate) const fn len(&self) -> usize {
-        self.selected.len()
-    }
-
-    /// Whether nothing is selected.
-    pub(crate) const fn is_empty(&self) -> bool {
-        self.selected.is_empty()
-    }
-
-    /// The tentative rubber-band sweep, for the highlight pass.
-    pub(crate) fn rect_pending(&self) -> &[(ScopedObjectId, Entity)] {
-        &self.rect_pending
-    }
-
-    /// Locally echo an edited name / description onto the **primary** node's
-    /// properties (the build floater's Object tab commit): an `ObjectName` /
-    /// `ObjectDescription` send is not echoed back by the simulator, so the
-    /// floater's own copy is the one the summary and fields re-read.
-    pub(crate) fn set_primary_name_description(
-        &mut self,
-        name: Option<&str>,
-        description: Option<&str>,
-    ) {
-        if let Some(node) = self.selected.last_mut()
-            && let Some(properties) = node.properties.as_mut()
-        {
-            if let Some(name) = name {
-                name.clone_into(&mut properties.name);
-            }
-            if let Some(description) = description {
-                description.clone_into(&mut properties.description);
-            }
-        }
-    }
-
-    /// The **primary** node's mutable properties, for the build floater's
-    /// local echo of a permission / group edit (the simulator does not echo
-    /// an `ObjectPermissions` / `ObjectGroup` back; the floater re-requests
-    /// the properties to confirm).
-    pub(crate) fn primary_properties_mut(&mut self) -> Option<&mut ObjectProperties> {
-        self.selected
-            .last_mut()
-            .and_then(|node| node.properties.as_deref_mut())
-    }
-
-    /// Fold an `ObjectProperties` reply onto the node it belongs to (matched
-    /// by grid-wide key). Returns whether a node took it.
-    fn apply_properties(&mut self, properties: Box<ObjectProperties>) -> bool {
-        for node in &mut self.selected {
-            if node.full == properties.object_id {
-                node.properties = Some(properties);
-                return true;
-            }
-        }
-        false
-    }
-}
 
 /// The in-flight left-button gesture of the selection tool: where it pressed,
 /// what it pressed on, and whether it has grown past the click slop into a
@@ -839,7 +518,7 @@ fn handle_select_pointer(
                 &mut band_nodes,
                 &mut commands,
             );
-            selection.rect_pending =
+            *selection.rect_pending_mut() =
                 sweep_candidates(min, max, camera, camera_transform, &candidates);
         }
         return;
@@ -853,9 +532,9 @@ fn handle_select_pointer(
     if finished.banding {
         // Commit the sweep: extend keeps the existing selection, plain replaces.
         if !finished.extend {
-            selection.selected.clear();
+            selection.clear();
         }
-        let pending = core::mem::take(&mut selection.rect_pending);
+        let pending = core::mem::take(selection.rect_pending_mut());
         for (scoped, entity) in pending {
             if let Some(full) = state.full_key(&scoped) {
                 selection.insert(scoped, full, entity);
@@ -1133,7 +812,7 @@ fn ingest_selection_events(
                     selection.remove(*local_id);
                 }
                 selection
-                    .rect_pending
+                    .rect_pending_mut()
                     .retain(|(scoped, _entity)| scoped != local_id);
                 // Gone from the region — nothing to deselect on the wire.
                 wire.synced.remove(local_id);
@@ -1616,9 +1295,69 @@ fn collect_own_face_ids(
     }
 }
 
+/// Promote every selected linked part to its linkset **root** — whole-linkset
+/// mode's invariant, the reference's `promoteSelectionToRoot`, run when
+/// *Edit Linked Parts* is switched off. Each node is resolved to its root
+/// (via [`ObjectState::linkset_root_of`]); duplicates collapse (two parts of
+/// one linkset become the single root); and selection order — hence the
+/// primary = last — is preserved, the last-selected part's root becoming the
+/// primary root. A root the viewer cannot resolve is kept as-is. Returns
+/// whether anything changed.
+///
+/// A promoted node drops its part's [`ObjectProperties`]; the wire diff
+/// ([`sync_selection_wire`]) then selects the root and re-requests them.
+pub(crate) fn promote_selection_to_roots(
+    selection: &mut SelectionSet,
+    objects: &ObjectState,
+) -> bool {
+    let mut promoted: Vec<SelectedNode> = Vec::new();
+    for node in selection.nodes() {
+        let root_scoped = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);
+        let promoted_node = if root_scoped == node.scoped {
+            // Already a root (or unresolvable): keep it, properties intact.
+            node.clone()
+        } else if let (Some(full), Some(entity)) = (
+            objects.full_key(&root_scoped),
+            objects.entity_by_scoped(&root_scoped),
+        ) {
+            SelectedNode {
+                scoped: root_scoped,
+                full,
+                entity,
+                properties: None,
+                // Promoting to the whole linkset drops any per-face selection.
+                faces: None,
+            }
+        } else {
+            // Root known but not resolvable to a scene entity: leave as-is.
+            node.clone()
+        };
+        // Dedupe with move-to-end, so the last-selected part's root wins the
+        // primary slot (mirrors `insert`'s promote-on-reselect).
+        if let Some(pos) = promoted
+            .iter()
+            .position(|existing| existing.scoped == promoted_node.scoped)
+        {
+            let existing = promoted.remove(pos);
+            promoted.push(existing);
+        } else {
+            promoted.push(promoted_node);
+        }
+    }
+    let changed = promoted.len() != selection.nodes().len()
+        || promoted
+            .iter()
+            .zip(selection.nodes())
+            .any(|(new, old)| new.scoped != old.scoped);
+    if changed {
+        selection.replace_nodes(promoted);
+    }
+    changed
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{HighlightAssets, SelectionSet, WireSelection};
+    use super::{HighlightAssets, SelectionSet, WireSelection, promote_selection_to_roots};
     use crate::face_material::FaceMaterial;
     use bevy::app::{App, TaskPoolPlugin};
     use bevy::asset::{AssetApp as _, AssetPlugin};
@@ -1679,7 +1418,7 @@ mod tests {
         set.insert(scoped(1), full(1), Entity::PLACEHOLDER);
         set.insert(scoped(2), full(2), Entity::PLACEHOLDER);
         assert!(
-            !set.promote_to_roots(&objects),
+            !promote_selection_to_roots(&mut set, &objects),
             "no linked parts to promote"
         );
         assert_eq!(set.len(), 2);

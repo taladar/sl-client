@@ -67,7 +67,6 @@ use sl_client_bevy::{
 };
 
 use crate::chat::LocalChatNotice;
-use crate::edit_selection::SelectionSet;
 use crate::edit_tool::{BuildTabPages, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS};
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -78,6 +77,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
+use crate::world_api::SelectionSet;
 
 /// The uniform height of a contents row, in logical pixels (matches the
 /// inventory list's row metric so the two read the same).
