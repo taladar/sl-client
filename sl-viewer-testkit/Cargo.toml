@@ -1,0 +1,24 @@
+[package]
+name = "sl-viewer-testkit"
+description = "The Second Life / OpenSim viewer's UI layout test harness: a headless Bevy app with the viewer's UI scaffold, and assertions about what the layout actually did"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "testing", "ui"]
+categories = ["development-tools::testing", "gui"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest). `system_font_discovery` because
+# the harness shapes real text, exactly as the viewer does.
+bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+sl-viewer-ui-core = { workspace = true }
+
+[lints]
+workspace = true

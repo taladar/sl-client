@@ -1329,6 +1329,23 @@ fn rebuild_pie_labels(
     }
 }
 
+/// Register [`fit_pie_layout`] with a layout-test harness.
+///
+/// The harness sits below the widgets and cannot name this system, so a pie
+/// test passes this to `LayoutTest::with_widget_layout`; without it the labels
+/// never leave the ring centre and every placement check reasons about a pie
+/// that was not laid out.
+///
+/// Gated to test builds: the live app registers [`fit_pie_layout`] through
+/// [`PieMenuPlugin`], so this exists only for the harness.
+#[cfg(test)]
+pub(crate) fn register_pie_layout(app: &mut App) {
+    app.add_systems(
+        bevy::app::PostUpdate,
+        fit_pie_layout.after(bevy::ui::UiSystems::Layout),
+    );
+}
+
 /// **Place the labels by polar coordinate, and grow the ring to hold them.**
 ///
 /// This is the layout, and it runs every frame after `bevy_ui` has *measured* the
@@ -2139,7 +2156,7 @@ mod tests {
         Compass, FIXTURE_CAN_EDIT, FIXTURE_PIE, FIXTURE_SITTING, OpenPieMenu,
         PIE_LABEL_RING_RADIUS, PIE_OUTER_RADIUS, PIE_SLICES, PieAddress, PieConditions, PieContent,
         PieGeometry, PieMenu, PieMenuDef, PiePlacement, SlotOutcome, addresses, clamp_centre,
-        pack_slot_states, pick, resolve_slots, ui_offset,
+        pack_slot_states, pick, register_pie_layout, resolve_slots, ui_offset,
     };
     use crate::ui::UiDirection;
     use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
@@ -2675,7 +2692,9 @@ mod tests {
     /// this way carries no `PiePlacement`, so `place_pie_menu` leaves it in the
     /// flow where the layout checks can measure it.
     fn pie_app(direction: UiDirection) -> Result<App, TestError> {
-        let test = LayoutTest::new().with_direction(direction);
+        let test = LayoutTest::new()
+            .with_widget_layout(&[register_pie_layout])
+            .with_direction(direction);
         let mut app = test.build();
         crate::ui_test::enable_action_recording(&mut app);
         app.add_systems(
@@ -2705,7 +2724,9 @@ mod tests {
     /// highlight itself and the commit reads it — which is exactly the state a real
     /// frame hands the commit, minus the pointer plumbing.
     fn live_pie_app() -> Result<App, TestError> {
-        let mut app = LayoutTest::new().build();
+        let mut app = LayoutTest::new()
+            .with_widget_layout(&[register_pie_layout])
+            .build();
         crate::ui_test::enable_action_recording(&mut app);
         app.init_resource::<ButtonInput<MouseButton>>()
             .add_systems(
@@ -3176,7 +3197,9 @@ mod tests {
                 "Arabic" | "Hebrew" => UiDirection::Rtl,
                 _other => UiDirection::Ltr,
             };
-            let test = LayoutTest::new().with_direction(direction);
+            let test = LayoutTest::new()
+                .with_widget_layout(&[register_pie_layout])
+                .with_direction(direction);
             for font_size in [11.0_f32, 15.0, 22.0] {
                 let cx = ElementCx {
                     text: cell,
@@ -3251,7 +3274,7 @@ mod tests {
             entries,
         }));
 
-        let test = LayoutTest::new();
+        let test = LayoutTest::new().with_widget_layout(&[register_pie_layout]);
         let mut app = test.build();
         app.add_message::<UiAction>();
         app.add_systems(
@@ -3300,7 +3323,9 @@ mod tests {
     /// in the right directions — which is the thing that was wrong.
     #[test]
     fn a_live_pie_places_its_labels_around_the_ring() -> Result<(), TestError> {
-        let mut app = LayoutTest::new().build();
+        let mut app = LayoutTest::new()
+            .with_widget_layout(&[register_pie_layout])
+            .build();
         app.add_message::<UiAction>()
             .add_message::<OpenPieMenu>()
             .add_systems(Update, super::open_pie_menus)

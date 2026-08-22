@@ -231,6 +231,7 @@ fs-err = { workspace = true }
 pretty_assertions = { workspace = true }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
+sl-viewer-testkit = { workspace = true }
 
 [lints]
 workspace = true
