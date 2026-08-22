@@ -46,9 +46,10 @@ use crate::edit_tool::{
 };
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
 use crate::hud::on_hud_layer;
-use crate::hud_pick::{UiPointerClaim, pointer_over_blocking_ui};
+use crate::hud_pick::pointer_over_blocking_ui;
 use crate::i18n::Translated;
 use crate::objects::{ObjectCategory, ObjectSlMotion, ObjectState, SceneObject};
+use crate::ui::UiPointerClaim;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;

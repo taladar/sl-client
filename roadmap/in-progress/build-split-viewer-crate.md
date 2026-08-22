@@ -92,6 +92,16 @@ Landed so far:
   — so the declared surface (231 settings, their sections, kinds, defaults and
   flags) is pinned in `tests/settings-golden.txt`, generated before the move
   and still passing after it.
+- **6, taken early** — `sl-viewer-testkit`: the headless UI layout harness.
+  Planned after the widgets, which was wrong: `ui_tab`, `ui_search`, `menu` and
+  `pie_menu` all test through it, so it had to come first. `ui_test` split in
+  two — the harness moved, the `ELEMENTS` sweeps stayed in the binary and
+  re-export it under the old module name. `LayoutTest` gained
+  `with_widget_layout` so it stops naming `pie_menu::fit_pie_layout`; a harness
+  below the widgets cannot see one.
+- **5** — `sl-viewer-ui-widgets`: 13 modules, 20.6k lines. `UiPointerClaim`
+  moved from `hud_pick` to `ui-core` first, which was the last thing tying the
+  widget layer to the world picker.
 - **4** — `sl-viewer-ui-core`: the UI vocabulary (scaffold and logical box
   model, font stack, Fluent lookup, CSS skin, UI sounds), 10 modules, 8.5k
   lines. Needed two prerequisites. The `ELEMENTS` registry named 35 feature
@@ -104,6 +114,10 @@ Landed so far:
   owns the shipped `.ftl` files.
 
 ## Remaining sequence
+
+Steps, not phases: the phases are sections of this plan (the target graph, the
+alias technique, the de-cycling mechanisms, the app-crate policy, the visibility
+pass) and apply during every step. The queue is the twenty numbered steps below.
 
 `2` platform + geom (28 leaf modules) · `3` settings (registrar inversion —
 `ViewerSettings::load()` runs before any `App` exists, so aggregation moves up

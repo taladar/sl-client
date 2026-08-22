@@ -13,7 +13,7 @@
 //!
 //! The persisted values live in the [`Account`](sl_settings::Scope::Account)
 //! scope of [`ViewerSettings`] — the per-(grid, avatar-name) settings file
-//! ([`crate::settings`]). The reference keeps floater rects in the *global*
+//! (`settings`). The reference keeps floater rects in the *global*
 //! `gSavedSettings`; we deliberately key them per avatar instead, so two
 //! characters on one machine keep their own window layouts.
 //!
@@ -33,24 +33,24 @@
 //!
 //! # The four-stage lifecycle
 //!
-//! - **Register** ([`register_floater_settings`]) — the frame a floater is
+//! - **Register** (`register_floater_settings`) — the frame a floater is
 //!   spawned, declare its four settings (with the spec geometry as the default).
 //!   This runs before login, so the account file that loads later is coerced to
 //!   the declared types.
-//! - **Seed** ([`seed_floaters_from_settings`]) — once the account scope is
+//! - **Seed** (`seed_floaters_from_settings`) — once the account scope is
 //!   loaded (post login), apply any *stored* value back onto the floater, keyed
 //!   by [`SettingsStore::is_overridden`](sl_settings::SettingsStore::is_overridden)
 //!   so a floater with nothing saved keeps its `FloaterSpec` default. The
-//!   manager's own [`clamp_floaters_on_screen`](crate::floater) then recovers a
+//!   manager's own `clamp_floaters_on_screen`(crate::floater) then recovers a
 //!   rect saved on a larger monitor: a window restored off-screen on a smaller
 //!   display is pulled back so its title bar stays reachable.
-//! - **Persist** ([`persist_floater_changes`]) — on any move / resize / minimize
+//! - **Persist** (`persist_floater_changes`) — on any move / resize / minimize
 //!   / dock / open / close, write the floater's geometry back into the store and
 //!   mark it dirty.
-//! - **Flush** ([`flush_floater_settings`]) — write the store to disk at most
-//!   once every [`FLUSH_INTERVAL_SECS`] while dirty, so a crash mid-session loses
+//! - **Flush** (`flush_floater_settings`) — write the store to disk at most
+//!   once every `FLUSH_INTERVAL_SECS` while dirty, so a crash mid-session loses
 //!   at most that window of adjustments rather than the whole session (the clean
-//!   logout save in [`crate::session`] flushes the rest).
+//!   logout save in `session` flushes the rest).
 //!
 //! # Tab-widget splits ride the same lifecycle
 //!
@@ -70,9 +70,9 @@ use bevy::prelude::*;
 use sl_settings::SettingValue;
 
 use crate::floater::{Floater, FloaterCommand, FloaterGeometry, FloaterOp};
-use crate::settings::{ViewerSettings, load_account_settings};
-use crate::ui::UiPanelShown;
 use crate::ui_tab::{TabStrip, TabStripWidth};
+use sl_viewer_settings::{ViewerSettings, load_account_settings};
+use sl_viewer_ui_core::ui::UiPanelShown;
 
 /// The persisted-file section every floater's settings are grouped under
 /// (`[floater]`). The per-floater id in each name keeps the flat keys distinct.
@@ -97,7 +97,7 @@ const STORED_PX_MAX: f32 = 32767.0;
 /// settings store, e.g. the gallery) by early-returning, so adding the plugin is
 /// always safe.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct FloaterPersistPlugin;
+pub struct FloaterPersistPlugin;
 
 impl Plugin for FloaterPersistPlugin {
     fn build(&self, app: &mut App) {
@@ -140,9 +140,9 @@ struct FloaterSeeded;
 /// rectangle — let alone "open" — would only ever restore an empty shell.
 /// Insert it on the floater root right after `spawn_floater`.
 #[derive(Component, Debug, Clone, Copy, Default)]
-pub(crate) struct FloaterPersistExempt;
+pub struct FloaterPersistExempt;
 
-/// The query filter [`persist_floater_changes`] runs on: a seeded floater whose
+/// The query filter `persist_floater_changes` runs on: a seeded floater whose
 /// geometry *or* open state changed this frame. Aliased to keep the system
 /// signature readable (and clear of `clippy::type_complexity`).
 type ChangedSeededFloater = (
@@ -151,11 +151,11 @@ type ChangedSeededFloater = (
 );
 
 /// The filter for a floater persistence has not yet touched: registered on
-/// spawn ([`register_floater_settings`]) — unless opted out.
+/// spawn (`register_floater_settings`) — unless opted out.
 type AddedPersistedFloater = (Added<Floater>, Without<FloaterPersistExempt>);
 
 /// The filter for a floater still awaiting its stored-geometry seed
-/// ([`seed_floaters_from_settings`]) — again minus the opted-out ones.
+/// (`seed_floaters_from_settings`) — again minus the opted-out ones.
 type UnseededPersistedFloater = (Without<FloaterSeeded>, Without<FloaterPersistExempt>);
 
 /// The `[floater]` setting name for a floater's remembered rectangle.
@@ -371,7 +371,7 @@ fn persist_floater_changes(
 }
 
 /// **Flush** the store to disk once a dirty change has aged past
-/// [`FLUSH_INTERVAL_SECS`], then clear the dirty clock.
+/// `FLUSH_INTERVAL_SECS`, then clear the dirty clock.
 fn flush_floater_settings(
     settings: Option<Res<ViewerSettings>>,
     mut dirty: ResMut<FloaterPersistDirty>,

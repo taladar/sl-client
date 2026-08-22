@@ -5,7 +5,7 @@
 //!
 //! Nothing upstream has one: `bevy_ui_widgets` ships `MenuPopup` / `MenuItem` /
 //! `MenuButton`, all of which assume a **line** layout. So this is ours, built on
-//! `bevy_ui` and [`crate::ui`]'s scaffold.
+//! `bevy_ui` and `ui`'s scaffold.
 //!
 //! # Angular stability is the invariant
 //!
@@ -24,10 +24,10 @@
 //! - An entry's full address is its [`PieAddress`] — the path of compass points
 //!   from the root pie — and it is a **static** property of the declaration:
 //!   [`addresses`] computes it without consulting any state, because there is no
-//!   state that could move it. [`tests::every_action_keeps_its_declared_address`]
+//!   state that could move it. `tests::every_action_keeps_its_declared_address`
 //!   pins every address in the fixture menu against a hard-coded table, so moving
 //!   a function is a loud diff rather than a silent re-teach.
-//! - [`tests::no_condition_can_move_an_entry`] then sweeps **every subset** of
+//! - `tests::no_condition_can_move_an_entry` then sweeps **every subset** of
 //!   the live conditions and asserts that each entry either lands at its declared
 //!   compass point or is absent. Never elsewhere. That is the muscle-memory claim
 //!   as an executable statement.
@@ -39,7 +39,7 @@
 //! avatar, land and attachment menus of [[viewer-object-context-menu]], and any
 //! future one. Each must ship a regression test that pins **every action's
 //! address against a committed table**, exactly like
-//! [`tests::every_action_keeps_its_declared_address`] does here.
+//! `tests::every_action_keeps_its_declared_address` does here.
 //!
 //! The reason is the whole point of a pie, and it is easy to lose: a developer
 //! who has never heard of angular stability will one day reorder a menu's entries
@@ -192,12 +192,12 @@
 //! # Mouse-only, and why
 //!
 //! The pie is driven by the pointer alone — no keyboard selection, no tab focus.
-//! The scaffold ([`crate::ui`]) makes keyboard reach the spine of the *panel* UI,
+//! The scaffold (`ui`) makes keyboard reach the spine of the *panel* UI,
 //! and the roadmap task asked for it here too, but it does not fit this widget: a
 //! pie opens **on an in-world object** the pointer is over, and there is no
 //! keyboard way to pick that object, so a keyboard way to pick *within* the menu
 //! would open onto nothing. The reference is mouse-only for the same reason, and
-//! this follows it. Selection is entirely angular — [`commit_pie_selection`] reads
+//! this follows it. Selection is entirely angular — `commit_pie_selection` reads
 //! the mouse release and picks by direction, for either button — so the labels are
 //! neither buttons nor focus targets, just pictures on their wedges.
 //!
@@ -226,9 +226,9 @@ use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use bevy::window::{PrimaryWindow, WindowFocused};
 
-use crate::ui::{UiRoot, column};
-use crate::ui_element::{ElementCx, RadialCentre, RadialPlacement, UiAction};
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::ui::{UiRoot, column};
+use sl_viewer_ui_core::ui_element::{ElementCx, RadialCentre, RadialPlacement, UiAction};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The internal handle the pie shader (`pie_menu.wgsl`) is loaded under.
 const PIE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2a7f5c31-9d84-4e62-b1a7-3c05e9f8d264");
@@ -241,7 +241,7 @@ const PIE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("2a7f5c31-9d84-4e62-b1a7-
 /// would shrink the targets and cost the muscle memory the whole widget exists
 /// for; the answer to "eight is not enough" is a **named sub-pie**, never a
 /// ninth slice.
-pub(crate) const PIE_SLICES: usize = 8;
+pub const PIE_SLICES: usize = 8;
 
 /// The name tying the labels' declared directions to the ring they are measured
 /// from. One group: a matrix cell spawns one element, and a viewer only ever has
@@ -306,7 +306,7 @@ const PIE_LABEL_RIM_MARGIN: f32 = 6.0;
 /// that is how a hand learns it, and because a compass is unambiguous in a
 /// mirrored layout where "right" is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum Compass {
+pub enum Compass {
     /// Due east — slot 0, angle 0.
     East,
     /// North-east — slot 1.
@@ -327,7 +327,7 @@ pub(crate) enum Compass {
 
 impl Compass {
     /// Every compass point, in slot order.
-    pub(crate) const ALL: [Self; PIE_SLICES] = [
+    pub const ALL: [Self; PIE_SLICES] = [
         Self::East,
         Self::NorthEast,
         Self::North,
@@ -349,7 +349,8 @@ impl Compass {
     /// to `f32` losslessly and infallibly ([`f32::from`]) where a `usize` would
     /// need a cast the workspace forbids — [`Self::slot`] is the `usize` view for
     /// the callers that index with it.
-    pub(crate) const fn slot_index(self) -> u8 {
+    #[must_use]
+    pub const fn slot_index(self) -> u8 {
         match self {
             Self::East => 0,
             Self::NorthEast => 1,
@@ -363,19 +364,22 @@ impl Compass {
     }
 
     /// This point's slot number, for indexing the eight slots.
-    pub(crate) fn slot(self) -> usize {
+    #[must_use]
+    pub fn slot(self) -> usize {
         usize::from(self.slot_index())
     }
 
     /// This point's centre angle, in radians counter-clockwise from due east, in
     /// a **y-up** frame.
-    pub(crate) fn centre_angle(self) -> f32 {
+    #[must_use]
+    pub fn centre_angle(self) -> f32 {
         let slice = core::f32::consts::TAU / 8.0;
         f32::from(self.slot_index()) * slice
     }
 
     /// This point's name, for a failure message and a debug overlay.
-    pub(crate) const fn name(self) -> &'static str {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
             Self::East => "east",
             Self::NorthEast => "north-east",
@@ -396,8 +400,9 @@ impl Compass {
     /// way round — nearest centre wins — which is both self-evidently what
     /// "aligned to the compass points" means and free of the float-to-integer
     /// conversion the workspace lints forbid. The two agree exactly, which
-    /// [`tests::the_partition_matches_the_reference_formula`] holds them to.
-    pub(crate) fn from_angle(angle: f32) -> Self {
+    /// `tests::the_partition_matches_the_reference_formula` holds them to.
+    #[must_use]
+    pub fn from_angle(angle: f32) -> Self {
         let mut best = Self::East;
         let mut best_distance = f32::INFINITY;
         for point in Self::ALL {
@@ -446,25 +451,25 @@ fn angular_distance(left: f32, right: f32) -> f32 {
 /// state move anything: see [`PieContent`] for the two things it means, neither
 /// of which is "shuffle up to fill a gap".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PieAction {
+pub struct PieAction {
     /// The slice's text. Laid out through the ordinary bidi text stack.
-    pub(crate) label: &'static str,
-    /// What this emits when picked — the `action` of the [`UiAction`] the widget
+    pub label: &'static str,
+    /// What this emits when picked — the `action` of the `UiAction` the widget
     /// writes, and the name the address table pins.
-    pub(crate) action: &'static str,
+    pub action: &'static str,
     /// The condition that must hold, or `None` for unconditionally available.
     ///
     /// A plain, named key rather than a closure over a session, because the
     /// registry's rule is that an element is **constructible without its
-    /// wiring** ([`crate::ui_element`]): the live viewer fills
+    /// wiring** (`ui_element`): the live viewer fills
     /// [`PieConditions`] from the world, the gallery leaves it empty, and a test
     /// sets exactly the subset it wants to interrogate.
-    pub(crate) when: Option<&'static str>,
+    pub when: Option<&'static str>,
 }
 
 /// What lives at one position.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PieContent {
+pub enum PieContent {
     /// A single action. If its `when` fails it is **disabled** — faded, not
     /// pickable, and still occupying its slot, because the position belongs to
     /// the entry and not to whether it is available this second.
@@ -492,13 +497,13 @@ pub(crate) enum PieContent {
 
 /// One entry: a declared position, and what sits there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PieEntry {
+pub struct PieEntry {
     /// **The position, declared.** Never inferred from this entry's index in the
     /// list — assigning slices in list order is the obvious implementation and it
     /// is the wrong one.
-    pub(crate) at: Compass,
+    pub at: Compass,
     /// What lives there.
-    pub(crate) content: PieContent,
+    pub content: PieContent,
 }
 
 /// A pie: a name, and its entries.
@@ -508,14 +513,14 @@ pub(crate) struct PieEntry {
 /// overflow bucket. `More >` cannot be expressed without lying in the `label`
 /// field, which a reviewer can see.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct PieMenuDef {
+pub struct PieMenuDef {
     /// What a slice opening this pie reads, and what names it in the address
     /// table. An honest name for the grouping — if there is not one, the grouping
     /// is overflow rather than structure.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The entries, in any order: order is presentation, position is
     /// [`PieEntry::at`].
-    pub(crate) entries: &'static [PieEntry],
+    pub entries: &'static [PieEntry],
 }
 
 impl PieMenuDef {
@@ -558,9 +563,9 @@ impl PieMenuDef {
 /// This is the muscle memory, written down. It is a static property of the
 /// declaration — no condition, no session state and no ordering can change it —
 /// which is exactly what makes it testable, and what
-/// [`tests::every_action_keeps_its_declared_address`] pins.
+/// `tests::every_action_keeps_its_declared_address` pins.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PieAddress(pub(crate) Vec<Compass>);
+pub struct PieAddress(pub Vec<Compass>);
 
 impl core::fmt::Display for PieAddress {
     /// `north > east`, so a failure message reads as the gesture it describes.
@@ -575,7 +580,8 @@ impl core::fmt::Display for PieAddress {
 /// Every member of an autohide chain reports the **same** address, because they
 /// share the one position — that is what a chain is, and a test that read them as
 /// separate addresses would be describing a different widget.
-pub(crate) fn addresses(menu: &'static PieMenuDef) -> Vec<(&'static str, PieAddress)> {
+#[must_use]
+pub fn addresses(menu: &'static PieMenuDef) -> Vec<(&'static str, PieAddress)> {
     let mut found = Vec::new();
     collect_addresses(menu, &mut Vec::new(), &mut found);
     found
@@ -616,11 +622,11 @@ fn collect_addresses(
 /// the gallery leaves it empty and every conditional entry simply reads as
 /// unavailable, which is a *true* rendering of "no session", not a stub.
 #[derive(Component, Debug, Clone, Default)]
-pub(crate) struct PieConditions(pub(crate) Vec<&'static str>);
+pub struct PieConditions(pub Vec<&'static str>);
 
 impl PieConditions {
     /// A set of conditions.
-    pub(crate) fn new(conditions: impl IntoIterator<Item = &'static str>) -> Self {
+    pub fn new(conditions: impl IntoIterator<Item = &'static str>) -> Self {
         Self(conditions.into_iter().collect())
     }
 
@@ -637,19 +643,19 @@ impl PieConditions {
 /// What a slot renders and does, once the declaration has been resolved against
 /// the live conditions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ResolvedSlot {
+pub struct ResolvedSlot {
     /// The text to draw.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// What picking it does.
-    pub(crate) outcome: SlotOutcome,
+    pub outcome: SlotOutcome,
     /// Whether it can be picked at all. A disabled slot keeps its position and
     /// its label, and simply cannot be committed.
-    pub(crate) enabled: bool,
+    pub enabled: bool,
 }
 
 /// What picking a slot does.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SlotOutcome {
+pub enum SlotOutcome {
     /// Emit this action.
     Action(&'static str),
     /// Descend into this sub-pie.
@@ -698,7 +704,8 @@ impl SlotState {
 /// move a position, which is a stronger property than testing that nothing does.
 ///
 /// Returned slot-indexed (not as a list), because a list is what invites the bug.
-pub(crate) fn resolve_slots(
+#[must_use]
+pub fn resolve_slots(
     menu: &PieMenuDef,
     conditions: &PieConditions,
 ) -> [Option<ResolvedSlot>; PIE_SLICES] {
@@ -760,11 +767,11 @@ fn pack_slot_states(slots: &[Option<ResolvedSlot>; PIE_SLICES]) -> u32 {
 
 /// The pie's measurements, in logical pixels.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct PieGeometry {
+pub struct PieGeometry {
     /// The dead zone's radius: inside this, nothing is selected.
-    pub(crate) dead_zone: f32,
+    pub dead_zone: f32,
     /// The ring's outer radius — what is drawn, not what bounds selection.
-    pub(crate) outer: f32,
+    pub outer: f32,
 }
 
 impl Default for PieGeometry {
@@ -786,7 +793,8 @@ impl Default for PieGeometry {
 /// has no limit, so a fast gesture in roughly the right direction lands whatever
 /// distance it travels, while a pinned menu has one, so there is an "outside" to
 /// click for abort.
-pub(crate) fn pick(offset: Vec2, geometry: PieGeometry, bound: Option<f32>) -> Option<Compass> {
+#[must_use]
+pub fn pick(offset: Vec2, geometry: PieGeometry, bound: Option<f32>) -> Option<Compass> {
     let distance = offset.length();
     if distance <= geometry.dead_zone {
         return None;
@@ -803,7 +811,8 @@ pub(crate) fn pick(offset: Vec2, geometry: PieGeometry, bound: Option<f32>) -> O
 /// The single conversion, mirroring the one in `pie_menu.wgsl`. Every angle in
 /// this module is y-up; every screen coordinate that reaches it comes through
 /// here.
-pub(crate) const fn ui_offset(offset: Vec2) -> Vec2 {
+#[must_use]
+pub const fn ui_offset(offset: Vec2) -> Vec2 {
     Vec2::new(offset.x, -offset.y)
 }
 
@@ -822,7 +831,8 @@ pub(crate) const fn ui_offset(offset: Vec2) -> Vec2 {
 /// A menu larger than the viewport on an axis cannot be placed legally at all; it
 /// is centred on that axis, which at least loses the same amount at both ends
 /// rather than all of it at one.
-pub(crate) fn clamp_centre(requested: Vec2, ring_offset: Vec2, size: Vec2, viewport: Vec2) -> Vec2 {
+#[must_use]
+pub fn clamp_centre(requested: Vec2, ring_offset: Vec2, size: Vec2, viewport: Vec2) -> Vec2 {
     Vec2::new(
         clamp_axis(requested.x, ring_offset.x, size.x, viewport.x),
         clamp_axis(requested.y, ring_offset.y, size.y, viewport.y),
@@ -855,7 +865,7 @@ fn clamp_axis(requested: f32, ring_offset: f32, size: f32, viewport: f32) -> f32
 /// "a flick in a direction is enough, at any distance" and "click outside to
 /// abort" both be true without contradicting each other.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PieInteraction {
+pub enum PieInteraction {
     /// The button that opened the menu is still down. **No outer bound**: any
     /// distance beyond the dead zone selects. Releasing commits the highlighted
     /// slot, or — in the dead zone — commits nothing and pins the menu open.
@@ -867,31 +877,32 @@ pub(crate) enum PieInteraction {
 
 /// An open pie menu, on its root node.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct PieMenu {
+pub struct PieMenu {
     /// The declaration this pie renders. Static: a menu is data.
-    pub(crate) menu: &'static PieMenuDef,
+    pub menu: &'static PieMenuDef,
     /// The path from `menu` to the pie currently showing — one compass point per
     /// level descended. Empty at the root.
-    pub(crate) path: Vec<Compass>,
+    pub path: Vec<Compass>,
     /// Where the pointer is, in logical pixels from the ring centre, y-down (in
     /// `bevy_ui`'s own frame; converted to y-up at the two points that need an
     /// angle).
     ///
-    /// A *reading*, not a thing the widget owns: [`drive_pie_cursor`] recomputes
+    /// A *reading*, not a thing the widget owns: `drive_pie_cursor` recomputes
     /// it from the real pointer every frame. See the module's placement section.
-    pub(crate) cursor: Vec2,
+    pub cursor: Vec2,
     /// The slot the cursor currently picks, if any.
-    pub(crate) highlighted: Option<Compass>,
+    pub highlighted: Option<Compass>,
     /// Which interaction mode this pie is in.
-    pub(crate) interaction: PieInteraction,
-    /// The `element` this pie's [`UiAction`]s are attributed to.
-    pub(crate) element: &'static str,
+    pub interaction: PieInteraction,
+    /// The `element` this pie's `UiAction`s are attributed to.
+    pub element: &'static str,
 }
 
 impl PieMenu {
     /// The pie currently showing — the root, or whatever sub-pie the path has
     /// descended into.
-    pub(crate) fn current(&self) -> Option<&'static PieMenuDef> {
+    #[must_use]
+    pub fn current(&self) -> Option<&'static PieMenuDef> {
         self.menu.follow(&self.path)
     }
 
@@ -901,10 +912,10 @@ impl PieMenu {
     /// All a level change *can* do about the pointer, since the pointer is not
     /// ours to move — see the module's placement section. It is honest rather than
     /// sufficient: the pointer is still out at the slice just picked, so
-    /// [`drive_pie_cursor`] will immediately re-highlight whatever the sub-pie
+    /// `drive_pie_cursor` will immediately re-highlight whatever the sub-pie
     /// holds in that same direction. Clearing it at least means the *parent's*
     /// highlight never survives into the child.
-    pub(crate) const fn drop_highlight(&mut self) {
+    pub const fn drop_highlight(&mut self) {
         self.highlighted = None;
     }
 }
@@ -912,23 +923,23 @@ impl PieMenu {
 /// A marker on the ring node — the square the shader draws into, and the node
 /// whose centre is the pie's origin for every angle.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct PieRing;
+pub struct PieRing;
 
 /// A marker on one slot's label node, carrying which slot it is.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct PieLabel {
+pub struct PieLabel {
     /// The compass point this label sits at. Fixed at spawn: a label never moves.
-    pub(crate) at: Compass,
+    pub at: Compass,
 }
 
 /// The path whose labels are **currently spawned** under a pie root.
 ///
-/// Compared against [`PieMenu::path`] by [`update_pie_labels`] so the labels are
+/// Compared against [`PieMenu::path`] by `update_pie_labels` so the labels are
 /// rebuilt only when the pie actually descends or ascends a level — never on the
 /// per-frame cursor updates, which would otherwise churn the labels faster than
 /// the layout can place them.
 #[derive(Component, Debug, Clone, Default)]
-pub(crate) struct DisplayedPiePath(Vec<Compass>);
+pub struct DisplayedPiePath(Vec<Compass>);
 
 /// Where a live pie asked to be placed, and what became of the request.
 ///
@@ -942,15 +953,15 @@ pub(crate) struct DisplayedPiePath(Vec<Compass>);
 /// Only a pie carrying this is *live*, and only a live pie is placed, grabs the
 /// pointer, or can be aborted.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct PiePlacement {
+pub struct PiePlacement {
     /// Where the caller asked for the ring's centre, in logical pixels. Updated on
     /// a descent so the sub-pie re-centres on the pointer — the inverse of the
     /// reference's pointer warp, which we cannot do.
-    pub(crate) requested: Vec2,
+    pub requested: Vec2,
     /// Whether the menu has been **revealed** yet. It is spawned hidden and shown
-    /// only once its layout has settled — see [`place_pie_menu`] for why the first
+    /// only once its layout has settled — see `place_pie_menu` for why the first
     /// measured frame is too early, and what the visible flicker looked like.
-    pub(crate) placed: bool,
+    pub placed: bool,
     /// The previous frame's applied top-left, in logical pixels — the settle
     /// detector. The menu grows over a frame or two (the labels are measured, then
     /// [`fit_pie_layout`] sizes the ring around them), so its top-left keeps moving
@@ -981,7 +992,7 @@ struct PieParams {
 
 /// The pie's ring material: one node, one draw, the geometry in the shader.
 #[derive(AsBindGroup, Asset, TypePath, Debug, Clone)]
-pub(crate) struct PieMenuMaterial {
+pub struct PieMenuMaterial {
     /// Everything the shader needs.
     #[uniform(0)]
     params: PieParams,
@@ -1027,7 +1038,7 @@ const PIE_LABEL_SUB_PIE: Color = Color::srgb(0.65, 0.86, 1.0);
 /// a tree out of ordinary nodes — which is what lets the headless harness check
 /// it with no renderer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PieMenuPlugin;
+pub struct PieMenuPlugin;
 
 impl Plugin for PieMenuPlugin {
     fn build(&self, app: &mut App) {
@@ -1078,28 +1089,28 @@ impl Plugin for PieMenuPlugin {
 /// drawn from each menu's fixed condition vocabulary; it is only the *set that
 /// holds right now* that is built at runtime.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenPieMenu {
+pub struct OpenPieMenu {
     /// The declaration to show.
-    pub(crate) menu: &'static PieMenuDef,
+    pub menu: &'static PieMenuDef,
     /// Where to centre it, in logical pixels. Clamped inward if the menu will not
     /// fit there.
-    pub(crate) at: Vec2,
+    pub at: Vec2,
     /// The `element` its actions are attributed to.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The conditions that hold right now. Snapshotted at open: a menu whose
     /// entries changed availability *while it was open* would be re-teaching the
     /// user's hand mid-gesture.
-    pub(crate) conditions: Vec<&'static str>,
+    pub conditions: Vec<&'static str>,
 }
 
 /// Spawn a pie's node tree under `parent`, showing `menu`'s root.
 ///
 /// The whole widget, and it takes no session, no window and no material — per the
-/// registry's rule ([`crate::ui_element`]) an element must be constructible
+/// registry's rule (`ui_element`) an element must be constructible
 /// without its wiring. The ring's material is attached separately (and only if
 /// the app has one), so a headless layout test gets the same tree the viewer
 /// does, minus the pixels.
-pub(crate) fn spawn_pie_menu(
+pub fn spawn_pie_menu(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -1271,7 +1282,7 @@ fn rebuild_pie_labels(
         commands
             .spawn((
                 // A label is a **picture, not a click target**. The pointer has one
-                // selection path and it is angular: [`commit_pie_selection`] reads the
+                // selection path and it is angular: `commit_pie_selection` reads the
                 // mouse release, for either button, and picks by *direction* — so a
                 // right-click on a slice selects it exactly like a left-click, matching
                 // the reference. The menu is mouse-only (no keyboard reach: there is no
@@ -1339,7 +1350,7 @@ fn rebuild_pie_labels(
 /// Gated to test builds: the live app registers [`fit_pie_layout`] through
 /// [`PieMenuPlugin`], so this exists only for the harness.
 #[cfg(test)]
-pub(crate) fn register_pie_layout(app: &mut App) {
+pub fn register_pie_layout(app: &mut App) {
     app.add_systems(
         bevy::app::PostUpdate,
         fit_pie_layout.after(bevy::ui::UiSystems::Layout),
@@ -1372,7 +1383,7 @@ pub(crate) fn register_pie_layout(app: &mut App) {
 /// The growth is the content-driven half of the scaffold's convention, in polar
 /// form: the pie is exactly as big as its labels need and no bigger, so a longer
 /// translation makes a larger wheel rather than an overrun.
-pub(crate) fn fit_pie_layout(
+pub fn fit_pie_layout(
     mut pies: Query<(&mut Node, &mut PieGeometry, &Children), With<PieMenu>>,
     mut labels: Query<(&PieLabel, &mut Node, &ComputedNode), Without<PieMenu>>,
 ) {
@@ -1484,7 +1495,7 @@ fn swallow_pie_press(mut press: On<Pointer<Press>>) {
 /// menu blocks picking over its own area (see [`spawn_pie_menu`]'s ring) and
 /// swallows the press ([`swallow_pie_press`]), so a click on a slice or the dead
 /// zone never reaches the open-observer and is handled by the menu itself
-/// ([`commit_pie_selection`]) instead. That is the reference's rule: a right-click
+/// (`commit_pie_selection`) instead. That is the reference's rule: a right-click
 /// on the menu selects (or, in the dead zone, closes), while a right-click
 /// elsewhere opens a new menu there.
 fn open_pie_menus(
@@ -1734,7 +1745,7 @@ fn commit_pie_selection(
 /// descend a level.
 ///
 /// The one place a selection is turned into an outcome, called from
-/// [`commit_pie_selection`] — so a slice means the same thing however the release
+/// `commit_pie_selection` — so a slice means the same thing however the release
 /// arrived at it.
 ///
 /// `live` is whether this pie was *opened* (see [`PiePlacement`]) rather than
@@ -1793,16 +1804,16 @@ fn apply_pie_selection(
 }
 
 /// A one-shot marker: a pie that has just descended and must re-centre itself on
-/// the current pointer. Consumed by [`recenter_pie_on_pointer`].
+/// the current pointer. Consumed by `recenter_pie_on_pointer`.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct PieRecenterOnPointer;
+pub struct PieRecenterOnPointer;
 
 /// Move a just-descended pie's requested centre to the current pointer, so the
 /// sub-pie opens *around* the pointer rather than off to one side of it.
 ///
 /// The inverse of the reference's pointer warp, and the only half of it available
 /// on a platform that will not move the cursor. It updates `requested`;
-/// [`place_pie_menu`] repositions to it every frame, so the menu slides its centre
+/// `place_pie_menu` repositions to it every frame, so the menu slides its centre
 /// under the pointer. `drive_pie_cursor` then reads the cursor as ~centre next
 /// frame, and the dead zone means nothing is selected until the pointer moves —
 /// exactly the fresh state a newly opened pie has.
@@ -1925,10 +1936,10 @@ fn drive_pie_material(
 // ---------------------------------------------------------------------------
 
 /// The condition naming a sat-down avatar, for the fixture's autohide chain.
-pub(crate) const FIXTURE_SITTING: &str = "sitting";
+pub const FIXTURE_SITTING: &str = "sitting";
 
 /// The condition naming an object the avatar may edit.
-pub(crate) const FIXTURE_CAN_EDIT: &str = "can-edit";
+pub const FIXTURE_CAN_EDIT: &str = "can-edit";
 
 /// The fixture's nested sub-pie, two levels from the root.
 static FIXTURE_LAND_PIE: PieMenuDef = PieMenuDef {
@@ -1976,7 +1987,7 @@ static FIXTURE_MANAGE_PIE: PieMenuDef = PieMenuDef {
 
 /// The fixture pie the registry and the gallery show. See the section comment
 /// above for why each entry is here.
-pub(crate) static FIXTURE_PIE: PieMenuDef = PieMenuDef {
+pub static FIXTURE_PIE: PieMenuDef = PieMenuDef {
     label: "Object",
     entries: &[
         PieEntry {
@@ -2046,7 +2057,7 @@ const PIE_TARGET_BACKGROUND: Color = Color::srgba(0.36, 0.72, 0.98, 0.10);
 const PIE_TARGET_BORDER: Color = Color::srgb(0.36, 0.72, 0.98);
 
 /// Spawn a surface that opens a **live** pie where you right-click it — the pie's
-/// entry in [`crate::ui_element::ELEMENTS`].
+/// entry in `ui_element::ELEMENTS`.
 ///
 /// A pie is not registered *as itself*, and that is deliberate. Almost everything
 /// interesting about it is in the gesture — the placement near an edge, the dead
@@ -2061,11 +2072,7 @@ const PIE_TARGET_BORDER: Color = Color::srgb(0.36, 0.72, 0.98);
 /// It works in the gallery and in the viewer for the same reason every other
 /// element does: it reaches for no session. A right-click writes an
 /// [`OpenPieMenu`], and who acts on that is the app's business.
-pub(crate) fn spawn_radial_menu_target(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_radial_menu_target(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     commands
         .spawn((
             Node {
@@ -2158,12 +2165,12 @@ mod tests {
         PieGeometry, PieMenu, PieMenuDef, PiePlacement, SlotOutcome, addresses, clamp_centre,
         pack_slot_states, pick, register_pie_layout, resolve_slots, ui_offset,
     };
-    use crate::ui::UiDirection;
-    use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
     use crate::ui_test::{LayoutTest, drain_actions, find_by_name, layout_violations, settle};
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use pretty_assertions::assert_eq;
+    use sl_viewer_ui_core::ui::UiDirection;
+    use sl_viewer_ui_core::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -2699,7 +2706,7 @@ mod tests {
         crate::ui_test::enable_action_recording(&mut app);
         app.add_systems(
             Startup,
-            (|mut commands: Commands, root: Res<crate::ui::UiRoot>| {
+            (|mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                 super::spawn_pie_menu(
                     &mut commands,
                     root.0,
@@ -2709,7 +2716,7 @@ mod tests {
                     PieConditions::default(),
                 );
             })
-            .after(crate::ui::UiScaffoldSystems::SpawnRoot),
+            .after(sl_viewer_ui_core::ui::UiScaffoldSystems::SpawnRoot),
         );
         settle(&mut app);
         Ok(app)
@@ -2731,7 +2738,7 @@ mod tests {
         app.init_resource::<ButtonInput<MouseButton>>()
             .add_systems(
                 Startup,
-                (|mut commands: Commands, root: Res<crate::ui::UiRoot>| {
+                (|mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                     let pie = super::spawn_pie_menu(
                         &mut commands,
                         root.0,
@@ -2746,7 +2753,7 @@ mod tests {
                         settled_at: Some(Vec2::ZERO),
                     });
                 })
-                .after(crate::ui::UiScaffoldSystems::SpawnRoot),
+                .after(sl_viewer_ui_core::ui::UiScaffoldSystems::SpawnRoot),
             )
             .add_systems(
                 Update,
@@ -2758,7 +2765,7 @@ mod tests {
 
     /// Point the pie at `point` and release the mouse, as a click on that slice
     /// does: the highlight is what the pointer would have set, the release is what
-    /// [`commit_pie_selection`] acts on.
+    /// `commit_pie_selection` acts on.
     fn commit_select(app: &mut App, point: Compass) -> Result<(), TestError> {
         let pie = find_by_name(app, "pie-menu").ok_or("the pie did not spawn")?;
         {
@@ -3209,7 +3216,7 @@ mod tests {
                 app.add_message::<UiAction>();
                 app.add_systems(
                     Startup,
-                    (move |mut commands: Commands, root: Res<crate::ui::UiRoot>| {
+                    (move |mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                         super::spawn_pie_menu(
                             &mut commands,
                             root.0,
@@ -3219,7 +3226,7 @@ mod tests {
                             PieConditions::default(),
                         );
                     })
-                    .after(crate::ui::UiScaffoldSystems::SpawnRoot),
+                    .after(sl_viewer_ui_core::ui::UiScaffoldSystems::SpawnRoot),
                 );
                 settle(&mut app);
                 let violations = layout_violations(&mut app, test);
@@ -3279,7 +3286,7 @@ mod tests {
         app.add_message::<UiAction>();
         app.add_systems(
             Startup,
-            (move |mut commands: Commands, root: Res<crate::ui::UiRoot>| {
+            (move |mut commands: Commands, root: Res<sl_viewer_ui_core::ui::UiRoot>| {
                 super::spawn_pie_menu(
                     &mut commands,
                     root.0,
@@ -3289,7 +3296,7 @@ mod tests {
                     PieConditions::default(),
                 );
             })
-            .after(crate::ui::UiScaffoldSystems::SpawnRoot),
+            .after(sl_viewer_ui_core::ui::UiScaffoldSystems::SpawnRoot),
         );
         settle(&mut app);
         settle(&mut app);

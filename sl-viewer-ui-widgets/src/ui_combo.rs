@@ -7,7 +7,7 @@
 //!
 //! [`ComboSelection`] on the anchor button carries the selected index and is the
 //! only thing that decides the selection; the closed value text is derived from
-//! it by [`apply_combo_selection`] (keyed off `Changed<ComboSelection>`), so an
+//! it by `apply_combo_selection` (keyed off `Changed<ComboSelection>`), so an
 //! external write — a panel syncing the combo to its own state — drives the same
 //! visual path as a user pick, exactly as the [radio widget](crate::ui_radio)
 //! does. A **user** pick additionally emits a [`ComboChanged`] message
@@ -20,7 +20,7 @@
 //! list spawned as a child of the anchor, lifted above the floaters with
 //! [`GlobalZIndex`] and escaping any clipping ancestor with `OverrideClip`, its
 //! rows consuming their press so an outside press falls through to the root
-//! dismiss observer ([`dismiss_combos_on_press`]).
+//! dismiss observer (`dismiss_combos_on_press`).
 //!
 //! Reference (Firestorm, read-only): `llcombobox`, `llfloater` popup handling.
 
@@ -30,9 +30,9 @@ use bevy::ui_widgets::Button;
 use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, PopoverSide};
 use bevy_flair::style::components::ClassList;
 
-use crate::i18n::Translated;
-use crate::ui::{UiRoot, UiScaffoldSystems, row};
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, row};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The combo popover's z-index — above the floaters, just below the menu popups
 /// ([`crate::menu`]'s `10_000`) so a menu opened over a combo still wins.
@@ -77,21 +77,21 @@ const VALUE_CLASS: &str = "sk-build-value";
 /// Everything a combo is built from — a struct so the knobs read at the call
 /// site, mirroring [`crate::ui_radio::RadioSpec`].
 #[derive(Debug, Clone)]
-pub(crate) struct ComboSpec<'labels> {
+pub struct ComboSpec<'labels> {
     /// The element id the combo reports in [`ComboChanged`] and the prefix of its
     /// nodes' [`Name`]s.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The option labels, in order; their count is the number of options.
-    pub(crate) labels: &'labels [String],
+    pub labels: &'labels [String],
     /// The initially-selected option, clamped into range.
-    pub(crate) active: usize,
+    pub active: usize,
     /// The combo's focus stop.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// The label font size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// Whether [`labels`](Self::labels) are Fluent **keys** to translate (real
     /// UI) rather than literal display text (the gallery / tests).
-    pub(crate) translate_labels: bool,
+    pub translate_labels: bool,
 }
 
 impl ComboSpec<'_> {
@@ -104,11 +104,11 @@ impl ComboSpec<'_> {
 /// A combo's state: which option is selected. The **single source of truth**;
 /// the closed value text is derived from it.
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ComboSelection {
+pub struct ComboSelection {
     /// The element id this combo reports in [`ComboChanged`].
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The index of the selected option.
-    pub(crate) active: usize,
+    pub active: usize,
 }
 
 /// The combo's option labels, held on the anchor so the popover can be built (and
@@ -123,7 +123,7 @@ struct ComboOptions {
     font_size: f32,
 }
 
-/// The anchor button's value-text node, rewritten by [`apply_combo_selection`].
+/// The anchor button's value-text node, rewritten by `apply_combo_selection`.
 #[derive(Component, Debug, Clone, Copy)]
 struct ComboValueText;
 
@@ -145,38 +145,38 @@ struct ComboOption {
 
 /// Ask a combo to replace its option labels in place — for a list that
 /// re-enumerates while visible (the preferences audio tab's output-device
-/// list). Applied by [`apply_set_combo_options`]: an equal list is a no-op,
+/// list). Applied by `apply_set_combo_options`: an equal list is a no-op,
 /// the closed value text re-resolves, an out-of-range selection clamps, and
 /// the update is **skipped while that combo's popover is open** so the rows
 /// are never yanked out from under the pointer — the sender's next refresh
 /// lands after it closes. The anchor itself is never respawned (the
-/// build-once rule); the popover always rebuilds from [`ComboOptions`] on
+/// build-once rule); the popover always rebuilds from `ComboOptions` on
 /// open, so the next open shows the new list.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct SetComboOptions {
+pub struct SetComboOptions {
     /// The anchor combo entity.
-    pub(crate) combo: Entity,
+    pub combo: Entity,
     /// The new option labels, in order (Fluent keys where the combo
     /// translates; a key no bundle defines renders as itself).
-    pub(crate) labels: Vec<String>,
+    pub labels: Vec<String>,
 }
 
 /// Emitted when the **user** picks a different option (not on a programmatic
 /// [`ComboSelection`] write) — the consumer's signal that a choice was made.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct ComboChanged {
+pub struct ComboChanged {
     /// The anchor combo entity, so a consumer that hosts several combos tells
     /// them apart (and can read its [`ComboSelection`] for the element id).
-    pub(crate) combo: Entity,
+    pub combo: Entity,
     /// The newly-selected option index.
-    pub(crate) active: usize,
+    pub active: usize,
 }
 
 /// The plugin the viewer (and the gallery) adds for the combo widget: the
 /// selection reconcile, the [`ComboChanged`] message, and the root dismiss
 /// observer. A no-op where nothing matches, so adding it is always safe.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ComboWidgetPlugin;
+pub struct ComboWidgetPlugin;
 
 impl Plugin for ComboWidgetPlugin {
     /// Register the reconcile system, the change message, and the outside-press
@@ -184,8 +184,8 @@ impl Plugin for ComboWidgetPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ComboChanged>()
             .add_message::<SetComboOptions>()
-            .init_resource::<crate::hud_pick::UiPointerClaim>()
-            .add_systems(First, crate::hud_pick::reset_ui_pointer_claim)
+            .init_resource::<sl_viewer_ui_core::ui::UiPointerClaim>()
+            .add_systems(First, sl_viewer_ui_core::ui::reset_ui_pointer_claim)
             .add_systems(
                 Update,
                 (
@@ -206,7 +206,7 @@ impl Plugin for ComboWidgetPlugin {
 /// list of options. Returns the anchor button entity, which carries
 /// [`ComboSelection`] (the source of truth a consumer reads / writes) and a
 /// [`ComboChanged`] on each user pick.
-pub(crate) fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) -> Entity {
+pub fn spawn_combo(commands: &mut Commands, parent: Entity, spec: &ComboSpec) -> Entity {
     let active = spec.resolved_active();
     let anchor = commands
         .spawn((
@@ -287,7 +287,7 @@ fn toggle_combo_popover(
     anchors: Query<&ComboOptions>,
     disabled: Query<(), With<bevy::ui::InteractionDisabled>>,
     popovers: Query<(Entity, &ComboPopover)>,
-    mut claim: ResMut<crate::hud_pick::UiPointerClaim>,
+    mut claim: ResMut<sl_viewer_ui_core::ui::UiPointerClaim>,
     mut commands: Commands,
 ) {
     if press.button != PointerButton::Primary {
@@ -444,7 +444,7 @@ fn select_combo_option(
     mut combos: Query<&mut ComboSelection>,
     popovers: Query<(Entity, &ComboPopover)>,
     mut changed: MessageWriter<ComboChanged>,
-    mut claim: ResMut<crate::hud_pick::UiPointerClaim>,
+    mut claim: ResMut<sl_viewer_ui_core::ui::UiPointerClaim>,
     mut commands: Commands,
 ) {
     if press.button != PointerButton::Primary {
@@ -474,9 +474,9 @@ fn select_combo_option(
     }
 }
 
-/// Apply [`SetComboOptions`]: replace the anchor's [`ComboOptions`] labels in
+/// Apply [`SetComboOptions`]: replace the anchor's `ComboOptions` labels in
 /// place (see the message doc for the skip rules), clamping the selection and
-/// touching it so [`apply_combo_selection`] re-resolves the closed value text
+/// touching it so `apply_combo_selection` re-resolves the closed value text
 /// against the new labels the same frame.
 fn apply_set_combo_options(
     mut events: MessageReader<SetComboOptions>,
@@ -591,10 +591,10 @@ fn dismiss_combos_on_press(
 }
 
 /// Gallery element: a combo with three literal options, the middle selected.
-pub(crate) fn spawn_combo_element(
+pub fn spawn_combo_element(
     commands: &mut Commands,
     parent: Entity,
-    cx: crate::ui_element::ElementCx,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
 ) -> Entity {
     let labels: Vec<String> = ["Low", "Medium", "High"]
         .iter()

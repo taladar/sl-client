@@ -8496,7 +8496,6 @@ dependencies = [
  "fs-err",
  "image",
  "jiff",
- "parley",
  "parry3d",
  "pretty_assertions",
  "reqwest 0.12.28",
@@ -8527,6 +8526,7 @@ dependencies = [
  "sl-viewer-settings",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -9074,6 +9074,22 @@ dependencies = [
  "sl-viewer-settings",
  "tracing",
  "unic-langid",
+]
+
+[[package]]
+name = "sl-viewer-ui-widgets"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "parley",
+ "pretty_assertions",
+ "sl-emoji",
+ "sl-settings",
+ "sl-viewer-settings",
+ "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+ "tracing",
 ]
 
 [[package]]

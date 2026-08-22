@@ -21,22 +21,22 @@
 //! thing that decides selection. Everything visible is derived from it — the
 //! per-item [`Checked`] markers (which the group's own arrow-key handler reads
 //! to find the current option) and the `◉` / `○` indicator glyphs — so nothing
-//! can drift. [`on_radio_value_change`] (an observer per group, mirroring
+//! can drift. `on_radio_value_change` (an observer per group, mirroring
 //! [`crate::ui_tab`]'s strip) is the only writer of `active` from a click or
-//! arrow key, and [`apply_radio_selection`] is the only writer of the derived
+//! arrow key, and `apply_radio_selection` is the only writer of the derived
 //! visuals. Because the reconcile keys off `Changed<RadioSelection>`, a consumer
 //! that sets `active` from **outside** — the Build Tools floater syncing its
-//! [`EditTool`](crate::edit_tool) — drives the exact same visual path with no
+//! `EditTool` — drives the exact same visual path with no
 //! second mechanism.
 //!
 //! # Constructible without wiring
 //!
-//! Per the registry rule ([`crate::ui_element`]) the widget never reaches a
-//! session: it switches its own selection and emits a [`UiAction`] naming that a
+//! Per the registry rule (`ui_element`) the widget never reaches a
+//! session: it switches its own selection and emits a `UiAction` naming that a
 //! choice was made (the *which* is readable from [`RadioSelection::active`]). A
 //! consumer that must *do* something reacts to `Changed<RadioSelection>` and
 //! reads the index — it is not wired into the widget. Two gallery elements (one
-//! per [`RadioLayout`]) register it so [`crate::ui_test`] sweeps both layouts.
+//! per [`RadioLayout`]) register it so `ui_test` sweeps both layouts.
 //!
 //! Reference (Firestorm, read-only): `indra/llui/llradiogroup.{h,cpp}`
 //! (`LLRadioGroup`, `LLRadioCtrl`).
@@ -46,10 +46,10 @@ use bevy::prelude::*;
 use bevy::ui::Checked;
 use bevy::ui_widgets::{RadioButton, RadioGroup, ValueChange};
 
-use crate::i18n::Translated;
-use crate::ui::{column, row};
-use crate::ui_element::UiAction;
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui::{column, row};
+use sl_viewer_ui_core::ui_element::UiAction;
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The gap between adjacent options, in logical pixels.
 const GROUP_GAP: f32 = 8.0;
@@ -81,15 +81,15 @@ const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
 /// The action a group emits when the user picks a different option. A single
 /// verb — "a choice was made" — because the *which* is readable directly from
-/// [`RadioSelection::active`]; the [`UiAction`] exists so the harness can assert
+/// [`RadioSelection::active`]; the `UiAction` exists so the harness can assert
 /// the change without a consumer behind it.
-pub(crate) const RADIO_SELECTED_ACTION: &str = "select-radio";
+pub const RADIO_SELECTED_ACTION: &str = "select-radio";
 
 /// Which axis a radio group's options flow along, named by axis rather than by
 /// side so the choice is independent of reading direction — see the [module
 /// documentation](self).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum RadioLayout {
+pub enum RadioLayout {
     /// The options flow along the inline (text) axis — a horizontal row that
     /// wraps when it outgrows its space and mirrors under RTL for free.
     Row,
@@ -99,8 +99,8 @@ pub(crate) enum RadioLayout {
 }
 
 impl RadioLayout {
-    /// The container node the options flow in: a wrapping [`crate::ui::row`] for
-    /// [`Row`](Self::Row), a [`crate::ui::column`] for [`Column`](Self::Column).
+    /// The container node the options flow in: a wrapping `ui::row` for
+    /// [`Row`](Self::Row), a `ui::column` for [`Column`](Self::Column).
     fn container_node(self) -> Node {
         match self {
             Self::Row => Node {
@@ -118,26 +118,26 @@ impl RadioLayout {
 /// Everything a radio group is built from — a struct rather than a positional
 /// call so the knobs read at the call site.
 #[derive(Debug, Clone)]
-pub(crate) struct RadioSpec<'labels> {
-    /// The element id the group reports in its [`UiAction`], and the prefix of
+pub struct RadioSpec<'labels> {
+    /// The element id the group reports in its `UiAction`, and the prefix of
     /// its nodes' [`Name`]s.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The option labels, in order; their count is the number of options.
-    pub(crate) labels: &'labels [String],
+    pub labels: &'labels [String],
     /// The initially-selected option, clamped into range.
-    pub(crate) active: usize,
+    pub active: usize,
     /// The group's single focus stop (the group, not the options) — pick it to
     /// slot the group into the surrounding tab order.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// The labels' font size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// Which axis the options flow along.
-    pub(crate) layout: RadioLayout,
+    pub layout: RadioLayout,
     /// Whether [`labels`](Self::labels) are Fluent **keys** to translate
     /// (re-resolved on locale change / bundle load) rather than literal display
     /// text. Use it for real UI; `false` for the gallery and tests, whose labels
     /// are fixed sample text.
-    pub(crate) translate_labels: bool,
+    pub translate_labels: bool,
 }
 
 impl RadioSpec<'_> {
@@ -165,27 +165,27 @@ impl RadioSpec<'_> {
 /// truth** — the [`Checked`] flags and the indicator glyphs are derived from it,
 /// so nothing can drift.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RadioSelection {
-    /// The element id this group reports in its [`UiAction`].
-    pub(crate) element: &'static str,
+pub struct RadioSelection {
+    /// The element id this group reports in its `UiAction`.
+    pub element: &'static str,
     /// The index of the selected option, into the group's options in spawn
     /// order.
-    pub(crate) active: usize,
+    pub active: usize,
 }
 
 /// A radio option: which group it belongs to and its index within it. Carried so
 /// the selection observer and the reconcile can find every option of a group and
 /// place it against the group's [`active`](RadioSelection::active) index.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RadioItem {
+pub struct RadioItem {
     /// The group ([`RadioGroup`]) this option belongs to.
-    pub(crate) group: Entity,
+    pub group: Entity,
     /// This option's index within the group.
-    pub(crate) index: usize,
+    pub index: usize,
 }
 
 /// An option's indicator glyph node, naming its group and index so
-/// [`apply_radio_selection`] can swap the glyph and colour when the selection
+/// `apply_radio_selection` can swap the glyph and colour when the selection
 /// changes.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
 struct RadioIndicator {
@@ -201,7 +201,7 @@ struct RadioIndicator {
 ///
 /// A no-op where it has nothing to act on, so adding it is always safe.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct RadioWidgetPlugin;
+pub struct RadioWidgetPlugin;
 
 impl Plugin for RadioWidgetPlugin {
     fn build(&self, app: &mut App) {
@@ -213,7 +213,7 @@ impl Plugin for RadioWidgetPlugin {
 }
 
 /// Spawn a radio group under `parent`: a single-select set of labelled options
-/// with the filled-dot indicator, keyboard selection, and a [`UiAction`] on
+/// with the filled-dot indicator, keyboard selection, and a `UiAction` on
 /// change. Returns the [`RadioGroup`] container entity.
 ///
 /// [`RadioSpec::active`] is clamped into range, so a caller cannot spawn a group
@@ -223,11 +223,7 @@ impl Plugin for RadioWidgetPlugin {
 /// returned — each carries [`RadioItem`], so a consumer that needs one finds it
 /// by that component (the tab widget's [`crate::ui_tab::TabContainerHandle`]
 /// convention: no handle field without a runtime reader).
-pub(crate) fn spawn_radio_group(
-    commands: &mut Commands,
-    parent: Entity,
-    spec: &RadioSpec,
-) -> Entity {
+pub fn spawn_radio_group(commands: &mut Commands, parent: Entity, spec: &RadioSpec) -> Entity {
     let active = spec.resolved_active();
     let group = commands
         .spawn((
@@ -278,7 +274,7 @@ fn spawn_radio_item(
         .id();
     // The initial `Checked` is set here — the group's arrow-key handler reads it
     // to find the current option, and setting it at spawn avoids a one-frame
-    // unselected flash before [`apply_radio_selection`] first runs.
+    // unselected flash before `apply_radio_selection` first runs.
     if active {
         commands.entity(item).insert(Checked);
     }
@@ -320,7 +316,7 @@ fn spawn_radio_item(
 
 /// The group's selection observer: on a [`RadioGroup`] value change — a click or
 /// an arrow key — move [`RadioSelection::active`] to the picked option and emit
-/// the [`UiAction`]. The visuals are left to [`apply_radio_selection`], which
+/// the `UiAction`. The visuals are left to `apply_radio_selection`, which
 /// picks up the `Changed<RadioSelection>` this write triggers.
 ///
 /// A no-op selection (the active option re-picked) returns before emitting, so
@@ -412,7 +408,7 @@ fn apply_radio_selection(
 /// Grey a disabled group's indicator glyphs (and restore them when enabled) —
 /// the visual half of the disabled state, run every frame so it tracks both the
 /// group's disabled flag and its selection. Supersedes
-/// [`apply_radio_selection`]'s indicator colouring.
+/// `apply_radio_selection`'s indicator colouring.
 fn reflect_radio_disabled(
     groups: Query<(&RadioSelection, Has<bevy::ui::InteractionDisabled>)>,
     mut indicators: Query<(&RadioIndicator, &mut TextColor)>,
@@ -435,7 +431,7 @@ fn reflect_radio_disabled(
 }
 
 // ---------------------------------------------------------------------------
-// Gallery elements — one per layout, so `crate::ui_test` sweeps both axes across
+// Gallery elements — one per layout, so `ui_test` sweeps both axes across
 // every script, direction, scale and font size.
 // ---------------------------------------------------------------------------
 
@@ -450,7 +446,7 @@ const SAMPLE_LABELS: [&str; 3] = ["Move", "Rotate", "Stretch"];
 fn spawn_radio_element(
     commands: &mut Commands,
     parent: Entity,
-    cx: crate::ui_element::ElementCx,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
     layout: RadioLayout,
     element: &'static str,
 ) -> Entity {
@@ -471,19 +467,19 @@ fn spawn_radio_element(
 }
 
 /// Gallery element: a horizontal (inline-axis) radio group.
-pub(crate) fn spawn_radio_row(
+pub fn spawn_radio_row(
     commands: &mut Commands,
     parent: Entity,
-    cx: crate::ui_element::ElementCx,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
 ) -> Entity {
     spawn_radio_element(commands, parent, cx, RadioLayout::Row, "radio-group-row")
 }
 
 /// Gallery element: a vertical (block-axis) radio group.
-pub(crate) fn spawn_radio_column(
+pub fn spawn_radio_column(
     commands: &mut Commands,
     parent: Entity,
-    cx: crate::ui_element::ElementCx,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
 ) -> Entity {
     spawn_radio_element(
         commands,
@@ -504,7 +500,7 @@ mod tests {
     use super::{
         RadioItem, RadioLayout, RadioSelection, RadioSpec, RadioWidgetPlugin, spawn_radio_group,
     };
-    use crate::ui_element::UiAction;
+    use sl_viewer_ui_core::ui_element::UiAction;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -514,8 +510,8 @@ mod tests {
     #[derive(Resource, Debug, Clone, Copy)]
     struct TestRadio(Entity);
 
-    /// Every [`UiAction`] the group has emitted, copied out each frame before the
-    /// message buffer is cleared — the same trick [`crate::ui_test`] uses.
+    /// Every `UiAction` the group has emitted, copied out each frame before the
+    /// message buffer is cleared — the same trick `ui_test` uses.
     #[derive(Resource, Debug, Default)]
     struct Recorded(Vec<UiAction>);
 
@@ -535,7 +531,7 @@ mod tests {
         app
     }
 
-    /// Copy this frame's [`UiAction`]s into [`Recorded`] before the buffer clears.
+    /// Copy this frame's `UiAction`s into [`Recorded`] before the buffer clears.
     fn record_actions(mut actions: MessageReader<UiAction>, mut recorded: ResMut<Recorded>) {
         recorded.0.extend(actions.read().copied());
     }

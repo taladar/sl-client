@@ -1,6 +1,6 @@
 //! The two-way widget↔settings binding layer (`viewer-ui-settings-binding`): the
 //! mechanism that connects a headless `bevy_ui_widgets` control to a named
-//! setting in the persistent store ([`crate::settings`]), so a panel *declares*
+//! setting in the persistent store (`settings`), so a panel *declares*
 //! which setting a checkbox or slider edits instead of hand-wiring each one.
 //!
 //! This is our counterpart of the reference viewer's `control_name=` idiom —
@@ -13,11 +13,11 @@
 //! # The three directions of sync
 //!
 //! - **Read on build.** When a bound widget is spawned (or the setting is first
-//!   registered), the [`sync_bound_checkboxes`] / [`sync_bound_sliders`] passes
+//!   registered), the `sync_bound_checkboxes` / `sync_bound_sliders` passes
 //!   push the setting's current effective value into the widget — the checkbox
 //!   shows `Checked`, the slider's thumb sits at the stored value.
 //! - **Write on change.** When the user toggles or drags, the widget emits a
-//!   [`ValueChange`]; [`on_bound_checkbox_change`] / [`on_bound_slider_change`]
+//!   [`ValueChange`]; `on_bound_checkbox_change` / `on_bound_slider_change`
 //!   write the new value to the binding's [`Scope`] and, so there is no one-frame
 //!   lag, immediately reflect the widget's own new state.
 //! - **React to external change.** Anything else that moves the store — a "reset
@@ -71,13 +71,13 @@ use bevy::ui_widgets::{
 use sl_settings::{Scope, SettingKind, SettingValue};
 use tracing::warn;
 
-use crate::settings::ViewerSettings;
-use crate::ui::{
-    LogicalInset, LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
-};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
 use crate::ui_combo::{ComboChanged, ComboSelection};
-use crate::ui_font::UiFont;
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::ui::{
+    LogicalInset, LogicalMargin, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
+};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// Names a setting a widget edits, and the override [`Scope`] a user edit is
 /// written to.
@@ -88,8 +88,8 @@ use crate::ui_font::UiFont;
 /// default); the scope only chooses which layer a write lands in — [`Global`](Scope::Global)
 /// for a machine-wide preference, [`Account`](Scope::Account) for a per-avatar one.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct SettingBinding {
-    /// The name of the setting in the [`crate::settings`] store.
+pub struct SettingBinding {
+    /// The name of the setting in the `settings` store.
     name: String,
     /// The override layer a user edit is written to.
     scope: Scope,
@@ -97,7 +97,7 @@ pub(crate) struct SettingBinding {
 
 impl SettingBinding {
     /// Bind to a machine-wide ([`Global`](Scope::Global)) setting.
-    pub(crate) fn global(name: impl Into<String>) -> Self {
+    pub fn global(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             scope: Scope::Global,
@@ -105,7 +105,7 @@ impl SettingBinding {
     }
 
     /// Bind to a per-avatar ([`Account`](Scope::Account)) setting.
-    pub(crate) fn account(name: impl Into<String>) -> Self {
+    pub fn account(name: impl Into<String>) -> Self {
         Self {
             name: name.into(),
             scope: Scope::Account,
@@ -113,12 +113,14 @@ impl SettingBinding {
     }
 
     /// The name of the bound setting.
-    pub(crate) fn name(&self) -> &str {
+    #[must_use]
+    pub fn name(&self) -> &str {
         &self.name
     }
 
     /// The override scope a user edit is written to.
-    pub(crate) const fn scope(&self) -> Scope {
+    #[must_use]
+    pub const fn scope(&self) -> Scope {
         self.scope
     }
 }
@@ -130,12 +132,13 @@ impl SettingBinding {
 /// Attach it beside a [`SettingBinding`] on the combo's anchor entity (the one
 /// carrying [`ComboSelection`]); its length must equal the combo's option count.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct ComboBindingValues(pub(crate) Vec<SettingValue>);
+pub struct ComboBindingValues(pub Vec<SettingValue>);
 
 /// The bundle for a checkbox bound to a boolean setting: the headless
 /// [`Checkbox`] widget plus its [`SettingBinding`]. The caller adds the node's
 /// styling, a [`TabIndex`] and any label.
-pub(crate) fn bound_checkbox(binding: SettingBinding) -> impl Bundle {
+#[must_use]
+pub fn bound_checkbox(binding: SettingBinding) -> impl Bundle {
     (Checkbox, binding)
 }
 
@@ -143,11 +146,8 @@ pub(crate) fn bound_checkbox(binding: SettingBinding) -> impl Bundle {
 /// widget with its range and step, seeded at the range start, plus its
 /// [`SettingBinding`]. The initial value is corrected to the stored one on the
 /// first sync pass; the caller adds the track/thumb nodes and a [`TabIndex`].
-pub(crate) fn bound_slider(
-    binding: SettingBinding,
-    range: SliderRange,
-    step: SliderStep,
-) -> impl Bundle {
+#[must_use]
+pub fn bound_slider(binding: SettingBinding, range: SliderRange, step: SliderStep) -> impl Bundle {
     (
         Slider::default(),
         SliderValue(range.start()),
@@ -164,7 +164,7 @@ pub(crate) fn bound_slider(
 /// e.g. the gallery) by early-returning, so adding the plugin is always safe. It
 /// also owns the `F7` demo panel, the live proof of the mechanism.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SettingsBindingPlugin;
+pub struct SettingsBindingPlugin;
 
 impl Plugin for SettingsBindingPlugin {
     fn build(&self, app: &mut App) {
@@ -352,7 +352,7 @@ fn write_bound_text_edits(
 ///
 /// A pick that lands on the setting's **declared default** is written as a
 /// [`ViewerSettings::reset`] instead of an override: the declared default is
-/// the active skin's value ([`crate::skin_colors`]), and pinning it as an
+/// the active skin's value (`skin_colors`), and pinning it as an
 /// override would freeze the colour across a later skin switch.
 fn write_bound_swatch_picks(
     mut picks: MessageReader<ColorPicked>,
@@ -409,7 +409,7 @@ fn sync_bound_checkboxes(
 
 /// Keep every bound slider's [`SliderValue`] equal to its setting's effective
 /// value (an integer setting widened to `f32`, clamped to the range). Idempotent,
-/// like [`sync_bound_checkboxes`]; [`SliderValue`] is an immutable component, so a
+/// like `sync_bound_checkboxes`; [`SliderValue`] is an immutable component, so a
 /// change is applied by re-inserting it.
 fn sync_bound_sliders(
     settings: Option<Res<ViewerSettings>>,
@@ -641,7 +641,7 @@ fn f32_to_u32(value: f32) -> u32 {
 // The `F7` demo panel: a live proof of the mechanism (in the pattern of the
 // `F5` scaffold and `F6` i18n demos). A checkbox and a slider are each bound to
 // a runtime-only setting; a "Reset" button drives them from outside to show the
-// react-to-external-change path. Modelled on `crate::ui`'s `setup_ui_demo`.
+// react-to-external-change path. Modelled on `ui`'s `setup_ui_demo`.
 // ---------------------------------------------------------------------------
 
 /// The key that toggles the demo panel on and off.
@@ -713,7 +713,7 @@ const DEMO_BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 struct SettingsBindingDemoVisible(bool);
 
 impl SettingsBindingDemoVisible {
-    /// Seed from [`DEMO_ENV`]: any non-empty value starts the panel shown.
+    /// Seed from `DEMO_ENV`: any non-empty value starts the panel shown.
     fn from_env() -> Self {
         Self(std::env::var_os(DEMO_ENV).is_some_and(|value| !value.is_empty()))
     }
@@ -915,7 +915,7 @@ fn reset_demo_settings(_activate: On<Activate>, settings: Option<ResMut<ViewerSe
     settings.reset(Scope::Account, DEMO_LEVEL_SETTING);
 }
 
-/// Toggle the demo panel when [`DEMO_TOGGLE_KEY`] is pressed.
+/// Toggle the demo panel when `DEMO_TOGGLE_KEY` is pressed.
 fn toggle_settings_binding_demo(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut visible: ResMut<SettingsBindingDemoVisible>,
@@ -926,7 +926,7 @@ fn toggle_settings_binding_demo(
 }
 
 /// Drive the demo panel's [`UiPanelShown`] from [`SettingsBindingDemoVisible`],
-/// leaving [`crate::ui::apply_panel_visibility`] to do the hiding.
+/// leaving `ui::apply_panel_visibility` to do the hiding.
 fn apply_settings_binding_demo_visibility(
     visible: Res<SettingsBindingDemoVisible>,
     mut panels: Query<&mut UiPanelShown, With<SettingsBindingDemoRoot>>,
@@ -1032,9 +1032,9 @@ mod tests {
         sync_bound_combos, sync_bound_sliders, sync_bound_text_inputs, write_bound_combo_changes,
         write_bound_swatch_picks, write_bound_text_edits,
     };
-    use crate::settings::ViewerSettings;
     use crate::ui_color_picker::{ColorPicked, ColorSwatchValue};
     use crate::ui_combo::{ComboChanged, ComboSelection};
+    use sl_viewer_settings::ViewerSettings;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.

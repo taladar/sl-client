@@ -13,21 +13,21 @@
 //! placeholder and glyph, and returns a [`SearchFieldHandle`] naming the box and
 //! the inner field.
 //!
-//! The two migrated consumers are [`crate::menu_search`] (the menu-bar filter) and
-//! [`crate::inventory`] (the inventory filter); each spawns the widget, marks or
+//! The two migrated consumers are `menu_search` (the menu-bar filter) and
+//! `inventory` (the inventory filter); each spawns the widget, marks or
 //! stores the returned field, and reacts to its text — the widget owns the input
 //! chrome, the consumer owns what the term *means*.
 //!
 //! # Constructible without wiring
 //!
-//! Per the registry rule ([`crate::ui_element`]): the field holds and edits its
+//! Per the registry rule (`ui_element`): the field holds and edits its
 //! own text and reaches no session. A consumer reads the term via
 //! [`EditableText::value`] / `Changed<EditableText>` and does its own filtering;
-//! nothing here emits a [`crate::ui_element::UiAction`]. The clear button, the
+//! nothing here emits a `ui_element::UiAction`. The clear button, the
 //! placeholder and `Escape`-to-clear are the widget's, driven by
 //! [`SearchFieldPlugin`]'s systems off the field's own value.
 //!
-//! Direction-neutral by construction: the box is a [`crate::ui::row`], so the
+//! Direction-neutral by construction: the box is a `ui::row`, so the
 //! leading glyph and the trailing clear button swap ends under RTL with no code
 //! here saying so (convention 1).
 //!
@@ -39,10 +39,10 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy_flair::style::components::ClassList;
 
-use crate::ui::row;
-use crate::ui_element::TextMayClip;
-use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use sl_viewer_ui_core::ui::row;
+use sl_viewer_ui_core::ui_element::TextMayClip;
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The skin class on the search box (the bordered container), so a skin can give
 /// it the same control surface as the other editable fields.
@@ -106,20 +106,20 @@ const MUTED_COLOR: Color = Color::srgb(0.55, 0.60, 0.68);
 /// generic systems (the clear-on-`Escape`) can find a *search* field among all
 /// editable fields, and a consumer can tell the widget's field from any other.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct SearchInputField;
+pub struct SearchInputField;
 
 /// The clear (`×`) button, naming the field it clears. Shown by
-/// [`toggle_search_clear`] only while that field holds a term.
+/// `toggle_search_clear` only while that field holds a term.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct SearchClearButton {
+pub struct SearchClearButton {
     /// The field this button clears.
     field: Entity,
 }
 
 /// The placeholder text, naming the field it prompts for. Shown by
-/// [`toggle_search_placeholder`] only while that field is empty.
+/// `toggle_search_placeholder` only while that field is empty.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct SearchPlaceholder {
+pub struct SearchPlaceholder {
     /// The field this placeholder belongs to.
     field: Entity,
 }
@@ -127,15 +127,15 @@ pub(crate) struct SearchPlaceholder {
 /// What [`spawn_search_field`] hands back: the box and the inner field, so a
 /// consumer can parent siblings to the box, and mark / store / read the field.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SearchFieldHandle {
+pub struct SearchFieldHandle {
     /// The bordered container — the search *box*.
-    pub(crate) container: Entity,
+    pub container: Entity,
     /// The inner [`EditableText`], whose value is the search term.
-    pub(crate) field: Entity,
+    pub field: Entity,
     /// The placeholder text node, when the spec asked for one — exposed so a
-    /// consumer can bind it to a Fluent key ([`crate::i18n::Translated`]); the
+    /// consumer can bind it to a Fluent key (`i18n::Translated`); the
     /// show / hide toggling only touches its `Node`, so the two coexist.
-    pub(crate) placeholder: Option<Entity>,
+    pub placeholder: Option<Entity>,
 }
 
 /// Everything a search field is built from — a struct rather than a positional
@@ -143,26 +143,27 @@ pub(crate) struct SearchFieldHandle {
 /// [`TextInputSpec`]). Build one with [`SearchFieldSpec::new`] and override with
 /// struct-update syntax.
 #[derive(Debug, Clone)]
-pub(crate) struct SearchFieldSpec {
+pub struct SearchFieldSpec {
     /// The prefix of the widget's node [`Name`]s, for the gallery and lookups.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The field's focus stop, for slotting it into the surrounding tab order.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// The field text's font size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// The box's least width, in logical pixels.
-    pub(crate) min_width: f32,
+    pub min_width: f32,
     /// The prompt shown while the field is empty, or empty for none.
-    pub(crate) placeholder: String,
+    pub placeholder: String,
     /// Whether to draw the leading 🔍 glyph.
-    pub(crate) search_glyph: bool,
+    pub search_glyph: bool,
 }
 
 impl SearchFieldSpec {
     /// A spec for `element` with the module defaults: no placeholder, no glyph,
     /// the default size and least width. Override the rest with struct-update
     /// syntax.
-    pub(crate) const fn new(element: &'static str) -> Self {
+    #[must_use]
+    pub const fn new(element: &'static str) -> Self {
         Self {
             element,
             tab_index: 0,
@@ -177,12 +178,12 @@ impl SearchFieldSpec {
 /// Spawn a search field under `parent`, returning the box and inner field
 /// ([`SearchFieldHandle`]).
 ///
-/// The box is a bordered [`crate::ui::row`] holding an optional leading glyph, the
+/// The box is a bordered `ui::row` holding an optional leading glyph, the
 /// bare single-line field (which fills the middle and scrolls), and a trailing
 /// clear button — so the glyph and the button mirror ends under RTL for free. The
 /// field carries [`SearchInputField`]; the clear button and placeholder are driven
 /// by [`SearchFieldPlugin`] off the field's value.
-pub(crate) fn spawn_search_field(
+pub fn spawn_search_field(
     commands: &mut Commands,
     parent: Entity,
     spec: &SearchFieldSpec,
@@ -361,7 +362,7 @@ fn spawn_clear_button(
 /// Each system is a no-op where there are no search fields, so adding it is always
 /// safe — the viewer and the gallery both add it.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct SearchFieldPlugin;
+pub struct SearchFieldPlugin;
 
 impl Plugin for SearchFieldPlugin {
     fn build(&self, app: &mut App) {
@@ -440,17 +441,17 @@ fn clear_focused_search_on_escape(
 
 /// Spawn the gallery specimen: a search field with the leading glyph, so the box,
 /// the glyph and the (initially hidden) clear button are swept by
-/// [`crate::ui_test`] across every script, direction, scale and font size.
+/// `ui_test` across every script, direction, scale and font size.
 ///
 /// The placeholder is left off the specimen deliberately: it is an *absolute*
 /// overlay, which taffy folds into the slot's `content_size` in a way the
 /// content-overflow harness reads as an overflow even though the box is sized
 /// correctly and the overlay is clipped. Its behaviour is covered by this module's
 /// unit tests and by the two live consumers (menu / inventory) instead.
-pub(crate) fn spawn_search_specimen(
+pub fn spawn_search_specimen(
     commands: &mut Commands,
     parent: Entity,
-    cx: crate::ui_element::ElementCx,
+    cx: sl_viewer_ui_core::ui_element::ElementCx,
 ) -> Entity {
     spawn_search_field(
         commands,
@@ -471,8 +472,8 @@ mod tests {
     use bevy::text::EditableText;
     use pretty_assertions::assert_eq;
 
-    use crate::ui::{UiRoot, UiScaffoldSystems};
     use crate::ui_test::{LayoutTest, TestError, find_by_name, settle};
+    use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
 
     /// Build a layout-test app with the widget's systems and one search field
     /// (with a placeholder) spawned under the root, plus the keyboard resource the

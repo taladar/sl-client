@@ -14,11 +14,11 @@
 //!   text alignment, and whether the column is a **sort** key.
 //! - A **header row** derived from the columns ([`spawn_table`]), guaranteed
 //!   aligned with the body cells because both carry [`TableColumnCell`] and the
-//!   one [`sync_table_column_widths`] system writes the same width to each.
+//!   one `sync_table_column_widths` system writes the same width to each.
 //! - **Cells that clip + no-wrap** and reveal a **locale-aware ellipsis**
-//!   ([`crate::i18n::LocaleEllipsisMarker`], driven by [`crate::i18n`] exactly
+//!   (`i18n::LocaleEllipsisMarker`, driven by `i18n` exactly
 //!   like the tab widget's) when the value overflows the column.
-//! - **Virtualized, recycled rows** on top of [`crate::virtual_list`]: the
+//! - **Virtualized, recycled rows** on top of `virtual_list`: the
 //!   consumer builds a row's cells once ([`spawn_table_row`]) and binds them from
 //!   its own projection, exactly as the `populate_*` / `bind_*` pattern already
 //!   does.
@@ -40,10 +40,10 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use sl_settings::SettingValue;
 
-use crate::i18n::{LocaleEllipsisMarker, Translated};
-use crate::settings::ViewerSettings;
-use crate::ui_font::UiFont;
-use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
+use sl_viewer_settings::ViewerSettings;
+use sl_viewer_ui_core::i18n::{LocaleEllipsisMarker, Translated};
+use sl_viewer_ui_core::ui_font::UiFont;
+use sl_viewer_ui_core::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
 
 /// The smallest a resizable column may be dragged, in logical pixels — enough to
 /// keep its header legible.
@@ -76,7 +76,7 @@ const SORT_ASCENDING_GLYPH: &str = "\u{25B2}";
 /// descending (`▼`).
 const SORT_DESCENDING_GLYPH: &str = "\u{25BC}";
 
-/// The ellipsis shown before any locale bundle has resolved [`crate::i18n`]'s
+/// The ellipsis shown before any locale bundle has resolved `i18n`'s
 /// `ui-ellipsis` — the Latin single ellipsis, matching the tab widget's default.
 const FALLBACK_ELLIPSIS: &str = "\u{2026}";
 
@@ -86,13 +86,13 @@ const FALLBACK_ELLIPSIS: &str = "\u{2026}";
 
 /// How a column claims horizontal space.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum TableColumnWidth {
+pub enum TableColumnWidth {
     /// A flexible column that grows to fill the row's slack, sharing it in
     /// proportion to this `flex-grow` factor. Not drag-resizable (it *is* the
     /// slack); at least one column is usually flexible so the row fills its width.
     Flex(f32),
-    /// A fixed-width column, drag-resizable between [`MIN_COLUMN_WIDTH`] and
-    /// [`MAX_COLUMN_WIDTH`]. `default` is its width until a persisted or dragged
+    /// A fixed-width column, drag-resizable between `MIN_COLUMN_WIDTH` and
+    /// `MAX_COLUMN_WIDTH`. `default` is its width until a persisted or dragged
     /// value replaces it.
     Fixed {
         /// The column's initial pixel width.
@@ -102,7 +102,7 @@ pub(crate) enum TableColumnWidth {
 
 /// A cell value's horizontal alignment within its column.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum TableAlign {
+pub enum TableAlign {
     /// Leading edge (the common case: a name or subject), so the *start* of a
     /// long value shows and the *end* clips under the trailing ellipsis.
     Start,
@@ -126,7 +126,7 @@ impl TableAlign {
 
 /// What a column's header and body cells contain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TableColumnKind {
+pub enum TableColumnKind {
     /// The widget owns the cell: a clipped, no-wrap value with a locale ellipsis
     /// (the common case). Its header is the translated [`TableColumn::header_key`].
     Text,
@@ -142,71 +142,71 @@ pub(crate) enum TableColumnKind {
 /// One column of a [`TableSpec`] — its header, width, alignment, and whether it
 /// is a sort key. Const-constructible so a table's columns are a `static` array.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TableColumn {
+pub struct TableColumn {
     /// The Fluent key of the column's header label ([`TableColumnKind::Text`]
     /// only; ignored for a [`TableColumnKind::Custom`] column).
-    pub(crate) header_key: &'static str,
+    pub header_key: &'static str,
     /// A stable token identifying this column in the persisted sort / width
     /// strings, so persistence survives a later column reorder or rename.
-    pub(crate) token: &'static str,
+    pub token: &'static str,
     /// What the column's cells contain.
-    pub(crate) kind: TableColumnKind,
+    pub kind: TableColumnKind,
     /// How the column claims width.
-    pub(crate) width: TableColumnWidth,
+    pub width: TableColumnWidth,
     /// The cell value's alignment.
-    pub(crate) align: TableAlign,
+    pub align: TableAlign,
     /// Whether the widget's built-in sort orders by this column when clicked (only
     /// honoured while [`TableSpec::builtin_sort`] is set).
-    pub(crate) sortable: bool,
+    pub sortable: bool,
 }
 
 /// A default sort level for a fresh table, before any persisted order loads.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TableSortDefault {
+pub struct TableSortDefault {
     /// The column index this level orders by.
-    pub(crate) column: usize,
+    pub column: usize,
     /// Ascending (else descending).
-    pub(crate) ascending: bool,
+    pub ascending: bool,
 }
 
 /// The full specification of a table: its columns, geometry, palette, and where
 /// its sort order / column widths persist. A `static`, shared by every instance
 /// of the same table.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct TableSpec {
+pub struct TableSpec {
     /// A short element name, used in the debug `Name`s of the table's entities.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The columns, left to right.
-    pub(crate) columns: &'static [TableColumn],
+    pub columns: &'static [TableColumn],
     /// The row-selection mode the widget provides.
-    pub(crate) selection: TableSelectionMode,
+    pub selection: TableSelectionMode,
     /// The default (pre-persistence) sort levels, most-significant first. Empty
     /// leaves the table unsorted (the consumer's natural order).
-    pub(crate) default_sort: &'static [TableSortDefault],
+    pub default_sort: &'static [TableSortDefault],
     /// Whether the widget owns the sort: clickable sortable headers, `▲`/`▼`
     /// arrows, and (with [`sort_setting`](Self::sort_setting)) persistence. Set to
     /// `false` for a table whose consumer drives its own ordering — the People
     /// friends list keeps its bespoke 8-way sort, so the widget adds no sort
     /// observers or arrows and the consumer wires its own header clicks.
-    pub(crate) builtin_sort: bool,
+    pub builtin_sort: bool,
     /// The uniform row height, in logical pixels.
-    pub(crate) row_height: f32,
+    pub row_height: f32,
     /// The font size of header and cell text, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// The header label colour.
-    pub(crate) header_color: Color,
+    pub header_color: Color,
     /// The default cell value colour (a bind may override a given cell).
-    pub(crate) cell_color: Color,
+    pub cell_color: Color,
     /// The gap between columns, in logical pixels — identical on the header and
     /// every row, which (with the shared widths) is what keeps them aligned.
-    pub(crate) column_gap: f32,
+    pub column_gap: f32,
     /// The horizontal padding inside the header and each row, in logical pixels.
-    pub(crate) row_padding: f32,
+    pub row_padding: f32,
     /// The persisted-setting name for this table's sort order, or `None` to not
     /// persist it. The consumer registers it (see [`register_table_settings`]).
-    pub(crate) sort_setting: Option<&'static str>,
+    pub sort_setting: Option<&'static str>,
     /// The persisted-setting name for this table's column widths, or `None`.
-    pub(crate) widths_setting: Option<&'static str>,
+    pub widths_setting: Option<&'static str>,
 }
 
 /// How the table lets the user select rows — owned by the widget (the highlight,
@@ -215,7 +215,7 @@ pub(crate) struct TableSpec {
 /// [`TableState::selection_revision`], exactly as it reads the sort). Mirrors the
 /// reference `LLScrollListCtrl`'s `multi_select` attribute.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum TableSelectionMode {
+pub enum TableSelectionMode {
     /// No widget-owned selection: rows are not selectable and the widget never
     /// paints a selection highlight (a display-only table, or one whose consumer
     /// wires its own row selection). The default.
@@ -241,11 +241,11 @@ const MAX_SORT_KEYS: usize = 6;
 
 /// One level of a multi-column sort: a column and its direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TableSortKey {
+pub struct TableSortKey {
     /// The column index this level orders by.
-    pub(crate) column: usize,
+    pub column: usize,
     /// Ascending (else descending).
-    pub(crate) ascending: bool,
+    pub ascending: bool,
 }
 
 /// The ordered multi-column sort — most-significant key first. A header click
@@ -256,7 +256,7 @@ pub(crate) struct TableSortKey {
 /// Pure and Bevy-free so it is unit-tested in isolation; the widget carries one
 /// on each table's [`TableState`].
 #[derive(Debug, Clone, Default)]
-pub(crate) struct TableSort {
+pub struct TableSort {
     /// The sort levels, most-significant first.
     keys: Vec<TableSortKey>,
 }
@@ -299,13 +299,15 @@ impl TableSort {
 
     /// The primary (most-significant) sort key, if any — what the header arrow
     /// reflects.
-    pub(crate) fn primary(&self) -> Option<TableSortKey> {
+    #[must_use]
+    pub fn primary(&self) -> Option<TableSortKey> {
         self.keys.first().copied()
     }
 
     /// The full key stack, most-significant first — the consumer walks it to
     /// order two rows (comparing by each column until one breaks the tie).
-    pub(crate) fn keys(&self) -> &[TableSortKey] {
+    #[must_use]
+    pub fn keys(&self) -> &[TableSortKey] {
         &self.keys
     }
 
@@ -370,8 +372,8 @@ fn resize_column_width(current: f32, delta_x: f32, direction_sign: f32) -> f32 {
 /// The live state of a table, on its **root** entity: the current per-column
 /// widths, the sort order, a revision the consumer watches to re-sort, and the
 /// persistence bookkeeping.
-#[derive(Component)]
-pub(crate) struct TableState {
+#[derive(Debug, Component)]
+pub struct TableState {
     /// The table's specification.
     spec: &'static TableSpec,
     /// The current width of each column, indexed to match
@@ -408,23 +410,27 @@ impl TableState {
     /// to order its rows.
     ///
     /// [`sort_revision`]: Self::sort_revision
-    pub(crate) const fn sort(&self) -> &TableSort {
+    #[must_use]
+    pub const fn sort(&self) -> &TableSort {
         &self.sort
     }
 
     /// The sort revision — a consumer stores the value it last sorted at and
     /// re-sorts when it advances.
-    pub(crate) const fn sort_revision(&self) -> u64 {
+    #[must_use]
+    pub const fn sort_revision(&self) -> u64 {
         self.sort_revision
     }
 
     /// The table's selection mode.
-    pub(crate) const fn selection_mode(&self) -> TableSelectionMode {
+    #[must_use]
+    pub const fn selection_mode(&self) -> TableSelectionMode {
         self.spec.selection
     }
 
     /// The selected row data indices, ascending. Empty when nothing is selected.
-    pub(crate) fn selected(&self) -> &[usize] {
+    #[must_use]
+    pub fn selected(&self) -> &[usize] {
         &self.selected
     }
 
@@ -434,31 +440,35 @@ impl TableState {
     /// `Shift`+click ranges from whatever row the old index now happens to be.
     ///
     /// [`set_selection`]: Self::set_selection
-    pub(crate) const fn anchor(&self) -> Option<usize> {
+    #[must_use]
+    pub const fn anchor(&self) -> Option<usize> {
         self.anchor
     }
 
     /// The single selected index for a single-select consumer (the first, if
     /// several are somehow selected).
-    pub(crate) fn primary_selected(&self) -> Option<usize> {
+    #[must_use]
+    pub fn primary_selected(&self) -> Option<usize> {
         self.selected.first().copied()
     }
 
     /// Whether `index` is currently selected.
-    pub(crate) fn is_selected(&self, index: usize) -> bool {
+    #[must_use]
+    pub fn is_selected(&self, index: usize) -> bool {
         self.selected.contains(&index)
     }
 
     /// The selection revision — a consumer stores the value it last acted on and
     /// re-reads when it advances.
-    pub(crate) const fn selection_revision(&self) -> u64 {
+    #[must_use]
+    pub const fn selection_revision(&self) -> u64 {
         self.selection_revision
     }
 
     /// Clear the selection (e.g. when the consumer replaces the table's data, so a
     /// stale index does not point at a different row). A no-op — with no revision
     /// bump — when already empty.
-    pub(crate) fn clear_selection(&mut self) {
+    pub fn clear_selection(&mut self) {
         if !self.selected.is_empty() || self.anchor.is_some() {
             self.selected.clear();
             self.anchor = None;
@@ -475,7 +485,7 @@ impl TableState {
     /// indices are normalised, and the revision only advances on a real change,
     /// so a rebuild that leaves the selection where it was is not a selection
     /// event.
-    pub(crate) fn set_selection(&mut self, selected: Vec<usize>, anchor: Option<usize>) {
+    pub fn set_selection(&mut self, selected: Vec<usize>, anchor: Option<usize>) {
         let mut selected = selected;
         selected.sort_unstable();
         selected.dedup();
@@ -518,10 +528,10 @@ impl TableState {
 /// Pure, so the algebra is unit-testable without an ECS world — and free rather
 /// than a [`TableState`] method because it is not only tables that let the user
 /// pick several rows: the avatar picker's results list
-/// ([`crate::avatar_picker`]) is a plain column with the same `Ctrl` / `Shift`
+/// (`avatar_picker`) is a plain column with the same `Ctrl` / `Shift`
 /// idiom, and one implementation of "what a modified click means" is what keeps
 /// the two feeling like one viewer.
-pub(crate) fn apply_selection_click(
+pub fn apply_selection_click(
     selected: &mut Vec<usize>,
     anchor: &mut Option<usize>,
     index: usize,
@@ -564,14 +574,14 @@ struct TableRow {
 const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 
 /// Links a header or body cell (the width-bearing node) to its table and column,
-/// so [`sync_table_column_widths`] keeps every cell of a column the same width as
+/// so `sync_table_column_widths` keeps every cell of a column the same width as
 /// its header.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct TableColumnCell {
+pub struct TableColumnCell {
     /// The table root this cell belongs to.
-    pub(crate) table: Entity,
+    pub table: Entity,
     /// The column index within the table's spec.
-    pub(crate) column: usize,
+    pub column: usize,
 }
 
 /// On a cell's **clip container**, naming the trailing ellipsis marker
@@ -594,25 +604,26 @@ struct TableHeaderArrow {
 
 /// A handle to a freshly-spawned table's key entities.
 #[derive(Debug, Clone)]
-pub(crate) struct TableHandle {
+pub struct TableHandle {
     /// The table root (a column: header over viewport). Carries [`TableState`];
     /// parent it wherever the table should live.
-    pub(crate) root: Entity,
+    pub root: Entity,
     /// The header row (its cells are [`header_cells`](Self::header_cells)) — a
     /// consumer may style it (e.g. a header background).
-    pub(crate) header: Entity,
+    pub header: Entity,
     /// The virtualized scrolling viewport (carries [`VirtualList`]). The consumer
     /// keeps its item count current and pools rows under it.
-    pub(crate) viewport: Entity,
+    pub viewport: Entity,
     /// The header cell of each column, in column order — a consumer fills the
     /// [`TableColumnKind::Custom`] ones (and adds its own sort click / arrow to a
     /// column whose sort it drives itself).
-    pub(crate) header_cells: Vec<Entity>,
+    pub header_cells: Vec<Entity>,
 }
 
 impl TableHandle {
     /// The header cell of `column`, if present.
-    pub(crate) fn header_cell(&self, column: usize) -> Option<Entity> {
+    #[must_use]
+    pub fn header_cell(&self, column: usize) -> Option<Entity> {
         self.header_cells.get(column).copied()
     }
 }
@@ -623,14 +634,15 @@ impl TableHandle {
 /// [`set_table_cell`]); for a [`TableColumnKind::Custom`] column it is the empty
 /// sized container the consumer fills with its own content.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct TableRowCells {
+pub struct TableRowCells {
     /// One cell node per column, left to right.
-    pub(crate) cells: Vec<Entity>,
+    pub cells: Vec<Entity>,
 }
 
 impl TableRowCells {
     /// The cell node for `column`, if present.
-    pub(crate) fn cell(&self, column: usize) -> Option<Entity> {
+    #[must_use]
+    pub fn cell(&self, column: usize) -> Option<Entity> {
         self.cells.get(column).copied()
     }
 }
@@ -643,7 +655,7 @@ impl TableRowCells {
 /// empty virtualized viewport. The consumer pools rows under
 /// [`TableHandle::viewport`] with [`spawn_table_row`] and keeps its
 /// [`VirtualList::item_count`] current.
-pub(crate) fn spawn_table(
+pub fn spawn_table(
     commands: &mut Commands,
     parent: Entity,
     spec: &'static TableSpec,
@@ -700,7 +712,7 @@ pub(crate) fn spawn_table(
         ))
         .id();
     // The overlay scrollbar every long table needs (hidden while content fits).
-    crate::virtual_list::spawn_virtual_scrollbar(commands, viewport);
+    sl_viewer_ui_core::virtual_list::spawn_virtual_scrollbar(commands, viewport);
     // Focus the viewport on a primary click, so the wheel scrolls it. The observed
     // entity is captured (not read from the event target, which bubbles up from a
     // clicked row), so a click on a row still focuses the viewport it lives in.
@@ -962,11 +974,11 @@ fn column_cell_node(column: &TableColumn, column_gap: f32) -> Node {
 }
 
 /// Build one pooled row's cells under `row_entity` (already a
-/// [`crate::virtual_list::VirtualRow`]) and configure the row node to match the
+/// `virtual_list::VirtualRow`) and configure the row node to match the
 /// header's gap / padding. Returns [`TableRowCells`] — one text node per column,
 /// which the consumer keeps and binds its projection into on each rebind. Also
 /// inserts that component on the row so widget systems can find the cells.
-pub(crate) fn spawn_table_row(
+pub fn spawn_table_row(
     commands: &mut Commands,
     row_entity: Entity,
     root: Entity,
@@ -1085,7 +1097,7 @@ fn spawn_body_cell(
 
 /// Set a cell's value text and colour in place (change-guarded), the binding
 /// counterpart to [`spawn_table_row`]. A no-op if `cell` is not a live text node.
-pub(crate) fn set_table_cell(
+pub fn set_table_cell(
     texts: &mut Query<(&mut Text, &mut TextColor)>,
     cell: Entity,
     value: &str,
@@ -1382,11 +1394,7 @@ fn persist_table_state(
 /// Register a table's persisted sort / width settings so the account file that
 /// loads at login is coerced to the right types. The consumer calls this from its
 /// settings-registration step (as the People list does).
-pub(crate) fn register_table_settings(
-    settings: &mut ViewerSettings,
-    section: &[&str],
-    spec: &TableSpec,
-) {
+pub fn register_table_settings(settings: &mut ViewerSettings, section: &[&str], spec: &TableSpec) {
     if let Some(name) = spec.sort_setting {
         let default = TableSort::from_defaults(spec.default_sort).encode(spec.columns);
         settings.register_hidden_in(
@@ -1412,7 +1420,8 @@ pub(crate) fn register_table_settings(
 
 /// The plugin that drives every [`TableState`]: column-width sync, ellipsis
 /// reveal, sort arrows, and the settings seed / persist.
-pub(crate) struct TableWidgetPlugin;
+#[derive(Debug)]
+pub struct TableWidgetPlugin;
 
 impl Plugin for TableWidgetPlugin {
     /// Register the reconciliation systems. The width sync and ellipsis reveal
@@ -1427,7 +1436,8 @@ impl Plugin for TableWidgetPlugin {
                 seed_tables_from_settings,
                 sync_table_column_widths,
                 drive_table_sort_arrows,
-                apply_table_selection_highlight.after(crate::virtual_list::layout_virtual_lists),
+                apply_table_selection_highlight
+                    .after(sl_viewer_ui_core::virtual_list::layout_virtual_lists),
                 persist_table_state,
             ),
         )

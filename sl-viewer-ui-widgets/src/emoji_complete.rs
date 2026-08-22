@@ -5,7 +5,7 @@
 //! # A field opt-in, on the same edit path
 //!
 //! The completer is attached to a single-line [`EditableText`] (the chat input
-//! ([`crate::chat_input`]) is its first consumer, and it is reusable on any field)
+//! (`chat_input`) is its first consumer, and it is reusable on any field)
 //! together with an **anchor** node it hangs its popup under — so the popup needs
 //! no screen-space maths: it is an absolute child of the field's own container,
 //! sitting just above it. Short-codes and glyphs come from [`sl_emoji`].
@@ -13,19 +13,19 @@
 //! # The trailing-token model
 //!
 //! A chat line is typed left to right, so the completer looks only at the
-//! **trailing** `:`-token of the value ([`trailing_colon_prefix`]): the run of
+//! **trailing** `:`-token of the value (`trailing_colon_prefix`): the run of
 //! short-code characters at the end, back to a `:` that itself sits at the start
 //! of the string or after whitespace. That keeps the detection a pure function of
 //! the string (no caret-offset bookkeeping), and means an already-closed
 //! `:smile:` does not re-trigger. Accepting a match replaces that token with the
-//! glyph ([`replace_trailing_token`]) and leaves the caret at the end.
+//! glyph (`replace_trailing_token`) and leaves the caret at the end.
 //!
 //! # Keys
 //!
 //! While the popup is open: `Up`/`Down` move the selection, `Enter`/`Tab` accept
 //! it, `Escape` closes it. The consumed keys are cleared from the frame's input
 //! ([`ButtonInput::clear_just_pressed`]) so the chat input's own `Enter`-to-send
-//! ([`crate::chat_input`]) — ordered after [`ColonCompleteSet`] — does not also
+//! (`chat_input`) — ordered after [`ColonCompleteSet`] — does not also
 //! fire on the same press.
 //!
 //! Reference (Firestorm, read-only): `llemojihelper`, `llpanelemojicomplete`.
@@ -35,8 +35,8 @@ use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
 use sl_emoji::{ShortcodeMatch, complete};
 
-use crate::ui::column;
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::ui::column;
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The fewest short-code characters after the `:` before the popup opens — so a
 /// lone `:` or `:)` does not pop a list up.
@@ -70,13 +70,13 @@ const ROW_TEXT_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 /// `Enter` handling (the chat input's send) can order **after** it and not fire on
 /// a press the completer already consumed.
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct ColonCompleteSet;
+pub struct ColonCompleteSet;
 
 /// The plugin that drives every attached completer: recompute-and-reflect, key
 /// handling, and the row highlight. Each system is a no-op where there is no
 /// completer, so adding it is always safe.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ColonCompletePlugin;
+pub struct ColonCompletePlugin;
 
 impl Plugin for ColonCompletePlugin {
     /// Register the completer systems, with the key handling in [`ColonCompleteSet`].
@@ -97,7 +97,7 @@ impl Plugin for ColonCompletePlugin {
 /// whether it is open, which match is selected, the current matches, and where the
 /// trailing `:` sits (so accepting replaces from there).
 #[derive(Component, Debug, Clone)]
-pub(crate) struct ColonComplete {
+pub struct ColonComplete {
     /// The popup container node (an absolute child of the field's anchor).
     popup: Entity,
     /// The pooled row entities, [`MAX_MATCHES`] of them, shown / hidden per match
@@ -118,7 +118,7 @@ pub(crate) struct ColonComplete {
 /// and the reflect / highlight systems address the right match) and its label
 /// node. The field it belongs to is captured by the row's click observer.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct ColonRow {
+pub struct ColonRow {
     /// This row's index into the completer's current matches.
     index: usize,
     /// The row's glyph + short-code text node.
@@ -203,13 +203,9 @@ fn matches_for(value: &str) -> Option<(usize, Vec<ShortcodeMatch>)> {
 ///
 /// The popup is an **absolute** child of `anchor`, sitting just above it
 /// (`bottom: 100%`) as the reference completer sits above the chat bar, so it
-/// needs no screen-space placement. It starts hidden; [`drive_colon_complete`]
+/// needs no screen-space placement. It starts hidden; `drive_colon_complete`
 /// shows and fills it.
-pub(crate) fn attach_colon_complete(
-    commands: &mut Commands,
-    field: Entity,
-    anchor: Entity,
-) -> Entity {
+pub fn attach_colon_complete(commands: &mut Commands, field: Entity, anchor: Entity) -> Entity {
     let popup = commands
         .spawn((
             Node {

@@ -13,7 +13,7 @@
 //! # What is inherited, and what is built here
 //!
 //! The hard text behaviours are **inherited** from the foundation
-//! ([`crate::ui_text`]) and parley, and are not re-implemented:
+//! (`ui_text`) and parley, and are not re-implemented:
 //!
 //! - **Bidi** — the caret moves in visual order and the selection geometry splits
 //!   across runs, from parley's Unicode Bidirectional Algorithm. The caret and
@@ -31,7 +31,7 @@
 //!   the reference viewer draws is blocked on winit exposing more than a single
 //!   cursor range and on an IME-capable host — tracked by
 //!   [[viewer-ui-text-ime-verification]], not undertaken here.
-//! - **No tofu / colour emoji** — from [`crate::ui_font`]'s bundled stack.
+//! - **No tofu / colour emoji** — from `ui_font`'s bundled stack.
 //!
 //! So what this module actually adds over a bare [`EditableText`] is threefold:
 //! the **chrome** a field needs to read and behave as a field (a border, a
@@ -53,11 +53,11 @@
 //! for the cheap, flicker-free half — it blocks a letter in a number field the
 //! instant it is typed, before it ever enters the buffer. The structural half —
 //! at most one `.`, a `-` only at the front — is enforced by
-//! [`enforce_numeric_intermediate`], which after each edit checks the whole value
-//! against [`TextInputKind::accepts`] and, if it has become structurally invalid,
-//! **reverts** it to the last valid value ([`NumericField::last_valid`]). The
+//! `enforce_numeric_intermediate`, which after each edit checks the whole value
+//! against `TextInputKind::accepts` and, if it has become structurally invalid,
+//! **reverts** it to the last valid value (`NumericField::last_valid`). The
 //! revert runs after `bevy_text`'s `apply_text_edits`
-//! ([`EditableTextSystems`](bevy::text::EditableTextSystems)) but *before* the
+//! ([`EditableTextSystems`]) but *before* the
 //! editable-text glyph layout (`UiSystems::PostLayout`), so the corrected buffer
 //! is what gets laid out — the rejected keystroke never reaches the screen.
 //!
@@ -69,13 +69,13 @@
 //!
 //! # Constructible without wiring
 //!
-//! Per the registry rule ([`crate::ui_element`]): a field holds and edits its own
-//! text and reaches no session, so nothing here emits a [`UiAction`]. A consumer
+//! Per the registry rule (`ui_element`): a field holds and edits its own
+//! text and reaches no session, so nothing here emits a `UiAction`. A consumer
 //! that must react to a change reads [`EditableText::value`] (or reacts to
 //! `Changed<EditableText>`); a consumer that wants the typed number calls
 //! [`TextInputKind::parse`]. The gallery registers one element per variant
 //! (`spawn_line_specimen` and friends) so every field is swept by
-//! [`crate::ui_test`], and an `F8` demo panel exercises live typing, rejection
+//! `ui_test`, and an `F8` demo panel exercises live typing, rejection
 //! and the IME by hand.
 //!
 //! Reference (Firestorm, read-only): `lllineeditor`, `lltexteditor`,
@@ -93,10 +93,10 @@ use bevy::text::{
 };
 use bevy::ui::UiSystems;
 
-use crate::skin::SkinTextCaret;
-use crate::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
-use crate::ui_element::{ElementCx, TextMayClip};
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::skin::SkinTextCaret;
+use sl_viewer_ui_core::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column, row};
+use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// A field's text colour.
 const FIELD_TEXT_COLOR: Color = Color::WHITE;
@@ -144,11 +144,11 @@ const DEFAULT_FONT_SIZE: f32 = 15.0;
 ///
 /// The numeric variants differ from each other in exactly two things a
 /// [`TextInputSpec`] reads off this enum — the set of characters that may be
-/// typed ([`Self::char_filter`]) and the whole-string shape that is a valid
-/// intermediate ([`Self::accepts`]) — so a new variant is those two functions and
+/// typed (`Self::char_filter`) and the whole-string shape that is a valid
+/// intermediate (`Self::accepts`) — so a new variant is those two functions and
 /// nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TextInputKind {
+pub enum TextInputKind {
     /// Free-form single-line text: one line, no newlines, scrolls horizontally.
     Line,
     /// Free-form multi-line text: newlines allowed, soft-wraps, scrolls
@@ -173,7 +173,7 @@ impl TextInputKind {
     }
 
     /// Whether this is one of the numeric variants — the ones that carry a
-    /// [`NumericField`] and are enforced by [`enforce_numeric_intermediate`].
+    /// [`NumericField`] and are enforced by `enforce_numeric_intermediate`.
     const fn is_numeric(self) -> bool {
         matches!(self, Self::Float | Self::Integer | Self::NonNegativeInteger)
     }
@@ -184,7 +184,7 @@ impl TextInputKind {
     /// This is the cheap, flicker-free half of numeric validation: it blocks a
     /// disallowed *character* (a letter, a stray sign) the instant it is typed,
     /// before it enters the buffer. It cannot enforce *arrangement* (one decimal
-    /// point, a sign only at the front) — that is [`Self::accepts`]'s job.
+    /// point, a sign only at the front) — that is `Self::accepts`'s job.
     fn char_filter(self) -> Option<fn(char) -> bool> {
         match self {
             Self::Line | Self::Multiline => None,
@@ -200,7 +200,7 @@ impl TextInputKind {
     /// The free-text kinds accept anything. The numeric kinds accept the states a
     /// complete number is reached *through* as well as complete ones: an empty
     /// field, a lone `-`, a trailing `.`. See the per-kind helpers for the exact
-    /// shape. This is what [`enforce_numeric_intermediate`] holds the field to,
+    /// shape. This is what `enforce_numeric_intermediate` holds the field to,
     /// reverting anything it rejects.
     fn accepts(self, value: &str) -> bool {
         match self {
@@ -214,12 +214,12 @@ impl TextInputKind {
     /// Parse a **committed** value out of a field's text, or `None` when the text
     /// is not (yet) a complete number of this kind.
     ///
-    /// Distinct from [`Self::accepts`], which admits the intermediate states a
+    /// Distinct from `Self::accepts`, which admits the intermediate states a
     /// user types through: `parse` of a lone `-`, a bare `.`, or an empty field is
     /// `None`, because none is a number yet. A consumer reads the typed value with
     /// this when it needs one (on `Enter`, on focus loss). The free-text kinds
     /// have no numeric value and always return `None`.
-    pub(crate) fn parse(self, value: &str) -> Option<TextInputValue> {
+    pub fn parse(self, value: &str) -> Option<TextInputValue> {
         match self {
             Self::Line | Self::Multiline => None,
             Self::Float => value.parse::<f64>().ok().map(TextInputValue::Float),
@@ -232,7 +232,7 @@ impl TextInputKind {
 /// A committed numeric value read out of a field by [`TextInputKind::parse`],
 /// typed to match the field's kind.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TextInputValue {
+pub enum TextInputValue {
     /// A [`TextInputKind::Float`] field's value.
     Float(f64),
     /// A [`TextInputKind::Integer`] field's value.
@@ -312,49 +312,50 @@ fn accepts_unsigned_integer(value: &str) -> bool {
 /// }
 /// ```
 #[derive(Debug, Clone)]
-pub(crate) struct TextInputSpec {
+pub struct TextInputSpec {
     /// The prefix of the field's node [`Name`], for the gallery and a test's
-    /// lookups. Numeric fields do not emit a [`UiAction`], so this is not an
+    /// lookups. Numeric fields do not emit a `UiAction`, so this is not an
     /// action id.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// Which kind of field this is — free text, or one of the numeric variants.
-    pub(crate) kind: TextInputKind,
+    pub kind: TextInputKind,
     /// The text the field starts with. Sanitised at spawn: an initial value the
     /// kind rejects is replaced by an empty field rather than seeding an invalid
     /// `last_valid`.
-    pub(crate) initial: String,
+    pub initial: String,
     /// The field's focus stop, for slotting it into the surrounding tab order.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// The field text's font size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// A single-line field's width, in `"0"`-glyph advances. Ignored for the
     /// multi-line kind, which sizes by [`visible_lines`](Self::visible_lines).
-    pub(crate) width_glyphs: f32,
+    pub width_glyphs: f32,
     /// A multi-line field's height, in visible text lines. Ignored for the
     /// single-line kinds.
-    pub(crate) visible_lines: f32,
+    pub visible_lines: f32,
     /// A cap on the number of characters the field will hold, or `None` for no
     /// cap. Enforced by `bevy_text` itself ([`EditableText::max_characters`]).
-    pub(crate) max_characters: Option<usize>,
+    pub max_characters: Option<usize>,
     /// Whether the field draws its own border and background (`true`, the
     /// default). Set `false` to spawn a **bare** field for embedding inside a
     /// container that carries the chrome itself — the search-field widget
     /// ([`crate::ui_search`]) does this, decorating the box around the field
     /// rather than the field.
-    pub(crate) decorated: bool,
+    pub decorated: bool,
     /// Whether a single-line field **flex-grows to fill** its parent instead of
     /// taking its intrinsic glyph-width (`false`, the default). A filled field
     /// has no `visible_width`; it takes the room its container gives it and
     /// scrolls. Ignored for the multi-line kind. Used by the search-field widget,
     /// whose box sets the width and lets the field fill it up to the clear button.
-    pub(crate) fill: bool,
+    pub fill: bool,
 }
 
 impl TextInputSpec {
     /// A spec for `element` of `kind`, with an empty initial value and the module
     /// defaults for size, width and height. Override the rest with struct-update
     /// syntax — see the [type documentation](Self).
-    pub(crate) const fn new(element: &'static str, kind: TextInputKind) -> Self {
+    #[must_use]
+    pub const fn new(element: &'static str, kind: TextInputKind) -> Self {
         Self {
             element,
             kind,
@@ -382,13 +383,13 @@ impl TextInputSpec {
 }
 
 /// A numeric field's structural-validation state: its kind and the last value that
-/// passed [`TextInputKind::accepts`], which [`enforce_numeric_intermediate`]
+/// passed `TextInputKind::accepts`, which `enforce_numeric_intermediate`
 /// reverts to when an edit makes the field structurally invalid.
 ///
 /// Present only on the numeric variants; the free-text fields carry no filter and
 /// no validator, so they never grow one.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct NumericField {
+pub struct NumericField {
     /// Which numeric kind this field is, so the enforcer knows which validator to
     /// apply.
     kind: TextInputKind,
@@ -405,11 +406,7 @@ pub(crate) struct NumericField {
 /// [`NumericField`] (structural validation) that together enforce the number
 /// format. It holds and edits its own text and reaches no session; a consumer
 /// reads the value with [`EditableText::value`] or [`TextInputKind::parse`].
-pub(crate) fn spawn_text_input(
-    commands: &mut Commands,
-    parent: Entity,
-    spec: &TextInputSpec,
-) -> Entity {
+pub fn spawn_text_input(commands: &mut Commands, parent: Entity, spec: &TextInputSpec) -> Entity {
     let multiline = spec.kind.is_multiline();
     let initial = spec.sanitised_initial();
 
@@ -472,7 +469,7 @@ pub(crate) fn spawn_text_input(
         editor,
         font.at(spec.font_size),
         TextColor(FIELD_TEXT_COLOR),
-        // No `TextCursorStyle` here: [`install_caret_style`] installs the shared
+        // No `TextCursorStyle` here: `install_caret_style` installs the shared
         // skin-driven caret + blink machinery on every editor (R28).
         TabIndex(spec.tab_index),
         node,
@@ -521,7 +518,7 @@ const CURSOR_BLINK_PERIOD_SECS: f64 = 1.0;
 /// The `EditableText::cursor_blink_period` every field is pinned to: long
 /// enough that Bevy's own caret blink (visible for the first half of the
 /// period, on a timer this code cannot read) never hides the caret, leaving the
-/// envelope entirely to [`drive_caret_blink`] — which reproduces the
+/// envelope entirely to `drive_caret_blink` — which reproduces the
 /// reference's solid-then-flash behaviour instead of Bevy's immediate flash.
 const CARET_HOLD_PERIOD: Duration = Duration::from_secs(3600);
 
@@ -545,13 +542,13 @@ const OVERWRITE_CARET_ALPHA: f32 = 0.6;
 /// (`LL_KIM_INSERT` / `LL_KIM_OVERWRITE`). In overwrite mode the caret is a
 /// block over the next glyph and typing replaces instead of inserting.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct OverwriteMode(pub(crate) bool);
+pub struct OverwriteMode(pub bool);
 
 /// The per-field caret blink state (R28), installed alongside the shared
-/// [`TextCursorStyle`] by [`install_caret_style`] and driven by
-/// [`drive_caret_blink`].
+/// [`TextCursorStyle`] by `install_caret_style` and driven by
+/// `drive_caret_blink`.
 #[derive(Component, Default)]
-pub(crate) struct CaretBlink {
+pub struct CaretBlink {
     /// Elapsed seconds at the last activity (focus gained, or a keystroke while
     /// focused) — the caret holds solid for [`CURSOR_FLASH_DELAY_SECS`] after
     /// this before flashing.
@@ -576,7 +573,7 @@ impl std::fmt::Debug for CaretBlink {
 /// The shared caret / selection style every editable field starts from (R28):
 /// the caret in the field's text colour (the reference default — the line
 /// editor draws its cursor "the same color as text"), selections in the
-/// fallback [`SkinTextCaret`] colours. [`drive_caret_blink`] re-derives all of
+/// fallback [`SkinTextCaret`] colours. `drive_caret_blink` re-derives all of
 /// it every frame from the skin (`.sk-text-field` → [`SkinTextCaret`]) once one
 /// applies; this initial value is what an unskinned first frame shows.
 fn viewer_caret_style(text_color: Color) -> TextCursorStyle {
@@ -620,7 +617,7 @@ fn install_caret_style(
 /// mode — but, also like the reference (whose `LLLineEditor` handles
 /// `KEY_INSERT` and calls `toggleInsertMode`), the key only toggles it while a
 /// text field holds focus, so Insert aimed at an embedded web page (routed to
-/// CEF by [`crate::media_keys`]) does not flip text entry behind its back.
+/// CEF by `media_keys`) does not flip text entry behind its back.
 fn toggle_overwrite_mode(
     keyboard: Res<ButtonInput<KeyCode>>,
     focus: Res<InputFocus>,
@@ -821,7 +818,7 @@ fn reflect_disabled_text_color(
 /// itself); the validator here is only the whole-string prevalidate the
 /// per-character filter cannot express.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TextInputPlugin;
+pub struct TextInputPlugin;
 
 impl Plugin for TextInputPlugin {
     fn build(&self, app: &mut App) {
@@ -881,7 +878,7 @@ fn clear_disabled_field_focus(
 
 /// Hold every numeric field to its kind's whole-string shape: after an edit, if
 /// the field's value is no longer a valid intermediate
-/// ([`TextInputKind::accepts`]), revert it to [`NumericField::last_valid`];
+/// (`TextInputKind::accepts`), revert it to `NumericField::last_valid`;
 /// otherwise remember the new value as the fallback.
 ///
 /// This is the structural half of numeric validation — the part
@@ -901,8 +898,8 @@ fn enforce_numeric_intermediate(
 }
 
 /// Reconcile one numeric field after an edit: remember a valid value as the new
-/// fallback, or revert an invalid one to [`NumericField::last_valid`] with the
-/// caret at its end — the per-entity body of [`enforce_numeric_intermediate`],
+/// fallback, or revert an invalid one to `NumericField::last_valid` with the
+/// caret at its end — the per-entity body of `enforce_numeric_intermediate`,
 /// split out so it can be driven by a headless test.
 fn reconcile_numeric_field(
     editable: &mut EditableText,
@@ -930,10 +927,10 @@ fn reconcile_numeric_field(
 
 // ---------------------------------------------------------------------------
 // Gallery specimens — one registered element per variant, so every field is
-// swept by `crate::ui_test` across every script, direction, scale and font size.
+// swept by `ui_test` across every script, direction, scale and font size.
 //
 // The numeric specimens keep their literal digits (a number is not translated,
-// exactly as `crate::ui_element::spawn_field_grid`'s cells are), while the
+// exactly as `ui_element::spawn_field_grid`'s cells are), while the
 // free-text specimens take the matrix's sample string so their layout is checked
 // in every writing system.
 // ---------------------------------------------------------------------------
@@ -943,11 +940,7 @@ fn reconcile_numeric_field(
 const SAMPLE_TEXT: &str = "The quick brown fox jumps over the lazy dog.";
 
 /// Spawn the single-line free-text field specimen.
-pub(crate) fn spawn_line_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_line_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_text_input(
         commands,
         parent,
@@ -960,11 +953,7 @@ pub(crate) fn spawn_line_specimen(
 }
 
 /// Spawn the multi-line free-text field specimen.
-pub(crate) fn spawn_multiline_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_multiline_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_text_input(
         commands,
         parent,
@@ -978,11 +967,7 @@ pub(crate) fn spawn_multiline_specimen(
 
 /// Spawn the signed-decimal (float) field specimen. The value stays literal — a
 /// number is not translated.
-pub(crate) fn spawn_float_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_float_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_text_input(
         commands,
         parent,
@@ -995,11 +980,7 @@ pub(crate) fn spawn_float_specimen(
 }
 
 /// Spawn the signed-integer field specimen.
-pub(crate) fn spawn_integer_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_integer_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_text_input(
         commands,
         parent,
@@ -1012,11 +993,7 @@ pub(crate) fn spawn_integer_specimen(
 }
 
 /// Spawn the non-negative-integer field specimen.
-pub(crate) fn spawn_unsigned_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_unsigned_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_text_input(
         commands,
         parent,
@@ -1030,8 +1007,8 @@ pub(crate) fn spawn_unsigned_specimen(
 
 // ---------------------------------------------------------------------------
 // The live demo panel (`F6`, or `SL_VIEWER_TEXT_INPUT_DEMO` for the screenshot
-// harness) — the by-hand proof surface, in the pattern of `crate::ui_text`'s `F4`
-// text panel and `crate::ui`'s `F5` scaffold panel. It is where the numeric
+// harness) — the by-hand proof surface, in the pattern of `ui_text`'s `F4`
+// text panel and `ui`'s `F5` scaffold panel. It is where the numeric
 // rejection, the IME and the single- / multi-line behaviours are exercised by a
 // human, which no headless test reaches. Not registered in `ELEMENTS`: it is a
 // hand-driven demonstration, not a swept element.
@@ -1041,7 +1018,7 @@ pub(crate) fn spawn_unsigned_specimen(
 const DEMO_TOGGLE_KEY: KeyCode = KeyCode::F8;
 
 /// The environment variable that starts the demo panel shown, for the offline
-/// screenshot harness (which cannot press [`DEMO_TOGGLE_KEY`]).
+/// screenshot harness (which cannot press `DEMO_TOGGLE_KEY`).
 const DEMO_ENV: &str = "SL_VIEWER_TEXT_INPUT_DEMO";
 
 /// The demo panel's margin, in logical pixels, from the leading and top edges of
@@ -1069,22 +1046,24 @@ const DEMO_TITLE: &str = "Text-input demo (F8) - Tab between the fields and type
      The numeric fields reject a bad character as you type, and revert a bad arrangement (a \
      second '.', a misplaced '-'); the single-line field scrolls, the multi-line one wraps.";
 
-/// Whether the demo panel is currently shown. Toggled by [`DEMO_TOGGLE_KEY`];
+/// Whether the demo panel is currently shown. Toggled by `DEMO_TOGGLE_KEY`;
 /// hidden by default.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct TextInputDemoVisible(pub(crate) bool);
+pub struct TextInputDemoVisible(pub bool);
 
 /// Run condition for [`update_demo_value_readouts`]: only while the demo panel
 /// is shown — the parsed-value read-outs are invisible otherwise, and they
 /// re-derive from the live field state on the first shown frame.
-pub(crate) fn text_input_demo_active(visible: Res<TextInputDemoVisible>) -> bool {
+#[must_use]
+pub fn text_input_demo_active(visible: Res<TextInputDemoVisible>) -> bool {
     visible.0
 }
 
 impl TextInputDemoVisible {
-    /// The initial visibility, seeded from [`DEMO_ENV`]: set to start shown, unset
+    /// The initial visibility, seeded from `DEMO_ENV`: set to start shown, unset
     /// to start hidden (the interactive default).
-    pub(crate) fn from_env() -> Self {
+    #[must_use]
+    pub fn from_env() -> Self {
         Self(std::env::var_os(DEMO_ENV).is_some())
     }
 }
@@ -1092,7 +1071,7 @@ impl TextInputDemoVisible {
 /// A marker on the demo panel's root node, so the toggle system can show / hide
 /// the whole subtree.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct TextInputDemoRoot;
+pub struct TextInputDemoRoot;
 
 /// A live read-out beside a numeric demo field, showing what
 /// [`TextInputKind::parse`] currently makes of the field's text — the committed
@@ -1100,7 +1079,7 @@ pub(crate) struct TextInputDemoRoot;
 /// Present only on the demo's numeric rows; it is what exercises `parse` and
 /// [`TextInputValue`] against live input.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct DemoValueReadout {
+pub struct DemoValueReadout {
     /// The field whose value this read-out parses.
     field: Entity,
     /// The field's kind, so the read-out parses it the same way the field
@@ -1111,8 +1090,8 @@ pub(crate) struct DemoValueReadout {
 /// Startup system: spawn the demo panel — a title over one labelled row per field
 /// kind — starting shown or hidden per [`TextInputDemoVisible`]. Parents itself to
 /// the scaffold's [`UiRoot`], so it must run after
-/// [`crate::ui::UiScaffoldSystems::SpawnRoot`].
-pub(crate) fn setup_text_input_demo(
+/// `ui::UiScaffoldSystems::SpawnRoot`.
+pub fn setup_text_input_demo(
     mut commands: Commands,
     visible: Res<TextInputDemoVisible>,
     root: Res<UiRoot>,
@@ -1222,7 +1201,7 @@ fn spawn_demo_row(
 /// Keep each numeric demo row's [`DemoValueReadout`] showing the live result of
 /// [`TextInputKind::parse`] on its field's text. Inert where there is no demo (the
 /// gallery has no read-outs), so it is safe to run everywhere.
-pub(crate) fn update_demo_value_readouts(
+pub fn update_demo_value_readouts(
     fields: Query<&EditableText>,
     mut readouts: Query<(&DemoValueReadout, &mut Text)>,
 ) {
@@ -1243,8 +1222,8 @@ pub(crate) fn update_demo_value_readouts(
     }
 }
 
-/// Toggle the demo panel when [`DEMO_TOGGLE_KEY`] is pressed.
-pub(crate) fn toggle_text_input_demo(
+/// Toggle the demo panel when `DEMO_TOGGLE_KEY` is pressed.
+pub fn toggle_text_input_demo(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut visible: ResMut<TextInputDemoVisible>,
 ) {
@@ -1255,7 +1234,7 @@ pub(crate) fn toggle_text_input_demo(
 
 /// Drive the demo panel's [`UiPanelShown`] from [`TextInputDemoVisible`] whenever
 /// it changes, leaving the scaffold's `apply_panel_visibility` to do the hiding.
-pub(crate) fn apply_text_input_demo_visibility(
+pub fn apply_text_input_demo_visibility(
     visible: Res<TextInputDemoVisible>,
     mut panels: Query<&mut UiPanelShown, With<TextInputDemoRoot>>,
 ) {
@@ -1515,7 +1494,7 @@ mod tests {
     /// The runtime reconcile drives the whole numeric enforcement path — the real
     /// parley editor, the `set_text` revert, the caret move — so a bad edit is
     /// undone and a good one remembered, exactly as the live system does it. This
-    /// is the one path `crate::ui_test`'s headless harness does not run (it does
+    /// is the one path `ui_test`'s headless harness does not run (it does
     /// not add [`super::TextInputPlugin`]), so it is exercised here.
     #[test]
     fn reconcile_reverts_a_bad_edit_and_remembers_a_good_one() -> Result<(), TestError> {

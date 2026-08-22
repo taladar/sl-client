@@ -3,7 +3,7 @@
 //! top of `bevy_ui`, and the chrome every real viewer panel hangs off.
 //!
 //! Nothing upstream has a floater manager — every Second Life viewer hand-writes
-//! one — so this is ours, built on [`crate::ui`]'s scaffold. It is modelled on
+//! one — so this is ours, built on `ui`'s scaffold. It is modelled on
 //! Firestorm's `LLFloater` (read-only reference: `indra/llui/llfloater.cpp`,
 //! `lldraghandle`, `llresizehandle`, `llmultifloater`), reproduced faithfully
 //! where the *feel* matters and adapted where our conventions are a strict
@@ -15,7 +15,7 @@
 //!   **z-order** where any press brings the floater to the front, a
 //!   **focus**/active highlight on the front-most one, and a **close** button
 //!   (plus `Ctrl+W`, the reference shortcut). Kept on screen: at least
-//!   [`MIN_VISIBLE`] logical pixels of the title bar always stay reachable
+//!   `MIN_VISIBLE` logical pixels of the title bar always stay reachable
 //!   (`FLOATER_MIN_VISIBLE_PIXELS = 16`).
 //! - **Resize / dock** (`viewer-ui-floater-resize-dock`): a **resize** grip at the
 //!   trailing-bottom corner, **minimize** to a title-only strip, and
@@ -29,7 +29,7 @@
 //! grows the window rather than clipping it (the reference pins a fixed
 //! `header_height`; we let the title bar size to its own content instead, which is
 //! the same idea done right). What a floater *does* own is a **position**, and
-//! that is the one thing the scaffold left a hole for: [`crate::ui::LogicalInset`]
+//! that is the one thing the scaffold left a hole for: `ui::LogicalInset`
 //! resting at `Val::Auto`, added by this task, so the remembered leading/top
 //! offset mirrors under RTL for free.
 //!
@@ -39,7 +39,7 @@
 //! convention explicitly carves out for a definite size — a list has no natural
 //! width, and the reference gives it a default rect and `can_resize` — so it
 //! opens at a `default_size` and the grip adjusts that **content-area** size
-//! ([`Floater::content_size`]), floored at the window's own
+//! (`Floater::content_size`), floored at the window's own
 //! [`min_size`](FloaterSpec::min_size), with the consumer's own content filling
 //! it (and the slot **clips**, so nothing renders past the window edge). So the
 //! window grows *and* shrinks with the grip, down to a real minimum, rather than
@@ -47,8 +47,8 @@
 //!
 //! # Constructible without its wiring
 //!
-//! Like every element (`crate::ui_element`), a floater's chrome is spawnable with
-//! no plugin, no session and no world: [`build_floater_chrome`] lays out the title
+//! Like every element (`ui_element`), a floater's chrome is spawnable with
+//! no plugin, no session and no world: `build_floater_chrome` lays out the title
 //! bar, buttons, content slot and grip as ordinary nodes, and the gallery /
 //! headless harness render that **specimen** ([`spawn_floater_specimen`], the
 //! registered element) with none of the live behaviour attached. The live
@@ -81,12 +81,12 @@ use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 
-use crate::ui::{
+use sl_viewer_ui_core::ui::{
     LogicalBorder, LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiPanelShown, UiRoot,
     UiScaffoldSystems, column, row,
 };
-use crate::ui_element::ElementCx;
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::ui_element::ElementCx;
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The least a floater may move off screen: at least this many **logical** pixels
 /// of it always stay reachable, so a window can never be dragged fully out of
@@ -167,7 +167,7 @@ const GLYPH_RESIZE: &str = "\u{25e2}";
 /// the scaffold's [`UiRoot`] — the viewer wires it; the gallery renders only the
 /// static specimen and does not need it.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct FloaterPlugin;
+pub struct FloaterPlugin;
 
 impl Plugin for FloaterPlugin {
     fn build(&self, app: &mut App) {
@@ -250,18 +250,18 @@ fn open_floaters_from_env(
 /// A live floating window, on its root node. Holds everything a floater
 /// remembers that is not derivable from the tree.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct Floater {
+pub struct Floater {
     /// A stable id — lets a consumer (the inventory window) tell its own floater
     /// apart from any other, and keys its remembered geometry in the settings
     /// store ([`crate::floater_persist`]).
-    pub(crate) id: &'static str,
+    pub id: &'static str,
     /// The remembered on-screen position while free-floating, in **logical**
     /// pixels: `x` is the inline-start offset, `y` the block-start (top) offset.
     /// Written into [`LogicalInset`], so it mirrors under RTL.
     position: Vec2,
     /// The **content-area** size, in logical pixels, or `None` for a purely
     /// content-driven floater. Seeded from [`FloaterSpec::default_size`] and
-    /// adjusted by the resize grip (floored at [`RESIZE_FLOOR`]); applied as the
+    /// adjusted by the resize grip (floored at `RESIZE_FLOOR`); applied as the
     /// width / height of the content slot, which the consumer's own content then
     /// fills. A scroll-list window (the inventory) wants a definite, resizable
     /// area like this — the scaffold's content-sizing convention carves scroll
@@ -283,7 +283,7 @@ pub(crate) struct Floater {
     /// The smallest the content area may be resized to, in logical pixels — the
     /// floor the grip stops at. Per floater, because a scroll-list window's real
     /// minimum (the toolbar and search must still fit) is bigger than a bare
-    /// [`RESIZE_FLOOR`]; below it the chrome would spill out of the window.
+    /// `RESIZE_FLOOR`; below it the chrome would spill out of the window.
     min_size: Vec2,
     /// Which chrome this floater offers.
     caps: FloaterCaps,
@@ -295,21 +295,22 @@ pub(crate) struct Floater {
 /// (its host entity, min-size, caps) that is either not user data or not stable
 /// across sessions; this is the slice that round-trips to disk.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct FloaterGeometry {
-    /// The free-floating position, in logical pixels (see [`Floater::position`]).
-    pub(crate) position: Vec2,
+pub struct FloaterGeometry {
+    /// The free-floating position, in logical pixels (see `Floater::position`).
+    pub position: Vec2,
     /// The content-area size, or `None` for a content-driven floater (see
-    /// [`Floater::content_size`]).
-    pub(crate) content_size: Option<Vec2>,
+    /// `Floater::content_size`).
+    pub content_size: Option<Vec2>,
     /// Whether it is collapsed to its title bar.
-    pub(crate) minimized: bool,
+    pub minimized: bool,
     /// Whether it is docked into a host.
-    pub(crate) docked: bool,
+    pub docked: bool,
 }
 
 impl Floater {
     /// The current geometry, snapshotted for persistence.
-    pub(crate) const fn geometry(&self) -> FloaterGeometry {
+    #[must_use]
+    pub const fn geometry(&self) -> FloaterGeometry {
         FloaterGeometry {
             position: self.position,
             content_size: self.content_size,
@@ -324,7 +325,7 @@ impl Floater {
     /// the manager's command path ([`FloaterOp::ToggleDock`]), so
     /// [`FloaterGeometry::docked`] is honoured by the seeding system separately —
     /// and `docked_in` is left untouched.
-    pub(crate) const fn restore_geometry(&mut self, geometry: FloaterGeometry) {
+    pub const fn restore_geometry(&mut self, geometry: FloaterGeometry) {
         self.position = geometry.position;
         self.content_size = geometry.content_size;
         self.minimized = geometry.minimized;
@@ -333,9 +334,9 @@ impl Floater {
     /// Move the floater's free-floating position to `position` (logical
     /// inline-start / block-start pixels), so a consumer can **anchor** it to
     /// something on screen — e.g. the emoji-picker opened next to the field's
-    /// emoji button. The next frame's [`clamp_floaters_on_screen`] keeps it on
-    /// screen, and [`apply_floater_inset`] reflects it onto the node.
-    pub(crate) const fn set_position(&mut self, position: Vec2) {
+    /// emoji button. The next frame's `clamp_floaters_on_screen` keeps it on
+    /// screen, and `apply_floater_inset` reflects it onto the node.
+    pub const fn set_position(&mut self, position: Vec2) {
         self.position = position;
     }
 }
@@ -343,7 +344,7 @@ impl Floater {
 /// The chrome entities of a floater, held on its root so the systems find each
 /// part without a marker query. `Option` where a capability may be absent.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct FloaterParts {
+pub struct FloaterParts {
     /// The title band (the drag handle).
     title_bar: Entity,
     /// The title text node — recoloured active / inactive.
@@ -371,7 +372,7 @@ pub(crate) struct FloaterParts {
 /// front-of-list ordering expressed as a paint order. `i32` is far more headroom
 /// than any session of clicks could exhaust.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct FloaterZTop(i32);
+pub struct FloaterZTop(i32);
 
 impl Default for FloaterZTop {
     fn default() -> Self {
@@ -395,13 +396,13 @@ impl FloaterZTop {
 /// The front-most / active floater, or `None`. Drives the title-bar highlight;
 /// the reference's front-child concept.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct ActiveFloater(Option<Entity>);
+pub struct ActiveFloater(Option<Entity>);
 
 /// The container a dock button docks its floater into, when one is set. The
 /// plugin spawns one on the trailing edge and publishes it here; without one the
 /// dock button is inert.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct DefaultDockHost(pub(crate) Option<Entity>);
+pub struct DefaultDockHost(pub Option<Entity>);
 
 /// The dock host's background — a faint panel so a docked floater reads as hosted
 /// (the reference hides a hosted floater's own background to avoid double
@@ -447,7 +448,7 @@ fn spawn_default_dock_host(
 }
 
 /// A chrome action to apply — written by a button's press observer and carried out
-/// by [`apply_floater_commands`].
+/// by `apply_floater_commands`.
 ///
 /// The reparent-and-restack operations (close, dock, raise) need `Commands`,
 /// several resources and cross-entity edits, which is a lot to give an observer;
@@ -455,16 +456,16 @@ fn spawn_default_dock_host(
 /// lifting in a single, testable system. Drag and resize, which only mutate the
 /// floater's own [`Floater`], skip the message and edit it directly.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct FloaterCommand {
+pub struct FloaterCommand {
     /// The floater root to act on.
-    pub(crate) floater: Entity,
+    pub floater: Entity,
     /// What to do to it.
-    pub(crate) op: FloaterOp,
+    pub op: FloaterOp,
 }
 
 /// The chrome operations routed through [`FloaterCommand`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum FloaterOp {
+pub enum FloaterOp {
     /// Raise to the front and make active (any press).
     BringToFront,
     /// Close (hide) the floater.
@@ -497,7 +498,7 @@ fn drag_position(position: Vec2, delta: Vec2, direction: UiDirection) -> Vec2 {
 }
 
 /// Grow (or shrink) a floater's manual size by a grip drag, floored at
-/// [`RESIZE_FLOOR`], respecting the writing direction.
+/// `RESIZE_FLOOR`, respecting the writing direction.
 ///
 /// The grip is at the **trailing**-bottom corner, so dragging it toward the
 /// trailing edge enlarges the width — rightward under LTR, leftward under RTL —
@@ -518,14 +519,14 @@ fn resize_size(size: Vec2, delta: Vec2, direction: UiDirection, floor: Vec2) -> 
 /// Per component rather than `size * inverse_scale_factor`, because the whole-
 /// `Vec2` `*` is a `glam` operator and the workspace's `arithmetic_side_effects`
 /// lint fires on those (but not on plain `f32` arithmetic) — the same reason
-/// `crate::pie_menu` and `crate::ik` spell their vector maths out.
+/// `crate::pie_menu` and `ik` spell their vector maths out.
 fn logical_size(computed: &ComputedNode) -> Vec2 {
     let size = computed.size();
     let inverse = computed.inverse_scale_factor();
     Vec2::new(size.x * inverse, size.y * inverse)
 }
 
-/// Clamp a floater's logical position so at least [`MIN_VISIBLE`] pixels of it
+/// Clamp a floater's logical position so at least `MIN_VISIBLE` pixels of it
 /// stay on screen.
 ///
 /// Reasoned entirely in **logical inline/block** terms, which is what makes it
@@ -551,44 +552,44 @@ fn clamp_position(position: Vec2, size: Vec2, viewport: Vec2) -> Vec2 {
 /// What a floater is created with. Everything the manager cannot derive: an id, a
 /// title, where it opens, and which chrome it offers.
 #[derive(Debug, Clone)]
-pub(crate) struct FloaterSpec {
+pub struct FloaterSpec {
     /// The stable id (see [`Floater::id`]).
-    pub(crate) id: &'static str,
+    pub id: &'static str,
     /// The title text.
-    pub(crate) title: String,
+    pub title: String,
     /// The opening position, in logical pixels (inline-start, block-start).
-    pub(crate) position: Vec2,
+    pub position: Vec2,
     /// The content slot's starting size, in logical pixels, or `None` to size the
     /// window to its content. A resizable scroll-list window (the inventory) sets
     /// this so the grip can grow *and* shrink it; a plain panel leaves it `None`.
-    pub(crate) default_size: Option<Vec2>,
+    pub default_size: Option<Vec2>,
     /// The smallest the grip may shrink the content area to, in logical pixels, or
-    /// `None` for the bare [`RESIZE_FLOOR`]. Set it to whatever keeps this window's
+    /// `None` for the bare `RESIZE_FLOOR`. Set it to whatever keeps this window's
     /// own chrome from spilling out (for the inventory, enough for the toolbar and
     /// search plus a few list rows).
-    pub(crate) min_size: Option<Vec2>,
+    pub min_size: Option<Vec2>,
     /// A **preferred** dock host for this floater, docked into ahead of the shared
     /// [`DefaultDockHost`]. `None` (the default) uses the shared top-trailing host;
     /// a floater that wants to dock elsewhere (the Conversations floater, beside
     /// the nearby-chat bar) passes its own host here.
-    pub(crate) dock_host: Option<Entity>,
+    pub dock_host: Option<Entity>,
     /// Which chrome to offer.
-    pub(crate) caps: FloaterCaps,
+    pub caps: FloaterCaps,
 }
 
 /// The entities a caller needs after spawning a floater.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FloaterHandle {
+pub struct FloaterHandle {
     /// The floater root — carries [`Floater`] and [`UiPanelShown`]. Open / close
     /// it by setting `UiPanelShown`.
-    pub(crate) root: Entity,
+    pub root: Entity,
     /// The content slot to parent the window's own UI into.
-    pub(crate) content: Entity,
+    pub content: Entity,
     /// The title-bar text node. Exposed so a caller can bind it to a Fluent key
-    /// (`crate::i18n::Translated`) rather than a fixed [`FloaterSpec::title`]; the
+    /// (`i18n::Translated`) rather than a fixed [`FloaterSpec::title`]; the
     /// floater's own active/inactive recolour only touches its colour, not its
     /// text, so the two coexist.
-    pub(crate) title_text: Entity,
+    pub title_text: Entity,
 }
 
 /// Deferred first-open content for a floater that spawns only its **chrome**
@@ -614,17 +615,17 @@ pub(crate) struct FloaterHandle {
 /// systems (the conversations tab strip, the People panes) poll for the
 /// resource and start up on their own once it appears.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct DeferredFloaterContent {
+pub struct DeferredFloaterContent {
     /// The registered one-shot content builder, run with [`Self::handle`].
-    pub(crate) builder: SystemId<In<FloaterHandle>>,
+    pub builder: SystemId<In<FloaterHandle>>,
     /// The chrome handle the builder parents the content into.
-    pub(crate) handle: FloaterHandle,
+    pub handle: FloaterHandle,
 }
 
 /// Build a deferred floater's content on its first open: on a [`UiPanelShown`]
 /// flip to shown, run the registered builder once and drop the deferral
 /// marker.
-pub(crate) fn build_deferred_floater_content(
+pub fn build_deferred_floater_content(
     mut commands: Commands,
     pending: Query<(Entity, &UiPanelShown, &DeferredFloaterContent), Changed<UiPanelShown>>,
 ) {
@@ -644,7 +645,8 @@ pub(crate) fn build_deferred_floater_content(
 /// has chrome (and so a [`Floater`]) from startup, but its resource only
 /// appears on first open — an opener that waited for the resource could never
 /// perform that first open.
-pub(crate) fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> Option<Entity> {
+#[must_use]
+pub fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> Option<Entity> {
     floaters
         .iter()
         .find_map(|(entity, floater)| (floater.id == id).then_some(entity))
@@ -663,9 +665,7 @@ pub(crate) fn floater_panel(floaters: &Query<(Entity, &Floater)>, id: &str) -> O
 /// makes every gate pass unconditionally — the A/B toggle for comparing
 /// against the ungated pre-change scheduling, in the same spirit as the
 /// other `SL_VIEWER_DISABLE_*` render toggles.
-pub(crate) fn floater_shown(
-    id: &'static str,
-) -> impl FnMut(Query<(&Floater, &UiPanelShown)>) -> bool {
+pub fn floater_shown(id: &'static str) -> impl FnMut(Query<(&Floater, &UiPanelShown)>) -> bool {
     let disabled = std::env::var_os("SL_VIEWER_DISABLE_PANEL_GATE").is_some();
     move |floaters: Query<(&Floater, &UiPanelShown)>| {
         disabled
@@ -678,7 +678,7 @@ pub(crate) fn floater_shown(
 /// Toggle the floater with the given stable id, when its chrome exists — the
 /// shared open/close primitive for every by-id opener (toolbar, menu bar,
 /// module-internal open paths).
-pub(crate) fn toggle_floater(
+pub fn toggle_floater(
     floaters: &Query<(Entity, &Floater)>,
     panels: &mut Query<&mut UiPanelShown>,
     id: &str,
@@ -694,7 +694,7 @@ pub(crate) fn toggle_floater(
 /// open-without-closing primitive for a menu entry that targets something
 /// *inside* a floater (the block list lives in a tab of the conversations
 /// window, so "Block List" must open that window, never close it).
-pub(crate) fn show_floater(
+pub fn show_floater(
     floaters: &Query<(Entity, &Floater)>,
     panels: &mut Query<&mut UiPanelShown>,
     id: &str,
@@ -709,16 +709,12 @@ pub(crate) fn show_floater(
 
 /// **Spawn a live floater** under `root`, starting hidden.
 ///
-/// Lays out the shared chrome ([`build_floater_chrome`]), then makes it live: an
+/// Lays out the shared chrome (`build_floater_chrome`), then makes it live: an
 /// absolute [`LogicalInset`] at the spec's position, the [`Floater`] state, a
 /// `GlobalZIndex` for the z-order, `Pickable` so it takes clicks off the world
 /// behind it, and the drag / press / button observers. Starts closed
 /// (`UiPanelShown(false)`) — the opener (e.g. the inventory toggle) shows it.
-pub(crate) fn spawn_floater(
-    commands: &mut Commands,
-    root: Entity,
-    spec: FloaterSpec,
-) -> FloaterHandle {
+pub fn spawn_floater(commands: &mut Commands, root: Entity, spec: FloaterSpec) -> FloaterHandle {
     let font = UiFont::Sans.at(CHROME_FONT_SIZE);
     let floater = commands
         .spawn((
@@ -925,15 +921,15 @@ fn drag_resize(
               obscure four plainly-named yes/no capabilities"
 )]
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct FloaterCaps {
+pub struct FloaterCaps {
     /// Build / offer the resize grip.
-    pub(crate) resizable: bool,
+    pub resizable: bool,
     /// Build / offer the minimize button.
-    pub(crate) minimizable: bool,
+    pub minimizable: bool,
     /// Build / offer the close button (and honour `Ctrl+W`).
-    pub(crate) closable: bool,
+    pub closable: bool,
     /// Build / offer the dock / tear-off button.
-    pub(crate) dockable: bool,
+    pub dockable: bool,
 }
 
 /// **Build the shared chrome** — the title bar, its buttons, the content slot and
@@ -1227,7 +1223,7 @@ fn raise(entity: Entity, z_indices: &mut Query<&mut GlobalZIndex>, z_top: &mut F
 /// Dock a free floater into `host`: reparent it into the host's flow, forget its
 /// float placement, un-minimize it, and drop it out of the z-order. The reference
 /// also disables its drag / resize / minimize while hosted; here the layout
-/// systems read `docked_in` for that ([`apply_floater_inset`],
+/// systems read `docked_in` for that (`apply_floater_inset`,
 /// [`apply_floater_content`]).
 fn dock(
     entity: Entity,
@@ -1459,10 +1455,10 @@ fn close_active_floater_shortcut(
     }
 }
 
-/// Keep every free-floating, shown floater at least [`MIN_VISIBLE`] pixels on
+/// Keep every free-floating, shown floater at least `MIN_VISIBLE` pixels on
 /// screen — the reference's "can't drag a window fully off screen".
 ///
-/// Writes back through [`Floater::position`] (which [`apply_floater_inset`], next
+/// Writes back through `Floater::position` (which `apply_floater_inset`, next
 /// in the chain, applies the *same* frame — so an overshoot never visibly snaps
 /// back). It reads last frame's measured size, which is close enough: a window's
 /// size changes slowly, and a frame-stale value can never let it escape by more
@@ -1502,11 +1498,7 @@ fn clamp_floaters_on_screen(
 /// nothing to a parent's content box and would sail past a check unmeasured. Its
 /// text is the harness's swept sample, so a long translation or a large font grows
 /// the window rather than clipping the title or a button glyph.
-pub(crate) fn spawn_floater_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_floater_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let floater = commands
         .spawn((
             Node {
@@ -1557,9 +1549,9 @@ mod tests {
         drag_position, floater_panel, highlight_active_floater, resize_size, spawn_floater,
         toggle_floater,
     };
-    use crate::ui::{UiDirection, UiPanelShown, UiRoot};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_ui_core::ui::{UiDirection, UiPanelShown, UiRoot};
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.

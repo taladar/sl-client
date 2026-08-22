@@ -9,7 +9,7 @@
 //! - a **tab strip** — a single-select strip of buttons ([`spawn_tab_strip`]),
 //!   which owns "exactly one is active", the active highlight, and keyboard
 //!   selection. This is all the inventory window needs
-//!   ([`crate::inventory`]): its Everything / Recent / Worn tabs drive **one**
+//!   (`inventory`): its Everything / Recent / Worn tabs drive **one**
 //!   shared list whose rows are rebuilt from the model, not three separate
 //!   panels to reveal.
 //! - the **panel switching** on top — a container that also holds one panel per
@@ -34,10 +34,10 @@
 //!   strip on the top / bottom edge (the block axis never mirrors, so these are
 //!   always top / bottom).
 //! - [`TabPlacement::InlineStart`] / [`TabPlacement::InlineEnd`] — a vertical
-//!   strip on the leading / trailing edge. Under [`UiDirection::Ltr`](crate::ui::UiDirection::Ltr) the leading
+//!   strip on the leading / trailing edge. Under `UiDirection::Ltr` the leading
 //!   edge is the left one and the trailing edge the right; under
-//!   [`UiDirection::Rtl`](crate::ui::UiDirection::Rtl) they swap, with no code here saying so — the container
-//!   is a [`crate::ui::row`] and [`crate::ui::apply_ui_direction`] reverses the
+//!   `UiDirection::Rtl` they swap, with no code here saying so — the container
+//!   is a `ui::row` and `ui::apply_ui_direction` reverses the
 //!   flow, exactly as the scaffold's convention 1 promises.
 //!
 //! `InlineEnd` is therefore not only "the RTL mirror of a left strip". It is a
@@ -74,27 +74,27 @@
 //! wants the opposite: a strip narrow enough to leave the panel room, with the
 //! long names truncated. So a container spawned with an explicit
 //! [`TabSpec::strip_width`] pins the vertical strip to that width, clips each
-//! over-long label (declaring [`crate::ui_element::TextMayClip`], the harness's
+//! over-long label (declaring `ui_element::TextMayClip`, the harness's
 //! sanctioned exception), and puts a **draggable divider** between the strip and
 //! the panel so the split can be moved. The width is a component
 //! ([`TabStripWidth`]) so it is the one source of truth: the drag writes it, and
 //! [`crate::floater_persist`] saves and restores it per host floater, so a window
 //! reopens with the split where the user left it. The drag's sign folds in both
-//! the placement and [`UiDirection`](crate::ui::UiDirection) — widening a
+//! the placement and `UiDirection` — widening a
 //! leading strip and a trailing one, under LTR and RTL, are four different screen
 //! gestures resolved by [`resize_strip_width`] — so the handle behaves under a
 //! mirrored layout with no per-side code.
 //!
 //! # Constructible without wiring
 //!
-//! Per the registry rule ([`crate::ui_element`]): selecting a tab is pure UI
+//! Per the registry rule (`ui_element`): selecting a tab is pure UI
 //! state and never reaches a session, so the widget switches panels itself and,
-//! for the harness, emits a [`UiAction`] naming that a switch happened. A consumer
+//! for the harness, emits a `UiAction` naming that a switch happened. A consumer
 //! that must *do* something on a tab change (the inventory rebuilding its list)
 //! reacts to `Changed<TabStrip>` and reads [`TabStrip::active`] — it is not wired
 //! into the widget. The gallery registers one element per placement
 //! ([`spawn_tabs_block_start`] and friends) so every orientation is swept by
-//! [`crate::ui_test`].
+//! `ui_test`.
 //!
 //! Reference (Firestorm, read-only): `indra/llui/lltabcontainer.{h,cpp}`
 //! (`LLTabContainer`).
@@ -108,10 +108,10 @@ use bevy::ui_widgets::{
     Button, ControlOrientation, RadioButton, RadioGroup, Scrollbar, ScrollbarThumb, ValueChange,
 };
 
-use crate::i18n::LocaleEllipsisMarker;
-use crate::ui::{FocusRevealBounds, UiDirection, column, row};
-use crate::ui_element::{ElementCx, TextMayClip, UiAction};
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::i18n::LocaleEllipsisMarker;
+use sl_viewer_ui_core::ui::{FocusRevealBounds, UiDirection, column, row};
+use sl_viewer_ui_core::ui_element::{ElementCx, TextMayClip, UiAction};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The gap between adjacent tab buttons, in logical pixels.
 const TAB_GAP: f32 = 4.0;
@@ -165,14 +165,14 @@ const TAB_CORNER_RADIUS: f32 = 8.0;
 
 /// The default truncation glyph for a clipped tab label — a single Latin
 /// ellipsis. See [`TabSpec::ellipsis`] for why this is configurable.
-pub(crate) const DEFAULT_ELLIPSIS: &str = "…";
+pub const DEFAULT_ELLIPSIS: &str = "…";
 
 /// The leading gap between a truncated label and its ellipsis, in logical pixels,
 /// so the marker is not glued to the last visible glyph.
 const ELLIPSIS_GAP: f32 = 2.0;
 
 /// A tab label's colour.
-pub(crate) const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub const TAB_LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
 /// The panel area's background — the "content" shade the active tab shares.
 const PANEL_BACKGROUND: Color = Color::srgb(0.19, 0.23, 0.31);
@@ -231,26 +231,26 @@ const ARROW_TOWARD_END: &str = "\u{25b6}";
 
 /// The action a strip emits when the user switches tabs. A single verb — "a
 /// switch happened" — because the *which* is readable directly from
-/// [`TabStrip::active`]; the [`UiAction`] exists so the harness can assert the
+/// [`TabStrip::active`]; the `UiAction` exists so the harness can assert the
 /// switch occurred without a session behind it.
-pub(crate) const TAB_SELECTED_ACTION: &str = "select-tab";
+pub const TAB_SELECTED_ACTION: &str = "select-tab";
 
 /// Where a tab strip sits relative to the panel it fronts, named logically so the
 /// side is chosen independently of the reading direction — see the [module
 /// documentation](self).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TabPlacement {
+pub enum TabPlacement {
     /// A horizontal strip along the top edge (the block-start edge, never
     /// mirrored).
     BlockStart,
     /// A horizontal strip along the bottom edge (the block-end edge, never
     /// mirrored).
     BlockEnd,
-    /// A vertical strip on the leading edge — left under [`UiDirection::Ltr`](crate::ui::UiDirection::Ltr),
-    /// right under [`UiDirection::Rtl`](crate::ui::UiDirection::Rtl).
+    /// A vertical strip on the leading edge — left under `UiDirection::Ltr`,
+    /// right under `UiDirection::Rtl`.
     InlineStart,
-    /// A vertical strip on the trailing edge — right under [`UiDirection::Ltr`](crate::ui::UiDirection::Ltr),
-    /// left under [`UiDirection::Rtl`](crate::ui::UiDirection::Rtl).
+    /// A vertical strip on the trailing edge — right under `UiDirection::Ltr`,
+    /// left under `UiDirection::Rtl`.
     InlineEnd,
 }
 
@@ -268,8 +268,8 @@ impl TabPlacement {
     }
 
     /// The container node that holds the strip and the panel area: a
-    /// [`crate::ui::column`] when the tabs are horizontal (strip stacked over
-    /// panel) and a [`crate::ui::row`] when they are vertical (strip beside
+    /// `ui::column` when the tabs are horizontal (strip stacked over
+    /// panel) and a `ui::row` when they are vertical (strip beside
     /// panel).
     ///
     /// `align_items: Stretch` always: it is what bounds the strip to the panel's
@@ -314,8 +314,8 @@ impl TabPlacement {
         node
     }
 
-    /// The scrolling **viewport** the buttons flow in: a [`crate::ui::column`] for
-    /// a vertical strip, a [`crate::ui::row`] for a horizontal one, scrolling on
+    /// The scrolling **viewport** the buttons flow in: a `ui::column` for
+    /// a vertical strip, a `ui::row` for a horizontal one, scrolling on
     /// that axis and shrinkable below its content so it clips rather than growing
     /// the strip. `flex_grow` fills the wrapper beside the controls.
     fn viewport_node(self) -> Node {
@@ -347,39 +347,39 @@ impl TabPlacement {
 /// long argument list, both for legibility and because the widget has more knobs
 /// than a positional call should carry.
 #[derive(Debug, Clone)]
-pub(crate) struct TabSpec<'labels> {
-    /// The element id the strip reports in its [`UiAction`], and the prefix of
+pub struct TabSpec<'labels> {
+    /// The element id the strip reports in its `UiAction`, and the prefix of
     /// its nodes' [`Name`]s. Also the stable key [`crate::floater_persist`] saves
     /// a resizable strip's width under.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// Where the strip sits relative to its panel.
-    pub(crate) placement: TabPlacement,
+    pub placement: TabPlacement,
     /// The tab labels, in order; their count is the number of tabs.
-    pub(crate) labels: &'labels [String],
+    pub labels: &'labels [String],
     /// The initially-active tab, clamped into range.
-    pub(crate) active: usize,
+    pub active: usize,
     /// The strip's single focus stop (the group, not the buttons) — pick it to
     /// slot the strip into the surrounding tab order.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// The tab labels' font size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// A fixed width for a **vertical** strip, in logical pixels, which turns on
     /// the draggable divider and label truncation. `None` (the default) keeps the
     /// strip content-sized with no divider; ignored for horizontal placements.
-    pub(crate) strip_width: Option<f32>,
+    pub strip_width: Option<f32>,
     /// The glyphs appended to a tab label that had to be truncated (only ever
     /// shown on a clipped, resizable strip). Configurable because the convention
     /// is not universal — Latin uses a single ellipsis `…`, while Chinese and
     /// Japanese use a centred six-dot `……`; a locale layer
     /// (`viewer-i18n-fluent-scaffold`) is where this would eventually come from.
     /// Use [`DEFAULT_ELLIPSIS`] where the caller has no locale of its own.
-    pub(crate) ellipsis: &'static str,
+    pub ellipsis: &'static str,
     /// Whether [`labels`](Self::labels) are Fluent **keys** to translate
-    /// (`crate::i18n::Translated`, re-resolved on locale change / bundle load)
+    /// (`i18n::Translated`, re-resolved on locale change / bundle load)
     /// rather than literal display text. A translated strip's labels start empty
     /// and fill once the bundle loads. Use it for real UI; `false` for the
     /// gallery and tests, whose labels are fixed sample text.
-    pub(crate) translate_labels: bool,
+    pub translate_labels: bool,
 }
 
 impl TabSpec<'_> {
@@ -390,7 +390,7 @@ impl TabSpec<'_> {
     }
 
     /// The text a label node starts with: empty for a translated strip (the key
-    /// is not display text, and `crate::i18n::Translated` fills the real text once
+    /// is not display text, and `i18n::Translated` fills the real text once
     /// the bundle loads), otherwise the literal label.
     fn initial_label(&self, label: &str) -> String {
         if self.translate_labels {
@@ -402,13 +402,13 @@ impl TabSpec<'_> {
 }
 
 /// Bind a tab-label node to its Fluent key when the strip is translated, so
-/// `crate::i18n::apply_translations` keeps it resolved; a no-op for a literal
+/// `i18n::apply_translations` keeps it resolved; a no-op for a literal
 /// strip.
 fn translate_tab_label(commands: &mut Commands, label_entity: Entity, spec: &TabSpec, label: &str) {
     if spec.translate_labels {
         commands
             .entity(label_entity)
-            .insert(crate::i18n::Translated::new(label.to_owned()));
+            .insert(sl_viewer_ui_core::i18n::Translated::new(label.to_owned()));
     }
 }
 
@@ -416,50 +416,50 @@ fn translate_tab_label(commands: &mut Commands, label_entity: Entity, spec: &Tab
 /// [`Checked`] flags, the highlight and the panel visibilities are all derived
 /// from it, so nothing can drift.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabStrip {
-    /// The element id this strip reports in its [`UiAction`], and the prefix of
+pub struct TabStrip {
+    /// The element id this strip reports in its `UiAction`, and the prefix of
     /// its nodes' [`Name`]s.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The index of the active tab, into the strip's buttons in spawn order.
-    pub(crate) active: usize,
+    pub active: usize,
 }
 
 /// A resizable vertical strip's width, in logical pixels — the single source of
-/// truth for its inline size. The divider drag writes it, [`apply_tab_strip_width`]
+/// truth for its inline size. The divider drag writes it, `apply_tab_strip_width`
 /// reflects it onto the node, and [`crate::floater_persist`] saves and restores
 /// it. Present only on a strip spawned with [`TabSpec::strip_width`].
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct TabStripWidth(pub(crate) f32);
+pub struct TabStripWidth(pub f32);
 
 /// The draggable divider between a resizable strip and its panel, naming the
 /// strip it resizes.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabDivider {
+pub struct TabDivider {
     /// The strip whose [`TabStripWidth`] this handle drags.
-    pub(crate) strip: Entity,
+    pub strip: Entity,
 }
 
 /// A truncatable tab label, naming the ellipsis marker
-/// [`apply_tab_ellipsis`] reveals when the label is clipped. Present only on a
+/// `apply_tab_ellipsis` reveals when the label is clipped. Present only on a
 /// clipped (resizable) strip's labels.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabLabelClip {
+pub struct TabLabelClip {
     /// The `…` marker node, shown only while this label overflows its box.
-    pub(crate) ellipsis: Entity,
+    pub ellipsis: Entity,
 }
 
 /// A tab button: which strip it belongs to and its index within it. Carried so
 /// the selection observer can find every button of a strip and place it against
 /// the strip's [`active`](TabStrip::active) index.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabButton {
+pub struct TabButton {
     /// The strip ([`RadioGroup`]) this button is a tab of.
-    pub(crate) strip: Entity,
+    pub strip: Entity,
     /// This tab's index within the strip.
-    pub(crate) index: usize,
-    /// The strip's placement, so [`apply_tab_corner_radius`] can round the two
+    pub index: usize,
+    /// The strip's placement, so `apply_tab_corner_radius` can round the two
     /// corners on the edge away from the content.
-    pub(crate) placement: TabPlacement,
+    pub placement: TabPlacement,
 }
 
 /// A tab panel: which strip switches it and which tab reveals it.
@@ -472,51 +472,51 @@ pub(crate) struct TabButton {
 /// consumer that puts focusables in tab panels will want the same here; no
 /// consumer does yet.)
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabPanel {
+pub struct TabPanel {
     /// The strip that switches this panel.
-    pub(crate) strip: Entity,
+    pub strip: Entity,
     /// The tab index that reveals it.
-    pub(crate) index: usize,
+    pub index: usize,
 }
 
 /// The scrolling viewport a strip's buttons live in — bounded to the available
 /// space (the panel size) and scrolling when the tabs outgrow it.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabViewport {
+pub struct TabViewport {
     /// Whether it scrolls on the block axis (a vertical strip) or the inline axis
     /// (a horizontal strip). Drives which measurement decides overflow and which
     /// controls appear.
-    pub(crate) vertical: bool,
+    pub vertical: bool,
 }
 
 /// A strip's scroll control — the vertical scrollbar or the horizontal arrow
-/// group — shown by [`apply_tab_scroll_controls`] only while its viewport
+/// group — shown by `apply_tab_scroll_controls` only while its viewport
 /// overflows, so it appears from available space, never configuration.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabScrollControl {
+pub struct TabScrollControl {
     /// The [`TabViewport`] this control scrolls / reflects.
-    pub(crate) viewport: Entity,
+    pub viewport: Entity,
     /// The measurement axis: block (vertical strip) or inline (horizontal).
-    pub(crate) vertical: bool,
+    pub vertical: bool,
 }
 
 /// One of a horizontal strip's two scroll-arrow buttons.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabScrollArrow {
+pub struct TabScrollArrow {
     /// The viewport this arrow scrolls.
-    pub(crate) viewport: Entity,
+    pub viewport: Entity,
     /// Whether it scrolls toward the inline **end** (`▶` under LTR) or the inline
     /// **start** (`◀`). The physical direction and glyph both fold in the live
-    /// [`UiDirection`](crate::ui::UiDirection).
-    pub(crate) toward_end: bool,
+    /// `UiDirection`.
+    pub toward_end: bool,
 }
 
-/// A scroll arrow's glyph text, so [`apply_tab_arrow_glyphs`] can point it the
+/// A scroll arrow's glyph text, so `apply_tab_arrow_glyphs` can point it the
 /// right physical way for the live direction.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TabArrowGlyph {
+pub struct TabArrowGlyph {
     /// Matches its [`TabScrollArrow::toward_end`].
-    pub(crate) toward_end: bool,
+    pub toward_end: bool,
 }
 
 /// What [`spawn_tab_container`] hands back: the outer container, the panel
@@ -527,18 +527,18 @@ pub(crate) struct TabArrowGlyph {
 /// `Changed<TabStrip>`), so returning them would be surface nobody reads. A
 /// consumer that comes to need one adds the field with its reader.
 #[derive(Debug, Clone)]
-pub(crate) struct TabContainerHandle {
+pub struct TabContainerHandle {
     /// The outer container node.
-    pub(crate) container: Entity,
+    pub container: Entity,
     /// The strip wrapper (the `[viewport, controls]` row;
     /// [`fill_tab_container`] lifts its scroll-axis bound so the bar tracks a
     /// definite parent).
-    pub(crate) strip: Entity,
+    pub strip: Entity,
     /// The one-cell grid the panels stack in ([`fill_tab_container`] restyles
     /// it to track a definite parent).
-    pub(crate) panel_area: Entity,
+    pub panel_area: Entity,
     /// The panel slots, in tab order — spawn each tab's content into these.
-    pub(crate) panels: Vec<Entity>,
+    pub panels: Vec<Entity>,
 }
 
 /// The plugin the viewer (and the gallery) adds for the tab widget's runtime
@@ -550,7 +550,7 @@ pub(crate) struct TabContainerHandle {
 /// on the node from the start, so only *later* width changes need the first
 /// system.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TabWidgetPlugin;
+pub struct TabWidgetPlugin;
 
 impl Plugin for TabWidgetPlugin {
     fn build(&self, app: &mut App) {
@@ -634,13 +634,13 @@ fn apply_tab_corner_radius(
 }
 
 /// Spawn a bare tab strip under `parent`: a single-select strip of buttons with
-/// the active highlight, keyboard selection, and a [`UiAction`] on change.
+/// the active highlight, keyboard selection, and a `UiAction` on change.
 ///
 /// [`TabSpec::active`] is clamped into range, so a caller cannot spawn a strip
 /// with nothing selected. The returned strip carries [`TabStrip`], whose `active`
 /// is the source of truth: a consumer that only needs the selection reacts to
 /// `Changed<TabStrip>` and reads it.
-pub(crate) fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &TabSpec) -> Entity {
+pub fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &TabSpec) -> Entity {
     // Clamp rather than trust: an out-of-range active would leave no tab checked,
     // which the arrow handler reads as "start from the end" and the highlight as
     // "none lit". `saturating_sub` keeps an empty strip at 0 without underflow.
@@ -690,7 +690,7 @@ pub(crate) fn spawn_tab_strip(commands: &mut Commands, parent: Entity, spec: &Ta
 
     // The scroll control sits after the viewport (its trailing inline edge): a
     // scrollbar for a vertical strip, a pair of arrows for a horizontal one. Both
-    // are hidden until [`apply_tab_scroll_controls`] finds the viewport
+    // are hidden until `apply_tab_scroll_controls` finds the viewport
     // overflowing, so they appear from available space, not configuration.
     if vertical {
         spawn_tab_scrollbar(commands, strip, viewport, spec);
@@ -850,7 +850,7 @@ fn arrow_scroll_delta(toward_end: bool, direction: UiDirection) -> f32 {
 /// The panels come back empty in [`TabContainerHandle::panels`]; the caller
 /// spawns each tab's content into them. Which panel is visible tracks the strip's
 /// selection with no wiring on the caller's part.
-pub(crate) fn spawn_tab_container(
+pub fn spawn_tab_container(
     commands: &mut Commands,
     parent: Entity,
     spec: &TabSpec,
@@ -954,13 +954,13 @@ pub(crate) fn spawn_tab_container(
 /// strip and panel area grow (min 0) to the space the parent gives them, the
 /// one grid cell becomes `1fr` so the panels track that size rather than their
 /// content, and each panel scrolls its overflow vertically — by wheel (the
-/// panels join [`scroll_tabs_with_wheel`] via [`TabViewport`]) and by a
+/// panels join `scroll_tabs_with_wheel` via [`TabViewport`]) and by a
 /// trailing-edge scrollbar that appears only while its panel both overflows
 /// and is the visible one.
 ///
 /// A content-driven host (the default) skips this and keeps the widget sized
 /// to its largest panel.
-pub(crate) fn fill_tab_container(
+pub fn fill_tab_container(
     commands: &mut Commands,
     placement: TabPlacement,
     handle: &TabContainerHandle,
@@ -1056,7 +1056,7 @@ fn handle_active(spec: &TabSpec) -> usize {
 /// the button grows to fit its label, centred. On a **resizable** strip the
 /// button is pinned to the strip width, so the label is a flex child that clips
 /// (leading-aligned, so the *start* of a long name shows) with a trailing
-/// ellipsis marker ([`spawn_tab_ellipsis`]) that [`apply_tab_ellipsis`] reveals
+/// ellipsis marker ([`spawn_tab_ellipsis`]) that `apply_tab_ellipsis` reveals
 /// only while the label is actually truncated. The label declares [`TextMayClip`]
 /// so the harness's clipping check knows the slice is by design.
 fn spawn_tab_button(
@@ -1179,7 +1179,7 @@ fn spawn_tab_button(
 }
 
 /// Spawn a clipped tab's trailing ellipsis marker (`…`, or whatever
-/// [`TabSpec::ellipsis`] configured), hidden until [`apply_tab_ellipsis`] finds
+/// [`TabSpec::ellipsis`] configured), hidden until `apply_tab_ellipsis` finds
 /// the label truncated.
 fn spawn_tab_ellipsis(
     commands: &mut Commands,
@@ -1297,7 +1297,7 @@ fn apply_tab_arrow_glyphs(
 
 /// Scroll the vertical tab viewport under the pointer with the mouse wheel — the
 /// horizontal strips scroll by their arrows, but a vertical strip wants the wheel
-/// like any list. Mirrors [`crate::virtual_list::scroll_virtual_lists`].
+/// like any list. Mirrors `virtual_list::scroll_virtual_lists`.
 fn scroll_tabs_with_wheel(
     wheel: Res<AccumulatedMouseScroll>,
     hover_map: Res<HoverMap>,
@@ -1422,7 +1422,8 @@ fn spawn_divider(
 /// direction; a trailing strip grows when it moves against it; and RTL flips
 /// which way the inline direction points on screen. The product of the two signs
 /// is the whole of it — no per-side branch.
-pub(crate) fn resize_strip_width(
+#[must_use]
+pub fn resize_strip_width(
     current: f32,
     delta_x: f32,
     placement: TabPlacement,
@@ -1451,7 +1452,7 @@ fn apply_tab_strip_width(mut strips: Query<(&TabStripWidth, &mut Node), Changed<
 /// The strip's selection observer: on a [`RadioGroup`] value change — a click or
 /// an arrow key — move [`TabStrip::active`] to the picked tab and reconcile
 /// everything derived from it (the [`Checked`] flags, the highlight, and the
-/// panel visibilities), then emit the [`UiAction`].
+/// panel visibilities), then emit the `UiAction`.
 ///
 /// `active` is the one source of truth, so this is the only writer of [`Checked`]
 /// and of a tab's [`BackgroundColor`] / a panel's [`Visibility`]. A no-op
@@ -1566,7 +1567,7 @@ fn apply_programmatic_tab_selection(
 }
 
 // ---------------------------------------------------------------------------
-// Gallery elements — one per placement, so `crate::ui_test` sweeps every
+// Gallery elements — one per placement, so `ui_test` sweeps every
 // orientation across every script, direction, scale and font size. All are
 // content-sized (no divider); the resizable variant is exercised by the unit
 // tests and, in the wild, by a host floater.
@@ -1640,29 +1641,17 @@ fn fill_sample_panels(commands: &mut Commands, panels: &[Entity], cx: ElementCx)
 }
 
 /// Gallery element: horizontal tabs on the top edge.
-pub(crate) fn spawn_tabs_block_start(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_tabs_block_start(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_tabs_element(commands, parent, cx, TabPlacement::BlockStart, "tabs-top")
 }
 
 /// Gallery element: horizontal tabs on the bottom edge.
-pub(crate) fn spawn_tabs_block_end(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_tabs_block_end(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_tabs_element(commands, parent, cx, TabPlacement::BlockEnd, "tabs-bottom")
 }
 
 /// Gallery element: vertical tabs on the leading edge (left under LTR).
-pub(crate) fn spawn_tabs_inline_start(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_tabs_inline_start(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_tabs_element(
         commands,
         parent,
@@ -1673,11 +1662,7 @@ pub(crate) fn spawn_tabs_inline_start(
 }
 
 /// Gallery element: vertical tabs on the trailing edge (right under LTR).
-pub(crate) fn spawn_tabs_inline_end(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_tabs_inline_end(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_tabs_element(
         commands,
         parent,
@@ -1699,16 +1684,12 @@ const RESIZABLE_LABELS: [&str; 3] = [
 /// Spawn the **resizable vertical tab** demo — a fixed-width strip with a
 /// draggable divider and clipped long labels.
 ///
-/// **Not a registered [`crate::ui_element`]**, and deliberately so: a clipped tab
-/// label is content wider than its box, which `crate::ui_test::overflow_violations`
+/// **Not a registered `ui_element`**, and deliberately so: a clipped tab
+/// label is content wider than its box, which `ui_test::overflow_violations`
 /// flags for every node whose overflow is not `Scroll` (clip included), so
 /// sweeping it would be a false positive. The gallery hosts it directly instead,
 /// as the one place a human can grab the divider and drag it.
-pub(crate) fn spawn_tabs_resizable_demo(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+pub fn spawn_tabs_resizable_demo(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let labels: Vec<String> = RESIZABLE_LABELS
         .iter()
         .map(|label| cx.text(label))
@@ -1737,9 +1718,9 @@ pub(crate) fn spawn_tabs_resizable_demo(
 /// tabs outgrow the space and stays hidden when they fit. Auto, from available
 /// space — the two copies differ only in tab count, never a flag.
 ///
-/// Not registered ([`crate::ui_element`]): a scrolling strip clips its tabs, and
+/// Not registered (`ui_element`): a scrolling strip clips its tabs, and
 /// the human wants to drive the wheel / arrows here anyway.
-pub(crate) fn spawn_tabs_scroll_demo(
+pub fn spawn_tabs_scroll_demo(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -1788,14 +1769,14 @@ mod tests {
         TabViewport, apply_tab_strip_width, arrow_scroll_delta, resize_strip_width,
         spawn_tab_container, spawn_tab_strip,
     };
-    use crate::ui::{UiDirection, UiRoot, spawn_ui_root};
-    use crate::ui_element::UiAction;
     use bevy::ecs::world::CommandQueue;
     use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::prelude::*;
     use bevy::ui::Checked;
     use bevy::ui_widgets::ValueChange;
     use pretty_assertions::assert_eq;
+    use sl_viewer_ui_core::ui::{UiDirection, UiRoot, spawn_ui_root};
+    use sl_viewer_ui_core::ui_element::UiAction;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
@@ -2016,7 +1997,7 @@ mod tests {
         app.update();
     }
 
-    /// Every [`UiAction`] emitted since the last drain.
+    /// Every `UiAction` emitted since the last drain.
     fn drained_actions(app: &mut App) -> Vec<UiAction> {
         app.world_mut()
             .resource_mut::<Messages<UiAction>>()
@@ -2225,7 +2206,7 @@ mod tests {
         for (label, ellipsis) in labels {
             assert!(
                 app.world()
-                    .get::<crate::ui_element::TextMayClip>(label)
+                    .get::<sl_viewer_ui_core::ui_element::TextMayClip>(label)
                     .is_some(),
                 "a clipped tab label declares the exception"
             );
@@ -2264,7 +2245,7 @@ mod tests {
     }
 
     /// Restoring a width — the persistence-seed path — writes it onto the node via
-    /// [`apply_tab_strip_width`].
+    /// `apply_tab_strip_width`.
     #[test]
     fn restoring_a_width_updates_the_node() -> Result<(), TestError> {
         let mut app = tab_app();
@@ -2346,8 +2327,8 @@ mod tests {
     /// default (unfilled) widget stays content-sized.
     #[test]
     fn a_filled_container_tracks_a_definite_parent() -> Result<(), TestError> {
-        use crate::ui::{UiRoot, UiScaffoldSystems, column};
         use crate::ui_test::{LayoutTest, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems, column};
         const SLOT: Vec2 = Vec2::new(400.0, 540.0);
         for fill in [false, true] {
             let mut app = LayoutTest::new().build();
@@ -2434,8 +2415,8 @@ mod tests {
     /// outgrow it. The vertical strip's own bound is [`TAB_STRIP_MAX_HEIGHT`].
     #[test]
     fn a_full_strip_overflows_its_viewport_and_a_light_one_does_not() -> Result<(), TestError> {
-        use crate::ui::{UiRoot, UiScaffoldSystems};
         use crate::ui_test::{LayoutTest, settle};
+        use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
         for (placement, vertical, host, count, want_overflow) in [
             (TabPlacement::BlockStart, false, None::<f32>, 3_usize, false),
             (TabPlacement::BlockStart, false, None, 8, false),

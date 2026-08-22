@@ -180,7 +180,6 @@ image = { version = "0.25.10", default-features = false, features = [
   "tga",
 ] }
 jiff = { version = "0.2.35" }
-parley = { version = "0.9.0", default-features = false, features = ["std"] }
 parry3d = "0.27.0"
 reqwest = { workspace = true, features = [
   "blocking",
@@ -214,6 +213,7 @@ sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-widgets = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "time"] }
 tracing = { workspace = true }

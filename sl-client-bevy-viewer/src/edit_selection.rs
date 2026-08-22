@@ -672,7 +672,7 @@ struct SelectPointer<'w, 's> {
     /// dropdown closing on a pick) sets this, and the world pick then skips it —
     /// the reliable path where the despawning widget leaves a stale hover-map
     /// entry the occlusion guard alone would miss.
-    ui_claim: Res<'w, crate::hud_pick::UiPointerClaim>,
+    ui_claim: Res<'w, crate::ui::UiPointerClaim>,
     /// The window, for the cursor position.
     windows: Query<'w, 's, &'static Window>,
     /// The world camera, to build pick rays and project candidate bounds.

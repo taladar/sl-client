@@ -27,9 +27,11 @@ use bevy::ui_widgets::{
 use bevy_flair::style::components::ClassList;
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
-use crate::i18n::Translated;
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::i18n::Translated;
+use sl_viewer_ui_core::ui::{
+    LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
+};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 /// The picker's numeric-channel maximum (an sRGB byte).
 const CHANNEL_MAX: f32 = 255.0;
@@ -74,12 +76,12 @@ const VALUE_CLASS: &str = "sk-build-value";
 /// A reusable colour swatch's current value; this module paints the swatch fill
 /// from it, and a consumer reads / writes it.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct ColorSwatchValue(pub(crate) Color);
+pub struct ColorSwatchValue(pub Color);
 
 /// Spawn a colour swatch under `parent`: a bordered button filled with `initial`
 /// that opens the picker on click, tagged with `element` for its [`Name`]. The
 /// returned entity is the **requester** a [`ColorPicked`] reply is matched by.
-pub(crate) fn spawn_color_swatch(
+pub fn spawn_color_swatch(
     commands: &mut Commands,
     parent: Entity,
     element: &'static str,
@@ -151,11 +153,11 @@ fn reflect_color_swatch_disabled(
 
 /// Open the colour picker for `requester`, seeded with `current`.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenColorPicker {
+pub struct OpenColorPicker {
     /// The swatch (or other widget) the reply is tagged back to.
-    pub(crate) requester: Entity,
+    pub requester: Entity,
     /// The colour to open on.
-    pub(crate) current: Color,
+    pub current: Color,
 }
 
 /// The chosen colour, tagged back to the [`requester`](Self::requester) that
@@ -164,14 +166,14 @@ pub(crate) struct OpenColorPicker {
 /// once on **OK** with `final_pick` `true`; **Cancel** emits the original colour
 /// with `final_pick` `false` so the consumer reverts its preview.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct ColorPicked {
+pub struct ColorPicked {
     /// The widget that opened the picker.
-    pub(crate) requester: Entity,
+    pub requester: Entity,
     /// The chosen colour.
-    pub(crate) color: Color,
+    pub color: Color,
     /// Whether this is the committed choice (**OK**) rather than a live-preview
     /// or revert update.
-    pub(crate) final_pick: bool,
+    pub final_pick: bool,
 }
 
 /// The picker's live state while open.
@@ -223,7 +225,7 @@ enum PickerButton {
 
 /// The plugin wiring the colour picker into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ColorPickerPlugin;
+pub struct ColorPickerPlugin;
 
 impl Plugin for ColorPickerPlugin {
     /// Register the messages, state, floater, and systems.

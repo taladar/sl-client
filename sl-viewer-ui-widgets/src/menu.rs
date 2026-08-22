@@ -13,8 +13,8 @@
 //! conditions under which it is available and checked. So the entry vocabulary
 //! here mirrors the pie's ([`crate::pie_menu::PieAction`] — a `label`, an
 //! `action` string, and a named `when` condition), and both widgets dispatch the
-//! same way, by writing a [`UiAction`] that someone else routes (the registry
-//! rule, [`crate::ui_element`]). What a given domain menu *contains* is
+//! same way, by writing a `UiAction` that someone else routes (the registry
+//! rule, `ui_element`). What a given domain menu *contains* is
 //! per-domain and not here, exactly as it is not in the pie.
 //!
 //! # Self-managed, on `bevy_ui_widgets`' `Popover`
@@ -25,25 +25,25 @@
 //! `bevy_ui_widgets`' `Button` / `MenuButton` activation. That indirection
 //! (`Pointer<Press>` → `Activate` → `MenuEvent`) proved not to fire in this app,
 //! whereas a plain press observer on the row is reliable — so a bar button's
-//! press toggles its menu ([`toggle_host`]), an entry's press runs it and closes
+//! press toggles its menu (`toggle_host`), an entry's press runs it and closes
 //! the stack, and a press that reaches the UI root (i.e. landed on nothing in a
 //! menu, because a menu row stops its own press) dismisses everything
-//! ([`dismiss_menus_on_press`]). The highlight is painted by
-//! [`highlight_menu_hover`], not bevy_flair `:hover`, so it reads identically in
+//! (`dismiss_menus_on_press`). The highlight is painted by
+//! `highlight_menu_hover`, not bevy_flair `:hover`, so it reads identically in
 //! the gallery and the viewer.
 //!
 //! Two consequences worth stating: a child label must be `Pickable::IGNORE`, or
 //! it swallows the press and the row never sees it (a child node blocks picking
 //! by default); and keyboard traversal of an *open* menu is driven in the same
-//! self-managed spirit ([`MenuKeyboard`] + [`menu_keyboard_nav`]) — a
+//! self-managed spirit (`MenuKeyboard` + `menu_keyboard_nav`) — a
 //! keyboard-highlighted row index fed from key input, reusing the same
-//! [`MenuEntryAction`] dispatch and submenu open/close the mouse path uses,
+//! `MenuEntryAction` dispatch and submenu open/close the mouse path uses,
 //! rather than the upstream focus machinery. The block-axis arrows step the
 //! highlight, the inline-axis arrows open / close a submenu (and switch bar
 //! menus at the top), `Enter` / `Space` activate, and the reference's
-//! underlined **jump keys** ([`assign_jump_keys`]) jump to an entry once
+//! underlined **jump keys** (`assign_jump_keys`) jump to an entry once
 //! keyboard navigation has begun. The highlight is the same component the hover
-//! system paints ([`highlight_menu_hover`]); keyboard is a second writer of it.
+//! system paints (`highlight_menu_hover`); keyboard is a second writer of it.
 //!
 //! # One widget, two containers — why the inventory shares it
 //!
@@ -56,7 +56,7 @@
 //! - [`spawn_menu_bar`] — a horizontal strip of those buttons. The top menu bar.
 //! - [`OpenContextMenu`] — pop a [`MenuDef`] at a screen point, with no anchor.
 //!
-//! All three build the same list ([`build_menu_popup`]) from the same
+//! All three build the same list (`build_menu_popup`) from the same
 //! [`MenuDef`].
 //!
 //! # Direction-neutral (convention 1)
@@ -79,9 +79,11 @@ use bevy::ui_widgets::popover::{Popover, PopoverAlign, PopoverPlacement, Popover
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
-use crate::ui::{LogicalMargin, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column};
-use crate::ui_element::{ElementCx, UiAction};
-use crate::ui_font::UiFont;
+use sl_viewer_ui_core::ui::{
+    LogicalMargin, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column,
+};
+use sl_viewer_ui_core::ui_element::{ElementCx, UiAction};
+use sl_viewer_ui_core::ui_font::UiFont;
 
 // ---------------------------------------------------------------------------
 // The declaration. A menu is a tree of entries, authored as data.
@@ -96,33 +98,34 @@ use crate::ui_font::UiFont;
 /// not: an accelerator drawn against the entry, and separate enable / check /
 /// visible conditions (the reference's `on_enable` / `on_check` / `on_visible`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MenuCommand {
+pub struct MenuCommand {
     /// The entry's text. Laid out through the ordinary bidi text stack.
-    pub(crate) label: &'static str,
-    /// What this emits when picked — the `action` of the [`UiAction`] the widget
+    pub label: &'static str,
+    /// What this emits when picked — the `action` of the `UiAction` the widget
     /// writes, and the name a test asserts against.
-    pub(crate) action: &'static str,
+    pub action: &'static str,
     /// The condition under which the entry is **enabled**, or `None` for always.
     /// A failing condition greys the entry and makes it unpickable; it keeps its
     /// line, because the entry belongs to the menu, not to whether it is
     /// available this second.
-    pub(crate) enabled_when: Option<&'static str>,
+    pub enabled_when: Option<&'static str>,
     /// The condition under which the entry shows a **check mark**, or `None` for
     /// a plain (uncheckable) entry. A radio group is several entries whose
     /// `checked_when` keys are mutually exclusive.
-    pub(crate) checked_when: Option<&'static str>,
+    pub checked_when: Option<&'static str>,
     /// The condition under which the entry is **shown at all**, or `None` for
     /// always — the reference's `on_visible`, unlike `enabled_when` which greys
     /// the line in place.
-    pub(crate) visible_when: Option<&'static str>,
+    pub visible_when: Option<&'static str>,
     /// The accelerator drawn against the entry (e.g. `"Ctrl+I"`), or `None`.
     /// Display-only here — binding the key globally is the live wiring's job.
-    pub(crate) accelerator: Option<&'static str>,
+    pub accelerator: Option<&'static str>,
 }
 
 impl MenuCommand {
     /// A plain always-available action: a label and the action it emits.
-    pub(crate) const fn new(label: &'static str, action: &'static str) -> Self {
+    #[must_use]
+    pub const fn new(label: &'static str, action: &'static str) -> Self {
         Self {
             label,
             action,
@@ -135,28 +138,28 @@ impl MenuCommand {
 
     /// The same entry with an accelerator label drawn against it.
     #[must_use]
-    pub(crate) const fn accel(mut self, accelerator: &'static str) -> Self {
+    pub const fn accel(mut self, accelerator: &'static str) -> Self {
         self.accelerator = Some(accelerator);
         self
     }
 
     /// The same entry as a check item, checked while `condition` holds.
     #[must_use]
-    pub(crate) const fn checked_when(mut self, condition: &'static str) -> Self {
+    pub const fn checked_when(mut self, condition: &'static str) -> Self {
         self.checked_when = Some(condition);
         self
     }
 
     /// The same entry, enabled only while `condition` holds.
     #[must_use]
-    pub(crate) const fn enabled_when(mut self, condition: &'static str) -> Self {
+    pub const fn enabled_when(mut self, condition: &'static str) -> Self {
         self.enabled_when = Some(condition);
         self
     }
 
     /// The same entry, shown only while `condition` holds.
     #[must_use]
-    pub(crate) const fn visible_when(mut self, condition: &'static str) -> Self {
+    pub const fn visible_when(mut self, condition: &'static str) -> Self {
         self.visible_when = Some(condition);
         self
     }
@@ -171,7 +174,7 @@ impl MenuCommand {
 /// better than a forest of separate `static MenuCommand`s referenced by pointer,
 /// and a menu is never large enough for the width to matter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum MenuItemDef {
+pub enum MenuItemDef {
     /// A single command. Greyed if its `enabled_when` fails, absent if its
     /// `visible_when` fails.
     Command(MenuCommand),
@@ -204,18 +207,18 @@ pub(crate) enum MenuItemDef {
 
 /// A menu: the label it drops from, and its lines.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MenuDef {
+pub struct MenuDef {
     /// The button / submenu label this menu drops from.
-    pub(crate) label: &'static str,
+    pub label: &'static str,
     /// The lines, in presentation order (top to bottom *is* the layout).
-    pub(crate) items: &'static [MenuItemDef],
+    pub items: &'static [MenuItemDef],
 }
 
 /// A menu bar: an ordered strip of top-level menus.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MenuBarDef {
+pub struct MenuBarDef {
     /// The top-level menus, left-to-right in text order.
-    pub(crate) menus: &'static [&'static MenuDef],
+    pub menus: &'static [&'static MenuDef],
 }
 
 // ---------------------------------------------------------------------------
@@ -225,24 +228,25 @@ pub(crate) struct MenuBarDef {
 /// The condition key that never holds — the convention for an entry that is
 /// present for structure but can never be activated (the top bar's "no entries
 /// yet" placeholder). The bar never sets it, so an `enabled_when(NEVER_CONDITION)`
-/// entry is always greyed; menu search ([`crate::menu_search`]) skips it, since a
+/// entry is always greyed; menu search (`menu_search`) skips it, since a
 /// permanently unavailable entry is not a real search target.
-pub(crate) const NEVER_CONDITION: &str = "never";
+pub const NEVER_CONDITION: &str = "never";
 
 /// The conditions that currently hold, by name.
 ///
 /// A component rather than a resource, so two open menus (or a test's fixture
 /// and the live bar) do not share one truth. The live viewer fills it from the
-/// session ([`crate::menu_bar`]); the gallery and tests leave it empty, and
+/// session (`menu_bar`); the gallery and tests leave it empty, and
 /// every conditional entry then reads as unavailable / unchecked — a *true*
 /// rendering of "no session", not a stub.
 #[derive(Component, Debug, Clone, Default)]
-pub(crate) struct MenuConditions(pub(crate) Vec<&'static str>);
+pub struct MenuConditions(pub Vec<&'static str>);
 
 impl MenuConditions {
     /// Whether a named condition holds. A `None` key always holds; a `Some` key
     /// holds iff it is present.
-    pub(crate) fn holds(&self, key: Option<&'static str>) -> bool {
+    #[must_use]
+    pub fn holds(&self, key: Option<&'static str>) -> bool {
         match key {
             None => true,
             Some(name) => self.0.contains(&name),
@@ -269,11 +273,12 @@ impl MenuConditions {
 /// menu action a `&'static str` while the *lines* are as many as there are
 /// avatars under the cursor.
 #[derive(Resource, Debug, Clone, Default)]
-pub(crate) struct MenuDynamicSlots(Vec<(&'static str, Vec<String>)>);
+pub struct MenuDynamicSlots(Vec<(&'static str, Vec<String>)>);
 
 impl MenuDynamicSlots {
     /// The labels filling `slot`, or an empty slice when nothing filled it.
-    pub(crate) fn labels(&self, slot: &'static str) -> &[String] {
+    #[must_use]
+    pub fn labels(&self, slot: &'static str) -> &[String] {
         self.0
             .iter()
             .find(|(name, _labels)| *name == slot)
@@ -289,19 +294,19 @@ impl MenuDynamicSlots {
     }
 }
 
-/// A pick of one runtime-filled entry — the dynamic counterpart of [`UiAction`].
+/// A pick of one runtime-filled entry — the dynamic counterpart of `UiAction`.
 ///
 /// It carries no action string because a dynamic entry has none: the domain that
 /// filled the slot resolves `index` against the snapshot it kept (which avatar
 /// the third line under the cursor was).
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MenuDynamicPick {
-    /// The `element` the pick is attributed to, as on [`UiAction`].
-    pub(crate) element: &'static str,
+pub struct MenuDynamicPick {
+    /// The `element` the pick is attributed to, as on `UiAction`.
+    pub element: &'static str,
     /// The slot the picked entry came from.
-    pub(crate) slot: &'static str,
+    pub slot: &'static str,
     /// The entry's index in that slot, as the opener filled it.
-    pub(crate) index: usize,
+    pub index: usize,
 }
 
 /// Re-label an open menu's dynamic slot **in place** — the asynchronous half.
@@ -314,16 +319,16 @@ pub(crate) struct MenuDynamicPick {
 /// labels the menu was built with are left alone: the line count is fixed at
 /// open, and only the text is refreshed.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct SetMenuDynamicLabels {
+pub struct SetMenuDynamicLabels {
     /// The slot to re-label.
-    pub(crate) slot: &'static str,
+    pub slot: &'static str,
     /// Its labels, in the same order the menu was opened with.
-    pub(crate) labels: Vec<String>,
+    pub labels: Vec<String>,
 }
 
 // ---------------------------------------------------------------------------
 // The menu-search filter — the reference's `hightlightAndHide`, applied while a
-// popup is built. Set by `crate::menu_search`; read here when a menu opens.
+// popup is built. Set by `menu_search`; read here when a menu opens.
 // ---------------------------------------------------------------------------
 
 /// The active menu-search filter.
@@ -334,13 +339,13 @@ pub(crate) struct SetMenuDynamicLabels {
 /// the reference viewer's `LLStatusBar` filter does (`hightlightAndHide`). An
 /// empty `query`, or any menu under a different `element` (the inventory gear, a
 /// context menu), builds in full, unfiltered. Set from the search field in
-/// [`crate::menu_search`]; a default (empty) filter changes nothing.
-#[derive(Resource, Default)]
-pub(crate) struct MenuFilter {
-    /// The `element` whose menus this filters — [`crate::menu_bar`]'s top bar.
-    pub(crate) element: &'static str,
+/// `menu_search`; a default (empty) filter changes nothing.
+#[derive(Debug, Resource, Default)]
+pub struct MenuFilter {
+    /// The `element` whose menus this filters — `menu_bar`'s top bar.
+    pub element: &'static str,
     /// The lower-cased search term; empty means no active filter.
-    pub(crate) query: String,
+    pub query: String,
 }
 
 impl MenuFilter {
@@ -419,9 +424,9 @@ fn subtree_matches_filter(def: &MenuDef, query: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 /// A menu bar / drop-down surface background. Shared with the status area
-/// ([`crate::status_bar`]) so the two halves of the top row paint the same
+/// (`status_bar`) so the two halves of the top row paint the same
 /// fallback colour when no skin is loaded.
-pub(crate) const MENU_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
+pub const MENU_BACKGROUND: Color = Color::srgb(0.13, 0.15, 0.20);
 
 /// A menu-bar button / menu entry's resting background (transparent).
 const ENTRY_BACKGROUND: Color = Color::NONE;
@@ -432,7 +437,7 @@ const ENTRY_HIGHLIGHT: Color = Color::srgb(0.24, 0.34, 0.52);
 /// The label colour of an entry that **matched** the active menu-search filter —
 /// a warm accent, the reference viewer's `hightlightAndHide` highlight. A
 /// build-time text colour, not a per-frame background, so it does not fight the
-/// hover highlight ([`highlight_menu_hover`], which paints backgrounds).
+/// hover highlight (`highlight_menu_hover`, which paints backgrounds).
 const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
 
 /// A drop-down's border.
@@ -502,8 +507,8 @@ const MENU_Z_INDEX: i32 = 10_000;
 
 /// The host of one menu-bar button (or gear button): the button plus, while
 /// open, its drop-down. Owns the def to (re)build and the open popup, if any.
-#[derive(Component)]
-pub(crate) struct MenuHost {
+#[derive(Debug, Component)]
+pub struct MenuHost {
     /// The menu this host drops down.
     def: &'static MenuDef,
     /// The `element` its actions are attributed to.
@@ -512,16 +517,16 @@ pub(crate) struct MenuHost {
     open: Option<Entity>,
 }
 
-/// A menu-bar (or gear) button, so [`highlight_menu_hover`] lights it on hover.
+/// A menu-bar (or gear) button, so `highlight_menu_hover` lights it on hover.
 #[derive(Component)]
 struct MenuBarButton;
 
 /// Marks the one menu-bar row that a lone `Alt` tap opens into keyboard
 /// navigation (the reference's tap-`Alt` menu access) — the app's primary top
-/// bar. Set by [`crate::menu_bar`]; a gear-button drop-down or a second bar does
+/// bar. Set by `menu_bar`; a gear-button drop-down or a second bar does
 /// not carry it, so `Alt` never targets those.
-#[derive(Component)]
-pub(crate) struct PrimaryMenuBar;
+#[derive(Debug, Component)]
+pub struct PrimaryMenuBar;
 
 /// A drop-down command line that emits an action when activated. Read by
 /// [`emit_menu_action`].
@@ -607,7 +612,7 @@ type ActivatableRows<'w, 's> = Query<'w, 's, (), Or<(With<MenuEntryAction>, With
 
 /// The keyboard **jump key** (mnemonic) bound to a command / submenu row — the
 /// reference's `LLMenuItemGL::mJumpKey`. Uppercased ASCII, matched against a
-/// typed letter once keyboard navigation has begun ([`menu_keyboard_nav`]).
+/// typed letter once keyboard navigation has begun (`menu_keyboard_nav`).
 #[derive(Component, Debug, Clone, Copy)]
 struct MenuMnemonic {
     /// The uppercased mnemonic character.
@@ -623,7 +628,7 @@ struct MnemonicSpan;
 /// The keyboard-navigation state of the open menu stack.
 ///
 /// A single writer of the highlight the hover system already paints
-/// ([`highlight_menu_hover`]). `active` records that keyboard navigation has
+/// (`highlight_menu_hover`). `active` records that keyboard navigation has
 /// begun — so the jump-key underlines show, typed letters jump, and the hover
 /// systems stand down; `highlighted` is the row the block-axis arrows currently
 /// sit on, in the deepest open menu. `pending_first` defers highlighting a
@@ -648,7 +653,7 @@ struct MenuKeyboard {
     /// highlight once its deferred rows have spawned.
     pending_first: Option<Entity>,
     /// Set for the one frame a menu is opened from a `Tab`-focused button, so the
-    /// opening key press is not re-read as a command by [`menu_keyboard_nav`].
+    /// opening key press is not re-read as a command by `menu_keyboard_nav`.
     just_opened: bool,
     /// Whether the menu system itself grabbed keyboard focus to open a menu (a
     /// mouse click on a bar button, a context menu, or a tap-`Alt`), as opposed
@@ -670,7 +675,7 @@ struct MenuKeyboard {
 ///
 /// The bar sizes to its buttons and wraps rather than clipping (convention 2),
 /// so a larger UI font or a longer translation grows and reflows it.
-pub(crate) fn spawn_menu_bar(
+pub fn spawn_menu_bar(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -704,9 +709,9 @@ pub(crate) fn spawn_menu_bar(
 ///
 /// The reusable unit shared by the top menu bar and the inventory window's gear
 /// / view buttons. Open / close is driven by the press observer on the button
-/// ([`toggle_host`]); the `Button` component is kept for keyboard focus, not its
+/// (`toggle_host`); the `Button` component is kept for keyboard focus, not its
 /// activation path.
-pub(crate) fn spawn_menu_button(
+pub fn spawn_menu_button(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -1633,9 +1638,9 @@ fn spawn_separator_line(commands: &mut Commands, popup: Entity) {
     ));
 }
 
-/// Observer on a command entry: write its [`UiAction`] when activated. The whole
+/// Observer on a command entry: write its `UiAction` when activated. The whole
 /// of an entry's outward wiring — the viewer routes it, the gallery drops it, a
-/// test reads it (the registry rule, [`crate::ui_element`]).
+/// test reads it (the registry rule, `ui_element`).
 fn emit_menu_action(
     activate: On<Activate>,
     entries: Query<&MenuEntryAction>,
@@ -1728,7 +1733,7 @@ fn manage_submenus(
     mut commands: Commands,
 ) {
     // While keyboard navigation owns the stack, submenu open / close is driven
-    // by the arrow keys ([`menu_keyboard_nav`]); hover must not fight it (it
+    // by the arrow keys (`menu_keyboard_nav`); hover must not fight it (it
     // would close a keyboard-opened submenu the pointer is not over).
     if keyboard.active {
         return;
@@ -1768,7 +1773,7 @@ fn manage_submenus(
 
 /// Build and attach `branch`'s child popup (a no-op if already open) — the shared
 /// submenu-open used by both hover ([`manage_submenus`]) and keyboard
-/// ([`menu_keyboard_nav`]).
+/// (`menu_keyboard_nav`).
 #[expect(
     clippy::too_many_arguments,
     reason = "commands and the branch to open plus what its popup is built from: the conditions \
@@ -1827,18 +1832,18 @@ fn conditions_at<'q>(
 /// Open a [`MenuDef`] at a screen point, with no anchor button — the shape a
 /// right-click context menu uses.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenContextMenu {
+pub struct OpenContextMenu {
     /// The menu to show.
-    pub(crate) menu: &'static MenuDef,
+    pub menu: &'static MenuDef,
     /// Where to place its corner, in logical pixels.
-    pub(crate) at: Vec2,
+    pub at: Vec2,
     /// The `element` its actions are attributed to.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The condition names that hold for this open, snapshotted by the opener —
     /// the same open-time model as [`crate::pie_menu::OpenPieMenu`]. Every
     /// `enabled_when` / `checked_when` / `visible_when` key of the menu resolves
     /// against this set; empty means every conditional entry reads unavailable.
-    pub(crate) conditions: Vec<&'static str>,
+    pub conditions: Vec<&'static str>,
 }
 
 /// Spawn a popup for each [`OpenContextMenu`] request, anchored to a zero-size
@@ -1963,7 +1968,7 @@ fn dismiss_all(
 /// hover map. A disabled entry never lights up. The hovered node is usually a
 /// child (a label), so each hovered entity is resolved to its owning row.
 ///
-/// While keyboard navigation is active ([`MenuKeyboard`]) it is the *second*
+/// While keyboard navigation is active (`MenuKeyboard`) it is the *second*
 /// writer of this highlight the module docs describe: the pointer stands down
 /// and the lit set becomes the keyboard-highlighted row plus every ancestor
 /// submenu row on its open path, so the whole chain from the top menu down reads
@@ -2736,7 +2741,8 @@ fn toggle_menu_mnemonic_underline(
 // ---------------------------------------------------------------------------
 
 /// The line-menu widget's runtime.
-pub(crate) struct MenuWidgetPlugin;
+#[derive(Debug)]
+pub struct MenuWidgetPlugin;
 
 impl Plugin for MenuWidgetPlugin {
     fn build(&self, app: &mut App) {
@@ -2836,21 +2842,17 @@ static FIXTURE_WORLD: MenuDef = MenuDef {
 };
 
 /// The fixture menu bar, referenced by the gallery specimen and the tests.
-pub(crate) static FIXTURE_MENU_BAR: MenuBarDef = MenuBarDef {
+pub static FIXTURE_MENU_BAR: MenuBarDef = MenuBarDef {
     menus: &[&FIXTURE_AVATAR, &FIXTURE_WORLD],
 };
 
 /// The fixture context menu, opened by the gallery's right-click toggle.
-pub(crate) static FIXTURE_CONTEXT_MENU: MenuDef = FIXTURE_AVATAR;
+pub static FIXTURE_CONTEXT_MENU: MenuDef = FIXTURE_AVATAR;
 
 /// Spawn the gallery's menu-bar specimen — the closed bar, whose menus open when
 /// clicked (never a pre-opened menu). Registered in
-/// [`crate::ui_element::ELEMENTS`].
-pub(crate) fn spawn_menu_bar_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+/// `ui_element::ELEMENTS`.
+pub fn spawn_menu_bar_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     spawn_menu_bar(commands, parent, cx, &FIXTURE_MENU_BAR, "menu-bar-specimen")
 }
 
@@ -2868,12 +2870,12 @@ mod tests {
     use bevy::ui_widgets::Activate;
     use pretty_assertions::assert_eq;
 
-    use crate::ui::{UiDirection, UiRoot, UiScaffoldSystems};
-    use crate::ui_element::{ElementCx, UiAction};
     use crate::ui_test::{
         LayoutTest, TestError, activate, drain_actions, enable_action_recording, find_by_name,
         settle,
     };
+    use sl_viewer_ui_core::ui::{UiDirection, UiRoot, UiScaffoldSystems};
+    use sl_viewer_ui_core::ui_element::{ElementCx, UiAction};
 
     /// Every command action in a menu, depth-first, tagged with the `>`-joined
     /// path of menu labels that reaches it — the line-menu analogue of the pie's
