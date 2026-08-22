@@ -1,41 +1,41 @@
 [package]
 name = "sl-mesh"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Decoding mesh fetch API and cache (LLMesh decode + LOD-aware store + Firestorm-compatible on-disk cache) for Second Life / OpenSim clients"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "mesh", "llmesh", "cache"]
-categories = ["network-programming", "game-development", "caching"]
+repository = { workspace = true }
+keywords = ["cache", "llmesh", "mesh", "opensim", "secondlife"]
+categories = ["caching", "game-development", "network-programming"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-arc-swap = { version = "1.9.2" }
-async-lock = { version = "3.4.2" }
-async-trait = { version = "0.1.89" }
-bytes = { version = "1.12.0" }
-dashmap = { version = "6.2.1" }
-event-listener = { version = "5.4.1" }
-flate2 = { version = "1.1.9" }
-fs-err = { version = "3.3.0" }
-num_cpus = { version = "1.17.0" }
-parking_lot = { version = "0.12.5" }
-sl-asset-sched = { version = "0.1.0", path = "../sl-asset-sched" }
-sl-proto = { version = "0.1.0", path = "../sl-proto" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
-thiserror = { version = "2.0.18" }
-tracing = { version = "0.1.44" }
-uuid = { version = "1.18.1" }
+arc-swap = { workspace = true }
+async-lock = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+dashmap = { workspace = true }
+event-listener = { workspace = true }
+flate2 = { workspace = true }
+fs-err = { workspace = true }
+num_cpus = { workspace = true }
+parking_lot = { workspace = true }
+sl-asset-sched = { workspace = true }
+sl-proto = { workspace = true }
+sl-wire = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
 
 [dev-dependencies]
-pollster = { version = "0.4.0" }
-pretty_assertions = { version = "1.4.1" }
+pollster = { workspace = true }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

@@ -1,45 +1,45 @@
 [package]
 name = "sl-wire"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Sans-I/O codec for the Second Life / OpenSim LLUDP wire protocol and XML-RPC login"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "lludp", "protocol", "codec"]
-categories = ["encoding", "parser-implementations", "network-programming"]
+repository = { workspace = true }
+keywords = ["codec", "lludp", "opensim", "protocol", "secondlife"]
+categories = ["encoding", "network-programming", "parser-implementations"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [features]
 # Derive `serde::Serialize` on the generated message/block structs and
 # `AnyMessage`, so decoded messages can be serialized (e.g. to JSON) by tools.
-serde = ["dep:serde", "uuid/serde", "url/serde", "sl-llsd/serde"]
+serde = ["dep:serde", "sl-llsd/serde", "url/serde", "uuid/serde"]
 
 [dependencies]
-base64 = { version = "0.22.1" }
-md5 = { version = "0.7.0" }
+base64 = { workspace = true }
+md5 = { workspace = true }
 miniz_oxide = { version = "0.8.9" }
-roxmltree = { version = "0.20.0" }
-serde = { version = "1.0.228", features = ["derive"], optional = true }
-sl-llsd = { version = "0.1.0", path = "../sl-llsd" }
-sl-lsl = { version = "0.1.0", path = "../sl-lsl" }
-sl-types = { version = "0.8.0" }
-thiserror = { version = "2.0.18" }
-tracing = { version = "0.1.44" }
-url = { version = "2.5.8" }
-uuid = { version = "1.18.1" }
+roxmltree = { workspace = true }
+serde = { workspace = true, features = ["derive"], optional = true }
+sl-llsd = { workspace = true }
+sl-lsl = { workspace = true }
+sl-types = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true }
 
 [build-dependencies]
-fs-err = { version = "3.1.1" }
-sl-msg-template = { version = "0.1.0", path = "../sl-msg-template" }
+fs-err = { workspace = true }
+sl-msg-template = { path = "../sl-msg-template", version = "0.1.0" }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

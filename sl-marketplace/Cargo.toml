@@ -1,29 +1,29 @@
 [package]
 name = "sl-marketplace"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Sans-I/O model of the Second Life Marketplace (SLM) DirectDelivery JSON REST API"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "marketplace", "slm", "json", "sans-io"]
+repository = { workspace = true }
+keywords = ["json", "marketplace", "sans-io", "secondlife", "slm"]
 categories = ["api-bindings", "encoding"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = { version = "1.0.145" }
-sl-types = { version = "0.8.0" }
-thiserror = { version = "2.0.18" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sl-types = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
-uuid = { version = "1.18.1" }
+pretty_assertions = { workspace = true }
+uuid = { workspace = true }
 
 [lints]
 workspace = true

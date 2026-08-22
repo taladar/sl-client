@@ -1,19 +1,19 @@
 [package]
 name = "sl-client-bevy"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Bevy ECS Second Life / OpenSim client plugin built on sl-proto"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "client", "bevy", "ecs"]
-categories = ["network-programming", "game-development"]
+repository = { workspace = true }
+keywords = ["bevy", "client", "ecs", "opensim", "secondlife"]
+categories = ["game-development", "network-programming"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [features]
 # Off by default: the headless client needs no renderer. The windowed viewer
@@ -23,58 +23,58 @@ default = []
 bevy_pbr = ["bevy/bevy_pbr"]
 
 [dependencies]
-arc-swap = { version = "1.9.2" }
-async-trait = { version = "0.1.89" }
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
 bevy = { version = "0.19.0", default-features = false, features = [
-    "bevy_asset",
-    "bevy_image",
-    "bevy_mesh",
-    # Per-frame avatar visual-param morphs (P31.12a) attach Bevy native morph
-    # targets to the base-mesh assets; `Mesh::set_morph_targets` is gated on this.
-    "morph",
+  "bevy_asset",
+  "bevy_image",
+  "bevy_mesh",
+  # Per-frame avatar visual-param morphs (P31.12a) attach Bevy native morph
+  # targets to the base-mesh assets; `Mesh::set_morph_targets` is gated on this.
+  "morph",
 ] }
-bytes = { version = "1.12.0" }
-crossbeam-channel = { version = "0.5.15" }
-flate2 = { version = "1.1.9" }
-fs-err = { version = "3.3.0" }
-reqwest = { version = "0.12.15", default-features = false, features = [
-    "blocking",
-    "rustls-tls",
+bytes = { workspace = true }
+crossbeam-channel = { workspace = true }
+flate2 = { workspace = true }
+fs-err = { workspace = true }
+reqwest = { workspace = true, features = [
+  "blocking",
+  "rustls-tls",
 ] }
-sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
-sl-anim = { version = "0.1.0", path = "../sl-anim" }
-sl-asset = { version = "0.1.0", path = "../sl-asset" }
-sl-avatar = { version = "0.1.0", path = "../sl-avatar" }
-sl-bake = { version = "0.1.0", path = "../sl-bake" }
-sl-material = { version = "0.1.0", path = "../sl-material" }
-sl-mesh = { version = "0.1.0", path = "../sl-mesh" }
-sl-prim = { version = "0.1.0", path = "../sl-prim" }
-sl-proto = { version = "0.1.0", path = "../sl-proto" }
-sl-sculpt = { version = "0.1.0", path = "../sl-sculpt" }
-sl-texture = { version = "0.1.0", path = "../sl-texture" }
-sl-tree = { version = "0.1.0", path = "../sl-tree" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
-time = { version = "0.3.49", features = ["local-offset"] }
+sl-account-dirs = { workspace = true }
+sl-anim = { workspace = true }
+sl-asset = { workspace = true }
+sl-avatar = { workspace = true }
+sl-bake = { path = "../sl-bake", version = "0.1.0" }
+sl-material = { workspace = true }
+sl-mesh = { workspace = true }
+sl-prim = { workspace = true }
+sl-proto = { workspace = true }
+sl-sculpt = { path = "../sl-sculpt", version = "0.1.0" }
+sl-texture = { path = "../sl-texture", version = "0.1.0" }
+sl-tree = { path = "../sl-tree", version = "0.1.0" }
+sl-wire = { workspace = true }
+time = { workspace = true, features = ["local-offset"] }
 # The small shared runtime the async asset fetchers drive (`async_runtime.rs`):
 # a few-thread multi-thread runtime so non-blocking `reqwest` downloads are no
 # longer pinned at Bevy's 4-wide `IoTaskPool` funnel. `rt-multi-thread` for the
 # pool, `net` + `time` for `enable_all()` (the reqwest IO driver and the
 # transient-retry backoff sleeps).
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "net", "time"] }
-tracing = { version = "0.1.44" }
-url = { version = "2.5.8" }
-uuid = { version = "1.18.1", features = ["v4"] }
+tokio = { workspace = true, features = ["net", "rt-multi-thread", "time"] }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 # Matches the version bevy_image re-exports through; used to construct `Image`.
-wgpu-types = { version = "29" }
+wgpu-types = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
-serde_json = { version = "1.0.145" }
+pretty_assertions = { workspace = true }
+serde_json = { workspace = true }
 # The loopback grid the `fake_grid_login_smoke` tier logs the real plugin
 # into; `sync` for its `broadcast` receivers, `rt-multi-thread` to host it.
-sl-fake-grid = { version = "0.1.0", path = "../sl-fake-grid" }
-tokio = { version = "1.52.3", features = ["rt-multi-thread", "sync"] }
-tracing-subscriber = { version = "0.3.19" }
+sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

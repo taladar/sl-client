@@ -1,94 +1,109 @@
 [workspace]
-members = [
-    "sl-account-dirs",
-    "sl-anim",
-    "sl-asset",
-    "sl-asset-sched",
-    "sl-audio",
-    "sl-avatar",
-    "sl-bake",
-    "sl-cef",
-    "sl-client-bevy",
-    "sl-client-bevy-viewer",
-    "sl-client-tokio",
-    "sl-conformance",
-    "sl-emoji",
-    "sl-fake-grid",
-    "sl-gst",
-    "sl-j2c-encode",
-    "sl-l10n",
-    "sl-llsd",
-    "sl-lsl",
-    "sl-lsl-lsp",
-    "sl-marketplace",
-    "sl-material",
-    "sl-media",
-    "sl-mesh",
-    "sl-msg-template",
-    "sl-notecard",
-    "sl-prim",
-    "sl-proto",
-    "sl-repl",
-    "sl-repl-bevy",
-    "sl-repl-tokio",
-    "sl-rlv",
-    "sl-sculpt",
-    "sl-settings",
-    "sl-survey",
-    "sl-terrain",
-    "sl-texture",
-    "sl-tree",
-    "sl-wire",
-]
 resolver = "3"
+members = [
+  "sl-account-dirs",
+  "sl-anim",
+  "sl-asset",
+  "sl-asset-sched",
+  "sl-audio",
+  "sl-avatar",
+  "sl-bake",
+  "sl-cef",
+  "sl-client-bevy",
+  "sl-client-bevy-viewer",
+  "sl-client-tokio",
+  "sl-conformance",
+  "sl-emoji",
+  "sl-fake-grid",
+  "sl-gst",
+  "sl-j2c-encode",
+  "sl-l10n",
+  "sl-llsd",
+  "sl-lsl",
+  "sl-lsl-lsp",
+  "sl-marketplace",
+  "sl-material",
+  "sl-media",
+  "sl-mesh",
+  "sl-msg-template",
+  "sl-notecard",
+  "sl-prim",
+  "sl-proto",
+  "sl-repl",
+  "sl-repl-bevy",
+  "sl-repl-tokio",
+  "sl-rlv",
+  "sl-sculpt",
+  "sl-settings",
+  "sl-survey",
+  "sl-terrain",
+  "sl-texture",
+  "sl-tree",
+  "sl-wire",
+]
 
-[profile.release]
-# Line tables, not full DWARF. Profiling here happens on release builds (a debug
-# build is too slow to run) with Tracy and `perf`, plus `gdb -p <pid> -ex
-# "thread apply all bt"` for hung-thread backtraces. All of those need symbol
-# names, file:line and inline frames — which line tables carry in full. `perf
-# --call-graph dwarf` unwinds through `.eh_frame`, which is emitted regardless.
-#
-# What full `debug = 2` adds on top is the variable/type descriptions only a
-# debugger inspecting locals reads: measured on this workspace's viewer binary,
-# `.debug_info` (932 MB) + `.debug_str` (863 MB) + `.debug_loc` (757 MB) out of
-# 2.86 GB of DWARF in a 3.17 GB binary whose `.text` is just 113 MB. Dropping
-# them keeps every profiling workflow intact while cutting the binary, the link
-# time, the link's peak RSS and the build-cache footprint by roughly 10x.
-#
-# Use `--profile release-debug` below on the rare occasion locals are needed.
-debug = "line-tables-only"
+[workspace.package]
+version = "0.1.0"
+authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
+edition = "2024"
+rust-version = "1.94.0"
+readme = "README.md"
+repository = "https://github.com/taladar/sl-client"
+license = "LGPL-2.1-only"
+exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+publish = false
 
-# Release plus full DWARF, for the rare debugger session that needs local
-# variables. Its own profile so it builds into `target/release-debug/` and never
-# invalidates the normal release artifacts.
-[profile.release-debug]
-inherits = "release"
-debug = 2
-
-[profile.dev]
-# Same reasoning as release, and more clear-cut: debug builds are not used for
-# debugging here, so full DWARF in them is pure cost. This is also what shrinks
-# `target/debug` and ggh's `target/nextest_check`, both of which build with the
-# dev profile.
-debug = "line-tables-only"
-# Light optimization for our own crates. Bevy's baseline advice leaves these at
-# opt-level 0 on the assumption the engine dominates frame time, but that does
-# not hold here: this workspace carries a lot of performance-sensitive code of
-# its own (the pose driver, culling, UI layout, the parry3d raycast index), and
-# unoptimized it is too slow to run. opt-level 1 keeps most of the runtime win
-# for a small fraction of opt-level 3's compile cost, and leaves debug
-# assertions and overflow checks on.
-opt-level = 1
-
-[profile.dev.package."*"]
-# Optimize every dependency (bevy, wgpu, parry3d, ...) fully even in a dev
-# build. This is Bevy's standard fast-build recommendation: the dependency wall
-# compiles once and is cached, so paying opt-level 3 there is nearly free per
-# iteration, while the crates that actually change between builds sit at
-# opt-level 1 above. Together these are what make a dev build runnable, so
-# iteration no longer has to go through a release build.
-opt-level = 3
+[workspace.dependencies]
+arc-swap = { version = "1.9.2" }
+async-lock = { version = "3.4.2" }
+async-trait = { version = "0.1.89" }
+base64 = { version = "0.22.1" }
+bytes = { version = "1.12.1" }
+clap = { version = "4.6.2" }
+clap_complete = { version = "4.6.2" }
+clap_mangen = { version = "0.3.0" }
+crossbeam-channel = { version = "0.5.15" }
+dashmap = { version = "6.2.1" }
+event-listener = { version = "5.4.1" }
+flate2 = { version = "1.1.9" }
+fs-err = { version = "3.3.0" }
+md5 = { version = "0.7.0" }
+num_cpus = { version = "1.17.0" }
+parking_lot = { version = "0.12.5" }
+pollster = { version = "0.4.0" }
+pretty_assertions = { version = "1.4.1" }
+reqwest = { version = "0.12.15", default-features = false }
+roxmltree = { version = "0.20.0" }
+rustyline = { version = "17.0.2" }
+serde = { version = "1.0.229" }
+serde_json = { version = "1.0.151" }
+sl-account-dirs = { path = "sl-account-dirs", version = "0.1.0" }
+sl-anim = { path = "sl-anim", version = "0.1.0" }
+sl-asset = { path = "sl-asset", version = "0.1.0" }
+sl-asset-sched = { path = "sl-asset-sched", version = "0.1.0" }
+sl-avatar = { path = "sl-avatar", version = "0.1.0" }
+sl-client-bevy = { path = "sl-client-bevy", version = "0.1.0" }
+sl-client-tokio = { path = "sl-client-tokio", version = "0.1.0" }
+sl-llsd = { path = "sl-llsd", version = "0.1.0" }
+sl-lsl = { path = "sl-lsl", version = "0.1.0" }
+sl-material = { path = "sl-material", version = "0.1.0" }
+sl-media = { path = "sl-media", version = "0.1.0" }
+sl-mesh = { path = "sl-mesh", version = "0.1.0" }
+sl-prim = { path = "sl-prim", version = "0.1.0" }
+sl-proto = { path = "sl-proto", version = "0.1.0" }
+sl-repl = { path = "sl-repl", version = "0.1.0" }
+sl-types = { version = "0.8.0" }
+sl-wire = { path = "sl-wire", version = "0.1.0" }
+thiserror = { version = "2.0.18" }
+time = { version = "0.3.49" }
+tokio = { version = "1.52.3" }
+toml = { version = "1.1.2" }
+tracing = { version = "0.1.44" }
+tracing-appender = { version = "0.2.5" }
+tracing-subscriber = { version = "0.3.23" }
+url = { version = "2.5.8" }
+uuid = { version = "1.18.1" }
+wgpu-types = { version = "29" }
 
 [workspace.lints.clippy]
 allow_attributes = "deny"
@@ -361,6 +376,16 @@ bevy_ecs_macro_logic = { git = "https://github.com/taladar/bevy.git", rev = "55d
 bevy_ecs_macros = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
 bevy_encase_derive = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
 bevy_feathers = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
+# bevy_flair 0.8.0 + the recalculate_style-on-Reset fix (debug-build panic /
+# release-build silent reset downgrade when a freshly spawned widget is swept
+# into a sibling/descendant recalculation in the same frame) — submitted
+# upstream; drop the patch once a release carries it. All flair crates come
+# from the same rev so the graph never mixes registry and git copies.
+bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
+bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
 bevy_gilrs = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
 bevy_gizmos = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
 bevy_gizmos_macros = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
@@ -406,17 +431,8 @@ bevy_winit = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690f
 bevy_world_serialization = { git = "https://github.com/taladar/bevy.git", rev = "55d00a73b690fa9bbd5fbeb9e603451ef6f3cbda" }
 fontique = { git = "https://github.com/taladar/parley.git", rev = "571106be1c1b39c984832d196afe81b5f265807e" }
 parley = { git = "https://github.com/taladar/parley.git", rev = "571106be1c1b39c984832d196afe81b5f265807e" }
-# bevy_flair 0.8.0 + the recalculate_style-on-Reset fix (debug-build panic /
-# release-build silent reset downgrade when a freshly spawned widget is swept
-# into a sibling/descendant recalculation in the same frame) — submitted
-# upstream; drop the patch once a release carries it. All flair crates come
-# from the same rev so the graph never mixes registry and git copies.
-bevy_flair = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_core = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_core_macros = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_css_parser = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
-bevy_flair_style = { git = "https://github.com/taladar/bevy_flair.git", rev = "aef41d88cc21228b378f81779c85b656ba7a53a5" }
 
+naga = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
 # Fork of wgpu 29.0.4 (github.com/taladar/wgpu, branch
 # sl-client-texture-init-fastpath) carrying ONE change vs the v29.0.4 tag: a
 # fast path in `wgpu-core`'s texture memory-init registration
@@ -442,4 +458,51 @@ wgpu-core-deps-windows-linux-android = { git = "https://github.com/taladar/wgpu.
 wgpu-hal = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
 wgpu-naga-bridge = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
 wgpu-types = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
-naga = { git = "https://github.com/taladar/wgpu.git", rev = "72126feaceecfe82a2b0fa5e37ac7e787920e107" }
+
+[profile.dev]
+# Light optimization for our own crates. Bevy's baseline advice leaves these at
+# opt-level 0 on the assumption the engine dominates frame time, but that does
+# not hold here: this workspace carries a lot of performance-sensitive code of
+# its own (the pose driver, culling, UI layout, the parry3d raycast index), and
+# unoptimized it is too slow to run. opt-level 1 keeps most of the runtime win
+# for a small fraction of opt-level 3's compile cost, and leaves debug
+# assertions and overflow checks on.
+opt-level = 1
+# Same reasoning as release, and more clear-cut: debug builds are not used for
+# debugging here, so full DWARF in them is pure cost. This is also what shrinks
+# `target/debug` and ggh's `target/nextest_check`, both of which build with the
+# dev profile.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+# Optimize every dependency (bevy, wgpu, parry3d, ...) fully even in a dev
+# build. This is Bevy's standard fast-build recommendation: the dependency wall
+# compiles once and is cached, so paying opt-level 3 there is nearly free per
+# iteration, while the crates that actually change between builds sit at
+# opt-level 1 above. Together these are what make a dev build runnable, so
+# iteration no longer has to go through a release build.
+opt-level = 3
+
+[profile.release]
+# Line tables, not full DWARF. Profiling here happens on release builds (a debug
+# build is too slow to run) with Tracy and `perf`, plus `gdb -p <pid> -ex
+# "thread apply all bt"` for hung-thread backtraces. All of those need symbol
+# names, file:line and inline frames — which line tables carry in full. `perf
+# --call-graph dwarf` unwinds through `.eh_frame`, which is emitted regardless.
+#
+# What full `debug = 2` adds on top is the variable/type descriptions only a
+# debugger inspecting locals reads: measured on this workspace's viewer binary,
+# `.debug_info` (932 MB) + `.debug_str` (863 MB) + `.debug_loc` (757 MB) out of
+# 2.86 GB of DWARF in a 3.17 GB binary whose `.text` is just 113 MB. Dropping
+# them keeps every profiling workflow intact while cutting the binary, the link
+# time, the link's peak RSS and the build-cache footprint by roughly 10x.
+#
+# Use `--profile release-debug` below on the rare occasion locals are needed.
+debug = "line-tables-only"
+
+# Release plus full DWARF, for the rare debugger session that needs local
+# variables. Its own profile so it builds into `target/release-debug/` and never
+# invalidates the normal release artifacts.
+[profile.release-debug]
+inherits = "release"
+debug = 2

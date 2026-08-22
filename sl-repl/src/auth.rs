@@ -212,7 +212,7 @@ impl Credentials {
     /// [`AuthError::Parse`] if its contents are not valid credentials.
     pub fn load(path: &Path) -> Result<Self, AuthError> {
         let text =
-            std::fs::read_to_string(path).map_err(|error| AuthError::Io(error.to_string()))?;
+            fs_err::read_to_string(path).map_err(|error| AuthError::Io(error.to_string()))?;
         Self::from_toml_str(&text)
     }
 

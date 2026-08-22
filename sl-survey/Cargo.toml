@@ -1,17 +1,17 @@
 [package]
 name = "sl-survey"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Headless Second Life / OpenSim survey client: teleports across regions collecting parcel and region data"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "survey", "client", "cli"]
+readme = { workspace = true }
+repository = { workspace = true }
+license = { workspace = true }
+keywords = ["cli", "client", "opensim", "secondlife", "survey"]
 categories = ["command-line-utilities", "network-programming"]
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
+publish = { workspace = true }
 
 [package.metadata.deb]
 name = "sl-survey"
@@ -20,8 +20,8 @@ extended-description = "Headless Second Life / OpenSim survey client: teleports 
 section = "database"
 copyright = "2026, Matthias Hörmann <mhoermann@gmail.com>"
 assets = [
-  [ "target/release/sl-survey", "usr/bin/", "755" ],
-  ]
+  ["target/release/sl-survey", "usr/bin/", "755"],
+]
 maintainer-scripts = "maintainer-scripts"
 changelog = "changelog"
 revision = "1"
@@ -34,29 +34,30 @@ sl-survey = { path = "/usr/bin/sl-survey" }
 
 [package.metadata.generate-rpm]
 assets = [
-    { source = "target/release/sl-survey", dest = "/usr/bin/sl-survey", mode = "755" },
+  { source = "target/release/sl-survey", dest = "/usr/bin/sl-survey", mode = "755" },
 ]
+
 [dependencies]
-clap = { version = "4.6.1", features = ["derive", "cargo", "env"] }
-clap_complete = "4.6.2"
-clap_mangen = "0.3.0"
+clap = { workspace = true, features = ["cargo", "derive", "env"] }
+clap_complete = { workspace = true }
+clap_mangen = { workspace = true }
 humantime = "2.3.0"
 log-panics = { version = "2.1.0", features = ["with-backtrace"] }
-serde = { version = "1.0.228", features = ["derive"] }
-serde_json = "1.0.145"
-sl-client-tokio = { version = "0.1.0", path = "../sl-client-tokio" }
-thiserror = "2.0.18"
-tokio = { version = "1.52.1", features = [ "full" ] }
-tracing = "0.1.44"
-tracing-appender = "0.2.5"
-tracing-subscriber = { version = "0.3.23", features = [ "env-filter", "tracing-log" ] }
-url = "2.5.8"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sl-client-tokio = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }
+url = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tracing-journald = "0.3.2"
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

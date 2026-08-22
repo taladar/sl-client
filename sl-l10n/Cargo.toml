@@ -1,19 +1,19 @@
 [package]
 name = "sl-l10n"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Locale-aware number, currency and date/time value formatting (CLDR/ICU) for Second Life / OpenSim clients"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "i18n", "l10n", "icu"]
+repository = { workspace = true }
+keywords = ["i18n", "icu", "l10n", "opensim", "secondlife"]
 categories = ["internationalization", "localization", "value-formatting"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
 # ICU4X (2.x): the CLDR-backed formatters. `compiled_data` (a default feature of
@@ -34,10 +34,10 @@ icu_locale_core = { version = "2.2.0" }
 # here makes every `icu_*` formatter thread-safe).
 icu_provider = { version = "2.2.0", features = ["sync"] }
 icu_time = { version = "2.2.0" }
-thiserror = { version = "2.0.18" }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

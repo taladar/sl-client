@@ -1,28 +1,28 @@
 [package]
 name = "sl-avatar"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Second Life / OpenSim avatar skeleton, base-body mesh, and visual-param decoding (pure, I/O-free), mirroring sl-mesh / sl-texture"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "avatar", "skeleton", "skinning"]
+repository = { workspace = true }
+keywords = ["avatar", "opensim", "secondlife", "skeleton", "skinning"]
 categories = ["game-development", "rendering", "rendering::data-formats"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-roxmltree = { version = "0.20.0" }
-sl-mesh = { version = "0.1.0", path = "../sl-mesh" }
-sl-proto = { version = "0.1.0", path = "../sl-proto" }
-thiserror = { version = "2.0.18" }
+roxmltree = { workspace = true }
+sl-mesh = { workspace = true }
+sl-proto = { workspace = true }
+thiserror = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

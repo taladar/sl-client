@@ -8828,6 +8828,7 @@ name = "sl-repl"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "fs-err",
  "pretty_assertions",
  "serde",
  "sl-proto",
@@ -8847,6 +8848,7 @@ dependencies = [
  "clap_complete",
  "clap_mangen",
  "crossbeam-channel",
+ "fs-err",
  "pretty_assertions",
  "rustyline",
  "sl-account-dirs",
@@ -8866,6 +8868,7 @@ dependencies = [
  "clap",
  "clap_complete",
  "clap_mangen",
+ "fs-err",
  "pretty_assertions",
  "rustyline",
  "sl-account-dirs",

@@ -1,26 +1,26 @@
 [package]
 name = "sl-lsl"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Pure Linden Scripting Language (LSL) tooling for Second Life / OpenSim clients — the logos token stream, mirroring sl-prim / sl-anim / sl-avatar"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "lsl", "lexer", "tokenizer"]
+repository = { workspace = true }
+keywords = ["lexer", "lsl", "opensim", "secondlife", "tokenizer"]
 categories = ["game-development", "parser-implementations"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
 logos = { version = "0.13.0" }
 
 [dev-dependencies]
-fs-err = { version = "3.3.0" }
-pretty_assertions = { version = "1.4.1" }
+fs-err = { workspace = true }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

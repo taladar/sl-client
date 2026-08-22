@@ -1,37 +1,40 @@
 [package]
 name = "sl-repl-bevy"
+version = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Interactive Bevy-driven Second Life / OpenSim REPL test client built on sl-repl and sl-client-bevy"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "repl", "client", "cli"]
+repository = { workspace = true }
+keywords = ["cli", "client", "opensim", "repl", "secondlife"]
 categories = ["command-line-utilities", "network-programming"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
 bevy = { version = "0.19.0", default-features = false }
-clap = { version = "4.6.1", features = ["derive", "cargo", "env"] }
-clap_complete = "4.6.2"
-clap_mangen = "0.3.0"
-crossbeam-channel = "0.5.15"
-rustyline = "17.0.2"
-sl-account-dirs = { version = "0.1.0", path = "../sl-account-dirs" }
-sl-client-bevy = { version = "0.1.0", path = "../sl-client-bevy" }
-sl-repl = { version = "0.1.0", path = "../sl-repl" }
-thiserror = "2.0.18"
-tracing = "0.1.44"
-tracing-appender = "0.2.5"
-tracing-subscriber = { version = "0.3.23", features = ["env-filter", "tracing-log"] }
-url = "2.5.8"
+clap = { workspace = true, features = ["cargo", "derive", "env"] }
+clap_complete = { workspace = true }
+clap_mangen = { workspace = true }
+crossbeam-channel = { workspace = true }
+# `clippy.toml` disallows `std::fs` so a read error names the file it failed
+# on — here the REPL script the user asked to run.
+fs-err = { workspace = true }
+rustyline = { workspace = true }
+sl-account-dirs = { workspace = true }
+sl-client-bevy = { workspace = true }
+sl-repl = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"] }
+url = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

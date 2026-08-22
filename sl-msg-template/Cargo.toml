@@ -1,28 +1,28 @@
 [package]
 name = "sl-msg-template"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Parser for the Second Life / OpenSim LLUDP message_template.msg into a typed AST"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "lludp", "protocol", "parser"]
-categories = ["parser-implementations", "encoding"]
+repository = { workspace = true }
+keywords = ["lludp", "opensim", "parser", "protocol", "secondlife"]
+categories = ["encoding", "parser-implementations"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-thiserror = { version = "2.0.18" }
+thiserror = { workspace = true }
 
 [dev-dependencies]
 # The integration test reads the vendored template from `sl-wire` at run time;
 # `clippy.toml` disallows `std::fs` in favour of `fs_err`.
-fs-err = { version = "3.3.0" }
-pretty_assertions = { version = "1.4.1" }
+fs-err = { workspace = true }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

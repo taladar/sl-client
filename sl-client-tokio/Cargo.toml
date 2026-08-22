@@ -1,46 +1,46 @@
 [package]
 name = "sl-client-tokio"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Tokio-based async Second Life / OpenSim client built on sl-proto"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "client", "tokio", "async"]
-categories = ["network-programming", "game-development"]
+repository = { workspace = true }
+keywords = ["async", "client", "opensim", "secondlife", "tokio"]
+categories = ["game-development", "network-programming"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-arc-swap = { version = "1.9.2" }
-async-trait = { version = "0.1.89" }
-bytes = { version = "1.12.0" }
-flate2 = { version = "1.1.9" }
-fs-err = { version = "3.3.0" }
-reqwest = { version = "0.12.15", default-features = false, features = [
-    "rustls-tls",
+arc-swap = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+flate2 = { workspace = true }
+fs-err = { workspace = true }
+reqwest = { workspace = true, features = [
+  "rustls-tls",
 ] }
-sl-asset = { version = "0.1.0", path = "../sl-asset" }
-sl-material = { version = "0.1.0", path = "../sl-material" }
-sl-mesh = { version = "0.1.0", path = "../sl-mesh" }
-sl-proto = { version = "0.1.0", path = "../sl-proto" }
-sl-texture = { version = "0.1.0", path = "../sl-texture" }
-sl-wire = { version = "0.1.0", path = "../sl-wire" }
-thiserror = { version = "2.0.18" }
-time = { version = "0.3.49", features = ["local-offset"] }
-tokio = { version = "1.44.2", features = ["net", "time", "rt", "macros", "sync"] }
-tracing = { version = "0.1.44" }
-url = { version = "2.5.8" }
-uuid = { version = "1.18.1", features = ["v4"] }
+sl-asset = { workspace = true }
+sl-material = { workspace = true }
+sl-mesh = { workspace = true }
+sl-proto = { workspace = true }
+sl-texture = { path = "../sl-texture", version = "0.1.0" }
+sl-wire = { workspace = true }
+thiserror = { workspace = true }
+time = { workspace = true, features = ["local-offset"] }
+tokio = { workspace = true, features = ["macros", "net", "rt", "sync", "time"] }
+tracing = { workspace = true }
+url = { workspace = true }
+uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
-tokio = { version = "1.44.2", features = ["rt-multi-thread", "macros", "time"] }
-tracing-subscriber = { version = "0.3.19" }
+pretty_assertions = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tracing-subscriber = { workspace = true }
 
 [lints]
 workspace = true

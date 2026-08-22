@@ -1,28 +1,28 @@
 [package]
 name = "sl-sculpt"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Sculpt-texture (RGB sculpt-map → geometry) tessellation for Second Life / OpenSim clients, reusing sl-prim's mesh output type"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "sculpt", "tessellation", "geometry"]
+repository = { workspace = true }
+keywords = ["geometry", "opensim", "sculpt", "secondlife", "tessellation"]
 categories = ["game-development", "rendering", "rendering::data-formats"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-sl-prim = { version = "0.1.0", path = "../sl-prim" }
-sl-texture = { version = "0.1.0", path = "../sl-texture", default-features = false }
+sl-prim = { workspace = true }
+sl-texture = { path = "../sl-texture", version = "0.1.0", default-features = false }
 
 [dev-dependencies]
-bytes = { version = "1.12.0" }
-pretty_assertions = { version = "1.4.1" }
-sl-proto = { version = "0.1.0", path = "../sl-proto" }
+bytes = { workspace = true }
+pretty_assertions = { workspace = true }
+sl-proto = { workspace = true }
 
 [lints]
 workspace = true

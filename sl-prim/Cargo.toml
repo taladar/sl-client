@@ -1,25 +1,25 @@
 [package]
 name = "sl-prim"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
 description = "Linden prim tessellation (path × profile sweep → geometry) for Second Life / OpenSim clients, mirroring sl-mesh / sl-texture"
-readme = "README.md"
-license = "LGPL-2.1-only"
-version = "0.1.0"
-authors = ["Matthias Hörmann <mhoermann@gmail.com>"]
-edition = "2024"
-rust-version = "1.94.0"
+readme = { workspace = true }
+license = { workspace = true }
 
-publish = false
-repository = "https://github.com/taladar/sl-client"
-keywords = ["secondlife", "opensim", "prim", "tessellation", "geometry"]
+repository = { workspace = true }
+keywords = ["geometry", "opensim", "prim", "secondlife", "tessellation"]
 categories = ["game-development", "rendering", "rendering::data-formats"]
+publish = { workspace = true }
 
-exclude = [".env", "tarpaulin-report.html", "tarpaulin-report.json"]
+exclude = { workspace = true }
 
 [dependencies]
-sl-proto = { version = "0.1.0", path = "../sl-proto" }
+sl-proto = { workspace = true }
 
 [dev-dependencies]
-pretty_assertions = { version = "1.4.1" }
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

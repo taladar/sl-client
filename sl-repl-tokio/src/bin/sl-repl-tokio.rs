@@ -334,7 +334,7 @@ fn input_mode(args: &RunArgs) -> InputMode {
 fn replay_lines(mode: &InputMode) -> Result<Option<Vec<String>>, Error> {
     let text = match mode {
         InputMode::Interactive => return Ok(None),
-        InputMode::Script(path) => std::fs::read_to_string(path)?,
+        InputMode::Script(path) => fs_err::read_to_string(path)?,
         InputMode::Stdin => std::io::read_to_string(std::io::stdin())?,
     };
     Ok(Some(text.lines().map(str::to_owned).collect()))
