@@ -14,13 +14,13 @@
 //!
 //! Any surface raises a sound by writing a [`PlayUiSound`] message — it never
 //! reaches into the audio engine. The clips are fetched and decoded once through
-//! the shared [`SoundCache`](crate::sound_cache::SoundCache) (over the region's
+//! the shared `SoundCache` (over the region's
 //! `ViewerAsset` capability, so a grid that lacks a given asset simply plays
 //! nothing) and prefetched at login so a trigger is not late.
 //!
 //! # Overriding a sound: user, then skin, then default
 //!
-//! Each sound resolves in priority order (see [`resolve`]): an explicit **user**
+//! Each sound resolves in priority order (see `resolve`): an explicit **user**
 //! setting (a non-blank `<key>_asset` UUID) wins; otherwise a **skin/theme** may
 //! override it through a `-sk-uisnd-<key>` CSS property — a `url("file.ogg")`
 //! bundled with the skin (loaded as a Bevy [`AudioSource`] and decoded through
@@ -52,9 +52,9 @@ use sl_audio::{AudioMixer as _, Bus, ClipParams, DecodedClip, Importance, Mixer,
 use sl_client_bevy::{AssetKey, Uuid};
 use sl_settings::SettingValue;
 
-use crate::settings::ViewerSettings;
-use crate::sound_cache::SoundCache;
 use crate::ui::UiRoot;
+use sl_viewer_platform::sound_cache::SoundCache;
+use sl_viewer_settings::ViewerSettings;
 
 /// The persisted-settings section the UI-sound overrides live under
 /// (`[audio.ui_sounds]`), kept distinct from the bus levels (`[audio.bus]`) and
@@ -64,7 +64,7 @@ const UI_SOUND_SECTION: &[&str] = &["audio", "ui_sounds"];
 /// One of the viewer's own feedback sounds. Each maps to a reference `UISnd*`
 /// asset and a `PlayModeUISnd*` enable toggle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum UiSound {
+pub enum UiSound {
     /// A generic button click (`UISndClick`).
     Click,
     /// The typing chirp played while entering local chat (`UISndTyping`).
@@ -192,11 +192,11 @@ impl UiSound {
 /// Raise a UI feedback sound. Any surface writes this; the driver resolves the
 /// asset, honours the per-sound enable toggle, and plays it on the UI bus.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct PlayUiSound(pub(crate) UiSound);
+pub struct PlayUiSound(pub UiSound);
 
 /// Register every UI sound's persisted enable toggle and overridable asset UUID.
-/// Called from [`ViewerSettings::load`](crate::settings::ViewerSettings).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+/// Called from `ViewerSettings::load`.
+pub fn register_settings(settings: &mut ViewerSettings) {
     for sound in UiSound::ALL {
         settings.register_in(
             UI_SOUND_SECTION,
@@ -273,7 +273,7 @@ fn is_enabled(settings: &ViewerSettings, sound: UiSound) -> bool {
 /// late. The [`SoundCache`] parks requests until the `ViewerAsset` capability and
 /// the device sample rate are known and retries them, so this only needs to run
 /// once the account settings (which may override an asset) have loaded.
-pub(crate) fn prefetch_ui_sounds(
+pub fn prefetch_ui_sounds(
     settings: Option<Res<ViewerSettings>>,
     skin: Query<&SkinUiSounds, With<UiRoot>>,
     mut cache: ResMut<SoundCache>,
@@ -304,7 +304,7 @@ pub(crate) fn prefetch_ui_sounds(
 /// Decode each skin-bundled UI sound (a `url()` in the active skin) once Bevy has
 /// loaded its [`AudioSource`], caching the decoded clip in [`SkinSoundClips`] so
 /// the driver can play it through the mixer like any other clip.
-pub(crate) fn decode_skin_sounds(
+pub fn decode_skin_sounds(
     skin: Query<&SkinUiSounds, With<UiRoot>>,
     audio_assets: Res<Assets<AudioSource>>,
     cache: Res<SoundCache>,
@@ -343,7 +343,7 @@ pub(crate) fn decode_skin_sounds(
 /// (user / skin / default), and trigger it on the UI bus once the clip is ready
 /// (a not-yet-fetched grid clip is requested and the trigger dropped — prefetch
 /// makes this rare).
-pub(crate) fn drive_ui_sounds(
+pub fn drive_ui_sounds(
     mut events: MessageReader<PlayUiSound>,
     settings: Option<Res<ViewerSettings>>,
     skin: Query<&SkinUiSounds, With<UiRoot>>,
@@ -387,9 +387,10 @@ pub(crate) fn drive_ui_sounds(
 
 /// The UI-sounds plugin: the [`PlayUiSound`] message, the login prefetch, the
 /// skin-sound decode, and the per-frame driver. Settings are registered from
-/// [`ViewerSettings::load`]; the skin CSS properties are registered from the skin
+/// `ViewerSettings::load`; the skin CSS properties are registered from the skin
 /// plugin (which owns `bevy_flair`).
-pub(crate) struct UiSoundsPlugin;
+#[derive(Debug)]
+pub struct UiSoundsPlugin;
 
 impl Plugin for UiSoundsPlugin {
     fn build(&self, app: &mut App) {
@@ -413,8 +414,8 @@ impl Plugin for UiSoundsPlugin {
 
 /// A skin/theme override for one UI sound: a grid asset by UUID, a skin-bundled
 /// file loaded as a Bevy [`AudioSource`], or unset (fall through to the default).
-#[derive(Reflect, Debug, Clone, PartialEq, Default)]
-pub(crate) enum SkinUiSound {
+#[derive(Reflect, Debug, Clone, PartialEq, Eq, Default)]
+pub enum SkinUiSound {
     /// No skin override for this sound.
     #[default]
     Unset,
@@ -446,10 +447,10 @@ impl Placeholder for SkinUiSoundFile {
 /// The per-UI-sound skin overrides, a `bevy_flair` component written onto the
 /// `:root` (`UiRoot`) from the `-sk-uisnd-<key>` CSS properties. One field per
 /// [`UiSound`]; unset fields fall through to the reference default.
-#[derive(Component, ComponentProperties, Reflect, Default)]
+#[derive(Debug, Component, ComponentProperties, Reflect, Default)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinUiSounds {
+pub struct SkinUiSounds {
     /// `-sk-uisnd-click`.
     click: SkinUiSound,
     /// `-sk-uisnd-typing`.
@@ -507,8 +508,8 @@ impl SkinUiSounds {
 
 /// The decoded clips of the active skin's bundled UI sounds, keyed by their
 /// loaded-[`AudioSource`] id (see [`decode_skin_sounds`]).
-#[derive(Resource, Default)]
-pub(crate) struct SkinSoundClips {
+#[derive(Debug, Resource, Default)]
+pub struct SkinSoundClips {
     /// Successfully decoded skin sounds.
     clips: HashMap<AssetId<AudioSource>, DecodedClip>,
     /// Skin sounds whose file failed to decode, so it is not retried each frame.
@@ -552,7 +553,7 @@ fn parse_skin_ui_sound(parser: &mut Parser) -> Result<ReflectValue, CssError> {
 /// mapping each onto a [`SkinUiSounds`] field. Called from the skin plugin's
 /// `build` (which owns `bevy_flair`), before the CSS loader snapshots the
 /// registry.
-pub(crate) fn register_skin_sound_properties(app: &mut App) {
+pub fn register_skin_sound_properties(app: &mut App) {
     {
         let parse =
             ReflectParseCss(|parser| parse_property_value_with(parser, parse_skin_ui_sound));

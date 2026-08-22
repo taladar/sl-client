@@ -1,0 +1,44 @@
+[package]
+name = "sl-viewer-ui-core"
+description = "The Second Life / OpenSim viewer's UI vocabulary: the scaffold and logical box model, the font stack, Fluent lookup, and the CSS skin system"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "ui", "bevy"]
+categories = ["gui", "game-development", "internationalization"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+# The skin system: real CSS as the skin language, hot-reloaded.
+# Fluent bundles behind Bevy assets, with runtime locale switching.
+# A direct dependency so the font stack can register the bundled faces under
+# private family names: `bevy_text` wraps parley but does not re-export it.
+# Kept at `bevy_text`'s own spec so the two unify on one parley build.
+bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+bevy_flair = { version = "0.8.0" }
+bevy_fluent = { version = "0.15.0" }
+fluent = { version = "0.16.1" }
+fluent_content = { version = "0.0.5" }
+fs-err = { workspace = true }
+parley = { version = "0.9.0", default-features = false, features = ["std"] }
+sl-audio = { path = "../sl-audio", version = "0.1.0" }
+sl-client-bevy = { workspace = true }
+sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
+sl-settings = { workspace = true }
+sl-viewer-platform = { workspace = true }
+sl-viewer-settings = { workspace = true }
+tracing = { workspace = true }
+unic-langid = { version = "0.9.6", features = ["macros"] }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

@@ -92,6 +92,16 @@ Landed so far:
   — so the declared surface (231 settings, their sections, kinds, defaults and
   flags) is pinned in `tests/settings-golden.txt`, generated before the move
   and still passing after it.
+- **4** — `sl-viewer-ui-core`: the UI vocabulary (scaffold and logical box
+  model, font stack, Fluent lookup, CSS skin, UI sounds), 10 modules, 8.5k
+  lines. Needed two prerequisites. The `ELEMENTS` registry named 35 feature
+  modules, so it moved to the binary crate as `ui_elements` — the same
+  composition-root argument as `REGISTRARS` — leaving `ui_element` holding the
+  vocabulary and the six generic spawners. And `assets/fonts/` moved with
+  `ui_font`, whose nine `include_bytes!` are its only consumer, keeping those
+  includes crate-local; `.gitattributes` repathed with it. The bundle-content
+  tests (Polish `few`/`many`, Arabic `zero`/`two`) moved to the viewer, which
+  owns the shipped `.ftl` files.
 
 ## Remaining sequence
 

@@ -43,6 +43,7 @@ members = [
   "sl-viewer-notifications",
   "sl-viewer-platform",
   "sl-viewer-settings",
+  "sl-viewer-ui-core",
   "sl-wire",
 ]
 
@@ -102,6 +103,7 @@ sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }
 sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }
 sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }
+sl-viewer-ui-core = { path = "sl-viewer-ui-core", version = "0.1.0" }
 sl-wire = { path = "sl-wire", version = "0.1.0" }
 thiserror = { version = "2.0.18" }
 time = { version = "0.3.49" }

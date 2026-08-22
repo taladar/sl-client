@@ -38,7 +38,7 @@
 //! rules are per-locale and correct: the same `items-selected` authoring picks
 //! `one` in English, `one`/`few`/`many`/`other` in Polish, and all six CLDR
 //! categories in Arabic, with nothing in this module or the call site knowing the
-//! difference. [`plural_selection_matches_cldr_rules`](tests) proves it.
+//! difference. `plural_selection_matches_cldr_rules` proves it.
 //!
 //! # Pseudolocalisation
 //!
@@ -73,21 +73,21 @@ use crate::ui_pseudoloc::pseudolocalise;
 
 /// The key the truncation ellipsis is stored under in every bundle. Read by
 /// [`refresh_locale_ellipsis`] and applied to every [`LocaleEllipsisMarker`] by
-/// [`apply_locale_ellipsis`].
+/// `apply_locale_ellipsis`.
 const ELLIPSIS_KEY: &str = "ui-ellipsis";
 
 /// Marks a text node whose glyph is the **locale truncation ellipsis** — a
 /// clipped strip's trailing `…` (or the centred `……` for CJK). A widget that
 /// truncates (the tab widget's label strip, the table widget's cells) reveals one
-/// on overflow and attaches this so [`apply_locale_ellipsis`] keeps its glyph in
+/// on overflow and attaches this so `apply_locale_ellipsis` keeps its glyph in
 /// step with the active locale. Owned here because the locale ellipsis is an i18n
 /// concept, not a per-widget one.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct LocaleEllipsisMarker;
+pub struct LocaleEllipsisMarker;
 
 /// The truncation ellipsis used before any bundle has loaded, or for a locale
-/// that does not translate [`ELLIPSIS_KEY`] — the Latin single ellipsis, matching
-/// the tab widget's own [`crate::ui_tab::DEFAULT_ELLIPSIS`].
+/// that does not translate `ELLIPSIS_KEY` — the Latin single ellipsis, matching
+/// the tab widget's own `ui_tab::DEFAULT_ELLIPSIS`.
 const FALLBACK_ELLIPSIS: &str = "…";
 
 /// The folder under the Bevy asset root the locale bundles are loaded from.
@@ -100,12 +100,12 @@ const UI_LOCALE_ENV: &str = "SL_VIEWER_UI_LOCALE";
 
 /// The persisted interface-language setting the preferences General tab binds:
 /// a [`LocaleChoice`] value string (`en`, `ja`, `ar`, `pl`, `pseudo`), or empty
-/// for "no override" (keep the [`UI_LOCALE_ENV`] / English seed). Applied
-/// **live** by [`apply_locale_setting`] — no restart, unlike the reference.
-pub(crate) const SETTING_UI_LANGUAGE: &str = "UiLanguage";
+/// for "no override" (keep the `UI_LOCALE_ENV` / English seed). Applied
+/// **live** by `apply_locale_setting` — no restart, unlike the reference.
+pub const SETTING_UI_LANGUAGE: &str = "UiLanguage";
 
 /// Register the i18n settings (the [`SETTING_UI_LANGUAGE`] override).
-pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) {
+pub fn register_settings(settings: &mut sl_viewer_settings::ViewerSettings) {
     settings.register_in(
         &["i18n"],
         SETTING_UI_LANGUAGE,
@@ -114,14 +114,14 @@ pub(crate) fn register_settings(settings: &mut crate::settings::ViewerSettings) 
     );
 }
 
-/// The [`UI_LOCALE_ENV`] value that selects the pseudolocale.
+/// The `UI_LOCALE_ENV` value that selects the pseudolocale.
 const PSEUDO_LOCALE_VALUE: &str = "pseudo";
 
 /// The i18n plugin: integrates [`bevy_fluent`], loads the locale bundles, and
 /// exposes the [`Translator`] lookup and the [`UiLocale`] resource. See the
 /// [module documentation](self).
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ViewerI18nPlugin;
+pub struct ViewerI18nPlugin;
 
 impl Plugin for ViewerI18nPlugin {
     /// Wire the Fluent asset pipeline, the locale resources, and the `F6` demo.
@@ -178,7 +178,7 @@ impl Plugin for ViewerI18nPlugin {
 /// the pseudolocale — which is not a language tag — has a first-class slot beside
 /// the real ones.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum LocaleChoice {
+pub enum LocaleChoice {
     /// English — the base locale and the fallback for every other bundle.
     #[default]
     English,
@@ -225,7 +225,7 @@ impl LocaleChoice {
         }
     }
 
-    /// The initial choice, seeded from [`UI_LOCALE_ENV`]: a language tag, the
+    /// The initial choice, seeded from `UI_LOCALE_ENV`: a language tag, the
     /// literal `pseudo`, or (unset / unrecognised) English.
     fn from_env() -> Self {
         match std::env::var(UI_LOCALE_ENV) {
@@ -269,29 +269,30 @@ impl LocaleChoice {
 ///
 /// This is the single place the rest of the UI reads "what language are we in,
 /// and which way does it lay out". [`ViewerI18nPlugin`] keeps it in step with
-/// the Fluent [`Locale`]: [`maintain_localization`] rebuilds the lookup when it
-/// changes, and [`sync_ui_direction`] flips the layout.
+/// the Fluent [`Locale`]: `maintain_localization` rebuilds the lookup when it
+/// changes, and `sync_ui_direction` flips the layout.
 #[derive(Resource, Debug, Clone)]
-pub(crate) struct UiLocale {
+pub struct UiLocale {
     /// Which shipped locale is active.
-    pub(crate) choice: LocaleChoice,
+    pub choice: LocaleChoice,
     /// The active language tag.
-    pub(crate) lang: LanguageIdentifier,
+    pub lang: LanguageIdentifier,
     /// The layout direction of [`lang`](Self::lang) — LTR for Latin / CJK /
     /// Cyrillic, RTL for Arabic / Hebrew.
-    pub(crate) direction: UiDirection,
-    /// The truncation ellipsis for this locale (the [`ELLIPSIS_KEY`] string),
-    /// resolved from the bundle once it loads; [`FALLBACK_ELLIPSIS`] until then.
-    pub(crate) ellipsis: String,
+    pub direction: UiDirection,
+    /// The truncation ellipsis for this locale (the `ELLIPSIS_KEY` string),
+    /// resolved from the bundle once it loads; `FALLBACK_ELLIPSIS` until then.
+    pub ellipsis: String,
     /// Whether every lookup is pseudolocalised (the [`LocaleChoice::Pseudo`]
     /// case).
-    pub(crate) pseudo: bool,
+    pub pseudo: bool,
 }
 
 impl UiLocale {
     /// A locale resource for `choice`, with the ellipsis at its fallback until a
     /// bundle loads.
-    pub(crate) fn new(choice: LocaleChoice) -> Self {
+    #[must_use]
+    pub fn new(choice: LocaleChoice) -> Self {
         let lang = choice.language();
         Self {
             direction: direction_of(&lang),
@@ -352,7 +353,7 @@ impl DirectionOverride {
 }
 
 /// The handle to the loaded locale folder, kept alive so
-/// [`maintain_localization`] can rebuild the lookup when the locale switches at
+/// `maintain_localization` can rebuild the lookup when the locale switches at
 /// runtime (a fresh negotiation over the same loaded bundles).
 #[derive(Resource, Debug)]
 struct LocaleFolder(Handle<LoadedFolder>);
@@ -392,8 +393,8 @@ fn maintain_localization(
 }
 
 /// Copy the active locale's truncation ellipsis out of the freshly-built bundle
-/// onto [`UiLocale`], so [`apply_locale_ellipsis`] can drive the tab widget from
-/// it. Runs after [`maintain_localization`] so it reads the current bundle.
+/// onto [`UiLocale`], so `apply_locale_ellipsis` can drive the tab widget from
+/// it. Runs after `maintain_localization` so it reads the current bundle.
 fn refresh_locale_ellipsis(localization: Res<Localization>, mut locale: ResMut<UiLocale>) {
     if !localization.is_changed() {
         return;
@@ -411,12 +412,12 @@ fn refresh_locale_ellipsis(localization: Res<Localization>, mut locale: ResMut<U
 /// The CLDR/ICU-backed number, currency and date/time formatters the
 /// [`Translator`] exposes so a panel writes a grouped balance / coordinate /
 /// timestamp for the active locale rather than a bare `to_string()`. `None`
-/// until [`maintain_value_formatters`] first builds it (and never expected to
+/// until `maintain_value_formatters` first builds it (and never expected to
 /// stay `None`, since the locale tag always parses); the [`Translator`] helpers
 /// fall back to an un-grouped render while it is, mirroring the string lookup's
 /// key-fallback.
 #[derive(Resource, Debug, Default)]
-pub(crate) struct LocaleFormatting {
+pub struct LocaleFormatting {
     /// The formatters for [`UiLocale::lang`], rebuilt on a locale change.
     formatters: Option<LocaleFormatters>,
 }
@@ -497,17 +498,18 @@ fn apply_locale_ellipsis(
 /// Values are stored owned (`'static`) so the built args outlive the borrow the
 /// lookup takes and a caller can build them from a temporary.
 #[derive(Debug, Default)]
-pub(crate) struct TransArgs(FluentArgs<'static>);
+pub struct TransArgs(FluentArgs<'static>);
 
 impl TransArgs {
     /// An empty argument set.
-    pub(crate) fn new() -> Self {
+    #[must_use]
+    pub fn new() -> Self {
         Self(FluentArgs::new())
     }
 
     /// Set an integer argument — the plural / `NUMBER()` case.
     #[must_use]
-    pub(crate) fn int(mut self, key: &'static str, value: i64) -> Self {
+    pub fn int(mut self, key: &'static str, value: i64) -> Self {
         self.0.set(key, FluentValue::from(value));
         self
     }
@@ -522,7 +524,7 @@ impl TransArgs {
     /// them as having a visible fraction) are the only numeric case the scaffold
     /// carries.
     #[must_use]
-    pub(crate) fn text(mut self, key: &'static str, value: &str) -> Self {
+    pub fn text(mut self, key: &'static str, value: &str) -> Self {
         self.0.set(key, FluentValue::from(value.to_owned()));
         self
     }
@@ -541,8 +543,8 @@ impl TransArgs {
 /// an untranslated key and to the key itself for one no bundle defines (the
 /// Fluent convention, so a missing key is visible rather than blank), and both
 /// apply the pseudolocale transform when it is active.
-#[derive(SystemParam)]
-pub(crate) struct Translator<'w> {
+#[derive(Debug, SystemParam)]
+pub struct Translator<'w> {
     /// The negotiated bundle chain the strings are looked up in.
     localization: Res<'w, Localization>,
     /// The active locale — read for the pseudolocale flag.
@@ -553,21 +555,24 @@ pub(crate) struct Translator<'w> {
 
 impl Translator<'_> {
     /// Whether the bundle or the locale changed since last frame — the same
-    /// signal [`apply_translations`] sweeps on. A widget that re-resolves its own
+    /// signal `apply_translations` sweeps on. A widget that re-resolves its own
     /// text (rather than binding a static [`Translated`]) gates a full re-resolve
     /// on this so a locale switch relocalises it.
-    pub(crate) fn changed(&self) -> bool {
+    #[must_use]
+    pub fn changed(&self) -> bool {
         self.localization.is_changed() || self.locale.is_changed()
     }
 
     /// Resolve a key with no arguments.
-    pub(crate) fn get(&self, key: &str) -> String {
+    #[must_use]
+    pub fn get(&self, key: &str) -> String {
         self.finish(key, self.localization.content(key))
     }
 
     /// Resolve a key, interpolating typed named arguments inside Fluent — so the
     /// `.ftl` plural / gender selectors resolve against the real values.
-    pub(crate) fn format(&self, key: &str, args: &TransArgs) -> String {
+    #[must_use]
+    pub fn format(&self, key: &str, args: &TransArgs) -> String {
         let content = self
             .localization
             .content(Request::new(key).args(args.as_fluent()));
@@ -597,14 +602,16 @@ impl Translator<'_> {
 
     /// Format a signed integer — an object / item count, an L$-less amount — with
     /// the locale's grouping separator (`1,234,567`).
-    pub(crate) fn integer(&self, value: i64) -> String {
+    #[must_use]
+    pub fn integer(&self, value: i64) -> String {
         self.formatters()
             .map_or_else(|| value.to_string(), |formatters| formatters.integer(value))
     }
 
     /// Format a float — a coordinate, a scale, a distance — to `fraction_digits`
     /// places with the locale's grouping separator and decimal mark.
-    pub(crate) fn decimal(&self, value: f64, fraction_digits: u8) -> String {
+    #[must_use]
+    pub fn decimal(&self, value: f64, fraction_digits: u8) -> String {
         self.formatters()
             .and_then(|formatters| formatters.decimal(value, fraction_digits).ok())
             .unwrap_or_else(|| {
@@ -615,7 +622,8 @@ impl Translator<'_> {
 
     /// Format a Linden-dollar balance (`L$1,234`), the amount grouped for the
     /// locale.
-    pub(crate) fn currency_l(&self, value: i64) -> String {
+    #[must_use]
+    pub fn currency_l(&self, value: i64) -> String {
         self.formatters().map_or_else(
             || format!("L${value}"),
             |formatters| formatters.currency_l(value),
@@ -625,7 +633,8 @@ impl Translator<'_> {
     /// Format a civil date / time for the locale at the given style and length.
     /// Falls back to an ISO-ish rendering before the formatters build or if a
     /// component is out of range.
-    pub(crate) fn datetime(
+    #[must_use]
+    pub fn datetime(
         &self,
         when: CivilDateTime,
         style: DateTimeStyle,
@@ -644,7 +653,8 @@ impl Translator<'_> {
     /// Parse a number a user typed in the active locale's conventions back into
     /// an `f64`, for a localized float input field. `None` if it does not parse
     /// (or before the formatters build).
-    pub(crate) fn parse_number(&self, input: &str) -> Option<f64> {
+    #[must_use]
+    pub fn parse_number(&self, input: &str) -> Option<f64> {
         self.formatters()
             .and_then(|formatters| formatters.parse_number(input).ok())
     }
@@ -652,12 +662,12 @@ impl Translator<'_> {
 
 /// A static (argument-free) UI label bound to a Fluent key.
 ///
-/// Put it on any entity that also has a [`Text`], and [`apply_translations`]
+/// Put it on any entity that also has a [`Text`], and `apply_translations`
 /// keeps that text resolved from the key: it fills in once the bundle loads,
 /// re-resolves on a locale switch, and localizes a freshly-spawned label the
 /// frame it appears. So a panel spawns `Text::default()` + `Translated::new(key)`
 /// and never touches an English literal — the mechanism the widgets a panel does
-/// not own use too ([`crate::ui_tab`]'s tab labels, the floater title).
+/// not own use too (`ui_tab`'s tab labels, the floater title).
 ///
 /// The key is owned (`String`) rather than `&'static str` so a widget can bind a
 /// label it was handed at runtime (a tab strip's `&str` labels). For a label
@@ -666,14 +676,14 @@ impl Translator<'_> {
 /// argument-free case, which is the common one and the only one that can be
 /// re-resolved from the key alone.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct Translated {
+pub struct Translated {
     /// The Fluent key this label resolves to.
     key: String,
 }
 
 impl Translated {
     /// Bind a label to `key`.
-    pub(crate) fn new(key: impl Into<String>) -> Self {
+    pub fn new(key: impl Into<String>) -> Self {
         Self { key: key.into() }
     }
 }
@@ -987,7 +997,7 @@ fn cycle_locale(_activate: On<Activate>, mut locale: ResMut<UiLocale>, mut fluen
 
 /// Switch the active locale to `choice`: update [`UiLocale`]'s derived
 /// conventions and drive the Fluent negotiation input, so
-/// [`maintain_localization`] rebuilds the lookup and
+/// `maintain_localization` rebuilds the lookup and
 /// [`refresh_locale_ellipsis`] re-reads the ellipsis. The one write path both
 /// the `F6` cycle and the persisted language setting go through.
 fn set_locale_choice(locale: &mut UiLocale, fluent: &mut Locale, choice: LocaleChoice) {
@@ -1005,7 +1015,7 @@ fn set_locale_choice(locale: &mut UiLocale, fluent: &mut Locale, choice: LocaleC
 /// moves the locale without touching the setting; an empty or unknown value
 /// changes nothing, leaving the environment seed in charge.
 fn apply_locale_setting(
-    settings: Option<Res<crate::settings::ViewerSettings>>,
+    settings: Option<Res<sl_viewer_settings::ViewerSettings>>,
     mut locale: ResMut<UiLocale>,
     mut fluent: ResMut<Locale>,
     mut last_seen: Local<Option<String>>,
@@ -1136,52 +1146,14 @@ fn update_i18n_demo_text(
 #[cfg(test)]
 mod tests {
     use super::{LocaleChoice, TransArgs, direction_of};
-    use fluent::{FluentArgs, FluentBundle, FluentResource, FluentValue};
-    use fluent_content::{Content as _, Request};
+    use fluent::FluentValue;
+
     use pretty_assertions::assert_eq;
-    use unic_langid::{LanguageIdentifier, langid};
+    use unic_langid::langid;
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
-
-    /// The English bundle source, embedded so the plural / argument behaviour is
-    /// testable without the async asset load. The runtime loads the same file as
-    /// a Bevy asset.
-    const EN_FTL: &str = include_str!("../assets/locales/en/main.ftl");
-
-    /// The Polish bundle source — the plural case the reference viewer gets
-    /// wrong, embedded for the CLDR-rules test.
-    const PL_FTL: &str = include_str!("../assets/locales/pl/main.ftl");
-
-    /// The Arabic bundle source — six plural categories.
-    const AR_FTL: &str = include_str!("../assets/locales/ar/main.ftl");
-
-    /// Build a non-isolating Fluent bundle from one `.ftl` source, so lookups
-    /// return clean strings (isolation marks would fail exact comparison).
-    fn bundle(
-        lang: LanguageIdentifier,
-        source: &str,
-    ) -> Result<FluentBundle<FluentResource>, TestError> {
-        let resource = FluentResource::try_new(source.to_owned())
-            .map_err(|(_, errors)| format!("parse: {errors:?}"))?;
-        let mut bundle = FluentBundle::new(vec![lang]);
-        bundle.set_use_isolating(false);
-        bundle
-            .add_resource(resource)
-            .map_err(|errors| format!("add_resource: {errors:?}"))?;
-        Ok(bundle)
-    }
-
-    /// Format a key with an integer argument against a bundle.
-    fn count_line(source: &str, lang: LanguageIdentifier, value: i64) -> Result<String, TestError> {
-        let bundle = bundle(lang, source)?;
-        let mut args = FluentArgs::new();
-        args.set("count", FluentValue::from(value));
-        bundle
-            .content(Request::new("items-selected").args(&args))
-            .ok_or_else(|| "no items-selected".into())
-    }
 
     /// Right-to-left tags resolve RTL; everything the viewer ships or is likely
     /// to, LTR. An explicit non-RTL script overrides an RTL-default language.
@@ -1197,74 +1169,6 @@ mod tests {
         assert_eq!(direction_of(&langid!("ku-Latn")), super::UiDirection::Ltr);
         // An explicit Arabic script on any language is RTL.
         assert_eq!(direction_of(&langid!("az-Arab")), super::UiDirection::Rtl);
-    }
-
-    /// English pluralisation: `one` at 1, `other` everywhere else, with the count
-    /// interpolated by its typed argument.
-    #[test]
-    fn english_plural_and_argument() -> Result<(), TestError> {
-        assert_eq!(count_line(EN_FTL, langid!("en"), 1)?, "1 item selected");
-        assert_eq!(count_line(EN_FTL, langid!("en"), 5)?, "5 items selected");
-        Ok(())
-    }
-
-    /// The load-bearing claim: Polish plural categories, which the reference
-    /// viewer's three-language if-ladder cannot express, resolve from CLDR rules.
-    /// 1 is `one`, 2-4 is `few`, 5+ (and 0) is `many`.
-    #[test]
-    fn plural_selection_matches_cldr_rules() -> Result<(), TestError> {
-        assert_eq!(
-            count_line(PL_FTL, langid!("pl"), 1)?,
-            "Zaznaczono 1 element"
-        );
-        assert_eq!(
-            count_line(PL_FTL, langid!("pl"), 2)?,
-            "Zaznaczono 2 elementy"
-        );
-        assert_eq!(
-            count_line(PL_FTL, langid!("pl"), 5)?,
-            "Zaznaczono 5 elementów"
-        );
-        // 22 is `few` in Polish (unlike a naive "> 4 is many"): the CLDR rule
-        // keys on the last digit, which a hardcoded ladder gets wrong.
-        assert_eq!(
-            count_line(PL_FTL, langid!("pl"), 22)?,
-            "Zaznaczono 22 elementy"
-        );
-        Ok(())
-    }
-
-    /// Arabic reaches plural categories no European language has (`zero`, `two`),
-    /// proving the selector is genuinely per-locale.
-    #[test]
-    fn arabic_reaches_zero_and_two_categories() -> Result<(), TestError> {
-        assert_eq!(
-            count_line(AR_FTL, langid!("ar"), 0)?,
-            "لم يتم تحديد أي عنصر"
-        );
-        assert_eq!(count_line(AR_FTL, langid!("ar"), 2)?, "تم تحديد عنصرين");
-        Ok(())
-    }
-
-    /// A gender selector driven by a typed string argument picks the right branch
-    /// and falls through to the default for an unknown key.
-    #[test]
-    fn gender_selector_picks_the_branch() -> Result<(), TestError> {
-        let bundle = bundle(langid!("en"), EN_FTL)?;
-        for (key, expected) in [
-            ("female", "She is online"),
-            ("male", "He is online"),
-            ("other", "They are online"),
-            ("nonbinary", "They are online"),
-        ] {
-            let mut args = FluentArgs::new();
-            args.set("gender", FluentValue::from(key));
-            let got = bundle
-                .content(Request::new("friend-status").args(&args))
-                .ok_or_else(|| -> TestError { "no friend-status".into() })?;
-            assert_eq!(got, expected, "gender {key}");
-        }
-        Ok(())
     }
 
     /// The typed argument builder stores what it is given without flattening it

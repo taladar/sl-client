@@ -213,6 +213,7 @@ sl-viewer-kit = { workspace = true }
 sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
+sl-viewer-ui-core = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "time"] }
 tracing = { workspace = true }

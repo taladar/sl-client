@@ -96,8 +96,8 @@
 //! of rework this scaffold exists to prevent.
 //!
 //! The obligation on a new panel or widget is one line: **register it in
-//! [`crate::ui_element::ELEMENTS`]**. That buys it every check in
-//! [`crate::ui_test`] — across every script, direction, UI scale, font size and
+//! `crate::ui_element::ELEMENTS`**. That buys it every check in
+//! `ui_test` — across every script, direction, UI scale, font size and
 //! translation length — including the checks that do not exist yet.
 //!
 //! Reference (Firestorm, read-only): `indra/llui/` (`llpanel`,
@@ -118,17 +118,17 @@ use crate::ui_font::{UiFont, register_ui_fonts};
 /// be exercised before a locale selector exists (`viewer-i18n-locale-selection`).
 const UI_DIRECTION_ENV: &str = "SL_VIEWER_UI_DIRECTION";
 
-/// The value of [`UI_DIRECTION_ENV`] that selects right-to-left.
+/// The value of `UI_DIRECTION_ENV` that selects right-to-left.
 const UI_DIRECTION_RTL: &str = "rtl";
 
-/// The value of [`UI_DIRECTION_ENV`] that selects left-to-right.
+/// The value of `UI_DIRECTION_ENV` that selects left-to-right.
 const UI_DIRECTION_LTR: &str = "ltr";
 
 /// The scaffold's startup work, as a set, so a panel spawned by another module
 /// can order itself after the root exists (`.after(UiScaffoldSystems::SpawnRoot)`)
 /// and read [`UiRoot`].
 #[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum UiScaffoldSystems {
+pub enum UiScaffoldSystems {
     /// [`spawn_ui_root`] has run: [`UiRoot`] is inserted and its node exists.
     SpawnRoot,
 }
@@ -137,7 +137,7 @@ pub(crate) enum UiScaffoldSystems {
 /// UI task builds on. See the [module documentation](self) for what it wires and
 /// the two conventions it establishes.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ViewerUiPlugin;
+pub struct ViewerUiPlugin;
 
 impl Plugin for ViewerUiPlugin {
     fn build(&self, app: &mut App) {
@@ -211,7 +211,7 @@ impl Plugin for ViewerUiPlugin {
 /// this flips is the **layout**: which side a panel's leading edge is on, which
 /// way a row flows, which side an asymmetric padding lands on.
 #[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum UiDirection {
+pub enum UiDirection {
     /// Left-to-right: the inline start edge is the left one (Latin, CJK,
     /// Cyrillic, …).
     #[default]
@@ -221,14 +221,15 @@ pub(crate) enum UiDirection {
 }
 
 impl UiDirection {
-    /// The initial direction, seeded from [`UI_DIRECTION_ENV`]: `rtl` selects
+    /// The initial direction, seeded from `UI_DIRECTION_ENV`: `rtl` selects
     /// right-to-left, anything else (including unset) left-to-right.
     ///
     /// A stopgap until the locale selector (`viewer-i18n-locale-selection`)
     /// owns this, and the way the mirroring is exercised by hand today — the
     /// resource is otherwise write-able at runtime, and everything downstream
     /// re-resolves when it changes.
-    pub(crate) fn from_env() -> Self {
+    #[must_use]
+    pub fn from_env() -> Self {
         Self::parse(std::env::var_os(UI_DIRECTION_ENV).as_deref())
     }
 
@@ -241,13 +242,14 @@ impl UiDirection {
         }
     }
 
-    /// The direction the [`UI_DIRECTION_ENV`] knob *forces*, or `None` when it is
+    /// The direction the `UI_DIRECTION_ENV` knob *forces*, or `None` when it is
     /// unset so the locale (`crate::i18n`) drives the layout instead.
     ///
     /// Distinct from [`from_env`](Self::from_env), which cannot tell "unset" from
     /// "`ltr`": the i18n scaffold needs "no override" to be a third answer, so a
     /// non-Latin locale can flip the layout while an explicit knob still wins.
-    pub(crate) fn rtl_override_from_env() -> Option<Self> {
+    #[must_use]
+    pub fn rtl_override_from_env() -> Option<Self> {
         Self::parse_override(std::env::var_os(UI_DIRECTION_ENV).as_deref())
     }
 
@@ -262,7 +264,8 @@ impl UiDirection {
     }
 
     /// Whether the inline axis runs right-to-left.
-    pub(crate) const fn is_rtl(self) -> bool {
+    #[must_use]
+    pub const fn is_rtl(self) -> bool {
         matches!(self, Self::Rtl)
     }
 
@@ -283,12 +286,12 @@ impl UiDirection {
 /// a `Res` is cheaper and less error-prone than a single-item query. Systems that
 /// spawn into it must run `.after(UiScaffoldSystems::SpawnRoot)`.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct UiRoot(pub(crate) Entity);
+pub struct UiRoot(pub Entity);
 
 /// A marker on the [`UiRoot`] node itself, for the systems that need to find it
 /// in the hierarchy rather than by resource.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct UiRootNode;
+pub struct UiRootNode;
 
 /// Drop the focus `InputFocusPlugin` parks on the primary window at startup.
 ///
@@ -309,7 +312,7 @@ fn clear_initial_window_focus(mut focus: ResMut<InputFocus>) {
 }
 
 /// Startup system: spawn the one [`UiRoot`] node and publish its entity.
-pub(crate) fn spawn_ui_root(mut commands: Commands, direction: Res<UiDirection>) {
+pub fn spawn_ui_root(mut commands: Commands, direction: Res<UiDirection>) {
     let root = commands
         .spawn((
             Node {
@@ -328,7 +331,7 @@ pub(crate) fn spawn_ui_root(mut commands: Commands, direction: Res<UiDirection>)
             // The root covers the whole window, and `bevy_picking` blocks lower
             // entities by default — so without this the root would swallow every
             // pointer hit aimed at the world behind it. The viewer's own object /
-            // HUD pick raycasts by hand (`crate::hud_pick`) and so is unaffected
+            // HUD pick raycasts by hand (`hud_pick`) and so is unaffected
             // today, but `viewer-object-selection-core` is expected to move to a
             // picking backend, which this would silently kill. Still hoverable,
             // so a click on empty UI space routes `AcquireFocus`, finds no
@@ -355,31 +358,32 @@ pub(crate) fn spawn_ui_root(mut commands: Commands, direction: Res<UiDirection>)
 /// `taffy` or Second Life has. `block_start` is therefore always the top. It is
 /// still named logically so the vocabulary is one thing rather than two.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LogicalRect {
+pub struct LogicalRect {
     /// The leading inline edge: `left` under [`UiDirection::Ltr`], `right` under
     /// [`UiDirection::Rtl`].
-    pub(crate) inline_start: Val,
+    pub inline_start: Val,
     /// The trailing inline edge: `right` under [`UiDirection::Ltr`], `left`
     /// under [`UiDirection::Rtl`].
-    pub(crate) inline_end: Val,
+    pub inline_end: Val,
     /// The leading block edge — the top.
-    pub(crate) block_start: Val,
+    pub block_start: Val,
     /// The trailing block edge — the bottom.
-    pub(crate) block_end: Val,
+    pub block_end: Val,
 }
 
 impl LogicalRect {
     /// Every edge zero — the identity for margin / padding / border.
-    pub(crate) const ZERO: Self = Self::all(Val::ZERO);
+    pub const ZERO: Self = Self::all(Val::ZERO);
 
     /// Every edge [`Val::Auto`] — the resting value for an **inset**, where
     /// `Auto` means "wherever flow put me" rather than "pinned to the edge". The
     /// base a [`LogicalInset`] overrides one or two edges of, so a floater that
     /// remembers only its leading / top position leaves the other edges to flow.
-    pub(crate) const AUTO: Self = Self::all(Val::Auto);
+    pub const AUTO: Self = Self::all(Val::Auto);
 
     /// The same value on all four edges.
-    pub(crate) const fn all(value: Val) -> Self {
+    #[must_use]
+    pub const fn all(value: Val) -> Self {
         Self {
             inline_start: value,
             inline_end: value,
@@ -401,7 +405,8 @@ impl LogicalRect {
     ///     ..LogicalRect::axes(Val::Px(8.0), Val::Px(4.0))
     /// }
     /// ```
-    pub(crate) const fn axes(inline: Val, block: Val) -> Self {
+    #[must_use]
+    pub const fn axes(inline: Val, block: Val) -> Self {
         Self {
             inline_start: inline,
             inline_end: inline,
@@ -413,7 +418,8 @@ impl LogicalRect {
     /// This rect as the physical [`UiRect`] `bevy_ui` wants, for `direction`:
     /// under [`UiDirection::Rtl`] the two inline edges swap sides, which is the
     /// whole of the mirroring.
-    pub(crate) const fn resolve(self, direction: UiDirection) -> UiRect {
+    #[must_use]
+    pub const fn resolve(self, direction: UiDirection) -> UiRect {
         let (left, right) = if direction.is_rtl() {
             (self.inline_end, self.inline_start)
         } else {
@@ -432,17 +438,17 @@ impl LogicalRect {
 /// [`resolve_logical_boxes`]; omit it when the margin is symmetric and write
 /// `Node::margin` directly.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LogicalMargin(pub(crate) LogicalRect);
+pub struct LogicalMargin(pub LogicalRect);
 
 /// A node's padding, in logical terms. Resolved into `Node::padding` by
 /// [`resolve_logical_boxes`].
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LogicalPadding(pub(crate) LogicalRect);
+pub struct LogicalPadding(pub LogicalRect);
 
 /// A node's border widths, in logical terms. Resolved into `Node::border` by
 /// [`resolve_logical_boxes`].
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LogicalBorder(pub(crate) LogicalRect);
+pub struct LogicalBorder(pub LogicalRect);
 
 /// A node's **inset** — its `left` / `right` / `top` / `bottom` position — in
 /// logical terms. Resolved into those four `Node` fields by
@@ -450,7 +456,7 @@ pub(crate) struct LogicalBorder(pub(crate) LogicalRect);
 ///
 /// The fourth physical box, and the last one to get a logical component, because
 /// nothing positioned itself by inset until a floater needed to remember where it
-/// was ([`viewer-ui-floater-basic`](crate::floater)). It differs from the other
+/// was (`viewer-ui-floater-basic`). It differs from the other
 /// three in exactly one way, and it is the load-bearing one: its resting value is
 /// [`LogicalRect::AUTO`], not [`LogicalRect::ZERO`]. `Val::Auto` on an inset edge
 /// means "leave this edge to flow", whereas `Val::ZERO` would **pin** the edge to
@@ -461,7 +467,7 @@ pub(crate) struct LogicalBorder(pub(crate) LogicalRect);
 /// `AUTO` base, so under [`UiDirection::Rtl`] its remembered leading offset
 /// mirrors to the right edge for free, exactly as an asymmetric margin does.
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LogicalInset(pub(crate) LogicalRect);
+pub struct LogicalInset(pub LogicalRect);
 
 /// Mark every logical box dirty when [`UiDirection`] flips, so
 /// [`resolve_logical_boxes`] — which is otherwise driven by change detection on
@@ -471,7 +477,7 @@ pub(crate) struct LogicalInset(pub(crate) LogicalRect);
 /// keeps that system to a single `&mut Node` query: several `Query<&mut Node>`
 /// in one system are a conflicting access and would need a `ParamSet` to
 /// untangle.
-pub(crate) fn invalidate_logical_boxes(
+pub fn invalidate_logical_boxes(
     direction: Res<UiDirection>,
     mut margins: Query<&mut LogicalMargin>,
     mut paddings: Query<&mut LogicalPadding>,
@@ -523,7 +529,7 @@ type ChangedLogicalBoxes<'world, 'state> = Query<
 /// the direction flips — see [`invalidate_logical_boxes`]), and writes through
 /// `Node`'s change detection only on a real difference, so an unchanged UI does
 /// not re-trigger layout every frame.
-pub(crate) fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: ChangedLogicalBoxes) {
+pub fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: ChangedLogicalBoxes) {
     for (mut node, margin, padding, border, inset) in &mut nodes {
         if let Some(LogicalMargin(rect)) = margin {
             let resolved = rect.resolve(*direction);
@@ -583,11 +589,11 @@ pub(crate) fn resolve_logical_boxes(direction: Res<UiDirection>, mut nodes: Chan
 /// A widget whose axes denote a **compass or world direction** rather than a
 /// reading order — the radial menu, and later the minimap and world map — must not
 /// mirror. It gets that not by exempting a node here but by not depending on this
-/// at all: `crate::pie_menu` positions its labels by absolute inset from a compass
+/// at all: `pie_menu` positions its labels by absolute inset from a compass
 /// *angle* (`fit_pie_layout`), which this never touches, so the compass stays put
 /// while each label's own text still shapes bidi. If a future widget cannot avoid
 /// laying itself out through `direction`, a per-node opt-out belongs here.
-pub(crate) fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&mut Node>) {
+pub fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&mut Node>) {
     let target = direction.inline();
     for mut node in &mut nodes {
         if node.direction != target {
@@ -614,17 +620,17 @@ pub(crate) fn apply_ui_direction(direction: Res<UiDirection>, mut nodes: Query<&
 ///
 /// All three are [`apply_panel_visibility`]'s job.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct UiPanelShown(pub(crate) bool);
+pub struct UiPanelShown(pub bool);
 
 /// Where a hidden panel's `TabIndex` waits while the panel is closed, so
 /// [`apply_panel_visibility`] can give each node back the index it had rather
 /// than a guessed one.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct ParkedTabIndex(TabIndex);
+pub struct ParkedTabIndex(TabIndex);
 
 /// Apply a panel's [`UiPanelShown`] to its whole subtree: flow, tab reachability
 /// and focus. See [`UiPanelShown`] for why each of the three is needed.
-pub(crate) fn apply_panel_visibility(
+pub fn apply_panel_visibility(
     mut commands: Commands,
     panels: Query<(Entity, &UiPanelShown), Changed<UiPanelShown>>,
     mut nodes: Query<&mut Node>,
@@ -679,7 +685,7 @@ pub(crate) fn apply_panel_visibility(
 /// both axes at once (a vertical tab strip, revealed horizontally, brings its
 /// side panel in the same way).
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct FocusRevealBounds(pub(crate) Entity);
+pub struct FocusRevealBounds(pub Entity);
 
 /// The scroll-offset delta, along one axis, that brings an item band fully into
 /// a viewport band — the pure heart of [`scroll_focus_into_view`], split out so
@@ -718,13 +724,13 @@ fn reveal_delta(viewport_min: f32, viewport_max: f32, item_min: f32, item_max: f
 /// is left alone for the pointer. It walks up from the focused entity to the
 /// nearest ancestor that owns a `ScrollPosition` (a scroll container), compares
 /// the two boxes as the layout currently has them, and moves the offset by
-/// [`reveal_delta`] on each axis — a no-op when the widget already fits, so it
+/// `reveal_delta` on each axis — a no-op when the widget already fits, so it
 /// never fights the wheel. Like the focus ring, it is one scaffold system that a
 /// new focusable widget in any scroll container gets for free.
 ///
 /// `pub(crate)` so the gallery — which stands up the scaffold's systems by hand
 /// rather than adding [`ViewerUiPlugin`] — can register it too.
-pub(crate) fn scroll_focus_into_view(
+pub fn scroll_focus_into_view(
     focus: Res<InputFocus>,
     focus_visible: Res<InputFocusVisible>,
     parents: Query<&ChildOf>,
@@ -859,7 +865,8 @@ fn scrolls_on_some_axis(node: &Node) -> bool {
 /// collapsing) on the result when a panel genuinely needs a bound — never
 /// `width` and `height` together, which is the fixed rect the convention exists
 /// to prevent.
-pub(crate) fn column(gap: Val) -> Node {
+#[must_use]
+pub fn column(gap: Val) -> Node {
     Node {
         flex_direction: FlexDirection::Column,
         // The gap between rows of a column is the *row* gap; `column_gap` here
@@ -879,7 +886,8 @@ pub(crate) fn column(gap: Val) -> Node {
 /// Note that `FlexDirection::Row` is already the logical "along the text
 /// direction" and needs no mirroring of its own — `taffy` reverses the flow off
 /// the node's `direction`, which [`apply_ui_direction`] keeps current.
-pub(crate) fn row(gap: Val) -> Node {
+#[must_use]
+pub fn row(gap: Val) -> Node {
     Node {
         flex_direction: FlexDirection::Row,
         // Mirror of `column`: the gap between items of a row is the *column* gap.
@@ -894,7 +902,7 @@ pub(crate) fn row(gap: Val) -> Node {
 // A toggleable panel (`F5`, or `SL_VIEWER_UI_DEMO` for the screenshot harness)
 // that exercises every part of the scaffold by hand, in the pattern the
 // neighbouring foundations already use (`crate::ui_text`'s `F4` text panel,
-// `crate::diagnostics`' `F3` pipeline overlay). It is not a widget library —
+// `diagnostics`' `F3` pipeline overlay). It is not a widget library —
 // the generic primitives come from `bevy_ui_widgets`, and the viewer-domain
 // composites are each their own task — it is the thing that makes the
 // scaffold's four claims falsifiable:

@@ -8525,6 +8525,7 @@ dependencies = [
  "sl-viewer-notifications",
  "sl-viewer-platform",
  "sl-viewer-settings",
+ "sl-viewer-ui-core",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -9042,6 +9043,28 @@ dependencies = [
  "sl-settings",
  "sl-viewer-platform",
  "tracing",
+]
+
+[[package]]
+name = "sl-viewer-ui-core"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "bevy_fluent",
+ "fluent",
+ "fluent_content",
+ "fs-err",
+ "parley",
+ "pretty_assertions",
+ "sl-audio",
+ "sl-client-bevy",
+ "sl-l10n",
+ "sl-settings",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "tracing",
+ "unic-langid",
 ]
 
 [[package]]

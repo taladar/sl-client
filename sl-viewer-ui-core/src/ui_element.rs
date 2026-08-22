@@ -1,6 +1,6 @@
 //! The **UI element registry** (`viewer-ui-test-harness`): the one list of
 //! things this viewer's UI is built from, shared by the gallery a human looks at
-//! ([`crate::gallery`]) and the checks a machine runs ([`crate::ui_test`]).
+//! (`gallery`) and the checks a machine runs (`ui_test`).
 //!
 //! # Why a registry, rather than each test spawning what it wants
 //!
@@ -14,7 +14,7 @@
 //! and elements have to meet in a list, or every pairing is a thing somebody has
 //! to remember to write.
 //!
-//! **A new panel or widget belongs in [`ELEMENTS`].** That is the whole
+//! **A new panel or widget belongs in `ELEMENTS`.** That is the whole
 //! obligation, and it is what buys the element every check that exists now and
 //! every check added later.
 //!
@@ -73,11 +73,11 @@ use crate::ui_pseudoloc::pseudolocalise;
 /// documentation](self): the viewer routes these to real handlers, the gallery
 /// routes them nowhere, and a test reads them to assert what a click meant.
 #[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct UiAction {
+pub struct UiAction {
     /// The [`UiElement::id`] of the element that emitted it.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// Which of that element's actions fired.
-    pub(crate) action: &'static str,
+    pub action: &'static str,
 }
 
 /// A sample of one writing system, for the matrix.
@@ -87,13 +87,13 @@ pub(crate) struct UiAction {
 /// `viewer-text-node-padding-measure` gets wrong — and a matrix carrying only
 /// one of them misses half the bugs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ScriptSample {
+pub struct ScriptSample {
     /// The script's name, for a failure message and the gallery's label.
-    pub(crate) name: &'static str,
+    pub name: &'static str,
     /// A label-length sample.
-    pub(crate) short: &'static str,
+    pub short: &'static str,
     /// A prose-length sample, long enough to wrap in a panel.
-    pub(crate) long: &'static str,
+    pub long: &'static str,
 }
 
 /// The scripts every element is checked in.
@@ -105,7 +105,7 @@ pub(crate) struct ScriptSample {
 /// stacks; emoji are colour bitmaps of an entirely different metric; and bidi is
 /// the mix, which is where the ordering bugs live and which no single-script
 /// sample can reach.
-pub(crate) const SCRIPTS: &[ScriptSample] = &[
+pub const SCRIPTS: &[ScriptSample] = &[
     ScriptSample {
         name: "Latin",
         short: "Save changes",
@@ -164,7 +164,7 @@ pub(crate) const SCRIPTS: &[ScriptSample] = &[
 /// `viewer-i18n-fluent-scaffold` will do for real, where the literal becomes a
 /// Fluent key and the bundle decides the rest.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum SampleText {
+pub enum SampleText {
     /// The element's own English literals, untouched — the baseline.
     #[default]
     Native,
@@ -187,7 +187,8 @@ impl SampleText {
     const PROSE_CHARS: usize = 40;
 
     /// Apply this cell's transform to one of an element's strings.
-    pub(crate) fn apply(self, original: &str) -> String {
+    #[must_use]
+    pub fn apply(self, original: &str) -> String {
         match self {
             Self::Native => original.to_owned(),
             Self::Pseudo => pseudolocalise(original),
@@ -202,7 +203,8 @@ impl SampleText {
     }
 
     /// This cell's name, for a failure message and the gallery's label.
-    pub(crate) const fn name(self) -> &'static str {
+    #[must_use]
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Native => "Native",
             Self::Pseudo => "Pseudo",
@@ -214,13 +216,13 @@ impl SampleText {
 /// What an element is spawned with: everything a cell varies that the element
 /// itself must not hard-code.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ElementCx {
+pub struct ElementCx {
     /// How this cell transforms the element's strings.
-    pub(crate) text: SampleText,
+    pub text: SampleText,
     /// The font size the element's text is set at, in logical pixels. A separate
     /// axis from the string: a panel that survives a long translation can still
     /// break when the user turns the UI font up.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
 }
 
 /// The font size an element uses when a cell does not say otherwise.
@@ -229,7 +231,8 @@ const DEFAULT_FONT_SIZE: f32 = 15.0;
 impl ElementCx {
     /// A context at the resting configuration: native strings at the default
     /// size.
-    pub(crate) const fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             text: SampleText::Native,
             font_size: DEFAULT_FONT_SIZE,
@@ -237,12 +240,14 @@ impl ElementCx {
     }
 
     /// Transform one of the element's own strings for this cell.
-    pub(crate) fn text(self, original: &str) -> String {
+    #[must_use]
+    pub fn text(self, original: &str) -> String {
         self.text.apply(original)
     }
 
     /// This cell's font, at this cell's size.
-    pub(crate) fn font(self, role: UiFont) -> TextFont {
+    #[must_use]
+    pub fn font(self, role: UiFont) -> TextFont {
         role.at(self.font_size)
     }
 }
@@ -260,19 +265,19 @@ impl ElementCx {
 /// by accident — the strings happened to be the same length. The failure is a
 /// language where they are not: a label column that is a tidy rule in English
 /// and a ragged edge in German, which is invisible to the author and obvious to
-/// the reader. Declared once, [`crate::ui_test::alignment_violations`] checks it
+/// the reader. Declared once, `ui_test::alignment_violations` checks it
 /// against every script, every translation length and every UI scale.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct AlignmentGroup {
+pub struct AlignmentGroup {
     /// The group's name — nodes sharing it must line up. Also what a failure
     /// message names.
-    pub(crate) group: &'static str,
+    pub group: &'static str,
     /// Which edge of those nodes must agree.
-    pub(crate) edge: AlignEdge,
+    pub edge: AlignEdge,
 }
 
 /// Declares that the text in this subtree **may legitimately be clipped
-/// mid-glyph**, so [`crate::ui_test::clipping_violations`] must not report it.
+/// mid-glyph**, so `ui_test::clipping_violations` must not report it.
 ///
 /// The escape hatch for the one universal check that is not, on inspection,
 /// universal. A label sliced in half is always a bug — but plenty of correct
@@ -295,24 +300,24 @@ pub(crate) struct AlignmentGroup {
 /// already an explicit structural statement that content is clipped and reached
 /// by scrolling, and the check reads it directly.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct TextMayClip {
+pub struct TextMayClip {
     /// Why this subtree is allowed to slice its text. Not decoration: it is what
     /// makes an audit of the exceptions possible, and what a reviewer argues
     /// with when the exception is really a bug wearing a declaration.
-    pub(crate) reason: &'static str,
+    pub reason: &'static str,
 }
 
 /// A declared **radial** placement: this node must lie in the named direction
 /// from its group's [`RadialCentre`], to within [`tolerance`](Self::tolerance).
 ///
 /// **Why the universal checks cannot cover this.** Every other check in
-/// [`crate::ui_test`] reasons about boxes — content inside its box, a box inside
+/// `ui_test` reasons about boxes — content inside its box, a box inside
 /// its parent, text not sliced. That vocabulary is exhausted by a layout made of
 /// rectangles, and a radial menu is not: its slices are *angular sectors drawn by
 /// a shader*, with no nodes of their own for a harness to measure. Every box in a
 /// pie can be perfectly legal while the widget is completely broken.
 ///
-/// And it is a real failure, not a hypothetical one. `crate::pie_menu` picks the
+/// And it is a real failure, not a hypothetical one. `pie_menu` picks the
 /// slice under the pointer from the **angle** to the ring's centre, and places its
 /// labels on wedges at a radius. Get the placement arithmetic wrong — or let a
 /// label grow enough that its box centre shifts — and the *angle* from the centre
@@ -326,31 +331,31 @@ pub(crate) struct TextMayClip {
 /// columns that must stay straight.
 ///
 /// Like [`AlignmentGroup`] and [`TextMayClip`], this is **declared** by an element
-/// and read only by [`crate::ui_test`]. That is not a smell: a declaration exists
+/// and read only by `ui_test`. That is not a smell: a declaration exists
 /// to be checked, the checker is the harness, and the gallery deliberately does
-/// not check anything (see [`crate::gallery`] — it answers "does this look right",
+/// not check anything (see `gallery` — it answers "does this look right",
 /// which is the question a machine cannot).
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct RadialPlacement {
+pub struct RadialPlacement {
     /// The group's name, tying this node to its [`RadialCentre`].
-    pub(crate) group: &'static str,
+    pub group: &'static str,
     /// The direction this node must lie in, in radians counter-clockwise from
-    /// due east, in a **y-up** frame (`crate::pie_menu::ui_offset` converts).
-    pub(crate) angle: f32,
+    /// due east, in a **y-up** frame (`pie_menu::ui_offset` converts).
+    pub angle: f32,
     /// How far the node's actual direction may stray, in radians.
     ///
     /// For a pie this is **half a slice**: the widget resolves a direction to the
     /// slice whose centre is nearest, so a label further than that from its own
     /// centre falls in a neighbour's sector and would select it. The tolerance is
     /// not a fudge factor — it is the exact width of the claim.
-    pub(crate) tolerance: f32,
+    pub tolerance: f32,
 }
 
 /// The node a [`RadialPlacement`] group's directions are measured from.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RadialCentre {
+pub struct RadialCentre {
     /// The group's name.
-    pub(crate) group: &'static str,
+    pub group: &'static str,
 }
 
 /// Which edge an [`AlignmentGroup`] holds in common.
@@ -360,7 +365,7 @@ pub(crate) struct RadialCentre {
 /// edge, and under RTL that is the right-hand side without anything here saying
 /// so.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AlignEdge {
+pub enum AlignEdge {
     /// The leading inline edge — left under LTR, right under RTL.
     InlineStart,
     /// The trailing inline edge — right under LTR, left under RTL.
@@ -370,18 +375,18 @@ pub(crate) enum AlignEdge {
 /// A UI element: something the gallery renders on its own and the harness checks
 /// to destruction.
 #[derive(Clone, Copy)]
-pub(crate) struct UiElement {
+pub struct UiElement {
     /// A stable id, used by the gallery's list and by a failing check's message.
-    pub(crate) id: &'static str,
+    pub id: &'static str,
     /// One line on what this is, shown beside it in the gallery.
-    pub(crate) summary: &'static str,
+    pub summary: &'static str,
     /// Spawn it under `parent`, returning its own root entity.
     ///
-    /// A plain `fn` pointer rather than a boxed closure so that [`ELEMENTS`] can
+    /// A plain `fn` pointer rather than a boxed closure so that `ELEMENTS` can
     /// be a `const` — the registry is a fixed list known at compile time, and
     /// keeping it one makes "is this element registered?" a question answered by
     /// reading the file.
-    pub(crate) spawn: fn(&mut Commands, Entity, ElementCx) -> Entity,
+    pub spawn: fn(&mut Commands, Entity, ElementCx) -> Entity,
 }
 
 impl core::fmt::Debug for UiElement {
@@ -394,411 +399,6 @@ impl core::fmt::Debug for UiElement {
             .finish_non_exhaustive()
     }
 }
-
-/// **The registry.** Every UI element, checked by [`crate::ui_test`] and
-/// rendered by [`crate::gallery`].
-///
-/// Add a panel or widget here and it inherits the whole suite. See the [module
-/// documentation](self).
-pub(crate) const ELEMENTS: &[UiElement] = &[
-    UiElement {
-        id: "label",
-        summary: "A text label in a decorated container — the pattern a text run must be \
-                  wrapped in.",
-        spawn: spawn_label,
-    },
-    UiElement {
-        id: "button",
-        summary: "A focusable `bevy_ui_widgets` button that emits a `UiAction` rather than \
-                  doing anything.",
-        spawn: spawn_button,
-    },
-    UiElement {
-        id: "button-row",
-        summary: "Three buttons flowing in text order, wrapping when they outgrow the panel.",
-        spawn: spawn_button_row,
-    },
-    UiElement {
-        id: "field-grid",
-        summary: "The build window's shape: rows of X/Y/Z fields whose columns must align \
-                  however the row labels are translated.",
-        spawn: spawn_field_grid,
-    },
-    UiElement {
-        id: "text-editor",
-        summary: "A multi-line `EditableText` with a caret, reachable by `Tab`.",
-        spawn: spawn_text_editor,
-    },
-    UiElement {
-        id: "text-input-line",
-        summary: "The reusable single-line text field (`crate::ui_text_input`): a bordered, \
-                  glyph-width-sized `EditableText` that scrolls its content horizontally.",
-        spawn: crate::ui_text_input::spawn_line_specimen,
-    },
-    UiElement {
-        id: "text-input-multiline",
-        summary: "The reusable multi-line text field: newlines allowed, prose soft-wraps at a \
-                  bound and scrolls vertically.",
-        spawn: crate::ui_text_input::spawn_multiline_specimen,
-    },
-    UiElement {
-        id: "text-input-float",
-        summary: "The signed-decimal numeric field: accepts an optional `-`, digits and one `.`; \
-                  a bad character is rejected as typed and a bad arrangement reverted.",
-        spawn: crate::ui_text_input::spawn_float_specimen,
-    },
-    UiElement {
-        id: "text-input-integer",
-        summary: "The signed-integer numeric field: an optional `-` then digits.",
-        spawn: crate::ui_text_input::spawn_integer_specimen,
-    },
-    UiElement {
-        id: "text-input-unsigned",
-        summary: "The non-negative-integer numeric field: digits only, the sign key rejected.",
-        spawn: crate::ui_text_input::spawn_unsigned_specimen,
-    },
-    UiElement {
-        id: "build-tools",
-        summary: "The Build Tools panel shape (viewer-object-edit-floater-shell): the tool-mode \
-                  radio group, a snap toggle row, and a numeric transform row of float fields.",
-        spawn: crate::edit_tool::spawn_build_tools_specimen,
-    },
-    UiElement {
-        id: "build-create",
-        summary: "The Create tool panel (viewer-prim-creation): the base-type radio (the seven \
-                  prim volume types plus Tree and Grass), a species combo, and the build hint.",
-        spawn: crate::edit_create::spawn_create_panel_specimen,
-    },
-    UiElement {
-        id: "notecard-editor",
-        summary: "The notecard editor's content (viewer-notecard-editor): a view toggle, an \
-                  editable multi-line body, and a Save button. The live floater \
-                  (`crate::edit_notecard`) fetches and saves the asset; here it is static so its \
-                  layout is swept.",
-        spawn: crate::edit_notecard::spawn_notecard_editor_specimen,
-    },
-    UiElement {
-        id: "notecard-reader",
-        summary: "The notecard rich read-only reader (viewer-notecard-editor / \
-                  crate::notecard_render): prose with a linkified URL and an inline clickable \
-                  embedded item (a landmark). Shown static so the interleaved run / item-box \
-                  layout is swept.",
-        spawn: crate::edit_notecard::spawn_notecard_reader_specimen,
-    },
-    UiElement {
-        id: "script-editor",
-        summary: "The LSL script editor's content (viewer-lsl-editor-save-compile): an editable \
-                  multi-line body, a Running toggle, a Save & Compile button, and a sample \
-                  compile-diagnostic row. The live floater (`crate::edit_script`) fetches, \
-                  uploads and compiles; here it is static so its layout is swept.",
-        spawn: crate::edit_script::spawn_script_editor_specimen,
-    },
-    UiElement {
-        id: "search-field",
-        summary: "The reusable search-field widget (`crate::ui_search`): a single-line field in a \
-                  bordered box with a leading search glyph, a placeholder shown while empty, and a \
-                  trailing × clear button shown only while it holds a term. The menu-bar and \
-                  inventory search boxes are two live consumers.",
-        spawn: crate::ui_search::spawn_search_specimen,
-    },
-    UiElement {
-        id: "panel",
-        summary: "A composite: a titled panel with prose and a button row, bounded but not \
-                  sized.",
-        spawn: spawn_panel,
-    },
-    UiElement {
-        id: "radial-menu-target",
-        summary: "Right-click to open a live pie menu under the pointer. The pie is opened, used \
-                  and dismissed one at a time — never a persistent card — so this is its \
-                  registered form; its layout is checked directly in `crate::pie_menu`'s tests.",
-        spawn: crate::pie_menu::spawn_radial_menu_target,
-    },
-    UiElement {
-        id: "inventory-row",
-        summary: "An inventory tree row: indent, expand arrow, type icon and label — an expanded \
-                  folder over an indented item. The live window (`crate::inventory`) recycles \
-                  this row through the virtualized list; here it is static so its layout is swept.",
-        spawn: crate::inventory::spawn_inventory_row_sample,
-    },
-    UiElement {
-        id: "floater",
-        summary: "A floating window's chrome: a title bar with dock / minimize / close buttons, a \
-                  content slot, and a resize grip. The live manager (`crate::floater`) makes it \
-                  draggable and dockable; here it is static so its layout is swept.",
-        spawn: crate::floater::spawn_floater_specimen,
-    },
-    UiElement {
-        id: "tabs-top",
-        summary: "A tabbed container with the tab strip on the top edge — three tabs fronting three \
-                  panels, one shown. The reusable widget (`crate::ui_tab`); one element per \
-                  placement so every orientation is swept.",
-        spawn: crate::ui_tab::spawn_tabs_block_start,
-    },
-    UiElement {
-        id: "tabs-bottom",
-        summary: "The tab widget with its strip on the bottom edge — a block-axis placement, which \
-                  stays bottom under RTL (only the inline axis mirrors).",
-        spawn: crate::ui_tab::spawn_tabs_block_end,
-    },
-    UiElement {
-        id: "tabs-leading",
-        summary: "The tab widget with a vertical strip on the leading edge (left under LTR); it \
-                  mirrors to the right under RTL with no separate code.",
-        spawn: crate::ui_tab::spawn_tabs_inline_start,
-    },
-    UiElement {
-        id: "preferences",
-        summary: "The preferences shell: a search box, a leading (RTL-mirroring) tab strip, \
-                  labelled setting rows and an OK / Cancel footer. Static — the live shell \
-                  (`crate::preferences`) adds the store binding, filter and snapshot/revert.",
-        spawn: crate::preferences::spawn_preferences_specimen,
-    },
-    UiElement {
-        id: "debug-settings",
-        summary: "The raw debug-settings editor: a search box over a changed-marker settings \
-                  list beside the detail column — per-layer value read-outs, a scope combo, a \
-                  numeric editor and the copy / reset buttons. Static — the live floater \
-                  (`crate::debug_settings`) adds the store, the table and the commit paths.",
-        spawn: crate::debug_settings::spawn_debug_settings_specimen,
-    },
-    UiElement {
-        id: "quick-preferences",
-        summary: "The Quick Preferences panel: the environment preset / time-of-day combos over \
-                  a divider and the curated setting slider rows (draw distance, particle cap). \
-                  Static — the live panel (`crate::quick_preferences`) adds the store binding and \
-                  the environment wiring.",
-        spawn: crate::quick_preferences::spawn_quick_prefs_specimen,
-    },
-    UiElement {
-        id: "tabs-trailing",
-        summary: "The tab widget with a vertical strip on the trailing edge (right under LTR) — a \
-                  placement the reference viewer cannot express, usable for LTR too, not only as \
-                  an RTL mirror.",
-        spawn: crate::ui_tab::spawn_tabs_inline_end,
-    },
-    UiElement {
-        id: "radio-group-row",
-        summary: "A radio-button group flowing along the inline axis (`crate::ui_radio`): \
-                  mutually-exclusive options with a filled-dot indicator, one selected, the group \
-                  the single focus stop. The Build Tools mode switch is a live consumer; here the \
-                  horizontal layout is swept, wrapping and mirroring under RTL.",
-        spawn: crate::ui_radio::spawn_radio_row,
-    },
-    UiElement {
-        id: "radio-group-column",
-        summary: "The radio-button group stacked down the block axis — the reference viewer's usual \
-                  radio shape. Same widget as `radio-group-row`, the vertical layout swept.",
-        spawn: crate::ui_radio::spawn_radio_column,
-    },
-    UiElement {
-        id: "combo-box",
-        summary: "A combo / dropdown (`crate::ui_combo`): a bordered value button that opens a \
-                  popover list of options and emits the chosen one. The Texture tab's bumpiness / \
-                  shininess / mapping controls are live consumers; swept closed here.",
-        spawn: crate::ui_combo::spawn_combo_element,
-    },
-    UiElement {
-        id: "menu-bar",
-        summary: "A closed menu bar (`crate::menu`): a strip of pull-down buttons whose drop-downs \
-                  open on click — command / check / disabled entries, separators, accelerators and \
-                  a submenu. Swept closed; its opened drop-down layout is checked in the module's \
-                  own tests, and it is drivable live by the gallery's right-click menu toggle.",
-        spawn: crate::menu::spawn_menu_bar_specimen,
-    },
-    UiElement {
-        id: "bottom-toolbar",
-        summary: "The persistent bottom toolbar (`crate::bottom_toolbar`): a row of floater-toggle \
-                  buttons in an enabled, an active (lit) and a disabled placeholder state. The live \
-                  bar (bottom-anchored, wrapping upward) toggles the main floaters; here it is \
-                  static so all three button states' layouts are swept.",
-        spawn: crate::bottom_toolbar::spawn_bottom_toolbar_specimen,
-    },
-    UiElement {
-        id: "notification-toast",
-        summary: "A toast card from the notification host (viewer-ui-notification-host): an \
-                  accent-bordered panel with a wrapping message, an OK / Cancel button row and \
-                  the \"don't show me this again\" checkbox. The live host \
-                  (`crate::notification_host`) stacks, times out and dismisses these in a corner \
-                  channel; here it is static so its layout is swept.",
-        spawn: crate::notification_host::spawn_notification_specimen,
-    },
-    UiElement {
-        id: "group-notice-toast",
-        summary: "A group-notice card (viewer-group-notice-display): the group image, a \"Group \
-                  Notice\" header, the \"Sent by …\" title, the subject / SLT date / body, an \
-                  attached item row, and the OK / Group Notices / Group Chat actions. The live \
-                  host (`crate::group_notice`) pops one per received notice; here it is static so \
-                  its layout is swept.",
-        spawn: crate::group_notice::spawn_group_notice_specimen,
-    },
-    UiElement {
-        id: "script-dialog-toast",
-        summary: "A script-dialog card (viewer-dialog-lldialog): an object / owner title, the \
-                  dialog message, and a three-column button grid filled bottom-up (button 0 \
-                  bottom-left), plus the Block / Ignore actions. The live host \
-                  (`crate::script_dialog`) pops one per received llDialog; here it is static so \
-                  the grid layout is swept.",
-        spawn: crate::script_dialog::spawn_script_dialog_specimen,
-    },
-    UiElement {
-        id: "script-dialog-textbox-toast",
-        summary: "An llTextBox script-dialog card (viewer-dialog-lldialog): the object / owner \
-                  title, the prompt, a text-entry field and a Submit / Block / Ignore row. The \
-                  live host (`crate::script_dialog`) pops one per received llTextBox; here it is \
-                  static so the text-prompt layout is swept.",
-        spawn: crate::script_dialog::spawn_script_textbox_specimen,
-    },
-    UiElement {
-        id: "linkified-text",
-        summary: "A run of text with its http(s) URL, labelled [url text] link and location \
-                  SLURL turned into coloured, hoverable, clickable spans \
-                  (viewer-url-linkification). The shared decoration layer every text-bearing \
-                  panel consumes; here a static sample sweeps the segment wrapping / link tint.",
-        spawn: crate::linkified_text::spawn_linkified_text_specimen,
-    },
-    UiElement {
-        id: "load-url-toast",
-        summary: "A script web-page request card (viewer-dialog-script-load-url): the \"Open a \
-                  web page?\" heading, the object / owner title, the script message, the target \
-                  URL, and the Load / Block / Ignore actions. The live host (`crate::load_url`) \
-                  pops one per received llLoadURL (LoadURL message); here it is static so the \
-                  layout is swept.",
-        spawn: crate::load_url::spawn_load_url_specimen,
-    },
-    UiElement {
-        id: "script-permission-toast",
-        summary: "A script permission-request card (viewer-permission-request-dialog): the \
-                  object / owner intro, a bulleted line per requested permission, \"Is this \
-                  OK?\", and the Yes / No / Block actions. The live host \
-                  (`crate::script_permission`) pops one per received llRequestPermissions \
-                  (ScriptQuestion message); here it is static so the layout is swept.",
-        spawn: crate::script_permission::spawn_script_permission_specimen,
-    },
-    UiElement {
-        id: "script-permission-caution-toast",
-        summary: "The money-access caution card (viewer-permission-request-dialog): the \
-                  ScriptQuestionCaution warning shown when a script asks to debit L$, the \
-                  \"also requesting\" list, and the Allow access / Deny actions. The live host \
-                  (`crate::script_permission`) pops one per debit request; here it is static \
-                  so the layout is swept.",
-        spawn: crate::script_permission::spawn_script_permission_caution_specimen,
-    },
-    UiElement {
-        id: "experience-permission-toast",
-        summary: "The experience-acceptance card (viewer-experience-permission-dialog): the \
-                  ScriptQuestionExperience object / owner / scope intro, the experience name, the \
-                  remembered-until-revoked note, the bulleted permission lines, \"Is this OK?\", \
-                  and the Yes / No / Block Experience / Block Object actions. The live host \
-                  (`crate::experience_permission`) pops one per received experience \
-                  ScriptQuestion; here it is static so the layout is swept.",
-        spawn: crate::experience_permission::spawn_experience_specimen,
-    },
-    UiElement {
-        id: "experiences-floater",
-        summary: "The Experiences manage surface (viewer-experience-permission-dialog): the \
-                  Allowed / Blocked headed lists, each row an experience name with a Forget \
-                  button. The live floater (`crate::experiences_floater`) fills the lists from \
-                  the GetExperiences reply; here it is static so the layout is swept.",
-        spawn: crate::experiences_floater::spawn_experiences_specimen,
-    },
-    UiElement {
-        id: "inventory-offer-toast",
-        summary: "An inventory-offer card (viewer-dialog-offers-invites): the gift heading, the \
-                  \"{giver} has given you an item\" lead, the item name, and the Accept / Decline \
-                  / Block actions. The live host (`crate::offers_invites`) pops one per received \
-                  inventory-offer IM; here it is static so the layout is swept.",
-        spawn: crate::offers_invites::spawn_inventory_offer_specimen,
-    },
-    UiElement {
-        id: "teleport-offer-toast",
-        summary: "A teleport-offer / lure card (viewer-dialog-offers-invites): the location \
-                  heading, the \"{offerer} has offered to teleport you\" lead, the offer message, \
-                  and the Teleport / Decline actions. The live host (`crate::offers_invites`) \
-                  pops one per received lure IM; here it is static so the layout is swept.",
-        spawn: crate::offers_invites::spawn_teleport_offer_specimen,
-    },
-    UiElement {
-        id: "friendship-offer-toast",
-        summary: "A friendship-offer card (viewer-dialog-offers-invites): the handshake heading, \
-                  the \"{agent} is offering to be your friend\" lead, any custom message, and the \
-                  Accept / Decline actions. The live host (`crate::offers_invites`) pops one per \
-                  received friendship-offer IM; here it is static so the layout is swept.",
-        spawn: crate::offers_invites::spawn_friendship_offer_specimen,
-    },
-    UiElement {
-        id: "group-invite-toast",
-        summary: "A group-membership invitation card (viewer-dialog-offers-invites): the people \
-                  heading, the \"{inviter} has invited you to join a group\" lead, the invite \
-                  message and any membership fee, and the Join / Decline actions. The live host \
-                  (`crate::offers_invites`) pops one per received group-invitation IM; here it is \
-                  static so the layout is swept.",
-        spawn: crate::offers_invites::spawn_group_invite_specimen,
-    },
-    UiElement {
-        id: "minimap",
-        summary: "The minimap surface (`crate::minimap`): terrain-ish backdrop, a parcel line, \
-                  avatar dots and the compass labels. The live floater composites a CPU image \
-                  from the world mirror; here it is static so its layout is swept.",
-        spawn: crate::minimap::spawn_minimap_specimen,
-    },
-    UiElement {
-        id: "radar",
-        summary: "The avatar radar's content (`crate::radar`): the counts line, the nearby-avatar \
-                  table with its status glyphs and band-coloured ranges, and the action buttons. \
-                  The live floater binds a virtualized table off the radar model; here it is \
-                  static so its layout is swept.",
-        spawn: crate::radar::spawn_radar_specimen,
-    },
-    UiElement {
-        id: "worldmap",
-        summary: "The world-map floater's layout (`crate::world_map`): a tile-ish map surface \
-                  with region fills and markers beside the search side panel with result rows. \
-                  The live floater composites grid tiles and live markers into a CPU image; \
-                  here it is static so its layout is swept.",
-        spawn: crate::world_map::spawn_world_map_specimen,
-    },
-    UiElement {
-        id: "parcel-audio-bar",
-        summary: "The parcel streaming-audio cluster (`crate::parcel_audio`): the ♫ marker, a \
-                  width-capped now-playing title, play and mute glyph buttons and the volume \
-                  slider. The live cluster (trailing side of the bottom area) follows the \
-                  agent's parcel stream; here it is static so its layout is swept.",
-        spawn: crate::parcel_audio::spawn_parcel_audio_specimen,
-    },
-    UiElement {
-        id: "emoji-picker",
-        summary: "The emoji-picker floater's novel layout (`crate::emoji_picker`): a couple of grid \
-                  rows of glyphs, the skin-tone swatch row and the preview line. The live floater \
-                  (`Ctrl+E`) filters, groups and inserts a chosen glyph into the focused field; \
-                  here it is static so its layout is swept.",
-        spawn: crate::emoji_picker::spawn_emoji_picker_specimen,
-    },
-    UiElement {
-        id: "chat-input",
-        summary: "The reusable chat-input widget (`crate::chat_input`): a single-line field in a \
-                  bordered box with a trailing emoji button and an inline `:`-completer. The live \
-                  widget opens the picker for its field and sends on Enter; here it is static so \
-                  the bar layout is swept.",
-        spawn: crate::chat_input::spawn_chat_input_specimen,
-    },
-    UiElement {
-        id: "local-chat-input",
-        summary: "The reusable local-chat-input widget (`crate::local_chat_input`): the chat input \
-                  plus a whisper/say/shout select box. The live widget parses `/N` channels and \
-                  `/command`s and maps Shift/Ctrl+Enter to whisper/shout; here it is static so the \
-                  bar layout is swept.",
-        spawn: crate::local_chat_input::spawn_local_chat_input_specimen,
-    },
-    UiElement {
-        id: "browser-view",
-        summary: "The embedded-browser view (`crate::browser_widget`): a surface-backed image \
-                  node with click-to-focus input routing. In the gallery the web-media engine is \
-                  live and renders an offline data-URL page; in a headless test it stays the \
-                  dark placeholder.",
-        spawn: crate::browser_widget::spawn_browser_specimen,
-    },
-];
 
 /// The accent colour on a label's leading edge.
 const ACCENT_COLOR: Color = Color::srgb(0.36, 0.72, 0.98);
@@ -848,7 +448,7 @@ const SAMPLE_PROSE: &str = "A much longer label, of the length a translated stri
 /// constraint on the whole UI until the upstream bug is fixed, and it is written
 /// down in the bug's roadmap file rather than only here. The scaffold's `F5`
 /// panel still demonstrates a logical accent bar, and still shows the artefact.
-fn spawn_label(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+pub fn spawn_label(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     commands
         .spawn((
             Node {
@@ -924,7 +524,7 @@ fn button(
 }
 
 /// Spawn a single button.
-fn spawn_button(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+pub fn spawn_button(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     button(commands, parent, cx, 1, "Save changes", "button", "save")
 }
 
@@ -933,7 +533,7 @@ fn spawn_button(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entit
 /// Three, not two: with two focusable nodes a tab cycle is its own reverse, so
 /// `Tab` and `Shift+Tab` are indistinguishable and neither order nor direction
 /// is observable.
-fn spawn_button_row(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+pub fn spawn_button_row(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let row = commands
         .spawn((
             Node {
@@ -986,7 +586,7 @@ const FIELD_COLUMNS: [&str; 3] = ["field-x", "field-y", "field-z"];
 /// [`AlignmentGroup`]s are what hold that claim to account across the whole
 /// matrix, and what will catch the next panel that reaches for per-row flex
 /// instead.
-fn spawn_field_grid(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+pub fn spawn_field_grid(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let grid = commands
         .spawn((
             Node {
@@ -1063,7 +663,7 @@ fn spawn_field_grid(commands: &mut Commands, parent: Entity, cx: ElementCx) -> E
 }
 
 /// Spawn a multi-line text editor with a caret, reachable by `Tab`.
-fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+pub fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let mut editor = EditableText::new(cx.text(SAMPLE_PROSE));
     editor.allow_newlines = true;
     editor.visible_lines = Some(3.0);
@@ -1101,7 +701,7 @@ fn spawn_text_editor(commands: &mut Commands, parent: Entity, cx: ElementCx) -> 
 }
 
 /// Spawn a titled panel: the composite the viewer's real panels take after.
-fn spawn_panel(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
+pub fn spawn_panel(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let panel = commands
         .spawn((
             Node {
@@ -1130,29 +730,8 @@ fn spawn_panel(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity
 
 #[cfg(test)]
 mod tests {
-    use super::{ELEMENTS, SCRIPTS, SampleText, ScriptSample};
+    use super::{SCRIPTS, SampleText, ScriptSample};
     use pretty_assertions::assert_eq;
-
-    /// Ids are what a failing check names and what the gallery lists, so a
-    /// duplicate would make one element's failure indistinguishable from
-    /// another's.
-    #[test]
-    fn element_ids_are_unique() {
-        let mut ids: Vec<&str> = ELEMENTS.iter().map(|element| element.id).collect();
-        let total = ids.len();
-        ids.sort_unstable();
-        ids.dedup();
-        assert_eq!(ids.len(), total, "two registered elements share an id");
-    }
-
-    /// The registry has to be non-empty, or every matrix test below passes by
-    /// iterating over nothing — the failure mode where a green suite means the
-    /// suite ran out of work rather than found none.
-    #[test]
-    fn the_registry_is_not_empty() {
-        assert!(!ELEMENTS.is_empty(), "no UI elements are registered");
-        assert!(!SCRIPTS.is_empty(), "no scripts are registered");
-    }
 
     /// A script swap keeps a label label-sized and prose prose-sized, or it would
     /// test a different layout problem than the string it replaced posed.

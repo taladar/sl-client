@@ -35,7 +35,7 @@
 //! or tabbing to it — focuses it (`bevy_input_focus`), after which typing, the
 //! host IME, caret motion, and grapheme-aware backspace can all be exercised by
 //! hand. It reuses the persistent-node + key-toggle pattern of the
-//! [`crate::diagnostics`] overlays.
+//! `diagnostics` overlays.
 //!
 //! The panel is built on [`crate::ui`]'s scaffold, which post-dates it: it hangs
 //! off the [`UiRoot`], is laid out by [`column()`] and a [`LogicalMargin`] rather
@@ -129,18 +129,19 @@ const DEMO_TEXT: &str = concat!(
 );
 
 /// Whether the text-foundation demo panel is currently shown. Toggled by
-/// [`TEXT_DEMO_TOGGLE_KEY`]; hidden by default so it stays out of the way until
+/// `TEXT_DEMO_TOGGLE_KEY`; hidden by default so it stays out of the way until
 /// the text stack is being inspected.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub(crate) struct TextDemoVisible(pub(crate) bool);
+pub struct TextDemoVisible(pub bool);
 
 impl TextDemoVisible {
     /// The initial visibility, seeded from the `SL_VIEWER_TEXT_DEMO` environment
     /// variable so the offline screenshot harness (which cannot press
-    /// [`TEXT_DEMO_TOGGLE_KEY`]) can capture the panel: set to start shown, unset
+    /// `TEXT_DEMO_TOGGLE_KEY`) can capture the panel: set to start shown, unset
     /// to start hidden (the interactive default). The key still toggles it either
     /// way.
-    pub(crate) fn from_env() -> Self {
+    #[must_use]
+    pub fn from_env() -> Self {
         Self(std::env::var_os("SL_VIEWER_TEXT_DEMO").is_some())
     }
 }
@@ -148,7 +149,7 @@ impl TextDemoVisible {
 /// A marker component tagging the demo panel's root node, so the toggle system
 /// can find and show / hide the whole subtree.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct TextDemoRoot;
+pub struct TextDemoRoot;
 
 /// Startup system: spawn the demo panel — a title plus one prefilled multi-line
 /// [`EditableText`] — starting shown or hidden per [`TextDemoVisible`]. The
@@ -156,11 +157,7 @@ pub(crate) struct TextDemoRoot;
 /// and both are wired by [`crate::ui::ViewerUiPlugin`], whose [`UiRoot`] this
 /// panel hangs off — so this system must run after
 /// [`crate::ui::UiScaffoldSystems::SpawnRoot`].
-pub(crate) fn setup_text_demo(
-    mut commands: Commands,
-    visible: Res<TextDemoVisible>,
-    root: Res<UiRoot>,
-) {
+pub fn setup_text_demo(mut commands: Commands, visible: Res<TextDemoVisible>, root: Res<UiRoot>) {
     let display = if visible.0 {
         Display::Flex
     } else {
@@ -238,11 +235,8 @@ pub(crate) fn setup_text_demo(
         });
 }
 
-/// Toggle the demo panel when [`TEXT_DEMO_TOGGLE_KEY`] is pressed.
-pub(crate) fn toggle_text_demo(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut visible: ResMut<TextDemoVisible>,
-) {
+/// Toggle the demo panel when `TEXT_DEMO_TOGGLE_KEY` is pressed.
+pub fn toggle_text_demo(keyboard: Res<ButtonInput<KeyCode>>, mut visible: ResMut<TextDemoVisible>) {
     if keyboard.just_pressed(TEXT_DEMO_TOGGLE_KEY) {
         visible.0 = !visible.0;
     }
@@ -252,7 +246,7 @@ pub(crate) fn toggle_text_demo(
 /// changes, leaving the scaffold's `apply_panel_visibility` to do the hiding —
 /// which is more than it sounds: a closed panel must also leave no gap in the
 /// root's flow, stop being reachable by `Tab`, and give up the keyboard.
-pub(crate) fn apply_text_demo_visibility(
+pub fn apply_text_demo_visibility(
     visible: Res<TextDemoVisible>,
     mut panels: Query<&mut UiPanelShown, With<TextDemoRoot>>,
 ) {

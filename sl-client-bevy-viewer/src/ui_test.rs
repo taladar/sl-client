@@ -1010,7 +1010,8 @@ mod tests {
         overflow_violations, settle, spawn_element,
     };
     use crate::ui::UiDirection;
-    use crate::ui_element::{ELEMENTS, ElementCx, SCRIPTS, SampleText, UiAction};
+    use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
+    use crate::ui_elements::ELEMENTS;
     use crate::ui_font::UiFont;
     use bevy::input_focus::InputFocus;
     use bevy::input_focus::tab_navigation::NavAction;

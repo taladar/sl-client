@@ -2,7 +2,7 @@
 //!
 //! Bevy's `ListBox` — and any plain `column()` under an `Overflow::scroll()`
 //! viewport (the gallery's approach) — spawns **one entity per row**, so a
-//! 10 000-item inventory ([`crate::inventory`]) would mean 10 000 taffy nodes
+//! 10 000-item inventory (`inventory`) would mean 10 000 taffy nodes
 //! laid out every frame. This widget instead keeps a **small pool** of row
 //! entities — only enough to cover the viewport plus a little overscan — and
 //! **recycles** them as the viewport scrolls: a row that scrolls off the top is
@@ -12,7 +12,7 @@
 //! # The split: generic recycling, app-supplied row content
 //!
 //! This module owns only the part that is the same for every list — the
-//! **windowing arithmetic** ([`row_window`]) and the **pool machinery** that
+//! **windowing arithmetic** (`row_window`) and the **pool machinery** that
 //! keeps the right rows alive and positioned ([`layout_virtual_lists`]). It knows
 //! nothing about what a row *contains*. A consumer:
 //!
@@ -25,7 +25,7 @@
 //!    into the pooled entity.
 //!
 //! That keeps the recycling logic testable in isolation (the pure
-//! [`row_window`] has no Bevy in it at all) and lets one mechanism back every
+//! `row_window` has no Bevy in it at all) and lets one mechanism back every
 //! long-list panel — inventory, radar, the people list, chat history at scale.
 //!
 //! # Scrolling and the camera
@@ -34,7 +34,7 @@
 //! must not fire at once. They are kept apart by **hover**: a virtual-list
 //! viewport is a blocking [`Pickable`] node, so whenever the pointer is over
 //! one the camera's wheel zoom stands down (`pointer_over_blocking_ui` in
-//! [`crate::camera`]) and [`scroll_virtual_lists`] scrolls the hovered list —
+//! `camera`) and [`scroll_virtual_lists`] scrolls the hovered list —
 //! no click-into-the-list first (the old input-context gate left the wheel
 //! doing *nothing* over a not-yet-focused list, since the camera already
 //! ignored it there too). Away from any list the hover walk finds nothing and
@@ -57,7 +57,8 @@ const LINE_SCROLL_PIXELS: f32 = 48.0;
 
 /// The plugin that drives every [`VirtualList`]: it recycles each list's row
 /// pool and routes the wheel to a hovered, focused list.
-pub(crate) struct VirtualListPlugin;
+#[derive(Debug)]
+pub struct VirtualListPlugin;
 
 impl Plugin for VirtualListPlugin {
     /// Register the scroll and layout systems. Layout runs after scroll so a
@@ -97,7 +98,7 @@ const SCROLLBAR_THUMB_COLOR: Color = Color::srgb(0.40, 0.48, 0.60);
 /// A [`VirtualList`] viewport's overlay scrollbar track, naming its viewport.
 /// Bevy's `Scrollbar` widget drives the native `ScrollPosition`, which a
 /// virtual list does not use (it owns its own clamped offset), so the bar is
-/// driven from [`VirtualList`] directly by [`drive_virtual_scrollbars`].
+/// driven from [`VirtualList`] directly by `drive_virtual_scrollbars`.
 #[derive(Component, Debug, Clone, Copy)]
 struct VirtualScrollbar {
     /// The [`VirtualList`] viewport this bar reflects and drives.
@@ -111,10 +112,10 @@ struct VirtualScrollbarThumb;
 /// Spawn the overlay scrollbar for a [`VirtualList`] `viewport`: a slim track
 /// pinned to the viewport's trailing inline edge (an *overlay*, so it never
 /// shifts the header / row layout), holding a thumb whose size and position
-/// [`drive_virtual_scrollbars`] keeps proportional to the scroll state.
+/// `drive_virtual_scrollbars` keeps proportional to the scroll state.
 /// Hidden while the content fits. Dragging the thumb scrolls the list; the
 /// wheel path is untouched (hover on the bar still bubbles to the viewport).
-pub(crate) fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Entity {
+pub fn spawn_virtual_scrollbar(commands: &mut Commands, viewport: Entity) -> Entity {
     let track = commands
         .spawn((
             Node {
@@ -262,14 +263,14 @@ fn drive_virtual_scrollbars(
 /// [`item_count`](Self::item_count) current; the scroll offset is owned here and
 /// nudged by [`scroll_virtual_lists`] / clamped by [`layout_virtual_lists`].
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct VirtualList {
+pub struct VirtualList {
     /// The uniform height of every row, in logical pixels. Uniform because the
     /// windowing arithmetic maps a scroll offset to a row index by division —
     /// variable heights would need a prefix-sum the inventory does not require.
-    pub(crate) row_height: f32,
+    pub row_height: f32,
     /// How many items the list is currently presenting. The consumer updates
     /// this whenever its model changes; the pool follows.
-    pub(crate) item_count: usize,
+    pub item_count: usize,
     /// The current scroll offset from the top, in logical pixels. Private so it
     /// is only ever changed through the systems that clamp it.
     scroll: f32,
@@ -278,7 +279,8 @@ pub(crate) struct VirtualList {
 impl VirtualList {
     /// A new list with the given uniform row height, empty and scrolled to the
     /// top.
-    pub(crate) const fn new(row_height: f32) -> Self {
+    #[must_use]
+    pub const fn new(row_height: f32) -> Self {
         Self {
             row_height,
             item_count: 0,
@@ -289,14 +291,15 @@ impl VirtualList {
     /// Reset the scroll offset to the top — used when the presented content
     /// changes wholesale (a tab switch, a new search) so the old offset does not
     /// leave the new, shorter list scrolled past its end.
-    pub(crate) const fn scroll_to_top(&mut self) {
+    pub const fn scroll_to_top(&mut self) {
         self.scroll = 0.0;
     }
 
     /// The current scroll offset from the top, in logical pixels — read by a
     /// consumer that maps a pointer position back to a row index (the inventory
     /// drag-and-drop hit test).
-    pub(crate) const fn scroll_offset(&self) -> f32 {
+    #[must_use]
+    pub const fn scroll_offset(&self) -> f32 {
         self.scroll
     }
 
@@ -304,7 +307,7 @@ impl VirtualList {
     /// toward the end). Clamped at the top here; the layout system clamps the
     /// far end against the live viewport height, exactly as it does for the
     /// wheel path.
-    pub(crate) const fn scroll_by(&mut self, delta: f32) {
+    pub const fn scroll_by(&mut self, delta: f32) {
         self.scroll = (self.scroll + delta).max(0.0);
     }
 
@@ -312,7 +315,7 @@ impl VirtualList {
     /// that reveals a specific row (the inventory "Show in Main view" action).
     /// The far end is clamped by the layout system against the live viewport
     /// height, exactly as the wheel path is.
-    pub(crate) fn scroll_to_index(&mut self, index: usize) {
+    pub fn scroll_to_index(&mut self, index: usize) {
         self.scroll = row_top(index, self.row_height);
     }
 }
@@ -324,32 +327,32 @@ impl VirtualList {
 /// [`index`](Self::index) is the model item it currently shows, or `None` when
 /// the pool has more rows than the window needs and this one is parked.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct VirtualRow {
+pub struct VirtualRow {
     /// This row's fixed index within its list's pool.
-    pub(crate) slot: usize,
+    pub slot: usize,
     /// The model item index this row currently presents, or `None` when parked
     /// (hidden). The consumer reads this to know what to draw.
-    pub(crate) index: Option<usize>,
+    pub index: Option<usize>,
 }
 
 /// Marks the entity a pooled row's `ChildOf` points at as a virtual-list
 /// viewport, so the pool-building system can find the list an
-/// [`Added`](bevy::prelude::Added) row belongs to. Inserted automatically
+/// [`Added`] row belongs to. Inserted automatically
 /// alongside [`VirtualList`] would be ideal, but the consumer spawns the
 /// viewport, so the layout system tolerates its absence and treats any
 /// [`VirtualList`] entity as the pool parent.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct VirtualViewport;
+pub struct VirtualViewport;
 
 /// The contiguous window of item indices that must have a live row entity: the
-/// rows on screen, plus [`OVERSCAN_ROWS`] beyond each edge, clamped to the item
+/// rows on screen, plus `OVERSCAN_ROWS` beyond each edge, clamped to the item
 /// count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RowWindow {
+pub struct RowWindow {
     /// The first item index in the window.
-    pub(crate) first: usize,
+    pub first: usize,
     /// How many items the window spans.
-    pub(crate) count: usize,
+    pub count: usize,
 }
 
 /// The total height of all rows, in logical pixels — the scrollable extent.
@@ -401,7 +404,7 @@ fn row_window(
 /// never zooms at the same time: a list viewport is blocking UI, and the
 /// camera's wheel zoom ignores a scroll over blocking UI — see the
 /// [module docs](self) for the coordination.
-pub(crate) fn scroll_virtual_lists(
+pub fn scroll_virtual_lists(
     wheel: Res<AccumulatedMouseScroll>,
     hover_map: Res<HoverMap>,
     child_of: Query<&ChildOf>,
@@ -438,7 +441,7 @@ pub(crate) fn scroll_virtual_lists(
 /// every pooled row. Runs every frame but writes a row's [`VirtualRow`] or
 /// [`Node`] only when a value actually changes, so a still list costs a compare
 /// and nothing more (and does not spuriously wake consumers' `Changed` binds).
-pub(crate) fn layout_virtual_lists(
+pub fn layout_virtual_lists(
     mut commands: Commands,
     mut lists: Query<(Entity, &mut VirtualList, &ComputedNode)>,
     children: Query<&Children>,
@@ -530,9 +533,10 @@ pub(crate) fn layout_virtual_lists(
 
 /// Widen a row index or count to `f32` without an `as` cast (the workspace
 /// forbids them), by splitting the low 32 bits into two `u16` halves — the same
-/// trick [`crate::coords::metres_to_f32`] uses. Counts far beyond `u32` are not
+/// trick `coords::metres_to_f32` uses. Counts far beyond `u32` are not
 /// reachable by any real inventory, and saturate rather than wrap.
-pub(crate) fn index_to_f32(n: usize) -> f32 {
+#[must_use]
+pub fn index_to_f32(n: usize) -> f32 {
     let clamped = u32::try_from(n).unwrap_or(u32::MAX);
     let high = u16::try_from(clamped >> 16).unwrap_or(u16::MAX);
     let low = u16::try_from(clamped & 0xFFFF).unwrap_or(u16::MAX);

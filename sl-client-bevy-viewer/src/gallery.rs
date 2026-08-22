@@ -60,7 +60,8 @@ use crate::ui::{
     UiDirection, UiScaffoldSystems, apply_panel_visibility, apply_ui_direction, column,
     invalidate_logical_boxes, resolve_logical_boxes, row, scroll_focus_into_view, spawn_ui_root,
 };
-use crate::ui_element::{ELEMENTS, ElementCx, SCRIPTS, SampleText, UiAction};
+use crate::ui_element::{ElementCx, SCRIPTS, SampleText, UiAction};
+use crate::ui_elements::ELEMENTS;
 use crate::ui_font::{UiFont, register_ui_fonts};
 
 /// The key that flips the layout direction.

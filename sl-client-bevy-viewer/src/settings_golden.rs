@@ -97,30 +97,51 @@ mod test {
     /// wrong.
     #[test]
     fn every_module_defining_a_registrar_is_listed() -> Result<(), TestError> {
-        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let manifest = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
         let listed = include_str!("lib.rs");
         let mut missing = Vec::new();
-        for entry in fs_err::read_dir(&src)? {
+        // The viewer's own modules, plus the extracted `sl-viewer-*` crates —
+        // a registrar keeps working after its module moves out (the alias
+        // preserves the path), so the search has to follow it. Read at run
+        // time rather than `include!`d, which would widen this crate's
+        // commit-hook relevance to the whole repository.
+        let mut roots = vec![manifest.join("src")];
+        let workspace = manifest
+            .parent()
+            .ok_or_else(|| -> TestError { "no workspace root".into() })?;
+        for entry in fs_err::read_dir(workspace)? {
             let path = entry?.path();
-            if path.extension().is_none_or(|ext| ext != "rs") {
-                continue;
+            let is_viewer_crate = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with("sl-viewer-"));
+            if is_viewer_crate && path.join("src").is_dir() {
+                roots.push(path.join("src"));
             }
-            let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            let body = fs_err::read_to_string(&path)?;
-            // A definition at column 0 with a visibility modifier is what
-            // takes part in the aggregation protocol. `volume_panel` and
-            // `world_sounds` each have a *private* helper of the same name
-            // that they call themselves, which is not the same thing; and
-            // requiring column 0 keeps this file's own mention of the pattern
-            // (inside a string literal, indented) from matching itself.
-            let defines = body.lines().any(|line| {
-                line.starts_with("pub(crate) fn register_settings(")
-                    || line.starts_with("pub fn register_settings(")
-            });
-            if defines && !listed.contains(&format!("crate::{stem}::register_settings")) {
-                missing.push(stem.to_owned());
+        }
+        for src in roots {
+            for entry in fs_err::read_dir(&src)? {
+                let path = entry?.path();
+                if path.extension().is_none_or(|ext| ext != "rs") {
+                    continue;
+                }
+                let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                    continue;
+                };
+                let body = fs_err::read_to_string(&path)?;
+                // A definition at column 0 with a visibility modifier is what
+                // takes part in the aggregation protocol. `volume_panel` and
+                // `world_sounds` each have a *private* helper of the same name
+                // that they call themselves, which is not the same thing; and
+                // requiring column 0 keeps this file's own mention of the pattern
+                // (inside a string literal, indented) from matching itself.
+                let defines = body.lines().any(|line| {
+                    line.starts_with("pub(crate) fn register_settings(")
+                        || line.starts_with("pub fn register_settings(")
+                });
+                if defines && !listed.contains(&format!("crate::{stem}::register_settings")) {
+                    missing.push(stem.to_owned());
+                }
             }
         }
         missing.sort();

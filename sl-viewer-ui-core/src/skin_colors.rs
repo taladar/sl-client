@@ -4,7 +4,7 @@
 //! Each tunable colour — chat text by source, the name-tag palette, the
 //! keyword-alert highlight — is a CSS custom property in every skin's
 //! `:root {}` (hex values only). [`bevy_flair`] resolves those onto the styled
-//! [`UiRoot`] entity as [`StyleVars`]; [`apply_skin_color_defaults`] reads them
+//! [`UiRoot`] entity as [`StyleVars`]; `apply_skin_color_defaults` reads them
 //! whenever they change and installs each as its setting's **declared default**
 //! ([`ViewerSettings::set_default`]). Per-account user overrides then sit above
 //! that in the store, so:
@@ -32,8 +32,8 @@ use bevy_flair::style::{VarOrToken, VarToken, VarTokens};
 use sl_settings::SettingValue;
 use tracing::warn;
 
-use crate::settings::ViewerSettings;
 use crate::ui::UiRoot;
+use sl_viewer_settings::ViewerSettings;
 
 /// The settings section the colour palette is grouped under in the persisted
 /// TOML.
@@ -41,67 +41,68 @@ const SECTION: &[&str] = &["colors"];
 
 /// Chat-overlay / transcript colour of the user's own lines (reference
 /// `UserChatColor`).
-pub(crate) const SETTING_CHAT_SELF: &str = "ChatColorSelf";
+pub const SETTING_CHAT_SELF: &str = "ChatColorSelf";
 
 /// Chat colour of other avatars' lines (reference `AgentChatColor`).
-pub(crate) const SETTING_CHAT_OTHERS: &str = "ChatColorOthers";
+pub const SETTING_CHAT_OTHERS: &str = "ChatColorOthers";
 
 /// Chat colour of object chat (reference `ObjectChatColor`).
-pub(crate) const SETTING_CHAT_OBJECTS: &str = "ChatColorObjects";
+pub const SETTING_CHAT_OBJECTS: &str = "ChatColorObjects";
 
 /// Colour of instant-message / group-chat lines (reference `AgentIMColor`).
-pub(crate) const SETTING_CHAT_IM: &str = "ChatColorIm";
+pub const SETTING_CHAT_IM: &str = "ChatColorIm";
 
 /// Colour of system / viewer-notice chat lines (reference `SystemChatColor`).
-pub(crate) const SETTING_CHAT_SYSTEM: &str = "ChatColorSystem";
+pub const SETTING_CHAT_SYSTEM: &str = "ChatColorSystem";
 
 /// The keyword-alert highlight colour. Registered with the palette now; the
 /// chat keyword-alerts feature (`viewer-chat-keyword-alerts`) is its consumer.
-pub(crate) const SETTING_KEYWORD_ALERT: &str = "KeywordAlertColor";
+pub const SETTING_KEYWORD_ALERT: &str = "KeywordAlertColor";
 
 /// Base name-tag colour: legacy names and matching display names (reference
 /// `NameTagLegacy` / `NameTagMatch`).
-pub(crate) const SETTING_NAME_TAG_DEFAULT: &str = "NameTagColorDefault";
+pub const SETTING_NAME_TAG_DEFAULT: &str = "NameTagColorDefault";
 
 /// The own avatar's name-tag colour (reference `NameTagSelf`).
-pub(crate) const SETTING_NAME_TAG_SELF: &str = "NameTagColorSelf";
+pub const SETTING_NAME_TAG_SELF: &str = "NameTagColorSelf";
 
 /// A friend's name-tag colour — the friend highlight (reference
 /// `NameTagFriend`).
-pub(crate) const SETTING_NAME_TAG_FRIEND: &str = "NameTagColorFriend";
+pub const SETTING_NAME_TAG_FRIEND: &str = "NameTagColorFriend";
 
 /// A muted avatar's name-tag colour (reference `NameTagMuted`).
-pub(crate) const SETTING_NAME_TAG_MUTED: &str = "NameTagColorMuted";
+pub const SETTING_NAME_TAG_MUTED: &str = "NameTagColorMuted";
 
 /// A Linden / grid-staff name-tag colour (reference `NameTagLinden`).
-pub(crate) const SETTING_NAME_TAG_LINDEN: &str = "NameTagColorLinden";
+pub const SETTING_NAME_TAG_LINDEN: &str = "NameTagColorLinden";
 
 /// Name-tag colour of a custom (mismatching) display name (reference
 /// `NameTagMismatch`).
-pub(crate) const SETTING_NAME_TAG_MISMATCH: &str = "NameTagColorMismatch";
+pub const SETTING_NAME_TAG_MISMATCH: &str = "NameTagColorMismatch";
 
 /// Distance-band tag colour inside whisper range (reference
 /// `NameTagWhisperDistanceColor`).
-pub(crate) const SETTING_NAME_TAG_DISTANCE_WHISPER: &str = "NameTagDistanceColorWhisper";
+pub const SETTING_NAME_TAG_DISTANCE_WHISPER: &str = "NameTagDistanceColorWhisper";
 
 /// Distance-band tag colour inside normal chat range (reference
 /// `NameTagChatDistanceColor`).
-pub(crate) const SETTING_NAME_TAG_DISTANCE_CHAT: &str = "NameTagDistanceColorChat";
+pub const SETTING_NAME_TAG_DISTANCE_CHAT: &str = "NameTagDistanceColorChat";
 
 /// Distance-band tag colour inside shout range (reference
 /// `NameTagShoutDistanceColor`).
-pub(crate) const SETTING_NAME_TAG_DISTANCE_SHOUT: &str = "NameTagDistanceColorShout";
+pub const SETTING_NAME_TAG_DISTANCE_SHOUT: &str = "NameTagDistanceColorShout";
 
 /// Distance-band tag colour beyond shout range (reference
 /// `NameTagBeyondShoutDistanceColor`).
-pub(crate) const SETTING_NAME_TAG_DISTANCE_BEYOND: &str = "NameTagDistanceColorBeyond";
+pub const SETTING_NAME_TAG_DISTANCE_BEYOND: &str = "NameTagDistanceColorBeyond";
 
 /// One user-tunable colour: its setting name, the skin CSS custom property
 /// that supplies its default, and the built-in fallback used until (or in
 /// place of) a skin value.
-pub(crate) struct ColorTokenDef {
+#[derive(Debug)]
+pub struct ColorTokenDef {
     /// The settings-store name (see the `SETTING_*` consts).
-    pub(crate) setting: &'static str,
+    pub setting: &'static str,
     /// The CSS custom-property name, **without** the `--` prefix — the form
     /// [`StyleVars`] keys use.
     css_var: &'static str,
@@ -112,9 +113,20 @@ pub(crate) struct ColorTokenDef {
     comment: &'static str,
 }
 
+impl ColorTokenDef {
+    /// The CSS custom-property name, without the `--` prefix.
+    ///
+    /// Public for the shipped-skin check, which lives in the crate that owns
+    /// `assets/skins/` and asserts every skin defines every token.
+    #[must_use]
+    pub const fn css_var(&self) -> &'static str {
+        self.css_var
+    }
+}
+
 /// Every user-tunable skin colour, in the order the preferences tab lists
 /// them.
-pub(crate) const COLOR_TOKENS: &[ColorTokenDef] = &[
+pub const COLOR_TOKENS: &[ColorTokenDef] = &[
     ColorTokenDef {
         setting: SETTING_CHAT_SELF,
         css_var: "chat-self",
@@ -215,8 +227,8 @@ pub(crate) const COLOR_TOKENS: &[ColorTokenDef] = &[
 
 /// Register every palette setting with its built-in fallback default. The skin
 /// supplies the real default a frame after it is applied
-/// ([`apply_skin_color_defaults`]).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+/// (`apply_skin_color_defaults`).
+pub fn register_settings(settings: &mut ViewerSettings) {
     for def in COLOR_TOKENS {
         settings.register_in(
             SECTION,
@@ -230,7 +242,8 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
 /// The effective colour of a palette setting: the store's resolved value
 /// (account override → skin default → fallback), or the table fallback when no
 /// store is available (the gallery, early startup, tests).
-pub(crate) fn setting_color(settings: Option<&ViewerSettings>, setting_name: &str) -> Color {
+#[must_use]
+pub fn setting_color(settings: Option<&ViewerSettings>, setting_name: &str) -> Color {
     if let Some(settings) = settings
         && let Ok(rgb) = settings.store().get_color3(setting_name)
     {
@@ -332,9 +345,10 @@ fn hex_nibble(hex: &str, index: usize) -> Option<u8> {
     nibble.checked_mul(17)
 }
 
-/// Registers [`apply_skin_color_defaults`]; the palette settings themselves are
-/// registered with the rest in [`ViewerSettings::load`].
-pub(crate) struct SkinColorsPlugin;
+/// Registers `apply_skin_color_defaults`; the palette settings themselves are
+/// registered with the rest in `ViewerSettings::load`.
+#[derive(Debug)]
+pub struct SkinColorsPlugin;
 
 impl Plugin for SkinColorsPlugin {
     fn build(&self, app: &mut App) {
@@ -344,7 +358,6 @@ impl Plugin for SkinColorsPlugin {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::sync::Arc;
 
     use pretty_assertions::assert_eq;
@@ -411,31 +424,6 @@ mod tests {
         );
         assert_eq!(parse_hex_rgb(&VarTokens::new()), None);
     }
-
-    /// Every shipped skin defines every palette token, so no skin silently
-    /// falls back to another skin's colours.
-    #[test]
-    fn shipped_skins_define_every_palette_token() -> Result<(), TestError> {
-        for skin in crate::skin::SKINS {
-            let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("assets")
-                .join("skins")
-                .join(skin)
-                .join("skin.css");
-            let css = fs_err::read_to_string(&path)?;
-            for def in COLOR_TOKENS {
-                assert!(
-                    css.contains(&format!("--{}:", def.css_var)),
-                    "{} does not define --{}",
-                    path.display(),
-                    def.css_var
-                );
-            }
-        }
-        Ok(())
-    }
-
-    /// Setting and css-var names are unique across the palette table.
     #[test]
     fn palette_table_names_are_distinct() {
         let mut settings: Vec<&str> = COLOR_TOKENS.iter().map(|def| def.setting).collect();

@@ -37,19 +37,19 @@
 //!   `border-inline-start-width`, `border-start-start-radius`, …) that
 //!   `bevy_flair` parses, cascades and `var()`-resolves into the flat
 //!   [`SkinMargin`] / [`SkinPadding`] / [`SkinBorder`] / [`SkinInset`] /
-//!   [`SkinRadius`] components. [`resolve_skin_boxes`] then folds those into the
+//!   [`SkinRadius`] components. `resolve_skin_boxes` then folds those into the
 //!   physical `Node` against the live [`UiDirection`], reusing the same
 //!   [`LogicalRect::resolve`] mirror the scaffold's own boxes use — so a skin's
 //!   `margin-inline-start` mirrors to the right edge under RTL for free.
 //! - The **physical** originals (`margin-left`, `left`, `border-top-left-radius`,
-//!   …) are **banned**: [`scan_banned_properties`] flags any of them, and the
+//!   …) are **banned**: `scan_banned_properties` flags any of them, and the
 //!   test suite fails the build if a shipped skin uses one. A skin author writes
 //!   only the logical names.
 //!
 //! # i18n-aware skins
 //!
 //! The active locale is bridged onto the [`UiRoot`] as CSS **attributes**
-//! (`dir="rtl"`, `lang="ja"`) by [`sync_skin_attributes`], so a skin or overlay
+//! (`dir="rtl"`, `lang="ja"`) by `sync_skin_attributes`, so a skin or overlay
 //! can be locale-conditional with an attribute selector
 //! (`:root[lang="ja"] { … }`) — and the culture-colour and colour-blind overlays
 //! (`viewer-i18n-cultural-color-meanings` / `viewer-i18n-colorblind-accessibility`)
@@ -81,17 +81,17 @@ const SKIN_BASE_FILE: &str = "skin.css";
 const THEMES_DIR: &str = "themes";
 
 /// The default skin id, used when neither the CLI nor the environment selects
-/// one. Matches a directory under [`SKINS_DIR`].
-pub(crate) const DEFAULT_SKIN: &str = "graphite";
+/// one. Matches a directory under `SKINS_DIR`.
+pub const DEFAULT_SKIN: &str = "graphite";
 
 /// The skin ids that ship with the viewer, in switcher-cycle order. Each is a
-/// directory under `assets/skins/` holding a [`SKIN_BASE_FILE`].
-pub(crate) const SKINS: &[&str] = &["graphite", "azure"];
+/// directory under `assets/skins/` holding a `SKIN_BASE_FILE`.
+pub const SKINS: &[&str] = &["graphite", "azure"];
 
 /// The theme overlays that ship, keyed loosely by skin: a `(skin, theme)` pair
 /// names `assets/skins/<skin>/themes/<theme>.css`. `None` in the switcher cycle
 /// means "the skin's own base, no overlay".
-pub(crate) const THEMES: &[(&str, &str)] = &[("graphite", "dark")];
+pub const THEMES: &[(&str, &str)] = &[("graphite", "dark")];
 
 /// The environment variable that seeds the initial [`SkinSelection`] skin id,
 /// for the offline screenshot harness. The CLI `--skin` flag is the
@@ -104,14 +104,14 @@ const THEME_ENV: &str = "SL_VIEWER_THEME";
 /// Which skin and (optional) theme overlay the UI is currently wearing.
 ///
 /// Written by the CLI at start-up and by the gallery's switcher at runtime;
-/// [`apply_skin_selection`] reloads the [`UiRoot`]'s stylesheet whenever it
+/// `apply_skin_selection` reloads the [`UiRoot`]'s stylesheet whenever it
 /// changes, so a flip re-styles the whole tree live.
 #[derive(Resource, Debug, Clone, PartialEq, Eq)]
-pub(crate) struct SkinSelection {
+pub struct SkinSelection {
     /// The skin id — a directory under `assets/skins/`.
-    pub(crate) skin: String,
+    pub skin: String,
     /// The theme overlay id, or `None` for the skin's own base.
-    pub(crate) theme: Option<String>,
+    pub theme: Option<String>,
 }
 
 impl Default for SkinSelection {
@@ -125,14 +125,15 @@ impl Default for SkinSelection {
 }
 
 impl SkinSelection {
-    /// The initial selection: the CLI / [`SKIN_ENV`]+[`THEME_ENV`] values if
+    /// The initial selection: the CLI / `SKIN_ENV`+`THEME_ENV` values if
     /// **either** is given (the pair is taken atomically, so a `--skin` with
     /// no `--theme` means that skin's base — never a stored theme grafted onto
     /// a different skin), else the persisted preferences pair (the colors &
     /// skins tab, validated against the shipped [`SKINS`] / [`THEMES`] since a
     /// hand-edited file must not dress the UI in a missing stylesheet), else
     /// the default.
-    pub(crate) fn resolve(
+    #[must_use]
+    pub fn resolve(
         skin: Option<String>,
         theme: Option<String>,
         stored_skin: Option<String>,
@@ -168,7 +169,7 @@ impl SkinSelection {
 
     /// Advance to the next shipped [`SKINS`] skin, wrapping, and drop any theme
     /// overlay (themes are skin-specific). Drives the gallery's skin switcher.
-    pub(crate) fn cycle_skin(&mut self) {
+    pub fn cycle_skin(&mut self) {
         let current = SKINS.iter().position(|candidate| *candidate == self.skin);
         let next_index = next_in_cycle(current, SKINS.len());
         if let Some(next) = SKINS.get(next_index) {
@@ -179,7 +180,7 @@ impl SkinSelection {
 
     /// Advance the theme overlay through the current skin's [`THEMES`] and back
     /// to `None` (the skin's own base). Drives the gallery's theme switcher.
-    pub(crate) fn cycle_theme(&mut self) {
+    pub fn cycle_theme(&mut self) {
         // The cycle for this skin: no overlay, then each shipped theme, repeat.
         let mut options: Vec<Option<&str>> = vec![None];
         for (skin, theme) in THEMES {
@@ -198,7 +199,8 @@ impl SkinSelection {
 
     /// A short human label of this selection for the switcher, e.g.
     /// `graphite / dark` or `graphite / (base)`.
-    pub(crate) fn label(&self) -> String {
+    #[must_use]
+    pub fn label(&self) -> String {
         match &self.theme {
             Some(theme) => format!("{} / {theme}", self.skin),
             None => format!("{} / (base)", self.skin),
@@ -220,7 +222,7 @@ const fn next_in_cycle(current: Option<usize>, len: usize) -> usize {
 /// corner properties, loads the selected skin onto the [`UiRoot`], and keeps the
 /// locale attributes in step. See the [module documentation](self).
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ViewerSkinPlugin;
+pub struct ViewerSkinPlugin;
 
 impl Plugin for ViewerSkinPlugin {
     fn build(&self, app: &mut App) {
@@ -346,7 +348,7 @@ fn stamp_text_field_class(
 /// `common.css`, whose values are the `--caret` / `--selection` /
 /// `--selection-unfocused` role tokens) and folded into the field's
 /// [`bevy::text::TextCursorStyle`] by
-/// [`crate::ui_text_input::drive_caret_blink`].
+/// `ui_text_input::drive_caret_blink`.
 ///
 /// This component exists because `TextCursorStyle` itself is not reflectable,
 /// so `bevy_flair` cannot drive it directly — the same shim pattern as the
@@ -357,13 +359,13 @@ fn stamp_text_field_class(
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinTextCaret {
+pub struct SkinTextCaret {
     /// The caret (text cursor) colour.
-    pub(crate) caret: Color,
+    pub caret: Color,
     /// The background colour of selected text while the field is focused.
-    pub(crate) selection: Color,
+    pub selection: Color,
     /// The background colour of selected text while the field is unfocused.
-    pub(crate) selection_unfocused: Color,
+    pub selection_unfocused: Color,
 }
 
 impl Default for SkinTextCaret {
@@ -403,24 +405,24 @@ fn register_caret_properties(app: &mut App) {
 /// `chat-server-history-color` / `chat-live-color` CSS properties (the
 /// `.sk-conversations` rule in `common.css`, whose values are the
 /// `--chat-recall` / `--chat-server-history` / `--chat-live` role tokens) and
-/// read by `crate::conversations::refresh_conversations` when it rebuilds a
+/// read by `conversations::refresh_conversations` when it rebuilds a
 /// transcript pane.
 ///
 /// The same shim pattern as [`SkinTextCaret`]: transcript lines are spawned
-/// dynamically with per-line [`crate::linkified_text::LinkTextStyle`] colours,
+/// dynamically with per-line `linkified_text::LinkTextStyle` colours,
 /// which `bevy_flair` cannot drive directly, so the skin lands the resolved
 /// colours here (on the floater root) and the rebuild reads them off.
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinChatBands {
+pub struct SkinChatBands {
     /// Local transcript recall (the reference `ChatHistoryMessageFromLog`).
-    pub(crate) recall: Color,
+    pub recall: Color,
     /// Server-fetched session history (the reference — Firestorm-only —
     /// `ChatHistoryMessageFromServerLog`).
-    pub(crate) server_history: Color,
+    pub server_history: Color,
     /// Live messages (the reference `AgentChatColor`).
-    pub(crate) live: Color,
+    pub live: Color,
 }
 
 impl Default for SkinChatBands {
@@ -472,7 +474,7 @@ fn register_chat_band_properties(app: &mut App) {
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinMargin {
+pub struct SkinMargin {
     /// The leading inline edge (left under LTR, right under RTL).
     inline_start: Val,
     /// The trailing inline edge.
@@ -514,7 +516,7 @@ impl SkinMargin {
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinPadding {
+pub struct SkinPadding {
     /// The leading inline edge.
     inline_start: Val,
     /// The trailing inline edge.
@@ -556,7 +558,7 @@ impl SkinPadding {
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinBorder {
+pub struct SkinBorder {
     /// The leading inline edge width.
     inline_start: Val,
     /// The trailing inline edge width.
@@ -597,7 +599,7 @@ impl SkinBorder {
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinInset {
+pub struct SkinInset {
     /// The leading inline edge.
     inline_start: Val,
     /// The trailing inline edge.
@@ -641,7 +643,7 @@ impl SkinInset {
 #[derive(Component, ComponentProperties, Reflect, Debug, Clone, Copy, PartialEq)]
 #[properties(auto_insert_remove)]
 #[reflect(Default)]
-pub(crate) struct SkinRadius {
+pub struct SkinRadius {
     /// The block-start, inline-start corner (top-leading).
     start_start: Val,
     /// The block-start, inline-end corner (top-trailing).
@@ -791,7 +793,7 @@ fn register_logical_properties(app: &mut App) {
     );
 }
 
-/// The nodes [`resolve_skin_boxes`] has work for: any carrying a skin box that
+/// The nodes `resolve_skin_boxes` has work for: any carrying a skin box that
 /// changed since it last ran (or all of them the frame the direction flips —
 /// see [`invalidate_skin_boxes`]).
 type ChangedSkinBoxes<'world, 'state> = Query<
@@ -862,7 +864,7 @@ fn resolve_skin_boxes(direction: Res<UiDirection>, mut nodes: ChangedSkinBoxes) 
     }
 }
 
-/// Mark every skin box dirty when [`UiDirection`] flips, so [`resolve_skin_boxes`]
+/// Mark every skin box dirty when [`UiDirection`] flips, so `resolve_skin_boxes`
 /// — otherwise driven by change detection on the components — re-resolves the
 /// whole tree against the new direction. Mirrors the scaffold's
 /// `invalidate_logical_boxes`.
@@ -951,12 +953,12 @@ fn sync_skin_attributes(
 /// straight onto `Node` and would not mirror under RTL. A skin author writes the
 /// logical name instead — the mapping is in the error the tests report.
 ///
-/// Enforced today at build time by the test suite (a shipped skin that uses one
-/// fails the build). Gated to test builds because that is its only consumer for
-/// now; the `viewer-ui-skin-l10n-functions` / user-skin follow-up will lift the
-/// gate for a runtime validator of user-authored skins.
-#[cfg(test)]
-const BANNED_PHYSICAL_PROPERTIES: &[&str] = &[
+/// Enforced at build time by the shipped-skin check (a skin that uses one fails
+/// the build). Public because that check lives in the crate that owns
+/// `assets/skins/` — the binary — and because the
+/// `viewer-ui-skin-l10n-functions` / user-skin follow-up wants the same scan at
+/// run time for user-authored skins.
+pub const BANNED_PHYSICAL_PROPERTIES: &[&str] = &[
     "margin-left",
     "margin-right",
     "padding-left",
@@ -977,8 +979,8 @@ const BANNED_PHYSICAL_PROPERTIES: &[&str] = &[
 /// The logical replacement a banned physical property should be rewritten to,
 /// for the error message. `None` when there is no single logical equivalent
 /// (`inset` is a shorthand; use the four `inset-*` longhands).
-#[cfg(test)]
-fn logical_replacement(physical: &str) -> Option<&'static str> {
+#[must_use]
+pub fn logical_replacement(physical: &str) -> Option<&'static str> {
     let replacement = match physical {
         "margin-left" | "margin-right" => "margin-inline-start / margin-inline-end",
         "padding-left" | "padding-right" => "padding-inline-start / padding-inline-end",
@@ -1001,9 +1003,8 @@ fn logical_replacement(physical: &str) -> Option<&'static str> {
 
 /// A banned physical property found in a skin stylesheet: which property, and
 /// the 1-based line it is on.
-#[cfg(test)]
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct BannedProperty {
+pub struct BannedProperty {
     /// The offending physical property name.
     property: String,
     /// The 1-based source line it appears on.
@@ -1018,8 +1019,8 @@ struct BannedProperty {
 /// selectors are not declarations, so they are not matched. Used by the test
 /// suite to fail the build if a skin reaches for a physical box property, and
 /// available for a future runtime validator of user-authored skins.
-#[cfg(test)]
-fn scan_banned_properties(css: &str) -> Vec<BannedProperty> {
+#[must_use]
+pub fn scan_banned_properties(css: &str) -> Vec<BannedProperty> {
     let mut findings = Vec::new();
     for (index, raw_line) in css.lines().enumerate() {
         // A declaration is `name : value`. Take the text before the first colon
@@ -1042,62 +1043,17 @@ fn scan_banned_properties(css: &str) -> Vec<BannedProperty> {
 #[cfg(test)]
 mod tests {
     use super::{
-        BANNED_PHYSICAL_PROPERTIES, DEFAULT_SKIN, FOCUSABLE_CLASS, SKINS, SkinMargin, SkinRadius,
-        SkinSelection, THEMES, UiDirection, invalidate_skin_boxes, logical_replacement,
-        resolve_skin_boxes, scan_banned_properties, stamp_focus_ring_class,
+        BANNED_PHYSICAL_PROPERTIES, DEFAULT_SKIN, FOCUSABLE_CLASS, SkinMargin, SkinRadius,
+        SkinSelection, UiDirection, invalidate_skin_boxes, logical_replacement, resolve_skin_boxes,
+        scan_banned_properties, stamp_focus_ring_class,
     };
     use bevy::input_focus::tab_navigation::TabIndex;
     use bevy::prelude::*;
     use bevy_flair::style::components::ClassList;
     use pretty_assertions::assert_eq;
-    use std::path::PathBuf;
 
     /// A boxed error so tests can use `?` instead of `unwrap` / `expect`.
     type TestError = Box<dyn core::error::Error>;
-
-    /// The absolute path of the shipped skins directory.
-    fn skins_dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("assets")
-            .join("skins")
-    }
-
-    /// Every shipped skin `.css` — the base of each skin plus every theme
-    /// overlay — must be free of the banned physical box properties. This is the
-    /// build-time enforcement of "no physical left/right in a skin".
-    #[test]
-    fn no_shipped_skin_uses_a_banned_property() -> Result<(), TestError> {
-        let mut checked = 0_usize;
-        for entry in walk_css(&skins_dir())? {
-            let css = fs_err::read_to_string(&entry)?;
-            let findings = scan_banned_properties(&css);
-            assert!(
-                findings.is_empty(),
-                "{}: uses banned physical properties {findings:?}; write the logical name instead",
-                entry.display()
-            );
-            checked = checked.saturating_add(1);
-        }
-        assert!(checked > 0, "no skin css files were found to check");
-        Ok(())
-    }
-
-    /// Collect every `.css` file under a directory tree.
-    fn walk_css(dir: &std::path::Path) -> Result<Vec<PathBuf>, TestError> {
-        let mut out = Vec::new();
-        for entry in fs_err::read_dir(dir)? {
-            let path = entry?.path();
-            if path.is_dir() {
-                out.extend(walk_css(&path)?);
-            } else if path.extension().is_some_and(|ext| ext == "css") {
-                out.push(path);
-            }
-        }
-        Ok(out)
-    }
-
-    /// The scanner flags a banned declaration but not a `var()` reference or a
-    /// legitimate logical property with a similar name.
     #[test]
     fn scanner_flags_only_real_declarations() {
         let css = "\
@@ -1309,24 +1265,5 @@ mod tests {
             theme: Some("dark".to_owned()),
         };
         assert_eq!(themed.asset_path(), "skins/graphite/themes/dark.css");
-    }
-
-    /// Every shipped skin id has a base stylesheet on disk, and every declared
-    /// theme overlay exists under its skin — so the switcher can never select a
-    /// missing file.
-    #[test]
-    fn shipped_skins_and_themes_exist() -> Result<(), TestError> {
-        for skin in SKINS {
-            let base = skins_dir().join(skin).join("skin.css");
-            assert!(base.is_file(), "missing skin base {}", base.display());
-        }
-        for (skin, theme) in THEMES {
-            let overlay = skins_dir()
-                .join(skin)
-                .join("themes")
-                .join(format!("{theme}.css"));
-            assert!(overlay.is_file(), "missing theme {}", overlay.display());
-        }
-        Ok(())
     }
 }

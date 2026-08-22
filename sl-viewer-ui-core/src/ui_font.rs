@@ -40,7 +40,7 @@
 //! a **real** italic rather than a synthesised slant.
 //!
 //! `Inter` covers Latin, Greek and Cyrillic but not Hebrew, Arabic, Armenian or
-//! Georgian, so [`SCRIPT_FALLBACKS`] points those scripts at a bundled
+//! Georgian, so `SCRIPT_FALLBACKS` points those scripts at a bundled
 //! `DejaVu Sans` ([`SANS_FALLBACK_FAMILY`]) — reachable *only* as a fallback,
 //! never selectable as a role. That keeps [`crate::ui_text`]'s hard bidi
 //! requirement (mixed RTL + Latin) rendering from bundled faces on every host.
@@ -167,17 +167,17 @@ const EMOJI_FONT: &[u8] = include_bytes!("../assets/fonts/NotoColorEmoji.ttf");
 /// enumerate its own copy under that same name and the two would merge into one
 /// family, making which face wins depend on the host. A name no host font can
 /// carry keeps the family exactly the faces bundled here.
-pub(crate) const SANS_FAMILY: &str = "SL Viewer Sans";
+pub const SANS_FAMILY: &str = "SL Viewer Sans";
 
 /// The private family name the bundled `DejaVu Sans` faces are registered
 /// under. This is **not** a [`UiFont`] role: nothing selects it directly. It is
-/// reachable only as the script fallback wired up by [`SCRIPT_FALLBACKS`], for
+/// reachable only as the script fallback wired up by `SCRIPT_FALLBACKS`, for
 /// the scripts `Inter` does not cover.
-pub(crate) const SANS_FALLBACK_FAMILY: &str = "SL Viewer Sans Fallback";
+pub const SANS_FALLBACK_FAMILY: &str = "SL Viewer Sans Fallback";
 
 /// The private family name the bundled monospace faces are registered under.
 /// Private for the same reason as [`SANS_FAMILY`].
-pub(crate) const MONO_FAMILY: &str = "SL Viewer Mono";
+pub const MONO_FAMILY: &str = "SL Viewer Mono";
 
 /// The private family name the bundled colour-emoji font is registered under.
 ///
@@ -185,7 +185,7 @@ pub(crate) const MONO_FAMILY: &str = "SL Viewer Mono";
 /// `Noto Color Emoji` is `COLRv1`, and under the shared embedded name the two
 /// faces merge into one family from which the blank `COLRv1` face may be
 /// selected instead of ours.
-pub(crate) const EMOJI_FAMILY: &str = "SL Viewer Emoji";
+pub const EMOJI_FAMILY: &str = "SL Viewer Emoji";
 
 /// A UI font role: which bundled family a piece of viewer text is set in.
 ///
@@ -209,7 +209,7 @@ pub(crate) const EMOJI_FAMILY: &str = "SL Viewer Emoji";
 /// Mirrors the reference viewer's named font roles (`fonts.xml`'s `SansSerif`,
 /// `Monospace`, `Emoji`, …), which likewise map to bundled files.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum UiFont {
+pub enum UiFont {
     /// The UI body face (`Inter`) — chat, labels, name tags, prose. The default
     /// for anything that is not tabular.
     Sans,
@@ -221,7 +221,8 @@ pub(crate) enum UiFont {
 
 impl UiFont {
     /// The private family name this role resolves to.
-    pub(crate) const fn family(self) -> &'static str {
+    #[must_use]
+    pub const fn family(self) -> &'static str {
         match self {
             Self::Sans => SANS_FAMILY,
             Self::Mono => MONO_FAMILY,
@@ -235,7 +236,8 @@ impl UiFont {
     /// A [`TextFont`] in this role at `size` logical pixels, in the regular
     /// weight and upright style. Chain `TextFont`'s own `with_font_weight` /
     /// `with_font_style` for bold or italic.
-    pub(crate) fn at(self, size: f32) -> TextFont {
+    #[must_use]
+    pub fn at(self, size: f32) -> TextFont {
         TextFont {
             font_size: FontSize::Px(size),
             ..default()
@@ -321,7 +323,7 @@ fn register_face(font_cx: &mut FontCx, family: &str, face: &[u8]) -> bool {
 /// is a real simplification over binding the emoji generic from a font *asset*,
 /// which could not resolve until Bevy's loader had run a frame later and so had
 /// to force a re-shape of everything already laid out.
-pub(crate) fn register_ui_fonts(mut font_cx: ResMut<FontCx>, mut fonts: ResMut<Assets<Font>>) {
+pub fn register_ui_fonts(mut font_cx: ResMut<FontCx>, mut fonts: ResMut<Assets<Font>>) {
     for (family, face) in BUNDLED_FACES {
         if !register_face(&mut font_cx, family, face) {
             error!("bundled UI font for family `{family}` registered no faces");
