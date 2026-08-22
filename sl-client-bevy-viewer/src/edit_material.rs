@@ -48,12 +48,10 @@ use sl_client_bevy::{
 
 use crate::chat::LocalChatNotice;
 use crate::edit_texture::{
-    MatModeState, PbrChannel, PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value,
-    primary_face_index, representative_face, spawn_row,
+    PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value, primary_face_index,
+    representative_face, spawn_row,
 };
-use crate::edit_tool::{
-    CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
-};
+use crate::edit_tool::{CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS};
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::legacy_materials::{
@@ -73,7 +71,9 @@ use crate::ui_texture_picker::{
     spawn_texture_swatch,
 };
 use crate::web_floater::set_editor_text;
+use crate::world_api::EditToolState;
 use crate::world_api::SelectionSet;
+use crate::world_api::{MatModeState, PbrChannel};
 
 /// The width, in `"0"`-glyph advances, of a material-channel numeric field
 /// (matching the diffuse fields' width).

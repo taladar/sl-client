@@ -33,6 +33,11 @@
 //! Reference (Firestorm, read-only): `llpanelface`, `lltoolface`; message
 //! `ObjectImage`.
 
+use crate::world_api::{
+    MATMEDIA_MATERIAL, MATMEDIA_PBR, MATTYPE_DIFFUSE, MATTYPE_NORMAL, MATTYPE_SPECULAR,
+    MatModeState, PBRTYPE_BASE_COLOR, PBRTYPE_EMISSIVE, PBRTYPE_METALLIC, PBRTYPE_NORMAL,
+    PBRTYPE_RENDER_MATERIAL,
+};
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
@@ -44,8 +49,8 @@ use sl_client_bevy::{
 
 use crate::edit_params::set_disabled_class;
 use crate::edit_tool::{
-    BuildTabPages, CHECKED_GLYPH, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH,
-    VALUE_CLASS, spawn_row_label,
+    BuildTabPages, CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
+    spawn_row_label,
 };
 use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -60,6 +65,7 @@ use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
 use crate::web_floater::set_editor_text;
+use crate::world_api::EditToolState;
 use crate::world_api::SelectionSet;
 
 /// The tab index the Texture-tab widgets start their focus order at (well past
@@ -73,100 +79,6 @@ const TEX_FIELD_GLYPHS: f32 = 7.0;
 // Material mode / channel selection (the reference's `combobox matmedia` +
 // `radio_material_type` + `radio_pbr_type`, `llpanelface.cpp`).
 // ---------------------------------------------------------------------------
-
-/// The `matmedia` combo index for the legacy **Material** (Blinn-Phong) mode —
-/// diffuse texture plus optional normal / specular maps.
-pub(crate) const MATMEDIA_MATERIAL: usize = 0;
-/// The `matmedia` combo index for the **PBR** (GLTF) render-material mode.
-pub(crate) const MATMEDIA_PBR: usize = 1;
-
-/// The `radio_material_type` index for the diffuse **Texture** channel.
-pub(crate) const MATTYPE_DIFFUSE: usize = 0;
-/// The `radio_material_type` index for the **Bumpiness** (normal-map) channel.
-pub(crate) const MATTYPE_NORMAL: usize = 1;
-/// The `radio_material_type` index for the **Shininess** (specular-map) channel.
-pub(crate) const MATTYPE_SPECULAR: usize = 2;
-
-/// The `radio_pbr_type` index for the whole render **material** (the material-id
-/// swatch — assign or clear a stored GLTF material asset).
-pub(crate) const PBRTYPE_RENDER_MATERIAL: usize = 0;
-/// The `radio_pbr_type` index for the PBR **base-colour** channel transform.
-pub(crate) const PBRTYPE_BASE_COLOR: usize = 1;
-/// The `radio_pbr_type` index for the PBR **metallic-roughness** channel
-/// transform.
-pub(crate) const PBRTYPE_METALLIC: usize = 2;
-/// The `radio_pbr_type` index for the PBR **emissive** channel transform.
-pub(crate) const PBRTYPE_EMISSIVE: usize = 3;
-/// The `radio_pbr_type` index for the PBR **normal** channel transform.
-pub(crate) const PBRTYPE_NORMAL: usize = 4;
-
-/// The current material mode / channel the Texture tab edits — the resolved
-/// `(matmedia, material-type, pbr-type)` selection, mirrored from the three
-/// selector widgets each frame so the visibility system and the channel editors
-/// read one place. Mirrors the reference's `mComboMatMedia` /
-/// `mRadioMaterialType` / `mRadioPbrType` current indices.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct MatModeState {
-    /// The `matmedia` selection ([`MATMEDIA_MATERIAL`] / [`MATMEDIA_PBR`]).
-    pub(crate) matmedia: usize,
-    /// The Material-mode map channel ([`MATTYPE_DIFFUSE`] / [`MATTYPE_NORMAL`] /
-    /// [`MATTYPE_SPECULAR`]).
-    pub(crate) mat_type: usize,
-    /// The PBR-mode channel ([`PBRTYPE_RENDER_MATERIAL`] …).
-    pub(crate) pbr_type: usize,
-}
-
-impl Default for MatModeState {
-    /// The tab opens in Material / Diffuse mode with the render-material PBR
-    /// channel pre-selected, exactly as the reference initialises its selectors.
-    fn default() -> Self {
-        Self {
-            matmedia: MATMEDIA_MATERIAL,
-            mat_type: MATTYPE_DIFFUSE,
-            pbr_type: PBRTYPE_RENDER_MATERIAL,
-        }
-    }
-}
-
-/// The active PBR texture channel a transform edits, or the whole material when
-/// the render-material channel is selected — the resolved form of
-/// [`MatModeState::pbr_type`] the PBR display path keys by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PbrChannel {
-    /// The complete render material (its asset id), not a single texture.
-    Material,
-    /// The base-colour texture.
-    BaseColor,
-    /// The metallic-roughness texture.
-    MetallicRoughness,
-    /// The emissive texture.
-    Emissive,
-    /// The normal texture.
-    Normal,
-}
-
-impl MatModeState {
-    /// Whether the Material (Blinn-Phong) mode is active.
-    pub(crate) const fn is_material(self) -> bool {
-        self.matmedia == MATMEDIA_MATERIAL
-    }
-
-    /// Whether the PBR (GLTF) mode is active.
-    pub(crate) const fn is_pbr(self) -> bool {
-        self.matmedia == MATMEDIA_PBR
-    }
-
-    /// The active PBR channel for the current `pbr_type` selection.
-    pub(crate) const fn pbr_channel(self) -> PbrChannel {
-        match self.pbr_type {
-            PBRTYPE_BASE_COLOR => PbrChannel::BaseColor,
-            PBRTYPE_METALLIC => PbrChannel::MetallicRoughness,
-            PBRTYPE_EMISSIVE => PbrChannel::Emissive,
-            PBRTYPE_NORMAL => PbrChannel::Normal,
-            _material => PbrChannel::Material,
-        }
-    }
-}
 
 /// When a mode-dependent Texture-tab control is shown: a single visibility system
 /// ([`apply_material_mode_visibility`]) sets each tagged control's `Node.display`

@@ -8,7 +8,7 @@
 //!   types, a Linden **tree** (with a species), or Linden **grass** (with a
 //!   species). It is the single source of truth the placer reads.
 //! - The **create panel** ([`spawn_create_panel`]) is shown only while the
-//!   Create tool ([`crate::edit_tool::EditTool::Create`]) is active, standing in
+//!   Create tool ([`crate::world_api::EditTool::Create`]) is active, standing in
 //!   for the per-aspect tabs (which [`sync_create_panel`] hides). It holds the
 //!   base-type radio and, for a tree / grass base, a species combo.
 //! - The **placer** ([`handle_create_pointer`]): while the Create tool is
@@ -40,9 +40,7 @@ use sl_client_bevy::{Command, PrimShape, SlCommand, Vector, pcode};
 
 use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
-use crate::edit_tool::{
-    EditTool, EditToolState, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label,
-};
+use crate::edit_tool::{LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
 use crate::hud::on_hud_layer;
 use crate::hud_pick::pointer_over_blocking_ui;
@@ -54,6 +52,7 @@ use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::world_api::SelectionSet;
+use crate::world_api::{EditTool, EditToolState};
 
 /// The uniform scale (metres) a Linden tree is rezzed at — its vector length
 /// drives the tree's rendered size (the reference's `radius = scale.length() *

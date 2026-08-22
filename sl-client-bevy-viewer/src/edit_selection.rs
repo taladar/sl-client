@@ -57,7 +57,6 @@ use sl_client_bevy::{
 
 use crate::camera::ViewerCamera;
 use crate::edit_math::rect_selects;
-use crate::edit_tool::{EditTool, EditToolState};
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gizmos::GizmoInteraction;
 use crate::hud::on_hud_layer;
@@ -69,6 +68,7 @@ use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
 };
 use crate::ui::UiRoot;
+use crate::world_api::{EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// How far (logical pixels) the cursor may wander between press and release

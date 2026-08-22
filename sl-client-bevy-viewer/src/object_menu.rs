@@ -1039,7 +1039,7 @@ fn handle_object_menu_actions(
     target: Res<ObjectMenuTarget>,
     inventory: Res<InventoryModel>,
     mut ground_sit: ResMut<SelfGroundSit>,
-    tool: Res<crate::edit_tool::EditToolState>,
+    tool: Res<crate::world_api::EditToolState>,
     floaters: Query<(Entity, &crate::floater::Floater)>,
     mut panels: Query<&mut crate::ui::UiPanelShown>,
     mut selection: ResMut<crate::world_api::SelectionSet>,

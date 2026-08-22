@@ -8,8 +8,8 @@
 //!
 //! - While the build tool is active with a non-empty selection, a **gizmo
 //!   rig** sits at the selection pivot, oriented to the grid frame
-//!   ([`crate::edit_tool::GridFrame`]) and scaled each frame to a constant
-//!   on-screen size. The active tool ([`crate::edit_tool::EditTool`]) picks
+//!   ([`crate::world_api::GridFrame`]) and scaled each frame to a constant
+//!   on-screen size. The active tool ([`crate::world_api::EditTool`]) picks
 //!   the handles: two-headed axis arrows + planar pads (move), axis rings
 //!   (rotate), face + corner cubes (stretch).
 //! - The rig renders through its **own overlay camera** (a child of the main
@@ -83,10 +83,11 @@ use crate::edit_math::{
     quat_to_rotation, ray_plane_intersect, ring_angle, snap_angle, snap_to_grid, vadd, vscale,
     vsub,
 };
-use crate::edit_tool::{EditTool, EditToolState, GridFrame};
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::objects::{ObjectCategory, ObjectSlMotion, ObjectState, SceneObject};
+use crate::world_api::GridFrame;
 use crate::world_api::SelectionSet;
+use crate::world_api::{EditTool, EditToolState};
 
 /// The render layer the gizmo rig (and only it) lives on, drawn by the
 /// overlay camera between the world (order 0) and the HUD (order 2).
@@ -1245,7 +1246,7 @@ fn maintain_gizmo_rig(
     if interaction.drag.is_some() {
         return;
     }
-    // The Select Face and Create tools ([`crate::edit_tool::EditTool::SelectFace`]
+    // The Select Face and Create tools ([`crate::world_api::EditTool::SelectFace`]
     // / [`EditTool::Create`]) drive no transform gizmo — one picks per-face
     // texture-entry selections, the other rezzes new objects — so neither rigs.
     let want = (tool.active && !selection.is_empty())

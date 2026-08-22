@@ -46,8 +46,6 @@ use sl_client_bevy::{
     parse_material_override,
 };
 
-use crate::edit_texture::MatModeState;
-use crate::edit_tool::EditToolState;
 use crate::face_material::{
     FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
 };
@@ -57,6 +55,8 @@ use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
 };
+use crate::world_api::EditToolState;
+use crate::world_api::MatModeState;
 use crate::world_api::SelectionSet;
 
 /// A face-material identity: the scoped object id and its Linden face index — the

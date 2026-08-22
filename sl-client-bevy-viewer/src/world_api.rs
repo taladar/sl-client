@@ -303,3 +303,232 @@ impl SelectionSet {
         false
     }
 }
+
+/// Which manipulator the build tool drives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum EditTool {
+    /// The translate gizmo (axis arrows + planar handles).
+    #[default]
+    Move,
+    /// The rotate gizmo (axis rings).
+    Rotate,
+    /// The scale gizmo (face + corner handles).
+    Stretch,
+    /// The **Select Face** tool (the reference's `LLToolFace`, its
+    /// `radio select face`): no transform gizmo — a click picks a prim face into
+    /// the per-face texture-entry selection the Texture tab
+    /// ([`crate::edit_texture`]) edits, `Shift`-click builds a multi-face set.
+    SelectFace,
+    /// The **Create** tool (the reference's `LLToolPlacer` / `LLToolCompCreate`):
+    /// no transform gizmo — a click on a surface rezzes the base type picked in
+    /// the create panel ([`crate::edit_create`]) at the ray-cast build point and
+    /// drops into edit on the new object.
+    Create,
+}
+
+impl EditTool {
+    /// This tool's index into [`BUILD_TOOLS`] — the radio option it selects.
+    pub(crate) fn radio_index(self) -> usize {
+        BUILD_TOOLS
+            .iter()
+            .position(|&tool| tool == self)
+            .unwrap_or(0)
+    }
+}
+
+/// The build tool's shared state. See the [module documentation](self).
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "the flags mirror the reference viewer's independent build-tool toggles \
+              (EditLinkedParts, ScaleUniform, SnapEnabled) plus the tool's own active bit; \
+              none is a state machine in disguise"
+)]
+#[derive(Resource, Debug)]
+pub(crate) struct EditToolState {
+    /// Whether the build tool is active (the floater is open): selection
+    /// clicks, gizmos, and the touch-suppression all key off this.
+    pub(crate) active: bool,
+    /// The manipulator picked in the floater (the resting tool).
+    pub(crate) tool: EditTool,
+    /// A manipulator temporarily forced by a held modifier — the reference's
+    /// `Ctrl` = rotate / `Ctrl+Shift` = stretch while held
+    /// (`LLToolCompTranslate::handleHover`'s mask dispatch). Cleared on
+    /// release; [`effective_tool`](Self::effective_tool) folds it in.
+    pub(crate) held_override: Option<EditTool>,
+    /// Edit linked parts: select and edit individual linkset prims instead of
+    /// whole linksets (the reference's `EditLinkedParts`).
+    pub(crate) edit_linked: bool,
+    /// Stretch both sides: scale about the selection centre instead of
+    /// holding the opposite face in place (the reference's `ScaleUniform`).
+    pub(crate) stretch_both: bool,
+    /// Whether grid snapping is on (the reference's `SnapEnabled`).
+    pub(crate) snap: bool,
+    /// The grid unit, in metres (the reference's `GridResolution`).
+    pub(crate) grid_unit: f32,
+    /// The grid frame the gizmos align to.
+    pub(crate) frame: GridFrame,
+}
+
+impl Default for EditToolState {
+    /// Reference-faithful defaults: move tool, whole-linkset selection, snap
+    /// on at a half-metre grid, world frame.
+    fn default() -> Self {
+        Self {
+            active: false,
+            tool: EditTool::Move,
+            held_override: None,
+            edit_linked: false,
+            stretch_both: false,
+            snap: true,
+            grid_unit: DEFAULT_GRID_UNIT,
+            frame: GridFrame::World,
+        }
+    }
+}
+
+impl EditToolState {
+    /// The manipulator actually in effect: a held modifier override
+    /// (`Ctrl` = rotate, `Ctrl+Shift` = stretch), or the floater's resting
+    /// tool.
+    pub(crate) fn effective_tool(&self) -> EditTool {
+        self.held_override.unwrap_or(self.tool)
+    }
+}
+
+/// The current material mode / channel the Texture tab edits — the resolved
+/// `(matmedia, material-type, pbr-type)` selection, mirrored from the three
+/// selector widgets each frame so the visibility system and the channel editors
+/// read one place. Mirrors the reference's `mComboMatMedia` /
+/// `mRadioMaterialType` / `mRadioPbrType` current indices.
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct MatModeState {
+    /// The `matmedia` selection ([`MATMEDIA_MATERIAL`] / [`MATMEDIA_PBR`]).
+    pub(crate) matmedia: usize,
+    /// The Material-mode map channel ([`MATTYPE_DIFFUSE`] / [`MATTYPE_NORMAL`] /
+    /// [`MATTYPE_SPECULAR`]).
+    pub(crate) mat_type: usize,
+    /// The PBR-mode channel ([`PBRTYPE_RENDER_MATERIAL`] …).
+    pub(crate) pbr_type: usize,
+}
+
+impl Default for MatModeState {
+    /// The tab opens in Material / Diffuse mode with the render-material PBR
+    /// channel pre-selected, exactly as the reference initialises its selectors.
+    fn default() -> Self {
+        Self {
+            matmedia: MATMEDIA_MATERIAL,
+            mat_type: MATTYPE_DIFFUSE,
+            pbr_type: PBRTYPE_RENDER_MATERIAL,
+        }
+    }
+}
+
+/// The active PBR texture channel a transform edits, or the whole material when
+/// the render-material channel is selected — the resolved form of
+/// [`MatModeState::pbr_type`] the PBR display path keys by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PbrChannel {
+    /// The complete render material (its asset id), not a single texture.
+    Material,
+    /// The base-colour texture.
+    BaseColor,
+    /// The metallic-roughness texture.
+    MetallicRoughness,
+    /// The emissive texture.
+    Emissive,
+    /// The normal texture.
+    Normal,
+}
+
+impl MatModeState {
+    /// Whether the Material (Blinn-Phong) mode is active.
+    pub(crate) const fn is_material(self) -> bool {
+        self.matmedia == MATMEDIA_MATERIAL
+    }
+
+    /// Whether the PBR (GLTF) mode is active.
+    pub(crate) const fn is_pbr(self) -> bool {
+        self.matmedia == MATMEDIA_PBR
+    }
+
+    /// The active PBR channel for the current `pbr_type` selection.
+    pub(crate) const fn pbr_channel(self) -> PbrChannel {
+        match self.pbr_type {
+            PBRTYPE_BASE_COLOR => PbrChannel::BaseColor,
+            PBRTYPE_METALLIC => PbrChannel::MetallicRoughness,
+            PBRTYPE_EMISSIVE => PbrChannel::Emissive,
+            PBRTYPE_NORMAL => PbrChannel::Normal,
+            _material => PbrChannel::Material,
+        }
+    }
+}
+
+/// The default grid unit, in metres — the reference's `GridResolution`.
+pub(crate) const DEFAULT_GRID_UNIT: f32 = 0.5;
+
+/// The tool-mode radio options, in the order they appear in the floater (the
+/// reference's `move` / `rotate` / `stretch`). The one place the index↔tool
+/// mapping lives, so [`spawn_build_floater`] and the two sync systems agree.
+pub(crate) const BUILD_TOOLS: [EditTool; 5] = [
+    EditTool::Create,
+    EditTool::Move,
+    EditTool::Rotate,
+    EditTool::Stretch,
+    EditTool::SelectFace,
+];
+
+/// The grid frame the gizmos align to and snap in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum GridFrame {
+    /// The world axes (the reference's `GRID_MODE_WORLD`).
+    #[default]
+    World,
+    /// The primary selection's own axes (`GRID_MODE_LOCAL`).
+    Local,
+    /// A reference object's axes (`GRID_MODE_REF_OBJECT`). Modelled now so the
+    /// snapping code handles it, but only settable once the grid-options task
+    /// (`viewer-build-grid-options`) ships its *Use Selection for Grid*
+    /// command.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "the reference-object grid frame is set by the grid-options task \
+                      (viewer-build-grid-options); the frame model carries it from the start"
+        )
+    )]
+    Reference,
+}
+
+/// The `matmedia` combo index for the legacy **Material** (Blinn-Phong) mode —
+/// diffuse texture plus optional normal / specular maps.
+pub(crate) const MATMEDIA_MATERIAL: usize = 0;
+
+/// The `matmedia` combo index for the **PBR** (GLTF) render-material mode.
+pub(crate) const MATMEDIA_PBR: usize = 1;
+
+/// The `radio_material_type` index for the diffuse **Texture** channel.
+pub(crate) const MATTYPE_DIFFUSE: usize = 0;
+
+/// The `radio_material_type` index for the **Bumpiness** (normal-map) channel.
+pub(crate) const MATTYPE_NORMAL: usize = 1;
+
+/// The `radio_material_type` index for the **Shininess** (specular-map) channel.
+pub(crate) const MATTYPE_SPECULAR: usize = 2;
+
+/// The `radio_pbr_type` index for the whole render **material** (the material-id
+/// swatch — assign or clear a stored GLTF material asset).
+pub(crate) const PBRTYPE_RENDER_MATERIAL: usize = 0;
+
+/// The `radio_pbr_type` index for the PBR **base-colour** channel transform.
+pub(crate) const PBRTYPE_BASE_COLOR: usize = 1;
+
+/// The `radio_pbr_type` index for the PBR **metallic-roughness** channel
+/// transform.
+pub(crate) const PBRTYPE_METALLIC: usize = 2;
+
+/// The `radio_pbr_type` index for the PBR **emissive** channel transform.
+pub(crate) const PBRTYPE_EMISSIVE: usize = 3;
+
+/// The `radio_pbr_type` index for the PBR **normal** channel transform.
+pub(crate) const PBRTYPE_NORMAL: usize = 4;
