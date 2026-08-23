@@ -140,7 +140,10 @@ mod edit_texture_align;
 mod edit_tool;
 mod edit_undo;
 mod edit_wearable;
-mod world_api;
+/// The shared world state every feature surface reads: the selection, the
+/// edit modes, the mute and buddy lists, group memberships, presence and map
+/// tracking. Aliased so the call sites read as a module of this crate.
+pub(crate) use sl_viewer_world_api as world_api;
 // The widgets (floaters, menus, inputs, tabs, tables) are their own crate;
 // each module is aliased under its old name so every `crate::<module>::…`
 // path in the viewer still resolves.

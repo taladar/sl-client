@@ -8527,6 +8527,7 @@ dependencies = [
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
  "thiserror 2.0.19",
  "tokio",
  "tracing",
@@ -9123,6 +9124,14 @@ dependencies = [
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "tracing",
+]
+
+[[package]]
+name = "sl-viewer-world-api"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "sl-client-bevy",
 ]
 
 [[package]]
