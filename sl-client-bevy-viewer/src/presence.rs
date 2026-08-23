@@ -6,7 +6,7 @@
 //!
 //! - **Away** — session state, set by hand from Comm ▸ Online Status or
 //!   automatically after [`SETTING_AFK_TIMEOUT`] seconds without input, and
-//!   cleared by the next input once it has held [`MIN_AFK_SECS`] (so a stray
+//!   cleared by the next input once it has held [`MIN_AFK_SECS`](crate::world_api::MIN_AFK_SECS) (so a stray
 //!   mouse twitch while the screen-saver runs does not un-away you). Going away
 //!   starts `ANIM_AGENT_AWAY` and raises [`ControlFlags::AWAY`] in the
 //!   `AgentUpdate` the movement driver sends.
@@ -86,6 +86,7 @@ use crate::contact_sets::{ContactSets, SetAutoresponseMode};
 use crate::conversations::{ConversationKey, ConversationModel, ConversationNotice};
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
+use crate::world_api::PresenceState;
 
 /// The settings section the presence modes and their replies live in.
 pub(crate) const PRESENCE_SECTION: &[&str] = &["presence"];
@@ -138,11 +139,6 @@ const AWAY_RESPONSE_DEFAULT: &str = "The Resident you messaged is currently away
 /// The default blocked-sender reply (the reference `MutedAvatarsResponseDefault`).
 const MUTED_RESPONSE_DEFAULT: &str =
     "The Resident you messaged has blocked you from sending them any messages.";
-
-/// How long the away state must have held before input clears it (the
-/// reference's `LLAgent::MIN_AFK_TIME`) — without it, the mouse move that
-/// happens to arrive one frame after the auto-AFK fires would cancel it.
-const MIN_AFK_SECS: f32 = 10.0;
 
 /// The short name of the built-in away animation in the [`sl_anim`] registry.
 const AWAY_ANIMATION: &str = "away";
@@ -294,75 +290,6 @@ pub(crate) const fn reply_for(
     None
 }
 
-/// The live presence state: the two session modes and the timers behind
-/// auto-AFK. The two autorespond modes are **not** here — they are their own
-/// persisted settings, read straight from the store wherever they are needed.
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "the two modes are independent (either, both or neither can be on) and the three \
-              remaining flags are per-mode bookkeeping — an enum would have to enumerate every \
-              combination to say the same thing"
-)]
-#[derive(Resource, Debug, Default)]
-pub(crate) struct PresenceState {
-    /// Whether the avatar is away.
-    away: bool,
-    /// Whether Do Not Disturb is on.
-    do_not_disturb: bool,
-    /// Seconds since the last user input (the reference `gAwayTriggerTimer`).
-    idle_secs: f32,
-    /// Seconds the away state has held (the reference `gAwayTimer`), used for
-    /// the clear debounce and the quit-after-AFK timeout.
-    away_secs: f32,
-    /// The away state last advertised to the simulator, so the animation
-    /// request is sent on the edge only.
-    advertised_away: bool,
-    /// The Do Not Disturb state last advertised, likewise.
-    advertised_dnd: bool,
-    /// Whether *we* sat the avatar down on going away, so returning only stands
-    /// it back up when it was our doing.
-    sat_on_away: bool,
-}
-
-impl PresenceState {
-    /// Whether the avatar is away.
-    #[must_use]
-    pub(crate) const fn is_away(&self) -> bool {
-        self.away
-    }
-
-    /// Whether Do Not Disturb is on.
-    #[must_use]
-    pub(crate) const fn is_do_not_disturb(&self) -> bool {
-        self.do_not_disturb
-    }
-
-    /// Set the away state, restarting the away clock on a rising edge. The wire
-    /// writes are reconciled by [`advertise_presence`].
-    pub(crate) const fn set_away(&mut self, away: bool) {
-        if self.away != away {
-            self.away = away;
-            self.away_secs = 0.0;
-        }
-    }
-
-    /// Set the Do Not Disturb state. The wire writes and the toast queue's
-    /// drain are reconciled by [`advertise_presence`] and the hosts that read
-    /// [`is_do_not_disturb`](Self::is_do_not_disturb).
-    pub(crate) const fn set_do_not_disturb(&mut self, busy: bool) {
-        self.do_not_disturb = busy;
-    }
-
-    /// Note user input: reset the idle clock and, once away has held long
-    /// enough to be real, clear it (the reference's `MIN_AFK_TIME` debounce).
-    fn note_activity(&mut self) {
-        if self.away && self.away_secs > MIN_AFK_SECS {
-            self.set_away(false);
-        }
-        self.idle_secs = 0.0;
-    }
-}
-
 /// The presence plugin: the state, its settings, the AFK clock, the wire
 /// advertisement and the IM auto-reply.
 pub(crate) struct PresencePlugin;
@@ -410,10 +337,7 @@ fn track_presence_activity(
     mut quit: MessageWriter<crate::session::QuitRequested>,
 ) {
     let dt = time.delta_secs();
-    state.idle_secs += dt;
-    if state.away {
-        state.away_secs += dt;
-    }
+    state.tick(dt);
     let active = keys.get_pressed().next().is_some()
         || buttons.get_pressed().next().is_some()
         || motion.delta != Vec2::ZERO
@@ -424,7 +348,7 @@ fn track_presence_activity(
     // Nothing is timed until there is a session to be away in (the reference's
     // "don't set AFK before a region" guard).
     if identity.agent_id.is_none() {
-        state.idle_secs = 0.0;
+        state.reset_idle();
         return;
     }
     let store = settings.as_deref().map(ViewerSettings::store);
@@ -435,14 +359,15 @@ fn track_presence_activity(
                 .ok()
         })
         .unwrap_or(0);
-    if afk_timeout > 0 && f64::from(state.idle_secs) > f64::from(afk_timeout) && !state.away {
+    if afk_timeout > 0 && f64::from(state.idle_secs()) > f64::from(afk_timeout) && !state.is_away()
+    {
         info!("presence: idle for {afk_timeout}s, going away");
         state.set_away(true);
     }
     let quit_after = store
         .and_then(|store| store.get_u32(SETTING_QUIT_AFTER_AFK).ok())
         .unwrap_or(0);
-    if quit_after > 0 && state.away && f64::from(state.away_secs) > f64::from(quit_after) {
+    if quit_after > 0 && state.is_away() && f64::from(state.away_secs()) > f64::from(quit_after) {
         info!("presence: away for {quit_after}s, logging out");
         quit.write(crate::session::QuitRequested);
     }
@@ -464,8 +389,7 @@ fn advertise_presence(
     mut state: ResMut<PresenceState>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    let away = state.away;
-    if away != state.advertised_away {
+    if let Some(away) = state.take_away_edge() {
         if let Some(id) = sl_anim::builtin_animation_by_name(AWAY_ANIMATION) {
             let key = AnimationKey::from(id.id);
             commands.write(SlCommand(if away {
@@ -482,19 +406,16 @@ fn advertise_presence(
             &mut state,
             &mut commands,
         );
-        state.advertised_away = away;
     }
-    let busy = state.do_not_disturb;
-    if busy != state.advertised_dnd {
-        if let Some(id) = sl_anim::builtin_animation_by_name(DND_ANIMATION) {
-            let key = AnimationKey::from(id.id);
-            commands.write(SlCommand(if busy {
-                Command::PlayAnimation(key)
-            } else {
-                Command::StopAnimation(key)
-            }));
-        }
-        state.advertised_dnd = busy;
+    if let Some(busy) = state.take_dnd_edge()
+        && let Some(id) = sl_anim::builtin_animation_by_name(DND_ANIMATION)
+    {
+        let key = AnimationKey::from(id.id);
+        commands.write(SlCommand(if busy {
+            Command::PlayAnimation(key)
+        } else {
+            Command::StopAnimation(key)
+        }));
     }
 }
 
@@ -519,15 +440,15 @@ fn apply_sit_on_away(
         if enabled && agent.seated_on.is_none() && !ground_sit.sitting {
             commands.write(SlCommand(Command::SitOnGround));
             ground_sit.sitting = true;
-            state.sat_on_away = true;
+            state.set_sat_on_away(true);
         }
-    } else if state.sat_on_away {
+    } else if state.sat_on_away() {
         // Stand back up whatever the setting says now — leaving the avatar sat
         // down because the preference was switched off mid-away would be worse
         // than honouring the state we created.
         commands.write(SlCommand(Command::Stand));
         ground_sit.sitting = false;
-        state.sat_on_away = false;
+        state.set_sat_on_away(false);
     }
 }
 
@@ -779,10 +700,11 @@ const fn direct_peer(key: ConversationKey) -> Option<sl_client_bevy::AgentKey> {
 #[cfg(test)]
 mod tests {
     use super::{
-        AWAY_ANIMATION, ContactSets, DND_ANIMATION, MIN_AFK_SECS, PresenceState, ReplyMode,
-        ReplyModes, SetAutoresponseMode, direct_peer, reply_for,
+        AWAY_ANIMATION, ContactSets, DND_ANIMATION, PresenceState, ReplyMode, ReplyModes,
+        SetAutoresponseMode, direct_peer, reply_for,
     };
     use crate::conversations::ConversationKey;
+    use crate::world_api::MIN_AFK_SECS;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::AgentKey;
 
@@ -874,17 +796,17 @@ mod tests {
     fn away_clears_only_after_the_debounce() {
         let mut state = PresenceState::default();
         state.set_away(true);
-        state.away_secs = MIN_AFK_SECS / 2.0;
+        state.tick(MIN_AFK_SECS / 2.0);
         state.note_activity();
         assert!(
             state.is_away(),
             "a twitch inside the debounce keeps away on"
         );
         assert!(
-            state.idle_secs.abs() < f32::EPSILON,
+            state.idle_secs().abs() < f32::EPSILON,
             "but it still resets the idle clock"
         );
-        state.away_secs = MIN_AFK_SECS + 1.0;
+        state.tick(MIN_AFK_SECS / 2.0 + 1.0);
         state.note_activity();
         assert!(!state.is_away(), "past the debounce, input clears away");
     }
@@ -895,18 +817,17 @@ mod tests {
     fn the_away_clock_restarts_on_each_edge() {
         let mut state = PresenceState::default();
         state.set_away(true);
-        state.away_secs = 120.0;
-        state.set_away(false);
-        assert!(
-            state.away_secs.abs() < f32::EPSILON,
-            "the away clock restarted"
-        );
-        state.away_secs = 30.0;
+        state.tick(30.0);
         // A redundant set is not an edge and must not reset the clock.
+        state.set_away(true);
+        assert!(
+            (state.away_secs() - 30.0).abs() < f32::EPSILON,
+            "a redundant set left the away clock alone"
+        );
         state.set_away(false);
         assert!(
-            (state.away_secs - 30.0).abs() < f32::EPSILON,
-            "a redundant set left the away clock alone"
+            state.away_secs().abs() < f32::EPSILON,
+            "the away clock restarted"
         );
     }
 

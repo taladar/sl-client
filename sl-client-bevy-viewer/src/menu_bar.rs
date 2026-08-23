@@ -579,7 +579,7 @@ fn update_top_menu_conditions(
     selection: Res<crate::world_api::SelectionSet>,
     edit_tool: Res<crate::world_api::EditToolState>,
     settings: Res<crate::settings::ViewerSettings>,
-    presence: Option<Res<crate::presence::PresenceState>>,
+    presence: Option<Res<crate::world_api::PresenceState>>,
     panels: Query<&UiPanelShown>,
     mut bars: Query<&mut MenuConditions, With<TopMenuBar>>,
 ) {
@@ -782,7 +782,7 @@ fn handle_top_menu_actions(
     mut settings: ResMut<crate::settings::ViewerSettings>,
     mut panels: Query<&mut UiPanelShown>,
     mut people_tabs: MessageWriter<crate::people::OpenPeopleSubTab>,
-    mut presence: Option<ResMut<crate::presence::PresenceState>>,
+    mut presence: Option<ResMut<crate::world_api::PresenceState>>,
     mut notify: MessageWriter<crate::notifications::ShowNotification>,
     mut quit: MessageWriter<crate::session::QuitRequested>,
 ) {

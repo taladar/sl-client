@@ -54,7 +54,6 @@ use crate::floater::{
 };
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
-use crate::minimap::{MapTracking, TrackTarget};
 use crate::minimap_math::{self, REGION_WIDTH_METRES, Rgba, Surface};
 use crate::settings::{AccountContext, ViewerSettings};
 use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
@@ -64,6 +63,7 @@ use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::web_floater::set_editor_text;
+use crate::world_api::{MapTracking, TrackTarget};
 use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
 };

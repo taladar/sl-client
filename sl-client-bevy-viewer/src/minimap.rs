@@ -68,7 +68,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
-use crate::world_api::FriendsModel;
+use crate::world_api::{FriendsModel, MapTracking, TrackTarget};
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
 pub(crate) const MINIMAP_ELEMENT: &str = "minimap";
@@ -614,31 +614,6 @@ impl MinimapMarks {
     const fn touch(&mut self) {
         self.revision = self.revision.wrapping_add(1);
     }
-}
-
-/// The map tracking target — a shared shape for the minimap today and the
-/// world map later (`viewer-world-map-tracking-teleport`), so both surfaces
-/// drive one beacon.
-#[derive(Resource, Default)]
-pub(crate) struct MapTracking {
-    /// The current target, or `None` when not tracking.
-    pub(crate) target: Option<TrackTarget>,
-}
-
-/// What the map is tracking.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum TrackTarget {
-    /// A fixed world location (global metres).
-    Location {
-        /// Global metres west→east.
-        east: f64,
-        /// Global metres south→north.
-        north: f64,
-        /// Altitude in metres.
-        up: f32,
-    },
-    /// An avatar, followed while it is known.
-    Avatar(AgentKey),
 }
 
 /// The chat ranges the rings draw at — the viewer defaults unless the grid's

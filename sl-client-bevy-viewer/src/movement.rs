@@ -279,7 +279,7 @@ pub(crate) fn drive_avatar_controls(
     avatar_axes: Res<AvatarAxisSettings>,
     mut nav_smoothing: ResMut<AvatarNavSmoothing>,
     motions: Query<&AvatarMotion>,
-    presence: Option<Res<crate::presence::PresenceState>>,
+    presence: Option<Res<crate::world_api::PresenceState>>,
     mut controls: ResMut<AvatarControls>,
     mut writer: MessageWriter<SlCommand>,
 ) {

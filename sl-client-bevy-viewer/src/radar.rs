@@ -67,10 +67,7 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{
     MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
 };
-use crate::minimap::{
-    ChatRanges, MARK_COLORS, MapTracking, MinimapMarks, TrackTarget, global_from_bevy,
-    origin_global,
-};
+use crate::minimap::{ChatRanges, MARK_COLORS, MinimapMarks, global_from_bevy, origin_global};
 use crate::mutes::RequestBlock;
 use crate::name_tag_content::{AWAY_ANIM, NameTagStatuses};
 use crate::notifications::ShowNotification;
@@ -97,6 +94,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
 use crate::world_api::FriendsModel;
 use crate::world_api::MuteModel;
+use crate::world_api::{MapTracking, TrackTarget};
 
 /// The radar floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub(crate) const RADAR_FLOATER_ID: &str = "radar";

@@ -980,7 +980,7 @@ fn raise_notifications(
     root: Res<UiRoot>,
     translator: Translator,
     settings: Option<Res<ViewerSettings>>,
-    presence: Option<Res<crate::presence::PresenceState>>,
+    presence: Option<Res<crate::world_api::PresenceState>>,
     mut queue: ResMut<DoNotDisturbQueue>,
     mut dismiss: MessageWriter<DismissNotification>,
     mut chat: MessageWriter<LocalChatNotice>,

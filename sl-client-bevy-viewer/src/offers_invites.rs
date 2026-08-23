@@ -265,7 +265,7 @@ fn ingest_offers_invites(
     mut manager: ResMut<NotificationManager>,
     translator: Translator,
     settings: Option<Res<crate::settings::ViewerSettings>>,
-    presence: Option<Res<crate::presence::PresenceState>>,
+    presence: Option<Res<crate::world_api::PresenceState>>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
     groups: Option<Res<crate::world_api::GroupsModel>>,
     mut deferred: ResMut<DeferredOffers>,
