@@ -166,7 +166,6 @@ bevy = { version = "0.19.0", features = [
 ] }
 bevy_flair = { version = "0.8.0" }
 bevy_fluent = { version = "0.15.0" }
-bytes = { workspace = true }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
 crossbeam-channel = { workspace = true }
 fluent = { version = "0.16.1" }
@@ -179,17 +178,11 @@ image = { version = "0.25.10", default-features = false, features = [
   "tga",
 ] }
 jiff = { version = "0.2.35" }
-parry3d = "0.27.0"
-reqwest = { workspace = true, features = [
-  "blocking",
-  "rustls-tls",
-] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sl-account-dirs = { workspace = true }
 sl-anim = { workspace = true }
 sl-audio = { path = "../sl-audio", version = "0.1.0" }
-sl-avatar = { workspace = true }
 sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
@@ -214,6 +207,7 @@ sl-viewer-settings = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
+sl-viewer-world = { workspace = true }
 sl-viewer-world-api = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["net", "rt", "time"] }
@@ -223,7 +217,6 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "tracing-log"
 tracing-tracy = { version = "0.11.4", optional = true }
 unic-langid = { version = "0.9.6", features = ["macros"] }
 url = { workspace = true }
-wgpu-types = { workspace = true }
 
 [build-dependencies]
 fs-err = { workspace = true }

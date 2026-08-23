@@ -1,0 +1,1510 @@
+//! Terrain rendering: turn each decoded `LayerData` height patch into a mesh and
+//! shade it with height-blended texture splatting, across the agent's region and
+//! its neighbours.
+//!
+//! On every [`SlSessionEvent::TerrainPatch`] for a land (ground-height) layer
+//! the viewer builds a heightfield mesh for that patch and places it in the
+//! scene. A patch owns `size`×`size` height samples but spans `size` metres, so
+//! its far (north / east / north-east) edge is the *shared* boundary with the
+//! neighbouring patches; the mesh is built `(size + 1)`×`(size + 1)` vertices,
+//! sampling that far edge from the neighbour patches (Firestorm's
+//! `LLSurfacePatch` stitching) so adjacent meshes meet with no seam.
+//!
+//! Texture splatting (P2.2): a region's `RegionHandshake` carries four ground
+//! ("detail") texture ids and per-corner elevation bands.
+//! [`SlSessionEvent::RegionInfoHandshake`] delivers them; the viewer requests
+//! the four textures through the shared [`textures`](crate::textures) store (the
+//! same fetch/decode/disk-cache pipeline the prims use) and, from the elevation
+//! bands, builds a [`sl_terrain::TerrainComposition`] that weights each vertex
+//! between the four textures. Each store-decoded detail texture arrives as a
+//! [`TextureDecoded`] message; the GPU blend + lighting is the custom
+//! [`TerrainMaterial`]; one shared material per region has its four textures
+//! swapped in (with a tiling sampler) as they decode, showing a flat olive
+//! placeholder until then.
+//!
+//! Multi-region: terrain streams from the agent's own region *and* every
+//! neighbour child circuit (the session opens those automatically). Patches are
+//! keyed by `(region_handle, patch_x, patch_y)` and placed at a **global
+//! offset** — each region's south-west corner relative to a moving scene origin
+//! — so neighbour regions tile outward instead of overlapping the home region.
+//! The origin follows the root region (see [`recenter_terrain`]): when a border
+//! crossing promotes a neighbour to root, the whole scene is re-centred on the
+//! new region and the fly-camera is shifted by the same delta, keeping
+//! coordinates small (so `f32` precision holds far from the login region) while
+//! the world stays visually continuous.
+//!
+//! The geometry is built in Second Life space (Z-up, relative to the patch
+//! origin cell) and oriented by the entity `Transform` via
+//! [`sl_to_bevy_rotation`], converting to Bevy's Y-up world only at the entity
+//! boundary.
+
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use bevy::asset::RenderAssetUsages;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
+use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::prelude::*;
+use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+use sl_client_bevy::{
+    ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, RegionIdentity, SlEvent, SlIdentity, SlSessionEvent,
+    TerrainLighting, TerrainMaterial, TerrainPatch, TextureKey, Vector, to_bevy_image,
+};
+
+/// The terrain lighting to seed a material with before the first
+/// [`drive_terrain_lighting`] update: a neutral sun and a mid-grey ambient (the
+/// old flat fallback), replaced every frame from the sky frame.
+const fn default_terrain_lighting() -> TerrainLighting {
+    TerrainLighting {
+        sun_color: Vec3::splat(0.8),
+        ambient_color: Vec3::splat(0.35),
+    }
+}
+
+/// The terrain lighting most recently applied to the region materials (and the
+/// value a newly created region material is seeded with), so
+/// [`drive_terrain_lighting`] can skip its `Assets::iter_mut` — which marks
+/// **every** terrain material modified, re-preparing each one's bind group —
+/// on the (typical) frame where the resolved sky lighting is unchanged.
+#[derive(Debug, Resource)]
+pub struct CurrentTerrainLighting(pub(crate) TerrainLighting);
+
+impl Default for CurrentTerrainLighting {
+    fn default() -> Self {
+        Self(default_terrain_lighting())
+    }
+}
+
+/// Drive every region's terrain material with the sky frame's atmospheric sun
+/// (`sunlit`) and ambient (`amblit`) colours, so the ground is lit like
+/// the reference legacy terrain — warm at dawn / dusk, cool at night — rather than
+/// by the raw (blue) reflection-probe irradiance. The colours are the same
+/// `resolve_sky` derives for the scene directional light
+/// and the sky ambient, so the terrain agrees with the rest of the scene lighting.
+///
+/// The materials are only touched when the resolved lighting differs from the
+/// last applied value ([`CurrentTerrainLighting`]): under a static sky this
+/// system does no ECS/asset writes at all.
+pub fn drive_terrain_lighting(
+    environment: Res<crate::environment::EnvironmentState>,
+    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    mut current: ResMut<CurrentTerrainLighting>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+) {
+    let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
+    let position = crate::sky::day_position(&environment.settings);
+    let Some(sky) = environment
+        .settings
+        .blended_sky_settings(altitude, position)
+    else {
+        return;
+    };
+    let resolved = crate::sky::resolve_sky(&sky);
+    let lighting = TerrainLighting {
+        sun_color: Vec3::from_array(resolved.diffuse),
+        ambient_color: Vec3::from_array(resolved.ambient),
+    };
+    if current.0 == lighting {
+        return;
+    }
+    current.0 = lighting;
+    for (_id, material) in materials.iter_mut() {
+        material.lighting = lighting;
+    }
+}
+use sl_terrain::TerrainComposition;
+
+use crate::asset_budget::MeshUploadBudget;
+use crate::camera::ViewerCamera;
+use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
+use crate::probe_layers::environment_render_layers;
+use crate::textures::{TextureDecoded, TextureManager};
+
+/// The region edge length in metres. A standard Second Life / OpenSim region is
+/// 256 m (16×16 patches of 16×16 cells).
+const REGION_SIZE_METRES: f32 = 256.0;
+
+/// The region edge length in metres as an integer, for the patch/region grid
+/// arithmetic that must stay in `u32` (mirrors [`REGION_SIZE_METRES`]).
+const REGION_SIZE_METRES_U32: u32 = 256;
+
+/// The world span, in metres, over which a detail texture repeats once. Terrain
+/// detail textures tile far more finely than the whole region, so the mesh's UVs
+/// wrap every few metres rather than stretching one texture across 256 m.
+const DETAIL_TILE_METRES: f32 = 8.0;
+
+/// The number of ground ("detail") textures a region blends between.
+const DETAIL_COUNT: usize = 4;
+
+/// The flat placeholder colour of the terrain material — a muted olive, shown
+/// until a region's detail textures decode and are swapped in.
+const TERRAIN_PLACEHOLDER_COLOR: [u8; 4] = [92, 112, 71, 255];
+
+/// The default per-vertex blend weight before a region's elevation bands are
+/// known: all weight on the lowest detail texture.
+const DEFAULT_WEIGHTS: [f32; DETAIL_COUNT] = [1.0, 0.0, 0.0, 0.0];
+
+/// A patch's key: its region plus grid position within that region.
+pub(crate) type PatchKey = (RegionHandle, u32, u32);
+
+/// Per-region terrain-compositing state: the elevation bands, the shared splat
+/// material, and the detail-texture keys requested for it.
+#[derive(Debug, Default)]
+struct RegionTerrain {
+    /// The region's terrain-compositing parameters, once its `RegionHandshake`
+    /// has been seen; `None` until then (patches render with flat weights).
+    composition: Option<TerrainComposition>,
+    /// The region's shared splat material (one per region — neighbours may use
+    /// different ground textures), created on its first patch.
+    material: Option<Handle<TerrainMaterial>>,
+    /// The texture key requested for each detail slot (`None` for a nil slot),
+    /// used to route an arriving texture to the right material slot.
+    detail_keys: [Option<TextureKey>; DETAIL_COUNT],
+    /// Whether this region's detail textures have been requested yet.
+    requested: bool,
+}
+
+/// Viewer-side terrain bookkeeping across the home region and its neighbours.
+#[derive(Debug, Resource, Default)]
+pub struct TerrainState {
+    /// The scene origin: the region whose south-west corner is Bevy `(0, 0)`.
+    /// Follows the root region so coordinates stay small near the camera.
+    origin: Option<RegionHandle>,
+    /// Per-region compositing state, keyed by region handle.
+    regions: HashMap<RegionHandle, RegionTerrain>,
+    /// The rendered entity for each patch; a repeat patch replaces its mesh.
+    patches: HashMap<PatchKey, Entity>,
+    /// The most recent raw patch for each key, kept so a patch's mesh can be
+    /// rebuilt (with real weights, or when a neighbour arrives) after the fact.
+    raw_patches: HashMap<PatchKey, TerrainPatch>,
+    /// The **last known land patch** for each key, retained across a region
+    /// teardown / rebuild (and, with the disk layer, across sessions) so
+    /// [`Self::land_height`] can still answer while the live [`Self::raw_patches`]
+    /// are gone — a region's ground height is stable, so a stale cached value is a
+    /// far better ground-floor answer than `None`. This is what keeps the avatar
+    /// ground floor (`physics.rs`) working through the login window and the
+    /// region-disappears-then-rebuilds flicker, so the avatar does not fall through
+    /// the terrain while its patches are absent. Land layers only.
+    land_cache: HashMap<PatchKey, TerrainPatch>,
+    /// The flat olive placeholder texture, shared by every region's material
+    /// until its real detail textures decode.
+    placeholder: Option<Handle<Image>>,
+    /// Decoded detail textures by key, so a texture shared by several regions is
+    /// decoded once and a repeated delivery is not decoded again.
+    decoded: HashMap<TextureKey, Handle<Image>>,
+    /// A monotonically increasing counter bumped whenever height or compositing
+    /// data changes (a patch arrives, a handshake's composition lands), so a
+    /// derived consumer (the minimap's terrain backdrop) can cheaply notice
+    /// staleness without hashing the patch maps.
+    map_revision: u64,
+    /// Per-region version of [`map_revision`], bumped only for the region whose
+    /// data actually changed, so a per-region consumer (the parcel-border bands,
+    /// which ground-follow) can rebuild only the terraformed / newly-streamed
+    /// region instead of all of them.
+    region_revisions: HashMap<RegionHandle, u64>,
+}
+
+/// Marks a rendered land-patch entity as a **walkable ground surface**, so the
+/// avatar ground probe ([`crate::ground`], P31.14) can accept it as something the
+/// feet may plant on — the same role the reference viewer's
+/// `LLWorld::resolveStepHeightGlobal` gives the land when its object raycast misses.
+///
+/// The probe only ever accepts geometry that is explicitly ground-like (this, and
+/// object faces), so it never plants an avatar's feet on the water plane, a particle
+/// billboard, the sky dome, or another avatar.
+#[derive(Component)]
+pub(crate) struct TerrainSurface;
+
+impl TerrainState {
+    /// The scene origin region (whose south-west corner is Bevy `(0, 0)`), or
+    /// `None` before the first terrain patch arrives.
+    #[must_use]
+    pub const fn origin(&self) -> Option<RegionHandle> {
+        self.origin
+    }
+
+    /// Despawn every rendered land patch and forget all per-region terrain state —
+    /// the terrain half of the distant-teleport scene purge
+    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
+    /// The destination streams its terrain fresh; the shared placeholder image and
+    /// the decoded-detail-texture cache are kept (a texture shared with the
+    /// destination need not be refetched). Drops the origin so [`recenter_terrain`]
+    /// re-anchors on the destination without a spurious camera shift.
+    pub(crate) fn purge(&mut self, commands: &mut Commands) {
+        for (_key, entity) in self.patches.drain() {
+            commands.entity(entity).try_despawn();
+        }
+        self.regions.clear();
+        self.raw_patches.clear();
+        self.map_revision = self.map_revision.wrapping_add(1);
+        // The purged regions are gone; a re-streamed region restarts at revision
+        // 1, which a stale per-region stamp (its pre-purge revision) will not
+        // match, so its bands rebuild.
+        self.region_revisions.clear();
+        self.origin = None;
+    }
+
+    /// The terrain-data revision — bumped on every ingested patch and learned
+    /// composition, so a derived map texture knows when to rebuild.
+    #[must_use]
+    pub const fn map_revision(&self) -> u64 {
+        self.map_revision
+    }
+
+    /// This region's terrain revision (see [`region_revisions`](Self::region_revisions));
+    /// `0` before any of its data has arrived.
+    pub(crate) fn region_revision(&self, region: RegionHandle) -> u64 {
+        self.region_revisions.get(&region).copied().unwrap_or(0)
+    }
+
+    /// Bump both the global [`map_revision`](Self::map_revision) and `region`'s
+    /// per-region revision — call wherever `region`'s height / compositing data
+    /// changes.
+    fn bump_revision(&mut self, region: RegionHandle) {
+        self.map_revision = self.map_revision.wrapping_add(1);
+        let revision = self.region_revisions.entry(region).or_insert(0);
+        *revision = revision.wrapping_add(1);
+    }
+
+    /// Every decoded land patch of `region`, for compositing a top-down map.
+    pub fn land_patches_of(&self, region: RegionHandle) -> impl Iterator<Item = &TerrainPatch> {
+        self.raw_patches.iter().filter_map(move |(key, patch)| {
+            (key.0 == region && patch.layer.is_land()).then_some(patch)
+        })
+    }
+
+    /// The terrain-compositing parameters of `region`, once its handshake has
+    /// been seen.
+    #[must_use]
+    pub fn composition_of(&self, region: RegionHandle) -> Option<&TerrainComposition> {
+        self.regions
+            .get(&region)
+            .and_then(|entry| entry.composition.as_ref())
+    }
+
+    /// The ground height at region-local metre position (`x`, `y`) in `region`,
+    /// read from the nearest decoded land-patch cell, or `None` when that region's
+    /// terrain has not been ingested (or the point is off-region / non-finite).
+    ///
+    /// A land patch holds `size`×`size` height samples spanning `size` metres (one
+    /// sample per metre for a standard 16-cell patch), so cell `(⌊x⌋, ⌊y⌋)` within
+    /// the patch is the nearest sample. Used by the physics dead-reckoning (P31.2)
+    /// as the ground floor an extrapolating object is clamped to
+    /// (`getMinAllowedZ`).
+    #[must_use]
+    pub fn land_height(&self, region: RegionHandle, x: f32, y: f32) -> Option<f32> {
+        if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
+            return None;
+        }
+        // The live patches first; fall back to the retained cache when they are
+        // absent (a region mid-rebuild, or not yet streamed after login), so the
+        // avatar ground floor keeps a stable answer instead of dropping to `None`.
+        land_height_in(&self.raw_patches, region, x, y)
+            .or_else(|| land_height_in(&self.land_cache, region, x, y))
+    }
+}
+
+/// Resolve the land height at region-local `(x, y)` from a patch map (the live
+/// [`TerrainState::raw_patches`] or the retained [`TerrainState::land_cache`]).
+/// `None` when no land patch in that map covers the point.
+fn land_height_in(
+    patches: &HashMap<PatchKey, TerrainPatch>,
+    region: RegionHandle,
+    x: f32,
+    y: f32,
+) -> Option<f32> {
+    for (&(patch_region, _, _), patch) in patches {
+        if patch_region != region || !patch.layer.is_land() {
+            continue;
+        }
+        let span = f32::from(u16::try_from(patch.size).unwrap_or(u16::MAX));
+        let x0 = f32::from(u16::try_from(patch.patch_x).unwrap_or(u16::MAX)) * span;
+        let y0 = f32::from(u16::try_from(patch.patch_y).unwrap_or(u16::MAX)) * span;
+        if x < x0 || y < y0 || x >= x0 + span || y >= y0 + span {
+            continue;
+        }
+        // The floored offset into the patch, in `0..size`. The subtraction is
+        // non-negative (guarded above) and below `size`, so the truncating cast
+        // is exact.
+        #[expect(
+            clippy::as_conversions,
+            clippy::cast_possible_truncation,
+            clippy::cast_sign_loss,
+            reason = "the offset is in 0.0..size, so it fits u32 exactly"
+        )]
+        let (cell_x, cell_y) = ((x - x0).floor() as u32, (y - y0).floor() as u32);
+        let last = patch.size.saturating_sub(1);
+        return patch.value(cell_x.min(last), cell_y.min(last));
+    }
+    None
+}
+
+/// Keep the scene origin on the root region: when a border crossing promotes a
+/// neighbour to root, re-centre every terrain patch on the new region and shift
+/// the camera by the same delta, so coordinates stay small while the world stays
+/// visually continuous.
+///
+/// The flycam holds an absolute position, so it is *translated* by the shift (and
+/// only translated — never rotated — so a crossing cannot yaw the view). The
+/// third-person / mouselook camera recomputes its position from the avatar each
+/// frame, so shifting its transform would be undone immediately; instead its
+/// smoothing is **resnapped** ([`CameraRig::resnap`](crate::camera::CameraRig)) so
+/// the eased pose does not glide across the 256 m rebase (the reference's
+/// sideways-after-crossing glitch).
+pub fn recenter_terrain(
+    identity: Res<SlIdentity>,
+    mut state: ResMut<TerrainState>,
+    mut cameras: Query<(&mut Transform, &mut crate::camera::CameraRig), With<ViewerCamera>>,
+    mut commands: Commands,
+) {
+    let Some(root) = identity.region_handle else {
+        return;
+    };
+    match state.origin {
+        Some(current) if current == root => {}
+        Some(previous) => {
+            // A genuine recenter: shift the camera to compensate for the world
+            // moving under it, then re-place every patch on the new origin.
+            let (previous_x, previous_y) = previous.global_coordinates();
+            let (root_x, root_y) = root.global_coordinates();
+            let delta = Vector {
+                x: metres_to_f32(root_x) - metres_to_f32(previous_x),
+                y: metres_to_f32(root_y) - metres_to_f32(previous_y),
+                z: 0.0,
+            };
+            let shift = sl_to_bevy_vec(&delta);
+            for (mut transform, mut rig) in &mut cameras {
+                // Per-component (not the `glam` vector operator) to stay clear
+                // of the workspace `arithmetic_side_effects` lint.
+                transform.translation.x -= shift.x;
+                transform.translation.y -= shift.y;
+                transform.translation.z -= shift.z;
+                // Snap the smoothing so the avatar-derived pose does not glide
+                // across the shift next frame.
+                rig.resnap();
+            }
+            state.origin = Some(root);
+            replace_all_transforms(&state, &mut commands);
+        }
+        None => state.origin = Some(root),
+    }
+}
+
+/// Patch-mesh rebuilds deferred to [`drain_patch_rebuilds`]'s per-frame
+/// budget, deduped — during a region stream the neighbour-seam pass re-queues
+/// the same patches over and over, and a `RegionInfoHandshake` queues a whole
+/// region (up to 256 patches); each queued patch rebuilds once, from the
+/// state current at drain time (never stale).
+#[derive(Debug, Resource, Default)]
+pub struct PendingPatchRebuilds {
+    /// Patches awaiting a rebuild, oldest at the front.
+    queue: VecDeque<PatchKey>,
+    /// The queued keys, for O(1) dedup.
+    queued: HashSet<PatchKey>,
+}
+
+impl PendingPatchRebuilds {
+    /// Queue a patch rebuild (a no-op if it is already queued).
+    fn push(&mut self, key: PatchKey) {
+        if self.queued.insert(key) {
+            self.queue.push_back(key);
+        }
+    }
+}
+
+/// Fold terrain events into the scene: build (or rebuild) each land patch's
+/// heightfield mesh, learn each region's compositing parameters and request its
+/// detail textures, and swap each decoded texture into the right material(s).
+///
+/// A freshly arrived patch builds inline **while the shared per-frame mesh budget
+/// holds** (its own latency matters); once that budget is spent — and for the
+/// seam-closing neighbour rebuilds and the handshake's whole-region rebuild — the
+/// patch is **queued** into [`PendingPatchRebuilds`] and drained a few per frame by
+/// [`drain_patch_rebuilds`], so a region streaming in no longer uploads an unbounded
+/// number of patch meshes in one frame (the serial `extract_render_asset<RenderMesh>`
+/// spike).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected ECS resources and event \
+              readers; folding terrain now also reads the texture store and its \
+              decode messages"
+)]
+pub fn update_terrain(
+    mut events: MessageReader<SlEvent>,
+    mut decoded: MessageReader<TextureDecoded>,
+    mut state: ResMut<TerrainState>,
+    mut rebuilds: ResMut<PendingPatchRebuilds>,
+    mut mesh_budget: ResMut<MeshUploadBudget>,
+    mut manager: ResMut<TextureManager>,
+    lighting: Res<CurrentTerrainLighting>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut images: ResMut<Assets<Image>>,
+    mut commands: Commands,
+) {
+    for event in events.read() {
+        match &event.0 {
+            SlSessionEvent::TerrainPatch(patch) if patch.layer.is_land() => {
+                let key = (patch.region_handle, patch.patch_x, patch.patch_y);
+                ensure_region(
+                    &mut state,
+                    patch.region_handle,
+                    lighting.0,
+                    &mut images,
+                    &mut materials,
+                );
+                state.raw_patches.insert(key, (**patch).clone());
+                // Retain the land patch across a later teardown / rebuild so the
+                // ground floor keeps answering (see [`TerrainState::land_cache`]).
+                state.land_cache.insert(key, (**patch).clone());
+                state.bump_revision(patch.region_handle);
+                // Build inline while the shared per-frame mesh budget holds; once it
+                // is spent, defer to the budgeted `drain_patch_rebuilds` so a region
+                // streaming in cannot upload a whole region of land patches at once.
+                if mesh_budget.has_budget() {
+                    if spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands) {
+                        mesh_budget.remaining = mesh_budget.remaining.saturating_sub(1);
+                    }
+                } else {
+                    rebuilds.push(key);
+                }
+                // This patch supplies the shared far edge for its west / south
+                // neighbours in the same region, so rebuild them (a few per
+                // frame, deduped) to close seams.
+                queue_neighbour_rebuilds(&state, key, &mut rebuilds);
+            }
+            SlSessionEvent::RegionInfoHandshake(identity) => {
+                learn_composition(
+                    &mut state,
+                    identity,
+                    &mut manager,
+                    &mut images,
+                    &mut materials,
+                );
+                state.bump_revision(identity.region_handle);
+                queue_region_rebuilds(&state, identity.region_handle, &mut rebuilds);
+            }
+            _other => {}
+        }
+    }
+    // A detail texture the store finished decoding: build its (tiling) image and
+    // swap it into every region material that requested it.
+    for &TextureDecoded(id) in decoded.read() {
+        apply_detail_texture(&mut state, id, &manager, &mut images, &mut materials);
+    }
+}
+
+/// Ensure the shared placeholder texture, the region entry, and its splat
+/// material exist, creating the material (with all four detail slots on the
+/// placeholder) on the region's first patch and reconciling any already-decoded
+/// textures into it.
+///
+/// A new material is seeded with the *current* resolved lighting, not the
+/// static default: [`drive_terrain_lighting`] only rewrites the materials when
+/// the lighting changes, so a material created under a stable sky would
+/// otherwise keep the default forever.
+fn ensure_region(
+    state: &mut TerrainState,
+    region: RegionHandle,
+    lighting: TerrainLighting,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<TerrainMaterial>,
+) {
+    let placeholder = state
+        .placeholder
+        .get_or_insert_with(|| images.add(placeholder_image()))
+        .clone();
+    let entry = state.regions.entry(region).or_default();
+    if entry.material.is_none() {
+        entry.material = Some(materials.add(TerrainMaterial {
+            detail0: placeholder.clone(),
+            detail1: placeholder.clone(),
+            detail2: placeholder.clone(),
+            detail3: placeholder,
+            lighting,
+        }));
+    }
+    reconcile_region(state, region, materials);
+}
+
+/// Spawn a fresh entity for the land patch at `key`, or replace the mesh and
+/// transform of the entity already rendering that grid position.
+///
+/// Returns `true` when it built and inserted a patch mesh (a new `Assets<Mesh>`
+/// upload — the budgeted unit), `false` when the key had no raw patch data / no
+/// composition yet and so did nothing.
+fn spawn_or_replace_patch(
+    state: &mut TerrainState,
+    key: PatchKey,
+    meshes: &mut Assets<Mesh>,
+    commands: &mut Commands,
+) -> bool {
+    let (region, patch_x, patch_y) = key;
+    let composition = state
+        .regions
+        .get(&region)
+        .and_then(|entry| entry.composition);
+    let Some(mesh_data) = build_patch_mesh(&state.raw_patches, composition.as_ref(), key) else {
+        return false;
+    };
+    let mesh = meshes.add(mesh_data);
+    let size = state.raw_patches.get(&key).map_or(0, |patch| patch.size);
+    let material = state
+        .regions
+        .get(&region)
+        .and_then(|entry| entry.material.clone())
+        .unwrap_or_default();
+    let transform = patch_transform(state.origin, region, patch_x, patch_y, size);
+    match state.patches.get(&key).copied() {
+        Some(entity) => {
+            let mut entity = commands.entity(entity);
+            entity.insert((Mesh3d(mesh), MeshMaterial3d(material), transform));
+        }
+        None => {
+            let entity = commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                transform,
+                TerrainSurface,
+                // Environment content: also visible to reflection-probe
+                // captures (including the environment-only default probe).
+                environment_render_layers(),
+            ));
+            let entity = entity.id();
+            state.patches.insert(key, entity);
+            debug!(
+                "spawned terrain patch {region:?} ({patch_x}, {patch_y}) ({} rendered)",
+                state.patches.len()
+            );
+        }
+    }
+    true
+}
+
+/// Queue a rebuild of the west / south / south-west neighbours of the patch at
+/// `key`: they share their far edge with this one, so a newly arrived patch
+/// closes their seam. The step crosses region boundaries — a patch on a
+/// region's west / south edge is the shared far edge of the **adjacent
+/// region's** east / north edge patch, so a border seam closes as the
+/// neighbouring region streams in. The rebuilds themselves run in
+/// [`drain_patch_rebuilds`] under its per-frame budget.
+fn queue_neighbour_rebuilds(
+    state: &TerrainState,
+    key: PatchKey,
+    rebuilds: &mut PendingPatchRebuilds,
+) {
+    let (region, patch_x, patch_y) = key;
+    let Some(size) = state.raw_patches.get(&key).map(|patch| patch.size) else {
+        return;
+    };
+    let (global_x, global_y) = region.global_coordinates();
+    let west = step_back(global_x, patch_x, size);
+    let south = step_back(global_y, patch_y, size);
+    if let Some((west_metre, west_patch_x)) = west {
+        let west_region = RegionHandle::from_global(west_metre, global_y);
+        rebuilds.push((west_region, west_patch_x, patch_y));
+    }
+    if let Some((south_metre, south_patch_y)) = south {
+        let south_region = RegionHandle::from_global(global_x, south_metre);
+        rebuilds.push((south_region, patch_x, south_patch_y));
+    }
+    if let (Some((west_metre, west_patch_x)), Some((south_metre, south_patch_y))) = (west, south) {
+        let corner_region = RegionHandle::from_global(west_metre, south_metre);
+        rebuilds.push((corner_region, west_patch_x, south_patch_y));
+    }
+}
+
+/// Queue a rebuild of every already-rendered patch of `region`, called once
+/// that region's elevation bands arrive after its patches — up to a whole
+/// region's 16×16 patches, which is exactly the burst the budgeted drain
+/// spreads across frames.
+fn queue_region_rebuilds(
+    state: &TerrainState,
+    region: RegionHandle,
+    rebuilds: &mut PendingPatchRebuilds,
+) {
+    for &key in state.patches.keys() {
+        let (patch_region, _, _) = key;
+        if patch_region == region {
+            rebuilds.push(key);
+        }
+    }
+}
+
+/// Drain queued patch-mesh (re)builds from the shared per-frame
+/// [`MeshUploadBudget`] — both the seam / region rebuilds and the initial patch
+/// spawns [`update_terrain`] deferred past the budget. A queued key whose patch has
+/// since vanished is free (it builds nothing, spends nothing); a build always reads
+/// the state current at drain time, so a deferred build is never stale.
+pub fn drain_patch_rebuilds(
+    mut rebuilds: ResMut<PendingPatchRebuilds>,
+    mut budget: ResMut<MeshUploadBudget>,
+    mut state: ResMut<TerrainState>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut commands: Commands,
+) {
+    while budget.has_budget() {
+        let Some(key) = rebuilds.queue.pop_front() else {
+            break;
+        };
+        let _was_queued = rebuilds.queued.remove(&key);
+        // `spawn_or_replace_patch` spawns a not-yet-rendered patch or replaces an
+        // existing one's mesh, and reports whether it actually built — only a real
+        // mesh upload spends budget, so a vanished key does not waste it.
+        if spawn_or_replace_patch(&mut state, key, &mut meshes, &mut commands) {
+            budget.remaining = budget.remaining.saturating_sub(1);
+        }
+    }
+}
+
+/// Re-place every patch's transform on the current scene origin, after a
+/// recenter moved it.
+fn replace_all_transforms(state: &TerrainState, commands: &mut Commands) {
+    for (&(region, patch_x, patch_y), &entity) in &state.patches {
+        let size = state
+            .raw_patches
+            .get(&(region, patch_x, patch_y))
+            .map_or(0, |patch| patch.size);
+        let transform = patch_transform(state.origin, region, patch_x, patch_y, size);
+        commands.entity(entity).insert(transform);
+    }
+}
+
+/// Learn a region's terrain-compositing parameters from its `RegionHandshake`
+/// and request its four detail textures through the shared texture store (once).
+fn learn_composition(
+    state: &mut TerrainState,
+    identity: &RegionIdentity,
+    manager: &mut TextureManager,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<TerrainMaterial>,
+) {
+    let region = identity.region_handle;
+    {
+        let entry = state.regions.entry(region).or_default();
+        let (global_x, global_y) = region.global_coordinates();
+        entry.composition = Some(TerrainComposition::new(
+            identity.terrain.start_heights,
+            identity.terrain.height_ranges,
+            REGION_SIZE_METRES,
+            [metres_to_f32(global_x), metres_to_f32(global_y)],
+        ));
+        if !entry.requested {
+            // A modern Second Life mainland region often leaves its `TerrainDetail`
+            // ids nil; substitute the default Linden terrain textures for those
+            // slots (as the reference viewer's `LLVLComposition` keeps its
+            // defaults) so the ground is shaded rather than left flat (R15).
+            let detail_textures = identity.terrain.detail_textures_or_default();
+            for (slot, texture) in entry.detail_keys.iter_mut().zip(detail_textures.iter()) {
+                if texture.is_nil() {
+                    continue;
+                }
+                let key = TextureKey::from(*texture);
+                *slot = Some(key);
+                // Terrain textures are boosted (P20.2 / `BOOST_TERRAIN`): they are
+                // few, always under the camera, and not ranked by the on-screen
+                // face pass (terrain is a custom material, not a prim face), so a
+                // fixed boost keeps the ground from being starved behind prims. The
+                // composition is learned during the region handshake — before the
+                // seed caps arrive — so the store holds this request until the
+                // `GetTexture` cap is up rather than failing it (see
+                // `TextureManager::request_from`).
+                manager.request_boosted(key, crate::render_priority::TERRAIN_BOOST_PRIORITY);
+            }
+            entry.requested = true;
+        }
+        let requested = entry.detail_keys.iter().filter(|key| key.is_some()).count();
+        debug!("learned terrain composition for {region:?} ({requested} detail textures)");
+    }
+    reconcile_region(state, region, materials);
+    // A detail texture may already be decoded — a prim face fetched the same default
+    // Linden UUID earlier, so the store's one-shot `TextureDecoded` for it fired
+    // before this region existed and `apply_detail_texture` (driven by that message
+    // stream) will never see it. Seed any already-decoded slot inline now, so the
+    // ground is textured rather than left on the olive placeholder while the F3
+    // overlay shows nothing left to load.
+    let decoded_keys: Vec<TextureKey> = state
+        .regions
+        .get(&region)
+        .map(|entry| entry.detail_keys.iter().flatten().copied().collect())
+        .unwrap_or_default();
+    for key in decoded_keys {
+        if manager.decoded(key).is_some() {
+            apply_detail_texture(state, key, manager, images, materials);
+        }
+    }
+}
+
+/// Route a store-decoded texture into every region material that requested it as
+/// a ground detail: build a Bevy image with a tiling (repeating) sampler once and
+/// cache it. Ignores a texture no region wants, or one the store failed to decode
+/// (the material keeps its placeholder).
+fn apply_detail_texture(
+    state: &mut TerrainState,
+    id: TextureKey,
+    manager: &TextureManager,
+    images: &mut Assets<Image>,
+    materials: &mut Assets<TerrainMaterial>,
+) {
+    let wanted = state
+        .regions
+        .values()
+        .any(|entry| entry.detail_keys.contains(&Some(id)));
+    if !wanted {
+        return;
+    }
+    if let std::collections::hash_map::Entry::Vacant(slot) = state.decoded.entry(id) {
+        let Some(decoded) = manager.decoded(id) else {
+            // The fetch/decode failed; the region keeps the flat placeholder.
+            return;
+        };
+        let mut image = to_bevy_image(decoded);
+        image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+            address_mode_u: ImageAddressMode::Repeat,
+            address_mode_v: ImageAddressMode::Repeat,
+            ..ImageSamplerDescriptor::linear()
+        });
+        slot.insert(images.add(image));
+        debug!("built tiling image for terrain detail texture {id}");
+    }
+    let regions: Vec<RegionHandle> = state.regions.keys().copied().collect();
+    for region in regions {
+        reconcile_region(state, region, materials);
+    }
+}
+
+/// Set every detail slot of a region's material to the decoded texture for its
+/// requested key, or the placeholder while that texture is still in flight.
+fn reconcile_region(
+    state: &TerrainState,
+    region: RegionHandle,
+    materials: &mut Assets<TerrainMaterial>,
+) {
+    let Some(entry) = state.regions.get(&region) else {
+        return;
+    };
+    let Some(material_handle) = &entry.material else {
+        return;
+    };
+    let Some(mut material) = materials.get_mut(material_handle) else {
+        return;
+    };
+    for (index, key) in entry.detail_keys.iter().enumerate() {
+        let handle = key
+            .and_then(|key| state.decoded.get(&key).cloned())
+            .or_else(|| state.placeholder.clone())
+            .unwrap_or_default();
+        assign_detail(&mut material, index, handle);
+    }
+}
+
+/// Set the material's detail-texture slot at `index` (0–3) to `handle`; an
+/// out-of-range index is ignored (there are only four detail slots).
+fn assign_detail(material: &mut TerrainMaterial, index: usize, handle: Handle<Image>) {
+    match index {
+        0 => material.detail0 = handle,
+        1 => material.detail1 = handle,
+        2 => material.detail2 = handle,
+        3 => material.detail3 = handle,
+        _other => {}
+    }
+}
+
+/// The entity transform placing patch (`patch_x`, `patch_y`) of `region` in the
+/// scene: the region's south-west corner relative to the scene `origin`, plus
+/// the patch's local origin, converted to Bevy's Y-up world.
+fn patch_transform(
+    origin: Option<RegionHandle>,
+    region: RegionHandle,
+    patch_x: u32,
+    patch_y: u32,
+    size: u32,
+) -> Transform {
+    let (region_x, region_y) = region.global_coordinates();
+    let (origin_x, origin_y) = origin.unwrap_or(region).global_coordinates();
+    let position = Vector {
+        x: metres_to_f32(region_x) - metres_to_f32(origin_x)
+            + patch_coord_f32(patch_x.saturating_mul(size)),
+        y: metres_to_f32(region_y) - metres_to_f32(origin_y)
+            + patch_coord_f32(patch_y.saturating_mul(size)),
+        z: 0.0,
+    };
+    Transform {
+        translation: sl_to_bevy_vec(&position),
+        rotation: sl_to_bevy_rotation(),
+        ..default()
+    }
+}
+
+/// A 1×1 olive placeholder [`Image`], used for every detail slot until the real
+/// textures decode.
+///
+/// `pub(crate)` for [`crate::render_scene`]: a terrain scene has no grid to fetch
+/// a region's detail textures from, so it stands at exactly the state a real
+/// region's terrain is in before they arrive.
+pub(crate) fn placeholder_image() -> Image {
+    Image::new(
+        Extent3d {
+            width: 1,
+            height: 1,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        TERRAIN_PLACEHOLDER_COLOR.to_vec(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    )
+}
+
+/// Build a Bevy heightfield [`Mesh`] for the terrain patch at `key`, in Second
+/// Life space relative to the patch origin cell, or `None` if that patch is not
+/// stored.
+///
+/// The mesh is `(size + 1)`×`(size + 1)` vertices: a patch owns `size`×`size`
+/// height samples but spans `size` metres, so its far (north / east /
+/// north-east) edge is the *shared* boundary with the neighbouring patches. That
+/// extra edge is sampled from the neighbour patches in `raw` (see
+/// [`sample_height`]) — including the **adjacent region's** patches at a region
+/// border — so adjacent patch meshes meet exactly and leave no seam, even where
+/// the ground is sloped across a region boundary.
+/// Each vertex carries computed normals, tiled detail UVs, and a four-component
+/// blend weight (from `composition`, or a flat default while it is unknown); the
+/// grid is two triangles per cell quad.
+///
+/// `pub(crate)` for [`crate::render_scene`]: this is already a pure
+/// `(patches, composition) -> Option<Mesh>`, so the terrain scenes call the real
+/// builder rather than a copy of it.
+pub(crate) fn build_patch_mesh(
+    raw: &HashMap<PatchKey, TerrainPatch>,
+    composition: Option<&TerrainComposition>,
+    key: PatchKey,
+) -> Option<Mesh> {
+    let (region, patch_x, patch_y) = key;
+    let size = raw.get(&key)?.size;
+    // Vertices per edge: the `size` owned samples plus one shared boundary
+    // sample from the north / east neighbour.
+    let width = size.saturating_add(1);
+    let region_origin_x = patch_x.saturating_mul(size);
+    let region_origin_y = patch_y.saturating_mul(size);
+    let capacity = usize::try_from(width.saturating_mul(width)).unwrap_or(0);
+
+    // Sample the extended height grid once (own cells plus the neighbour-shared
+    // far edge), so the normals and positions agree on the seam.
+    let mut heights: Vec<f32> = Vec::with_capacity(capacity);
+    for y in 0..width {
+        for x in 0..width {
+            heights.push(sample_height(raw, region, patch_x, patch_y, size, x, y));
+        }
+    }
+
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(capacity);
+    let mut normals: Vec<[f32; 3]> = Vec::with_capacity(capacity);
+    let mut uvs: Vec<[f32; 2]> = Vec::with_capacity(capacity);
+    let mut weights: Vec<[f32; DETAIL_COUNT]> = Vec::with_capacity(capacity);
+    for y in 0..width {
+        for x in 0..width {
+            let height = grid_height(&heights, width, x, y);
+            positions.push([patch_coord_f32(x), patch_coord_f32(y), height]);
+            normals.push(grid_normal(&heights, width, x, y));
+            // Region-local metres (0..=size within the region), the input the
+            // composition expects; the composition's own global origin makes the
+            // noise continuous across region borders.
+            let local_x = patch_coord_f32(region_origin_x) + patch_coord_f32(x);
+            let local_y = patch_coord_f32(region_origin_y) + patch_coord_f32(y);
+            uvs.push([local_x / DETAIL_TILE_METRES, local_y / DETAIL_TILE_METRES]);
+            weights.push(match composition {
+                Some(composition) => composition.blend_weights(local_x, local_y, height),
+                None => DEFAULT_WEIGHTS,
+            });
+        }
+    }
+    let mut indices: Vec<u32> = Vec::new();
+    for y in 0..size {
+        for x in 0..size {
+            let x1 = x.saturating_add(1);
+            let y1 = y.saturating_add(1);
+            let i00 = vertex_index(width, x, y);
+            let i10 = vertex_index(width, x1, y);
+            let i01 = vertex_index(width, x, y1);
+            let i11 = vertex_index(width, x1, y1);
+            // Wound counter-clockwise viewed from above (+Z), so the upward
+            // normals match the front face.
+            indices.extend_from_slice(&[i00, i10, i11, i00, i11, i01]);
+        }
+    }
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    )
+    .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, normals)
+    .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+    .with_inserted_attribute(ATTRIBUTE_TERRAIN_WEIGHTS, weights);
+    mesh.insert_indices(Indices::U32(indices));
+    Some(mesh)
+}
+
+/// The ground height for extended grid cell (`x`, `y`) of patch (`patch_x`,
+/// `patch_y`) in `region`: an own sample for `x`/`y` in `0..size`, or the shared
+/// boundary sample (the extra `size` index) from the east / north / north-east
+/// neighbour patch — which may be **another region's** patch when this patch sits
+/// on its region's own far edge, so a sloped region border stitches to the
+/// neighbouring region's real edge instead of stepping.
+///
+/// When the neighbour patch is not loaded yet (or there is genuinely no neighbour
+/// — the outermost edge of the loaded world), the far edge **flat-extends** the
+/// nearest real line along *only* the missing axis, keeping the other axis's real
+/// value. That is what avoids the visible corner **fold**: an interior north-edge
+/// patch's east far edge follows the (in-region) east neighbour's rising slope,
+/// so its north-east corner must extend that same height northward, not collapse
+/// to the patch's own clamped `(size-1, size-1)` cell. A truly void far edge is
+/// then a flat 1 m lip; a border that later loads its neighbour rebuilds
+/// seamlessly ([`rebuild_neighbours`]).
+fn sample_height(
+    raw: &HashMap<PatchKey, TerrainPatch>,
+    region: RegionHandle,
+    patch_x: u32,
+    patch_y: u32,
+    size: u32,
+    x: u32,
+    y: u32,
+) -> f32 {
+    // The exact sample, crossing into the neighbouring region if this patch is on
+    // its region's far edge.
+    if let Some(height) = resolved_height(raw, region, patch_x, patch_y, size, x, y) {
+        return height;
+    }
+    // No neighbour there. Flat-extend along the missing axis only, preferring to
+    // keep whichever far edge *does* resolve (so the corner tracks the sloped
+    // edge instead of folding down).
+    let x_back = x.min(size.saturating_sub(1));
+    let y_back = y.min(size.saturating_sub(1));
+    if y == size
+        && let Some(height) = resolved_height(raw, region, patch_x, patch_y, size, x, y_back)
+    {
+        return height;
+    }
+    if x == size
+        && let Some(height) = resolved_height(raw, region, patch_x, patch_y, size, x_back, y)
+    {
+        return height;
+    }
+    // Both far edges void (or the diagonal corner): this patch's own clamped cell.
+    resolved_height(raw, region, patch_x, patch_y, size, x_back, y_back).unwrap_or(0.0)
+}
+
+/// The stored height for extended grid cell (`x`, `y`) of patch (`patch_x`,
+/// `patch_y`) in `region`, resolving the extra `size` far-edge index to the
+/// neighbour patch — crossing into the adjacent **region**'s first patch when this
+/// patch is on its region's far edge — or `None` when that patch is not loaded.
+///
+/// This is the exact (no-fallback) lookup [`sample_height`] tries first; the
+/// per-axis flat-extension fallback lives in `sample_height` so this stays a pure
+/// "is the real neighbour sample available?" query, reused for each flat-extend
+/// step.
+fn resolved_height(
+    raw: &HashMap<PatchKey, TerrainPatch>,
+    region: RegionHandle,
+    patch_x: u32,
+    patch_y: u32,
+    size: u32,
+    x: u32,
+    y: u32,
+) -> Option<f32> {
+    let (shift_x, neighbour_x, local_x) = resolve_axis(patch_x, size, x);
+    let (shift_y, neighbour_y, local_y) = resolve_axis(patch_y, size, y);
+    let (global_x, global_y) = region.global_coordinates();
+    let target = RegionHandle::from_global(
+        global_x.saturating_add(shift_x),
+        global_y.saturating_add(shift_y),
+    );
+    raw.get(&(target, neighbour_x, neighbour_y))
+        .and_then(|patch| patch.value(local_x, local_y))
+}
+
+/// Resolve one axis of the extended `0..=size` sample grid to a
+/// `(region_metre_shift, patch_index, local_offset)`: an owned sample (`shift 0`,
+/// this patch) for `index` in `0..size`; the shared far-edge sample (`index ==
+/// size`) borrows the next patch's first sample, staying in this region for an
+/// interior patch or crossing into the next region (`shift ==
+/// REGION_SIZE_METRES_U32`, that region's patch `0`) when this patch is the
+/// region's far-edge patch.
+const fn resolve_axis(patch: u32, size: u32, index: u32) -> (u32, u32, u32) {
+    if index < size {
+        return (0, patch, index);
+    }
+    let next = patch.saturating_add(1);
+    // The region-local metre of the next patch's first sample; at (or past) the
+    // region edge it belongs to the adjacent region's patch 0.
+    if next.saturating_mul(size) < REGION_SIZE_METRES_U32 {
+        (0, next, 0)
+    } else {
+        (REGION_SIZE_METRES_U32, 0, 0)
+    }
+}
+
+/// The patch one step west/south of `(region_metre, patch)` on one axis, in
+/// global patch space: this region's previous patch for an interior patch, else
+/// the previous region's far-edge patch. `region_metre` is the region's global
+/// south-west corner on that axis; returns `(previous_region_metre,
+/// previous_patch_index)`, or `None` when stepping before the grid origin.
+fn step_back(region_metre: u32, patch: u32, size: u32) -> Option<(u32, u32)> {
+    let this_metre = region_metre.checked_add(patch.saturating_mul(size))?;
+    let previous_metre = this_metre.checked_sub(size)?;
+    let region_start = previous_metre
+        .checked_div(REGION_SIZE_METRES_U32)?
+        .saturating_mul(REGION_SIZE_METRES_U32);
+    let patch_index = previous_metre
+        .saturating_sub(region_start)
+        .checked_div(size)?;
+    Some((region_start, patch_index))
+}
+
+/// The height at extended grid cell (`x`, `y`) in a `width`-wide, row-major grid.
+fn grid_height(heights: &[f32], width: u32, x: u32, y: u32) -> f32 {
+    let index = usize::try_from(y.saturating_mul(width).saturating_add(x)).unwrap_or(0);
+    heights.get(index).copied().unwrap_or(0.0)
+}
+
+/// The flat vertex-buffer index of grid cell (`x`, `y`) in a `width`-wide,
+/// row-major grid.
+const fn vertex_index(width: u32, x: u32, y: u32) -> u32 {
+    y.saturating_mul(width).saturating_add(x)
+}
+
+/// The upward-facing unit normal at extended grid cell (`x`, `y`), from a
+/// central-difference of the neighbouring ground heights (one-sided at the grid
+/// edges). Because the grid already carries the neighbour-shared far edge, the
+/// normals agree across patch seams.
+fn grid_normal(heights: &[f32], width: u32, x: u32, y: u32) -> [f32; 3] {
+    let left_x = if x > 0 { x.saturating_sub(1) } else { x };
+    let right_x = if x.saturating_add(1) < width {
+        x.saturating_add(1)
+    } else {
+        x
+    };
+    let down_y = if y > 0 { y.saturating_sub(1) } else { y };
+    let up_y = if y.saturating_add(1) < width {
+        y.saturating_add(1)
+    } else {
+        y
+    };
+    // Height differences over the cell span between the sampled neighbours (2
+    // cells interior, 1 at an edge), guarded to at least one cell so a
+    // degenerate grid cannot divide by zero.
+    let span_x = patch_coord_f32(right_x.saturating_sub(left_x)).max(1.0);
+    let span_y = patch_coord_f32(up_y.saturating_sub(down_y)).max(1.0);
+    let dz_dx =
+        (grid_height(heights, width, right_x, y) - grid_height(heights, width, left_x, y)) / span_x;
+    let dz_dy =
+        (grid_height(heights, width, x, up_y) - grid_height(heights, width, x, down_y)) / span_y;
+    // The surface `z = h(x, y)` has upward normal `(-dz/dx, -dz/dy, 1)`.
+    let nx = -dz_dx;
+    let ny = -dz_dy;
+    let nz = 1.0_f32;
+    let length = (nx * nx + ny * ny + nz * nz).sqrt();
+    [nx / length, ny / length, nz / length]
+}
+
+/// Convert a small patch/region cell coordinate (well under `u16::MAX` for any
+/// region) to `f32`; there is no `From<u32>` for `f32`, and the value is exact.
+fn patch_coord_f32(value: u32) -> f32 {
+    f32::from(u16::try_from(value).unwrap_or(u16::MAX))
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use super::{
+        DEFAULT_WEIGHTS, PatchKey, TerrainState, build_patch_mesh, metres_to_f32, patch_transform,
+    };
+    use bevy::asset::RenderAssetUsages;
+    use bevy::mesh::{Indices, Mesh, PrimitiveTopology, VertexAttributeValues};
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{ATTRIBUTE_TERRAIN_WEIGHTS, RegionHandle, TerrainLayerType, TerrainPatch};
+    use sl_terrain::TerrainComposition;
+
+    /// The region and grid position the test patches use.
+    const KEY: PatchKey = (RegionHandle(0), 1, 2);
+
+    #[test]
+    fn per_region_revision_bumps_only_its_region() {
+        let mut state = TerrainState::default();
+        let a = RegionHandle(256_000);
+        let b = RegionHandle(256_256);
+        assert_eq!(state.region_revision(a), 0);
+        assert_eq!(state.region_revision(b), 0);
+
+        state.bump_revision(a);
+        state.bump_revision(a);
+        assert_eq!(state.region_revision(a), 2, "region a bumped twice");
+        assert_eq!(state.region_revision(b), 0, "region b left untouched");
+
+        let global_before = state.map_revision();
+        state.bump_revision(b);
+        assert_eq!(state.region_revision(b), 1);
+        assert_eq!(state.region_revision(a), 2, "bumping b leaves a alone");
+        assert!(
+            state.map_revision() > global_before,
+            "the global revision advances on any per-region bump"
+        );
+    }
+
+    #[test]
+    fn land_height_falls_back_to_the_retained_cache() {
+        let mut state = TerrainState::default();
+        // A patch whose height is a recognisable function of the cell.
+        let map = one_patch_map(16, |x, y| {
+            100.0 + f32::from(u16::try_from(x + y).unwrap_or(0))
+        });
+        // Only in the retained cache — the live patches are gone (a region mid-
+        // rebuild, or not yet streamed after login), so `raw_patches` misses.
+        state.land_cache = map;
+        // Point (20.5, 35.5) is cell (4, 3) of the patch at grid (1, 2): height
+        // 100 + (4 + 3) = 107. The cache answers even with no live patch.
+        let height = state.land_height(RegionHandle(0), 20.5, 35.5);
+        assert!(
+            height.is_some_and(|height| (height - 107.0).abs() <= 1.0e-4),
+            "land_height should fall back to the retained cache, got {height:?}"
+        );
+        // A region with no cached patch still returns `None` (nothing to stand on).
+        assert!(
+            state
+                .land_height(RegionHandle(999_000), 20.5, 35.5)
+                .is_none()
+        );
+    }
+
+    /// A single-patch map for the land patch of the given edge size whose height
+    /// is `f(x, y)`, at [`KEY`].
+    fn one_patch_map(
+        size: u32,
+        mut height: impl FnMut(u32, u32) -> f32,
+    ) -> HashMap<PatchKey, TerrainPatch> {
+        let mut values = Vec::new();
+        for y in 0..size {
+            for x in 0..size {
+                values.push(height(x, y));
+            }
+        }
+        let (region, patch_x, patch_y) = KEY;
+        let patch = TerrainPatch {
+            region_handle: region,
+            layer: TerrainLayerType::Land,
+            patch_x,
+            patch_y,
+            size,
+            values,
+        };
+        let mut map = HashMap::new();
+        map.insert(KEY, patch);
+        map
+    }
+
+    /// Build the mesh for [`KEY`], asserting it is present.
+    fn mesh_for(map: &HashMap<PatchKey, TerrainPatch>, comp: Option<&TerrainComposition>) -> Mesh {
+        mesh_at(map, comp, KEY)
+    }
+
+    /// Build the mesh for `key`, asserting it is present (an empty mesh stands in
+    /// on the impossible `None` so the restriction lints stay clear of `expect`).
+    fn mesh_at(
+        map: &HashMap<PatchKey, TerrainPatch>,
+        comp: Option<&TerrainComposition>,
+        key: PatchKey,
+    ) -> Mesh {
+        let mesh = build_patch_mesh(map, comp, key);
+        assert!(mesh.is_some(), "patch mesh should build for {key:?}");
+        mesh.unwrap_or_else(|| {
+            Mesh::new(
+                PrimitiveTopology::TriangleList,
+                RenderAssetUsages::default(),
+            )
+        })
+    }
+
+    /// The vertex normals of a built mesh, or empty if the attribute is absent.
+    fn normals_of(mesh: &Mesh) -> Vec<[f32; 3]> {
+        match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+            Some(VertexAttributeValues::Float32x3(values)) => values.clone(),
+            _other => Vec::new(),
+        }
+    }
+
+    /// The four-component blend weights carried on a built mesh, or empty if the
+    /// attribute is absent.
+    fn weights_of(mesh: &Mesh) -> Vec<[f32; 4]> {
+        match mesh.attribute(ATTRIBUTE_TERRAIN_WEIGHTS.id) {
+            Some(VertexAttributeValues::Float32x4(values)) => values.clone(),
+            _other => Vec::new(),
+        }
+    }
+
+    /// A 16-sample patch spans 16 metres of quads: `(16 + 1)²` vertices (the
+    /// extra edge is the shared boundary), `16×16` cell quads, straight-up
+    /// normals on flat ground, and a four-component weight per vertex. The extra
+    /// edge is what closes the seam between adjacent patches.
+    #[test]
+    fn flat_patch_spans_the_full_edge() {
+        let map = one_patch_map(16, |_x, _y| 21.0);
+        let mesh = mesh_for(&map, None);
+        let positions = mesh.attribute(Mesh::ATTRIBUTE_POSITION);
+        // 17×17 vertices: 16 owned samples plus the neighbour-shared far edge.
+        assert!(matches!(
+            positions,
+            Some(VertexAttributeValues::Float32x3(values)) if values.len() == 289
+        ));
+        let weights = mesh.attribute(ATTRIBUTE_TERRAIN_WEIGHTS.id);
+        assert!(matches!(
+            weights,
+            Some(VertexAttributeValues::Float32x4(values)) if values.len() == 289
+        ));
+        // 16×16 quads × 2 triangles × 3 indices — a full 16 m span, no gap.
+        assert_eq!(mesh.indices().map(Indices::len), Some(16 * 16 * 2 * 3));
+        // A flat field has every normal pointing straight up (Second Life +Z).
+        let normals = normals_of(&mesh);
+        let centre = normals.get(8 * 17 + 8).copied().unwrap_or([0.0; 3]);
+        assert!((centre[0]).abs() < 1.0e-6);
+        assert!((centre[1]).abs() < 1.0e-6);
+        assert!((centre[2] - 1.0).abs() < 1.0e-6);
+    }
+
+    /// A slope in `x` tilts the interior normal away from straight up, toward
+    /// `-x`.
+    #[test]
+    fn sloped_patch_tilts_the_normal() {
+        // Height rises one metre per cell along `x`, so `dz/dx == 1` and the
+        // normal is `(-1, 0, 1)` normalised.
+        let map = one_patch_map(16, |x, _y| super::patch_coord_f32(x));
+        let mesh = mesh_for(&map, None);
+        let normals = normals_of(&mesh);
+        let centre = normals.get(8 * 17 + 8).copied().unwrap_or([0.0; 3]);
+        assert!(centre[0] < 0.0, "normal should tilt toward -x: {centre:?}");
+        let expected = 1.0_f32 / 2.0_f32.sqrt();
+        assert!((centre[0] + expected).abs() < 1.0e-5);
+        assert!((centre[2] - expected).abs() < 1.0e-5);
+    }
+
+    /// Without a composition, every vertex carries the flat default weight.
+    #[test]
+    fn no_composition_yields_default_weights() {
+        let map = one_patch_map(16, |_x, _y| 12.0);
+        let mesh = mesh_for(&map, None);
+        let weights = weights_of(&mesh);
+        assert!(!weights.is_empty(), "weights attribute missing");
+        for weight in &weights {
+            let differs = weight
+                .iter()
+                .zip(DEFAULT_WEIGHTS.iter())
+                .any(|(a, b)| (a - b).abs() > 1.0e-6);
+            assert!(!differs, "weight {weight:?} is not the default");
+        }
+    }
+
+    /// With a composition whose band rises across the region, a patch's vertex
+    /// weights vary — higher ground shifts weight toward the higher detail
+    /// textures — rather than staying flat.
+    #[test]
+    fn composition_varies_the_vertex_weights() {
+        let composition =
+            TerrainComposition::new([10.0; 4], [40.0; 4], 256.0, [256_000.0, 256_000.0]);
+        let map = one_patch_map(16, |_x, y| super::patch_coord_f32(y) * 3.0);
+        let mesh = mesh_for(&map, Some(&composition));
+        let weights = weights_of(&mesh);
+        assert!(!weights.is_empty(), "weights attribute missing");
+        // Every weight vector is normalised (partitions unity).
+        for weight in &weights {
+            let sum: f32 = weight.iter().sum();
+            assert!(
+                (sum - 1.0).abs() < 1.0e-4,
+                "weight {weight:?} sums to {sum}"
+            );
+        }
+        // The low and high rows do not share the same weight (the band moved).
+        let first = weights.first().copied().unwrap_or([0.0; 4]);
+        let last = weights.last().copied().unwrap_or([0.0; 4]);
+        let moved = first
+            .iter()
+            .zip(last.iter())
+            .any(|(a, b)| (a - b).abs() > 1.0e-3);
+        assert!(moved, "weights {first:?} and {last:?} did not vary");
+    }
+
+    /// A neighbour region east of the origin is offset one region (256 m) along
+    /// Bevy `+X`, while the origin region sits at zero.
+    #[test]
+    fn neighbour_region_is_offset_by_one_region() {
+        let origin = RegionHandle::from_global(256_000, 256_000);
+        let east = RegionHandle::from_global(256_256, 256_000);
+        // Patch (0, 0) of the origin region sits at Bevy X 0.
+        let home = patch_transform(Some(origin), origin, 0, 0, 16);
+        assert!(home.translation.x.abs() < 1.0e-3, "home at {home:?}");
+        // Patch (0, 0) of the east neighbour sits 256 m along Bevy +X.
+        let neighbour = patch_transform(Some(origin), east, 0, 0, 16);
+        assert!(
+            (neighbour.translation.x - 256.0).abs() < 1.0e-3,
+            "east neighbour at {neighbour:?}"
+        );
+    }
+
+    /// Insert a land patch at `(region, patch_x, patch_y)` of edge `size` whose
+    /// height is `f(x, y)` into `map`.
+    fn insert_patch(
+        map: &mut HashMap<PatchKey, TerrainPatch>,
+        region: RegionHandle,
+        patch_x: u32,
+        patch_y: u32,
+        size: u32,
+        mut height: impl FnMut(u32, u32) -> f32,
+    ) {
+        let mut values = Vec::new();
+        for y in 0..size {
+            for x in 0..size {
+                values.push(height(x, y));
+            }
+        }
+        map.insert(
+            (region, patch_x, patch_y),
+            TerrainPatch {
+                region_handle: region,
+                layer: TerrainLayerType::Land,
+                patch_x,
+                patch_y,
+                size,
+                values,
+            },
+        );
+    }
+
+    /// The vertex positions of a built mesh (`[x, y, height]` in patch space), or
+    /// empty if the attribute is absent.
+    fn positions_of(mesh: &Mesh) -> Vec<[f32; 3]> {
+        match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(values)) => values.clone(),
+            _other => Vec::new(),
+        }
+    }
+
+    /// The far east far-edge column (`x == size`) of a `size`-patch mesh reaches
+    /// across the **region** boundary into the adjacent region's first patch, so a
+    /// sloped region border stitches to the neighbour's real edge height instead
+    /// of falling back to this region's flat clamped edge.
+    #[test]
+    fn far_edge_stitches_across_region_border() {
+        let west = RegionHandle::from_global(256_000, 256_000);
+        let east = RegionHandle::from_global(256_256, 256_000);
+        let mut map = HashMap::new();
+        // West region's east-edge patch: low, rising gently east (10..=25).
+        insert_patch(&mut map, west, 15, 0, 16, |x, _y| {
+            10.0 + super::patch_coord_f32(x)
+        });
+        // East region's west-edge patch: far higher (a rising slope continues),
+        // so the sampled far edge is unmistakably the neighbour's, not the clamp.
+        insert_patch(&mut map, east, 0, 0, 16, |_x, _y| 100.0);
+        let mesh = mesh_at(&map, None, (west, 15, 0));
+        let positions = positions_of(&mesh);
+        let width = 17_usize;
+        // The whole far east column (x == 16) takes the east region's edge height.
+        for y in 0..width {
+            let index = y * width + 16;
+            let height = positions.get(index).map_or(0.0, |position| position[2]);
+            assert!(
+                (height - 100.0).abs() < 1.0e-4,
+                "far edge vertex (16, {y}) height {height} is not the neighbour region's 100"
+            );
+        }
+    }
+
+    /// A north-edge patch whose east neighbour (in-region) rises but whose north
+    /// neighbour region is not loaded must **flat-extend** its north-east corner
+    /// along the sloped east edge, not collapse it to the patch's own clamped
+    /// cell — the corner "fold" the region rim showed on a slope.
+    #[test]
+    fn void_north_edge_corner_does_not_fold() {
+        let region = RegionHandle::from_global(256_000, 256_000);
+        let mut map = HashMap::new();
+        // North-edge west-column patch: flat and low.
+        insert_patch(&mut map, region, 0, 15, 16, |_x, _y| 10.0);
+        // Its in-region east neighbour: high (the slope rises east).
+        insert_patch(&mut map, region, 1, 15, 16, |_x, _y| 100.0);
+        // No region to the north is loaded.
+        let mesh = mesh_at(&map, None, (region, 0, 15));
+        let positions = positions_of(&mesh);
+        let width = 17_usize;
+        let height_at = |x: usize, y: usize| {
+            positions
+                .get(y * width + x)
+                .map_or(f32::NAN, |position| position[2])
+        };
+        // The real east far edge (x == 16, y == 15) is the east neighbour's 100.
+        assert!((height_at(16, 15) - 100.0).abs() < 1.0e-4, "east far edge");
+        // The north-east corner (16, 16) flat-extends that 100 northward — without
+        // the fix it would clamp to this patch's own (15, 15) cell, i.e. 10.
+        assert!(
+            (height_at(16, 16) - 100.0).abs() < 1.0e-4,
+            "corner {} folded down instead of extending the sloped east edge",
+            height_at(16, 16)
+        );
+    }
+
+    /// [`super::step_back`] walks one patch west/south, crossing into the previous
+    /// region's far-edge patch at a region boundary and stopping at the grid
+    /// origin.
+    #[test]
+    fn step_back_crosses_region_boundary() {
+        // Interior: patch 5 → patch 4, same region metre.
+        assert_eq!(super::step_back(256_000, 5, 16), Some((256_000, 4)));
+        // West edge: patch 0 → the previous region's last patch (15).
+        assert_eq!(super::step_back(256_000, 0, 16), Some((255_744, 15)));
+        // At the grid origin there is nothing further west.
+        assert_eq!(super::step_back(0, 0, 16), None);
+    }
+
+    /// Global metres round-trip exactly through the 16-bit high/low split (the
+    /// values are all within the `f32` mantissa's exact-integer range).
+    #[test]
+    fn metres_convert_exactly() {
+        assert_eq!(metres_to_f32(0x0).to_bits(), 0.0_f32.to_bits());
+        assert_eq!(metres_to_f32(0x0100).to_bits(), 256.0_f32.to_bits());
+        assert_eq!(metres_to_f32(0x0001_0000).to_bits(), 65_536.0_f32.to_bits());
+        assert_eq!(
+            metres_to_f32(0x0004_0000).to_bits(),
+            262_144.0_f32.to_bits()
+        );
+        assert_eq!(
+            metres_to_f32(0x0010_0100).to_bits(),
+            1_048_832.0_f32.to_bits()
+        );
+    }
+
+    /// A region material created after the sky lighting has moved on from the
+    /// default is seeded with the *current* lighting: `drive_terrain_lighting`
+    /// only rewrites materials when the lighting changes, so a stale default
+    /// seed would otherwise persist until the next sky change.
+    #[test]
+    fn ensure_region_seeds_current_lighting() {
+        let mut state = super::TerrainState::default();
+        let mut images = bevy::asset::Assets::<bevy::image::Image>::default();
+        let mut materials = bevy::asset::Assets::<sl_client_bevy::TerrainMaterial>::default();
+        let lighting = sl_client_bevy::TerrainLighting {
+            sun_color: bevy::math::Vec3::new(0.9, 0.5, 0.2),
+            ambient_color: bevy::math::Vec3::new(0.1, 0.2, 0.3),
+        };
+        super::ensure_region(
+            &mut state,
+            RegionHandle(7),
+            lighting,
+            &mut images,
+            &mut materials,
+        );
+        let material = state
+            .regions
+            .get(&RegionHandle(7))
+            .and_then(|entry| entry.material.as_ref())
+            .and_then(|handle| materials.get(handle));
+        assert!(
+            material.is_some_and(|material| material.lighting == lighting),
+            "the new region material should carry the passed-in lighting"
+        );
+    }
+}

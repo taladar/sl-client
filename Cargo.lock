@@ -8487,7 +8487,6 @@ dependencies = [
  "bevy",
  "bevy_flair",
  "bevy_fluent",
- "bytes",
  "clap",
  "crossbeam-channel",
  "fluent",
@@ -8495,15 +8494,12 @@ dependencies = [
  "fs-err",
  "image",
  "jiff",
- "parry3d",
  "pretty_assertions",
- "reqwest 0.12.28",
  "serde",
  "serde_json",
  "sl-account-dirs",
  "sl-anim",
  "sl-audio",
- "sl-avatar",
  "sl-cef",
  "sl-client-bevy",
  "sl-emoji",
@@ -8527,6 +8523,7 @@ dependencies = [
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
+ "sl-viewer-world",
  "sl-viewer-world-api",
  "thiserror 2.0.19",
  "tokio",
@@ -8536,7 +8533,6 @@ dependencies = [
  "tracing-tracy",
  "unic-langid",
  "url",
- "wgpu-types",
 ]
 
 [[package]]
@@ -9124,6 +9120,43 @@ dependencies = [
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "tracing",
+]
+
+[[package]]
+name = "sl-viewer-world"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bytes",
+ "clap",
+ "fs-err",
+ "image",
+ "jiff",
+ "parry3d",
+ "pretty_assertions",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sl-anim",
+ "sl-avatar",
+ "sl-cef",
+ "sl-client-bevy",
+ "sl-proto",
+ "sl-settings",
+ "sl-terrain",
+ "sl-texture",
+ "sl-viewer-kit",
+ "sl-viewer-media",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-spacenav",
+ "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world-api",
+ "tracing",
+ "url",
+ "wgpu-types",
 ]
 
 [[package]]
