@@ -57,7 +57,6 @@ use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     spawn_floater,
 };
-use crate::groups::GroupsModel;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
@@ -76,6 +75,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::world_api::GroupsModel;
 
 /// The chrome font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;

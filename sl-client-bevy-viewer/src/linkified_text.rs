@@ -42,7 +42,6 @@ use bevy::window::PrimaryWindow;
 use sl_client_bevy::{AgentKey, Command, GroupKey, SlCommand};
 
 use crate::avatars::{AvatarState, NameRecord};
-use crate::groups::GroupsModel;
 use crate::i18n::Translator;
 use crate::parcel_names::ParcelNames;
 use crate::ui::UiRoot;
@@ -51,6 +50,7 @@ use crate::ui_font::UiFont;
 use crate::ui_name_link::{NAME_LINK_COLOR, NAME_PLAIN_COLOR};
 use crate::url_linkify::{AgentNameStyle, LinkIcon, LinkLabel, LinkTarget, TextRun, linkify};
 use crate::web_floater::{OpenWebBrowser, open_in_system_browser};
+use crate::world_api::GroupsModel;
 
 /// The leading-icon size, in logical pixels, relative to the label font size.
 const ICON_SCALE: f32 = 1.0;

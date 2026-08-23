@@ -267,7 +267,7 @@ fn ingest_offers_invites(
     settings: Option<Res<crate::settings::ViewerSettings>>,
     presence: Option<Res<crate::presence::PresenceState>>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
-    groups: Option<Res<crate::groups::GroupsModel>>,
+    groups: Option<Res<crate::world_api::GroupsModel>>,
     mut deferred: ResMut<DeferredOffers>,
     inventory: Res<InventoryModel>,
     mut sl: MessageWriter<SlCommand>,

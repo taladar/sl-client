@@ -60,7 +60,6 @@ use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     spawn_floater,
 };
-use crate::groups::GroupsModel;
 use crate::i18n::{Translated, Translator};
 use crate::inventory_properties::format_unix_date;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -78,6 +77,7 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::world_api::GroupsModel;
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;

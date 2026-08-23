@@ -665,7 +665,7 @@ pub(crate) struct AvatarState {
     /// Group titles from each avatar object's NameValue `Title` — the classic
     /// mechanism the reference reads for other avatars' tags. (The own
     /// avatar's fresher title comes from `ActiveGroupChanged` via
-    /// [`crate::groups::GroupsModel`].)
+    /// [`crate::world_api::GroupsModel`].)
     titles: HashMap<AgentKey, String>,
     /// Agents whose name has already been requested (but has not necessarily
     /// arrived), so the same request is never sent twice.

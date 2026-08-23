@@ -771,7 +771,7 @@ pub(crate) fn compose_name_tags(
     playback: Res<crate::animations::AnimationPlayback>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
     mutes: Option<Res<crate::world_api::MuteModel>>,
-    groups: Option<Res<crate::groups::GroupsModel>>,
+    groups: Option<Res<crate::world_api::GroupsModel>>,
     complexity: Option<Res<crate::avatar_complexity::AvatarComplexityModel>>,
     identity: Option<Res<sl_client_bevy::SlIdentity>>,
     settings: Option<Res<crate::settings::ViewerSettings>>,

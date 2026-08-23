@@ -42,9 +42,9 @@ use sl_client_bevy::{AgentKey, Command, GroupKey, OwnerKey, SlCommand};
 use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
 use crate::group_profile::OpenGroupProfile;
-use crate::groups::GroupsModel;
 use crate::i18n::Translator;
 use crate::ui_font::UiFont;
+use crate::world_api::GroupsModel;
 
 /// The default link tint — the same cornflower blue the bespoke owner links used,
 /// so migrated sites look unchanged.

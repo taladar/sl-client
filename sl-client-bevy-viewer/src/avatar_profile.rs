@@ -52,7 +52,6 @@ use crate::floater::{
     spawn_floater,
 };
 use crate::group_profile::OpenGroupProfile;
-use crate::groups::GroupsModel;
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
@@ -67,6 +66,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::FriendsModel;
+use crate::world_api::GroupsModel;
 
 /// The chrome font size, in logical pixels.
 const PROFILE_FONT_SIZE: f32 = 14.0;

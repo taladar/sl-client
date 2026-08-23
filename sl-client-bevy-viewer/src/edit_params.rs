@@ -58,7 +58,6 @@ use crate::edit_tool::{
     BuildTabPages, CHECKED_GLYPH, LABEL_CLASS, TOOL_FONT_SIZE, UNCHECKED_GLYPH, VALUE_CLASS,
     spawn_row_label,
 };
-use crate::groups::GroupsModel;
 use crate::i18n::{Translated, Translator};
 use crate::objects::ObjectState;
 use crate::ui::{UiPanelShown, column, row};
@@ -66,6 +65,7 @@ use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
 use crate::web_floater::set_editor_text;
 use crate::world_api::EditToolState;
+use crate::world_api::GroupsModel;
 use crate::world_api::SelectionSet;
 
 // ---------------------------------------------------------------------------
