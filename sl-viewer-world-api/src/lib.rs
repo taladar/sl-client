@@ -24,6 +24,29 @@ use sl_client_bevy::{
     MuteEntry, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId, SlCommand, TextureKey,
     Uuid,
 };
+use sl_viewer_settings::ViewerSettings;
+
+/// Whether the autorespond mode is on (the reference `FSAutorespondMode`).
+/// Account-scoped and persisted.
+pub const SETTING_AUTORESPOND_MODE: &str = "AutorespondMode";
+
+/// Whether the autorespond-to-non-friends mode is on (the reference
+/// `FSAutorespondNonFriendsMode`). Account-scoped and persisted.
+pub const SETTING_AUTORESPOND_NON_FRIENDS_MODE: &str = "AutorespondNonFriendsMode";
+
+/// Whether either autorespond mode is on, which is the one question three
+/// different tiers ask: the IM auto-reply decides whether to answer, the
+/// Comm menu ticks its toggles, and a name tag badges the own avatar. Kept
+/// here so the "either mode counts" rule has exactly one statement.
+#[must_use]
+pub fn shows_autoresponse(settings: Option<&ViewerSettings>) -> bool {
+    [
+        SETTING_AUTORESPOND_MODE,
+        SETTING_AUTORESPOND_NON_FRIENDS_MODE,
+    ]
+    .into_iter()
+    .any(|name| settings.is_some_and(|settings| settings.store().get_bool(name).unwrap_or(false)))
+}
 
 /// One selected object in the [`SelectionSet`].
 #[derive(Debug, Clone)]

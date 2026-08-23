@@ -666,14 +666,14 @@ fn update_top_menu_conditions(
     }
     if settings
         .store()
-        .get_bool(crate::presence::SETTING_AUTORESPOND_MODE)
+        .get_bool(crate::world_api::SETTING_AUTORESPOND_MODE)
         .unwrap_or(false)
     {
         wanted.push(PRESENCE_AUTORESPOND);
     }
     if settings
         .store()
-        .get_bool(crate::presence::SETTING_AUTORESPOND_NON_FRIENDS_MODE)
+        .get_bool(crate::world_api::SETTING_AUTORESPOND_NON_FRIENDS_MODE)
         .unwrap_or(false)
     {
         wanted.push(PRESENCE_AUTORESPOND_NON_FRIENDS);

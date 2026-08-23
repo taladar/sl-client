@@ -16,8 +16,8 @@
 //!   showing them, and answers IMs with the busy reply.
 //! - **Autorespond** and **Autorespond to non-friends** — the Firestorm
 //!   extension: answer IMs but keep receiving them normally. Unlike the first
-//!   two these **persist per account** ([`SETTING_AUTORESPOND_MODE`] /
-//!   [`SETTING_AUTORESPOND_NON_FRIENDS_MODE`]), exactly as the reference stores
+//!   two these **persist per account** ([`SETTING_AUTORESPOND_MODE`](crate::world_api::SETTING_AUTORESPOND_MODE) /
+//!   [`SETTING_AUTORESPOND_NON_FRIENDS_MODE`](crate::world_api::SETTING_AUTORESPOND_NON_FRIENDS_MODE)), exactly as the reference stores
 //!   them, so they survive a relog.
 //!
 //! The two session modes deliberately do **not** persist: the reference resets
@@ -86,19 +86,12 @@ use crate::contact_sets::{ContactSets, SetAutoresponseMode};
 use crate::conversations::{ConversationKey, ConversationModel, ConversationNotice};
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
-use crate::world_api::PresenceState;
+use crate::world_api::{
+    PresenceState, SETTING_AUTORESPOND_MODE, SETTING_AUTORESPOND_NON_FRIENDS_MODE,
+};
 
 /// The settings section the presence modes and their replies live in.
 pub(crate) const PRESENCE_SECTION: &[&str] = &["presence"];
-
-/// Whether the autorespond mode is on (the reference `FSAutorespondMode`).
-/// Account-scoped and **persisted**, like the reference's per-account flag, so
-/// the mode survives a relog.
-pub(crate) const SETTING_AUTORESPOND_MODE: &str = "AutorespondMode";
-
-/// Whether the autorespond-to-non-friends mode is on (the reference
-/// `FSAutorespondNonFriendsMode`). Account-scoped and persisted.
-pub(crate) const SETTING_AUTORESPOND_NON_FRIENDS_MODE: &str = "AutorespondNonFriendsMode";
 
 /// Whether an IM received while merely **away** is answered at all (the
 /// reference `FSSendAwayAvatarResponse`; default off — being away is not being
@@ -676,14 +669,6 @@ fn toggle_mode_setting(
     if on {
         notify.write(ShowNotification::new(template));
     }
-}
-
-/// Whether the own name tag should carry the reference's `Auto-Response` status
-/// entry: either autorespond mode is on and the tag is set to show it.
-#[must_use]
-pub(crate) fn shows_autoresponse(settings: Option<&ViewerSettings>) -> bool {
-    bool_setting(settings, SETTING_AUTORESPOND_MODE)
-        || bool_setting(settings, SETTING_AUTORESPOND_NON_FRIENDS_MODE)
 }
 
 /// The agent a [`ConversationKey::Direct`] names, for a caller that only has

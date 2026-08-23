@@ -9132,6 +9132,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "sl-client-bevy",
+ "sl-viewer-settings",
 ]
 
 [[package]]

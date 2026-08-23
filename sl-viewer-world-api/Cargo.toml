@@ -18,6 +18,7 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest).
 bevy = { version = "0.19.0" }
 sl-client-bevy = { workspace = true }
+sl-viewer-settings = { workspace = true }
 
 [lints]
 workspace = true

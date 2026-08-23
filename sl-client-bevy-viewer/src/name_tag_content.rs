@@ -781,7 +781,7 @@ pub(crate) fn compose_name_tags(
     let toggles = TagToggles::from_settings(settings.as_deref());
     let colors = TagColors::from_settings(settings.as_deref());
     // Autorespond is local-only state, so it can only ever mark the own tag.
-    let autoresponse = crate::presence::shows_autoresponse(settings.as_deref());
+    let autoresponse = crate::world_api::shows_autoresponse(settings.as_deref());
     let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
     // The distance line measures from the OWN AVATAR (the reference's
     // behaviour) — the camera-based distances only govern fade/cut-off.
