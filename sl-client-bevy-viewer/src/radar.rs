@@ -74,7 +74,6 @@ use crate::minimap::{
 use crate::mutes::RequestBlock;
 use crate::name_tag_content::{AWAY_ANIM, NameTagStatuses};
 use crate::notifications::ShowNotification;
-use crate::people::FriendsModel;
 use crate::radar_model::{
     PaymentInfo, RadarAlert, RadarAlertKind, RadarModel, RadarRow, RadarSample, RangeBand,
     SortColumn, SweepConfig, counts, elapsed_seconds, format_range, format_seen, matches_filter,
@@ -96,6 +95,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::FriendsModel;
 use crate::world_api::MuteModel;
 
 /// The radar floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).

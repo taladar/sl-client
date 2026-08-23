@@ -62,13 +62,13 @@ use crate::minimap_math::{
 };
 use crate::mutes::RequestBlock;
 use crate::objects::{ObjectDebugInfo, ObjectState};
-use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
 use crate::terrain::TerrainState;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
+use crate::world_api::FriendsModel;
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
 pub(crate) const MINIMAP_ELEMENT: &str = "minimap";

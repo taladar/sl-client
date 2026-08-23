@@ -104,9 +104,9 @@ use crate::avatars::AvatarState;
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::object_menu::TARGET_TOUCHABLE;
 use crate::objects::ObjectPickSummary;
-use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
+use crate::world_api::FriendsModel;
 
 /// The `element` both attachment pies attribute their [`UiAction`]s to.
 ///

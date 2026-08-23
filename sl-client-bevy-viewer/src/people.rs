@@ -46,7 +46,7 @@
 //! [`viewer-social-groups`]: the separate ready roadmap task for the group list.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -54,8 +54,7 @@ use bevy::input_focus::{FocusCause, InputFocus};
 use bevy::prelude::*;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
-    AgentKey, Command, Friend, FriendKey, FriendPresence, FriendRights, MuteType, SlCommand,
-    SlEvent, SlSessionEvent, Uuid,
+    AgentKey, Command, FriendKey, FriendRights, MuteType, SlCommand, SlEvent, SlSessionEvent,
 };
 
 use sl_settings::SettingValue;
@@ -75,6 +74,7 @@ use crate::ui_table::{
     TableState, register_table_settings, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::world_api::{FriendRow, FriendsModel, short_id};
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
 /// conversation-transcript density so the whole floater reads as one surface.
@@ -358,281 +358,6 @@ const DOUBLE_CLICK_SECS: f32 = 0.4;
 // Pure model
 // ---------------------------------------------------------------------------
 
-/// One friend's cached state: the friendship rights in both directions and the
-/// last-known presence.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct FriendEntry {
-    /// The rights this agent grants the friend.
-    rights_granted: FriendRights,
-    /// The rights the friend grants this agent.
-    rights_received: FriendRights,
-    /// Whether the friend is currently known-online (`false` is "offline or not
-    /// visible", never provably offline).
-    online: bool,
-}
-
-impl FriendEntry {
-    /// A fresh entry from a login / snapshot [`Friend`] record, offline until a
-    /// presence notification says otherwise.
-    const fn new(friend: Friend, online: bool) -> Self {
-        Self {
-            rights_granted: friend.rights_granted,
-            rights_received: friend.rights_received,
-            online,
-        }
-    }
-}
-
-/// The pure friends model: the buddy cache keyed by friend id, the resolved name
-/// cache, and a revision stamp bumped on every change so the view rebuilds only
-/// when something actually moved. Fed solely from the event stream.
-#[derive(Resource, Debug, Default)]
-pub(crate) struct FriendsModel {
-    /// The buddy list, by friend id.
-    friends: BTreeMap<FriendKey, FriendEntry>,
-    /// Last-seen legacy display name per agent, for the row labels.
-    names: BTreeMap<AgentKey, String>,
-    /// The name the user gave a friend instead, if any (already quoted, as the
-    /// name cache shows it) — mirrored from the contact-set store by
-    /// [`crate::contact_sets::apply_name_aliases`]. Kept beside the resolved
-    /// names rather than over them: a wire action still needs the real one.
-    aliases: BTreeMap<AgentKey, String>,
-    /// The current multi-column sort order (persisted per avatar).
-    sort: SortState,
-    /// Bumped on each mutation; the view compares its last-built value to skip an
-    /// unchanged rebuild.
-    revision: u64,
-}
-
-impl FriendsModel {
-    /// Bump the revision after a mutation.
-    const fn touch(&mut self) {
-        self.revision = self.revision.wrapping_add(1);
-    }
-
-    /// Merge a buddy-list record set (login `FriendList`), keeping any presence
-    /// already learned for a friend that is being refreshed.
-    fn note_friends(&mut self, friends: &[Friend]) {
-        for friend in friends {
-            let online = self
-                .friends
-                .get(&friend.id)
-                .is_some_and(|entry| entry.online);
-            self.friends
-                .insert(friend.id, FriendEntry::new(*friend, online));
-        }
-        self.touch();
-    }
-
-    /// Replace the model from a presence snapshot (the [`Command::QueryFriends`]
-    /// reply): authoritative for both rights and the online flag.
-    fn apply_snapshot(&mut self, presence: &[FriendPresence]) {
-        self.friends.clear();
-        for entry in presence {
-            self.friends.insert(
-                entry.friend.id,
-                FriendEntry::new(entry.friend, entry.online),
-            );
-        }
-        self.touch();
-    }
-
-    /// Set the online flag on a set of friends (an online / offline notification).
-    fn set_online(&mut self, friends: &[FriendKey], online: bool) {
-        let mut changed = false;
-        for id in friends {
-            if let Some(entry) = self.friends.get_mut(id)
-                && entry.online != online
-            {
-                entry.online = online;
-                changed = true;
-            }
-        }
-        if changed {
-            self.touch();
-        }
-    }
-
-    /// Update one friend's rights from a [`SlSessionEvent::FriendRightsChanged`]:
-    /// `granted_to_us` distinguishes the rights the friend now grants us from a
-    /// server echo of the rights we grant them.
-    fn update_rights(&mut self, friend: FriendKey, rights: FriendRights, granted_to_us: bool) {
-        if let Some(entry) = self.friends.get_mut(&friend) {
-            if granted_to_us {
-                entry.rights_received = rights;
-            } else {
-                entry.rights_granted = rights;
-            }
-            self.touch();
-        }
-    }
-
-    /// Drop a friend (friendship terminated by either side).
-    fn remove(&mut self, friend: FriendKey) {
-        if self.friends.remove(&friend).is_some() {
-            self.touch();
-        }
-    }
-
-    /// Record a resolved legacy name for an agent (ignoring empties).
-    fn note_name(&mut self, id: AgentKey, name: &str) {
-        if !name.is_empty() && self.names.get(&id).map(String::as_str) != Some(name) {
-            self.names.insert(id, name.to_owned());
-            self.touch();
-        }
-    }
-
-    /// The resolved name for an agent, if known — the **grid's** answer, which
-    /// is what a wire action (a mute entry) has to carry.
-    fn name_of(&self, id: AgentKey) -> Option<&str> {
-        self.names.get(&id).map(String::as_str)
-    }
-
-    /// The name to **show** for an agent: the alias the user gave them, else the
-    /// resolved name.
-    fn shown_name_of(&self, id: AgentKey) -> Option<&str> {
-        self.aliases
-            .get(&id)
-            .or_else(|| self.names.get(&id))
-            .map(String::as_str)
-    }
-
-    /// Replace the mirrored aliases, rebuilding the list when they moved (an
-    /// alias given now renames that friend in the list at once). The one way in;
-    /// [`crate::contact_sets::apply_name_aliases`] is the caller.
-    pub(crate) fn set_name_aliases(&mut self, aliases: BTreeMap<AgentKey, String>) {
-        if self.aliases == aliases {
-            return;
-        }
-        self.aliases = aliases;
-        self.touch();
-    }
-
-    /// The model revision — a consumer that mirrors the roster (the friends-only
-    /// render filter, [`crate::derender`]) compares its last-mirrored value to
-    /// skip an unchanged rebuild.
-    pub(crate) const fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    /// Every friend's agent id. The friends-only render filter mirrors this by
-    /// revision so its per-avatar gate — which runs for every streamed object at
-    /// a crowded event — stays a single hash lookup.
-    pub(crate) fn friend_ids(&self) -> std::collections::HashSet<Uuid> {
-        self.friends
-            .keys()
-            .map(|id| AgentKey::from(*id).uuid())
-            .collect()
-    }
-
-    /// Whether `agent` is already in the buddy cache — a friend.
-    ///
-    /// The avatar context menu reads this to disable "Add as Friend" for someone
-    /// who already is one, matching the reference viewer's `on_enable`.
-    pub(crate) fn is_friend(&self, agent: AgentKey) -> bool {
-        self.friends.contains_key(&FriendKey::from(agent.uuid()))
-    }
-
-    /// Whether `agent` is a friend the grid last reported **online**. Someone
-    /// who is not a friend at all is not online as far as this model knows — the
-    /// buddy cache is the only presence the protocol gives us.
-    pub(crate) fn is_online(&self, agent: AgentKey) -> bool {
-        self.friends
-            .get(&FriendKey::from(agent.uuid()))
-            .is_some_and(|entry| entry.online)
-    }
-
-    /// The whole roster as `(agent, display label)` pairs, name order — the
-    /// avatar picker's Friends tab reads this. A friend whose name has not
-    /// resolved yet labels as a provisional id fragment.
-    pub(crate) fn roster(&self) -> Vec<(AgentKey, String)> {
-        let mut entries: Vec<(AgentKey, String)> = self
-            .friends
-            .keys()
-            .map(|id| {
-                let agent = AgentKey::from(*id);
-                let label = self
-                    .names
-                    .get(&agent)
-                    .cloned()
-                    .unwrap_or_else(|| format!("({id})"));
-                (agent, label)
-            })
-            .collect();
-        entries.sort_by_key(|entry| entry.1.to_lowercase());
-        entries
-    }
-
-    /// The friends whose name is not yet resolved — the set to request names for.
-    fn unnamed(&self) -> Vec<AgentKey> {
-        self.friends
-            .keys()
-            .map(|id| AgentKey::from(*id))
-            .filter(|agent| !self.names.contains_key(agent))
-            .collect()
-    }
-
-    /// The ordered, render-ready row list: online friends first, then by
-    /// case-folded name (an unresolved name sorts by its short-id placeholder).
-    fn ordered(&self) -> Vec<FriendRow> {
-        let mut rows: Vec<FriendRow> = self
-            .friends
-            .iter()
-            .map(|(id, entry)| {
-                let agent = AgentKey::from(*id);
-                let name = self
-                    .shown_name_of(agent)
-                    .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
-                FriendRow {
-                    friend: *id,
-                    agent,
-                    name,
-                    online: entry.online,
-                    rights_granted: entry.rights_granted,
-                    rights_received: entry.rights_received,
-                }
-            })
-            .collect();
-        rows.sort_by(|left, right| self.sort.compare(left, right));
-        rows
-    }
-
-    /// Apply a header click to the sort order (bumping the revision so the view
-    /// re-sorts). Returns the encoded sort for persistence.
-    fn sort_by(&mut self, column: SortColumn) -> String {
-        self.sort.click(column);
-        self.touch();
-        self.sort.encode()
-    }
-
-    /// Replace the sort order (from a persisted value at login), re-sorting.
-    fn set_sort(&mut self, sort: SortState) {
-        self.sort = sort;
-        self.touch();
-    }
-
-    /// The primary (most-significant) sort key, for the header arrow indicator.
-    fn primary_sort(&self) -> Option<SortKey> {
-        self.sort.primary()
-    }
-
-    /// The rights this agent currently grants `friend`, if known.
-    fn granted_rights(&self, friend: FriendKey) -> Option<FriendRights> {
-        self.friends.get(&friend).map(|entry| entry.rights_granted)
-    }
-
-    /// Optimistically set the rights this agent grants `friend` (so a toggled
-    /// checkbox flips immediately; the server echo re-confirms the same value).
-    fn set_granted(&mut self, friend: FriendKey, rights: FriendRights) {
-        if let Some(entry) = self.friends.get_mut(&friend)
-            && entry.rights_granted != rights
-        {
-            entry.rights_granted = rights;
-            self.touch();
-        }
-    }
-}
-
 /// The rights bitfield with `kind`'s bit flipped.
 const fn toggled_rights(rights: FriendRights, kind: RightKind) -> FriendRights {
     let bit = match kind {
@@ -641,12 +366,6 @@ const fn toggled_rights(rights: FriendRights, kind: RightKind) -> FriendRights {
         RightKind::Edit => FriendRights::CAN_MODIFY_OBJECTS,
     };
     FriendRights(rights.0 ^ bit)
-}
-
-/// A short, readable stand-in for an unresolved agent id — its first eight hex
-/// digits (mirrors [`crate::conversations`]'s placeholder).
-fn short_id(id: Uuid) -> String {
-    id.simple().to_string().chars().take(8).collect()
 }
 
 // ---------------------------------------------------------------------------
@@ -860,25 +579,6 @@ fn edge(px: f32, py: f32, ax: f32, ay: f32, bx: f32, by: f32) -> f32 {
     (bx - ax) * (py - ay) - (by - ay) * (px - ax)
 }
 
-/// One render-ready friend row: the ids the actions need, the display name, the
-/// presence flag, and the friendship rights in both directions (the table's
-/// permission columns).
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct FriendRow {
-    /// The friend id (for remove / grant-rights, which take a [`FriendKey`]).
-    friend: FriendKey,
-    /// The agent id (for IM / teleport / mute, which take an [`AgentKey`]).
-    agent: AgentKey,
-    /// The display name (or a short-id placeholder until the name resolves).
-    name: String,
-    /// Whether the friend is currently known-online.
-    online: bool,
-    /// The rights this agent grants the friend (the "They can …" columns).
-    rights_granted: FriendRights,
-    /// The rights the friend grants this agent (the "You can …" columns).
-    rights_received: FriendRights,
-}
-
 /// One of the three friendship rights a permission column can show.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum RightKind {
@@ -939,6 +639,15 @@ enum SortColumn {
     Right(bool, RightKind),
 }
 
+/// The ordered, render-ready row list: the model's rows put into the table's
+/// current sort order (online first, then case-folded name, by default). An
+/// unresolved name sorts by its short-id placeholder.
+fn ordered(model: &FriendsModel, sort: &SortState) -> Vec<FriendRow> {
+    let mut rows = model.rows();
+    rows.sort_by(|left, right| sort.compare(left, right));
+    rows
+}
+
 /// One level of the multi-column sort: a column and its direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct SortKey {
@@ -956,7 +665,7 @@ const MAX_SORT_KEYS: usize = 6;
 /// demoting the previous order to tie-breakers: "sort by the last-clicked column,
 /// then the one before that, …". Persisted per avatar
 /// ([`FRIENDS_SORT_SETTING`]).
-#[derive(Debug, Clone)]
+#[derive(Resource, Debug, Clone)]
 struct SortState {
     /// The sort levels, most-significant first.
     keys: Vec<SortKey>,
@@ -1416,6 +1125,7 @@ pub(crate) struct PeoplePlugin;
 impl Plugin for PeoplePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FriendsModel>()
+            .init_resource::<SortState>()
             .init_resource::<FriendsView>()
             .init_resource::<SelectedFriend>()
             .init_resource::<FriendClickTracker>()
@@ -2279,6 +1989,7 @@ fn notify_friend_presence(
 fn seed_sort_from_settings(
     settings: Option<Res<ViewerSettings>>,
     mut model: ResMut<FriendsModel>,
+    mut sort: ResMut<SortState>,
     mut seeded: Local<bool>,
 ) {
     if *seeded {
@@ -2292,7 +2003,8 @@ fn seed_sort_from_settings(
     }
     *seeded = true;
     if let Ok(encoded) = settings.store().get_str(FRIENDS_SORT_SETTING) {
-        model.set_sort(SortState::parse(encoded));
+        *sort = SortState::parse(encoded);
+        model.touch();
     }
 }
 
@@ -2301,11 +2013,14 @@ fn seed_sort_from_settings(
 fn apply_sort(
     mut events: MessageReader<SortByColumn>,
     mut model: ResMut<FriendsModel>,
+    mut sort: ResMut<SortState>,
     settings: Option<ResMut<ViewerSettings>>,
 ) {
     let mut encoded = None;
     for event in events.read() {
-        encoded = Some(model.sort_by(event.column));
+        sort.click(event.column);
+        model.touch();
+        encoded = Some(sort.encode());
     }
     let Some(encoded) = encoded else {
         return;
@@ -2322,17 +2037,18 @@ fn apply_sort(
 /// list scroll to the top so the new order is read from its start.
 fn rebuild_friends_view(
     model: Res<FriendsModel>,
+    sort: Res<SortState>,
     mut view: ResMut<FriendsView>,
     ui: Option<Res<PeopleUi>>,
     mut selection: ResMut<SelectedFriend>,
     mut lists: Query<&mut VirtualList>,
     mut tables: Query<&mut TableState>,
 ) {
-    if view.built_revision == model.revision {
+    if view.built_revision == model.revision() {
         return;
     }
-    view.built_revision = model.revision;
-    view.rows = model.ordered();
+    view.built_revision = model.revision();
+    view.rows = ordered(&model, &sort);
     let Some(ui) = ui else {
         return;
     };
@@ -2395,7 +2111,7 @@ fn mirror_friend_selection(
 fn refresh_people(
     focus: Res<StripFocus>,
     ui: Option<Res<PeopleUi>>,
-    model: Res<FriendsModel>,
+    sort: Res<SortState>,
     strips: Query<&TabStrip>,
     mut backgrounds: Query<&mut BackgroundColor>,
     mut borders: Query<&mut BorderColor>,
@@ -2408,7 +2124,7 @@ fn refresh_people(
     let active = focus.is_external();
 
     // Sort-direction arrows: only the primary (most-significant) column shows one.
-    let primary = model.primary_sort();
+    let primary = sort.primary();
     set_arrow(
         &mut texts,
         ui.name_arrow,
@@ -2822,7 +2538,8 @@ fn set_text(text: &mut Text, value: &str) {
 #[cfg(test)]
 mod tests {
     use super::{
-        Command, FriendAction, FriendRow, FriendsModel, FriendsView, SelectedFriend, friend_command,
+        Command, FriendAction, FriendRow, FriendsModel, FriendsView, SelectedFriend, SortState,
+        friend_command, ordered,
     };
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, Friend, FriendKey, FriendPresence, FriendRights, Uuid};
@@ -2891,10 +2608,10 @@ mod tests {
     fn friend_list_then_presence() {
         let mut model = FriendsModel::default();
         model.note_friends(&[friend(1), friend(2)]);
-        assert_eq!(model.friends.len(), 2);
-        assert!(model.friends.values().all(|entry| !entry.online));
+        assert_eq!(model.rows().len(), 2);
+        assert!(model.rows().iter().all(|row| !row.online));
         model.set_online(&[FriendKey::from(Uuid::from_u128(1))], true);
-        let rows = model.ordered();
+        let rows = ordered(&model, &SortState::default());
         // Online sorts first.
         assert_eq!(rows.first().map(|row| row.online), Some(true));
         assert_eq!(rows.get(1).map(|row| row.online), Some(false));
@@ -2909,13 +2626,19 @@ mod tests {
             friend: friend(9),
             online: true,
         }]);
-        assert_eq!(model.friends.len(), 1);
+        assert_eq!(model.rows().len(), 1);
         assert!(
             model
-                .friends
-                .contains_key(&FriendKey::from(Uuid::from_u128(9)))
+                .rows()
+                .iter()
+                .any(|row| row.friend == FriendKey::from(Uuid::from_u128(9)))
         );
-        assert_eq!(model.ordered().first().map(|row| row.online), Some(true));
+        assert_eq!(
+            ordered(&model, &SortState::default())
+                .first()
+                .map(|row| row.online),
+            Some(true)
+        );
     }
 
     /// The six permission columns read the right rights field per direction:
@@ -2930,7 +2653,7 @@ mod tests {
             // I can edit their objects (bit 2); not see-online / map.
             rights_received: FriendRights(0b100),
         }]);
-        let columns = model.ordered().first().map(|row| {
+        let columns = ordered(&model, &SortState::default()).first().map(|row| {
             super::RIGHT_COLUMNS
                 .iter()
                 .map(|column| super::column_is_set(row, *column))
@@ -3002,9 +2725,9 @@ mod tests {
         let mut model = FriendsModel::default();
         model.note_friends(&[friend(1), friend(2)]);
         model.remove(FriendKey::from(Uuid::from_u128(1)));
-        assert_eq!(model.friends.len(), 1);
+        assert_eq!(model.rows().len(), 1);
         model.remove(FriendKey::from(Uuid::from_u128(42)));
-        assert_eq!(model.friends.len(), 1);
+        assert_eq!(model.rows().len(), 1);
     }
 
     /// Names resolve the row label and drop out of the unnamed request set; an
@@ -3014,8 +2737,7 @@ mod tests {
         let mut model = FriendsModel::default();
         model.note_friends(&[friend(0x1234_5678_9abc)]);
         assert_eq!(model.unnamed().len(), 1);
-        let placeholder = model
-            .ordered()
+        let placeholder = ordered(&model, &SortState::default())
             .first()
             .map(|row| row.name.clone())
             .unwrap_or_default();
@@ -3026,7 +2748,9 @@ mod tests {
         model.note_name(agent, "Avatar One");
         assert!(model.unnamed().is_empty());
         assert_eq!(
-            model.ordered().first().map(|row| row.name.clone()),
+            ordered(&model, &SortState::default())
+                .first()
+                .map(|row| row.name.clone()),
             Some("Avatar One".to_owned())
         );
     }
@@ -3043,7 +2767,10 @@ mod tests {
         model.note_name(a2, "Bob");
         model.note_name(a3, "amy");
         model.set_online(&[FriendKey::from(Uuid::from_u128(1))], true);
-        let names: Vec<String> = model.ordered().into_iter().map(|row| row.name).collect();
+        let names: Vec<String> = ordered(&model, &SortState::default())
+            .into_iter()
+            .map(|row| row.name)
+            .collect();
         // zoe online first; then amy, Bob offline (case-folded ascending).
         assert_eq!(names, vec!["zoe", "amy", "Bob"]);
     }

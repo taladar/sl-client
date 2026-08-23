@@ -100,8 +100,8 @@ use tracing::{debug, info, warn};
 
 use crate::avatars::{AvatarState, NameAlias};
 use crate::notifications::ShowNotification;
-use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
+use crate::world_api::FriendsModel;
 
 /// The per-account file the sets are stored in (a sibling of the account
 /// `settings.toml`, like [`crate::avatar_render_settings`]'s exceptions). The

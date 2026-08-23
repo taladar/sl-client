@@ -35,7 +35,7 @@
 //!   through `GetDisplayNames` instead, as the reference does — pasting a key
 //!   is a normal way to name someone. A search that matches nobody says so
 //!   rather than leaving a blank list.
-//! - **Friends** — the held friends roster ([`crate::people::FriendsModel`]).
+//! - **Friends** — the held friends roster ([`crate::world_api::FriendsModel`]).
 //! - **Near Me** — the avatars this viewer currently knows in-world
 //!   ([`crate::avatars::AvatarState`]), sorted by distance from the own
 //!   avatar (the reference's radius slider is folded into the sort — the
@@ -55,10 +55,10 @@ use sl_client_bevy::{
 use crate::avatars::AvatarState;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
-use crate::people::FriendsModel;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
+use crate::world_api::FriendsModel;
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 const PICKER_FLOATER_ID: &str = "avatar-picker";

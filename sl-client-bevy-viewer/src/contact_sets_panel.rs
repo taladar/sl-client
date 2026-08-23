@@ -80,7 +80,7 @@ use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::notifications::{NotificationResponse, ShowNotification};
-use crate::people::{FriendsModel, PeopleUi};
+use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
@@ -94,6 +94,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::FriendsModel;
 
 /// The tag the panel opens the shared avatar picker under, so only its own pick
 /// is consumed.

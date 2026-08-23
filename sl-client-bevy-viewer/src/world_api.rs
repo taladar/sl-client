@@ -15,10 +15,13 @@
 //! when nothing here reaches back into a feature, it becomes
 //! `sl-viewer-world-api` and the world layer can follow it out.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
-use sl_client_bevy::{MuteEntry, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId, Uuid};
+use sl_client_bevy::{
+    AgentKey, Friend, FriendKey, FriendPresence, FriendRights, MuteEntry, ObjectKey,
+    ObjectProperties, PrimFaceId, ScopedObjectId, Uuid,
+};
 
 /// One selected object in the [`SelectionSet`].
 #[derive(Debug, Clone)]
@@ -665,4 +668,286 @@ fn same_target(entry: &MuteEntry, id: Uuid, name: &str) -> bool {
     } else {
         entry.id == id
     }
+}
+
+/// A short, readable stand-in for an unresolved agent id — its first eight hex
+/// digits (mirrors [`crate::conversations`]'s placeholder).
+pub(crate) fn short_id(id: Uuid) -> String {
+    id.simple().to_string().chars().take(8).collect()
+}
+
+/// One friend's cached state: the friendship rights in both directions and the
+/// last-known presence.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FriendEntry {
+    /// The rights this agent grants the friend.
+    rights_granted: FriendRights,
+    /// The rights the friend grants this agent.
+    rights_received: FriendRights,
+    /// Whether the friend is currently known-online (`false` is "offline or not
+    /// visible", never provably offline).
+    online: bool,
+}
+
+impl FriendEntry {
+    /// A fresh entry from a login / snapshot [`Friend`] record, offline until a
+    /// presence notification says otherwise.
+    const fn new(friend: Friend, online: bool) -> Self {
+        Self {
+            rights_granted: friend.rights_granted,
+            rights_received: friend.rights_received,
+            online,
+        }
+    }
+}
+
+/// The pure friends model: the buddy cache keyed by friend id, the resolved name
+/// cache, and a revision stamp bumped on every change so the view rebuilds only
+/// when something actually moved. Fed solely from the event stream.
+#[derive(Resource, Debug, Default)]
+pub(crate) struct FriendsModel {
+    /// The buddy list, by friend id.
+    friends: BTreeMap<FriendKey, FriendEntry>,
+    /// Last-seen legacy display name per agent, for the row labels.
+    names: BTreeMap<AgentKey, String>,
+    /// The name the user gave a friend instead, if any (already quoted, as the
+    /// name cache shows it) — mirrored from the contact-set store by
+    /// [`crate::contact_sets::apply_name_aliases`]. Kept beside the resolved
+    /// names rather than over them: a wire action still needs the real one.
+    aliases: BTreeMap<AgentKey, String>,
+    /// Bumped on each mutation; the view compares its last-built value to skip an
+    /// unchanged rebuild.
+    revision: u64,
+}
+
+impl FriendsModel {
+    /// Bump the revision after a mutation.
+    pub(crate) const fn touch(&mut self) {
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    /// Merge a buddy-list record set (login `FriendList`), keeping any presence
+    /// already learned for a friend that is being refreshed.
+    pub(crate) fn note_friends(&mut self, friends: &[Friend]) {
+        for friend in friends {
+            let online = self
+                .friends
+                .get(&friend.id)
+                .is_some_and(|entry| entry.online);
+            self.friends
+                .insert(friend.id, FriendEntry::new(*friend, online));
+        }
+        self.touch();
+    }
+
+    /// Replace the model from a presence snapshot (the [`Command::QueryFriends`]
+    /// reply): authoritative for both rights and the online flag.
+    pub(crate) fn apply_snapshot(&mut self, presence: &[FriendPresence]) {
+        self.friends.clear();
+        for entry in presence {
+            self.friends.insert(
+                entry.friend.id,
+                FriendEntry::new(entry.friend, entry.online),
+            );
+        }
+        self.touch();
+    }
+
+    /// Set the online flag on a set of friends (an online / offline notification).
+    pub(crate) fn set_online(&mut self, friends: &[FriendKey], online: bool) {
+        let mut changed = false;
+        for id in friends {
+            if let Some(entry) = self.friends.get_mut(id)
+                && entry.online != online
+            {
+                entry.online = online;
+                changed = true;
+            }
+        }
+        if changed {
+            self.touch();
+        }
+    }
+
+    /// Update one friend's rights from a [`SlSessionEvent::FriendRightsChanged`]:
+    /// `granted_to_us` distinguishes the rights the friend now grants us from a
+    /// server echo of the rights we grant them.
+    pub(crate) fn update_rights(
+        &mut self,
+        friend: FriendKey,
+        rights: FriendRights,
+        granted_to_us: bool,
+    ) {
+        if let Some(entry) = self.friends.get_mut(&friend) {
+            if granted_to_us {
+                entry.rights_received = rights;
+            } else {
+                entry.rights_granted = rights;
+            }
+            self.touch();
+        }
+    }
+
+    /// Drop a friend (friendship terminated by either side).
+    pub(crate) fn remove(&mut self, friend: FriendKey) {
+        if self.friends.remove(&friend).is_some() {
+            self.touch();
+        }
+    }
+
+    /// Record a resolved legacy name for an agent (ignoring empties).
+    pub(crate) fn note_name(&mut self, id: AgentKey, name: &str) {
+        if !name.is_empty() && self.names.get(&id).map(String::as_str) != Some(name) {
+            self.names.insert(id, name.to_owned());
+            self.touch();
+        }
+    }
+
+    /// The resolved name for an agent, if known — the **grid's** answer, which
+    /// is what a wire action (a mute entry) has to carry.
+    pub(crate) fn name_of(&self, id: AgentKey) -> Option<&str> {
+        self.names.get(&id).map(String::as_str)
+    }
+
+    /// The name to **show** for an agent: the alias the user gave them, else the
+    /// resolved name.
+    pub(crate) fn shown_name_of(&self, id: AgentKey) -> Option<&str> {
+        self.aliases
+            .get(&id)
+            .or_else(|| self.names.get(&id))
+            .map(String::as_str)
+    }
+
+    /// Replace the mirrored aliases, rebuilding the list when they moved (an
+    /// alias given now renames that friend in the list at once). The one way in;
+    /// [`crate::contact_sets::apply_name_aliases`] is the caller.
+    pub(crate) fn set_name_aliases(&mut self, aliases: BTreeMap<AgentKey, String>) {
+        if self.aliases == aliases {
+            return;
+        }
+        self.aliases = aliases;
+        self.touch();
+    }
+
+    /// The model revision — a consumer that mirrors the roster (the friends-only
+    /// render filter, [`crate::derender`]) compares its last-mirrored value to
+    /// skip an unchanged rebuild.
+    pub(crate) const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Every friend's agent id. The friends-only render filter mirrors this by
+    /// revision so its per-avatar gate — which runs for every streamed object at
+    /// a crowded event — stays a single hash lookup.
+    pub(crate) fn friend_ids(&self) -> std::collections::HashSet<Uuid> {
+        self.friends
+            .keys()
+            .map(|id| AgentKey::from(*id).uuid())
+            .collect()
+    }
+
+    /// Whether `agent` is already in the buddy cache — a friend.
+    ///
+    /// The avatar context menu reads this to disable "Add as Friend" for someone
+    /// who already is one, matching the reference viewer's `on_enable`.
+    pub(crate) fn is_friend(&self, agent: AgentKey) -> bool {
+        self.friends.contains_key(&FriendKey::from(agent.uuid()))
+    }
+
+    /// Whether `agent` is a friend the grid last reported **online**. Someone
+    /// who is not a friend at all is not online as far as this model knows — the
+    /// buddy cache is the only presence the protocol gives us.
+    pub(crate) fn is_online(&self, agent: AgentKey) -> bool {
+        self.friends
+            .get(&FriendKey::from(agent.uuid()))
+            .is_some_and(|entry| entry.online)
+    }
+
+    /// The whole roster as `(agent, display label)` pairs, name order — the
+    /// avatar picker's Friends tab reads this. A friend whose name has not
+    /// resolved yet labels as a provisional id fragment.
+    pub(crate) fn roster(&self) -> Vec<(AgentKey, String)> {
+        let mut entries: Vec<(AgentKey, String)> = self
+            .friends
+            .keys()
+            .map(|id| {
+                let agent = AgentKey::from(*id);
+                let label = self
+                    .names
+                    .get(&agent)
+                    .cloned()
+                    .unwrap_or_else(|| format!("({id})"));
+                (agent, label)
+            })
+            .collect();
+        entries.sort_by_key(|entry| entry.1.to_lowercase());
+        entries
+    }
+
+    /// The friends whose name is not yet resolved — the set to request names for.
+    pub(crate) fn unnamed(&self) -> Vec<AgentKey> {
+        self.friends
+            .keys()
+            .map(|id| AgentKey::from(*id))
+            .filter(|agent| !self.names.contains_key(agent))
+            .collect()
+    }
+
+    /// The render-ready row list, in map order. The table sorts it through
+    /// its own [`SortState`](crate::people); the model has no opinion on
+    /// display order.
+    pub(crate) fn rows(&self) -> Vec<FriendRow> {
+        self.friends
+            .iter()
+            .map(|(id, entry)| {
+                let agent = AgentKey::from(*id);
+                let name = self
+                    .shown_name_of(agent)
+                    .map_or_else(|| short_id(agent.uuid()), ToOwned::to_owned);
+                FriendRow {
+                    friend: *id,
+                    agent,
+                    name,
+                    online: entry.online,
+                    rights_granted: entry.rights_granted,
+                    rights_received: entry.rights_received,
+                }
+            })
+            .collect()
+    }
+
+    /// The rights this agent currently grants `friend`, if known.
+    pub(crate) fn granted_rights(&self, friend: FriendKey) -> Option<FriendRights> {
+        self.friends.get(&friend).map(|entry| entry.rights_granted)
+    }
+
+    /// Optimistically set the rights this agent grants `friend` (so a toggled
+    /// checkbox flips immediately; the server echo re-confirms the same value).
+    pub(crate) fn set_granted(&mut self, friend: FriendKey, rights: FriendRights) {
+        if let Some(entry) = self.friends.get_mut(&friend)
+            && entry.rights_granted != rights
+        {
+            entry.rights_granted = rights;
+            self.touch();
+        }
+    }
+}
+
+/// One render-ready friend row: the ids the actions need, the display name, the
+/// presence flag, and the friendship rights in both directions (the table's
+/// permission columns).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FriendRow {
+    /// The friend id (for remove / grant-rights, which take a [`FriendKey`]).
+    pub(crate) friend: FriendKey,
+    /// The agent id (for IM / teleport / mute, which take an [`AgentKey`]).
+    pub(crate) agent: AgentKey,
+    /// The display name (or a short-id placeholder until the name resolves).
+    pub(crate) name: String,
+    /// Whether the friend is currently known-online.
+    pub(crate) online: bool,
+    /// The rights this agent grants the friend (the "They can …" columns).
+    pub(crate) rights_granted: FriendRights,
+    /// The rights the friend grants this agent (the "You can …" columns).
+    pub(crate) rights_received: FriendRights,
 }

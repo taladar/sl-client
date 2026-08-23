@@ -96,8 +96,8 @@ use tracing::{debug, info, warn};
 
 use crate::avatars::AvatarState;
 use crate::objects::ObjectState;
-use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
+use crate::world_api::FriendsModel;
 
 /// The per-account file the permanent blacklist is stored in (a sibling of the
 /// account `settings.toml`). Our account directory is already per-grid and
@@ -278,7 +278,7 @@ pub(crate) struct DerenderList {
     /// The agent's own id, which the filter never hides.
     own_agent: Option<Uuid>,
     /// The friends the filter spares, mirrored from
-    /// [`FriendsModel`](crate::people::FriendsModel) so the per-object gate stays
+    /// [`FriendsModel`](crate::world_api::FriendsModel) so the per-object gate stays
     /// one hash lookup.
     friends: HashSet<Uuid>,
 }

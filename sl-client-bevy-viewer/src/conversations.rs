@@ -1838,7 +1838,7 @@ pub(crate) fn ingest_conversation_events(
     mut avatars: ResMut<crate::avatars::AvatarState>,
     identity: Res<SlIdentity>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
-    friends: Option<Res<crate::people::FriendsModel>>,
+    friends: Option<Res<crate::world_api::FriendsModel>>,
     mut sl: MessageWriter<SlCommand>,
 ) {
     for event in events.read() {

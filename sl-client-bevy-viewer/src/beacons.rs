@@ -61,10 +61,10 @@ use crate::camera::ViewerCamera;
 use crate::coords::{metres_to_f32, sl_to_bevy_vec};
 use crate::minimap::{MapTracking, TrackTarget};
 use crate::name_tag_billboard::tag_render_layers;
-use crate::people::FriendsModel;
 use crate::terrain::TerrainState;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
+use crate::world_api::FriendsModel;
 
 /// The internal handle the beacon-beam shader (`beacon_beam.wgsl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.

@@ -769,7 +769,7 @@ pub(crate) fn compose_name_tags(
     avatars: Res<crate::avatars::AvatarState>,
     statuses: Res<NameTagStatuses>,
     playback: Res<crate::animations::AnimationPlayback>,
-    friends: Option<Res<crate::people::FriendsModel>>,
+    friends: Option<Res<crate::world_api::FriendsModel>>,
     mutes: Option<Res<crate::world_api::MuteModel>>,
     groups: Option<Res<crate::groups::GroupsModel>>,
     complexity: Option<Res<crate::avatar_complexity::AvatarComplexityModel>>,

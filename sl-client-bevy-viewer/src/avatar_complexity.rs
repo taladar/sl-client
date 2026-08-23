@@ -123,9 +123,9 @@ use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::objects::{ObjectState, PrimComplexityFacts};
 use crate::particles::ObjectParticleSystem;
-use crate::people::FriendsModel;
 use crate::settings::ViewerSettings;
 use crate::textures::{TextureDecoded, TextureManager};
+use crate::world_api::FriendsModel;
 
 // ---------------------------------------------------------------------------
 // Settings.

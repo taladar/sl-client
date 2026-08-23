@@ -102,10 +102,10 @@ use crate::land_menu::OpenLandMenu;
 use crate::mutes::RequestBlock;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
-use crate::people::FriendsModel;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
+use crate::world_api::FriendsModel;
 
 /// The `element` both avatar pies attribute their [`UiAction`]s to.
 ///

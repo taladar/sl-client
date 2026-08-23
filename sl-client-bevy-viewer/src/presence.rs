@@ -546,7 +546,7 @@ fn auto_respond_to_ims(
     mut events: MessageReader<SlEvent>,
     presence: Res<PresenceState>,
     settings: Option<Res<ViewerSettings>>,
-    friends: Option<Res<crate::people::FriendsModel>>,
+    friends: Option<Res<crate::world_api::FriendsModel>>,
     mutes: Option<Res<crate::world_api::MuteModel>>,
     sets: Option<Res<ContactSets>>,
     inventory: Res<crate::inventory::InventoryModel>,

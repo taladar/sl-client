@@ -266,7 +266,7 @@ fn ingest_offers_invites(
     translator: Translator,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     presence: Option<Res<crate::presence::PresenceState>>,
-    friends: Option<Res<crate::people::FriendsModel>>,
+    friends: Option<Res<crate::world_api::FriendsModel>>,
     groups: Option<Res<crate::groups::GroupsModel>>,
     mut deferred: ResMut<DeferredOffers>,
     inventory: Res<InventoryModel>,
