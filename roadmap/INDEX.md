@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 93 |
 | ready | 256 |
-| blocked | 67 |
+| blocked | 68 |
 | in-progress | 18 |
 | bugs | 33 |
 | done | 863 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1366** |
+| **total** | **1367** |
 
 ## ideas (93)
 
@@ -819,10 +819,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
 
-## blocked (67)
+## blocked (68)
 
 ### viewer
 
+- [`build-structural-encapsulation-audit`](blocked/build-structural-encapsulation-audit.md)
+  — Audit the workspace for structural and encapsulation improvements the crate
+  split exposed (blocked by `build-split-viewer-crate`)
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
