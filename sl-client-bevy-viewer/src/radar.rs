@@ -71,7 +71,7 @@ use crate::minimap::{
     ChatRanges, MARK_COLORS, MapTracking, MinimapMarks, TrackTarget, global_from_bevy,
     origin_global,
 };
-use crate::mutes::{MuteModel, RequestBlock};
+use crate::mutes::RequestBlock;
 use crate::name_tag_content::{AWAY_ANIM, NameTagStatuses};
 use crate::notifications::ShowNotification;
 use crate::people::FriendsModel;
@@ -96,6 +96,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::MuteModel;
 
 /// The radar floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub(crate) const RADAR_FLOATER_ID: &str = "radar";

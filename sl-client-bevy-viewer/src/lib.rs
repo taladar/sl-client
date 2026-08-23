@@ -1815,7 +1815,7 @@ fn run_session(
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
         .init_resource::<AppearanceApplyBudget>()
-        .init_resource::<mutes::MuteModel>()
+        .init_resource::<world_api::MuteModel>()
         .add_message::<mutes::RequestBlock>()
         .init_resource::<name_tag_content::NameTagStatuses>()
         .init_resource::<AvatarRuntimeMorphs>()

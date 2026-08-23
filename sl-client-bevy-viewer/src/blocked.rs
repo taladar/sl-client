@@ -14,7 +14,7 @@
 //!
 //! # What it does
 //!
-//! - Lists every [`MuteEntry`] the [mute model](crate::mutes::MuteModel) holds,
+//! - Lists every [`MuteEntry`] the [mute model](crate::world_api::MuteModel) holds,
 //!   with the entry's **type** (Resident / Object / Group / By name /
 //!   external) beside its name, sorted by name or type and filtered by a name
 //!   fragment.
@@ -64,7 +64,7 @@ use crate::avatar_profile::OpenAvatarProfile;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
-use crate::mutes::{MuteModel, RequestBlock, flags_apply};
+use crate::mutes::{RequestBlock, flags_apply};
 use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -78,6 +78,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::MuteModel;
 
 /// The `element` the block list's menu / UI actions are attributed to.
 const BLOCKED_ELEMENT: &str = "blocked";

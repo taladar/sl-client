@@ -38,136 +38,13 @@
 //! landed), so matching a non-nil id ignores the name deliberately.
 
 use bevy::prelude::*;
-use std::collections::HashSet;
 
 use sl_client_bevy::{
     Command, MuteEntry, MuteFlags, MuteType, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
 use crate::notifications::ShowNotification;
-
-/// The most entries the mute list holds — the reference's `MuteListLimit`
-/// debug setting, whose default this matches. A mute past the limit is
-/// refused client-side (the server silently drops it) and reported as
-/// `MuteLimitReached`.
-pub(crate) const MUTE_LIST_LIMIT: usize = 1000;
-
-/// The agent's mute list: every muted entry (agents and objects alike — the
-/// tag colouring only ever looks up agent ids).
-#[derive(Resource, Debug, Default)]
-pub(crate) struct MuteModel {
-    /// The entries, in the order the list was received / mutes were added.
-    entries: Vec<MuteEntry>,
-    /// The non-nil muted ids, derived from [`Self::entries`] — the hot-path
-    /// `is_muted` index.
-    muted: HashSet<Uuid>,
-    /// Whether the one-per-session `RequestMuteList` has been sent.
-    requested: bool,
-    /// Bumped on every change to [`Self::entries`], so the block-list view
-    /// rebuilds exactly when the list actually moved.
-    revision: u64,
-}
-
-impl MuteModel {
-    /// Whether `id` is on the mute list at all (any aspect).
-    pub(crate) fn is_muted(&self, id: Uuid) -> bool {
-        self.muted.contains(&id)
-    }
-
-    /// Whether the aspect whose *exception* bit is `allow_mask` (one of the
-    /// `MuteFlags::ALLOW_*` constants) is actually muted for `id`: the id is on
-    /// the list **and** the entry does not carry that exception.
-    pub(crate) fn is_muted_aspect(&self, id: Uuid, allow_mask: u32) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.id == id && !entry.flags.contains(allow_mask))
-    }
-
-    /// The whole list, in display order.
-    pub(crate) fn entries(&self) -> &[MuteEntry] {
-        &self.entries
-    }
-
-    /// The list revision — a view stores the value it last built at and
-    /// rebuilds when it advances.
-    pub(crate) const fn revision(&self) -> u64 {
-        self.revision
-    }
-
-    /// Whether the list is at [`MUTE_LIST_LIMIT`] and refuses further mutes.
-    pub(crate) const fn is_full(&self) -> bool {
-        self.entries.len() >= MUTE_LIST_LIMIT
-    }
-
-    /// Whether a **by-name** entry already carries `name` (case-insensitively)
-    /// — the duplicate check a by-name block needs, since such entries share a
-    /// nil id and nothing else tells them apart. Entries with an id are not
-    /// consulted: the reference keeps its by-name mutes in a separate set, so
-    /// blocking an object *by name* is allowed even when a same-named avatar is
-    /// blocked by id.
-    fn has_by_name(&self, name: &str) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| entry.id.is_nil() && entry.name.eq_ignore_ascii_case(name))
-    }
-
-    /// The entry matching `id` / `name`, if any (see the module docs for how a
-    /// nil id falls back to the name).
-    pub(crate) fn entry(&self, id: Uuid, name: &str) -> Option<&MuteEntry> {
-        self.entries
-            .iter()
-            .find(|entry| same_target(entry, id, name))
-    }
-
-    /// Record a locally-issued mute so consumers update without waiting for a
-    /// list re-request. An existing entry for the same target is **replaced**
-    /// (that is how a flag edit lands, since it re-sends the whole entry).
-    pub(crate) fn note_mute(&mut self, entry: MuteEntry) {
-        if let Some(existing) = self
-            .entries
-            .iter_mut()
-            .find(|candidate| same_target(candidate, entry.id, &entry.name))
-        {
-            *existing = entry;
-        } else {
-            self.entries.push(entry);
-        }
-        self.reindex();
-    }
-
-    /// Record a locally-issued unmute (see [`Self::note_mute`]).
-    pub(crate) fn note_unmute(&mut self, id: Uuid, name: &str) {
-        self.entries.retain(|entry| !same_target(entry, id, name));
-        self.reindex();
-    }
-
-    /// Replace the whole list (a received `MuteList`).
-    fn replace(&mut self, entries: Vec<MuteEntry>) {
-        self.entries = entries;
-        self.reindex();
-    }
-
-    /// Rebuild the derived id index and bump the revision.
-    fn reindex(&mut self) {
-        self.muted = self
-            .entries
-            .iter()
-            .map(|entry| entry.id)
-            .filter(|id| !id.is_nil())
-            .collect();
-        self.revision = self.revision.wrapping_add(1);
-    }
-}
-
-/// Whether `entry` is the mute list's record of `id` / `name`: by id when the
-/// id is non-nil, else by case-folded name (a [`MuteType::ByName`] entry).
-fn same_target(entry: &MuteEntry, id: Uuid, name: &str) -> bool {
-    if id.is_nil() {
-        entry.id.is_nil() && entry.name.eq_ignore_ascii_case(name)
-    } else {
-        entry.id == id
-    }
-}
+use crate::world_api::{MUTE_LIST_LIMIT, MuteModel};
 
 /// Request the mute list once the session is up (the login handshake has
 /// produced an agent id).
@@ -176,10 +53,9 @@ pub(crate) fn request_mute_list(
     mut model: ResMut<MuteModel>,
     mut commands: MessageWriter<SlCommand>,
 ) {
-    if model.requested || identity.agent_id.is_none() {
+    if identity.agent_id.is_none() || !model.claim_request() {
         return;
     }
-    model.requested = true;
     commands.write(SlCommand(Command::RequestMuteList));
 }
 
