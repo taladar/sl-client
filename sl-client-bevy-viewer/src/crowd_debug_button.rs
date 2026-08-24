@@ -22,8 +22,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 
-use crate::bottom_toolbar::BottomArea;
 use crate::gpu_avatars::crowd::GpuCrowd;
+use crate::ui::BottomArea;
 use crate::ui_font::UiFont;
 
 /// The button label font size, in logical pixels — matched to the toolbar's.

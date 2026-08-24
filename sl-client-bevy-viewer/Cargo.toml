@@ -188,7 +188,6 @@ sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
 sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
-sl-gst = { path = "../sl-gst", version = "0.1.0" }
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 sl-map-apis = { version = "0.8.0" }
 sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
@@ -199,6 +198,7 @@ sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
   "encode",
 ] }
 sl-types = { workspace = true }
+sl-viewer-audio = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-media = { workspace = true }
 sl-viewer-notifications = { workspace = true }

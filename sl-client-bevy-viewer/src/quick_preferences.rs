@@ -46,7 +46,6 @@ use bevy::window::PrimaryWindow;
 use serde::{Deserialize, Serialize};
 use sl_settings::{Scope, SettingKind};
 
-use crate::bottom_toolbar::BottomArea;
 use crate::environment::{EnvironmentState, FixedEnvironment};
 use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterCommand, FloaterHandle, FloaterOp,
@@ -56,6 +55,7 @@ use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox, bound_slider};
 use crate::sky_presets::FixedSky;
+use crate::ui::BottomArea;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_element::ElementCx;
@@ -566,7 +566,9 @@ impl Plugin for QuickPreferencesPlugin {
         .add_systems(
             Update,
             (
-                spawn_quick_prefs_button,
+                // Trailing-most in the bottom area's upper-trailing slot, so it
+                // spawns after the parcel-audio and volume controls it follows.
+                spawn_quick_prefs_button.after(crate::volume_panel::spawn_volume_controls),
                 write_template,
                 anchor_quick_prefs,
                 apply_env_combos,

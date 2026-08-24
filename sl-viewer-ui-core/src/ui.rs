@@ -114,6 +114,37 @@ use bevy::ui_widgets::{Activate, Button};
 
 use crate::ui_font::{UiFont, register_ui_fonts};
 
+/// The bottom-area layout host, published so the neighbour bottom-edge controls
+/// (nearby chat bar, volume, voice, quick preferences — each its own task) parent
+/// themselves into the row just above the button bar. That row is split into two
+/// non-overlapping halves — [`upper_leading`](Self::upper_leading) and
+/// [`upper_trailing`](Self::upper_trailing) — so a control appearing in one half
+/// never reflows the other.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct BottomArea {
+    /// The bottom-anchored column that holds the whole area — the chat overlay
+    /// (`chat`) reads its measured height to sit just above it.
+    pub area: Entity,
+    /// The **leading** half of the row directly above the button bar — the
+    /// nearby-chat bar (`nearby_chat_bar`) spawns into it, so it always
+    /// rides in the same place at the bar's leading edge.
+    pub upper_leading: Entity,
+    /// The **trailing** half of that same row — the parcel music / nearby-media
+    /// cluster (`parcel_audio`) spawns into it (as will the volume, voice
+    /// and quick-prefs controls). It sits beside the chat bar, not above it, so
+    /// toggling the music cluster's visibility never moves the chat bar.
+    pub upper_trailing: Entity,
+    /// The button-bar row itself — the host a control that wants to sit directly
+    /// in the button row (rather than the upper row) parents into. The
+    /// Spawn crowd debug button uses it.
+    pub bar: Entity,
+    /// The reserved **state slot** at the bar's leading edge — a fixed-width host
+    /// the Stand Up / Stop flycam state button (`stand_stop_button`)
+    /// parents into. Its fixed width (matched by a trailing spacer) keeps the state
+    /// button from ever reflowing the centred toolbar buttons.
+    pub state_slot: Entity,
+}
+
 /// The environment variable that seeds [`UiDirection`], so the RTL mirroring can
 /// be exercised before a locale selector exists (`viewer-i18n-locale-selection`).
 const UI_DIRECTION_ENV: &str = "SL_VIEWER_UI_DIRECTION";

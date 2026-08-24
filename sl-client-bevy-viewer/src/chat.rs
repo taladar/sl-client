@@ -30,11 +30,11 @@ use sl_client_bevy::{
     AgentKey, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
 };
 
-use crate::bottom_toolbar::BottomArea;
 use crate::preferences_chat::{
     SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
 };
 use crate::settings::ViewerSettings;
+use crate::ui::BottomArea;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 

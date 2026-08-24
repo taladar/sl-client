@@ -26,10 +26,10 @@ use bevy::window::PrimaryWindow;
 use sl_audio::{AudioMixer as _, Bus, BusLevel, Mixer};
 use sl_settings::SettingValue;
 
-use crate::bottom_toolbar::BottomArea;
 use crate::i18n::Translated;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
+use crate::ui::BottomArea;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, column, row};
 use crate::ui_font::UiFont;
 
@@ -46,11 +46,11 @@ const AUDIO_SECTION: &[&str] = &["audio"];
 /// unfocused. Deliberate deviation: the reference mutes only while
 /// *minimised*; this viewer mutes on focus loss, because Wayland gives an
 /// application no reliable minimised signal — focus is the portable superset.
-/// Applied by [`apply_volume_settings_to_mixer`] as a mixer-side overlay: the
+/// Applied by `apply_volume_settings_to_mixer` as a mixer-side overlay: the
 /// stored `master_mute` setting is never written, so the bar's mute glyph
 /// does not flip, and refocusing restores the exact level (mute retains the
 /// bus gain).
-pub(crate) const SETTING_MUTE_WHEN_MINIMIZED: &str = "MuteWhenMinimized";
+pub const SETTING_MUTE_WHEN_MINIMIZED: &str = "MuteWhenMinimized";
 
 /// Slider track width in logical pixels.
 const TRACK_WIDTH: f32 = 90.0;
@@ -93,13 +93,15 @@ const fn default_gain(bus: Bus) -> f32 {
 /// The setting name for a bus's remembered linear volume (`0.0..=1.0`). Public so
 /// the parcel-stream bar can bind its inline volume slider to the **music** bus
 /// (the stream's single volume, not one in series with the bus).
-pub(crate) fn bus_volume_setting(bus: Bus) -> String {
+#[must_use]
+pub fn bus_volume_setting(bus: Bus) -> String {
     volume_key(bus)
 }
 
 /// The setting name for a bus's mute flag. Public for the parcel-stream bar's
 /// inline mute (see [`bus_volume_setting`]).
-pub(crate) fn bus_mute_setting(bus: Bus) -> String {
+#[must_use]
+pub fn bus_mute_setting(bus: Bus) -> String {
     mute_key(bus)
 }
 
@@ -115,7 +117,8 @@ fn mute_key(bus: Bus) -> String {
 
 /// The setting name of the master-volume control, for the other surfaces that
 /// bind the same value (Quick Preferences, the Preferences audio tab).
-pub(crate) fn master_volume_setting() -> String {
+#[must_use]
+pub fn master_volume_setting() -> String {
     volume_key(Bus::Master)
 }
 
@@ -158,21 +161,22 @@ struct ToggleVolumePanel;
 
 /// The volume-panel plugin: register the settings, spawn the cluster, and keep
 /// the mixer, thumbs and glyphs in sync.
-pub(crate) struct VolumePanelPlugin;
+#[derive(Debug)]
+pub struct VolumePanelPlugin;
 
 impl Plugin for VolumePanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ToggleMute>()
             .add_message::<ToggleVolumePanel>()
             .add_systems(Startup, register_volume_settings)
-            // Order the cluster between the parcel-audio bar and the quick-prefs
-            // button so `upper_trailing` lays them out (leading→trailing) as
-            // parcel-audio · volume · quick-prefs, with quick-prefs trailing-most.
+            // Order the cluster after the parcel-audio bar so `upper_trailing`
+            // lays them out (leading→trailing) as parcel-audio · volume. The
+            // quick-prefs button places itself after this one: it sits
+            // trailing-most, and stating it from there keeps the audio cluster
+            // from naming a preferences module it otherwise never touches.
             .add_systems(
                 Update,
-                spawn_volume_controls
-                    .after(crate::parcel_audio::spawn_parcel_audio_bar)
-                    .before(crate::quick_preferences::spawn_quick_prefs_button),
+                spawn_volume_controls.after(crate::parcel_audio::spawn_parcel_audio_bar),
             )
             .add_systems(
                 Update,
@@ -224,7 +228,7 @@ fn register_settings(settings: &mut ViewerSettings) {
 
 /// Spawn the volume cluster into the bottom area's trailing slot, once (the
 /// [`Local`] latch waits for the bottom toolbar's host to exist).
-fn spawn_volume_controls(
+pub fn spawn_volume_controls(
     mut commands: Commands,
     area: Option<Res<BottomArea>>,
     mut spawned: Local<bool>,

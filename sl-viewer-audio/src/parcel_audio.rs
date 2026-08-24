@@ -49,11 +49,11 @@ use sl_audio::{Bus, Mixer};
 use sl_client_bevy::SlAgentParcel;
 use sl_gst::{AudioStreamPlayer, AudioStreamState};
 
-use crate::bottom_toolbar::BottomArea;
 use crate::media_audio::MixerStream;
 use crate::media_diagnostics::MediaDiagnostics;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_slider};
+use crate::ui::BottomArea;
 use crate::ui::{LogicalInset, LogicalRect, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -68,7 +68,7 @@ const AUDIO_SECTION: &[&str] = &["audio"];
 /// Whether the parcel music stream starts automatically (the reference's
 /// streaming-music preference). Public so the preferences audio tab can bind
 /// its streaming row to the same setting.
-pub(crate) const MUSIC_ENABLED_SETTING: &str = "MusicStreamEnabled";
+pub const MUSIC_ENABLED_SETTING: &str = "MusicStreamEnabled";
 
 /// The control cluster's font size, in logical pixels.
 const BAR_FONT_SIZE: f32 = 12.0;
@@ -143,7 +143,8 @@ struct ParcelAudioUi {
 struct VolumeThumb;
 
 /// The parcel streaming-audio plugin.
-pub(crate) struct ParcelAudioPlugin;
+#[derive(Debug)]
+pub struct ParcelAudioPlugin;
 
 impl Plugin for ParcelAudioPlugin {
     fn build(&self, app: &mut App) {
@@ -643,7 +644,7 @@ fn drive_volume_thumb(
 /// title, the play and mute buttons and the volume slider at half — static,
 /// so the bar is swept across scripts / sizes / directions like every
 /// element ([`crate::ui_element`]).
-pub(crate) fn spawn_parcel_audio_specimen(
+pub fn spawn_parcel_audio_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

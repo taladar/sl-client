@@ -78,7 +78,9 @@ use crate::minimap::MINIMAP_FLOATER_ID;
 use crate::nearby_chat_bar::NearbyChatBar;
 use crate::search::SEARCH_FLOATER_ID;
 use crate::snapshot_floater::SNAPSHOT_FLOATER_ID;
-use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
+use crate::ui::{
+    BottomArea, LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row,
+};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::world_map::WORLD_MAP_FLOATER_ID;
@@ -331,37 +333,6 @@ struct ToolbarButton {
     /// The label text node, so [`update_toolbar_button_states`] can dim it in the
     /// disabled state.
     label: Entity,
-}
-
-/// The bottom-area layout host, published so the neighbour bottom-edge controls
-/// (nearby chat bar, volume, voice, quick preferences — each its own task) parent
-/// themselves into the row just above the button bar. That row is split into two
-/// non-overlapping halves — [`upper_leading`](Self::upper_leading) and
-/// [`upper_trailing`](Self::upper_trailing) — so a control appearing in one half
-/// never reflows the other.
-#[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct BottomArea {
-    /// The bottom-anchored column that holds the whole area — the chat overlay
-    /// ([`crate::chat`]) reads its measured height to sit just above it.
-    pub(crate) area: Entity,
-    /// The **leading** half of the row directly above the button bar — the
-    /// nearby-chat bar ([`crate::nearby_chat_bar`]) spawns into it, so it always
-    /// rides in the same place at the bar's leading edge.
-    pub(crate) upper_leading: Entity,
-    /// The **trailing** half of that same row — the parcel music / nearby-media
-    /// cluster ([`crate::parcel_audio`]) spawns into it (as will the volume, voice
-    /// and quick-prefs controls). It sits beside the chat bar, not above it, so
-    /// toggling the music cluster's visibility never moves the chat bar.
-    pub(crate) upper_trailing: Entity,
-    /// The button-bar row itself — the host a control that wants to sit directly
-    /// in the button row (rather than the upper row) parents into. The
-    /// [Spawn crowd debug button](crate::crowd_debug_button) uses it.
-    pub(crate) bar: Entity,
-    /// The reserved **state slot** at the bar's leading edge — a fixed-width host
-    /// the Stand Up / Stop flycam state button ([`crate::stand_stop_button`])
-    /// parents into. Its fixed width (matched by a trailing spacer) keeps the state
-    /// button from ever reflowing the centred toolbar buttons.
-    pub(crate) state_slot: Entity,
 }
 
 /// The bottom toolbar's runtime: spawn the bar, route its presses, and keep each

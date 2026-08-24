@@ -3,7 +3,7 @@
 //! side-signals the simulator already sends but the viewer never consumed.
 //!
 //! The receive protocol (`protocol-22`) is done and rides in on
-//! [`SlEvent`](sl_client_bevy::SlEvent):
+//! [`SlEvent`]:
 //!
 //! - [`SlSessionEvent::SoundTrigger`] — a fire-and-forget spatial one-shot at a
 //!   given region position and gain.
@@ -17,22 +17,22 @@
 //!   triggered, so the trigger is not late.
 //!
 //! Everything plays through the one shared [`Mixer`] on its [`Bus::Sfx`], decoded
-//! once by the [`SoundCache`](crate::sound_cache::SoundCache) and spatialised
+//! once by the [`SoundCache`] and spatialised
 //! against the listener the camera drives. The mixer's own source cap and
 //! priority eviction (`sl_audio`'s [`VoicePool`](sl_audio::VoicePool)) handle the
 //! "SL asks for more sounds than any device wants" problem, so this module never
 //! has to cap voices itself.
 //!
 //! Muting is honoured up front: a sound whose owner **or** object is on the mute
-//! list ([`MuteModel`](crate::world_api::MuteModel)) is never started.
+//! list ([`MuteModel`]) is never started.
 //!
 //! **Parcel-local sound** (`SOUND_LOCAL`) is honoured through
-//! [`ParcelAudibility`], the reference viewer's `LLViewerParcelMgr::canHearSound`
+//! `ParcelAudibility`, the reference viewer's `LLViewerParcelMgr::canHearSound`
 //! reduced to the data we decode: a one-shot the agent cannot hear is dropped,
 //! and an inaudible attached sound is driven to silence (kept time-coherent, it
 //! returns when the agent re-enters the parcel).
 //!
-//! **Collision sounds** ([`ingest_collisions`]): a scripted `llCollisionSound`
+//! **Collision sounds** (`ingest_collisions`): a scripted `llCollisionSound`
 //! already arrives as an ordinary [`SoundTrigger`](SlSessionEvent::SoundTrigger)
 //! and needs nothing extra, so this module adds the viewer-*synthesized* layer —
 //! a material-default sound when two physical prims meet, detected each frame by
@@ -69,10 +69,10 @@ use crate::world_api::MuteModel;
 const AUDIO_SECTION: &[&str] = &["audio"];
 
 /// The reference `EnableCollisionSounds` setting name: whether the
-/// viewer-synthesized material collision sounds ([`ingest_collisions`]) play.
+/// viewer-synthesized material collision sounds (`ingest_collisions`) play.
 /// On by default, like the reference. Scripted `llCollisionSound`s arrive as
 /// ordinary `SoundTrigger`s and are deliberately not gated by this.
-pub(crate) const SETTING_COLLISION_SOUNDS: &str = "EnableCollisionSounds";
+pub const SETTING_COLLISION_SOUNDS: &str = "EnableCollisionSounds";
 
 /// The parcel-local (`SOUND_LOCAL`) audibility check, grouped so the sound
 /// systems take one param rather than three. Mirrors the reference viewer's
@@ -191,7 +191,7 @@ pub(crate) struct WorldSounds {
     touching_pairs: HashSet<(u64, u64)>,
 }
 
-/// Ingest the four sound events into [`WorldSounds`] and prefetch their clips.
+/// Ingest the four sound events into `WorldSounds` and prefetch their clips.
 ///
 /// This has no access to the [`Mixer`] (an ingest system, not the audio pump);
 /// it only records intent and requests decodes. [`drive_world_sounds`] turns that
@@ -603,10 +603,11 @@ pub(crate) fn ingest_collisions(
         .retain(|_, last| now - *last < COLLISION_COOLDOWN_SECONDS * 8.0);
 }
 
-/// The in-world-sounds plugin: the [`WorldSounds`] state, the event ingest, and
+/// The in-world-sounds plugin: the `WorldSounds` state, the event ingest, and
 /// the per-frame drive that plays / follows / reaps the voices. The drive runs
 /// after the ingest so a sound triggered this frame is considered the same frame.
-pub(crate) struct WorldSoundsPlugin;
+#[derive(Debug)]
+pub struct WorldSoundsPlugin;
 
 impl Plugin for WorldSoundsPlugin {
     fn build(&self, app: &mut App) {

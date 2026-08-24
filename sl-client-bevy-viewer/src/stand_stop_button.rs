@@ -24,7 +24,7 @@
 //! The reference floats its stand panel in the bottom-centre tray, where it
 //! collides with the bottom-left conversation dock. We instead host it in a
 //! fixed-width **reserved slot** the bottom toolbar
-//! ([`BottomArea::state_slot`](crate::bottom_toolbar::BottomArea::state_slot))
+//! ([`BottomArea::state_slot`](crate::ui::BottomArea::state_slot))
 //! carves out at the button group's leading edge, balanced by a trailing spacer so
 //! the button's coming and going never reflows the toolbar and never intrudes on
 //! the dock.
@@ -39,9 +39,9 @@ use bevy::ui_widgets::{Activate, Button};
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
 use crate::avatar_menu::SelfGroundSit;
-use crate::bottom_toolbar::BottomArea;
 use crate::camera::{CameraMode, CameraRig, FocusTarget, ViewerCamera};
 use crate::i18n::Translated;
+use crate::ui::BottomArea;
 use crate::ui_font::UiFont;
 
 /// The state-button label font size, in logical pixels — matched to the toolbar's.

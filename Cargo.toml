@@ -39,6 +39,7 @@ members = [
   "sl-terrain",
   "sl-texture",
   "sl-tree",
+  "sl-viewer-audio",
   "sl-viewer-kit",
   "sl-viewer-media",
   "sl-viewer-notifications",
@@ -105,6 +106,7 @@ sl-proto = { path = "sl-proto", version = "0.1.0" }
 sl-repl = { path = "sl-repl", version = "0.1.0" }
 sl-settings = { path = "sl-settings", version = "0.1.0" }
 sl-types = { version = "0.8.0" }
+sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
 sl-viewer-media = { path = "sl-viewer-media", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }

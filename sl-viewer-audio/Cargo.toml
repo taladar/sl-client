@@ -1,0 +1,40 @@
+[package]
+name = "sl-viewer-audio"
+description = "The Second Life / OpenSim viewer's audio surfaces: in-world sound effects, the parcel music and media bar, and the volume panel"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "audio"]
+categories = ["game-development", "multimedia::audio"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+sl-audio = { path = "../sl-audio", version = "0.1.0" }
+sl-client-bevy = { workspace = true, features = [
+  "bevy_pbr",
+] }
+sl-gst = { path = "../sl-gst", version = "0.1.0" }
+sl-settings = { path = "../sl-settings", version = "0.1.0" }
+sl-viewer-kit = { workspace = true }
+sl-viewer-media = { workspace = true }
+sl-viewer-platform = { workspace = true }
+sl-viewer-settings = { workspace = true }
+sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-widgets = { workspace = true }
+sl-viewer-world = { workspace = true }
+sl-viewer-world-api = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

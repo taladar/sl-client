@@ -70,7 +70,7 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
-use crate::bottom_toolbar::{BOTTOM_BAR_Z, BottomArea};
+use crate::bottom_toolbar::BOTTOM_BAR_Z;
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
@@ -79,6 +79,7 @@ use crate::i18n::{TransArgs, Translator};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
+use crate::ui::BottomArea;
 use crate::ui::{
     LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column, row,
 };

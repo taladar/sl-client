@@ -18,7 +18,7 @@
 //!   `MediaSoundsEarLocation`): whether the listener's *position* is the
 //!   camera's or the avatar's. The reference switches only the position — the
 //!   orientation always stays the camera's (`llvieweraudio.cpp`,
-//!   `audio_update_listener`), and [`resolve_listener`] mirrors that. The
+//!   `audio_update_listener`), and `resolve_listener` mirrors that. The
 //!   avatar position is the body-root anchor's current-frame local
 //!   [`Transform`] (a top-level entity whose local *is* its world pose — the
 //!   [`crate::camera`] `own_avatar_pose` idiom; the frame-late
@@ -45,17 +45,17 @@ const AUDIO_SECTION: &[&str] = &["audio"];
 
 /// The reference `MediaSoundsEarLocation` setting name: where the ears are —
 /// `0` the camera position (the default), `1` the avatar position.
-pub(crate) const SETTING_EAR_LOCATION: &str = "MediaSoundsEarLocation";
+pub const SETTING_EAR_LOCATION: &str = "MediaSoundsEarLocation";
 /// The default ear location: the camera (the reference default).
 const DEFAULT_EAR_LOCATION: u32 = 0;
 
 /// The output-device setting name: the audio output device to open, by its
 /// reported name, or empty for the system default.
-pub(crate) const SETTING_OUTPUT_DEVICE: &str = "AudioOutputDevice";
+pub const SETTING_OUTPUT_DEVICE: &str = "AudioOutputDevice";
 
 /// Register this module's persisted settings. Called from
 /// [`ViewerSettings`]'s `load`.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         AUDIO_SECTION,
         SETTING_EAR_LOCATION,
@@ -75,7 +75,8 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
 /// ear-position preference), applies the output-device preference, and pumps
 /// the mixer once per frame. If the device cannot be opened the viewer still
 /// runs — every audio system guards on the mixer being present.
-pub(crate) struct AudioPlugin;
+#[derive(Debug)]
+pub struct AudioPlugin;
 
 impl Plugin for AudioPlugin {
     /// Create the mixer (device + graph) and wire the per-frame pump. The

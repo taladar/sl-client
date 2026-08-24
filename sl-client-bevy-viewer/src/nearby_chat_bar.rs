@@ -9,7 +9,7 @@
 //! this module only does the three things a *live* bar adds:
 //!
 //! 1. **Placement** — one widget spawned into the bottom area's leading upper
-//!    slot ([`crate::bottom_toolbar::BottomArea::upper_leading`]), so it always
+//!    slot ([`crate::ui::BottomArea::upper_leading`]), so it always
 //!    rides just above the toolbar buttons at their leading edge, beside (not
 //!    stacked with) the trailing-half controls.
 //! 2. **Send** — the widget's session-free [`LocalChatSubmit`] mapped to
@@ -39,11 +39,11 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{Command, SlCommand};
 
-use crate::bottom_toolbar::BottomArea;
 use crate::chat_input::ChatInputSpec;
 use crate::input_context::world_has_keyboard;
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::typing::TypingState;
+use crate::ui::BottomArea;
 use crate::ui::row;
 
 /// The bar's least width, in logical pixels — a floor so it stays usable on a very

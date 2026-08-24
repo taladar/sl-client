@@ -8503,7 +8503,6 @@ dependencies = [
  "sl-cef",
  "sl-client-bevy",
  "sl-emoji",
- "sl-gst",
  "sl-l10n",
  "sl-map-apis",
  "sl-mesh",
@@ -8514,6 +8513,7 @@ dependencies = [
  "sl-terrain",
  "sl-texture",
  "sl-types",
+ "sl-viewer-audio",
  "sl-viewer-kit",
  "sl-viewer-media",
  "sl-viewer-notifications",
@@ -8986,6 +8986,27 @@ dependencies = [
  "strum",
  "thiserror 2.0.19",
  "uuid",
+]
+
+[[package]]
+name = "sl-viewer-audio"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-audio",
+ "sl-client-bevy",
+ "sl-gst",
+ "sl-settings",
+ "sl-viewer-kit",
+ "sl-viewer-media",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "url",
 ]
 
 [[package]]
