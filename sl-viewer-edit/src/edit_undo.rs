@@ -40,7 +40,7 @@
 //! `LLSelectMgr` being the edit-menu handler, i.e. while building). A node whose
 //! `ObjectProperties` reply has not yet arrived counts as permitted
 //! (optimistic), like [`crate::edit_link`]; the simulator is the final arbiter.
-//! The Build-menu entries grey out when these fail ([`crate::menu_bar`]), and
+//! The Build-menu entries grey out when these fail (`crate::menu_bar`), and
 //! the shortcut path re-checks before sending.
 //!
 //! Reference (Firestorm, read-only): `llselectmgr` `undo` / `redo`,
@@ -57,10 +57,10 @@ use crate::world_api::EditToolState;
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// The Build-menu action string the Undo entry emits.
-pub(crate) const UNDO_ACTION: &str = "undo-objects";
+pub const UNDO_ACTION: &str = "undo-objects";
 
 /// The Build-menu action string the Redo entry emits.
-pub(crate) const REDO_ACTION: &str = "redo-objects";
+pub const REDO_ACTION: &str = "redo-objects";
 
 /// Whether the agent may **modify** this selected object — the reference's
 /// `permModify`. A node whose `ObjectProperties` reply has not yet arrived
@@ -83,7 +83,8 @@ fn node_movable(node: &SelectedNode) -> bool {
 /// selected object is modifiable **or** movable. (The reference also excludes
 /// `isPermanentEnforced` objects; the viewer does not track that flag, so a rare
 /// permanent object would send an undo the simulator simply ignores.)
-pub(crate) fn can_undo(selection: &SelectionSet, tool: &EditToolState) -> bool {
+#[must_use]
+pub fn can_undo(selection: &SelectionSet, tool: &EditToolState) -> bool {
     tool.active
         && !selection.is_empty()
         && selection
@@ -94,7 +95,7 @@ pub(crate) fn can_undo(selection: &SelectionSet, tool: &EditToolState) -> bool {
 /// Whether the current selection can be **redone** — the reference's `canRedo`
 /// (`getFirstEditableObject`): the build tool is active and at least one selected
 /// object is modifiable.
-pub(crate) fn can_redo(selection: &SelectionSet, tool: &EditToolState) -> bool {
+pub fn can_redo(selection: &SelectionSet, tool: &EditToolState) -> bool {
     tool.active && !selection.is_empty() && selection.iter().any(node_modifiable)
 }
 
@@ -145,7 +146,7 @@ fn redo_selection(
 
 /// The plugin wiring object undo / redo into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditUndoPlugin;
+pub struct EditUndoPlugin;
 
 impl Plugin for EditUndoPlugin {
     /// Register the undo / redo driver.

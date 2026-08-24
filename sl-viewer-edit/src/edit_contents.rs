@@ -8,15 +8,15 @@
 //! Both windows show the *same* thing — a prim's task inventory
 //! ([`TaskInventoryItem`]s) as a virtualized list ([`crate::virtual_list`]) — so
 //! the row pool, the model cache, and the fetch driver are shared and each
-//! surface is just a [`ContentsSurface`] tag on its viewport:
+//! surface is just a `ContentsSurface` tag on its viewport:
 //!
-//! - [`ContentsSurface::BuildTab`] — docked into the Build floater's Content
-//!   tab page ([`crate::edit_tool::BuildTabPages::content`]). It follows the
+//! - `ContentsSurface::BuildTab` — docked into the Build floater's Content
+//!   tab page (`crate::edit_tool::BuildTabPages::content`). It follows the
 //!   build selection: the currently-selected prim, which in *edit linked parts*
 //!   mode ([`EditToolState::edit_linked`]) is an individual linkset member and
 //!   otherwise the linkset root. It offers the editing actions (new script,
 //!   rename, remove, drag-in add) gated by permission.
-//! - [`ContentsSurface::OpenFloater`] — a separate window opened by the object
+//! - `ContentsSurface::OpenFloater` — a separate window opened by the object
 //!   pie's **Open** action (the reference viewer's `LLFloaterOpenObject`). It
 //!   lists a picked object's contents and offers **Copy To Inventory** /
 //!   **Copy And Wear**, which move the contents into the agent's inventory.
@@ -25,7 +25,7 @@
 //!
 //! Fetching a prim's inventory is a round trip (a `RequestTaskInventory`, then a
 //! legacy `Xfer` download of the listing — see [`Command::FetchTaskInventory`]),
-//! so it can be slow. [`TaskInventoryCache`] keeps every fetched listing keyed by
+//! so it can be slow. `TaskInventoryCache` keeps every fetched listing keyed by
 //! the prim's [`ObjectKey`] for the whole session, so stepping the ◀ ▶ linked-part
 //! nav through a linkset re-shows an already-loaded prim's contents with no wire
 //! traffic. A prim is fetched once on first view (or on an explicit **Refresh**);
@@ -37,13 +37,13 @@
 //! The reference distinguishes the **object's** permissions (`permModify` /
 //! `permYouOwner` / `flagAllowInventoryAdd`) from each **content item's** own
 //! permission masks, and gates each action on the right one
-//! ([`ContentsPerms`]):
+//! (`ContentsPerms`):
 //!
 //! - **Add** (drag-in / new script): the object is modifiable **or** flagged
 //!   "allow anyone to add inventory" ([`ObjectState::agent_allows_inventory_drop`]),
 //!   the one documented exception to needing object modify.
 //! - **Remove**: offered when you can modify **or own** the object
-//!   ([`ContentsPerms::can_remove_menu`]), but only actually applied with object
+//!   (`ContentsPerms::can_remove_menu`), but only actually applied with object
 //!   **modify** — an owner-without-modify gets the reference's
 //!   "can't modify content in a no-modify object" notice.
 //! - **Rename**: offered when you can modify **or own** the object, but only
@@ -486,13 +486,13 @@ struct OpenObjectFloaterState {
 }
 
 /// A request to open the Object Contents floater against a picked object, sent
-/// by the object menu's **Open** action ([`crate::object_menu`]).
+/// by the object menu's **Open** action (`crate::object_menu`).
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenObjectContents {
+pub struct OpenObjectContents {
     /// The region-scoped id of the picked object.
-    pub(crate) scoped: ScopedObjectId,
+    pub scoped: ScopedObjectId,
     /// The grid-wide key of the picked object.
-    pub(crate) full: ObjectKey,
+    pub full: ObjectKey,
 }
 
 /// Marks a viewport as a contents list, carrying which surface it is, so the
@@ -535,7 +535,7 @@ enum ContentsAction {
 
 /// The plugin wiring the contents tab + floater into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditContentsPlugin;
+pub struct EditContentsPlugin;
 
 impl Plugin for EditContentsPlugin {
     /// Register the cache / views / selection resources, spawn both surfaces,

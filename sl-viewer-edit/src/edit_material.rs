@@ -7,7 +7,7 @@
 //! # Model
 //!
 //! - The three selector widgets (matmedia combo, material-type radio, pbr-type
-//!   radio) and the shared [`MatModeState`] / [`ShowWhen`] visibility live in
+//!   radio) and the shared [`MatModeState`] / `ShowWhen` visibility live in
 //!   [`crate::edit_texture`]; this module spawns and drives the per-channel
 //!   editors that appear under them.
 //! - **Blinn-Phong (`LLMaterial`)**: the normal / specular map swatches, their
@@ -564,11 +564,11 @@ struct MatShown {
 
 /// The plugin wiring the material channels into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditMaterialPlugin;
+pub struct EditMaterialPlugin;
 
 impl Plugin for EditMaterialPlugin {
     /// Run the material-channel sync + commit systems (the widgets are spawned by
-    /// [`spawn_material_channels`], called from the Texture-tab spawn).
+    /// `spawn_material_channels`, called from the Texture-tab spawn).
     fn build(&self, app: &mut App) {
         app.init_resource::<MatShownSnapshot>()
             .init_resource::<LegacyPreview>()

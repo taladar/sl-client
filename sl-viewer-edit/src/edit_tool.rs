@@ -59,7 +59,7 @@ pub(crate) const TOOL_FONT_SIZE: f32 = 13.0;
 
 /// The build-tools floater's stable [`crate::floater::Floater::id`], the key
 /// the openers (toolbar, menu bar, object pie) look the panel up by.
-pub(crate) const BUILD_TOOLS_FLOATER_ID: &str = "build-tools";
+pub const BUILD_TOOLS_FLOATER_ID: &str = "build-tools";
 
 /// The width of a numeric transform field, in `"0"`-glyph advances.
 const FIELD_WIDTH_GLYPHS: f32 = 8.0;
@@ -230,7 +230,7 @@ pub(crate) struct BuildTabPages {
 
 /// The plugin wiring the build tool into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditToolPlugin;
+pub struct EditToolPlugin;
 
 impl Plugin for EditToolPlugin {
     /// Register the tool state, spawn the floater, and run the sync systems.
@@ -1375,7 +1375,7 @@ fn commit_numeric_fields(
 /// Spawn the gallery specimen of the Build Tools panel: the static shape —
 /// tool buttons, a toggle row, and one numeric transform row — with no live
 /// behaviour, for the no-login gallery and the `ui_test` matrix.
-pub(crate) fn spawn_build_tools_specimen(
+pub fn spawn_build_tools_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
@@ -1491,7 +1491,8 @@ pub(crate) fn spawn_build_tools_specimen(
 /// Run condition: true while the build tool is **inactive** — the gate that
 /// hands the left click back to the touch pick
 /// ([`crate::hud_pick::pick_and_touch`]) outside edit mode.
-pub(crate) fn edit_tool_inactive(state: Res<EditToolState>) -> bool {
+#[must_use]
+pub fn edit_tool_inactive(state: Res<EditToolState>) -> bool {
     !state.active
 }
 

@@ -192,7 +192,8 @@ struct MatEdit {
 }
 
 /// The material-editor plugin.
-pub(crate) struct EditMaterialAssetPlugin;
+#[derive(Debug)]
+pub struct EditMaterialAssetPlugin;
 
 impl Plugin for EditMaterialAssetPlugin {
     /// Register the open message, state and systems; spawn the hidden floater.

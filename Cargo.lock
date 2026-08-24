@@ -8510,6 +8510,7 @@ dependencies = [
  "sl-texture",
  "sl-types",
  "sl-viewer-audio",
+ "sl-viewer-edit",
  "sl-viewer-inventory",
  "sl-viewer-kit",
  "sl-viewer-map",
@@ -9007,6 +9008,24 @@ dependencies = [
  "sl-viewer-world",
  "sl-viewer-world-api",
  "url",
+]
+
+[[package]]
+name = "sl-viewer-edit"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "bevy_fluent",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-viewer-inventory",
+ "sl-viewer-kit",
+ "sl-viewer-pickers",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
 ]
 
 [[package]]

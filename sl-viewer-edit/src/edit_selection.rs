@@ -8,7 +8,7 @@
 //! - [`SelectionSet`] is the shared state: the ordered list of selected
 //!   objects (the **primary** — the one the numeric fields and local-frame
 //!   gizmos follow — is the most recently added), each carrying the
-//!   [`ObjectProperties`] the simulator returned for it (permission masks,
+//!   `ObjectProperties` the simulator returned for it (permission masks,
 //!   names, owner), plus the tentative set a rubber-band drag is sweeping.
 //! - While the build tool ([`crate::edit_tool`]) is active, a **left click**
 //!   in the world selects the object under the cursor — the whole linkset by
@@ -23,13 +23,13 @@
 //!   Only in-world volume objects (prims / sculpts / meshes) are swept —
 //!   avatars, trees, grass, and worn attachments are not rubber-band
 //!   selectable, matching the reference.
-//! - The **wire side** ([`sync_selection_wire`]): every object added to the
+//! - The **wire side** (`sync_selection_wire`): every object added to the
 //!   set is sent in an `ObjectSelect` ([`Command::RequestObjectProperties`]),
 //!   whose `ObjectProperties` reply is folded back onto the node; every
 //!   object removed is sent in an `ObjectDeselect`. A simulator-forced
 //!   selection (`ForceObjectSelect`) replaces or extends the set, and an
 //!   object killed out of the scene is pruned.
-//! - The **highlight** ([`apply_selection_highlight`]): every face mesh of a
+//! - The **highlight** (`apply_selection_highlight`): every face mesh of a
 //!   selected object (and its linkset children) gets a translucent unlit
 //!   overlay child sharing its mesh — a simpler stand-in for the reference's
 //!   silhouette edge rendering (`generateSilhouette`), deliberately not a
@@ -269,7 +269,7 @@ struct WireSelection {
 
 /// The plugin wiring the selection core into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditSelectionPlugin;
+pub struct EditSelectionPlugin;
 
 impl Plugin for EditSelectionPlugin {
     /// Register the selection state and its systems. The pointer gesture runs
@@ -1283,8 +1283,8 @@ fn collect_own_face_ids(
 /// primary root. A root the viewer cannot resolve is kept as-is. Returns
 /// whether anything changed.
 ///
-/// A promoted node drops its part's [`ObjectProperties`]; the wire diff
-/// ([`sync_selection_wire`]) then selects the root and re-requests them.
+/// A promoted node drops its part's `ObjectProperties`; the wire diff
+/// (`sync_selection_wire`) then selects the root and re-requests them.
 pub(crate) fn promote_selection_to_roots(
     selection: &mut SelectionSet,
     objects: &ObjectState,

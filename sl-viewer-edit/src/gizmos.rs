@@ -13,7 +13,7 @@
 //!   the handles: two-headed axis arrows + planar pads (move), axis rings
 //!   (rotate), face + corner cubes (stretch).
 //! - The rig renders through its **own overlay camera** (a child of the main
-//!   camera on [`EDIT_GIZMO_RENDER_LAYER`], drawn between the world and the
+//!   camera on `EDIT_GIZMO_RENDER_LAYER`, drawn between the world and the
 //!   HUD) so handles are never occluded by scene geometry, the reference's
 //!   always-on-top manipulator rendering.
 //! - **Dragging** intersects the mouse ray with the reference viewer's drag
@@ -1128,7 +1128,7 @@ struct BuiltRig {
 
 /// The plugin wiring the transform gizmos into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditGizmoPlugin;
+pub struct EditGizmoPlugin;
 
 impl Plugin for EditGizmoPlugin {
     /// Register the gizmo resources and systems.

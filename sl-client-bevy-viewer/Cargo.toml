@@ -193,6 +193,7 @@ sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
 ] }
 sl-types = { workspace = true }
 sl-viewer-audio = { workspace = true }
+sl-viewer-edit = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-map = { workspace = true }

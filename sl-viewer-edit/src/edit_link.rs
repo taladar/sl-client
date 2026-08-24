@@ -17,7 +17,7 @@
 //!
 //! Our [`SelectionSet`] keeps the primary (last-selected) node **last** in
 //! insertion order, so the link order is simply the selection **reversed**:
-//! primary first, then back through the earlier picks. [`link_order`] does
+//! primary first, then back through the earlier picks. `link_order` does
 //! exactly that — it must never re-sort the set (e.g. into id order), or the
 //! wrong prim becomes root.
 //!
@@ -37,9 +37,9 @@
 //! at least two selected roots, and at least one modifiable object; unlink needs
 //! at least one modifiable object (attachments are already kept out of the set
 //! by the selection core). The Build-menu entries grey out when these fail
-//! ([`crate::menu_bar`]), and the shortcut path re-checks before sending. The
+//! (`crate::menu_bar`), and the shortcut path re-checks before sending. The
 //! per-linkset prim **limit** is not part of the enable gate (the reference
-//! checks it only at link time, in `linkObjects`); [`link_selection`] enforces
+//! checks it only at link time, in `linkObjects`); `link_selection` enforces
 //! it before sending.
 //!
 //! Reference (Firestorm, read-only): `llselectmgr` `linkObjects` / `sendLink`,
@@ -56,10 +56,10 @@ use crate::world_api::EditToolState;
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// The Build-menu action string the Link entry emits.
-pub(crate) const LINK_ACTION: &str = "link-objects";
+pub const LINK_ACTION: &str = "link-objects";
 
 /// The Build-menu action string the Unlink entry emits.
-pub(crate) const UNLINK_ACTION: &str = "unlink-objects";
+pub const UNLINK_ACTION: &str = "unlink-objects";
 
 /// The most prims one linkset may hold — a root plus the reference's
 /// `MAX_CHILDREN_PER_TASK` (255) children. A link whose combined prim count
@@ -91,7 +91,7 @@ pub(crate) fn link_order(selection: &SelectionSet) -> Vec<ScopedObjectId> {
 /// Whether the current selection can be **linked** — the reference's
 /// `enableLinkObjects`: whole-linkset (not edit-linked-parts) mode, at least two
 /// selected roots, and at least one modifiable object.
-pub(crate) fn can_link(selection: &SelectionSet, tool: &EditToolState) -> bool {
+pub fn can_link(selection: &SelectionSet, tool: &EditToolState) -> bool {
     !tool.edit_linked && selection.len() >= 2 && selection.iter().any(node_modifiable)
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn can_link(selection: &SelectionSet, tool: &EditToolState) -> bool {
 /// `enableUnlinkObjects`: at least one modifiable selected object. Attachments
 /// (which the reference also excludes) never enter the selection set, so no
 /// extra guard is needed here.
-pub(crate) fn can_unlink(selection: &SelectionSet) -> bool {
+pub fn can_unlink(selection: &SelectionSet) -> bool {
     !selection.is_empty() && selection.iter().any(node_modifiable)
 }
 
@@ -191,7 +191,7 @@ fn unlink_selection(
 
 /// The plugin wiring linking / unlinking into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditLinkPlugin;
+pub struct EditLinkPlugin;
 
 impl Plugin for EditLinkPlugin {
     /// Register the link / unlink driver.

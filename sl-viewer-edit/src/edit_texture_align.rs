@@ -8,7 +8,7 @@
 //!
 //! The reference computes, for each face, a **planar projection frame** — a
 //! rotation and a scale derived from the face's normal and tangent
-//! ([`face_projection`], a port of `LLFace::getPlanarProjectedParams` reduced to
+//! (`face_projection`, a port of `LLFace::getPlanarProjectedParams` reduced to
 //! what a single object needs: the per-face `face_pos` the reference reads is the
 //! object's world position, identical for every face, so the inter-face
 //! translation term is zero and the object world transform cancels out of the

@@ -8,10 +8,10 @@
 //! # Model
 //!
 //! - Every widget reads the **primary selection**'s representative face: the
-//!   object's decoded [`TextureEntry`](sl_client_bevy::TextureEntry)
+//!   object's decoded [`TextureEntry`]
 //!   ([`ObjectState::texture_entry_of`]) indexed by the lowest selected face (or
 //!   face 0 for a whole-object selection). Widgets rewrite only when that
-//!   snapshot **changes** ([`TexShownSnapshot`]), so a just-committed edit is
+//!   snapshot **changes** (`TexShownSnapshot`), so a just-committed edit is
 //!   not clobbered back to the pre-echo value while the simulator's confirming
 //!   `ObjectUpdate` is in flight.
 //! - A **commit** touches exactly one texture-entry attribute (the reference's
@@ -446,7 +446,7 @@ struct TexFieldFocus {
 
 /// The plugin wiring the Texture tab into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditTexturePlugin;
+pub struct EditTexturePlugin;
 
 impl Plugin for EditTexturePlugin {
     /// Spawn the Texture-tab widgets (after the build floater's tab pages exist)
@@ -614,7 +614,7 @@ struct ModeSelectors {
 }
 
 /// Spawn the matmedia tab strip, the material-type radio and the pbr-type radio,
-/// returning their entities. The radios each carry their own [`ShowWhen`] so the
+/// returning their entities. The radios each carry their own `ShowWhen` so the
 /// material-type radio hides in PBR mode and the pbr-type radio hides in Material
 /// mode, mirroring the reference `updateVisibility`.
 fn spawn_mode_selectors(
@@ -939,7 +939,7 @@ fn spawn_tex_field(commands: &mut Commands, parent: Entity, field: TexField, tab
 }
 
 /// Spawn one Texture-tab toggle row (check glyph + label); returns the toggle
-/// row so the caller can tag it (e.g. with a [`ShowWhen`]).
+/// row so the caller can tag it (e.g. with a `ShowWhen`).
 fn spawn_tex_toggle(
     commands: &mut Commands,
     parent: Entity,
@@ -1010,7 +1010,7 @@ fn spawn_tex_combo(commands: &mut Commands, parent: Entity, cycle: TexCycle, tab
 }
 
 /// Spawn the Align-planar-faces action button; returns the button entity so the
-/// caller can tag it (e.g. with a [`ShowWhen`]).
+/// caller can tag it (e.g. with a `ShowWhen`).
 fn spawn_align_button(commands: &mut Commands, parent: Entity, tab_index: &mut i32) -> Entity {
     let index = *tab_index;
     *tab_index = tab_index.saturating_add(1);

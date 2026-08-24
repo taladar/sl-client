@@ -11,7 +11,7 @@
 //!   ([`crate::world_api::SelectionSet`]) through
 //!   [`ObjectState::edit_data`] (shape / flags / material / extra params) and
 //!   the node's `ObjectProperties` (name / description). Widgets rewrite only
-//!   when that snapshot **changes** ([`ShownSnapshot`]), so a just-committed
+//!   when that snapshot **changes** (`ShownSnapshot`), so a just-committed
 //!   edit is not clobbered back to the pre-echo value while the simulator's
 //!   confirming `ObjectUpdate` is in flight.
 //! - **Commits** mirror the reference viewer's message split: name /
@@ -27,7 +27,7 @@
 //!   `llpanelobject.cpp`): for a sphere / torus / tube / ring the "Path Cut"
 //!   row edits the *path* begin/end and the advanced row ("Dimple" / "Profile
 //!   Cut") the *profile* begin/end; for a box / cylinder / prism it is exactly
-//!   reversed ("Slice" = path). [`ShapeField`] display values likewise scale
+//!   reversed ("Slice" = path). `ShapeField` display values likewise scale
 //!   twist by ±180° on a linear path and ±360° on a circular one, show hollow
 //!   as a percentage, and show the box-family taper as `1 − ratio`.
 //! - Deliberate deviations from the reference, pending their own tasks: the
@@ -1993,7 +1993,7 @@ struct ShownSnapshot {
     shown: Option<SnapshotData>,
 }
 
-/// See [`ShownSnapshot`].
+/// See `ShownSnapshot`.
 #[derive(Debug, Clone, PartialEq)]
 struct SnapshotData {
     /// The primary selection's scoped id.
@@ -2065,7 +2065,7 @@ struct ParamFieldFocus {
 /// [`crate::edit_tool::EditToolPlugin`]'s startup chain (the pages must exist
 /// first).
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditParamsPlugin;
+pub struct EditParamsPlugin;
 
 impl Plugin for EditParamsPlugin {
     /// Register the snapshot / focus state and the sync + commit systems.
@@ -2284,7 +2284,7 @@ struct ParamWidgets<'w, 's> {
 
 /// Mirror the primary selection into every parameter widget: field texts,
 /// toggle glyphs, cycle labels, the per-type row visibility, and the
-/// gated enabled / greyed-out state. Rewrites only when the [`ShownSnapshot`]
+/// gated enabled / greyed-out state. Rewrites only when the `ShownSnapshot`
 /// changed (or the localization did), and never touches the focused field.
 #[expect(
     clippy::too_many_arguments,

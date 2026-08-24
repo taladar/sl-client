@@ -4,19 +4,19 @@
 //!
 //! # Model
 //!
-//! - [`CreateToolState`] is the picked base type: one of the seven prim volume
+//! - `CreateToolState` is the picked base type: one of the seven prim volume
 //!   types, a Linden **tree** (with a species), or Linden **grass** (with a
 //!   species). It is the single source of truth the placer reads.
-//! - The **create panel** ([`spawn_create_panel`]) is shown only while the
+//! - The **create panel** (`spawn_create_panel`) is shown only while the
 //!   Create tool ([`crate::world_api::EditTool::Create`]) is active, standing in
-//!   for the per-aspect tabs (which [`sync_create_panel`] hides). It holds the
+//!   for the per-aspect tabs (which `sync_create_panel` hides). It holds the
 //!   base-type radio and, for a tree / grass base, a species combo.
-//! - The **placer** ([`handle_create_pointer`]): while the Create tool is
+//! - The **placer** (`handle_create_pointer`): while the Create tool is
 //!   active, a left click on a surface ray-casts the build point, converts it to
 //!   the region's frame, and rezzes the picked base type there through the same
 //!   `ObjectAdd` ([`Command::RezObject`]) the `rez_sample_*` examples use — the
 //!   three families differ only in `pcode` / `state`. A held `Shift` keeps the
-//!   placer active for repeat-rez; otherwise [`select_new_object`] drops into
+//!   placer active for repeat-rez; otherwise `select_new_object` drops into
 //!   edit on the new object (selects it and switches to the Move tool) once its
 //!   `ObjectAdded` arrives.
 //!
@@ -325,7 +325,7 @@ struct PendingRezzes {
     rezzes: Vec<PendingRez>,
 }
 
-/// Marks the Build Tools tab container, so [`sync_create_panel`] can hide the
+/// Marks the Build Tools tab container, so `sync_create_panel` can hide the
 /// per-aspect tabs while the Create tool's panel stands in for them. Inserted by
 /// [`crate::edit_tool::spawn_build_floater`].
 #[derive(Component, Debug, Clone, Copy)]
@@ -389,7 +389,7 @@ impl FromWorld for CreateCursor {
 
 /// The plugin wiring the Create tool into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct EditCreatePlugin;
+pub struct EditCreatePlugin;
 
 impl Plugin for EditCreatePlugin {
     /// Register the create state and its systems. The placer runs after the
@@ -560,7 +560,7 @@ fn distance_to_segment(point: Vec2, a: Vec2, b: Vec2) -> f32 {
 /// Spawn the create panel under `parent` (the floater content): the base-type
 /// radio, a build hint, and the tree / grass species rows. Publishes
 /// [`CreatePanelUi`]. The panel and species rows start hidden ([`UiPanelShown`]);
-/// [`sync_create_panel`] reveals them with the Create tool.
+/// `sync_create_panel` reveals them with the Create tool.
 pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
     // The panel root: hidden until the Create tool is active.
     let panel = commands
@@ -610,7 +610,7 @@ pub(crate) fn spawn_create_panel(commands: &mut Commands, parent: Entity) {
 
     // The species rows, siblings of the panel (not nested inside its
     // `UiPanelShown`, so their own gates never race the panel's un-park). Each is
-    // shown by [`sync_create_panel`] only when its plant base is picked.
+    // shown by `sync_create_panel` only when its plant base is picked.
     let (tree_row, tree_combo) = spawn_species_row(
         commands,
         parent,
@@ -693,7 +693,7 @@ fn sync_create_base(
     }
 }
 
-/// Fold a species-combo pick into [`CreateToolState`]: the chosen index maps to
+/// Fold a species-combo pick into `CreateToolState`: the chosen index maps to
 /// the species byte for whichever plant the combo drives.
 fn sync_create_species(
     ui: Option<Res<CreatePanelUi>>,
@@ -1057,7 +1057,7 @@ fn near_build(position: &Vector, target: &Vector) -> bool {
 /// Spawn the gallery specimen of the create panel: the base-type radio and a
 /// species combo, a static shape for the no-login gallery and the `ui_test`
 /// matrix.
-pub(crate) fn spawn_create_panel_specimen(
+pub fn spawn_create_panel_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
