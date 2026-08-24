@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 93 |
+| ideas | 97 |
 | ready | 256 |
 | blocked | 68 |
 | in-progress | 18 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 863 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1367** |
+| **total** | **1371** |
 
-## ideas (93)
+## ideas (97)
 
 ### viewer
 
@@ -76,6 +76,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   preprocessor (FS-compatible)
 - [`viewer-manual-music-stream-url`](ideas/viewer-manual-music-stream-url.md) —
   Manually specify a music-stream URL (cruises / travel events)
+- [`viewer-marketplace-shop-link`](ideas/viewer-marketplace-shop-link.md) — Shop
+  — open the grid's marketplace storefront
+- [`viewer-material-asset-authoring`](ideas/viewer-material-asset-authoring.md)
+  — Create and upload GLTF material assets
+- [`viewer-menu-touch-object`](ideas/viewer-menu-touch-object.md) — Touch an
+  object from the object and attachment menus
 - [`viewer-minimap-collision-parcels`](ideas/viewer-minimap-collision-parcels.md)
   — Minimap collision-parcel ("banned from here") fill
 - [`viewer-mouselook-combat`](ideas/viewer-mouselook-combat.md) — Mouselook
@@ -170,6 +176,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scheme & size adjustment
 - [`viewer-ui-sound-customization`](ideas/viewer-ui-sound-customization.md) —
   User-customizable UI event sounds
+- [`viewer-upload-model`](ideas/viewer-upload-model.md) — Model / mesh upload
+  wizard
 - [`viewer-window-attention-flash`](ideas/viewer-window-attention-flash.md) —
   Window urgency flash + in-UI unread-flash cues
 
