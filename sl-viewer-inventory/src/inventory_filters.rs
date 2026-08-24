@@ -8,10 +8,10 @@
 //!
 //! # Split: pure filter, thin UI
 //!
-//! The filter itself is plain data ([`ItemFilter`]) with a pure predicate
-//! ([`ItemFilter::passes`]) tested in isolation; the floater is a column of
+//! The filter itself is plain data (`ItemFilter`) with a pure predicate
+//! (`ItemFilter::passes`) tested in isolation; the floater is a column of
 //! toggle rows, two numeric fields and a reset button that edit an
-//! [`InventoryFilterState`] resource. [`crate::inventory`]'s view rebuild
+//! `InventoryFilterState` resource. [`crate::inventory`]'s view rebuild
 //! reads the resource and — whenever the filter is active — narrows the tree
 //! exactly like a text search does (matching items shown inside their
 //! expanded ancestor hierarchy).
@@ -384,7 +384,8 @@ struct DirectionToggle(DateDirection);
 struct ToggleGlyph;
 
 /// The plugin that owns the filters floater and its state.
-pub(crate) struct InventoryFiltersPlugin;
+#[derive(Debug)]
+pub struct InventoryFiltersPlugin;
 
 impl Plugin for InventoryFiltersPlugin {
     /// Register the state, spawn the floater, and keep the toggle glyphs and

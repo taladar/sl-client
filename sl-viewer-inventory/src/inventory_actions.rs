@@ -10,9 +10,9 @@
 //! The reference viewer builds every inventory context menu from **one** shared
 //! `menu_inventory.xml`; each bridge type (`LL*Bridge::buildContextMenu`) then
 //! shows / hides / disables the entries that apply to it. This module mirrors
-//! that: one [`INVENTORY_ITEM_MENU`] whose type-specific entries carry
+//! that: one `INVENTORY_ITEM_MENU` whose type-specific entries carry
 //! `visible_when` conditions (`is-landmark`, `is-object`, …) and one
-//! [`INVENTORY_FOLDER_MENU`] likewise — so a landmark shows Teleport, an object
+//! `INVENTORY_FOLDER_MENU` likewise — so a landmark shows Teleport, an object
 //! shows Wear / Detach, the Trash shows Empty Trash, exactly as the reference
 //! decides per bridge. Entries whose feature this viewer does not have yet are
 //! declared in their reference order but gated on
@@ -30,10 +30,10 @@
 //! # Dispatch
 //!
 //! The widget ([`crate::menu`]) emits a [`UiAction`] tagged
-//! [`INVENTORY_MENU_ELEMENT`]; [`handle_inventory_menu_actions`] routes it. The
-//! acted-on row is snapshotted into [`InventoryMenuTarget`] when the menu opens
+//! `INVENTORY_MENU_ELEMENT`; `handle_inventory_menu_actions` routes it. The
+//! acted-on row is snapshotted into `InventoryMenuTarget` when the menu opens
 //! (action strings are `&'static` and cannot carry a key — the same out-of-band
-//! shape as [`crate::avatar_menu::AvatarMenuTarget`]). Mutations go through the
+//! shape as `crate::avatar_menu::AvatarMenuTarget`). Mutations go through the
 //! session commands, whose cache applies them optimistically; the affected
 //! folder pages are re-queried immediately after, so the tree reflects the
 //! change without waiting for a server round-trip.
@@ -676,7 +676,8 @@ pub(crate) struct ActiveGestures {
 
 /// The wearable slot an inventory wearable occupies, from the item's low flag
 /// byte (`LLInventoryItemFlags::II_FLAGS_SUBTYPE_MASK`).
-pub(crate) fn wearable_type_of(item: &ItemInfo) -> WearableType {
+#[must_use]
+pub fn wearable_type_of(item: &ItemInfo) -> WearableType {
     WearableType::from_code(u8::try_from(item.flags & 0xFF).unwrap_or(0))
 }
 
@@ -877,7 +878,8 @@ pub(crate) fn folder_conditions(folder: &FolderInfo, facts: FolderMenuFacts) -> 
 /// (`LLItemBridge::restoreItem`) because the wire does not record where a
 /// trashed item used to live. Asset types without a same-named system folder
 /// map to [`FolderType::None`], which the caller resolves to the agent root.
-pub(crate) const fn default_folder_type(asset_type: AssetType) -> FolderType {
+#[must_use]
+pub const fn default_folder_type(asset_type: AssetType) -> FolderType {
     match asset_type {
         AssetType::Texture => FolderType::Texture,
         AssetType::Sound => FolderType::Sound,
@@ -2438,7 +2440,7 @@ fn deep_copy_folder(
 /// flags empty, so the reply is followed with a `ChangeInventoryItemFlags`
 /// carrying the slot — matched FIFO (the reply carries no correlation id).
 #[derive(Resource, Debug, Default)]
-pub(crate) struct PendingWearableUploads {
+pub struct PendingWearableUploads {
     /// The in-flight creations: the slot to stamp and the folder to refresh.
     queue: VecDeque<(WearableType, InventoryFolderKey)>,
 }
@@ -2448,7 +2450,7 @@ impl PendingWearableUploads {
     /// and its `folder` refreshed when the upload reply lands. Shared by the
     /// New-Clothes / New-Body-Parts creators and the appearance editor's
     /// Save-As, which both mint a fresh wearable item via `UploadAsset`.
-    pub(crate) fn enqueue(&mut self, slot: WearableType, folder: InventoryFolderKey) {
+    pub fn enqueue(&mut self, slot: WearableType, folder: InventoryFolderKey) {
         self.queue.push_back((slot, folder));
     }
 }
@@ -2478,8 +2480,9 @@ pub(crate) fn wearable_slot_of(action: &str) -> Option<(WearableType, &'static s
 }
 
 /// The `avatar_lad.xml` `wearable` attribute value naming a slot's visual
-/// params (the filter [`default_wearable_asset`] applies).
-pub(crate) const fn wearable_param_group(slot: WearableType) -> &'static str {
+/// params (the filter `default_wearable_asset` applies).
+#[must_use]
+pub const fn wearable_param_group(slot: WearableType) -> &'static str {
     match slot {
         WearableType::Shape => "shape",
         WearableType::Skin => "skin",
@@ -2789,7 +2792,7 @@ fn seed_worn_from_cof(model: Res<InventoryModel>, mut worn: ResMut<WornAttachmen
 
 /// The plugin wiring the inventory context actions into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct InventoryActionsPlugin;
+pub struct InventoryActionsPlugin;
 
 impl Plugin for InventoryActionsPlugin {
     /// Register the target / clipboard / worn stashes, the rename dialog, and

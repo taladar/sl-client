@@ -34,7 +34,7 @@
 //!
 //! The pointer near the viewport's top / bottom edge **auto-scrolls** the
 //! virtualized list, and lingering over a collapsed folder **auto-expands** it
-//! ([`crate::inventory::InventoryUiAction::ExpandFolder`]) — the two affordances
+//! (`crate::inventory::InventoryUiAction::ExpandFolder`) — the two affordances
 //! that make a deep tree reachable mid-drag (the reference's `llfolderview`
 //! does both). The destination folder's row is highlighted while it is the
 //! target.
@@ -94,18 +94,18 @@ const AUTO_EXPAND_SECS: f64 = 0.7;
 /// with it; the floating name tags already carry the equivalent
 /// [`AvatarPickTarget`], which the drop resolution also accepts.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct AgentDropTarget(pub(crate) AgentKey);
+pub struct AgentDropTarget(pub AgentKey);
 
 /// A task-inventory drop target: dropping a dragged inventory item on a node
 /// carrying this adds the item to the named object's contents (the Content tab /
-/// Object Contents floater lists, [`crate::edit_contents`]). Kept updated by
-/// [`crate::edit_contents`] with the surface's current target object, or `None`
+/// Object Contents floater lists, `crate::edit_contents`). Kept updated by
+/// `crate::edit_contents` with the surface's current target object, or `None`
 /// when the surface shows nothing / the agent may not add to it.
 #[derive(Component, Debug, Clone, Copy, Default)]
-pub(crate) struct ContentsDropTarget {
+pub struct ContentsDropTarget {
     /// The object whose contents accept the drop (region-scoped id + grid-wide
     /// key), or `None` when adding is not currently allowed here.
-    pub(crate) target: Option<(ScopedObjectId, ObjectKey)>,
+    pub target: Option<(ScopedObjectId, ObjectKey)>,
 }
 
 /// The live drag, while one is in progress.
@@ -1045,7 +1045,7 @@ fn drop_onto_agent(
 /// The plugin wiring inventory drag-and-drop into the viewer. The row
 /// observers themselves are installed by [`crate::inventory`]'s row pool.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct InventoryDragPlugin;
+pub struct InventoryDragPlugin;
 
 impl Plugin for InventoryDragPlugin {
     /// Register the drag state and the per-frame drive systems.

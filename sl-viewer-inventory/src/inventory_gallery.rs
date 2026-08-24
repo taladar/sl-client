@@ -11,7 +11,7 @@
 //! or snapshot tile resolves its own asset through the shared texture
 //! pipeline as its thumbnail (the wire model does not carry the reference's
 //! per-item thumbnail id); every other tile shows its type glyph large.
-//! Selection is the tree's [`crate::inventory::InventorySelection`]; a
+//! Selection is the tree's `crate::inventory::InventorySelection`; a
 //! right-click opens the same context menus; a double-click descends into a
 //! folder or opens an item's preview.
 //!
@@ -159,7 +159,8 @@ struct PendingThumbnails {
 }
 
 /// The plugin owning the gallery view.
-pub(crate) struct InventoryGalleryPlugin;
+#[derive(Debug)]
+pub struct InventoryGalleryPlugin;
 
 impl Plugin for InventoryGalleryPlugin {
     /// Register the state and systems and spawn the (hidden) floater.

@@ -17,7 +17,7 @@
 //!   on a grid that does not populate the COF.
 //! - **Search** — a text field that narrows the shown rows to items (and
 //!   folders) whose name matches. Type-and-date filters are a follow-up
-//!   ([`viewer-inventory-search-filter`]); this is the name filter.
+//!   (`viewer-inventory-search-filter`); this is the name filter.
 //!
 //! # It talks to the model, never the wire
 //!
@@ -35,7 +35,7 @@
 //! The tree is flattened to a linear list of visible rows and drawn through the
 //! recycling [`crate::virtual_list`], so a 10 000-item inventory scrolls at the
 //! cost of the viewport, not the item count. The flattening
-//! ([`InventoryModel::build_rows`]) is a pure function tested in isolation; the
+//! (`InventoryModel::build_rows`) is a pure function tested in isolation; the
 //! Bevy half only turns its output into pooled row entities.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -150,7 +150,8 @@ const SELECTED_ROW_BACKGROUND: Color = Color::srgba(0.24, 0.34, 0.52, 0.55);
 const DOUBLE_CLICK_SECS: f64 = 0.35;
 
 /// The plugin that owns the inventory window.
-pub(crate) struct InventoryPlugin;
+#[derive(Debug)]
+pub struct InventoryPlugin;
 
 impl Plugin for InventoryPlugin {
     /// Wire up the window: its resources, its spawn (after the scaffold root
@@ -224,8 +225,8 @@ impl Plugin for InventoryPlugin {
 ///
 /// Everything here is fed by the high-level bridge events; nothing here reaches
 /// for the wire.
-#[derive(Resource, Default)]
-pub(crate) struct InventoryModel {
+#[derive(Debug, Resource, Default)]
+pub struct InventoryModel {
     /// Every known folder, by key.
     folders: HashMap<InventoryFolderKey, FolderInfo>,
     /// Child folder keys per parent, kept sorted by name.
@@ -278,14 +279,16 @@ impl InventoryModel {
     }
 
     /// The held info of a folder, if known.
-    pub(crate) fn folder_info(&self, folder: InventoryFolderKey) -> Option<&FolderInfo> {
+    #[must_use]
+    pub fn folder_info(&self, folder: InventoryFolderKey) -> Option<&FolderInfo> {
         self.folders.get(&folder)
     }
 
     /// Find a loaded item anywhere in the tree by its key. A linear scan over
     /// the fetched folders — run on a click, not per frame, where the largest
     /// real inventory is cheap.
-    pub(crate) fn find_item(&self, item: InventoryKey) -> Option<&ItemInfo> {
+    #[must_use]
+    pub fn find_item(&self, item: InventoryKey) -> Option<&ItemInfo> {
         self.items
             .values()
             .flat_map(|items| items.iter())
@@ -300,7 +303,8 @@ impl InventoryModel {
     /// The first folder of a given system type in the **agent's** tree (the
     /// Library may carry same-typed folders; those never win), e.g. the Trash
     /// or Lost And Found.
-    pub(crate) fn folder_by_type(&self, folder_type: FolderType) -> Option<InventoryFolderKey> {
+    #[must_use]
+    pub fn folder_by_type(&self, folder_type: FolderType) -> Option<InventoryFolderKey> {
         self.folders
             .values()
             .filter(|info| !self.library_folders.contains(&info.folder_id))
@@ -332,7 +336,8 @@ impl InventoryModel {
 
     /// The agent's own root folder ("My Inventory") — the first non-Library
     /// root, the target of a right-click on the window's empty background.
-    pub(crate) fn agent_root(&self) -> Option<InventoryFolderKey> {
+    #[must_use]
+    pub fn agent_root(&self) -> Option<InventoryFolderKey> {
         self.roots
             .iter()
             .copied()
@@ -341,8 +346,9 @@ impl InventoryModel {
 
     /// Every root folder — the agent's "My Inventory" first, then the Library
     /// root(s) — for a view that shows the whole tree (the texture picker's
-    /// folder tree, [`crate::ui_texture_picker`]).
-    pub(crate) fn roots(&self) -> &[InventoryFolderKey] {
+    /// folder tree, `crate::ui_texture_picker`).
+    #[must_use]
+    pub fn roots(&self) -> &[InventoryFolderKey] {
         &self.roots
     }
 
@@ -395,21 +401,23 @@ impl InventoryModel {
     }
 
     /// The fetched items of `folder` (empty when unfetched) — the crate-facing
-    /// face of [`items_of`](Self::items_of), for the folder deep-copy walk.
-    pub(crate) fn loaded_items_of(&self, folder: InventoryFolderKey) -> &[ItemInfo] {
+    /// face of `items_of`, for the folder deep-copy walk.
+    #[must_use]
+    pub fn loaded_items_of(&self, folder: InventoryFolderKey) -> &[ItemInfo] {
         self.items_of(folder)
     }
 
     /// Every **loaded** item across the whole inventory — agent **and** library,
     /// every fetched folder — for a picker that lists items regardless of where
     /// they sit (the texture picker's grid).
-    pub(crate) fn all_loaded_items(&self) -> impl Iterator<Item = &ItemInfo> {
+    pub fn all_loaded_items(&self) -> impl Iterator<Item = &ItemInfo> {
         self.items.values().flatten()
     }
 
     /// The child folders of `folder` — the crate-facing face of
-    /// [`children_of`](Self::children_of), for the folder deep-copy walk.
-    pub(crate) fn child_folders_of(&self, folder: InventoryFolderKey) -> &[InventoryFolderKey] {
+    /// `children_of`, for the folder deep-copy walk.
+    #[must_use]
+    pub fn child_folders_of(&self, folder: InventoryFolderKey) -> &[InventoryFolderKey] {
         self.children_of(folder)
     }
 
@@ -1764,7 +1772,8 @@ fn route_gear_menu(
 /// The emoji glyph for an inventory item's type — the viewer's font stack paints
 /// colour emoji, so a glyph stands in for the reference viewer's icon textures
 /// (which are not among the assets we ship).
-pub(crate) const fn item_icon(inv_type: InventoryType) -> &'static str {
+#[must_use]
+pub const fn item_icon(inv_type: InventoryType) -> &'static str {
     match inv_type {
         InventoryType::Texture => "\u{1f5bc}\u{fe0f}",
         InventoryType::Sound => "\u{1f50a}",
@@ -1882,7 +1891,7 @@ const fn wearable_label(wearable_type: WearableType) -> &'static str {
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in the settings store
 /// ([`crate::floater_persist`]).
-pub(crate) const INVENTORY_FLOATER_ID: &str = "inventory";
+pub const INVENTORY_FLOATER_ID: &str = "inventory";
 
 /// `Ctrl+I` opens / closes the window, matching the reference viewer's shortcut.
 /// Ungated by the input-context (like the `F`-key overlay toggles) so it always
@@ -2195,10 +2204,7 @@ fn request_folder(
 /// mutation: the session's cache applies moves / renames / removals
 /// optimistically, so re-querying a page immediately reflects them in the
 /// model (used by [`crate::inventory_actions`] and [`crate::inventory_drag`]).
-pub(crate) fn query_folder_page(
-    folder: InventoryFolderKey,
-    commands: &mut MessageWriter<SlCommand>,
-) {
+pub fn query_folder_page(folder: InventoryFolderKey, commands: &mut MessageWriter<SlCommand>) {
     commands.write(SlCommand(Command::QueryInventoryFolder {
         folder,
         before: None,
@@ -2376,7 +2382,7 @@ fn read_search_field(
 }
 
 /// Seconds of typing quiet before a search-query edit re-flattens the view:
-/// [`InventoryModel::build_rows`] walks the **whole** inventory (O(total
+/// `InventoryModel::build_rows` walks the **whole** inventory (O(total
 /// items)), so re-running it per keystroke on a large inventory is a
 /// per-frame CPU burst the debounce collapses to one run per pause. Every
 /// other trigger (tab, sort, filter, model change) stays immediate.
@@ -2525,9 +2531,10 @@ struct RowParts {
 /// should be revealed. The label `Text` is no-wrap and does not shrink, so when
 /// the name is wider than the (shrunk) clip the clip reports a `content_size`
 /// wider than its own `size` — the same overflow test the table cells use
-/// ([`crate::ui_table`]'s `apply_table_cell_ellipsis`). Pure so it is
+/// (`crate::ui_table`'s `apply_table_cell_ellipsis`). Pure so it is
 /// unit-testable without a running layout.
-pub(crate) fn ellipsis_visible(clip: &ComputedNode) -> bool {
+#[must_use]
+pub fn ellipsis_visible(clip: &ComputedNode) -> bool {
     clip.content_size.x > clip.size.x + f32::EPSILON
 }
 
@@ -2541,7 +2548,8 @@ pub(crate) fn ellipsis_visible(clip: &ComputedNode) -> bool {
 /// The clip and the shrink live here, on the container, so the `Text` child
 /// stays bare and dodges the text-measure width loss
 /// (`viewer-text-node-padding-measure`).
-pub(crate) fn label_clip_node() -> Node {
+#[must_use]
+pub fn label_clip_node() -> Node {
     Node {
         min_width: Val::Px(0.0),
         overflow: Overflow::clip(),
@@ -3334,7 +3342,7 @@ fn spawn_toolbar_button(
 /// Static by construction (no live model, no recycling), which is what lets the
 /// registry check it — the live window is driven by resources, like the `F`-key
 /// demos, and so is deliberately not registered.
-pub(crate) fn spawn_inventory_row_sample(
+pub fn spawn_inventory_row_sample(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
@@ -3454,36 +3462,36 @@ fn spawn_sample_row(
 
 /// Open the About Landmark floater on a landmark item.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenAboutLandmark {
+pub struct OpenAboutLandmark {
     /// The landmark inventory item to show.
-    pub(crate) item: ItemInfo,
+    pub item: ItemInfo,
 }
 
 /// Open the appearance editor on a worn wearable (the inventory context menu's
 /// **Edit**).
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenWearableEditor {
+pub struct OpenWearableEditor {
     /// The wearable item to edit.
-    pub(crate) item: ItemInfo,
+    pub item: ItemInfo,
 }
 
 /// Open the material editor on a material inventory item.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenMaterialEditor {
+pub struct OpenMaterialEditor {
     /// The material item to edit.
-    pub(crate) item: ItemInfo,
+    pub item: ItemInfo,
 }
 
 /// Add a dropped inventory item to the open notecard as an **embedded item**.
 /// Written by [`crate::inventory_drag`] when an inventory row is dropped onto
-/// the notecard editor; consumed by [`ingest_added_items`], which appends the
+/// the notecard editor; consumed by `ingest_added_items`, which appends the
 /// item to the baseline item table and its marker to the edit buffer (the
 /// reference's drag-into-notecard, minus the caret-precise placement the
 /// inline-box widget will add).
 #[derive(Message, Debug, Clone)]
-pub(crate) struct AddEmbeddedItem {
+pub struct AddEmbeddedItem {
     /// The inventory item to embed.
-    pub(crate) item: ItemInfo,
+    pub item: ItemInfo,
 }
 
 #[cfg(test)]

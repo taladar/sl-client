@@ -5,7 +5,7 @@
 //! the small per-type preview floaters behind the context menu's Open:
 //! a notecard reader, a texture / snapshot preview, and an animation preview
 //! (play in-world / stop). A landmark's Open forwards to the full About
-//! Landmark floater ([`crate::about_landmark`]).
+//! Landmark floater (`crate::about_landmark`).
 //!
 //! # Layout follows the Vintage skin
 //!
@@ -81,9 +81,9 @@ pub(crate) struct OpenItemProperties {
 
 /// Open the per-type preview for an item (the context menu's Open).
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenItemPreview {
+pub struct OpenItemPreview {
     /// The item to preview.
-    pub(crate) item: ItemInfo,
+    pub item: ItemInfo,
 }
 
 /// Whether this viewer has a preview for an item's type — gates the context
@@ -148,7 +148,8 @@ enum PropsToggle {
 }
 
 /// The plugin owning the properties floater and the preview floaters.
-pub(crate) struct InventoryPropertiesPlugin;
+#[derive(Debug)]
+pub struct InventoryPropertiesPlugin;
 
 impl Plugin for InventoryPropertiesPlugin {
     /// Register messages, state and systems; spawn the (hidden) floaters.
@@ -745,8 +746,8 @@ fn commit_text_edits(
 
 /// Send an `UpdateInventoryItem` for the (edited) item and refresh its
 /// folder page (shared with the About Landmark floater's title / notes
-/// editing, [`crate::about_landmark`]).
-pub(crate) fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlCommand>) {
+/// editing, `crate::about_landmark`).
+pub fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlCommand>) {
     commands.write(SlCommand(Command::UpdateInventoryItem {
         item: Box::new(to_wire_item(item)),
         transaction_id: TransactionId::from(Uuid::nil()),
@@ -756,7 +757,8 @@ pub(crate) fn send_item_update(item: &ItemInfo, commands: &mut MessageWriter<SlC
 
 /// Rebuild an [`ItemInfo`] into the wire `InventoryItem` an update carries
 /// (shared with the COF link renumbering in [`crate::inventory_actions`]).
-pub(crate) fn to_wire_item(item: &ItemInfo) -> InventoryItem {
+#[must_use]
+pub fn to_wire_item(item: &ItemInfo) -> InventoryItem {
     let (sale_type, sale_price) = match item.sale.clone() {
         Some((sale_type, price)) => (sale_type.to_code(), Some(price)),
         None => (SaleType::NotForSale.to_code(), None),
@@ -783,7 +785,8 @@ pub(crate) fn to_wire_item(item: &ItemInfo) -> InventoryItem {
 
 /// Format a unix timestamp as a UTC `YYYY-MM-DD HH:MM` label, via the civil
 /// calendar arithmetic (Howard Hinnant's `civil_from_days`).
-pub(crate) fn format_unix_date(unix: i64) -> String {
+#[must_use]
+pub fn format_unix_date(unix: i64) -> String {
     let days = unix.div_euclid(86_400);
     let secs = unix.rem_euclid(86_400);
     let (year, month, day) = civil_from_days(days);
@@ -1045,18 +1048,19 @@ fn spawn_text_button(
 
 /// A parsed landmark asset: the tiny `Landmark version 2` text body.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LandmarkAsset {
+pub struct LandmarkAsset {
     /// The destination region's id.
-    pub(crate) region_id: Uuid,
+    pub region_id: Uuid,
     /// The region-local position.
-    pub(crate) position: (f32, f32, f32),
+    pub position: (f32, f32, f32),
 }
 
 /// Parse a landmark asset body through the shared `sl_wire` codec
 /// (`Landmark version 2\nregion_id <uuid>\nlocal_pos <x> <y> <z>`). `None`
 /// when malformed, or for a legacy version-1 body (a global position with no
 /// region id — nothing here can resolve it).
-pub(crate) fn parse_landmark(text: &str) -> Option<LandmarkAsset> {
+#[must_use]
+pub fn parse_landmark(text: &str) -> Option<LandmarkAsset> {
     match sl_client_bevy::parse_landmark(text).ok()? {
         sl_client_bevy::WireLandmarkAsset::Regional {
             region_id,
