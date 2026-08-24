@@ -11,7 +11,7 @@
 //! [`AvatarPicked`] with the same tag, and only the requesting feature acts
 //! on it — the same out-of-band shape as the context-menu targets. The first
 //! consumer is the inventory context menu's **Share** entry
-//! ([`crate::inventory_actions`]).
+//! (`crate::inventory_actions`).
 //!
 //! # One resident or several
 //!
@@ -235,7 +235,8 @@ pub(crate) struct AvatarPickerUi {
 }
 
 /// The plugin owning the avatar picker.
-pub(crate) struct AvatarPickerPlugin;
+#[derive(Debug)]
+pub struct AvatarPickerPlugin;
 
 impl Plugin for AvatarPickerPlugin {
     /// Register the messages, state and systems, and spawn the floater.

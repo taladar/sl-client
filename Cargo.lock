@@ -8516,6 +8516,7 @@ dependencies = [
  "sl-viewer-media",
  "sl-viewer-notices",
  "sl-viewer-notifications",
+ "sl-viewer-pickers",
  "sl-viewer-platform",
  "sl-viewer-search",
  "sl-viewer-settings",
@@ -9119,6 +9120,21 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "pretty_assertions",
+]
+
+[[package]]
+name = "sl-viewer-pickers"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-viewer-inventory",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
 ]
 
 [[package]]

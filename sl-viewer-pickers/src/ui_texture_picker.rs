@@ -123,7 +123,7 @@ const VALUE_CLASS: &str = "sk-build-value";
 /// A reusable texture swatch's current value; this module paints the swatch's
 /// thumbnail from it, and a consumer reads / writes it.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct TextureSwatchValue(pub(crate) TextureKey);
+pub struct TextureSwatchValue(pub TextureKey);
 
 /// Marks a swatch as a **material** picker and carries its current material
 /// asset id. A swatch with this component opens the picker in
@@ -131,12 +131,12 @@ pub(crate) struct TextureSwatchValue(pub(crate) TextureKey);
 /// its [`TextureSwatchValue`], which for a material swatch paints the material's
 /// base-colour stand-in thumbnail).
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct MaterialSwatchValue(pub(crate) Uuid);
+pub struct MaterialSwatchValue(pub Uuid);
 
 /// Spawn a texture swatch under `parent`: a bordered button showing `initial`'s
 /// thumbnail that opens the picker on click. The returned entity is the
 /// **requester** a [`TexturePicked`] reply is matched by.
-pub(crate) fn spawn_texture_swatch(
+pub fn spawn_texture_swatch(
     commands: &mut Commands,
     parent: Entity,
     element: &'static str,
@@ -170,7 +170,7 @@ pub(crate) fn spawn_texture_swatch(
 /// [`PickerKind::Material`] seeded with `initial_material`. Carries both a
 /// [`TextureSwatchValue`] (the thumbnail the consumer keeps current) and a
 /// [`MaterialSwatchValue`] (the material asset id the pick opens on / returns).
-pub(crate) fn spawn_material_swatch(
+pub fn spawn_material_swatch(
     commands: &mut Commands,
     parent: Entity,
     element: &'static str,
@@ -341,7 +341,7 @@ enum TreeRow {
 
 /// The plugin wiring the texture picker into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct TexturePickerPlugin;
+pub struct TexturePickerPlugin;
 
 impl Plugin for TexturePickerPlugin {
     /// Register the messages, state, floater, and systems.
