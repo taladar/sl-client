@@ -122,10 +122,10 @@ use crate::avatars::{AvatarBodyPart, AvatarState};
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::objects::{ObjectState, PrimComplexityFacts};
-use crate::particles::ObjectParticleSystem;
 use crate::settings::ViewerSettings;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::world_api::FriendsModel;
+use crate::world_api::ObjectParticleSystem;
 
 // ---------------------------------------------------------------------------
 // Settings.

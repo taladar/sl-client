@@ -60,11 +60,11 @@ use bevy::render::texture::GpuImage;
 use sl_client_bevy::{AgentKey, PrimFaceId, ScopedObjectId};
 
 use crate::avatars::AvatarPickTarget;
-use crate::camera::ViewerCamera;
 use crate::hud::on_hud_layer;
 use crate::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
 use crate::terrain::TerrainSurface;
 use crate::water::{WaterOcean, WaterRegionPlane};
+use crate::world_api::ViewerCamera;
 
 /// The internal handle `pick.wgsl` is loaded under.
 const PICK_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f5d1a82-6c47-49b3-8e90-b21f7c04a6de");

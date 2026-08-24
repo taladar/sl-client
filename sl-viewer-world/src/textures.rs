@@ -725,7 +725,7 @@ pub fn sync_texture_blacklist(
         return;
     }
     manager.blacklist_revision = derender.revision();
-    manager.blacklist = derender.ids_of_kind(crate::derender::DerenderKind::Texture);
+    manager.blacklist = derender.ids_of_kind(crate::world_api::DerenderKind::Texture);
 }
 
 /// Refresh the store fetcher's `GetTexture` capability URL each time the region's

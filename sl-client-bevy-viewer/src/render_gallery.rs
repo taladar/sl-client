@@ -69,7 +69,6 @@ use sl_client_bevy::{
 };
 use tracing::{error, info};
 
-use crate::camera::ViewerCamera;
 use crate::face_material::SlFaceMaterialPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_scene::{
@@ -77,6 +76,7 @@ use crate::render_scene::{
     SceneRuntimePlugin, SymmetricAbout, UvsInUnitSquare, WorldScaleGeometry, scene_root,
     scene_root_transform,
 };
+use crate::world_api::ViewerCamera;
 
 /// The command-line options for the render gallery.
 ///

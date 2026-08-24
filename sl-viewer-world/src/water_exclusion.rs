@@ -47,12 +47,12 @@ use bevy::render::render_resource::{Extent3d, TextureFormat};
 use bevy::window::PrimaryWindow;
 use sl_client_bevy::WaterMaterial;
 
-use crate::camera::ViewerCamera;
 use crate::face_material::FaceMaterial;
 use crate::material_cache::SharedFaceMaterial;
 use crate::objects::FaceTextureDebug;
 use crate::probe_layers::WATER_EXCLUSION_LAYER;
 use crate::water::WaterState;
+use crate::world_api::ViewerCamera;
 
 /// The mask camera's render order: below the main camera's default `0` so the mask
 /// is finished before the main pass's water fragments sample it (the same slot the

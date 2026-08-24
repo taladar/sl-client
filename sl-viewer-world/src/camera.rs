@@ -60,9 +60,12 @@ use crate::avatars::{AvatarState, SeatChainQuery, seat_world_transform};
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
 use crate::input_context::InputContext;
-use crate::physics::AvatarMotion;
 use crate::spacenav::{FlycamAxisSettings, SpacenavInput};
 use crate::water::{WaterOcean, WaterRegionPlane};
+use crate::world_api::{
+    AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
+    ViewerCamera,
+};
 use sl_client_bevy::{SlIdentity, Vector};
 
 /// The agent-frame focus offset (forward, left, up metres) used only as the
@@ -70,21 +73,6 @@ use sl_client_bevy::{SlIdentity, Vector};
 /// joint — one metre ahead of and above the anchor. A rigged avatar focuses on its
 /// actual head instead ([`third_person_focus`]).
 const FOCUS_OFFSET: Vec3 = Vec3::new(1.0, 0.0, 1.0);
-
-/// The agent-frame rear-view camera offset (forward, left, up metres), the
-/// reference's `CameraOffsetRearView`: three metres behind and 0.75 m above the
-/// focus. Its length is the default zoom distance and its elevation the default
-/// tilt.
-const CAMERA_OFFSET: Vec3 = Vec3::new(-3.0, 0.0, 0.75);
-
-/// The closest the third-person camera zooms before it crosses into mouselook —
-/// the reference's `LAND_MIN_ZOOM`, near enough to the head that the transition
-/// reads as "stepping inside".
-const MOUSELOOK_CROSS_DISTANCE: f32 = 0.5;
-
-/// The farthest the third-person camera zooms from the avatar
-/// (`MAX_CAMERA_DISTANCE_FROM_AGENT`).
-const MAX_DISTANCE: f32 = 50.0;
 
 /// The mouselook eye offsets: `x` is the forward nudge (metres) from the head
 /// joint so the view looks out past the face rather than through it; `z` is the
@@ -109,9 +97,6 @@ const PIXELS_PER_LINE: f32 = 20.0;
 /// Radians of yaw/pitch per pixel of mouse motion in mouselook / flycam look —
 /// finer than the orbit rate so aiming is steady.
 const AIM_SENSITIVITY: f32 = 0.003;
-
-/// Pitch clamp (just under a quarter turn) so the view never flips over the pole.
-const MAX_PITCH: f32 = 1.54;
 
 /// The multiplicative zoom step per mouse-wheel notch (scroll in shrinks the
 /// distance by this factor), matching the reference's geometric zoom.
@@ -230,19 +215,6 @@ pub struct CameraStart {
     pub look: Option<Vec3>,
 }
 
-/// The camera mode: one of the three the [`ViewerCamera`] cycles between. See the
-/// [module documentation](self).
-#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum CameraMode {
-    /// First-person: at the eyes, mouse aims, cursor captured.
-    Mouselook,
-    /// Orbiting third-person around a [`FocusTarget`] (the default).
-    #[default]
-    ThirdPerson,
-    /// Free 6-DOF spectator camera (the promoted debug fly-camera).
-    Flycam,
-}
-
 /// What the third-person camera orbits around.
 ///
 /// The alt-zoom focus tool (`lltoolfocus`) moves this off the avatar onto a picked
@@ -255,13 +227,6 @@ pub enum FocusTarget {
     /// A fixed world point (the alt-click focus of `lltoolfocus`).
     Point(Vec3),
 }
-
-/// The marker on the one main viewer camera entity — the camera every world
-/// system means by "the camera", as opposed to the reflection-probe, mirror and
-/// minimap cameras that also carry `Camera3d`. Mode-agnostic: the same entity is
-/// the camera in mouselook, third person and flycam.
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct ViewerCamera;
 
 /// A debug affordance (env `SL_VIEWER_CAMERA_DUMP`): log the current camera pose and the
 /// smoothed frame rate once a second. The pose is emitted as a ready-to-paste
@@ -312,145 +277,6 @@ pub fn dump_camera_pose(
         "benchmark: fps={fps:.1} --camera-position {:.2},{:.2},{:.2} --camera-look-at {:.2},{:.2},{:.2}",
         sl_pos.x, sl_pos.y, sl_pos.z, sl_look.x, sl_look.y, sl_look.z,
     );
-}
-
-/// The drivable state of the [`ViewerCamera`], shared by every mode.
-///
-/// Third person reads the orbit fields (`azimuth` /
-/// `elevation` / `distance`); mouselook and
-/// flycam read the aim fields (`yaw` / `pitch` /
-/// `roll`). The flycam's *position* is the entity `Transform`'s
-/// translation, not stored here — so a debug focus system that writes the
-/// transform moves the flycam directly. The smoothed pose eases toward the mode's
-/// desired pose so mode changes glide.
-#[derive(Component, Debug, Clone)]
-pub struct CameraRig {
-    /// Third-person horizontal orbit offset from dead-behind the avatar, radians
-    /// (`0` = rear view). Only a mouse-drag moves it — never the arrow keys.
-    azimuth: f32,
-    /// Third-person vertical orbit angle, radians (positive looks down onto the
-    /// avatar). Seeded from `CAMERA_OFFSET`'s elevation.
-    elevation: f32,
-    /// Third-person camera distance from the focus, metres, clamped between
-    /// [`MOUSELOOK_CROSS_DISTANCE`] and the tunable maximum
-    /// ([`CameraTuning::max_distance`], default `MAX_DISTANCE`).
-    distance: f32,
-    /// Mouselook / flycam yaw about Bevy up (`+Y`), radians.
-    yaw: f32,
-    /// Mouselook / flycam pitch about the camera's local right, radians, clamped
-    /// to `±MAX_PITCH`.
-    pitch: f32,
-    /// Flycam roll about the camera's local forward, radians (only [`CameraSpin`]
-    /// roll moves it).
-    roll: f32,
-    /// The world-space offset from a [`FocusTarget::Point`] focus to the camera
-    /// eye, used only in focus-on-object. Captured at alt-click so the camera does
-    /// not jump, and orbited / zoomed since. Unlike the avatar rear-view orbit
-    /// (which follows the heading) this is fixed in the world, as the reference's
-    /// object focus is.
-    point_offset: Vec3,
-    /// The last rendered eye position, eased toward the mode's desired eye.
-    smoothed_eye: Vec3,
-    /// The last rendered look-at point, eased toward the mode's desired focus.
-    smoothed_focus: Vec3,
-    /// Whether the smoothed pose has been seeded yet (so the first valid frame
-    /// snaps rather than gliding in from an arbitrary origin).
-    seeded: bool,
-}
-
-impl Default for CameraRig {
-    /// The reference rear-view orbit: dead behind, tilted and distanced by
-    /// `CAMERA_OFFSET`.
-    fn default() -> Self {
-        let horizontal =
-            (CAMERA_OFFSET.x * CAMERA_OFFSET.x + CAMERA_OFFSET.y * CAMERA_OFFSET.y).sqrt();
-        Self {
-            azimuth: 0.0,
-            elevation: CAMERA_OFFSET.z.atan2(horizontal),
-            distance: CAMERA_OFFSET.length(),
-            yaw: 0.0,
-            pitch: 0.0,
-            roll: 0.0,
-            point_offset: Vec3::ZERO,
-            smoothed_eye: Vec3::ZERO,
-            smoothed_focus: Vec3::ZERO,
-            seeded: false,
-        }
-    }
-}
-
-impl CameraRig {
-    /// Reset the third-person orbit to the default rear view — the reference's
-    /// `Escape` "reset camera". Leaves the aim / smoothing alone (the caller snaps
-    /// via the mode change).
-    fn reset_orbit(&mut self) {
-        let default = Self::default();
-        self.azimuth = default.azimuth;
-        self.elevation = default.elevation;
-        self.distance = default.distance;
-    }
-
-    /// Seed the third-person orbit from the debug framing environment variables,
-    /// so the offline screenshot harness can frame the avatar from a chosen angle
-    /// (the same `SL_VIEWER_CAMERA_*` knobs the old login-snap read). A no-op when
-    /// none are set — the default rear view stands.
-    ///
-    /// `SL_VIEWER_CAMERA_ORBIT_DEG` swings the azimuth (90 = a side view),
-    /// `_ELEV_DEG` the elevation (positive looks down), `_DISTANCE` the zoom.
-    pub fn seed_orbit_from_env(&mut self) {
-        let env_f32 = |key: &str| -> Option<f32> {
-            std::env::var(key).ok().and_then(|value| value.parse().ok())
-        };
-        if let Some(orbit) = env_f32("SL_VIEWER_CAMERA_ORBIT_DEG") {
-            self.azimuth = orbit.to_radians();
-        }
-        if let Some(elevation) = env_f32("SL_VIEWER_CAMERA_ELEV_DEG") {
-            self.elevation = elevation.to_radians().clamp(-MAX_PITCH, MAX_PITCH);
-        }
-        if let Some(distance) = env_f32("SL_VIEWER_CAMERA_DISTANCE") {
-            self.distance = distance.clamp(MOUSELOOK_CROSS_DISTANCE, MAX_DISTANCE);
-        }
-    }
-
-    /// Reset the smoothing so the next frame snaps to the mode's desired pose
-    /// rather than gliding — called after a region-origin shift
-    /// ([`crate::terrain::recenter_terrain`]) so the eased pose does not drift
-    /// across the 256 m rebase (the reference's sideways-after-crossing bug).
-    pub const fn resnap(&mut self) {
-        self.seeded = false;
-    }
-
-    /// Aim the flycam / mouselook along `direction` (Bevy Y-up space) by setting
-    /// the yaw/pitch, so the aim survives the next frame's re-derivation. A zero
-    /// direction is ignored. Yaw is measured so `-Z` gives yaw `0`; pitch is the
-    /// elevation, clamped to `±MAX_PITCH`.
-    pub fn aim_along(&mut self, direction: Vec3) {
-        let dir = direction.normalize_or_zero();
-        if dir == Vec3::ZERO {
-            return;
-        }
-        self.yaw = (-dir.x).atan2(-dir.z);
-        self.pitch = dir.y.asin().clamp(-MAX_PITCH, MAX_PITCH);
-    }
-
-    /// The rotation the rig's current yaw/pitch aims along (roll excluded) — the
-    /// same reconstruction mouselook uses, so `rotation * NEG_Z` is the aim
-    /// direction. A fixed flycam bakes this into its entity transform at spawn:
-    /// `drive_flycam` integrates input deltas onto the transform and never reads
-    /// the rig, so without this the transform keeps its identity (SL-north)
-    /// orientation and `--camera-look-at` has no effect.
-    #[must_use]
-    pub fn aim_quat(&self) -> Quat {
-        Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0)
-    }
-
-    /// Place the focus-on-point eye offset directly (world space, eye = point +
-    /// offset). The media-controls **Zoom** (`crate::media_controls`) uses this
-    /// to park the camera squarely in front of a media face — the counterpart of
-    /// `focus_on_object` capturing the offset at an alt-click.
-    pub const fn set_point_offset(&mut self, offset: Vec3) {
-        self.point_offset = offset;
-    }
 }
 
 /// The feathering state of the SpaceNavigator flycam: the per-axis smoothed
@@ -1644,10 +1470,8 @@ fn sl_heading_from_bevy_forward(forward: Vec3) -> f32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        CAMERA_OFFSET, CameraRig, facing_from_yaw, flatten, sl_heading_from_bevy_forward,
-        third_person_eye,
-    };
+    use super::{facing_from_yaw, flatten, sl_heading_from_bevy_forward, third_person_eye};
+    use crate::world_api::{CAMERA_OFFSET, CameraRig};
     use bevy::math::Vec3;
 
     /// The default rig reproduces the reference rear-view offset: with the focus at

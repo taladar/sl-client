@@ -73,11 +73,11 @@ use bevy::render::sync_component::SyncComponent;
 use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
 
-use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::sky::day_position;
 use crate::water::WaterLevel;
+use crate::world_api::ViewerCamera;
 
 /// The internal handle the fog shader (`underwater_fog.wgsl`) is loaded under.
 const FOG_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f2a9c17-54e8-4b6d-a90c-2e718d43ff05");

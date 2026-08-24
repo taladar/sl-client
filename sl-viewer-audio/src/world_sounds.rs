@@ -58,11 +58,11 @@ use sl_client_bevy::{
 };
 
 use crate::coords::{bevy_to_sl_vec, region_offset_bevy, sl_to_bevy_vec};
-use crate::derender::DerenderKind;
 use crate::objects::{ObjectState, SceneObject};
 use crate::raycast_index::DynamicColliders;
 use crate::settings::ViewerSettings;
 use crate::sound_cache::SoundCache;
+use crate::world_api::DerenderKind;
 use crate::world_api::MuteModel;
 
 /// The persisted-settings section [`SETTING_COLLISION_SOUNDS`] lives under.

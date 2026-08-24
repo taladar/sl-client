@@ -19,12 +19,13 @@
 use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
+use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, ChatSessionKind, Command, Friend, FriendKey, FriendPresence,
     FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, MuteEntry, MuteFlags,
-    MuteType, ObjectKey, ObjectProperties, PrimFaceId, RegionCoordinates, RegionHandle,
-    RestoreItem, ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation, SlCommand,
-    TaskInventoryKey, TextureKey, Uuid, Vector,
+    MuteType, Object, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, RegionCoordinates,
+    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
+    ScriptUploadLocation, SlCommand, TaskInventoryKey, TextureKey, Uuid, Vector,
 };
 use sl_viewer_settings::ViewerSettings;
 
@@ -2097,6 +2098,383 @@ pub const SHOW_COORDINATES_KEY: &str = "statusbar_show_coordinates";
 /// `DoubleClickAction`). Bound by the preferences camera & movement tab
 /// (`preferences_camera_move`).
 pub const SETTING_DOUBLE_CLICK_ACTION: &str = "DoubleClickAction";
+
+/// The agent-frame rear-view camera offset (forward, left, up metres), the
+/// reference's `CameraOffsetRearView`: three metres behind and 0.75 m above the
+/// focus. Its length is the default zoom distance and its elevation the default
+/// tilt.
+pub const CAMERA_OFFSET: Vec3 = Vec3::new(-3.0, 0.0, 0.75);
+
+/// The closest the third-person camera zooms before it crosses into mouselook —
+/// the reference's `LAND_MIN_ZOOM`, near enough to the head that the transition
+/// reads as "stepping inside".
+pub const MOUSELOOK_CROSS_DISTANCE: f32 = 0.5;
+
+/// The farthest the third-person camera zooms from the avatar
+/// (`MAX_CAMERA_DISTANCE_FROM_AGENT`).
+pub const MAX_DISTANCE: f32 = 50.0;
+
+/// Pitch clamp (just under a quarter turn) so the view never flips over the pole.
+pub const MAX_PITCH: f32 = 1.54;
+
+// ---------------------------------------------------------------------------
+// World state the world's own layers share
+// ---------------------------------------------------------------------------
+//
+// Where the camera is and what it is doing, how the avatar is moving, which
+// region's terrain is loaded, what has been derendered: state produced by one
+// part of the world layer and read by the others. It sits here so those parts
+// can be separate crates that describe the same world without depending on
+// each other to name it.
+
+/// The camera mode: one of the three the [`ViewerCamera`] cycles between. See the
+/// [module documentation](self).
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum CameraMode {
+    /// First-person: at the eyes, mouse aims, cursor captured.
+    Mouselook,
+    /// Orbiting third-person around a `FocusTarget` (the default).
+    #[default]
+    ThirdPerson,
+    /// Free 6-DOF spectator camera (the promoted debug fly-camera).
+    Flycam,
+}
+
+/// The marker on the one main viewer camera entity — the camera every world
+/// system means by "the camera", as opposed to the reflection-probe, mirror and
+/// minimap cameras that also carry `Camera3d`. Mode-agnostic: the same entity is
+/// the camera in mouselook, third person and flycam.
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct ViewerCamera;
+
+/// The drivable state of the [`ViewerCamera`], shared by every mode.
+///
+/// Third person reads the orbit fields (`azimuth` /
+/// `elevation` / `distance`); mouselook and
+/// flycam read the aim fields (`yaw` / `pitch` /
+/// `roll`). The flycam's *position* is the entity `Transform`'s
+/// translation, not stored here — so a debug focus system that writes the
+/// transform moves the flycam directly. The smoothed pose eases toward the mode's
+/// desired pose so mode changes glide.
+#[derive(Component, Debug, Clone)]
+pub struct CameraRig {
+    /// Third-person horizontal orbit offset from dead-behind the avatar, radians
+    /// (`0` = rear view). Only a mouse-drag moves it — never the arrow keys.
+    pub azimuth: f32,
+    /// Third-person vertical orbit angle, radians (positive looks down onto the
+    /// avatar). Seeded from `CAMERA_OFFSET`'s elevation.
+    pub elevation: f32,
+    /// Third-person camera distance from the focus, metres, clamped between
+    /// [`MOUSELOOK_CROSS_DISTANCE`] and the tunable maximum
+    /// (`CameraTuning::max_distance`, default `MAX_DISTANCE`).
+    pub distance: f32,
+    /// Mouselook / flycam yaw about Bevy up (`+Y`), radians.
+    pub yaw: f32,
+    /// Mouselook / flycam pitch about the camera's local right, radians, clamped
+    /// to `±MAX_PITCH`.
+    pub pitch: f32,
+    /// Flycam roll about the camera's local forward, radians (only `CameraSpin`
+    /// roll moves it).
+    pub roll: f32,
+    /// The world-space offset from a `FocusTarget::Point` focus to the camera
+    /// eye, used only in focus-on-object. Captured at alt-click so the camera does
+    /// not jump, and orbited / zoomed since. Unlike the avatar rear-view orbit
+    /// (which follows the heading) this is fixed in the world, as the reference's
+    /// object focus is.
+    pub point_offset: Vec3,
+    /// The last rendered eye position, eased toward the mode's desired eye.
+    pub smoothed_eye: Vec3,
+    /// The last rendered look-at point, eased toward the mode's desired focus.
+    pub smoothed_focus: Vec3,
+    /// Whether the smoothed pose has been seeded yet (so the first valid frame
+    /// snaps rather than gliding in from an arbitrary origin).
+    pub seeded: bool,
+}
+
+impl Default for CameraRig {
+    /// The reference rear-view orbit: dead behind, tilted and distanced by
+    /// `CAMERA_OFFSET`.
+    fn default() -> Self {
+        let horizontal =
+            (CAMERA_OFFSET.x * CAMERA_OFFSET.x + CAMERA_OFFSET.y * CAMERA_OFFSET.y).sqrt();
+        Self {
+            azimuth: 0.0,
+            elevation: CAMERA_OFFSET.z.atan2(horizontal),
+            distance: CAMERA_OFFSET.length(),
+            yaw: 0.0,
+            pitch: 0.0,
+            roll: 0.0,
+            point_offset: Vec3::ZERO,
+            smoothed_eye: Vec3::ZERO,
+            smoothed_focus: Vec3::ZERO,
+            seeded: false,
+        }
+    }
+}
+
+impl CameraRig {
+    /// Reset the third-person orbit to the default rear view — the reference's
+    /// `Escape` "reset camera". Leaves the aim / smoothing alone (the caller snaps
+    /// via the mode change).
+    pub fn reset_orbit(&mut self) {
+        let default = Self::default();
+        self.azimuth = default.azimuth;
+        self.elevation = default.elevation;
+        self.distance = default.distance;
+    }
+
+    /// Seed the third-person orbit from the debug framing environment variables,
+    /// so the offline screenshot harness can frame the avatar from a chosen angle
+    /// (the same `SL_VIEWER_CAMERA_*` knobs the old login-snap read). A no-op when
+    /// none are set — the default rear view stands.
+    ///
+    /// `SL_VIEWER_CAMERA_ORBIT_DEG` swings the azimuth (90 = a side view),
+    /// `_ELEV_DEG` the elevation (positive looks down), `_DISTANCE` the zoom.
+    pub fn seed_orbit_from_env(&mut self) {
+        let env_f32 = |key: &str| -> Option<f32> {
+            std::env::var(key).ok().and_then(|value| value.parse().ok())
+        };
+        if let Some(orbit) = env_f32("SL_VIEWER_CAMERA_ORBIT_DEG") {
+            self.azimuth = orbit.to_radians();
+        }
+        if let Some(elevation) = env_f32("SL_VIEWER_CAMERA_ELEV_DEG") {
+            self.elevation = elevation.to_radians().clamp(-MAX_PITCH, MAX_PITCH);
+        }
+        if let Some(distance) = env_f32("SL_VIEWER_CAMERA_DISTANCE") {
+            self.distance = distance.clamp(MOUSELOOK_CROSS_DISTANCE, MAX_DISTANCE);
+        }
+    }
+
+    /// Reset the smoothing so the next frame snaps to the mode's desired pose
+    /// rather than gliding — called after a region-origin shift
+    /// (`crate::terrain::recenter_terrain`) so the eased pose does not drift
+    /// across the 256 m rebase (the reference's sideways-after-crossing bug).
+    pub const fn resnap(&mut self) {
+        self.seeded = false;
+    }
+
+    /// Aim the flycam / mouselook along `direction` (Bevy Y-up space) by setting
+    /// the yaw/pitch, so the aim survives the next frame's re-derivation. A zero
+    /// direction is ignored. Yaw is measured so `-Z` gives yaw `0`; pitch is the
+    /// elevation, clamped to `±MAX_PITCH`.
+    pub fn aim_along(&mut self, direction: Vec3) {
+        let dir = direction.normalize_or_zero();
+        if dir == Vec3::ZERO {
+            return;
+        }
+        self.yaw = (-dir.x).atan2(-dir.z);
+        self.pitch = dir.y.asin().clamp(-MAX_PITCH, MAX_PITCH);
+    }
+
+    /// The rotation the rig's current yaw/pitch aims along (roll excluded) — the
+    /// same reconstruction mouselook uses, so `rotation * NEG_Z` is the aim
+    /// direction. A fixed flycam bakes this into its entity transform at spawn:
+    /// `drive_flycam` integrates input deltas onto the transform and never reads
+    /// the rig, so without this the transform keeps its identity (SL-north)
+    /// orientation and `--camera-look-at` has no effect.
+    #[must_use]
+    pub fn aim_quat(&self) -> Quat {
+        Quat::from_euler(EulerRot::YXZ, self.yaw, self.pitch, 0.0)
+    }
+
+    /// Place the focus-on-point eye offset directly (world space, eye = point +
+    /// offset). The media-controls **Zoom** (`crate::media_controls`) uses this
+    /// to park the camera squarely in front of a media face — the counterpart of
+    /// `focus_on_object` capturing the offset at an alt-click.
+    pub const fn set_point_offset(&mut self, offset: Vec3) {
+        self.point_offset = offset;
+    }
+}
+
+/// The authoritative kinematic motion of a full-object avatar (`pcode` 47) as of
+/// its last `ObjectUpdate`, attached to the avatar's anchor entity by
+/// `apply_object`(crate::avatars) and change-detected: a fresh insert on every
+/// update reseeds the interpolation. Its presence marks the avatar anchors
+/// `drive_avatar_motion` dead-reckons between updates. Coarse (minimap-only)
+/// avatars carry no velocity and so get no [`AvatarMotion`].
+#[derive(Debug, Component, Clone)]
+pub struct AvatarMotion {
+    /// Region-local position (metres, Second Life Z-up frame).
+    pub position: Vector,
+    /// Linear velocity (metres/second).
+    pub velocity: Vector,
+    /// Linear acceleration (metres/second²).
+    pub acceleration: Vector,
+    /// Orientation (a Second Life unit quaternion).
+    pub rotation: Rotation,
+    /// Angular velocity (rotation axis scaled by radians/second).
+    pub angular_velocity: Vector,
+    /// The region this avatar lives in, for the region-edge / neighbour lookups.
+    pub region_handle: RegionHandle,
+    /// The avatar's bounding-box height (object scale Z), for the ground floor.
+    pub height: f32,
+    /// Whether the anchor applies the object's orientation (a rigged body root) or
+    /// stays upright (a placeholder sphere, which does not visibly rotate).
+    pub apply_rotation: bool,
+    /// The **collision (foot) plane** the simulator reports for this avatar: the
+    /// surface its physics capsule is resting on, as the plane equation
+    /// `[nx, ny, nz, w]` (a unit normal and a distance) in the region-local
+    /// Second Life frame — `n · p = w`. `None` when the update carried no plane
+    /// (a placeholder sphere, or a compressed update). This is the simulator's
+    /// authoritative ground under the avatar — it already accounts for prims the
+    /// avatar stands on, unlike a terrain-only lookup — and is what
+    /// `crate::ground` resolves the foot-IK ground from, exactly as the
+    /// reference viewer's `getGround` / `mFootPlane` do.
+    collision_plane: Option<[f32; 4]>,
+}
+
+impl AvatarMotion {
+    /// The avatar's current heading (yaw about the Second Life up axis, radians),
+    /// extracted from its reported orientation. The viewer's movement controls
+    /// (`crate::movement`) seed the walk heading from this so the first step does
+    /// not snap the avatar to an arbitrary facing.
+    #[must_use]
+    pub fn yaw(&self) -> f32 {
+        let Rotation { x, y, z, s } = &self.rotation;
+        // Yaw about Z from a unit quaternion (`atan2(2(sz + xy), 1 - 2(y² + z²))`).
+        let siny_cosp = 2.0 * (s * z + x * y);
+        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
+        siny_cosp.atan2(cosy_cosp)
+    }
+
+    /// The avatar's vertical (Second Life Z-up) velocity component (metres/second):
+    /// positive climbing, negative descending / falling. The client-side locomotion
+    /// fallback (`crate::locomotion`) reads this to pick the ascend / descend /
+    /// fall states — the only states with no advertised control-flag intent.
+    #[must_use]
+    pub const fn vertical_speed(&self) -> f32 {
+        self.velocity.z
+    }
+
+    /// The region this avatar is in — the frame the terrain queries and its reported
+    /// position are expressed in.
+    #[must_use]
+    pub const fn region(&self) -> RegionHandle {
+        self.region_handle
+    }
+
+    /// The avatar's reported linear velocity (Second Life Z-up metres/second, region
+    /// frame). The walk-adjust foot-slip servo (P31.14) matches the walk animation's
+    /// playback speed to this.
+    #[must_use]
+    pub const fn sl_velocity(&self) -> Vec3 {
+        Vec3::new(self.velocity.x, self.velocity.y, self.velocity.z)
+    }
+
+    /// The avatar's reported angular velocity (rotation axis scaled by radians/second,
+    /// region frame). The fly-adjust bank (P31.14) rolls the pelvis into a turn by its
+    /// Z component, exactly as the reference's `LLFlyAdjustMotion` does.
+    #[must_use]
+    pub const fn sl_angular_velocity(&self) -> Vec3 {
+        Vec3::new(
+            self.angular_velocity.x,
+            self.angular_velocity.y,
+            self.angular_velocity.z,
+        )
+    }
+
+    /// Build the authoritative motion from an avatar's object update. `apply_rotation`
+    /// is `true` for a rigged body root (whose anchor carries the object rotation)
+    /// and `false` for a placeholder sphere.
+    #[must_use]
+    pub fn from_object(object: &Object, apply_rotation: bool) -> Self {
+        Self {
+            position: object.motion.position.clone(),
+            velocity: object.motion.velocity.clone(),
+            acceleration: object.motion.acceleration.clone(),
+            rotation: object.motion.rotation.clone(),
+            angular_velocity: object.motion.angular_velocity.clone(),
+            region_handle: object.region_handle,
+            height: object.scale.z,
+            apply_rotation,
+            collision_plane: object.motion.collision_plane,
+        }
+    }
+
+    /// The simulator's collision (foot) plane for this avatar (region-local
+    /// `[nx, ny, nz, w]`), or `None` when the last update carried none. The ground
+    /// probe (`crate::ground`) resolves the foot-IK ground from it.
+    #[must_use]
+    pub const fn collision_plane(&self) -> Option<[f32; 4]> {
+        self.collision_plane
+    }
+}
+
+/// What kind of thing a blacklist entry names — the reference's `LLAssetType`,
+/// narrowed to the kinds a viewer can actually refuse.
+///
+/// The two **in-world** kinds are what the derender menus produce and what the
+/// scene mirror gates on. The three **asset** kinds are refused at their own
+/// point of use instead — a blacklisted sound is never played, a blacklisted
+/// animation never runs, a blacklisted texture is never fetched — which is
+/// exactly where the reference refuses them. Their producers are the explorer
+/// floaters (the sound explorer feeds `Sound`, the animation explorer
+/// `Animation`); until those land, an asset entry comes from the per-account
+/// file itself, which is also how the reference's distributed blacklist data
+/// (`fsdata`) feeds textures.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DerenderKind {
+    /// An in-world object (the reference's `AT_OBJECT`).
+    Object,
+    /// An avatar (the reference's `AT_PERSON`).
+    Resident,
+    /// A sound asset, never played (`AT_SOUND`).
+    Sound,
+    /// An animation asset, never run (`AT_ANIMATION`).
+    Animation,
+    /// A texture asset, never fetched (`AT_TEXTURE`).
+    Texture,
+}
+
+impl DerenderKind {
+    /// The Fluent key naming this kind in the blacklist's Type column.
+    #[must_use]
+    pub const fn label_key(self) -> &'static str {
+        match self {
+            Self::Object => "derender-type-object",
+            Self::Resident => "derender-type-resident",
+            Self::Sound => "derender-type-sound",
+            Self::Animation => "derender-type-animation",
+            Self::Texture => "derender-type-texture",
+        }
+    }
+
+    /// A stable sort rank, so the Type column orders deterministically.
+    #[must_use]
+    pub const fn rank(self) -> u8 {
+        match self {
+            Self::Object => 0,
+            Self::Resident => 1,
+            Self::Sound => 2,
+            Self::Animation => 3,
+            Self::Texture => 4,
+        }
+    }
+
+    /// Whether this kind names something the **scene mirror** suppresses (as
+    /// opposed to an asset refused at its point of use).
+    #[must_use]
+    pub const fn is_in_world(self) -> bool {
+        matches!(self, Self::Object | Self::Resident)
+    }
+}
+
+/// A component marking an object entity as a **particle source**, carrying the
+/// decoded `LLPartSysData` particle-system parameters in Second Life semantics —
+/// ready for P30.2 to drive a CPU particle simulation and render its particles as
+/// camera-facing billboards.
+///
+/// Attached to (and refreshed / cleared on) each object entity by
+/// `apply_object`(crate::objects) as its updates arrive. Only a *live* system
+/// (non-zero CRC) is carried; see `particles_from_object`.
+#[derive(Component, Debug, Clone, PartialEq)]
+pub struct ObjectParticleSystem {
+    /// The decoded particle system: the source parameters (pattern, burst / age
+    /// timing, emission angles / radius / speed, angular velocity, acceleration,
+    /// texture, target) plus the template particle parameters it emits
+    /// (per-particle age, start / end colour and scale, glow, blend).
+    pub system: ParticleSystem,
+}
 
 #[cfg(test)]
 mod tests {

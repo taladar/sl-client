@@ -80,7 +80,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::window::{CursorGrabMode, CursorOptions};
 
-use crate::camera::CameraMode;
+use crate::world_api::CameraMode;
 
 /// The key that hands the keyboard back to the world from a focused UI.
 const RELEASE_FOCUS_KEY: KeyCode = KeyCode::Escape;
@@ -257,7 +257,7 @@ mod tests {
         CursorGrabAllowed, InputContext, InputContextPlugin, compute_input_context,
         drive_cursor_grab, release_ui_focus_on_escape, world_has_keyboard,
     };
-    use crate::camera::CameraMode;
+    use crate::world_api::CameraMode;
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::prelude::*;
     use bevy::text::EditableText;

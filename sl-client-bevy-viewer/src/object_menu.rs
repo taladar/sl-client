@@ -105,12 +105,13 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING};
-use crate::derender::{DerenderKind, RequestDerender};
+use crate::derender::RequestDerender;
 use crate::inventory::InventoryModel;
 use crate::menu::UNIMPLEMENTED;
 use crate::objects::{ObjectRayHit, ObjectState};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
+use crate::world_api::DerenderKind;
 use crate::world_api::RequestBlock;
 use crate::world_api::SelfGroundSit;
 
@@ -904,7 +905,7 @@ fn handle_object_menu_actions(
     mut selection: ResMut<crate::world_api::SelectionSet>,
     state: Res<ObjectState>,
     seat_poses: Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
-    seat_cameras: Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
+    seat_cameras: Query<&GlobalTransform, With<crate::world_api::ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut derenders: MessageWriter<RequestDerender>,
@@ -1033,7 +1034,7 @@ fn sit_here_offset(
     hit: &ObjectRayHit,
     state: &ObjectState,
     seat_poses: &Query<(&GlobalTransform, &crate::objects::ObjectSlMotion)>,
-    seat_cameras: &Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
+    seat_cameras: &Query<&GlobalTransform, With<crate::world_api::ViewerCamera>>,
 ) -> Vector {
     let fallback = || hit.surface.position.clone();
     let Some(entity) = state.entity_by_scoped(&hit.summary.picked_scoped) else {

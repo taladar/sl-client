@@ -97,7 +97,7 @@ use tracing::{debug, info, warn};
 use crate::avatars::AvatarState;
 use crate::objects::ObjectState;
 use crate::settings::ViewerSettings;
-use crate::world_api::FriendsModel;
+use crate::world_api::{DerenderKind, FriendsModel};
 
 /// The per-account file the permanent blacklist is stored in (a sibling of the
 /// account `settings.toml`). Our account directory is already per-grid and
@@ -126,64 +126,6 @@ pub(crate) const SETTING_FRIENDS_ONLY_PERSISTS_TP: &str = "RenderFriendsOnlyPers
 // ---------------------------------------------------------------------------
 // The model.
 // ---------------------------------------------------------------------------
-
-/// What kind of thing a blacklist entry names — the reference's `LLAssetType`,
-/// narrowed to the kinds a viewer can actually refuse.
-///
-/// The two **in-world** kinds are what the derender menus produce and what the
-/// scene mirror gates on. The three **asset** kinds are refused at their own
-/// point of use instead — a blacklisted sound is never played, a blacklisted
-/// animation never runs, a blacklisted texture is never fetched — which is
-/// exactly where the reference refuses them. Their producers are the explorer
-/// floaters (the sound explorer feeds `Sound`, the animation explorer
-/// `Animation`); until those land, an asset entry comes from the per-account
-/// file itself, which is also how the reference's distributed blacklist data
-/// (`fsdata`) feeds textures.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DerenderKind {
-    /// An in-world object (the reference's `AT_OBJECT`).
-    Object,
-    /// An avatar (the reference's `AT_PERSON`).
-    Resident,
-    /// A sound asset, never played (`AT_SOUND`).
-    Sound,
-    /// An animation asset, never run (`AT_ANIMATION`).
-    Animation,
-    /// A texture asset, never fetched (`AT_TEXTURE`).
-    Texture,
-}
-
-impl DerenderKind {
-    /// The Fluent key naming this kind in the blacklist's Type column.
-    #[must_use]
-    pub const fn label_key(self) -> &'static str {
-        match self {
-            Self::Object => "derender-type-object",
-            Self::Resident => "derender-type-resident",
-            Self::Sound => "derender-type-sound",
-            Self::Animation => "derender-type-animation",
-            Self::Texture => "derender-type-texture",
-        }
-    }
-
-    /// A stable sort rank, so the Type column orders deterministically.
-    #[must_use]
-    pub const fn rank(self) -> u8 {
-        match self {
-            Self::Object => 0,
-            Self::Resident => 1,
-            Self::Sound => 2,
-            Self::Animation => 3,
-            Self::Texture => 4,
-        }
-    }
-
-    /// Whether this kind names something the **scene mirror** suppresses (as
-    /// opposed to an asset refused at its point of use).
-    const fn is_in_world(self) -> bool {
-        matches!(self, Self::Object | Self::Resident)
-    }
-}
 
 /// One blacklist entry: what was derendered, where and when.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

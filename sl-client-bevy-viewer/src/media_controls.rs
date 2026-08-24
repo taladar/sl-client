@@ -38,7 +38,7 @@ use bevy::ui_widgets::{
 use sl_cef::PlaybackState;
 use sl_client_bevy::{Command, SlCommand};
 
-use crate::camera::{CameraRig, FocusTarget, ViewerCamera};
+use crate::camera::FocusTarget;
 use crate::media_diagnostics::MediaDiagnostics;
 use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{
@@ -51,6 +51,7 @@ use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSyste
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::{CameraRig, ViewerCamera};
 
 /// The [`UiAction`] element name of the bar.
 pub(crate) const MEDIA_CONTROLS_ELEMENT: &str = "media-controls";

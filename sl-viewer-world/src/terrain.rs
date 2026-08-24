@@ -114,10 +114,10 @@ pub fn drive_terrain_lighting(
 use sl_terrain::TerrainComposition;
 
 use crate::asset_budget::MeshUploadBudget;
-use crate::camera::ViewerCamera;
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::probe_layers::environment_render_layers;
 use crate::textures::{TextureDecoded, TextureManager};
+use crate::world_api::ViewerCamera;
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
 /// 256 m (16×16 patches of 16×16 cells).
@@ -146,63 +146,6 @@ const DEFAULT_WEIGHTS: [f32; DETAIL_COUNT] = [1.0, 0.0, 0.0, 0.0];
 /// A patch's key: its region plus grid position within that region.
 pub(crate) type PatchKey = (RegionHandle, u32, u32);
 
-/// Per-region terrain-compositing state: the elevation bands, the shared splat
-/// material, and the detail-texture keys requested for it.
-#[derive(Debug, Default)]
-struct RegionTerrain {
-    /// The region's terrain-compositing parameters, once its `RegionHandshake`
-    /// has been seen; `None` until then (patches render with flat weights).
-    composition: Option<TerrainComposition>,
-    /// The region's shared splat material (one per region — neighbours may use
-    /// different ground textures), created on its first patch.
-    material: Option<Handle<TerrainMaterial>>,
-    /// The texture key requested for each detail slot (`None` for a nil slot),
-    /// used to route an arriving texture to the right material slot.
-    detail_keys: [Option<TextureKey>; DETAIL_COUNT],
-    /// Whether this region's detail textures have been requested yet.
-    requested: bool,
-}
-
-/// Viewer-side terrain bookkeeping across the home region and its neighbours.
-#[derive(Debug, Resource, Default)]
-pub struct TerrainState {
-    /// The scene origin: the region whose south-west corner is Bevy `(0, 0)`.
-    /// Follows the root region so coordinates stay small near the camera.
-    origin: Option<RegionHandle>,
-    /// Per-region compositing state, keyed by region handle.
-    regions: HashMap<RegionHandle, RegionTerrain>,
-    /// The rendered entity for each patch; a repeat patch replaces its mesh.
-    patches: HashMap<PatchKey, Entity>,
-    /// The most recent raw patch for each key, kept so a patch's mesh can be
-    /// rebuilt (with real weights, or when a neighbour arrives) after the fact.
-    raw_patches: HashMap<PatchKey, TerrainPatch>,
-    /// The **last known land patch** for each key, retained across a region
-    /// teardown / rebuild (and, with the disk layer, across sessions) so
-    /// [`Self::land_height`] can still answer while the live [`Self::raw_patches`]
-    /// are gone — a region's ground height is stable, so a stale cached value is a
-    /// far better ground-floor answer than `None`. This is what keeps the avatar
-    /// ground floor (`physics.rs`) working through the login window and the
-    /// region-disappears-then-rebuilds flicker, so the avatar does not fall through
-    /// the terrain while its patches are absent. Land layers only.
-    land_cache: HashMap<PatchKey, TerrainPatch>,
-    /// The flat olive placeholder texture, shared by every region's material
-    /// until its real detail textures decode.
-    placeholder: Option<Handle<Image>>,
-    /// Decoded detail textures by key, so a texture shared by several regions is
-    /// decoded once and a repeated delivery is not decoded again.
-    decoded: HashMap<TextureKey, Handle<Image>>,
-    /// A monotonically increasing counter bumped whenever height or compositing
-    /// data changes (a patch arrives, a handshake's composition lands), so a
-    /// derived consumer (the minimap's terrain backdrop) can cheaply notice
-    /// staleness without hashing the patch maps.
-    map_revision: u64,
-    /// Per-region version of [`map_revision`], bumped only for the region whose
-    /// data actually changed, so a per-region consumer (the parcel-border bands,
-    /// which ground-follow) can rebuild only the terraformed / newly-streamed
-    /// region instead of all of them.
-    region_revisions: HashMap<RegionHandle, u64>,
-}
-
 /// Marks a rendered land-patch entity as a **walkable ground surface**, so the
 /// avatar ground probe ([`crate::ground`], P31.14) can accept it as something the
 /// feet may plant on — the same role the reference viewer's
@@ -213,95 +156,6 @@ pub struct TerrainState {
 /// billboard, the sky dome, or another avatar.
 #[derive(Component)]
 pub(crate) struct TerrainSurface;
-
-impl TerrainState {
-    /// The scene origin region (whose south-west corner is Bevy `(0, 0)`), or
-    /// `None` before the first terrain patch arrives.
-    #[must_use]
-    pub const fn origin(&self) -> Option<RegionHandle> {
-        self.origin
-    }
-
-    /// Despawn every rendered land patch and forget all per-region terrain state —
-    /// the terrain half of the distant-teleport scene purge
-    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
-    /// The destination streams its terrain fresh; the shared placeholder image and
-    /// the decoded-detail-texture cache are kept (a texture shared with the
-    /// destination need not be refetched). Drops the origin so [`recenter_terrain`]
-    /// re-anchors on the destination without a spurious camera shift.
-    pub(crate) fn purge(&mut self, commands: &mut Commands) {
-        for (_key, entity) in self.patches.drain() {
-            commands.entity(entity).try_despawn();
-        }
-        self.regions.clear();
-        self.raw_patches.clear();
-        self.map_revision = self.map_revision.wrapping_add(1);
-        // The purged regions are gone; a re-streamed region restarts at revision
-        // 1, which a stale per-region stamp (its pre-purge revision) will not
-        // match, so its bands rebuild.
-        self.region_revisions.clear();
-        self.origin = None;
-    }
-
-    /// The terrain-data revision — bumped on every ingested patch and learned
-    /// composition, so a derived map texture knows when to rebuild.
-    #[must_use]
-    pub const fn map_revision(&self) -> u64 {
-        self.map_revision
-    }
-
-    /// This region's terrain revision (see [`region_revisions`](Self::region_revisions));
-    /// `0` before any of its data has arrived.
-    pub(crate) fn region_revision(&self, region: RegionHandle) -> u64 {
-        self.region_revisions.get(&region).copied().unwrap_or(0)
-    }
-
-    /// Bump both the global [`map_revision`](Self::map_revision) and `region`'s
-    /// per-region revision — call wherever `region`'s height / compositing data
-    /// changes.
-    fn bump_revision(&mut self, region: RegionHandle) {
-        self.map_revision = self.map_revision.wrapping_add(1);
-        let revision = self.region_revisions.entry(region).or_insert(0);
-        *revision = revision.wrapping_add(1);
-    }
-
-    /// Every decoded land patch of `region`, for compositing a top-down map.
-    pub fn land_patches_of(&self, region: RegionHandle) -> impl Iterator<Item = &TerrainPatch> {
-        self.raw_patches.iter().filter_map(move |(key, patch)| {
-            (key.0 == region && patch.layer.is_land()).then_some(patch)
-        })
-    }
-
-    /// The terrain-compositing parameters of `region`, once its handshake has
-    /// been seen.
-    #[must_use]
-    pub fn composition_of(&self, region: RegionHandle) -> Option<&TerrainComposition> {
-        self.regions
-            .get(&region)
-            .and_then(|entry| entry.composition.as_ref())
-    }
-
-    /// The ground height at region-local metre position (`x`, `y`) in `region`,
-    /// read from the nearest decoded land-patch cell, or `None` when that region's
-    /// terrain has not been ingested (or the point is off-region / non-finite).
-    ///
-    /// A land patch holds `size`×`size` height samples spanning `size` metres (one
-    /// sample per metre for a standard 16-cell patch), so cell `(⌊x⌋, ⌊y⌋)` within
-    /// the patch is the nearest sample. Used by the physics dead-reckoning (P31.2)
-    /// as the ground floor an extrapolating object is clamped to
-    /// (`getMinAllowedZ`).
-    #[must_use]
-    pub fn land_height(&self, region: RegionHandle, x: f32, y: f32) -> Option<f32> {
-        if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
-            return None;
-        }
-        // The live patches first; fall back to the retained cache when they are
-        // absent (a region mid-rebuild, or not yet streamed after login), so the
-        // avatar ground floor keeps a stable answer instead of dropping to `None`.
-        land_height_in(&self.raw_patches, region, x, y)
-            .or_else(|| land_height_in(&self.land_cache, region, x, y))
-    }
-}
 
 /// Resolve the land height at region-local `(x, y)` from a patch map (the live
 /// [`TerrainState::raw_patches`] or the retained [`TerrainState::land_cache`]).
@@ -347,13 +201,13 @@ fn land_height_in(
 /// only translated — never rotated — so a crossing cannot yaw the view). The
 /// third-person / mouselook camera recomputes its position from the avatar each
 /// frame, so shifting its transform would be undone immediately; instead its
-/// smoothing is **resnapped** ([`CameraRig::resnap`](crate::camera::CameraRig)) so
+/// smoothing is **resnapped** ([`CameraRig::resnap`](crate::world_api::CameraRig)) so
 /// the eased pose does not glide across the 256 m rebase (the reference's
 /// sideways-after-crossing glitch).
 pub fn recenter_terrain(
     identity: Res<SlIdentity>,
     mut state: ResMut<TerrainState>,
-    mut cameras: Query<(&mut Transform, &mut crate::camera::CameraRig), With<ViewerCamera>>,
+    mut cameras: Query<(&mut Transform, &mut crate::world_api::CameraRig), With<ViewerCamera>>,
     mut commands: Commands,
 ) {
     let Some(root) = identity.region_handle else {
@@ -1109,6 +963,152 @@ fn grid_normal(heights: &[f32], width: u32, x: u32, y: u32) -> [f32; 3] {
 /// region) to `f32`; there is no `From<u32>` for `f32`, and the value is exact.
 fn patch_coord_f32(value: u32) -> f32 {
     f32::from(u16::try_from(value).unwrap_or(u16::MAX))
+}
+
+/// Per-region terrain-compositing state: the elevation bands, the shared splat
+/// material, and the detail-texture keys requested for it.
+#[derive(Debug, Default)]
+struct RegionTerrain {
+    /// The region's terrain-compositing parameters, once its `RegionHandshake`
+    /// has been seen; `None` until then (patches render with flat weights).
+    composition: Option<TerrainComposition>,
+    /// The region's shared splat material (one per region — neighbours may use
+    /// different ground textures), created on its first patch.
+    material: Option<Handle<TerrainMaterial>>,
+    /// The texture key requested for each detail slot (`None` for a nil slot),
+    /// used to route an arriving texture to the right material slot.
+    detail_keys: [Option<TextureKey>; DETAIL_COUNT],
+    /// Whether this region's detail textures have been requested yet.
+    requested: bool,
+}
+
+/// Viewer-side terrain bookkeeping across the home region and its neighbours.
+#[derive(Debug, Resource, Default)]
+pub struct TerrainState {
+    /// The scene origin: the region whose south-west corner is Bevy `(0, 0)`.
+    /// Follows the root region so coordinates stay small near the camera.
+    origin: Option<RegionHandle>,
+    /// Per-region compositing state, keyed by region handle.
+    regions: HashMap<RegionHandle, RegionTerrain>,
+    /// The rendered entity for each patch; a repeat patch replaces its mesh.
+    patches: HashMap<PatchKey, Entity>,
+    /// The most recent raw patch for each key, kept so a patch's mesh can be
+    /// rebuilt (with real weights, or when a neighbour arrives) after the fact.
+    raw_patches: HashMap<PatchKey, TerrainPatch>,
+    /// The **last known land patch** for each key, retained across a region
+    /// teardown / rebuild (and, with the disk layer, across sessions) so
+    /// [`Self::land_height`] can still answer while the live [`Self::raw_patches`]
+    /// are gone — a region's ground height is stable, so a stale cached value is a
+    /// far better ground-floor answer than `None`. This is what keeps the avatar
+    /// ground floor (`physics.rs`) working through the login window and the
+    /// region-disappears-then-rebuilds flicker, so the avatar does not fall through
+    /// the terrain while its patches are absent. Land layers only.
+    land_cache: HashMap<PatchKey, TerrainPatch>,
+    /// The flat olive placeholder texture, shared by every region's material
+    /// until its real detail textures decode.
+    placeholder: Option<Handle<Image>>,
+    /// Decoded detail textures by key, so a texture shared by several regions is
+    /// decoded once and a repeated delivery is not decoded again.
+    decoded: HashMap<TextureKey, Handle<Image>>,
+    /// A monotonically increasing counter bumped whenever height or compositing
+    /// data changes (a patch arrives, a handshake's composition lands), so a
+    /// derived consumer (the minimap's terrain backdrop) can cheaply notice
+    /// staleness without hashing the patch maps.
+    map_revision: u64,
+    /// Per-region version of [`map_revision`], bumped only for the region whose
+    /// data actually changed, so a per-region consumer (the parcel-border bands,
+    /// which ground-follow) can rebuild only the terraformed / newly-streamed
+    /// region instead of all of them.
+    region_revisions: HashMap<RegionHandle, u64>,
+}
+
+impl TerrainState {
+    /// The scene origin region (whose south-west corner is Bevy `(0, 0)`), or
+    /// `None` before the first terrain patch arrives.
+    #[must_use]
+    pub const fn origin(&self) -> Option<RegionHandle> {
+        self.origin
+    }
+
+    /// Despawn every rendered land patch and forget all per-region terrain state —
+    /// the terrain half of the distant-teleport scene purge
+    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
+    /// The destination streams its terrain fresh; the shared placeholder image and
+    /// the decoded-detail-texture cache are kept (a texture shared with the
+    /// destination need not be refetched). Drops the origin so [`recenter_terrain`]
+    /// re-anchors on the destination without a spurious camera shift.
+    pub(crate) fn purge(&mut self, commands: &mut Commands) {
+        for (_key, entity) in self.patches.drain() {
+            commands.entity(entity).try_despawn();
+        }
+        self.regions.clear();
+        self.raw_patches.clear();
+        self.map_revision = self.map_revision.wrapping_add(1);
+        // The purged regions are gone; a re-streamed region restarts at revision
+        // 1, which a stale per-region stamp (its pre-purge revision) will not
+        // match, so its bands rebuild.
+        self.region_revisions.clear();
+        self.origin = None;
+    }
+
+    /// The terrain-data revision — bumped on every ingested patch and learned
+    /// composition, so a derived map texture knows when to rebuild.
+    #[must_use]
+    pub const fn map_revision(&self) -> u64 {
+        self.map_revision
+    }
+
+    /// This region's terrain revision (see [`region_revisions`](Self::region_revisions));
+    /// `0` before any of its data has arrived.
+    pub(crate) fn region_revision(&self, region: RegionHandle) -> u64 {
+        self.region_revisions.get(&region).copied().unwrap_or(0)
+    }
+
+    /// Bump both the global [`map_revision`](Self::map_revision) and `region`'s
+    /// per-region revision — call wherever `region`'s height / compositing data
+    /// changes.
+    fn bump_revision(&mut self, region: RegionHandle) {
+        self.map_revision = self.map_revision.wrapping_add(1);
+        let revision = self.region_revisions.entry(region).or_insert(0);
+        *revision = revision.wrapping_add(1);
+    }
+
+    /// Every decoded land patch of `region`, for compositing a top-down map.
+    pub fn land_patches_of(&self, region: RegionHandle) -> impl Iterator<Item = &TerrainPatch> {
+        self.raw_patches.iter().filter_map(move |(key, patch)| {
+            (key.0 == region && patch.layer.is_land()).then_some(patch)
+        })
+    }
+
+    /// The terrain-compositing parameters of `region`, once its handshake has
+    /// been seen.
+    #[must_use]
+    pub fn composition_of(&self, region: RegionHandle) -> Option<&TerrainComposition> {
+        self.regions
+            .get(&region)
+            .and_then(|entry| entry.composition.as_ref())
+    }
+
+    /// The ground height at region-local metre position (`x`, `y`) in `region`,
+    /// read from the nearest decoded land-patch cell, or `None` when that region's
+    /// terrain has not been ingested (or the point is off-region / non-finite).
+    ///
+    /// A land patch holds `size`×`size` height samples spanning `size` metres (one
+    /// sample per metre for a standard 16-cell patch), so cell `(⌊x⌋, ⌊y⌋)` within
+    /// the patch is the nearest sample. Used by the physics dead-reckoning (P31.2)
+    /// as the ground floor an extrapolating object is clamped to
+    /// (`getMinAllowedZ`).
+    #[must_use]
+    pub fn land_height(&self, region: RegionHandle, x: f32, y: f32) -> Option<f32> {
+        if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 {
+            return None;
+        }
+        // The live patches first; fall back to the retained cache when they are
+        // absent (a region mid-rebuild, or not yet streamed after login), so the
+        // avatar ground floor keeps a stable answer instead of dropping to `None`.
+        land_height_in(&self.raw_patches, region, x, y)
+            .or_else(|| land_height_in(&self.land_cache, region, x, y))
+    }
 }
 
 #[cfg(test)]

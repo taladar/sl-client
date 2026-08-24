@@ -433,7 +433,7 @@ pub(crate) struct BlendInputs<'w, 's> {
     /// The decoded-motion cache the clip arena uploads from.
     manager: Option<Res<'w, AnimationManager>>,
     /// The viewer camera, for the exact-phase sync distance.
-    camera: Query<'w, 's, &'static GlobalTransform, With<crate::camera::ViewerCamera>>,
+    camera: Query<'w, 's, &'static GlobalTransform, With<crate::world_api::ViewerCamera>>,
 }
 
 /// Assemble this frame's [`GpuAvatarStaging`] snapshot: free/allocate avatar

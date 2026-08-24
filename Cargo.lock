@@ -9419,6 +9419,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "pretty_assertions",
+ "serde",
  "sl-client-bevy",
  "sl-viewer-settings",
 ]

@@ -15,7 +15,7 @@
 //! - **Clear temporary** drops every session-only entry at once (the
 //!   reference's "Clear temporary" button).
 //!
-//! Every [`DerenderKind`](crate::derender::DerenderKind) is listed here, asset
+//! Every [`DerenderKind`](crate::world_api::DerenderKind) is listed here, asset
 //! entries included: the model honours a blacklisted sound / animation / texture
 //! at its own point of use, so this is where one is seen and removed even though
 //! no surface produces one yet (the explorer floaters will).
@@ -737,7 +737,8 @@ fn bind_blacklist_rows(
 #[cfg(test)]
 mod tests {
     use super::{format_date, matches_filter, sort_rows};
-    use crate::derender::{DerenderEntry, DerenderKind};
+    use crate::derender::DerenderEntry;
+    use crate::world_api::DerenderKind;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;
 

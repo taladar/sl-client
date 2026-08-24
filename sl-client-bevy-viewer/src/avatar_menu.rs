@@ -91,7 +91,7 @@ use sl_client_bevy::{AgentKey, Command, MuteType, SlAgentParcel, SlCommand, SlId
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatars::{AvatarState, RefetchAvatarTextures};
-use crate::derender::{DerenderKind, RequestDerender};
+use crate::derender::RequestDerender;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
@@ -104,6 +104,7 @@ use crate::objects::ObjectPicker;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
+use crate::world_api::DerenderKind;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::{ConversationKey, OpenConversation};

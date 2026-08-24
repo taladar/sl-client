@@ -53,14 +53,14 @@ use sl_client_bevy::{
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarBodyPart, AvatarRuntimeMorphs, AvatarState};
 use crate::body_physics::{BodyPhysicsInput, BodyPhysicsMotion};
-use crate::derender::DerenderKind;
 use crate::ground::AvatarGround;
 use crate::locomotion_ik::{AdjustInput, AdjusterAnims, LegJoints, LocomotionAdjust};
 use crate::look_at::{
     BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
 };
-use crate::physics::AvatarMotion;
 use crate::reach::{PointAtTargets, ReachInput, ReachJoints, ReachMotion};
+use crate::world_api::AvatarMotion;
+use crate::world_api::DerenderKind;
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional

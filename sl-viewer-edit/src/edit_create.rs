@@ -38,7 +38,6 @@ use bevy::window::{CursorIcon, CustomCursor, CustomCursorImage, PrimaryWindow, S
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, PrimShape, SlCommand, Vector, pcode};
 
-use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::{LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
@@ -52,6 +51,7 @@ use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::world_api::SelectionSet;
+use crate::world_api::ViewerCamera;
 use crate::world_api::{EditTool, EditToolState};
 
 /// The uniform scale (metres) a Linden tree is rezzed at — its vector length

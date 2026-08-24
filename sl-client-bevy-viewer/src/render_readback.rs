@@ -53,9 +53,9 @@ use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::render_resource::{TextureFormat, TextureUsages};
 use bevy::winit::WinitPlugin;
 
-use crate::camera::ViewerCamera;
 use crate::face_material::SlFaceMaterialPlugin;
 use crate::probes::ReflectionProbePlugin;
+use crate::world_api::ViewerCamera;
 use sl_client_bevy::{
     CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
     TerrainMaterialPlugin, WaterMaterialPlugin,

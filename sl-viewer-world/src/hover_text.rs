@@ -334,7 +334,7 @@ pub struct HoverTextObjects<'w, 's> {
 /// moving object by one frame — imperceptible for the stationary vendors /
 /// signs floating text lives on.
 pub fn follow_hover_text(
-    cameras: Query<&GlobalTransform, With<crate::camera::ViewerCamera>>,
+    cameras: Query<&GlobalTransform, With<crate::world_api::ViewerCamera>>,
     objects: HoverTextObjects,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     mut billboards: Query<(&HoverText, &mut Transform, &mut Visibility)>,

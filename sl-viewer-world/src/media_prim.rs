@@ -34,7 +34,6 @@ use sl_client_bevy::{
     ScopedObjectId, SlCommand, SlEvent, SlSessionEvent, texture_face_uv_transform,
 };
 
-use crate::camera::ViewerCamera;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud_pick::{pointer_over_blocking_ui, surface_info_from_hit};
@@ -44,6 +43,7 @@ use crate::media_engine::{
 };
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
+use crate::world_api::ViewerCamera;
 use sl_cef::{KeyInput, MediaKind, SurfaceConfig, classify_url};
 
 /// The hard cap on simultaneously live in-world media surfaces (the

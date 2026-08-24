@@ -113,9 +113,9 @@
 //! `apply_object`: crate::objects
 //! [`GeneratedEnvironmentMapLight`]: bevy::light::GeneratedEnvironmentMapLight
 
-use crate::camera::ViewerCamera;
 use crate::probe_layers::{default_probe_camera_render_layers, local_probe_camera_render_layers};
 use crate::settings::ViewerSettings;
+use crate::world_api::ViewerCamera;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::CUBE_MAP_FACES;
 use bevy::camera::visibility::RenderLayers;

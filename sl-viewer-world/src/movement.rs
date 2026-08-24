@@ -41,11 +41,12 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, ControlFlags, Rotation, SlAgentParcel, SlCommand, SlIdentity};
 
 use crate::avatars::AvatarState;
-use crate::camera::{CameraAim, CameraMode};
+use crate::camera::CameraAim;
 use crate::input_action::Action;
-use crate::physics::AvatarMotion;
 use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
 use crate::terrain::TerrainState;
+use crate::world_api::AvatarMotion;
+use crate::world_api::CameraMode;
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second
 /// (~183°/s — a brisk turn that feels responsive rather than sluggish).
@@ -361,8 +362,9 @@ pub fn drive_avatar_controls(
         } else {
             controls.ascend_hold_secs = 0.0;
         }
-        let grounded = own_motion
-            .is_none_or(|motion| motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M));
+        let grounded = own_motion.is_none_or(|motion| {
+            crate::physics::avatar_at_ground_floor(motion, &terrain, LANDING_HEIGHT_MARGIN_M)
+        });
         if should_take_off(
             tuning.automatic_fly,
             controls.flying,
@@ -382,7 +384,7 @@ pub fn drive_avatar_controls(
                 ascend,
                 descend,
                 motion.vertical_speed(),
-                motion.at_ground_floor(&terrain, LANDING_HEIGHT_MARGIN_M),
+                crate::physics::avatar_at_ground_floor(motion, &terrain, LANDING_HEIGHT_MARGIN_M),
             )
         {
             controls.flying = false;

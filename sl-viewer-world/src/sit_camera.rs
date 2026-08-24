@@ -30,7 +30,8 @@ use bevy::prelude::*;
 
 use sl_client_bevy::{ObjectKey, SlAgentParcel, SlEvent, SlSessionEvent};
 
-use crate::camera::{CameraMode, CameraRig, FocusTarget, ViewerCamera};
+use crate::camera::FocusTarget;
+use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
 /// The squared distance (metres²) the eye and at offsets must differ by for a sit
 /// camera to count as "set" — the reference's `CAMERA_POSITION_THRESHOLD_SQUARED`

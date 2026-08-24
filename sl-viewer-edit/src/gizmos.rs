@@ -71,7 +71,6 @@ use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use sl_client_bevy::{Command, ObjectTransform, Rotation, ScopedObjectId, SlCommand, Vector};
 
-use crate::camera::ViewerCamera;
 use crate::coords::{
     bevy_to_sl_vec, sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_rotation,
     sl_to_bevy_vec,
@@ -87,6 +86,7 @@ use crate::objects::{ObjectCategory, ObjectSlMotion, ObjectState, SceneObject};
 use crate::world_api::GridFrame;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::SelectionSet;
+use crate::world_api::ViewerCamera;
 use crate::world_api::{EditTool, EditToolState};
 
 /// The render layer the gizmo rig (and only it) lives on, drawn by the

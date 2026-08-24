@@ -99,7 +99,6 @@ use bevy::render::batching::NoAutomaticBatching;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Object, ParticleSystem, particle_pattern, to_bevy_image};
 
-use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_rotation;
 use crate::hud::{HUD_RENDER_LAYER, on_hud_layer};
 use crate::particle_render::{
@@ -108,23 +107,7 @@ use crate::particle_render::{
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
-
-/// A component marking an object entity as a **particle source**, carrying the
-/// decoded `LLPartSysData` particle-system parameters in Second Life semantics —
-/// ready for P30.2 to drive a CPU particle simulation and render its particles as
-/// camera-facing billboards.
-///
-/// Attached to (and refreshed / cleared on) each object entity by
-/// `apply_object`(crate::objects) as its updates arrive. Only a *live* system
-/// (non-zero CRC) is carried; see `particles_from_object`.
-#[derive(Component, Debug, Clone, PartialEq)]
-pub struct ObjectParticleSystem {
-    /// The decoded particle system: the source parameters (pattern, burst / age
-    /// timing, emission angles / radius / speed, angular velocity, acceleration,
-    /// texture, target) plus the template particle parameters it emits
-    /// (per-particle age, start / end colour and scale, glow, blend).
-    pub(crate) system: ParticleSystem,
-}
+use crate::world_api::{ObjectParticleSystem, ViewerCamera};
 
 /// Lift a live particle system off an object into an [`ObjectParticleSystem`], or
 /// `None` when the object is not (or is no longer) a particle source.
@@ -717,8 +700,8 @@ impl ParticleSim {
 /// write directly (the others recompute it), so it switches there.
 pub fn focus_camera_on_particles(
     sim: Res<ParticleSim>,
-    mut mode: ResMut<crate::camera::CameraMode>,
-    mut camera: Query<(&mut Transform, &mut crate::camera::CameraRig), With<ViewerCamera>>,
+    mut mode: ResMut<crate::world_api::CameraMode>,
+    mut camera: Query<(&mut Transform, &mut crate::world_api::CameraRig), With<ViewerCamera>>,
     mut enabled: Local<Option<bool>>,
 ) {
     let on = *enabled.get_or_insert_with(|| std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some());
@@ -733,7 +716,7 @@ pub fn focus_camera_on_particles(
     };
     // Stand back along +X/+Y from the cloud and look at it, in flycam so the pose
     // sticks (and the rig aim is seeded so the flycam driver reproduces it).
-    *mode = crate::camera::CameraMode::Flycam;
+    *mode = crate::world_api::CameraMode::Flycam;
     let eye = v_add(centroid, Vec3::new(6.0, 3.0, 6.0));
     let look = Vec3::new(centroid.x - eye.x, centroid.y - eye.y, centroid.z - eye.z);
     rig.aim_along(look);

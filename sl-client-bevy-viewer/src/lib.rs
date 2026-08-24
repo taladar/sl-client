@@ -390,8 +390,7 @@ use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
 use crate::blocked::BlockedPlugin;
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
 use crate::camera::{
-    CameraMode, CameraPlugin, CameraRig, CameraSpin, CameraStart, SpinAxis, ViewerCamera,
-    dump_camera_pose, position_camera,
+    CameraPlugin, CameraSpin, CameraStart, SpinAxis, dump_camera_pose, position_camera,
 };
 use crate::chat::{
     ChatOverlay, position_chat_overlay, restyle_chat_overlay, setup_chat_overlay,
@@ -487,8 +486,9 @@ use crate::sky::{
 };
 use crate::spacenav::SpacenavPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
+use crate::terrain::TerrainState;
 use crate::terrain::{
-    PendingPatchRebuilds, TerrainState, drain_patch_rebuilds, recenter_terrain, update_terrain,
+    PendingPatchRebuilds, drain_patch_rebuilds, recenter_terrain, update_terrain,
 };
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
@@ -516,6 +516,7 @@ use crate::water_exclusion::{
     bind_water_exclusion_mask, convert_water_exclusion_faces, setup_water_exclusion,
     sync_water_exclusion_camera,
 };
+use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";

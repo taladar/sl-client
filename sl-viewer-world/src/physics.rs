@@ -80,7 +80,6 @@ use sl_client_bevy::{
 };
 
 use crate::avatars::{AvatarState, update_avatar_objects};
-use crate::camera::ViewerCamera;
 use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::meshes::MeshManager;
 use crate::objects::{
@@ -88,6 +87,7 @@ use crate::objects::{
 };
 use crate::raycast_index::{DynamicColliders, RaycastIndexColliders};
 use crate::terrain::TerrainState;
+use crate::world_api::{AvatarMotion, ViewerCamera};
 
 /// Clamp a raw region time dilation into the `0.0..=1.0` speed factor the
 /// dead-reckoning step multiplies by. Guard a non-finite value (falling back to
@@ -1329,136 +1329,6 @@ fn avatar_collision_floor(
         (None, None) => None,
     };
     ground.map(|ground| ground + 0.5 * height)
-}
-
-/// The authoritative kinematic motion of a full-object avatar (`pcode` 47) as of
-/// its last `ObjectUpdate`, attached to the avatar's anchor entity by
-/// `apply_object`(crate::avatars) and change-detected: a fresh insert on every
-/// update reseeds the interpolation. Its presence marks the avatar anchors
-/// `drive_avatar_motion` dead-reckons between updates. Coarse (minimap-only)
-/// avatars carry no velocity and so get no [`AvatarMotion`].
-#[derive(Debug, Component, Clone)]
-pub struct AvatarMotion {
-    /// Region-local position (metres, Second Life Z-up frame).
-    position: Vector,
-    /// Linear velocity (metres/second).
-    velocity: Vector,
-    /// Linear acceleration (metres/second²).
-    acceleration: Vector,
-    /// Orientation (a Second Life unit quaternion).
-    rotation: Rotation,
-    /// Angular velocity (rotation axis scaled by radians/second).
-    angular_velocity: Vector,
-    /// The region this avatar lives in, for the region-edge / neighbour lookups.
-    region_handle: RegionHandle,
-    /// The avatar's bounding-box height (object scale Z), for the ground floor.
-    height: f32,
-    /// Whether the anchor applies the object's orientation (a rigged body root) or
-    /// stays upright (a placeholder sphere, which does not visibly rotate).
-    apply_rotation: bool,
-    /// The **collision (foot) plane** the simulator reports for this avatar: the
-    /// surface its physics capsule is resting on, as the plane equation
-    /// `[nx, ny, nz, w]` (a unit normal and a distance) in the region-local
-    /// Second Life frame — `n · p = w`. `None` when the update carried no plane
-    /// (a placeholder sphere, or a compressed update). This is the simulator's
-    /// authoritative ground under the avatar — it already accounts for prims the
-    /// avatar stands on, unlike a terrain-only lookup — and is what
-    /// [`crate::ground`] resolves the foot-IK ground from, exactly as the
-    /// reference viewer's `getGround` / `mFootPlane` do.
-    collision_plane: Option<[f32; 4]>,
-}
-
-impl AvatarMotion {
-    /// The avatar's current heading (yaw about the Second Life up axis, radians),
-    /// extracted from its reported orientation. The viewer's movement controls
-    /// ([`crate::movement`]) seed the walk heading from this so the first step does
-    /// not snap the avatar to an arbitrary facing.
-    #[must_use]
-    pub(crate) fn yaw(&self) -> f32 {
-        let Rotation { x, y, z, s } = &self.rotation;
-        // Yaw about Z from a unit quaternion (`atan2(2(sz + xy), 1 - 2(y² + z²))`).
-        let siny_cosp = 2.0 * (s * z + x * y);
-        let cosy_cosp = 1.0 - 2.0 * (y * y + z * z);
-        siny_cosp.atan2(cosy_cosp)
-    }
-
-    /// The avatar's vertical (Second Life Z-up) velocity component (metres/second):
-    /// positive climbing, negative descending / falling. The client-side locomotion
-    /// fallback ([`crate::locomotion`]) reads this to pick the ascend / descend /
-    /// fall states — the only states with no advertised control-flag intent.
-    #[must_use]
-    pub(crate) const fn vertical_speed(&self) -> f32 {
-        self.velocity.z
-    }
-
-    /// Whether this avatar's authoritative position sits at (or within `margin`
-    /// metres above) the **stricter avatar ground floor** (`avatar_ground_floor`:
-    /// `land + 0.5 * height`) for the terrain beneath it — i.e. the avatar is on /
-    /// very close to the ground rather than up in the air. The viewer's movement
-    /// controls ([`crate::movement`]) use this to auto-stop flying on landing
-    /// (P31.11). Returns `false` when the land height under the avatar is not yet
-    /// known (terrain not ingested), so an unknown floor never forces a landing.
-    #[must_use]
-    pub(crate) fn at_ground_floor(&self, terrain: &TerrainState, margin: f32) -> bool {
-        avatar_ground_floor(
-            terrain.land_height(self.region_handle, self.position.x, self.position.y),
-            self.height,
-        )
-        .is_some_and(|floor| self.position.z <= floor + margin)
-    }
-
-    /// The region this avatar is in — the frame the terrain queries and its reported
-    /// position are expressed in.
-    #[must_use]
-    pub(crate) const fn region(&self) -> RegionHandle {
-        self.region_handle
-    }
-
-    /// The avatar's reported linear velocity (Second Life Z-up metres/second, region
-    /// frame). The walk-adjust foot-slip servo (P31.14) matches the walk animation's
-    /// playback speed to this.
-    #[must_use]
-    pub(crate) const fn sl_velocity(&self) -> Vec3 {
-        Vec3::new(self.velocity.x, self.velocity.y, self.velocity.z)
-    }
-
-    /// The avatar's reported angular velocity (rotation axis scaled by radians/second,
-    /// region frame). The fly-adjust bank (P31.14) rolls the pelvis into a turn by its
-    /// Z component, exactly as the reference's `LLFlyAdjustMotion` does.
-    #[must_use]
-    pub(crate) const fn sl_angular_velocity(&self) -> Vec3 {
-        Vec3::new(
-            self.angular_velocity.x,
-            self.angular_velocity.y,
-            self.angular_velocity.z,
-        )
-    }
-
-    /// Build the authoritative motion from an avatar's object update. `apply_rotation`
-    /// is `true` for a rigged body root (whose anchor carries the object rotation)
-    /// and `false` for a placeholder sphere.
-    #[must_use]
-    pub(crate) fn from_object(object: &Object, apply_rotation: bool) -> Self {
-        Self {
-            position: object.motion.position.clone(),
-            velocity: object.motion.velocity.clone(),
-            acceleration: object.motion.acceleration.clone(),
-            rotation: object.motion.rotation.clone(),
-            angular_velocity: object.motion.angular_velocity.clone(),
-            region_handle: object.region_handle,
-            height: object.scale.z,
-            apply_rotation,
-            collision_plane: object.motion.collision_plane,
-        }
-    }
-
-    /// The simulator's collision (foot) plane for this avatar (region-local
-    /// `[nx, ny, nz, w]`), or `None` when the last update carried none. The ground
-    /// probe ([`crate::ground`]) resolves the foot-IK ground from it.
-    #[must_use]
-    pub(crate) const fn collision_plane(&self) -> Option<[f32; 4]> {
-        self.collision_plane
-    }
 }
 
 /// The viewer-side interpolation state for one avatar, owned entirely by
@@ -2805,6 +2675,26 @@ pub(crate) fn log_colliders_near_avatar(
              avatar={is_avatar} mesh={mesh:?}"
         );
     }
+}
+
+/// Whether this avatar's authoritative position sits at (or within `margin`
+/// metres above) the **stricter avatar ground floor** (`avatar_ground_floor`:
+/// `land + 0.5 * height`) for the terrain beneath it — i.e. the avatar is on /
+/// very close to the ground rather than up in the air. The viewer's movement
+/// controls ([`crate::movement`]) use this to auto-stop flying on landing
+/// (P31.11). Returns `false` when the land height under the avatar is not yet
+/// known (terrain not ingested), so an unknown floor never forces a landing.
+#[must_use]
+pub(crate) fn avatar_at_ground_floor(
+    motion: &AvatarMotion,
+    terrain: &TerrainState,
+    margin: f32,
+) -> bool {
+    avatar_ground_floor(
+        terrain.land_height(motion.region_handle, motion.position.x, motion.position.y),
+        motion.height,
+    )
+    .is_some_and(|floor| motion.position.z <= floor + margin)
 }
 
 #[cfg(test)]

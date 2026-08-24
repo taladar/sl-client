@@ -55,7 +55,6 @@ use sl_client_bevy::{
     SlEvent, SlSessionEvent, TransactionId, Uuid, texture_face_uv_transform,
 };
 
-use crate::camera::ViewerCamera;
 use crate::edit_math::rect_selects;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gizmos::GizmoInteraction;
@@ -68,6 +67,7 @@ use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
 };
 use crate::ui::UiRoot;
+use crate::world_api::ViewerCamera;
 use crate::world_api::{DragHoverHighlight, EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 

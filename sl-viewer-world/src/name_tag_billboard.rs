@@ -417,7 +417,7 @@ pub fn layout_tag_text(
     mut reprocess_queue: Local<EntityHashSet>,
     mut textures: ResMut<Assets<Image>>,
     fonts: Res<Assets<bevy::text::Font>>,
-    cameras: Query<&Camera, With<crate::camera::ViewerCamera>>,
+    cameras: Query<&Camera, With<crate::world_api::ViewerCamera>>,
     mut font_atlas_set: ResMut<FontAtlasSet>,
     mut text_pipeline: ResMut<TextPipeline>,
     mut blocks: Query<(
@@ -1297,7 +1297,7 @@ pub(crate) fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
 )]
 pub fn follow_tag_anchors(
     time: Res<Time>,
-    cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::ViewerCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<crate::world_api::ViewerCamera>>,
     anchors: Query<&Transform, (With<AvatarAnchor>, Without<NameTag>)>,
     mut tags: Query<
         (
@@ -1581,7 +1581,7 @@ pub(crate) fn solve_overlap_offsets(tags: &[(Rect, f32)]) -> Vec<Vec2> {
 pub fn solve_tag_overlap(
     time: Res<Time>,
     mut last_camera: Local<Option<Vec3>>,
-    cameras: Query<(&Camera, &GlobalTransform), With<crate::camera::ViewerCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<crate::world_api::ViewerCamera>>,
     mut tags: Query<
         (
             &AvatarPickTarget,
@@ -2067,7 +2067,7 @@ mod tests {
         // looking down -Z with a symmetric orthographic clip sized to the
         // window.
         app.world_mut().spawn((
-            crate::camera::ViewerCamera,
+            crate::world_api::ViewerCamera,
             Camera {
                 computed: bevy::camera::ComputedCameraValues {
                     clip_from_view: Mat4::orthographic_rh(-640.0, 640.0, -360.0, 360.0, 0.1, 100.0),

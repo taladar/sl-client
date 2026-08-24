@@ -55,8 +55,8 @@ use sl_client_bevy::{
     ViewerEffectData,
 };
 
-use crate::camera::{CameraMode, ViewerCamera};
 use crate::coords::{metres_to_f32, sl_to_bevy_vec};
+use crate::world_api::{CameraMode, ViewerCamera};
 
 /// Neck rotation factor — the fraction of the head's look-at rotation the neck
 /// takes (in world space), the head completing the rest (reference `NECK_LAG`).

@@ -53,7 +53,6 @@ use sl_client_bevy::{
     TextureKey, Uuid, WaterMaterial, WaterParams, WaterSettings,
 };
 
-use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::probe_layers::environment_render_layers;
@@ -61,6 +60,7 @@ use crate::render_priority::SKY_BOOST_PRIORITY;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::WaterSurface;
+use crate::world_api::ViewerCamera;
 
 /// A standard Second Life / OpenSim region edge length, in metres.
 const REGION_SIZE_METRES: f32 = 256.0;

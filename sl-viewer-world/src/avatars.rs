@@ -63,9 +63,10 @@ use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::name_tag_billboard::name_tag_render_bundle;
 use crate::name_tag_content::TagContent;
 use crate::objects::ObjectState;
-use crate::physics::{AvatarInterp, AvatarMotion};
+use crate::physics::AvatarInterp;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
+use crate::world_api::AvatarMotion;
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -1280,10 +1281,10 @@ pub fn focus_camera_on_volume_shape(
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,
     roots: Query<&GlobalTransform>,
-    mut mode: ResMut<crate::camera::CameraMode>,
+    mut mode: ResMut<crate::world_api::CameraMode>,
     mut camera: Query<
-        (&mut Transform, &mut crate::camera::CameraRig),
-        With<crate::camera::ViewerCamera>,
+        (&mut Transform, &mut crate::world_api::CameraRig),
+        With<crate::world_api::ViewerCamera>,
     >,
     mut setting: Local<Option<String>>,
     mut framed: Local<bool>,
@@ -1371,7 +1372,7 @@ pub fn focus_camera_on_volume_shape(
     );
     // Switch to flycam (the only mode whose pose a system may write; the others
     // recompute it) and seed the rig aim so the flycam driver reproduces the look.
-    *mode = crate::camera::CameraMode::Flycam;
+    *mode = crate::world_api::CameraMode::Flycam;
     let look = Vec3::new(target.x - eye.x, target.y - eye.y, target.z - eye.z);
     rig.aim_along(look);
     *transform = Transform::from_translation(eye).looking_at(target, Vec3::Y);
@@ -3167,7 +3168,10 @@ pub(crate) type SeatChainQuery<'world, 'state> = Query<
     'world,
     'state,
     (&'static Transform, Option<&'static ChildOf>),
-    (Without<AvatarAnchor>, Without<crate::camera::ViewerCamera>),
+    (
+        Without<AvatarAnchor>,
+        Without<crate::world_api::ViewerCamera>,
+    ),
 >;
 
 /// Drive every **seated** avatar's world pose from its seat each frame — self and

@@ -41,7 +41,7 @@ use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use sl_settings::{Scope, SettingValue};
 
 use crate::avatars::AvatarState;
-use crate::camera::{CameraMode, CameraTuning, ViewerCamera};
+use crate::camera::CameraTuning;
 use crate::movement::MovementTuning;
 use crate::preferences::{
     spawn_footer_button, spawn_pref_checkbox, spawn_pref_combo, spawn_pref_section,
@@ -49,6 +49,7 @@ use crate::preferences::{
 };
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
+use crate::world_api::{CameraMode, ViewerCamera};
 use sl_client_bevy::SlIdentity;
 
 /// The stable id of this tab in `crate::preferences::PREF_TABS`.
@@ -523,9 +524,10 @@ mod tests {
         SETTING_TAP_TAP_HOLD_RUN, apply_camera_fov, refresh_camera_tuning, refresh_movement_tuning,
         register_settings,
     };
-    use crate::camera::{CameraTuning, ViewerCamera};
+    use crate::camera::CameraTuning;
     use crate::movement::MovementTuning;
     use crate::settings::ViewerSettings;
+    use crate::world_api::ViewerCamera;
 
     /// The boxed-error type the tests bubble failures with.
     type TestError = Box<dyn core::error::Error>;

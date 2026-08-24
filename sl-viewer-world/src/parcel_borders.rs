@@ -50,7 +50,8 @@ use sl_client_bevy::{
 
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::settings::ViewerSettings;
-use crate::terrain::{TerrainState, update_terrain};
+use crate::terrain::TerrainState;
+use crate::terrain::update_terrain;
 use crate::water::WaterState;
 
 /// The setting name gating the in-world property lines (the reference viewer's

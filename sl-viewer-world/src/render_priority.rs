@@ -49,7 +49,6 @@ use sl_client_bevy::{
     DEFAULT_LOD_FACTOR, MeshKey, MeshLod, PrimLod, Priority, ScreenMetrics, TextureKey, TreeLod,
 };
 
-use crate::camera::ViewerCamera;
 use crate::hud::on_hud_layer;
 use crate::meshes::MeshManager;
 use crate::objects::{
@@ -57,6 +56,7 @@ use crate::objects::{
     TreeTier,
 };
 use crate::textures::TextureManager;
+use crate::world_api::ViewerCamera;
 
 /// How often (seconds) the render-priority pass re-ranks the queued fetches. The
 /// reference viewer re-derives every texture's virtual size once per frame; a few

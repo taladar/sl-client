@@ -38,11 +38,12 @@ use bevy::ui_widgets::{Activate, Button};
 
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
-use crate::camera::{CameraMode, CameraRig, FocusTarget, ViewerCamera};
+use crate::camera::FocusTarget;
 use crate::i18n::Translated;
 use crate::ui::BottomArea;
 use crate::ui_font::UiFont;
 use crate::world_api::SelfGroundSit;
+use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
 /// The state-button label font size, in logical pixels — matched to the toolbar's.
 const FONT_SIZE: f32 = 13.0;
@@ -261,7 +262,7 @@ fn update_state_button_visibility(
 #[cfg(test)]
 mod tests {
     use super::{StateButtonKind, is_seated, wanted_button};
-    use crate::camera::CameraMode;
+    use crate::world_api::CameraMode;
     use crate::world_api::SelfGroundSit;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ObjectKey, SlAgentParcel, Uuid};

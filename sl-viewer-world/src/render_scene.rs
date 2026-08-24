@@ -122,7 +122,7 @@ use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, inert_f
 use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi};
 use crate::legacy_materials::{apply_legacy_scalars, build_linear_image, build_srgb_image};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
-use crate::particles::{ObjectParticleSystem, ParticleSim, drive_particles, float_to_u8};
+use crate::particles::{ParticleSim, drive_particles, float_to_u8};
 use crate::probes::ObjectReflectionProbe;
 use crate::sky::{
     MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
@@ -136,6 +136,7 @@ use crate::terrain::{
 use crate::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
 use crate::textures::TextureManager;
 use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
+use crate::world_api::ObjectParticleSystem;
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a

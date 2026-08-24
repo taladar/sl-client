@@ -81,13 +81,13 @@ use tracing::{Event, Level, Subscriber};
 use tracing_subscriber::layer::{Context, Layer, SubscriberExt as _};
 use tracing_subscriber::registry;
 
-use crate::camera::ViewerCamera;
 use crate::face_material::FaceMaterial;
 use crate::particle_render::ParticleInstances;
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SceneRuntimePlugin,
     SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry, scene_root,
 };
+use crate::world_api::ViewerCamera;
 
 /// A boxed error, so a test can use `?` rather than the workspace-denied
 /// `unwrap` / `expect`.

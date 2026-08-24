@@ -44,7 +44,6 @@ use sl_settings::{Scope, SettingValue};
 use sl_terrain::TerrainComposition;
 
 use crate::avatars::AvatarState;
-use crate::camera::{CameraMode, ViewerCamera};
 use crate::coords::bevy_to_sl_vec;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -67,6 +66,7 @@ use crate::water::WaterState;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::{CameraMode, ViewerCamera};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, MapTracking, TrackTarget};
 

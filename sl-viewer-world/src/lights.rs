@@ -34,8 +34,8 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::{LightData, Object, TextureKey};
 
-use crate::camera::ViewerCamera;
 use crate::sky::SCENE_LIGHT_ILLUMINANCE;
+use crate::world_api::ViewerCamera;
 
 /// The maximum number of local prim lights rendered at once (P25.2). Second
 /// Life's legacy fixed-function path capped hardware lights at

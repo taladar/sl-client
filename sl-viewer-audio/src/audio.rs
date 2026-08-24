@@ -21,7 +21,7 @@
 //!   `audio_update_listener`), and `resolve_listener` mirrors that. The
 //!   avatar position is the body-root anchor's current-frame local
 //!   [`Transform`] (a top-level entity whose local *is* its world pose — the
-//!   [`crate::camera`] `own_avatar_pose` idiom; the frame-late
+//!   `camera` `own_avatar_pose` idiom; the frame-late
 //!   `GlobalTransform` would trail a moving avatar).
 //! - **Output device** ([`SETTING_OUTPUT_DEVICE`]): the device the mixer's
 //!   stream opens, by name, empty for the system default. A change rebuilds
@@ -36,8 +36,8 @@ use sl_audio::{AudioMixer as _, DeviceSelection, EarMode, Listener, Mixer, Mixer
 use sl_settings::SettingValue;
 
 use crate::avatars::AvatarState;
-use crate::camera::ViewerCamera;
 use crate::settings::ViewerSettings;
+use crate::world_api::ViewerCamera;
 use sl_client_bevy::SlIdentity;
 
 /// The persisted-settings section this module's keys live under (`[audio]`).

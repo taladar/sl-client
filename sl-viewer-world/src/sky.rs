@@ -60,12 +60,12 @@ use sl_client_bevy::{
     Uuid, to_bevy_image,
 };
 
-use crate::camera::ViewerCamera;
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::probe_layers::{environment_render_layers, mirror_sun_render_layers};
 use crate::render_priority::SKY_BOOST_PRIORITY;
 use crate::textures::{TextureDecoded, TextureManager};
+use crate::world_api::ViewerCamera;
 
 /// The radius of the sky dome, in metres. The dome's *depth* is forced to the far
 /// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any

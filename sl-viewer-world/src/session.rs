@@ -23,9 +23,9 @@ use sl_client_bevy::{
 };
 use sl_settings::SettingValue;
 
-use crate::camera::ViewerCamera;
 use crate::coords::bevy_to_sl_vec;
 use crate::settings::ViewerSettings;
+use crate::world_api::ViewerCamera;
 
 /// The persisted-settings section the draw-distance setting lives under.
 const RENDER_SECTION: &[&str] = &["render"];
@@ -440,7 +440,7 @@ pub fn apply_draw_distance(
 /// ([`crate::camera::position_camera`]) follows the avatar the moment it arrives,
 /// so there is nothing to snap. The `SL_VIEWER_CAMERA_*` framing knobs the old
 /// snap read now seed the third-person orbit
-/// ([`CameraRig::seed_orbit_from_env`](crate::camera::CameraRig)).
+/// ([`CameraRig::seed_orbit_from_env`](crate::world_api::CameraRig)).
 pub fn drive_session(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,

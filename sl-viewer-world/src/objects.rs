@@ -59,7 +59,6 @@ use crate::asset_budget::MeshUploadBudget;
 use crate::avatars::{
     AvatarBody, AvatarPickTarget, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
-use crate::camera::ViewerCamera;
 use crate::coords::{
     origin_shift_bevy, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_object_rotation,
     sl_to_bevy_vec,
@@ -68,6 +67,7 @@ use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::hud_pick::surface_info_from_hit;
+use crate::world_api::ViewerCamera;
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
 

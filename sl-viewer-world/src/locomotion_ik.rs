@@ -108,7 +108,7 @@ use crate::coords::{bevy_to_sl_vec, metres_to_f32, sl_to_bevy_rotation};
 use crate::ground::{AgentGround, GroundHit};
 use crate::ik::{Chain, JointSolver};
 use crate::look_at::smooth_interpolant;
-use crate::physics::AvatarMotion;
+use crate::world_api::AvatarMotion;
 
 /// Maximum ground speed (m/s) the walk servo adjusts for; beyond it the avatar is
 /// moving too fast for the walk cycle to keep up at all
