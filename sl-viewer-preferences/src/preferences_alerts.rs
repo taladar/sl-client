@@ -2,10 +2,10 @@
 //!
 //! Three headline notification toggles, then the per-notification list the
 //! reference calls the popup list: one row per *suppressible* catalogue
-//! template ([`NotificationIgnore::is_suppressible`]) with a "Show" checkbox
+//! template (`NotificationIgnore::is_suppressible`) with a "Show" checkbox
 //! bound to the template's `[notifications]` show/suppress `Bool` setting and
 //! a label showing the ported reference `ignoretext`
-//! ([`NotificationTemplate::ignore_key`]). This is Firestorm's current
+//! (`NotificationTemplate::ignore_key`). This is Firestorm's current
 //! single-filtered-list design (`buildPopupList` over `all_popups`), not the
 //! older two-list one; the floater's shared search box doubles as the list
 //! filter.
@@ -26,8 +26,8 @@
 //!   list, not just the visible slice.
 //! - **Filter coupling.** The list matches the shared lowercased term against
 //!   its resolved labels and reports "this tab still has hits" through
-//!   [`PreferencesExtraHits`], so the shell dims / jumps tabs exactly as it
-//!   does for [`spawn_pref_checkbox`] rows.
+//!   `PreferencesExtraHits`, so the shell dims / jumps tabs exactly as it
+//!   does for `spawn_pref_checkbox` rows.
 //!
 //! Reference (Firestorm, read-only): `panel_preferences_alerts.xml`,
 //! `llfloaterpreference.cpp` (`buildPopupList` / `onSelectPopup`).
@@ -52,7 +52,7 @@ use crate::ui_text_input::TextInputKind;
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use sl_settings::SettingValue;
 
-/// The stable id of this tab in [`PREF_TABS`].
+/// The stable id of this tab in `PREF_TABS`.
 const TAB_ID: &str = "alerts";
 
 /// The list's uniform row height, in logical pixels.
@@ -108,7 +108,7 @@ const ALERTS_TABLE: TableSpec = TableSpec {
     widths_setting: None,
 };
 
-/// The alerts tab's retained table entities, inserted by [`build_alerts_tab`].
+/// The alerts tab's retained table entities, inserted by `build_alerts_tab`.
 #[derive(Resource, Debug, Clone, Copy)]
 struct AlertsTabUi {
     /// The table root ([`spawn_table_row`] needs it).
@@ -288,7 +288,7 @@ pub(crate) fn build_alerts_tab(commands: &mut Commands, panel: Entity) {
 /// first run and on a locale switch, and re-derive the view (label-sorted,
 /// filter-matched) whenever that happens or the shared filter term changes.
 /// Keeps the viewport's [`VirtualList::item_count`] current and reports the
-/// tab's filter hits through [`PreferencesExtraHits`].
+/// tab's filter hits through `PreferencesExtraHits`.
 fn refresh_alerts_view(
     model: Option<ResMut<AlertsModel>>,
     ui: Option<Res<AlertsTabUi>>,
@@ -477,10 +477,10 @@ mod tests {
 }
 
 /// Owns the alerts tab's list: the model refresh, the row pool population and
-/// the row binding. The tab's *content build* is [`build_alerts_tab`], invoked
-/// by the shell through [`PREF_TABS`].
+/// the row binding. The tab's *content build* is `build_alerts_tab`, invoked
+/// by the shell through `PREF_TABS`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PreferencesAlertsPlugin;
+pub struct PreferencesAlertsPlugin;
 
 impl Plugin for PreferencesAlertsPlugin {
     fn build(&self, app: &mut App) {

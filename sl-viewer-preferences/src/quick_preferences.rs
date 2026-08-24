@@ -13,7 +13,7 @@
 //! The reference viewer's defining trait here is that the panel's contents are a
 //! *curated view over the settings store*, user-configurable rather than
 //! hard-coded. We keep that architecture: the setting rows are built from a
-//! data-driven [`QuickPrefEntry`] list, and that list is **persisted per-avatar**
+//! data-driven `QuickPrefEntry` list, and that list is **persisted per-avatar**
 //! (a `quick_preferences.json` in the account directory). A power user can edit
 //! that file to add, remove or retype entries — any registered setting can be
 //! surfaced without being reimplemented, because each row binds through the shared
@@ -130,7 +130,7 @@ const BUTTON_FILL: Color = Color::srgb(0.16, 0.17, 0.2);
 // The entry model — a view over the settings store.
 // ---------------------------------------------------------------------------
 
-/// The kind of control a [`QuickPrefEntry`] surfaces its setting through.
+/// The kind of control a `QuickPrefEntry` surfaces its setting through.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum QuickPrefKind {
     /// A boolean setting, shown as a checkbox.
@@ -139,7 +139,7 @@ enum QuickPrefKind {
     Slider,
 }
 
-/// Where a [`QuickPrefEntry`]'s label text comes from.
+/// Where a `QuickPrefEntry`'s label text comes from.
 #[derive(Debug, Clone)]
 enum QuickPrefLabel {
     /// A Fluent key, resolved (and re-resolved on locale change) via
@@ -555,7 +555,7 @@ struct QuickPrefValueLabel {
 /// Owns the Quick Preferences panel: the floater chrome + deferred content, the
 /// toolbar button, the environment combos, and the control visuals.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct QuickPreferencesPlugin;
+pub struct QuickPreferencesPlugin;
 
 impl Plugin for QuickPreferencesPlugin {
     fn build(&self, app: &mut App) {
@@ -1277,7 +1277,7 @@ fn drive_quick_pref_checkboxes(
 /// environment section over a divider and two setting slider rows — the layout,
 /// with none of the live behaviour (per the element registry's rule: no plugin,
 /// no store, no observers).
-pub(crate) fn spawn_quick_prefs_specimen(
+pub fn spawn_quick_prefs_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

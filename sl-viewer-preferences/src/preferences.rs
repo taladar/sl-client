@@ -8,9 +8,9 @@
 //! - **The window**: a resizable floater hosting a search box, a **leading**
 //!   ([`TabPlacement::InlineStart`], so it mirrors under RTL) tab strip, one
 //!   panel per registered tab, and an OK / Cancel footer.
-//! - **The tab registry** ([`PREF_TABS`]): a static list in the pattern of
-//!   [`crate::menu_bar`]'s menus and [`crate::ui_element`]'s `ELEMENTS` — a
-//!   sibling tab task appends one [`PreferencesTabDef`] and provides its build
+//! - **The tab registry** (`PREF_TABS`): a static list in the pattern of
+//!   `crate::menu_bar`'s menus and [`crate::ui_element`]'s `ELEMENTS` — a
+//!   sibling tab task appends one `PreferencesTabDef` and provides its build
 //!   `fn`; the shell lays the tab out, fills it on first open, and gives its
 //!   controls snapshot / revert, search and the account guard for free.
 //! - **Commit semantics**, faithful to the reference viewer: controls edit the
@@ -19,9 +19,9 @@
 //!   closing the window revert** to that snapshot, and **OK** re-snapshots
 //!   (so the close-revert becomes a no-op), saves both scopes to disk and
 //!   closes. A tab whose settings need a non-live side effect on OK listens for
-//!   [`PreferencesApplied`].
+//!   `PreferencesApplied`.
 //! - **The search / filter box**: typing filters every tab's labelled rows
-//!   ([`spawn_pref_checkbox`] / [`spawn_pref_slider`] tag them), hides the
+//!   (`spawn_pref_checkbox` / `spawn_pref_slider` tag them), hides the
 //!   misses, highlights
 //!   the hits, dims the tabs left empty and jumps to the first tab that still
 //!   has a match. Matching is against the **resolved translated** label text,
@@ -70,16 +70,16 @@ use crate::ui_tab::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
-pub(crate) const PREFERENCES_FLOATER_ID: &str = "preferences";
+pub const PREFERENCES_FLOATER_ID: &str = "preferences";
 
 /// The shell's body font size, in logical pixels.
-pub(crate) const FONT: f32 = 13.0;
+pub const FONT: f32 = 13.0;
 
 /// A section heading's font size, a step up from the rows it heads.
 const SECTION_FONT: f32 = 14.0;
 
 /// A row label's resting colour (the shared panel label tone).
-pub(crate) const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
+pub const LABEL_COLOR: Color = Color::srgb(0.90, 0.92, 0.96);
 
 /// A section heading's colour — same tone as the labels; the size difference
 /// carries the hierarchy.
@@ -93,7 +93,7 @@ const MUTED_COLOR: Color = Color::srgb(0.55, 0.60, 0.68);
 const FILTER_MATCH_COLOR: Color = Color::srgb(0.98, 0.82, 0.40);
 
 /// A control's border tone (the settings-binding demo's, kept for continuity).
-pub(crate) const CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
+pub const CONTROL_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// A checkbox box's fill while unchecked.
 pub(crate) const CHECK_OFF: Color = Color::srgb(0.12, 0.14, 0.18);
@@ -142,7 +142,7 @@ const ROW_GAP: f32 = 8.0;
 
 /// One tab of the preferences floater.
 ///
-/// A sibling tab task appends an entry to [`PREF_TABS`] and provides the two
+/// A sibling tab task appends an entry to `PREF_TABS` and provides the two
 /// pieces in its own module; the shell does the rest (layout, deferred build,
 /// snapshot / revert, search, the account guard).
 pub(crate) struct PreferencesTabDef {
@@ -255,11 +255,11 @@ impl PreferencesState {
 /// hits. [`apply_preferences_filter`] ORs these into its per-tab hit counts,
 /// so such a tab is dimmed / jumped-to like any other; an entry is only
 /// meaningful while a filter term is active. Written by the owning tab's
-/// module (the alerts view refresh), keyed by the tab's [`PREF_TABS`] index.
+/// module (the alerts view refresh), keyed by the tab's `PREF_TABS` index.
 #[derive(Resource, Debug, Default)]
 pub(crate) struct PreferencesExtraHits(pub(crate) HashMap<usize, bool>);
 
-/// Debug: the [`PREF_TABS`] id to select once the floater's content builds —
+/// Debug: the `PREF_TABS` id to select once the floater's content builds —
 /// for the offline screenshot harness, which cannot click the tab strip (the
 /// `SL_VIEWER_UI_DEMO` idiom). Combine with the persisted open state
 /// (`preferences_visible`) to land a headless run on a chosen tab.
@@ -387,7 +387,7 @@ pub(crate) fn spawn_pref_checkbox(
 }
 
 /// Spawn a searchable row holding a translated label and a settings-bound
-/// **slider**, returning the row node (see [`spawn_pref_checkbox`]).
+/// **slider**, returning the row node (see `spawn_pref_checkbox`).
 pub(crate) fn spawn_pref_slider(
     commands: &mut Commands,
     parent: Entity,
@@ -443,7 +443,7 @@ pub(crate) fn spawn_pref_slider(
 /// Spawn a searchable row holding a translated label and a settings-bound
 /// **combo**: each `(label_key, value)` option pair maps one translated option
 /// label to the [`SettingValue`] it writes / matches. Returns the row node
-/// (see [`spawn_pref_checkbox`]).
+/// (see `spawn_pref_checkbox`).
 pub(crate) fn spawn_pref_combo(
     commands: &mut Commands,
     parent: Entity,
@@ -499,7 +499,7 @@ pub(crate) fn spawn_pref_combo_with_anchor(
 /// Spawn a searchable **text-field** row: a translated label above a
 /// settings-bound text input (single-line or multiline per `kind` /
 /// `visible_lines`). Returns the outer node the filter hides / shows (see
-/// [`spawn_pref_checkbox`]).
+/// `spawn_pref_checkbox`).
 pub(crate) fn spawn_pref_text(
     commands: &mut Commands,
     parent: Entity,
@@ -538,7 +538,7 @@ pub(crate) fn spawn_pref_text(
 /// opens the shared colour picker, every pick writes through the binding, and
 /// the swatch follows the store (see the colour-swatch binding in
 /// [`crate::settings_binding`]). Returns the row node (see
-/// [`spawn_pref_checkbox`]).
+/// `spawn_pref_checkbox`).
 pub(crate) fn spawn_pref_color(
     commands: &mut Commands,
     parent: Entity,
@@ -602,7 +602,7 @@ pub(crate) fn spawn_pref_section(commands: &mut Commands, parent: Entity, key: &
 /// Owns the preferences floater: the chrome spawn, the deferred content build,
 /// the snapshot / revert lifecycle, the filter and the account guard.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PreferencesPlugin;
+pub struct PreferencesPlugin;
 
 impl Plugin for PreferencesPlugin {
     fn build(&self, app: &mut App) {
@@ -664,7 +664,7 @@ fn spawn_preferences_floater(mut commands: Commands, root: Res<UiRoot>) {
 }
 
 /// First-open content build: the search row, the leading tab container (one
-/// panel per [`PREF_TABS`] entry, each filled by its tab's builder), and the
+/// panel per `PREF_TABS` entry, each filled by its tab's builder), and the
 /// OK / Cancel footer — ending with the [`PreferencesUi`] insert.
 fn build_preferences_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
     // The content column: search on top, tabs filling the middle, footer last.
@@ -1201,7 +1201,7 @@ fn build_world_ui_tab(commands: &mut Commands, panel: Entity) {
         commands,
         panel,
         "preferences-row-status-coordinates",
-        SettingBinding::global(crate::status_bar::SHOW_COORDINATES_KEY),
+        SettingBinding::global(crate::world_api::SHOW_COORDINATES_KEY),
     );
     spawn_pref_checkbox(
         commands,
@@ -1306,7 +1306,7 @@ fn build_world_ui_tab(commands: &mut Commands, panel: Entity) {
 /// search box, a leading two-tab container, two stand-in setting rows and
 /// the OK / Cancel footer — the layout, with none of the live behaviour (per
 /// the element registry's rule: no plugin, no store, no observers).
-pub(crate) fn spawn_preferences_specimen(
+pub fn spawn_preferences_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

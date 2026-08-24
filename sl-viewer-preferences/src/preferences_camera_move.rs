@@ -10,11 +10,11 @@
 //!
 //! Every row is a **live** control: the camera / movement systems read the
 //! [`CameraTuning`] / [`MovementTuning`] resources this module refreshes from
-//! the store each frame ([`refresh_camera_tuning`] /
-//! [`refresh_movement_tuning`]), the field of view is applied straight onto
-//! the world camera's projection ([`apply_camera_fov`]), and the mouselook
+//! the store each frame (`refresh_camera_tuning` /
+//! `refresh_movement_tuning`), the field of view is applied straight onto
+//! the world camera's projection (`apply_camera_fov`), and the mouselook
 //! avatar visibility onto the own avatar's body-root anchor
-//! ([`apply_first_person_avatar_visibility`]). The defaults reproduce the
+//! (`apply_first_person_avatar_visibility`). The defaults reproduce the
 //! previously hardcoded constants, so out of the box nothing changes — except
 //! tap-tap-hold-to-run, a new gesture shipped enabled like the reference.
 //!
@@ -51,7 +51,7 @@ use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
 use sl_client_bevy::SlIdentity;
 
-/// The stable id of this tab in [`crate::preferences::PREF_TABS`].
+/// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "camera-move";
 
 /// The settings section the camera keys live in.
@@ -61,7 +61,7 @@ const CAMERA_SECTION: &[&str] = &["camera"];
 const MOVEMENT_SECTION: &[&str] = &["movement"];
 
 /// The world camera's vertical field of view, radians (the reference
-/// `CameraAngle`, Ctrl+8 / Ctrl+0). Applied by [`apply_camera_fov`].
+/// `CameraAngle`, Ctrl+8 / Ctrl+0). Applied by `apply_camera_fov`.
 pub(crate) const SETTING_CAMERA_ANGLE: &str = "CameraAngle";
 
 /// Multiplier on the third-person orbit distance (the reference
@@ -122,7 +122,7 @@ const FOV_MIN: f32 = 0.087_266_46;
 const FOV_MAX: f32 = 3.054_326_2;
 
 /// Below this difference (radians) the stored field of view counts as already
-/// applied, so [`apply_camera_fov`] does not re-write (and `Changed`-mark) the
+/// applied, so `apply_camera_fov` does not re-write (and `Changed`-mark) the
 /// projection every frame.
 const FOV_EPSILON: f32 = 1.0e-4;
 
@@ -130,7 +130,7 @@ const FOV_EPSILON: f32 = 1.0e-4;
 /// [`CameraTuning::default`] / [`MovementTuning::default`] — the previously
 /// hardcoded constants — so registering (and never touching) the settings
 /// changes nothing.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     let camera = CameraTuning::default();
     let movement = MovementTuning::default();
     settings.register_in(
@@ -322,7 +322,7 @@ pub(crate) fn build_camera_move_tab(commands: &mut Commands, panel: Entity) {
         commands,
         panel,
         "preferences-row-double-click-action",
-        SettingBinding::global(crate::double_click_teleport::SETTING_DOUBLE_CLICK_ACTION),
+        SettingBinding::global(crate::world_api::SETTING_DOUBLE_CLICK_ACTION),
         &[
             ("preferences-double-click-none", SettingValue::I32(0)),
             ("preferences-double-click-teleport", SettingValue::I32(1)),
@@ -390,7 +390,7 @@ fn refresh_camera_tuning(settings: Option<Res<ViewerSettings>>, mut tuning: ResM
     }
 }
 
-/// Refresh [`MovementTuning`] from the store — see [`refresh_camera_tuning`].
+/// Refresh [`MovementTuning`] from the store — see `refresh_camera_tuning`.
 fn refresh_movement_tuning(
     settings: Option<Res<ViewerSettings>>,
     mut tuning: ResMut<MovementTuning>,
@@ -492,9 +492,9 @@ fn apply_first_person_avatar_visibility(
 /// Owns the camera & movement tab's runtime side: the per-frame tuning
 /// refreshes and the two direct appliers (field of view, mouselook avatar
 /// visibility). The tab *content* is built by the preferences shell through
-/// [`crate::preferences::PREF_TABS`].
+/// `crate::preferences::PREF_TABS`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PreferencesCameraMovePlugin;
+pub struct PreferencesCameraMovePlugin;
 
 impl Plugin for PreferencesCameraMovePlugin {
     fn build(&self, app: &mut App) {

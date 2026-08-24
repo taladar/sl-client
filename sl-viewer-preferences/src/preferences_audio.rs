@@ -18,8 +18,8 @@
 //!
 //! The **output device** combo starts from the device names enumerated at
 //! tab-build time ([`Mixer::output_devices`]) and **re-enumerates while the
-//! preferences floater is open** ([`refresh_output_device_options`], every
-//! [`DEVICE_POLL_SECONDS`]) so a hot-plugged PipeWire / PulseAudio device
+//! preferences floater is open** (`refresh_output_device_options`, every
+//! `DEVICE_POLL_SECONDS`) so a hot-plugged PipeWire / PulseAudio device
 //! appears without a restart — a poll, because cpal has no device-change
 //! notification to subscribe to. The options update in place through
 //! [`SetComboOptions`] (deferred while the popover is open); the paired
@@ -47,7 +47,7 @@ use crate::ui::UiPanelShown;
 use crate::ui_combo::SetComboOptions;
 use crate::volume_panel::{bus_mute_setting, bus_volume_setting};
 
-/// The stable id of this tab in [`crate::preferences::PREF_TABS`].
+/// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "audio";
 
 /// The volume sliders' step (the volume panel's, one twentieth).
@@ -59,7 +59,7 @@ const VOLUME_STEP: f32 = 0.05;
 const DEVICE_POLL_SECONDS: f32 = 2.0;
 
 /// Marks the output-device combo's anchor, so
-/// [`refresh_output_device_options`] finds it.
+/// `refresh_output_device_options` finds it.
 #[derive(Component, Debug, Clone, Copy)]
 struct OutputDeviceCombo;
 
@@ -105,7 +105,7 @@ fn device_options(devices: Vec<String>) -> Vec<(String, SettingValue)> {
 }
 
 /// Build the audio tab's content into its panel (the
-/// [`crate::preferences::PREF_TABS`] `build` hook).
+/// `crate::preferences::PREF_TABS` `build` hook).
 pub(crate) fn build_audio_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-volumes");
     for bus in Bus::ALL {
@@ -219,9 +219,10 @@ fn refresh_output_device_options(
 }
 
 /// The audio tab's runtime side (the tab *content* is built by the shell
-/// through [`crate::preferences::PREF_TABS`]): the live output-device
+/// through `crate::preferences::PREF_TABS`): the live output-device
 /// re-enumeration.
-pub(crate) struct PreferencesAudioPlugin;
+#[derive(Debug)]
+pub struct PreferencesAudioPlugin;
 
 impl Plugin for PreferencesAudioPlugin {
     fn build(&self, app: &mut App) {

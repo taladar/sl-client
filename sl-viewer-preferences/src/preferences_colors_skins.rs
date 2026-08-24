@@ -4,11 +4,11 @@
 //! Two concerns share the tab, as in the reference's Colors / Skins panels:
 //!
 //! - **Skin & theme choice.** The UI skin (`graphite` / `azure`) and its theme
-//!   overlay become persisted global settings ([`SETTING_UI_SKIN`] /
-//!   [`SETTING_UI_SKIN_THEME`]) instead of a CLI-only flag;
-//!   [`apply_skin_setting`] drives the live [`SkinSelection`] re-dress the
+//!   overlay become persisted global settings (`SETTING_UI_SKIN` /
+//!   `SETTING_UI_SKIN_THEME`) instead of a CLI-only flag;
+//!   `apply_skin_setting` drives the live [`SkinSelection`] re-dress the
 //!   moment the setting changes — no restart, unlike the reference. The theme
-//!   combo repopulates per skin ([`repopulate_theme_combo`]), since overlays
+//!   combo repopulates per skin (`repopulate_theme_combo`), since overlays
 //!   are skin-specific (azure ships base-only today). The CLI / env override
 //!   still wins at startup for that run (`SkinSelection::resolve`); the memo
 //!   seeding below keeps it standing until the user actually edits the combo.
@@ -35,7 +35,7 @@ use crate::settings_binding::{ComboBindingValues, SettingBinding};
 use crate::skin::{DEFAULT_SKIN, SKINS, SkinSelection, THEMES};
 use crate::ui_combo::SetComboOptions;
 
-/// The stable id of this tab in [`crate::preferences::PREF_TABS`].
+/// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "colors-skins";
 
 /// The settings section the skin choice lives in.
@@ -50,7 +50,7 @@ pub(crate) const SETTING_UI_SKIN_THEME: &str = "UiSkinTheme";
 
 /// Register the skin-choice settings (the colour palette registers with
 /// [`crate::skin_colors::register_settings`]).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         UI_SECTION,
         SETTING_UI_SKIN,
@@ -68,7 +68,7 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
 /// The persisted skin / theme pair from a (pre-app, throwaway) settings load,
 /// as `SkinSelection::resolve` inputs: the theme is `None` when unset or
 /// empty. `resolve` validates both against the shipped skins.
-pub(crate) fn stored_skin_choice(settings: &ViewerSettings) -> (Option<String>, Option<String>) {
+pub fn stored_skin_choice(settings: &ViewerSettings) -> (Option<String>, Option<String>) {
     let skin = settings
         .store()
         .get_str(SETTING_UI_SKIN)
@@ -83,7 +83,7 @@ pub(crate) fn stored_skin_choice(settings: &ViewerSettings) -> (Option<String>, 
     (skin, theme)
 }
 
-/// Marks the theme combo's anchor entity, so [`repopulate_theme_combo`] can
+/// Marks the theme combo's anchor entity, so `repopulate_theme_combo` can
 /// rebuild its options when the skin changes.
 #[derive(Component, Debug, Clone, Copy)]
 struct ThemeComboAnchor;
@@ -324,9 +324,9 @@ fn repopulate_theme_combo(
 }
 
 /// This tab's runtime systems; the tab content itself is built by the
-/// preferences shell through [`crate::preferences::PREF_TABS`].
+/// preferences shell through `crate::preferences::PREF_TABS`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PreferencesColorsSkinsPlugin;
+pub struct PreferencesColorsSkinsPlugin;
 
 impl Plugin for PreferencesColorsSkinsPlugin {
     fn build(&self, app: &mut App) {

@@ -78,7 +78,7 @@ use crate::settings::ViewerSettings;
 use crate::slt;
 use crate::ui_font::UiFont;
 use crate::ui_perf::FixedSlotContentSize;
-use crate::world_api::AgentRegionPosition;
+use crate::world_api::{AgentRegionPosition, SHOW_COORDINATES_KEY};
 
 /// The read-out font size, in logical pixels.
 const STATUS_FONT_SIZE: f32 = 14.0;
@@ -114,13 +114,6 @@ const ICON_SIZE: f32 = 16.0;
 /// always laid out; only its [`Visibility`] toggles, so the icon shows only when
 /// its restriction is in force while the icon bar keeps a constant width.
 const ICON_CLASS: &str = "sk-parcel-icon";
-
-/// The settings key (under the `[statusbar]` section) gating the agent-position
-/// coordinates in the location read-out, mirroring the reference viewer's
-/// `NavBarShowCoordinates`. Bare, like the floater-geometry keys — the section
-/// only shapes the persisted file, not the lookup. `pub(crate)` for the
-/// preferences floater's bound checkbox.
-pub(crate) const SHOW_COORDINATES_KEY: &str = "statusbar_show_coordinates";
 
 /// Which parcel permission an icon reflects, in the reference viewer's
 /// left-to-right order.

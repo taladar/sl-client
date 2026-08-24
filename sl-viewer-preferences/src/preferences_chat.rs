@@ -12,13 +12,13 @@
 //!
 //! Per-control notes:
 //!
-//! - The **display** options are applied live by [`crate::chat`] (the overlay)
-//!   and [`crate::conversations`] (the transcript font).
-//! - The **logging** options feed [`chat_log_config_from_settings`]; the
+//! - The **display** options are applied live by `crate::chat` (the overlay)
+//!   and `crate::conversations` (the transcript font).
+//! - The **logging** options feed `chat_log_config_from_settings`; the
 //!   rebuilt [`ChatLogConfig`] is pushed to the runtime's chat logger via
 //!   [`Command::SetChatLogConfig`] — once when the account scope loads at
-//!   login ([`push_chat_log_config_at_login`]) and again on every OK press
-//!   that changed it ([`apply_chat_privacy`]). Until the login push lands the
+//!   login (`push_chat_log_config_at_login`) and again on every OK press
+//!   that changed it (`apply_chat_privacy`). Until the login push lands the
 //!   runtime logs under the all-types-on default it was built with (a benign
 //!   few-frame window). The log *path* stays with the network & cache tab; the
 //!   12/24-hour clock style has no reference setting and stays 24-hour.
@@ -35,7 +35,7 @@
 //! - The **privacy** pair is server state, not a local setting: the values
 //!   live on the grid (`UserInfo` capability, legacy `UserInfoRequest` /
 //!   `UpdateUserInfo` UDP on OpenSim), so both are **transient** settings —
-//!   seeded from the grid's reply ([`seed_user_info`], requested each time
+//!   seeded from the grid's reply (`seed_user_info`, requested each time
 //!   the floater opens) and written back on OK only when they differ from the
 //!   last grid-confirmed state. The IM-to-email toggle is meaningful on
 //!   OpenSim; Second Life manages the forwarding preference on the account
@@ -72,7 +72,7 @@ use crate::world_api::{
     SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
 };
 
-/// The stable id of this tab in [`crate::preferences::PREF_TABS`].
+/// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "chat";
 
 /// The settings section the chat tab's keys live in.
@@ -142,7 +142,7 @@ const REPLY_FIELD_LINES: f32 = 3.0;
 /// persisted (`[chat]` section; the logging keys bind at account scope); the
 /// two `UserInfo` mirrors are transient — server state must never be written
 /// to disk as if it were ours.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         CHAT_SECTION,
         SETTING_CHAT_FONT_SIZE,
@@ -246,7 +246,7 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
 }
 
 /// Build the chat tab's content into its panel (the
-/// [`crate::preferences::PREF_TABS`] `build` hook).
+/// `crate::preferences::PREF_TABS` `build` hook).
 pub(crate) fn build_chat_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-chat-display");
     spawn_pref_combo(
@@ -571,7 +571,7 @@ struct UserInfoSync {
 /// Request the grid's stored `UserInfo` pair each time the preferences
 /// floater opens, so the privacy checkboxes show (and diff against) current
 /// server state. Cap-preferred with a UDP fallback in the runtime; the reply
-/// lands in [`seed_user_info`].
+/// lands in `seed_user_info`.
 fn request_user_info_on_open(
     ui: Option<Res<PreferencesUi>>,
     panels: Query<&UiPanelShown>,
@@ -668,10 +668,11 @@ fn apply_chat_privacy(
 }
 
 /// The chat tab's runtime side (the tab *content* is built by the shell
-/// through [`crate::preferences::PREF_TABS`]): the login-time chat-log
+/// through `crate::preferences::PREF_TABS`): the login-time chat-log
 /// configuration push, the `UserInfo` request / seed pair, and the per-OK
 /// apply hook.
-pub(crate) struct PreferencesChatPlugin;
+#[derive(Debug)]
+pub struct PreferencesChatPlugin;
 
 impl Plugin for PreferencesChatPlugin {
     fn build(&self, app: &mut App) {

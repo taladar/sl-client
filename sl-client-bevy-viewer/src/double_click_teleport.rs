@@ -48,15 +48,12 @@ use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_context::InputContext;
 use crate::minimap::{narrow, region_handle_at};
 use crate::settings::ViewerSettings;
-use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
+use crate::world_api::{
+    BeginTeleportFlow, SETTING_DOUBLE_CLICK_ACTION, TeleportTarget, issue_teleport,
+};
 
 /// The persisted setting section — shared with other input-behaviour settings.
 const INPUT_SECTION: &[&str] = &["input"];
-
-/// The in-world double-click action setting name (mirrors the reference's
-/// `DoubleClickAction`). Bound by the preferences camera & movement tab
-/// ([`crate::preferences_camera_move`]).
-pub(crate) const SETTING_DOUBLE_CLICK_ACTION: &str = "DoubleClickAction";
 
 /// The maximum interval (seconds) between the two clicks of a double-click, and
 /// the maximum cursor travel (pixels) between them — matched to the minimap's.

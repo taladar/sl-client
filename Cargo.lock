@@ -8485,7 +8485,6 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_flair",
- "bevy_fluent",
  "clap",
  "fluent",
  "fluent_content",
@@ -8493,10 +8492,7 @@ dependencies = [
  "image",
  "jiff",
  "pretty_assertions",
- "serde",
- "serde_json",
  "sl-account-dirs",
- "sl-audio",
  "sl-cef",
  "sl-client-bevy",
  "sl-l10n",
@@ -8519,6 +8515,7 @@ dependencies = [
  "sl-viewer-pickers",
  "sl-viewer-places",
  "sl-viewer-platform",
+ "sl-viewer-preferences",
  "sl-viewer-search",
  "sl-viewer-settings",
  "sl-viewer-spacenav",
@@ -9259,6 +9256,34 @@ dependencies = [
  "sl-client-bevy",
  "tracing",
  "url",
+]
+
+[[package]]
+name = "sl-viewer-preferences"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "bevy_fluent",
+ "fs-err",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sl-audio",
+ "sl-client-bevy",
+ "sl-settings",
+ "sl-viewer-audio",
+ "sl-viewer-kit",
+ "sl-viewer-map",
+ "sl-viewer-notifications",
+ "sl-viewer-people",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "tracing",
 ]
 
 [[package]]

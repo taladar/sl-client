@@ -12,7 +12,7 @@
 //!
 //! - **Left**: a search box (matching name *and* comment, case-insensitively),
 //!   a "changed settings only" toggle (itself a registered setting,
-//!   [`SETTING_HIDE_DEFAULT`], the reference's `DebugSettingsHideDefault`),
+//!   `SETTING_HIDE_DEFAULT`, the reference's `DebugSettingsHideDefault`),
 //!   and a virtualized two-column table — a `*` changed-marker column and the
 //!   setting name, in the store's sorted-name order.
 //! - **Right**: the selected setting's comment, type, and its value at every
@@ -67,7 +67,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_t
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 
 /// The floater's stable id (geometry persistence, menu toggle, tests).
-pub(crate) const DEBUG_SETTINGS_FLOATER_ID: &str = "debug_settings";
+pub const DEBUG_SETTINGS_FLOATER_ID: &str = "debug_settings";
 
 /// The "changed settings only" toggle's setting — a real registered setting,
 /// like the reference's `DebugSettingsHideDefault` (its name kept for
@@ -149,8 +149,8 @@ const DEBUG_TABLE: TableSpec = TableSpec {
     widths_setting: None,
 };
 
-/// Register this module's settings ([`SETTING_HIDE_DEFAULT`]).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+/// Register this module's settings (`SETTING_HIDE_DEFAULT`).
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         &["debug_settings"],
         SETTING_HIDE_DEFAULT,
@@ -313,7 +313,7 @@ struct DebugEditField;
 /// Owns the debug-settings floater: the chrome spawn, the deferred content
 /// build, the list model, the per-kind detail editor and its commit paths.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct DebugSettingsPlugin;
+pub struct DebugSettingsPlugin;
 
 impl Plugin for DebugSettingsPlugin {
     fn build(&self, app: &mut App) {
@@ -1664,7 +1664,7 @@ fn on_copy_setting_name(
 /// marker, and the detail column with a scope combo, a numeric field and the
 /// two buttons — the layout, with none of the live behaviour (per the element
 /// registry's rule: no plugin, no store, no observers).
-pub(crate) fn spawn_debug_settings_specimen(
+pub fn spawn_debug_settings_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

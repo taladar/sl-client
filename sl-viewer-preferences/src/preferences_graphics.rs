@@ -14,9 +14,9 @@
 //! `Startup` systems — always before the floater's deferred first-open
 //! build, so binding those keys here is safe).
 //!
-//! - **Quality tier** ([`SETTING_RENDER_QUALITY`], the reference
+//! - **Quality tier** (`SETTING_RENDER_QUALITY`, the reference
 //!   `RenderQualityPerformance`): a *driver* control. A user pick writes the
-//!   [`QUALITY_TIERS`] row's values through the store (the reference
+//!   `QUALITY_TIERS` row's values through the store (the reference
 //!   `LLFeatureManager::setGraphicsLevel` shape); every written key has a
 //!   bound row in this tab, so the shell's open-time snapshot covers a tier
 //!   click and Cancel fully reverts it. The applier reacts to
@@ -61,7 +61,7 @@ use crate::settings_binding::SettingBinding;
 use crate::sky::SceneSun;
 use crate::ui_combo::ComboChanged;
 
-/// The stable id of this tab in [`crate::preferences::PREF_TABS`].
+/// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "graphics";
 
 /// The persisted-file section the tab's own settings live in (`[render]`),
@@ -122,7 +122,7 @@ const FPS_LIMIT_MAX: f32 = 240.0;
 const FPS_LIMIT_STEP: f32 = 5.0;
 
 /// The reference `RenderQualityPerformance` setting name: the last-applied
-/// quality tier, `0` (low) ..= `6` (ultra), indexing [`QUALITY_TIERS`].
+/// quality tier, `0` (low) ..= `6` (ultra), indexing `QUALITY_TIERS`.
 pub(crate) const SETTING_RENDER_QUALITY: &str = "RenderQualityPerformance";
 /// The default quality tier: 4 ("high" — this viewer's stock defaults sit
 /// between the high and ultra rows).
@@ -161,7 +161,7 @@ const EXPOSURE_STEP: f32 = 0.1;
 #[derive(Component, Debug)]
 pub(crate) struct QualityTierControl;
 
-/// One quality tier's target values ([`QUALITY_TIERS`]).
+/// One quality tier's target values (`QUALITY_TIERS`).
 struct QualityTier {
     /// Draw distance, metres ([`crate::session::SETTING_DRAW_DISTANCE`]).
     far_clip: f32,
@@ -184,7 +184,7 @@ struct QualityTier {
 }
 
 /// The tier table [`apply_quality_tier`] writes through the store, indexed by
-/// [`SETTING_RENDER_QUALITY`] (0 = low .. 6 = ultra). The ramps follow the
+/// `SETTING_RENDER_QUALITY` (0 = low .. 6 = ultra). The ramps follow the
 /// reference `featuretable.txt` reshaped to *this* viewer's stock defaults
 /// (draw distance 512, mirrors on): the top tier reaches the defaults, the
 /// low tiers shed the costly features first (shadows, dynamic probe content,
@@ -266,7 +266,7 @@ const QUALITY_TIERS: [QualityTier; 7] = [
 ];
 
 /// The quality-tier combo's option keys, in tier order (must stay in step
-/// with [`QUALITY_TIERS`] — a unit test pins the lengths equal). Shared with
+/// with `QUALITY_TIERS` — a unit test pins the lengths equal). Shared with
 /// the quick-preferences panel's quality row.
 pub(crate) const QUALITY_OPTION_KEYS: [&str; 7] = [
     "preferences-quality-low",
@@ -289,7 +289,7 @@ pub(crate) fn quality_option_values() -> Vec<SettingValue> {
 
 /// Register the settings this tab itself consumes (see the module doc for
 /// the ownership split). Called from [`ViewerSettings`]'s `load`.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         RENDER_SECTION,
         SETTING_SHADOW_DETAIL,
@@ -336,7 +336,7 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
 }
 
 /// Build the graphics tab's content into its panel (the
-/// [`crate::preferences::PREF_TABS`] `build` hook).
+/// `crate::preferences::PREF_TABS` `build` hook).
 pub(crate) fn build_graphics_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-render-quality");
     let quality_options: Vec<(&str, SettingValue)> = QUALITY_OPTION_KEYS
@@ -773,7 +773,7 @@ fn limit_framerate(
 }
 
 /// Apply a **user** pick on a quality-tier combo (an entity carrying
-/// [`QualityTierControl`]): write the picked [`QUALITY_TIERS`] row through
+/// [`QualityTierControl`]): write the picked `QUALITY_TIERS` row through
 /// the store. Reacts to [`ComboChanged`] only — programmatic combo writes
 /// (the preferences Cancel revert) emit none, so a revert never re-applies
 /// a tier (see the module doc).
@@ -836,8 +836,9 @@ fn apply_quality_tier(
 }
 
 /// The graphics tab's runtime appliers (the tab *content* is built by the
-/// shell through [`crate::preferences::PREF_TABS`]).
-pub(crate) struct PreferencesGraphicsPlugin;
+/// shell through `crate::preferences::PREF_TABS`).
+#[derive(Debug)]
+pub struct PreferencesGraphicsPlugin;
 
 impl Plugin for PreferencesGraphicsPlugin {
     fn build(&self, app: &mut App) {

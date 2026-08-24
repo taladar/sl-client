@@ -4,7 +4,7 @@
 //! The network / cache tab of the preferences floater
 //! ([`crate::preferences`]):
 //!
-//! - **Maximum bandwidth** — a **live** control: [`apply_throttle`] folds the
+//! - **Maximum bandwidth** — a **live** control: `apply_throttle` folds the
 //!   slider value through [`Throttle::from_total`] (the reference viewer's
 //!   preset-interpolating split) into an `AgentThrottle`, re-sent on change
 //!   and on every region handshake (replacing the previously hardcoded
@@ -15,7 +15,7 @@
 //!   is out of scope (`roadmap/deferred/viewer-socks5-udp-proxy.md`), and the
 //!   embedded CEF browser keeps its own network stack. **Restart-scoped**:
 //!   reqwest clients only take a proxy at build time, so
-//!   [`crate::run_viewer`] reads the persisted values pre-app and installs
+//!   `crate::run_viewer` reads the persisted values pre-app and installs
 //!   them via [`sl_client_bevy::http_proxy::set_proxy`].
 //! - **Cache sizes** — the texture cache's and the asset caches' size
 //!   ceilings, in MB. The asset value governs **each** of the six parallel
@@ -56,7 +56,7 @@ use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
 use crate::ui_text_input::TextInputKind;
 
-/// The stable id of this tab in [`crate::preferences::PREF_TABS`].
+/// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "network-cache";
 
 /// The settings section the network keys live in.
@@ -114,7 +114,7 @@ const BANDWIDTH_MAX_KBPS: f32 = 3000.0;
 const BANDWIDTH_STEP_KBPS: f32 = 50.0;
 
 /// Register this tab's settings.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         NETWORK_SECTION,
         SETTING_MAX_BANDWIDTH,
@@ -160,11 +160,11 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
 }
 
 /// Consume this tab's **restart-scoped** settings from the pre-app store
-/// load in [`crate::run_viewer`]: install the cache / chat-log locations and
+/// load in `crate::run_viewer`: install the cache / chat-log locations and
 /// cache-size ceilings as [`crate::paths`] startup overrides, install the
 /// HTTP proxy, and honour a pending clear-cache request — all before any
 /// store or HTTP client is built.
-pub(crate) fn apply_startup_settings(settings: &ViewerSettings) {
+pub fn apply_startup_settings(settings: &ViewerSettings) {
     let store = settings.store();
     crate::paths::set_startup_overrides(crate::paths::StartupOverrides {
         cache_root: validated_dir(store.get_str(SETTING_CACHE_LOCATION).ok(), "cache"),
@@ -462,9 +462,9 @@ fn delete_inventory_caches(base: &std::path::Path) {
 
 /// Owns the network & cache tab's runtime side: the live throttle applier and
 /// the clear-cache confirmation routing. The tab *content* is built by the
-/// preferences shell through [`crate::preferences::PREF_TABS`].
+/// preferences shell through `crate::preferences::PREF_TABS`.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PreferencesNetworkCachePlugin;
+pub struct PreferencesNetworkCachePlugin;
 
 impl Plugin for PreferencesNetworkCachePlugin {
     fn build(&self, app: &mut App) {

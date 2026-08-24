@@ -17,8 +17,8 @@
 //!   `PreferredMaturity` setting drives
 //!   [`Command::SetAgentPreferences`] (the `AgentPreferences` capability), the
 //!   grid's echo is checked, a mismatch retries up to
-//!   [`MATURITY_MAX_ATTEMPTS`], and a final failure (or a grid without the
-//!   capability, detected by [`MATURITY_TIMEOUT_SECONDS`]) rolls the setting
+//!   `MATURITY_MAX_ATTEMPTS`, and a final failure (or a grid without the
+//!   capability, detected by `MATURITY_TIMEOUT_SECONDS`) rolls the setting
 //!   back and raises the reference `MaturityChangeError` notification. The
 //!   combo refuses a value above the account's login ceiling
 //!   (`agent_access_max`) by reverting, the reference `canSetMaturity` rule.
@@ -29,7 +29,7 @@
 //!   percentage readout and a reset-to-100% button.
 //! - **Name tags** — only the master toggle and the own-tag toggle live here
 //!   (the toggles today's renderer honours, applied in
-//!   [`crate::avatars::position_name_tags`]); the full reference set is the
+//!   `crate::avatars::position_name_tags`); the full reference set is the
 //!   separate `viewer-name-tags-preferences` task.
 //! - The **away timeout** is registered and edited here but *consumed* by the
 //!   away / do-not-disturb mode machinery (`viewer-do-not-disturb-away`),
@@ -73,7 +73,7 @@ pub(crate) const SETTING_PREFERRED_MATURITY: &str = "PreferredMaturity";
 /// The default login start location: `"last"`, `"home"` or a
 /// `uri:Region&x&y&z` string ([`StartLocation`]'s wire form). Read at login by
 /// [`resolve_start_location`]; the `--start` CLI flag overrides it.
-pub(crate) const SETTING_LOGIN_START_LOCATION: &str = "LoginStartLocation";
+pub const SETTING_LOGIN_START_LOCATION: &str = "LoginStartLocation";
 
 /// The UI scale factor applied to every logical pixel (Bevy's [`UiScale`]).
 pub(crate) const SETTING_UI_SCALE: &str = "UiScale";
@@ -95,7 +95,7 @@ const MATURITY_TIMEOUT_SECONDS: f64 = 10.0;
 
 /// Register the general tab's settings (the language key lives in
 /// [`crate::i18n`], the name-tag keys in [`crate::avatars`]).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         GENERAL_SECTION,
         SETTING_PREFERRED_MATURITY,
@@ -122,10 +122,9 @@ pub(crate) fn register_settings(settings: &mut ViewerSettings) {
     );
 }
 
-/// Build the general tab's content into its panel (the [`PREF_TABS`] `build`
+/// Build the general tab's content into its panel (the `PREF_TABS` `build`
 /// hook).
 ///
-/// [`PREF_TABS`]: crate::preferences::PREF_TABS
 pub(crate) fn build_general_tab(commands: &mut Commands, panel: Entity) {
     spawn_pref_section(commands, panel, "preferences-section-language");
     spawn_pref_combo(
@@ -433,7 +432,7 @@ struct MaturityAttempt {
 
 /// Ingest the login account (ceiling + the grid's current rating) and the
 /// `AgentPreferences` echoes: a matching echo confirms the in-flight change, a
-/// mismatching one retries up to [`MATURITY_MAX_ATTEMPTS`] then rolls back
+/// mismatching one retries up to `MATURITY_MAX_ATTEMPTS` then rolls back
 /// (via [`drive_maturity_setting`] adopting the server value) with the
 /// reference `MaturityChangeError` notification.
 fn ingest_maturity_events(
@@ -642,10 +641,8 @@ const fn maturity_within_ceiling(wanted: &str, ceiling: Option<Maturity>) -> boo
 /// stored [`SETTING_LOGIN_START_LOCATION`] (in [`StartLocation`]'s wire form),
 /// else "last". An unparsable stored value falls back to "last" rather than
 /// aborting a login.
-pub(crate) fn resolve_start_location(
-    cli: Option<StartLocation>,
-    stored: Option<&str>,
-) -> StartLocation {
+#[must_use]
+pub fn resolve_start_location(cli: Option<StartLocation>, stored: Option<&str>) -> StartLocation {
     if let Some(cli) = cli {
         return cli;
     }
@@ -656,12 +653,11 @@ pub(crate) fn resolve_start_location(
 
 /// The general tab's runtime systems: the UI-scale applier and the maturity
 /// server conversation. (The tab *content* is built by the shell through
-/// [`PREF_TABS`]; the language applier lives in [`crate::i18n`], the name-tag
+/// `PREF_TABS`; the language applier lives in [`crate::i18n`], the name-tag
 /// gates in [`crate::avatars`].)
 ///
-/// [`PREF_TABS`]: crate::preferences::PREF_TABS
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PreferencesGeneralPlugin;
+pub struct PreferencesGeneralPlugin;
 
 impl Plugin for PreferencesGeneralPlugin {
     fn build(&self, app: &mut App) {
