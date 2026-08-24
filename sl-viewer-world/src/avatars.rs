@@ -1532,7 +1532,7 @@ fn spawn_body_part(
             ));
             if let Some(canonical) = canonical {
                 spawned.insert(crate::gpu_avatars::GpuSkinBinding {
-                    slot: crate::gpu_avatars::PoseSlotKey::Avatar(agent),
+                    slot: crate::world_api::PoseSlotKey::Avatar(agent),
                     canonical: std::sync::Arc::from(canonical),
                 });
             }
@@ -2817,7 +2817,7 @@ impl AvatarState {
                     manager.request_server_bake(id, url);
                 }
                 None => {
-                    manager.request_boosted(id, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                    manager.request_boosted(id, crate::world_api::AVATAR_BOOST_PRIORITY);
                 }
             }
         }
@@ -3096,7 +3096,7 @@ pub fn update_avatar_objects(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
-    derender: Res<crate::derender::DerenderList>,
+    derender: Res<crate::world_api::DerenderList>,
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -3466,7 +3466,7 @@ pub fn ingest_avatar_bakes(
                     }
                     None => {
                         debug!("requesting bake slot {slot} ({slot_name}) = {id} (by-UUID)");
-                        manager.request_boosted(id, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                        manager.request_boosted(id, crate::world_api::AVATAR_BOOST_PRIORITY);
                     }
                 }
             }

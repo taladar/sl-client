@@ -39,7 +39,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::Uuid;
 
-use crate::derender::{DerenderEntry, DerenderList, UnDerender};
+use crate::derender::UnDerender;
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
 };
@@ -55,6 +55,7 @@ use crate::ui_table::{
     spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::{DerenderEntry, DerenderList};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub(crate) const BLACKLIST_FLOATER_ID: &str = "asset-blacklist";
@@ -737,7 +738,7 @@ fn bind_blacklist_rows(
 #[cfg(test)]
 mod tests {
     use super::{format_date, matches_filter, sort_rows};
-    use crate::derender::DerenderEntry;
+    use crate::world_api::DerenderEntry;
     use crate::world_api::DerenderKind;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::Uuid;

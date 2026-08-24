@@ -81,11 +81,12 @@ use crate::particles::{apply_particles, particles_from_object};
 use crate::physics::apply_physics;
 use crate::probe_layers::{dynamic_render_layers, world_geom_render_layers};
 use crate::probes::{apply_reflection_probe, reflection_probe_from_object};
-use crate::render_priority::{AVATAR_BOOST_PRIORITY, HUD_BOOST_PRIORITY};
+use crate::render_priority::HUD_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material, intern_face_material,
 };
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 
 /// The broad render classification of an in-world object, decided from its
 /// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
@@ -1859,7 +1860,7 @@ fn drain_budgeted<T>(
 pub fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
-    derender: Res<crate::derender::DerenderList>,
+    derender: Res<crate::world_api::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
     mut commands: Commands,
@@ -4812,7 +4813,7 @@ pub fn apply_rigged_attachments(
                 root,
                 joints,
                 None,
-                crate::gpu_avatars::PoseSlotKey::Animesh(object),
+                crate::world_api::PoseSlotKey::Animesh(object),
             )
         } else {
             // The wearer avatar, found by chasing this mesh's parent links up to the
@@ -4886,7 +4887,7 @@ pub fn apply_rigged_attachments(
                 root,
                 joints,
                 Some(agent),
-                crate::gpu_avatars::PoseSlotKey::Avatar(agent),
+                crate::world_api::PoseSlotKey::Avatar(agent),
             )
         };
         let Some(fallback) = joints.first().copied() else {
@@ -5171,7 +5172,7 @@ fn build_rigged_submeshes(
     canonical: &[u32],
     texture_entry: &[u8],
     root: Entity,
-    slot: crate::gpu_avatars::PoseSlotKey,
+    slot: crate::world_api::PoseSlotKey,
     agent: Option<AgentKey>,
     worn: Option<ScopedObjectId>,
     mesh_key: MeshKey,

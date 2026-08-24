@@ -60,12 +60,12 @@ use crate::notification_persist::{
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::slt;
 use crate::textures::TextureManager;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::{ConversationKey, OpenConversation};

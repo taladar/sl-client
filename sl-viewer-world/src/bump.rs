@@ -56,8 +56,8 @@ use sl_client_bevy::{DecodedTexture, Priority, TextureFace, TextureKey, Uuid};
 use crate::face_material::FaceMaterial;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
-use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{TextureApplyBudget, TextureManager};
+use crate::world_api::TERRAIN_BOOST_PRIORITY;
 
 /// The reference viewer's `SHININESS_TO_ALPHA` table (`llface.cpp`): the
 /// environment-reflection intensity for each of the four shiny levels (none / low

@@ -46,10 +46,10 @@ use crate::inventory::OpenAboutLandmark;
 use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
 };
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::GroupsModel;
 
 /// The floater's font size, in logical pixels.

@@ -26,7 +26,7 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::pbr::ExternallyPosedSkin;
 use bevy::prelude::*;
 use bevy::render::extract_resource::ExtractResource;
-use sl_client_bevy::{AgentKey, AssetKey, ObjectKey, SkeletalDeformations, VolumeDeformations};
+use sl_client_bevy::{AssetKey, SkeletalDeformations, VolumeDeformations};
 
 use super::GpuAvatarsMode;
 use super::crowd::{CrowdCopy, GpuCrowd};
@@ -40,27 +40,7 @@ use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::animesh::ControlAvatarState;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::{AvatarBody, AvatarState};
-
-/// A GPU-posed pose slot's identity (§5): either a rigged **avatar** keyed by
-/// its wearer agent, or an **animesh** control avatar keyed by its animated-
-/// object root. The registry, the feed and pass D's staging all key their
-/// per-slot state on this, so avatars and animesh share the one passes-A–D
-/// pipeline and one dense slot space.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
-pub(crate) enum PoseSlotKey {
-    /// A rigged avatar, keyed by its wearer agent.
-    Avatar(AgentKey),
-    /// An animesh control avatar, keyed by its animated-object root
-    /// ([`ObjectKey`]) — it has no wearer agent.
-    Animesh(ObjectKey),
-    /// A synthetic **debug-crowd copy** of the local avatar
-    /// (`SL_VIEWER_CROWD`, [`crate::gpu_avatars::crowd`]), keyed by its crowd
-    /// index. It carries no real agent: it reuses the local avatar's shape,
-    /// clips and body submesh handles but stages its own slot, so passes A–D
-    /// run at crowd scale for perf measurement. Never allocated when the env is
-    /// unset (the crowd resource is empty), so a normal run never sees it.
-    Crowd(u32),
-}
+use crate::world_api::PoseSlotKey;
 
 /// The GPU-avatar **skin binding** written at skin-build time
 /// (`roadmap/context/gpu-avatars.md` §1.1): which pose slot a skinned submesh

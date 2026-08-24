@@ -562,7 +562,7 @@ fn learn_composition(
                 // seed caps arrive — so the store holds this request until the
                 // `GetTexture` cap is up rather than failing it (see
                 // `TextureManager::request_from`).
-                manager.request_boosted(key, crate::render_priority::TERRAIN_BOOST_PRIORITY);
+                manager.request_boosted(key, crate::world_api::TERRAIN_BOOST_PRIORITY);
             }
             entry.requested = true;
         }

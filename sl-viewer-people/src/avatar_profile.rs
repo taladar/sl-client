@@ -53,7 +53,6 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
@@ -62,6 +61,7 @@ use crate::ui_tab::{
     spawn_tab_container,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::FriendsModel;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;

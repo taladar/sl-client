@@ -417,7 +417,7 @@ pub fn publish_control_avatars(
             continue;
         };
         feed.publish_real(
-            crate::gpu_avatars::PoseSlotKey::Animesh(object),
+            crate::world_api::PoseSlotKey::Animesh(object),
             root_global.to_matrix(),
             Vec::new(),
         );

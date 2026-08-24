@@ -54,7 +54,6 @@ pub(crate) use sl_viewer_world::material_preview;
 pub(crate) use sl_viewer_world::materials;
 pub(crate) use sl_viewer_world::object_cost;
 pub(crate) use sl_viewer_world::objects;
-pub(crate) use sl_viewer_world::render_priority;
 pub(crate) use sl_viewer_world::textures;
 pub(crate) use sl_viewer_world_api as world_api;
 

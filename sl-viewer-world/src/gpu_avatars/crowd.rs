@@ -42,9 +42,10 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, SlIdentity};
 
-use super::stage::{GpuAvatarPoseFeed, GpuSkinBinding, PoseSlotKey};
+use super::stage::{GpuAvatarPoseFeed, GpuSkinBinding};
 use crate::avatars::{AvatarBody, AvatarState};
 use crate::face_material::FaceMaterial;
+use crate::world_api::PoseSlotKey;
 
 /// The env var selecting the synthetic-crowd copy count (`SL_VIEWER_CROWD=N`).
 const ENV_CROWD: &str = "SL_VIEWER_CROWD";

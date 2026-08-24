@@ -50,7 +50,6 @@ use crate::floater::{
 };
 use crate::i18n::{Translated, UiLocale};
 use crate::media_engine::MediaSurfaces;
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
 use crate::textures::TextureManager;
@@ -68,6 +67,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::{ConversationKey, OpenConversation};

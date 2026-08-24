@@ -38,10 +38,10 @@ use sl_client_bevy::{
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_font::UiFont;
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 
 /// The chrome font size, in logical pixels.
 const PROPS_FONT_SIZE: f32 = 14.0;

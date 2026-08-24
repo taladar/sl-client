@@ -42,7 +42,6 @@ pub(crate) use sl_viewer_world::gpu_pick;
 pub(crate) use sl_viewer_world::hud_pick;
 pub(crate) use sl_viewer_world::input_context;
 pub(crate) use sl_viewer_world::objects;
-pub(crate) use sl_viewer_world::render_priority;
 pub(crate) use sl_viewer_world::textures;
 pub(crate) use sl_viewer_world_api as world_api;
 

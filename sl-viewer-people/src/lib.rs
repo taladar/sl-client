@@ -69,7 +69,6 @@ pub(crate) use sl_viewer_world::avatar_render_settings;
 pub(crate) use sl_viewer_world::avatars;
 pub(crate) use sl_viewer_world::derender;
 pub(crate) use sl_viewer_world::name_tag_content;
-pub(crate) use sl_viewer_world::render_priority;
 pub(crate) use sl_viewer_world::session;
 pub(crate) use sl_viewer_world::terrain;
 pub(crate) use sl_viewer_world::textures;

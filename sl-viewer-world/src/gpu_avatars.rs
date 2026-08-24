@@ -62,7 +62,7 @@ use bevy::render::renderer::{RenderAdapter, RenderDevice};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
 pub use stage::GpuAvatarPoseFeed;
-pub(crate) use stage::{GpuSkinBinding, PoseSlotKey};
+pub(crate) use stage::GpuSkinBinding;
 
 /// The internal handle `pose.wgsl` is loaded under.
 const POSE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("7e3a9c15-24d8-4b6f-9a01-c85e2f7b4d39");

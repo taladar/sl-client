@@ -16,16 +16,17 @@
 //! a single upward reference added here would put the whole feature tier back
 //! underneath the world.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, ChatSessionKind, Command, Friend, FriendKey, FriendPresence,
     FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, MuteEntry, MuteFlags,
-    MuteType, Object, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, RegionCoordinates,
-    RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget,
-    ScriptUploadLocation, SlCommand, TaskInventoryKey, TextureKey, Uuid, Vector,
+    MuteType, Object, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, Priority,
+    RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage,
+    ScriptTarget, ScriptUploadLocation, SlCommand, TaskInventoryKey, TextureKey, Uuid, Vector,
 };
 use sl_viewer_settings::ViewerSettings;
 
@@ -2474,6 +2475,374 @@ pub struct ObjectParticleSystem {
     /// texture, target) plus the template particle parameters it emits
     /// (per-particle age, start / end colour and scale, glow, blend).
     pub system: ParticleSystem,
+}
+
+/// The top of the pixel-area priority range: [`Priority::from_pixel_area`]
+/// saturates here (`FULL_RESOLUTION_PIXEL_AREA` = `2048 * 2048`). Boost
+/// priorities sit *strictly above* this, so a boosted asset always outranks even
+/// the closest, largest prim face rather than merely tying with it on a region
+/// dense with max-pixel-area content — mirroring how the reference viewer's
+/// `BOOST_*` levels force a texture ahead of ordinary pixel-area-ranked content.
+pub const PIXEL_AREA_CAP: u32 = 2048 * 2048;
+
+/// The fixed boost priority for a region's four terrain detail textures
+/// (`LLGLTexture::BOOST_TERRAIN`): one step into the boost band, so the ground is
+/// not starved behind nearer prims (the terrain textures are few and always
+/// under the camera, and the on-screen face pass does not rank them — terrain is
+/// a custom material, not a tessellated prim face).
+pub const TERRAIN_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 1);
+
+/// The fixed boost priority for the sky's referenced textures — the rainbow /
+/// halo (and, later, sun / moon / cloud / bloom) maps the atmospheric sky dome
+/// samples (`LLGLTexture::BOOST_HIGH`). In the boost band so a sky texture
+/// resolves ahead of ordinary pixel-area-ranked scene faces (the sky is drawn
+/// behind everything and, like terrain, is a custom material the on-screen face
+/// pass cannot rank), one step above the avatar boost.
+pub const SKY_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 3);
+
+/// The fixed boost priority for an avatar's textures and server-side bakes
+/// (`LLGLTexture::BOOST_AVATAR` / `BOOST_AVATAR_BAKED`): above terrain, so the
+/// avatars the camera is looking at resolve first even on a region dense with
+/// max-pixel-area prims. The avatar is a skinned mesh, not a tessellated prim
+/// face, so the on-screen face pass does not rank it — this boost is what keeps
+/// its bakes ahead of the surrounding scene.
+pub const AVATAR_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 2);
+
+/// A GPU-posed pose slot's identity (§5): either a rigged **avatar** keyed by
+/// its wearer agent, or an **animesh** control avatar keyed by its animated-
+/// object root. The registry, the feed and pass D's staging all key their
+/// per-slot state on this, so avatars and animesh share the one passes-A–D
+/// pipeline and one dense slot space.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum PoseSlotKey {
+    /// A rigged avatar, keyed by its wearer agent.
+    Avatar(AgentKey),
+    /// An animesh control avatar, keyed by its animated-object root
+    /// ([`ObjectKey`]) — it has no wearer agent.
+    Animesh(ObjectKey),
+    /// A synthetic **debug-crowd copy** of the local avatar
+    /// (`SL_VIEWER_CROWD`, `gpu_avatars::crowd`), keyed by its crowd
+    /// index. It carries no real agent: it reuses the local avatar's shape,
+    /// clips and body submesh handles but stages its own slot, so passes A–D
+    /// run at crowd scale for perf measurement. Never allocated when the env is
+    /// unset (the crowd resource is empty), so a normal run never sees it.
+    Crowd(u32),
+}
+
+/// One blacklist entry: what was derendered, where and when.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerenderEntry {
+    /// The derendered thing's persistent id (an object's full id, an avatar's
+    /// agent id).
+    pub id: Uuid,
+    /// Its name, as the surface that derendered it knew it (may be empty when
+    /// the object-properties reply had not landed yet).
+    pub name: String,
+    /// The region it was derendered in (empty when unknown).
+    pub region: String,
+    /// What kind of thing it is.
+    pub kind: DerenderKind,
+    /// Whether it survives a teleport and a relog (the "Blacklist" slice) or is
+    /// a session-only "Temporary" derender.
+    pub permanent: bool,
+    /// When it was added, as Unix epoch seconds (stored as a plain integer so
+    /// the file needs no date parser).
+    pub added_epoch_secs: i64,
+}
+
+/// Why a region-scoped id is suppressed — which release frees it again.
+///
+/// Two sources share one suppression index (and therefore one ingest gate, one
+/// transitive parent walk, one purge and one re-fetch): the **blacklist**, keyed
+/// by the entry's id, and the **friends-only filter**, keyed by the non-friend
+/// agent it hides. Keeping the source on each entry is what lets a release be
+/// exact — un-blacklisting one object, or befriending one avatar, frees that
+/// subtree and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HiddenBy {
+    /// The blacklist entry with this id ([`DerenderList::remove`] frees it).
+    Blacklist(Uuid),
+    /// The friends-only filter, hiding this non-friend agent (turning the filter
+    /// off — or befriending them — frees it).
+    FriendsOnly(Uuid),
+}
+
+impl HiddenBy {
+    /// The persistent id at the root of this suppression — a blacklist entry's
+    /// id, or the hidden agent's.
+    #[must_use]
+    pub const fn id(self) -> Uuid {
+        match self {
+            Self::Blacklist(id) | Self::FriendsOnly(id) => id,
+        }
+    }
+}
+
+/// The viewer's derender / blacklist state, and the friends-only filter that
+/// shares its suppression machinery.
+#[derive(Resource, Debug, Default)]
+pub struct DerenderList {
+    /// The entries, newest last.
+    pub entries: Vec<DerenderEntry>,
+    /// The blacklisted ids and what each is blacklisted **as**, derived from
+    /// [`Self::entries`] — the hot-path index every check goes through. Keyed by
+    /// id alone: an id is one thing, so a second entry for it would be a
+    /// contradiction, and the kind rides along so a sound check never matches an
+    /// object entry.
+    ids: HashMap<Uuid, DerenderKind>,
+    /// The region-scoped ids currently suppressed, each mapped to **what hides
+    /// it**: an entry's own object maps to its own source, a linkset child or
+    /// attachment to its root's. Keeping the source is what lets a single
+    /// release free exactly its own subtree (see `Self::release`).
+    /// Session-derived, never persisted.
+    pub hidden_scoped: HashMap<ScopedObjectId, HiddenBy>,
+    /// Suppressions whose scene entities still need despawning, by source: a
+    /// fresh blacklist entry, or an avatar the friends-only filter just started
+    /// hiding.
+    pub pending_ids: Vec<HiddenBy>,
+    /// Scoped ids whose scene entities still need despawning (an object that
+    /// was already tracked when its parent became hidden).
+    pub pending_scoped: Vec<ScopedObjectId>,
+    /// Scoped ids just **released** from suppression, to be re-fetched from the
+    /// simulator so an un-derendered object comes back at once
+    /// (`refetch_released_objects`).
+    pub pending_refetch: Vec<ScopedObjectId>,
+    /// Bumped on every change to [`Self::entries`], so the floater rebuilds
+    /// exactly when the list moved.
+    revision: u64,
+    /// The per-account store path, resolved at login; `None` until then (and
+    /// when the platform has no per-avatar directory, disabling persistence).
+    pub path: Option<PathBuf>,
+    /// Whether the on-disk list has been read — a once-per-session load.
+    pub loaded: bool,
+    /// Whether the **permanent** entries changed since the last flush.
+    pub dirty: bool,
+    /// Whether the **friends-only** filter is on (`viewer-render-friends-only`,
+    /// the reference's `FSRenderFriendsOnly`): while it is, every avatar that is
+    /// not a friend and not the agent itself is suppressed exactly as a
+    /// derendered one is.
+    pub friends_only: bool,
+    /// The agent's own id, which the filter never hides.
+    pub own_agent: Option<Uuid>,
+    /// The friends the filter spares, mirrored from
+    /// [`FriendsModel`] so the per-object gate stays
+    /// one hash lookup.
+    pub friends: HashSet<Uuid>,
+}
+
+impl DerenderList {
+    /// Whether `id` is blacklisted **as** `kind` — the query each point of use
+    /// runs (a sound before playing it, an animation before running it, a
+    /// texture before fetching it).
+    #[must_use]
+    pub fn blacklists(&self, id: Uuid, kind: DerenderKind) -> bool {
+        self.ids.get(&id) == Some(&kind)
+    }
+
+    /// Whether `id` names an in-world thing this viewer must not draw — a
+    /// blacklisted object / avatar, or an avatar the friends-only filter hides.
+    /// The hot-path query the scene mirror runs per streamed object.
+    #[must_use]
+    pub fn hides_in_world(&self, id: Uuid) -> bool {
+        self.blacklists_in_world(id) || self.friends_only_hides(id)
+    }
+
+    /// Whether `id` is on the **blacklist** as an in-world kind (as opposed to
+    /// being hidden by the friends-only filter).
+    #[must_use]
+    pub fn blacklists_in_world(&self, id: Uuid) -> bool {
+        self.ids.get(&id).is_some_and(|kind| kind.is_in_world())
+    }
+
+    /// Whether the friends-only filter hides the avatar `agent`: the filter is
+    /// on, and they are neither the agent itself nor a friend. Animesh
+    /// ("control") avatars are exempt for free — they are ordinary mesh objects
+    /// on the wire, never `pcode` 47, so this gate never sees them, which is the
+    /// reference's `!avatar->isControlAvatar()` by construction.
+    #[must_use]
+    pub fn friends_only_hides(&self, agent: Uuid) -> bool {
+        self.friends_only && self.own_agent != Some(agent) && !self.friends.contains(&agent)
+    }
+
+    /// Every blacklisted id of `kind` — how a consumer that cannot consult the
+    /// list per item (the texture store, whose fetch gate is not a Bevy system)
+    /// mirrors the set it needs.
+    #[must_use]
+    pub fn ids_of_kind(&self, kind: DerenderKind) -> HashSet<Uuid> {
+        self.ids
+            .iter()
+            .filter(|(_id, held)| **held == kind)
+            .map(|(id, _held)| *id)
+            .collect()
+    }
+
+    /// Whether the object with region-scoped id `scoped` must not be mirrored
+    /// into the scene: it is blacklisted itself, or it hangs off something that
+    /// is (a linkset child, an attachment). Maintained by
+    /// `index_derendered_objects`.
+    #[must_use]
+    pub fn is_suppressed(&self, scoped: ScopedObjectId) -> bool {
+        self.hidden_scoped.contains_key(&scoped)
+    }
+
+    /// What suppresses `scoped`, if anything — the source an inherited
+    /// suppression is inherited from.
+    #[must_use]
+    pub fn suppressing_root(&self, scoped: ScopedObjectId) -> Option<HiddenBy> {
+        self.hidden_scoped.get(&scoped).copied()
+    }
+
+    /// Record every id in `removed` as suppressed by the blacklisted `root`.
+    ///
+    /// The scene purge calls this with what it despawned, because those ids are
+    /// often the *only* record of them: the simulator streams a static object
+    /// once, so an object derendered long after it was streamed never produces
+    /// another update for `index_derendered_objects` to learn from — and
+    /// without the record, un-derendering it would have nothing to re-fetch.
+    pub fn note_hidden(
+        &mut self,
+        removed: impl IntoIterator<Item = ScopedObjectId>,
+        root: HiddenBy,
+    ) {
+        for scoped in removed {
+            let _prior = self.hidden_scoped.insert(scoped, root);
+        }
+    }
+
+    /// The whole list, in insertion order.
+    #[must_use]
+    pub fn entries(&self) -> &[DerenderEntry] {
+        &self.entries
+    }
+
+    /// The list revision — a view stores the value it last built at and rebuilds
+    /// when it advances.
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Add (or replace) an entry, marking the scene for a purge of its id.
+    /// Re-derendering an id already listed **upgrades** it: a temporary entry
+    /// that is blacklisted becomes permanent, never the other way round, which
+    /// is what the reference's `addNewItemToBlacklist` overwrite amounts to for
+    /// the only two paths that reach it.
+    pub fn add(&mut self, entry: DerenderEntry) {
+        if let Some(existing) = self.entries.iter_mut().find(|held| held.id == entry.id) {
+            let upgraded = entry.permanent && !existing.permanent;
+            existing.permanent |= entry.permanent;
+            if existing.name.is_empty() {
+                existing.name.clone_from(&entry.name);
+            }
+            if upgraded {
+                self.dirty = true;
+                self.revision = self.revision.wrapping_add(1);
+            }
+            return;
+        }
+        self.dirty |= entry.permanent;
+        self.pending_ids.push(HiddenBy::Blacklist(entry.id));
+        self.entries.push(entry);
+        self.reindex();
+    }
+
+    /// Drop the entry for `id`, if held, releasing everything it suppressed and
+    /// queueing those objects for a re-fetch (see `Self::release`).
+    pub fn remove(&mut self, id: Uuid) {
+        let before = self.entries.len();
+        self.entries.retain(|entry| entry.id != id);
+        if self.entries.len() == before {
+            return;
+        }
+        self.dirty = true;
+        self.reindex();
+        // Release exactly what this entry was suppressing — its own object and
+        // everything that inherited the suppression from it — and nothing else:
+        // another blacklisted root's children (and anything the friends-only
+        // filter hides) must stay hidden.
+        self.release(|root| root == HiddenBy::Blacklist(id));
+    }
+
+    /// Drop every temporary entry (a teleport, or the floater's Clear temporary).
+    pub fn clear_temporary(&mut self) {
+        let before = self.entries.len();
+        self.entries.retain(|entry| entry.permanent);
+        if self.entries.len() == before {
+            return;
+        }
+        self.reindex();
+        // Every suppression whose blacklist entry just left the list is
+        // released; the permanent entries — and the friends-only filter — keep
+        // theirs.
+        let live: HashSet<Uuid> = self.ids.keys().copied().collect();
+        self.release(|root| match root {
+            HiddenBy::Blacklist(id) => !live.contains(&id),
+            HiddenBy::FriendsOnly(_agent) => false,
+        });
+    }
+
+    /// Drop every suppression whose root `released` accepts, and queue the
+    /// freed region-scoped ids for a re-fetch.
+    ///
+    /// The re-fetch is what makes "Re-render" mean it: the simulator streams an
+    /// object once, and the viewer dropped every update for it while it was
+    /// suppressed, so simply forgetting the entry would leave the object absent
+    /// until the region streamed it again (a teleport away and back — which is
+    /// all the reference does). Because the index kept the object's *region-local*
+    /// id the whole time, we can instead ask for it back right now
+    /// (`RequestMultipleObjects`, a full cache miss).
+    fn release(&mut self, released: impl Fn(HiddenBy) -> bool) {
+        let freed: Vec<ScopedObjectId> = self
+            .hidden_scoped
+            .iter()
+            .filter(|(_scoped, root)| released(**root))
+            .map(|(scoped, _root)| *scoped)
+            .collect();
+        for scoped in &freed {
+            let _dropped = self.hidden_scoped.remove(scoped);
+        }
+        self.pending_refetch.extend(freed);
+    }
+
+    /// Re-apply the friends-only filter after its inputs moved (the toggle
+    /// flipped, the friends list changed, or the own agent became known): free
+    /// everyone it no longer hides — queuing their re-fetch, so they come back
+    /// without a relog — and queue a purge for every avatar it now does.
+    ///
+    /// `known` is the agents this viewer currently tracks; only they can have
+    /// anything in the scene to purge, and anyone streaming in later is caught
+    /// by the ingest gate instead.
+    pub fn resync_friends_only(&mut self, known: &[Uuid]) {
+        let spared: HashSet<Uuid> = self
+            .hidden_scoped
+            .values()
+            .filter_map(|hidden| match hidden {
+                HiddenBy::FriendsOnly(agent) => Some(*agent),
+                HiddenBy::Blacklist(_id) => None,
+            })
+            .filter(|agent| !self.friends_only_hides(*agent))
+            .collect();
+        if !spared.is_empty() {
+            self.release(
+                |root| matches!(root, HiddenBy::FriendsOnly(agent) if spared.contains(&agent)),
+            );
+        }
+        for agent in known {
+            if self.friends_only_hides(*agent) {
+                self.pending_ids.push(HiddenBy::FriendsOnly(*agent));
+            }
+        }
+    }
+
+    /// Rebuild the derived id index and bump the revision.
+    fn reindex(&mut self) {
+        self.ids = self
+            .entries
+            .iter()
+            .map(|entry| (entry.id, entry.kind))
+            .collect();
+        self.revision = self.revision.wrapping_add(1);
+    }
 }
 
 #[cfg(test)]

@@ -901,9 +901,10 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
     use bevy::camera::primitives::Aabb;
     use bevy::camera::{CameraProjection, PerspectiveProjection};
 
+    use super::GpuSkinBinding;
     use super::render::GpuAvatarBounds;
     use super::stage::{GpuAvatarRegistry, apply_gpu_avatar_bounds};
-    use super::{GpuSkinBinding, PoseSlotKey};
+    use crate::world_api::PoseSlotKey;
 
     // Slot 0 — a "real avatar": the entity transform equals the GPU pose root,
     // so its world bound sits right at the entity (10 m ahead of the origin).
@@ -1004,7 +1005,8 @@ fn applied_bounds_cull_an_offscreen_avatar() -> Result<(), TestError> {
 fn gpu_skin_binding_requires_externally_posed_marker() {
     use bevy::pbr::ExternallyPosedSkin;
 
-    use super::{GpuSkinBinding, PoseSlotKey};
+    use super::GpuSkinBinding;
+    use crate::world_api::PoseSlotKey;
 
     let mut world = World::new();
     let entity = world

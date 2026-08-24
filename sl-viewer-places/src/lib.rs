@@ -36,7 +36,6 @@ pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world::avatars;
 pub(crate) use sl_viewer_world::environment;
-pub(crate) use sl_viewer_world::render_priority;
 pub(crate) use sl_viewer_world::textures;
 pub(crate) use sl_viewer_world_api as world_api;
 

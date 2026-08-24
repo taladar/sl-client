@@ -36,7 +36,7 @@
 //!   and refines it as the camera approaches.
 //!
 //! Assets the pixel-area pass does not cover — terrain detail textures and avatar
-//! textures / bakes — are requested at a fixed [boost](AVATAR_BOOST_PRIORITY)
+//! textures / bakes — are requested at a fixed boost (`AVATAR_BOOST_PRIORITY`)
 //! instead (mirroring `LLGLTexture::BOOST_TERRAIN` / `BOOST_AVATAR`), so they are
 //! not starved behind nearer prims. The own avatar / attachments / HUD would map
 //! to the same full-resolution boost; those consumers arrive with later phases.
@@ -56,7 +56,7 @@ use crate::objects::{
     TreeTier,
 };
 use crate::textures::TextureManager;
-use crate::world_api::ViewerCamera;
+use crate::world_api::{PIXEL_AREA_CAP, ViewerCamera};
 
 /// How often (seconds) the render-priority pass re-ranks the queued fetches. The
 /// reference viewer re-derives every texture's virtual size once per frame; a few
@@ -95,14 +95,6 @@ pub fn register_settings(settings: &mut crate::settings::ViewerSettings) {
     );
 }
 
-/// The top of the pixel-area priority range: [`Priority::from_pixel_area`]
-/// saturates here (`FULL_RESOLUTION_PIXEL_AREA` = `2048 * 2048`). Boost
-/// priorities sit *strictly above* this, so a boosted asset always outranks even
-/// the closest, largest prim face rather than merely tying with it on a region
-/// dense with max-pixel-area content — mirroring how the reference viewer's
-/// `BOOST_*` levels force a texture ahead of ordinary pixel-area-ranked content.
-pub(crate) const PIXEL_AREA_CAP: u32 = 2048 * 2048;
-
 /// Whether `priority` sits in the boost band strictly above the pixel-area range
 /// (terrain / avatar / worn-attachment textures). A boosted texture is fetched
 /// at full resolution and excluded from pixel-area LOD management (P21.1): its
@@ -114,21 +106,6 @@ pub(crate) const fn is_boost_priority(priority: Priority) -> bool {
     priority.get() > PIXEL_AREA_CAP
 }
 
-/// The fixed boost priority for a region's four terrain detail textures
-/// (`LLGLTexture::BOOST_TERRAIN`): one step into the boost band, so the ground is
-/// not starved behind nearer prims (the terrain textures are few and always
-/// under the camera, and the on-screen face pass does not rank them — terrain is
-/// a custom material, not a tessellated prim face).
-pub const TERRAIN_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 1);
-
-/// The fixed boost priority for an avatar's textures and server-side bakes
-/// (`LLGLTexture::BOOST_AVATAR` / `BOOST_AVATAR_BAKED`): above terrain, so the
-/// avatars the camera is looking at resolve first even on a region dense with
-/// max-pixel-area prims. The avatar is a skinned mesh, not a tessellated prim
-/// face, so the on-screen face pass does not rank it — this boost is what keeps
-/// its bakes ahead of the surrounding scene.
-pub const AVATAR_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 2);
-
 /// The fixed boost priority for a **HUD** attachment's textures and mesh geometry
 /// (`LLGLTexture::BOOST_HUD`, which likewise outranks the avatar and terrain
 /// boosts): a HUD hangs off the screen rather than the world, always in front of
@@ -139,14 +116,6 @@ pub const AVATAR_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 2);
 /// camera distance is meaningless — so this boost, plus the full-screen area the
 /// pass hands it instead, is what keeps a HUD sharp (P35.1).
 pub(crate) const HUD_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 4);
-
-/// The fixed boost priority for the sky's referenced textures — the rainbow /
-/// halo (and, later, sun / moon / cloud / bloom) maps the atmospheric sky dome
-/// samples (`LLGLTexture::BOOST_HIGH`). In the boost band so a sky texture
-/// resolves ahead of ordinary pixel-area-ranked scene faces (the sky is drawn
-/// behind everything and, like terrain, is a custom material the on-screen face
-/// pass cannot rank), one step above the avatar boost.
-pub(crate) const SKY_BOOST_PRIORITY: Priority = Priority::new(PIXEL_AREA_CAP + 3);
 
 /// Re-rank every queued texture and mesh fetch by on-screen pixel area (P20.2),
 /// throttled to `REPRIORITIZE_INTERVAL_SECS`.

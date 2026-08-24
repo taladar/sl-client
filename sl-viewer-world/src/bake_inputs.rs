@@ -186,7 +186,7 @@ impl OwnBakeInputs {
             let key = TextureKey::from(id);
             if texture_manager.decoded(key).is_none() {
                 let _new = self.pending_textures.insert(key);
-                texture_manager.request_boosted(key, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                texture_manager.request_boosted(key, crate::world_api::AVATAR_BOOST_PRIORITY);
             }
         }
     }
@@ -670,8 +670,7 @@ fn parse_and_request_textures(
                     // Our own avatar's client-side bake layer textures are boosted
                     // (P20.2): they clothe the own avatar and are not ranked by the
                     // on-screen prim-face pass, so a fixed boost loads them promptly.
-                    texture_manager
-                        .request_boosted(key, crate::render_priority::AVATAR_BOOST_PRIORITY);
+                    texture_manager.request_boosted(key, crate::world_api::AVATAR_BOOST_PRIORITY);
                 }
             }
         }

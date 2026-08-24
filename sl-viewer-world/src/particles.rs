@@ -104,9 +104,9 @@ use crate::hud::{HUD_RENDER_LAYER, on_hud_layer};
 use crate::particle_render::{
     ParticleBlend, ParticleDrawParams, ParticleInstance, ParticleInstances, ParticleQuad,
 };
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::{ObjectParticleSystem, ViewerCamera};
 
 /// Lift a live particle system off an object into an [`ObjectParticleSystem`], or

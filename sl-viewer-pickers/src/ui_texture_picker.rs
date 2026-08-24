@@ -49,11 +49,11 @@ use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::inventory::{InventoryModel, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 use sl_client_bevy::SlCommand;
 

@@ -311,7 +311,7 @@ impl TextureManager {
         self.request_from(
             id,
             RemoteTextureSource::ServerBake { url },
-            crate::render_priority::AVATAR_BOOST_PRIORITY,
+            crate::world_api::AVATAR_BOOST_PRIORITY,
             DiscardLevel::FULL,
             false,
         );
@@ -718,7 +718,7 @@ fn texture_cache_dir() -> Option<PathBuf> {
 /// Bevy resource. Cheap: a revision compare per frame, a rebuild only on a real
 /// change.
 pub fn sync_texture_blacklist(
-    derender: Res<crate::derender::DerenderList>,
+    derender: Res<crate::world_api::DerenderList>,
     mut manager: ResMut<TextureManager>,
 ) {
     if manager.blacklist_revision == derender.revision() {

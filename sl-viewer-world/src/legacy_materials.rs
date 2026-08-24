@@ -52,8 +52,8 @@ use sl_client_bevy::{
 use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC};
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
-use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{TextureApplyBudget, TextureManager};
+use crate::world_api::TERRAIN_BOOST_PRIORITY;
 
 /// The fetch priority a legacy material's normal map is requested at — the same
 /// modest boost the PBR pipeline uses for its maps, so the map loads at full

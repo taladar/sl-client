@@ -335,7 +335,7 @@ pub fn update_animation_caps(
 pub fn ingest_avatar_animations(
     mut events: MessageReader<SlEvent>,
     mut manager: ResMut<AnimationManager>,
-    derender: Res<crate::derender::DerenderList>,
+    derender: Res<crate::world_api::DerenderList>,
 ) {
     let log = std::env::var("SL_VIEWER_LOG_LOCOMOTION").as_deref() == Ok("1");
     for event in events.read() {
@@ -1041,7 +1041,7 @@ pub fn drive_avatar_skeletons(
     mut playback: ResMut<AnimationPlayback>,
     adjust: Res<LocomotionAdjust>,
     state: Res<AvatarState>,
-    derender: Res<crate::derender::DerenderList>,
+    derender: Res<crate::world_api::DerenderList>,
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,
     gpu: GpuAvatarHooks<'_, '_>,
@@ -1205,7 +1205,7 @@ impl GpuAvatarHooks<'_, '_> {
         }
         if let Some(feed) = self.feed.as_mut() {
             feed.publish_real(
-                crate::gpu_avatars::PoseSlotKey::Avatar(agent),
+                crate::world_api::PoseSlotKey::Avatar(agent),
                 root,
                 corrections,
             );

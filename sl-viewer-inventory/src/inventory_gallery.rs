@@ -34,11 +34,11 @@ use crate::inventory::{
     InventoryModel, InventorySelection, RowKey, folder_icon, item_icon, query_folder_page,
 };
 use crate::inventory_properties::{OpenItemPreview, previewable};
-use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
+use crate::world_api::AVATAR_BOOST_PRIORITY;
 
 /// The gallery font size for tile names, in logical pixels.
 const TILE_FONT_SIZE: f32 = 12.0;

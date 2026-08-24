@@ -209,7 +209,7 @@ pub(crate) fn ingest_world_sound_events(
     mut sounds: ResMut<WorldSounds>,
     state: Res<ObjectState>,
     mutes: Res<MuteModel>,
-    derender: Res<crate::derender::DerenderList>,
+    derender: Res<crate::world_api::DerenderList>,
     parcel: ParcelAudibility,
 ) {
     let now = time.elapsed_secs();
