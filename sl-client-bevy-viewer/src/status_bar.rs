@@ -77,6 +77,7 @@ use crate::i18n::{TransArgs, Translator};
 use crate::settings::ViewerSettings;
 use crate::ui_font::UiFont;
 use crate::ui_perf::FixedSlotContentSize;
+use crate::world_api::AgentRegionPosition;
 
 pub(crate) mod slt;
 
@@ -247,28 +248,6 @@ impl ParcelIcons {
 pub(crate) struct AgentBalance {
     /// The current balance, or `None` before the first reply.
     balance: Option<LindenBalance>,
-}
-
-/// The agent's own region-local position, folded from its own-avatar object
-/// updates ([`SlSessionEvent::ObjectAdded`] / [`SlSessionEvent::ObjectUpdated`]
-/// whose `full_id` is the agent id). `None` before the own avatar arrives. This
-/// is the region-local `⟨x, y, z⟩` the location read-out shows, the same source
-/// the reference viewer's `LLAgentUI::buildLocationString` reads
-/// (`gAgent.getPositionAgent`).
-#[derive(Resource, Debug, Clone, Default)]
-pub(crate) struct AgentRegionPosition {
-    /// The region-local position in metres, or `None` before the own avatar
-    /// object arrives.
-    position: Option<Vector>,
-}
-
-impl AgentRegionPosition {
-    /// The agent's region-local position in metres, or `None` before the own
-    /// avatar object arrives. Read by the About Land Options tab to set a
-    /// parcel's landing point to where the agent stands.
-    pub(crate) const fn position(&self) -> Option<&Vector> {
-        self.position.as_ref()
-    }
 }
 
 /// Which read-out a status text node carries, so one update system can rewrite

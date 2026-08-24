@@ -49,7 +49,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, Permissions, ScopedObjectId, SlCommand};
 
 use crate::input_context::InputContext;
-use crate::menu_bar::TOP_MENU_ELEMENT;
+use crate::menu::TOP_MENU_ELEMENT;
 use crate::objects::ObjectState;
 use crate::ui_element::UiAction;
 use crate::world_api::EditToolState;

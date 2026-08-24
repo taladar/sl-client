@@ -2006,6 +2006,29 @@ impl StartConference {
 /// account-scoped like the replies themselves.
 pub const SETTING_AUTORESPONSE_ITEM: &str = "AutoresponseItemUUID";
 
+/// The agent's own region-local position, folded from its own-avatar object
+/// updates (`SlSessionEvent::ObjectAdded` / `SlSessionEvent::ObjectUpdated`
+/// whose `full_id` is the agent id). `None` before the own avatar arrives. This
+/// is the region-local `⟨x, y, z⟩` the location read-out shows, the same source
+/// the reference viewer's `LLAgentUI::buildLocationString` reads
+/// (`gAgent.getPositionAgent`).
+#[derive(Resource, Debug, Clone, Default)]
+pub struct AgentRegionPosition {
+    /// The region-local position in metres, or `None` before the own avatar
+    /// object arrives.
+    pub position: Option<Vector>,
+}
+
+impl AgentRegionPosition {
+    /// The agent's region-local position in metres, or `None` before the own
+    /// avatar object arrives. Read by the About Land Options tab to set a
+    /// parcel's landing point to where the agent stands.
+    #[must_use]
+    pub const fn position(&self) -> Option<&Vector> {
+        self.position.as_ref()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::target_for;

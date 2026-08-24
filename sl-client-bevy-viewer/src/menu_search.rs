@@ -44,7 +44,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 
 use crate::menu::MenuFilter;
-use crate::menu_bar::TOP_MENU_ELEMENT;
+use crate::menu::TOP_MENU_ELEMENT;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 
 /// The field's font size, in logical pixels — matched to the menu bar's entries.
@@ -138,7 +138,7 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use crate::menu::MenuFilter;
-    use crate::menu_bar::TOP_MENU_ELEMENT;
+    use crate::menu::TOP_MENU_ELEMENT;
     use crate::ui::{UiRoot, UiScaffoldSystems};
     use crate::ui_search::SearchFieldPlugin;
     use crate::ui_test::{LayoutTest, TestError, find_by_name, settle};

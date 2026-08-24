@@ -63,7 +63,7 @@ use crate::hud::on_hud_layer;
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::input_context::InputContext;
 use crate::inventory::InventoryModel;
-use crate::object_menu::ObjectPicker;
+use crate::objects::ObjectPicker;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
 };

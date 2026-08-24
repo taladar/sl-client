@@ -2865,6 +2865,13 @@ pub fn spawn_menu_bar_specimen(commands: &mut Commands, parent: Entity, cx: Elem
 /// untouched.
 pub const UNIMPLEMENTED: &str = "unimplemented";
 
+/// The `element` the top menu bar attributes its actions to — the tag
+/// `handle_top_menu_actions` filters on, so it routes *its* menu's picks and
+/// not some other widget's. Menu search (`crate::menu_search`) emits under the
+/// same tag, so activating a search hit routes through `handle_top_menu_actions`
+/// exactly as opening the menu and clicking the entry would.
+pub const TOP_MENU_ELEMENT: &str = "top-menu-bar";
+
 #[cfg(test)]
 mod tests {
     use super::{

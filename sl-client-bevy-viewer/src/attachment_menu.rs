@@ -77,7 +77,7 @@
 //! [`OpenAttachmentMenu`]:
 //!
 //! - a **HUD** hit — the orthographic HUD-camera ray resolved through
-//!   [`ObjectPicker::pick_hud`](crate::object_menu::ObjectPicker) (only own
+//!   [`ObjectPicker::pick_hud`](crate::objects::ObjectPicker) (only own
 //!   HUDs are shown, so always the self pie);
 //! - a **rigid worn attachment** in world — the object ray's
 //!   [`ObjectPickSummary`] says `attachment`;

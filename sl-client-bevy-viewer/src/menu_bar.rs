@@ -38,17 +38,11 @@ use bevy::prelude::*;
 
 use crate::floater::toggle_floater;
 use crate::menu::{
-    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, PrimaryMenuBar, spawn_menu_bar,
+    MenuBarDef, MenuCommand, MenuConditions, MenuDef, MenuItemDef, PrimaryMenuBar,
+    TOP_MENU_ELEMENT, spawn_menu_bar,
 };
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems};
 use crate::ui_element::{ElementCx, UiAction};
-
-/// The `element` the top menu bar attributes its actions to — the tag
-/// [`handle_top_menu_actions`] filters on, so it routes *its* menu's picks and
-/// not some other widget's. Menu search ([`crate::menu_search`]) emits under the
-/// same tag, so activating a search hit routes through [`handle_top_menu_actions`]
-/// exactly as opening the menu and clicking the entry would.
-pub(crate) const TOP_MENU_ELEMENT: &str = "top-menu-bar";
 
 /// The z-index the bar renders at — above the floaters (so a window never covers
 /// the menu bar), below an open menu's popup (`crate::menu`'s `MENU_Z_INDEX`).

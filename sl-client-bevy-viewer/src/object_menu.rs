@@ -98,23 +98,17 @@
 //! Reference (Firestorm, read-only): `menu_pie_object.xml` (the compass
 //! positions), `lltoolpie.cpp` (the pick), `llviewermenu.cpp` (the handlers).
 
-use std::collections::HashSet;
-
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, DeRezDestination, FolderType, MuteType, ScopedObjectId, SlAgentParcel, SlCommand,
-    SlEvent, SlSessionEvent, SurfaceInfo, TransactionId, Uuid, Vector,
+    Command, DeRezDestination, FolderType, MuteType, SlAgentParcel, SlCommand, SlEvent,
+    SlSessionEvent, TransactionId, Uuid, Vector,
 };
 
 use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit};
 use crate::derender::{DerenderKind, RequestDerender};
-use crate::hud_pick::surface_info_from_hit;
 use crate::inventory::InventoryModel;
 use crate::menu::UNIMPLEMENTED;
-use crate::objects::{
-    FaceTextureDebug, ObjectCategory, ObjectPickSummary, ObjectState, PrimFaceEntity, SceneObject,
-};
+use crate::objects::{ObjectRayHit, ObjectState};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::world_api::RequestBlock;
@@ -764,143 +758,6 @@ pub(crate) static OBJECT_PIE: PieMenuDef = PieMenuDef {
 // The pick: resolving a world ray to an object, the way the left-click touch
 // does, packaged for the shared right-click resolver.
 // ---------------------------------------------------------------------------
-
-/// A world ray resolved to an in-world object: what the right-click resolver
-/// compares against the avatar pick, and what the open request carries.
-#[derive(Debug, Clone)]
-pub(crate) struct ObjectRayHit {
-    /// The picked prim and its linkset resolution.
-    pub(crate) summary: ObjectPickSummary,
-    /// The surface the ray struck, in the picked object's own frame — carried
-    /// into Touch (`llDetectedTouch*`) and Sit Here (the seat offset).
-    pub(crate) surface: SurfaceInfo,
-}
-
-/// Everything an object pick reads, bundled as one [`SystemParam`] so the
-/// right-click resolver adds a single parameter.
-#[derive(SystemParam)]
-pub(crate) struct ObjectPicker<'w, 's> {
-    /// The tracked-object store, for the linkset walk.
-    state: Res<'w, ObjectState>,
-    /// Object identities, to resolve a hit entity to its object.
-    scene: Query<'w, 's, &'static SceneObject>,
-    /// Face markers + per-face texture placement, for the surface info.
-    faces: Query<'w, 's, (&'static PrimFaceEntity, &'static FaceTextureDebug)>,
-    /// Parent links, to walk from a face entity up to its object.
-    parents: Query<'w, 's, &'static ChildOf>,
-    /// Globals, to carry the world hit into the object's own frame.
-    globals: Query<'w, 's, &'static GlobalTransform>,
-}
-
-impl ObjectPicker<'_, '_> {
-    /// Resolve `ray` to the nearest object it hits — an in-world object, or a
-    /// worn (rigid) attachment ([`ObjectPickSummary::attachment`] tells the two
-    /// apart) — or `None` when the first thing struck is neither (terrain, an
-    /// avatar's own body). Deliberately first-hit-only, so an occluded object
-    /// is not picked through whatever hides it.
-    ///
-    /// Only the **edit tool**'s click-select still resolves through this ray
-    /// walk ([`crate::edit_selection`]); the cursor picks (touch, menus,
-    /// hover) moved to the GPU ID buffer ([`crate::gpu_pick`]).
-    ///
-    /// `exclude` is the HUD entity set: a HUD is screen-space and never a world
-    /// pick (see [`pick_hud`](Self::pick_hud) for its own ray).
-    pub(crate) fn pick(
-        &self,
-        ray: Ray3d,
-        ray_cast: &mut MeshRayCast,
-        exclude: &HashSet<Entity>,
-    ) -> Option<ObjectRayHit> {
-        let world_filter = |entity: Entity| !exclude.contains(&entity);
-        let settings = MeshRayCastSettings::default().with_filter(&world_filter);
-        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
-        self.resolve(entity, &hit)
-    }
-
-    /// Refine a GPU ID-buffer pick against the **one face entity** the ID
-    /// buffer named: a single-entity ray test (the filter admits only
-    /// `entity`, so this is not a scene walk) that recovers the exact struck
-    /// surface — face index, ST/UV, position, normal — the touch / sit /
-    /// menu paths carry. `None` when the ray unexpectedly misses the face
-    /// (an alpha-cutout edge pixel the v1 pick treats as opaque).
-    pub(crate) fn pick_entity(
-        &self,
-        ray: Ray3d,
-        ray_cast: &mut MeshRayCast,
-        entity: Entity,
-    ) -> Option<ObjectRayHit> {
-        let only = |candidate: Entity| candidate == entity;
-        let settings = MeshRayCastSettings::default()
-            // The GPU pick already established visibility (it drew the
-            // pixel); the refinement must not second-guess a per-view flag.
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Any)
-            .with_filter(&only);
-        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
-        self.resolve(entity, &hit)
-    }
-
-    /// Resolve the **HUD** ray `ray` (orthographic, through the HUD camera) to
-    /// the worn HUD attachment it hits: the same resolution as
-    /// [`pick`](Self::pick) but restricted **to** the HUD subtree
-    /// (`hud_entities`) and to *shown* geometry — only the agent's own HUDs are
-    /// routed to the screen and visible, so a hit here is always an own worn
-    /// object, which the resolver gives the attachment-self pie.
-    pub(crate) fn pick_hud(
-        &self,
-        ray: Ray3d,
-        ray_cast: &mut MeshRayCast,
-        hud_entities: &HashSet<Entity>,
-    ) -> Option<ObjectRayHit> {
-        let hud_filter = |entity: Entity| hud_entities.contains(&entity);
-        let settings = MeshRayCastSettings::default()
-            // Inherited visibility, not per-view: the HUD is drawn by its own
-            // camera (the `crate::hud_pick` convention).
-            .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
-            .with_filter(&hud_filter);
-        let (entity, hit) = ray_cast.cast_ray(ray, &settings).first().cloned()?;
-        self.resolve(entity, &hit)
-    }
-
-    /// The pick summary of an already-identified object — used by the resolver
-    /// when the **avatar** pick lands on a worn rigged submesh, whose worn
-    /// object is known by identity ([`crate::objects::WornPickTarget`]) rather
-    /// than by this module's ray walk.
-    pub(crate) fn summary_of(&self, scoped: ScopedObjectId) -> Option<ObjectPickSummary> {
-        self.state.pick_summary(scoped)
-    }
-
-    /// Resolve one ray hit to its object: walk the entity hierarchy up to the
-    /// [`SceneObject`], summarize its linkset, and package the struck surface.
-    fn resolve(
-        &self,
-        entity: Entity,
-        hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
-    ) -> Option<ObjectRayHit> {
-        // Walk up the linkset to the entity carrying the scene identity, exactly
-        // as the left-click touch does.
-        let mut current = entity;
-        let scene = loop {
-            if let Ok(scene) = self.scene.get(current) {
-                break scene;
-            }
-            current = self.parents.get(current).ok()?.parent();
-        };
-        // An avatar is picked by its class-1 GPU pick tag, not here.
-        if scene.category == ObjectCategory::Avatar {
-            return None;
-        }
-        let summary = self.state.pick_summary(scene.scoped_id)?;
-        let face = self.faces.get(entity).ok();
-        let object_global = self.globals.get(current).ok()?;
-        let surface = surface_info_from_hit(
-            hit,
-            face.map(|(marker, _tf)| marker.face_id),
-            face.map(|(_marker, FaceTextureDebug(tf))| tf),
-            object_global,
-        );
-        Some(ObjectRayHit { summary, surface })
-    }
-}
 
 // ---------------------------------------------------------------------------
 // The widget-facing wiring: open request → open pie → dispatch.

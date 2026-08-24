@@ -92,7 +92,7 @@ pub(crate) const BOTTOM_TOOLBAR_ELEMENT: &str = "bottom-toolbar";
 
 /// The z-index the bottom area renders at — above the floaters (so a window never
 /// hides the persistent toolbar), matching the top menu bar's
-/// [`crate::menu_bar::TOP_MENU_ELEMENT`] strip. `pub(crate)` so the Conversations
+/// [`crate::menu::TOP_MENU_ELEMENT`] strip. `pub(crate)` so the Conversations
 /// floater's bottom-left dock host can lift a docked window just above the bar (a
 /// window docked *against* the bar must still take clicks, else its input reads as
 /// dead — the bar would win the pick at `9000` over a docked floater at `0`).
