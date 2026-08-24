@@ -8516,6 +8516,7 @@ dependencies = [
  "sl-viewer-audio",
  "sl-viewer-kit",
  "sl-viewer-media",
+ "sl-viewer-notices",
  "sl-viewer-notifications",
  "sl-viewer-platform",
  "sl-viewer-settings",
@@ -9046,6 +9047,31 @@ dependencies = [
  "sl-viewer-platform",
  "sl-viewer-ui-core",
  "url",
+]
+
+[[package]]
+name = "sl-viewer-notices"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "fs-err",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sl-client-bevy",
+ "sl-settings",
+ "sl-types",
+ "sl-viewer-kit",
+ "sl-viewer-notifications",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "tracing",
 ]
 
 [[package]]

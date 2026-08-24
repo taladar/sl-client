@@ -28,7 +28,7 @@
 //! *same* [`SlSessionEvent::ExperiencePermissions`] event as the GET reply but with
 //! empty lists. So this floater treats an `ExperiencePermissions` event as an
 //! authoritative full list **only** while it is expecting a GET reply it issued
-//! (tracked by [`ExperiencesState::pending_full_list`]); a mutation reply, which
+//! (tracked by `ExperiencesState::pending_full_list`); a mutation reply, which
 //! arrives with no GET outstanding, is ignored (the optimistic update already
 //! stands). The accept-prompt companion — the `ScriptQuestionExperience` toast a
 //! script pops to *join* an experience — is [`crate::experience_permission`].
@@ -50,7 +50,7 @@ use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 
 /// The floater's id (its geometry-persistence key and menu target).
-pub(crate) const EXPERIENCES_FLOATER_ID: &str = "experiences";
+pub const EXPERIENCES_FLOATER_ID: &str = "experiences";
 
 /// The element id the gallery specimen and its inert actions report under.
 const EXPERIENCES_ELEMENT: &str = "experiences-floater";
@@ -94,7 +94,8 @@ const LIST_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.25);
 const SHORT_ID_LEN: usize = 8;
 
 /// The plugin owning the Experiences floater.
-pub(crate) struct ExperiencesPlugin;
+#[derive(Debug)]
+pub struct ExperiencesPlugin;
 
 impl Plugin for ExperiencesPlugin {
     /// Register the state and systems, and spawn the (hidden) floater.
@@ -269,7 +270,7 @@ fn spawn_section(commands: &mut Commands, parent: Entity, heading_key: &'static 
 }
 
 /// Issue a fresh full-list GET, counting it so its reply is accepted as
-/// authoritative (see [`ExperiencesState::pending_full_list`]).
+/// authoritative (see `ExperiencesState::pending_full_list`).
 fn request_permissions(state: &mut ExperiencesState, sl: &mut MessageWriter<SlCommand>) {
     state.pending_full_list = state.pending_full_list.saturating_add(1);
     sl.write(SlCommand(Command::RequestExperiencePermissions));
@@ -530,9 +531,9 @@ fn spawn_button_shell(commands: &mut Commands, parent: Entity, tab: i32) -> Enti
 
 /// The gallery / `ui_test` specimen: a static Allowed / Blocked layout with a few
 /// rows, so the heading / row / Forget layout is swept login-free (the live floater
-/// needs a session). Registered in [`crate::ui_element::ELEMENTS`]; its buttons
+/// needs a session). Registered in `crate::ui_element::ELEMENTS`; its buttons
 /// report an inert [`UiAction`].
-pub(crate) fn spawn_experiences_specimen(
+pub fn spawn_experiences_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

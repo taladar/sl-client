@@ -42,6 +42,7 @@ members = [
   "sl-viewer-audio",
   "sl-viewer-kit",
   "sl-viewer-media",
+  "sl-viewer-notices",
   "sl-viewer-notifications",
   "sl-viewer-platform",
   "sl-viewer-settings",
@@ -109,6 +110,7 @@ sl-types = { version = "0.8.0" }
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }
 sl-viewer-media = { path = "sl-viewer-media", version = "0.1.0" }
+sl-viewer-notices = { path = "sl-viewer-notices", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }
 sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }
 sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }

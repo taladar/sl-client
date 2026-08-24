@@ -21,7 +21,7 @@
 //!
 //! "We do not know the owner yet" (the reply is still in flight) is distinct from
 //! "there is genuinely no owner", so the binding is a **tri-state**
-//! ([`NameTarget`] / [`NameBinding`]) rather than a bare `Option`:
+//! ([`NameTarget`] / `NameBinding`) rather than a bare `Option`:
 //!
 //! - **Loading** — data not yet received: the configured loading label
 //!   (e.g. `(loading)`), plain colour, non-clickable.
@@ -77,7 +77,7 @@ enum NameBinding {
 /// kind so an avatar-only site binds a `NameTarget<AgentKey>`, a group-only site
 /// a `NameTarget<GroupKey>`, and an owner site a `NameTarget<OwnerKey>`.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum NameTarget<K> {
+pub enum NameTarget<K> {
     /// The value is not yet available — show the loading label.
     Loading,
     /// The value is known to be absent — show the unset label.
@@ -90,7 +90,7 @@ impl<K> NameTarget<K> {
     /// Build a target from an `Option` plus whether the underlying data has
     /// arrived: `Loading` before it has, then `Unset` / `Set` once it has. This
     /// is the exact "reply present? owner present?" shape the floaters carry.
-    pub(crate) fn from_option(loaded: bool, value: Option<K>) -> Self {
+    pub fn from_option(loaded: bool, value: Option<K>) -> Self {
         match (loaded, value) {
             (false, _absent_or_present) => Self::Loading,
             (true, None) => Self::Unset,
@@ -100,7 +100,7 @@ impl<K> NameTarget<K> {
 }
 
 impl<K: IntoOwnerKey> NameTarget<K> {
-    /// Lower a caller target into the stored [`NameBinding`].
+    /// Lower a caller target into the stored `NameBinding`.
     fn into_binding(self) -> NameBinding {
         match self {
             Self::Loading => NameBinding::Loading,
@@ -113,7 +113,7 @@ impl<K: IntoOwnerKey> NameTarget<K> {
 /// A key kind that can be viewed as an [`OwnerKey`], so the one widget serves
 /// avatar-only, group-only, and owner (either-kind) bindings through a single
 /// resolution + click path.
-pub(crate) trait IntoOwnerKey {
+pub trait IntoOwnerKey {
     /// This key as an owner key.
     fn into_owner_key(self) -> OwnerKey;
 }
@@ -143,7 +143,7 @@ impl IntoOwnerKey for OwnerKey {
 /// How a [`NameLink`] node looks: its two non-clickable labels (Fluent keys), an
 /// optional group-owned annotation, its font size, and its two colours.
 #[derive(Debug, Clone)]
-pub(crate) struct NameLinkSpec {
+pub struct NameLinkSpec {
     /// Fluent key for the **loading** label (data not yet received).
     loading_key: String,
     /// Fluent key for the **unset** label (known to have no owner).
@@ -163,7 +163,7 @@ pub(crate) struct NameLinkSpec {
 
 impl NameLinkSpec {
     /// A spec with the two non-clickable labels and the default font / colours.
-    pub(crate) fn new(loading_key: impl Into<String>, unset_key: impl Into<String>) -> Self {
+    pub fn new(loading_key: impl Into<String>, unset_key: impl Into<String>) -> Self {
         Self {
             loading_key: loading_key.into(),
             unset_key: unset_key.into(),
@@ -177,7 +177,7 @@ impl NameLinkSpec {
     /// Annotate a group owner with `key`'s text (after a space) — the parcel
     /// owner field's "(group owned)" suffix.
     #[must_use]
-    pub(crate) fn with_group_suffix(mut self, key: impl Into<String>) -> Self {
+    pub fn with_group_suffix(mut self, key: impl Into<String>) -> Self {
         self.group_suffix_key = Some(key.into());
         self
     }
@@ -185,9 +185,9 @@ impl NameLinkSpec {
 
 /// A clickable name node: it carries the tri-state binding and the display
 /// config, its text and colour are kept in step with the name cache by
-/// [`refresh_name_links`], and pressing it opens the bound owner's profile.
+/// `refresh_name_links`, and pressing it opens the bound owner's profile.
 #[derive(Component, Debug, Clone)]
-pub(crate) struct NameLink {
+pub struct NameLink {
     /// The current tri-state binding.
     binding: NameBinding,
     /// Fluent key for the loading label.
@@ -206,15 +206,10 @@ pub(crate) struct NameLink {
 // Spawn / bind.
 // ---------------------------------------------------------------------------
 
-/// Spawn a name-link node under `parent`, starting in the [`Loading`] state. The
+/// Spawn a name-link node under `parent`, starting in the `Loading` state. The
 /// returned entity is the handle a caller binds with [`set_name_link`].
 ///
-/// [`Loading`]: NameBinding::Loading
-pub(crate) fn spawn_name_link(
-    commands: &mut Commands,
-    parent: Entity,
-    spec: NameLinkSpec,
-) -> Entity {
+pub fn spawn_name_link(commands: &mut Commands, parent: Entity, spec: NameLinkSpec) -> Entity {
     commands
         .spawn((
             Text::new(String::new()),
@@ -237,10 +232,10 @@ pub(crate) fn spawn_name_link(
 }
 
 /// Bind `node`'s name link to `target`, changing the stored binding only when it
-/// differs (so [`request_name_links`] fires a resolve request exactly once per
+/// differs (so `request_name_links` fires a resolve request exactly once per
 /// real change, and the text / colour sweep stays cheap). A `None` node is a
 /// no-op, matching the floaters' `Option<Entity>` handles.
-pub(crate) fn set_name_link<K: IntoOwnerKey>(
+pub fn set_name_link<K: IntoOwnerKey>(
     links: &mut Query<&mut NameLink>,
     node: Option<Entity>,
     target: NameTarget<K>,
@@ -392,7 +387,7 @@ fn on_name_link_press(
 /// Wires the name-link resolve / request systems. The click observer is attached
 /// per node at [`spawn_name_link`], so a consumer only needs this plugin once.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct NameLinkPlugin;
+pub struct NameLinkPlugin;
 
 impl Plugin for NameLinkPlugin {
     fn build(&self, app: &mut App) {

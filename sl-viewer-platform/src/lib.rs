@@ -33,5 +33,6 @@ pub mod clipboard;
 pub mod environment_assets;
 pub mod paths;
 pub mod sound_cache;
+pub mod system_browser;
 pub mod ui_perf;
 pub mod url_linkify;

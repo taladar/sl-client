@@ -12,11 +12,11 @@
 //! **shared notification-host channel** ([`crate::notification_host`]) —
 //! top-trailing, priority-ordered, overflow-cycled — in one of two shapes:
 //!
-//! - the **standard** card ([`ScriptQuestion`]): an intro naming the object and
+//! - the **standard** card (`ScriptQuestion`): an intro naming the object and
 //!   its owner (`'Object', an object owned by Owner, would like to:`), a line per
 //!   requested permission, `Is this OK?`, and the **Yes** / **No** / **Block**
 //!   actions; or
-//! - the **caution** card ([`ScriptQuestionCaution`], `priority="critical"`): the
+//! - the **caution** card (`ScriptQuestionCaution`, `priority="critical"`): the
 //!   money-access warning the reference shows when a script asks to **debit** the
 //!   agent's L$ account, with any *other* requested permissions listed below, and
 //!   **Allow access** / **Deny** actions.
@@ -52,8 +52,8 @@
 //! a request (leaving the caution / standard shapes to the non-experience and
 //! money paths), exactly as the reference `process_script_question` shows
 //! `ScriptQuestionExperience` instead of `ScriptQuestion` for it. The shared
-//! permission-line machinery ([`recognized_mask`], [`other_permission_keys`],
-//! [`is_caution`]) is `pub(crate)` so the experience host renders the same
+//! permission-line machinery (`recognized_mask`, `other_permission_keys`,
+//! `is_caution`) is `pub(crate)` so the experience host renders the same
 //! `[QUESTIONS]` lines and computes the same grant mask.
 //!
 //! There are no free-text URLs in a permission prompt (the strings are the fixed
@@ -255,7 +255,8 @@ pub(crate) fn other_permission_keys(permissions: ScriptPermissions) -> Vec<&'sta
 
 /// The plugin: drives the script permission-request cards into the shared
 /// notification channel.
-pub(crate) struct ScriptPermissionPlugin;
+#[derive(Debug)]
+pub struct ScriptPermissionPlugin;
 
 impl Plugin for ScriptPermissionPlugin {
     /// Ingest received `ScriptQuestion` messages into the shared toast channel.
@@ -740,8 +741,8 @@ fn spawn_bounded_text(
 /// The gallery / `ui_test` specimen (standard card): a static permission request
 /// with a few listed permissions, so the intro / line / confirm / action layout
 /// is swept login-free (a live card needs a scripted object). Registered in
-/// [`crate::ui_element::ELEMENTS`]; its buttons report an inert [`UiAction`].
-pub(crate) fn spawn_script_permission_specimen(
+/// `crate::ui_element::ELEMENTS`; its buttons report an inert [`UiAction`].
+pub fn spawn_script_permission_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -771,7 +772,7 @@ pub(crate) fn spawn_script_permission_specimen(
 /// The gallery / `ui_test` specimen (caution card): a static money-access request
 /// with additional permissions, so the caution warning / footer / action layout
 /// is swept.
-pub(crate) fn spawn_script_permission_caution_specimen(
+pub fn spawn_script_permission_caution_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

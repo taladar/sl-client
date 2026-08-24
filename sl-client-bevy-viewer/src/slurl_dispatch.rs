@@ -70,9 +70,9 @@ use sl_client_bevy::{
 use crate::avatars::AvatarState;
 use crate::linkified_text::LinkActivated;
 use crate::notifications::{NotificationResponse, ShowNotification};
+use crate::system_browser::open_in_system_browser;
 use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::url_linkify::{LinkTarget, LocationCoords, LocationKind, TextRun, linkify};
-use crate::web_floater::open_in_system_browser;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::OpenWebBrowser;

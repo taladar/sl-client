@@ -14,7 +14,7 @@
 //! [`Alert`](NotificationKind::Alert) **sticks** until a button is clicked; an
 //! [`AlertModal`](NotificationKind::AlertModal) is a **centred dialog over a
 //! scrim** that blocks the world until answered. Each corner toast carries a
-//! **close ×** for early dismissal, and only [`MAX_VISIBLE_TOASTS`] show at once
+//! **close ×** for early dismissal, and only `MAX_VISIBLE_TOASTS` show at once
 //! — the rest queue (paused) behind a **"N more ▸"** control that cycles them
 //! into view, so a flood never fills the whole edge of the screen (the reference
 //! notification well).
@@ -32,13 +32,13 @@
 //! is added by the viewer binary, not this plugin, so the login-free gallery /
 //! test harness can host the plugin without the session's `SlEvent` stream. The
 //! **gallery specimen** ([`spawn_notification_specimen`]) is a static toast card
-//! registered in [`crate::ui_element::ELEMENTS`], so the host inherits the whole
+//! registered in `crate::ui_element::ELEMENTS`, so the host inherits the whole
 //! layout matrix.
 //!
 //! # Timing is frame-time, not wall-clock
 //!
 //! A toast ages by [`Time::delta_secs`], never wall-clock, matching the chat
-//! overlay ([`crate::chat`]) so a headless / manual-clock run is deterministic.
+//! overlay (`crate::chat`) so a headless / manual-clock run is deterministic.
 
 use std::cmp::Ordering;
 
@@ -178,7 +178,7 @@ const MAX_VISIBLE_TOASTS: usize = 1;
 /// notifications shortly after startup, so the live stacking / timeout / fade /
 /// modal behaviour can be watched without a server alert. A source-level debug
 /// affordance (see the memory note on CLI vs env), off by default.
-pub(crate) const DEMO_ENV: &str = "SL_VIEWER_NOTIFICATION_DEMO";
+pub const DEMO_ENV: &str = "SL_VIEWER_NOTIFICATION_DEMO";
 
 /// How long the demo waits before raising the corner toasts, in seconds — enough
 /// for the async Fluent bundle to load so their text resolves through i18n.
@@ -204,7 +204,8 @@ const fn kind_accent(kind: NotificationKind) -> Color {
 /// and the ignorable-notification settings. Does **not** wire the live
 /// `AlertMessage` source ([`ingest_alert_messages`]) — the viewer binary adds
 /// that, so the gallery can host the plugin without the session event stream.
-pub(crate) struct NotificationHostPlugin;
+#[derive(Debug)]
+pub struct NotificationHostPlugin;
 
 impl Plugin for NotificationHostPlugin {
     /// Register the messages, the manager resource, the channel spawn and the
@@ -272,18 +273,18 @@ struct DoNotDisturbQueue {
     was_busy: bool,
 }
 
-/// The channel container and its overflow control, so [`raise_notifications`]
+/// The channel container and its overflow control, so `raise_notifications`
 /// can parent a corner toast to the channel and the overflow systems can drive
 /// the "N more" control.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct NotificationChannelRoot {
+pub struct NotificationChannelRoot {
     /// The stacking channel container the toasts are children of. Exposed so a
-    /// bespoke-content toast (the group-notice card, [`crate::group_notice`]) can
+    /// bespoke-content toast (the group-notice card, `crate::group_notice`) can
     /// join the same stack — and thus the same ordering / overflow-cycling — as
     /// the catalogue toasts, via [`adopt_toast`].
     pub(crate) channel: Entity,
     /// The overflow control (a "N more ▸" cycle button), the last channel child,
-    /// hidden until the stack exceeds [`MAX_VISIBLE_TOASTS`].
+    /// hidden until the stack exceeds `MAX_VISIBLE_TOASTS`.
     overflow: Entity,
 }
 
@@ -315,7 +316,7 @@ struct Toast {
     /// Whether the pointer is over the toast, which pauses its timer (the
     /// reference `stopToastTimer`).
     hovered: bool,
-    /// Whether the toast is queued off-screen past [`MAX_VISIBLE_TOASTS`]
+    /// Whether the toast is queued off-screen past `MAX_VISIBLE_TOASTS`
     /// ([`apply_toast_overflow`]) — hidden and its timer paused until a visible
     /// toast is dismissed or the overflow control cycles it into view.
     overflowed: bool,
@@ -336,7 +337,7 @@ struct Toast {
 /// tail is Rust-driven.
 #[derive(Component, Debug)]
 struct FadeColor {
-    /// The [`Toast`]-bearing entity whose opacity drives this node.
+    /// The `Toast`-bearing entity whose opacity drives this node.
     toast: Entity,
     /// The captured base background colour, once the fade has begun.
     base_bg: Option<Color>,
@@ -360,14 +361,14 @@ struct CycleToasts;
 /// [`DismissNotification`]. Centralises teardown so one system despawns the toast,
 /// clears the dedup index, persists the ignore flag and emits the public
 /// [`NotificationResponse`]. Exposed so a bespoke-content toast (the group-notice
-/// card, [`crate::group_notice`]) tears down through the same path as the
+/// card, `crate::group_notice`) tears down through the same path as the
 /// catalogue toasts — the reference "close counts as acknowledged".
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct ResolveNotification {
-    /// The [`Toast`]-bearing entity to tear down.
-    pub(crate) toast: Entity,
+pub struct ResolveNotification {
+    /// The `Toast`-bearing entity to tear down.
+    pub toast: Entity,
     /// The chosen button, or `None` for an expiry / external dismiss.
-    pub(crate) button: Option<&'static str>,
+    pub button: Option<&'static str>,
 }
 
 /// Startup: declare each suppressible notification's "show again" flag
@@ -482,7 +483,7 @@ fn spawn_notification_channel(mut commands: Commands, root: Res<UiRoot>) {
 
 /// The already-resolved content of one toast, ready to render: the live path
 /// resolves the catalogue template + i18n into this; the gallery specimen builds
-/// it from literals, so both render through the one [`build_toast_card`].
+/// it from literals, so both render through the one `build_toast_card`.
 struct ToastContent {
     /// The behaviour class (drives the accent and whether it fades).
     kind: NotificationKind,
@@ -510,7 +511,7 @@ struct ToastContent {
     input: Option<String>,
 }
 
-/// One button's resolved spec for [`build_toast_card`].
+/// One button's resolved spec for `build_toast_card`.
 struct ToastButtonSpec {
     /// The stable button name (response id).
     name: &'static str,
@@ -520,7 +521,7 @@ struct ToastButtonSpec {
     is_default: bool,
 }
 
-/// The entities [`build_toast_card`] produced that a caller wires: the card root,
+/// The entities `build_toast_card` produced that a caller wires: the card root,
 /// the button boxes (paired with their name), and the ignore checkbox.
 struct ToastCard {
     /// The card root node (or, for a modal, the panel reparented under the
@@ -778,7 +779,7 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
             .id();
         // The label is bounded (and the sole occupant of its box) so a long /
         // large-font translation wraps inside the card instead of overflowing it —
-        // the same measure-safe pattern as the body (see [`build_toast_card`]).
+        // the same measure-safe pattern as the body (see `build_toast_card`).
         let label_box = commands
             .spawn((
                 Node {
@@ -813,11 +814,11 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
 
 /// Adopt an externally-built card `root` as a managed toast in the shared corner
 /// channel — the way a bespoke-content notification (the group-notice card,
-/// [`crate::group_notice`]) joins the catalogue toasts so it inherits the same
+/// `crate::group_notice`) joins the catalogue toasts so it inherits the same
 /// priority ordering and "N more" overflow-cycling rather than owning a second
 /// channel.
 ///
-/// Parents the card into the channel, tags it with a [`Toast`] (of the given
+/// Parents the card into the channel, tags it with a `Toast` (of the given
 /// `kind` — its [`lifetime_secs`](NotificationKind::lifetime_secs) drives whether
 /// it fades or sticks), and records a history entry. The caller is responsible for
 /// wiring the card's own dismiss affordances to a [`ResolveNotification`] (so a
@@ -829,7 +830,7 @@ fn build_toast_card(commands: &mut Commands, content: &ToastContent) -> ToastCar
               priority, template, default button, history body) plus the commands / manager / \
               root it acts on; bundling them into a struct would only move the list, not shorten it"
 )]
-pub(crate) fn adopt_toast(
+pub fn adopt_toast(
     commands: &mut Commands,
     manager: &mut NotificationManager,
     channel: &NotificationChannelRoot,
@@ -1435,7 +1436,7 @@ fn order_channel_by_priority(
     commands.entity(channel.channel).add_children(&ordered);
 }
 
-/// Cap the visible stack at [`MAX_VISIBLE_TOASTS`]: show the top toasts in the
+/// Cap the visible stack at `MAX_VISIBLE_TOASTS`: show the top toasts in the
 /// channel's order and hide (and pause) the rest, then drive the overflow control
 /// — shown as a "N more ▸" button when toasts are queued, hidden otherwise. Runs
 /// every frame (cheap: a handful of nodes), so a dismissal promotes the next
@@ -1575,7 +1576,7 @@ fn log_notification_responses(
 ///
 /// [`GenericAlert`]: crate::notifications::NOTIFICATIONS
 /// [`SystemMessage`]: crate::notifications::NOTIFICATIONS
-pub(crate) fn ingest_alert_messages(
+pub fn ingest_alert_messages(
     mut events: MessageReader<SlEvent>,
     mut show: MessageWriter<ShowNotification>,
 ) {
@@ -1631,7 +1632,7 @@ pub(crate) fn ingest_alert_messages(
 /// — so the corner stack is seen in its corner before the modal's scrim covers
 /// it. Bodies are resolved through [`Translator`] so they localise like the rest
 /// of the UI.
-pub(crate) fn spawn_notification_demo(
+pub fn spawn_notification_demo(
     time: Res<Time>,
     translator: Translator,
     mut show: MessageWriter<ShowNotification>,
@@ -1678,9 +1679,9 @@ pub(crate) fn spawn_notification_demo(
 
 /// The gallery / test-harness specimen (`viewer-ui-test-harness`): a static
 /// alert-style toast card — a paragraph body, an OK / Cancel button row and the
-/// ignore checkbox — built through the same [`build_toast_card`] the live host
+/// ignore checkbox — built through the same `build_toast_card` the live host
 /// uses, minus the handlers (its buttons emit an inert [`UiAction`]).
-pub(crate) fn spawn_notification_specimen(
+pub fn spawn_notification_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

@@ -146,7 +146,8 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 
 /// The plugin: drives the script-dialog cards into the shared notification channel.
-pub(crate) struct ScriptDialogPlugin;
+#[derive(Debug)]
+pub struct ScriptDialogPlugin;
 
 impl Plugin for ScriptDialogPlugin {
     /// Ingest received `ScriptDialog` messages into the shared toast channel.
@@ -735,8 +736,8 @@ fn spawn_bounded_linked_text(
 /// The gallery / `ui_test` specimen (buttons): a static script-dialog card with a
 /// five-button grid, so the three-column bottom-up layout is swept login-free (a
 /// live dialog needs a scripted object). Registered in
-/// [`crate::ui_element::ELEMENTS`]; its buttons report an inert [`UiAction`].
-pub(crate) fn spawn_script_dialog_specimen(
+/// `crate::ui_element::ELEMENTS`; its buttons report an inert [`UiAction`].
+pub fn spawn_script_dialog_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -763,7 +764,7 @@ pub(crate) fn spawn_script_dialog_specimen(
 
 /// The gallery / `ui_test` specimen (text box): a static `llTextBox` card — a
 /// text field plus Submit / Block / Ignore — so the text-prompt layout is swept.
-pub(crate) fn spawn_script_textbox_specimen(
+pub fn spawn_script_textbox_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

@@ -163,7 +163,8 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 /// The plugin: defers each experience `ScriptQuestion` until its metadata resolves,
 /// then drives the reference `ScriptQuestionExperience` card into the shared
 /// notification channel.
-pub(crate) struct ExperiencePermissionPlugin;
+#[derive(Debug)]
+pub struct ExperiencePermissionPlugin;
 
 impl Plugin for ExperiencePermissionPlugin {
     /// Record and fetch each experience permission request, then raise its card
@@ -824,12 +825,8 @@ fn spawn_experience_name(
 /// The gallery / `ui_test` specimen: a static experience card, so the intro /
 /// name / note / permission-line / action layout is swept login-free (a live card
 /// needs a scripted object running under an experience). Registered in
-/// [`crate::ui_element::ELEMENTS`]; its buttons report an inert [`UiAction`].
-pub(crate) fn spawn_experience_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    cx: ElementCx,
-) -> Entity {
+/// `crate::ui_element::ELEMENTS`; its buttons report an inert [`UiAction`].
+pub fn spawn_experience_specimen(commands: &mut Commands, parent: Entity, cx: ElementCx) -> Entity {
     let content = ExperienceContent {
         intro: cx.text(
             "'Race Gate', an object owned by Track Owner Resident, requests your participation \

@@ -3,7 +3,7 @@
 //! SLURLs and `secondlife:///app/...` entity links turned into coloured,
 //! hoverable, clickable spans. Consumers (nearby chat, IM, notifications,
 //! profiles, object descriptions) drop this in place of a bare
-//! [`Text`](bevy::prelude::Text).
+//! [`Text`].
 //!
 //! # How the text is laid out
 //!
@@ -44,12 +44,12 @@ use sl_client_bevy::{AgentKey, Command, GroupKey, SlCommand};
 use crate::avatars::{AvatarState, NameRecord};
 use crate::i18n::Translator;
 use crate::parcel_names::ParcelNames;
+use crate::system_browser::open_in_system_browser;
 use crate::ui::UiRoot;
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NAME_LINK_COLOR, NAME_PLAIN_COLOR};
 use crate::url_linkify::{AgentNameStyle, LinkIcon, LinkLabel, LinkTarget, TextRun, linkify};
-use crate::web_floater::open_in_system_browser;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenWebBrowser;
 
@@ -95,13 +95,13 @@ const TOOLTIP_CURSOR_OFFSET: Vec2 = Vec2::new(14.0, 18.0);
 
 /// How a linkified-text block is styled: its font size and its two text colours.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct LinkTextStyle {
+pub struct LinkTextStyle {
     /// The text size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// The colour of plain (non-link) text.
-    pub(crate) plain_color: Color,
+    pub plain_color: Color,
     /// The colour of a link.
-    pub(crate) link_color: Color,
+    pub link_color: Color,
 }
 
 impl Default for LinkTextStyle {
@@ -117,7 +117,8 @@ impl Default for LinkTextStyle {
 
 impl LinkTextStyle {
     /// A style at `font_size` with the default colours.
-    pub(crate) fn at(font_size: f32) -> Self {
+    #[must_use]
+    pub fn at(font_size: f32) -> Self {
         Self {
             font_size,
             ..Self::default()
@@ -128,7 +129,7 @@ impl LinkTextStyle {
 /// Spawn a linkified-text block under `parent`: the source string is segmented,
 /// each segment rendered as a child of a wrapping row, and the returned entity is
 /// the row container (so a caller can width-bound or reparent it).
-pub(crate) fn spawn_linkified_text(
+pub fn spawn_linkified_text(
     commands: &mut Commands,
     parent: Entity,
     text: &str,
@@ -157,7 +158,7 @@ pub(crate) fn spawn_linkified_text(
 /// Segment `text` and spawn one child node per segment under `container`.
 /// Public within the crate so a rich reader (the notecard body) can interleave
 /// linkified prose runs with its own inline nodes in a shared wrapping row.
-pub(crate) fn populate_linkified_text(
+pub fn populate_linkified_text(
     commands: &mut Commands,
     container: Entity,
     text: &str,
@@ -283,14 +284,14 @@ struct LinkIconMarker(LinkIcon);
 
 /// Emitted when a link is clicked, for the SLURL dispatcher and any consumer to
 /// route. A `Web` target is additionally opened directly by
-/// [`dispatch_web_links`], so a consumer that only cares about SLURLs can ignore
+/// `dispatch_web_links`, so a consumer that only cares about SLURLs can ignore
 /// those.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct LinkActivated {
+pub struct LinkActivated {
     /// What the clicked link points at.
-    pub(crate) target: LinkTarget,
+    pub target: LinkTarget,
     /// The clicked link's canonical URL.
-    pub(crate) url: String,
+    pub url: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -318,7 +319,7 @@ fn on_link_out(_out: On<Pointer<Out>>, mut hovered: ResMut<HoveredLink>) {
 }
 
 /// On a primary press, emit [`LinkActivated`] for the target — the SLURL
-/// dispatcher and consumers route it, and [`dispatch_web_links`] opens `Web`
+/// dispatcher and consumers route it, and `dispatch_web_links` opens `Web`
 /// targets directly.
 fn on_link_press(
     press: On<Pointer<Press>>,
@@ -670,10 +671,10 @@ fn position_link_tooltip(
 
 /// Wires the linkified-text systems: label resolution, name requests, web-link
 /// dispatch and the shared hover tooltip. Link click / hover observers are
-/// attached per node at [`spawn_link_run`], so a consumer only needs this plugin
+/// attached per node at `spawn_link_run`, so a consumer only needs this plugin
 /// once.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct LinkifiedTextPlugin;
+pub struct LinkifiedTextPlugin;
 
 impl Plugin for LinkifiedTextPlugin {
     fn build(&self, app: &mut App) {
@@ -709,13 +710,13 @@ const SPECIMEN_MAX_WIDTH: f32 = 420.0;
 /// The gallery / `ui_test` specimen: a paragraph mixing plain prose with a web
 /// URL, a labelled link and a location SLURL, so the segment rendering / wrapping
 /// / link tint is swept login-free across every script, translation length and UI
-/// scale. Registered in [`crate::ui_element::ELEMENTS`].
+/// scale. Registered in `crate::ui_element::ELEMENTS`.
 ///
 /// The connective prose runs through the cell's string transform (so the matrix
 /// sweeps translations), but the URLs stay native — a mangled URL would not
 /// linkify, which is not what this specimen is testing. A URL is a single
 /// unbreakable node, so the subtree is declared [`TextMayClip`].
-pub(crate) fn spawn_linkified_text_specimen(
+pub fn spawn_linkified_text_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -748,10 +749,10 @@ mod tests {
     use super::{LinkTextStyle, agent_label, spawn_linkified_text};
     use crate::avatars::NameRecord;
     use crate::ui::{UiRoot, UiScaffoldSystems};
-    use crate::ui_test::{LayoutTest, TestError, settle};
     use crate::url_linkify::AgentNameStyle;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+    use sl_viewer_testkit::{LayoutTest, TestError, settle};
 
     /// A complete-style label is "Display (username)" for a custom display name,
     /// and the plain preferred name for a default one.

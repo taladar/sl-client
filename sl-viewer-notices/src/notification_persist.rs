@@ -6,7 +6,7 @@
 //! # Why
 //!
 //! A sticky notification the user never answered — a group notice
-//! ([`crate::group_notice`]), an alert — must survive a relog: the reference
+//! (`crate::group_notice`), an alert — must survive a relog: the reference
 //! writes every `persist="true"` notification still on its `"Persistent"` channel
 //! to `open_notifications_<grid>.xml`, reloads them at startup, and removes each
 //! one when the user finally responds. "Seen" is thus a **client-side** fact
@@ -17,13 +17,13 @@
 //!
 //! - A producer persists a notification by writing a [`PersistNotification`] for
 //!   its [`NotificationId`]: [`crate::notification_host`] does so for every sticky
-//!   `persist` catalogue toast it raises, and [`crate::group_notice`] does so for
+//!   `persist` catalogue toast it raises, and `crate::group_notice` does so for
 //!   each group-notice card (which is a bespoke [`PersistedKind::Custom`] payload,
 //!   not a catalogue entry).
-//! - The store [forgets](forget_answered_notifications) an entry when its
-//!   [`NotificationResponse`](crate::notifications::NotificationResponse) arrives —
+//! - The store forgets an entry when its
+//!   [`NotificationResponse`] arrives —
 //!   the user answered, so it must not reappear.
-//! - At login, once the per-account directory resolves, [`load_persisted`] reads
+//! - At login, once the per-account directory resolves, `load_persisted` reads
 //!   the file and **re-raises** each entry: a catalogue entry via
 //!   [`ShowNotification`], a custom entry via a [`ReloadPersistedNotification`]
 //!   the owning module rebuilds its card from.
@@ -52,7 +52,7 @@ const STORE_FILE: &str = "open_notifications.json";
 /// The [`NotificationId`] is **not** stored: it is session-local, reassigned when
 /// the notification is re-raised.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub(crate) enum PersistedKind {
+pub enum PersistedKind {
     /// A catalogue notification ([`crate::notifications::NOTIFICATIONS`]),
     /// re-raised via [`ShowNotification`] with its original substitutions.
     Catalogue {
@@ -66,7 +66,7 @@ pub(crate) enum PersistedKind {
         context: Option<String>,
     },
     /// A bespoke-content notification (the group-notice card): a `renderer` id and
-    /// a flat string map the owning module ([`crate::group_notice`]) rebuilds its
+    /// a flat string map the owning module (`crate::group_notice`) rebuilds its
     /// card from on reload.
     Custom {
         /// The renderer id the owning module matches on
@@ -78,25 +78,25 @@ pub(crate) enum PersistedKind {
 }
 
 /// A request to persist a notification under its live [`NotificationId`] — written
-/// by whoever raised it (the host for a catalogue toast, [`crate::group_notice`]
+/// by whoever raised it (the host for a catalogue toast, `crate::group_notice`
 /// for a card). Re-persisting the same id just overwrites its payload.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct PersistNotification {
+pub struct PersistNotification {
     /// The live notification this persists.
-    pub(crate) id: NotificationId,
+    pub id: NotificationId,
     /// The payload to re-raise it from after a relog.
-    pub(crate) kind: PersistedKind,
+    pub kind: PersistedKind,
 }
 
 /// A reloaded [`PersistedKind::Custom`] entry, for the owning module to rebuild
 /// its bespoke card from — the reload counterpart of the [`ShowNotification`] a
 /// catalogue entry re-raises through.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct ReloadPersistedNotification {
+pub struct ReloadPersistedNotification {
     /// The renderer id (e.g. `"group-notice"`); a module ignores others.
-    pub(crate) renderer: String,
+    pub renderer: String,
     /// The renderer's serialized fields, as saved.
-    pub(crate) data: BTreeMap<String, String>,
+    pub data: BTreeMap<String, String>,
 }
 
 /// The store resource: the live open notifications, the resolved file path, and
@@ -133,7 +133,8 @@ impl PersistentNotificationStore {
 
 /// The plugin: registers the messages, the store, and the record / forget / load /
 /// flush systems.
-pub(crate) struct NotificationPersistPlugin;
+#[derive(Debug)]
+pub struct NotificationPersistPlugin;
 
 impl Plugin for NotificationPersistPlugin {
     /// Register the persistence messages, the store resource, and its systems.

@@ -201,6 +201,7 @@ sl-types = { workspace = true }
 sl-viewer-audio = { workspace = true }
 sl-viewer-kit = { workspace = true }
 sl-viewer-media = { workspace = true }
+sl-viewer-notices = { workspace = true }
 sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }

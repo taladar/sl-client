@@ -20,6 +20,7 @@ use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
+use crate::system_browser::open_in_system_browser;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -339,23 +340,6 @@ fn handle_web_actions(
             "open-external" => open_in_system_browser(&slot.status.url),
             _ => {}
         }
-    }
-}
-
-/// Hand a URL to the operating system's browser.
-pub(crate) fn open_in_system_browser(url: &str) {
-    if url.is_empty() {
-        return;
-    }
-    #[cfg(target_os = "linux")]
-    {
-        if let Err(error) = std::process::Command::new("xdg-open").arg(url).spawn() {
-            warn!("xdg-open failed for {url}: {error}");
-        }
-    }
-    #[cfg(not(target_os = "linux"))]
-    {
-        warn!("open-in-system-browser is not wired on this platform yet ({url})");
     }
 }
 
