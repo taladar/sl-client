@@ -864,9 +864,9 @@ fn open_previews(
     mut panels: Query<&mut UiPanelShown>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
-    mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
-    mut script_opens: MessageWriter<crate::edit_script::OpenScript>,
-    mut landmark_opens: MessageWriter<crate::about_landmark::OpenAboutLandmark>,
+    mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
+    mut script_opens: MessageWriter<crate::world_api::OpenScript>,
+    mut landmark_opens: MessageWriter<crate::inventory::OpenAboutLandmark>,
 ) {
     let Some(ui) = ui else {
         return;
@@ -876,11 +876,11 @@ fn open_previews(
         match item.inv_type {
             InventoryType::Notecard => {
                 // The notecard editor floater owns this type (read / edit / save).
-                notecard_opens.write(crate::edit_notecard::OpenNotecard {
+                notecard_opens.write(crate::world_api::OpenNotecard {
                     name: item.name.clone(),
                     asset_id: item.asset_id,
                     editable: item.permissions.owner.contains(Permissions::MODIFY),
-                    source: crate::edit_notecard::NotecardSource::Agent {
+                    source: crate::world_api::NotecardSource::Agent {
                         item_id: item.item_id,
                     },
                 });
@@ -888,14 +888,14 @@ fn open_previews(
             InventoryType::Script => {
                 // The script editor floater owns this type (read / edit / save →
                 // compile). The compile backend follows the item's language flag.
-                script_opens.write(crate::edit_script::OpenScript {
+                script_opens.write(crate::world_api::OpenScript {
                     name: item.name.clone(),
                     asset_id: item.asset_id,
                     editable: item.permissions.owner.contains(Permissions::MODIFY),
-                    source: crate::edit_script::ScriptSource::Agent {
+                    source: crate::world_api::ScriptSource::Agent {
                         item_id: item.item_id,
                     },
-                    target: crate::edit_script::target_for(
+                    target: crate::world_api::target_for(
                         sl_client_bevy::ScriptLanguage::from_item_flags(item.flags),
                     ),
                 });
@@ -933,8 +933,7 @@ fn open_previews(
             }
             InventoryType::Landmark => {
                 // The full About Landmark floater owns this type.
-                landmark_opens
-                    .write(crate::about_landmark::OpenAboutLandmark { item: item.clone() });
+                landmark_opens.write(crate::inventory::OpenAboutLandmark { item: item.clone() });
             }
             InventoryType::Animation => {
                 reset_preview(

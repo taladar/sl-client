@@ -60,7 +60,7 @@
 //! about the sender, and the reference gives them no per-set layer either.
 //!
 //! A mode reply can also **carry an inventory item**
-//! ([`SETTING_AUTORESPONSE_ITEM`](crate::auto_reject::SETTING_AUTORESPONSE_ITEM),
+//! ([`SETTING_AUTORESPONSE_ITEM`](crate::world_api::SETTING_AUTORESPONSE_ITEM),
 //! the reference's `FSAutoresponseItemUUID`) — a landmark or a notecard saying
 //! more than a line of text can. The blocked-sender reply never sends it: that
 //! reply exists to tell someone they are blocked, not to give them a present.
@@ -544,7 +544,7 @@ fn auto_respond_to_ims(
 }
 
 /// The optional inventory item an autoresponse carries
-/// ([`SETTING_AUTORESPONSE_ITEM`](crate::auto_reject::SETTING_AUTORESPONSE_ITEM)),
+/// ([`SETTING_AUTORESPONSE_ITEM`](crate::world_api::SETTING_AUTORESPONSE_ITEM)),
 /// as its name and the give command for it. `None` when no item is configured,
 /// the setting does not parse as an id, or the item is not in the (loaded)
 /// inventory — a stale configured id is silently skipped rather than sending a
@@ -556,7 +556,7 @@ fn autoresponse_item(
 ) -> Option<(String, Command)> {
     let configured = settings?
         .store()
-        .get_str(crate::auto_reject::SETTING_AUTORESPONSE_ITEM)
+        .get_str(crate::world_api::SETTING_AUTORESPONSE_ITEM)
         .ok()?;
     if configured.is_empty() {
         return None;

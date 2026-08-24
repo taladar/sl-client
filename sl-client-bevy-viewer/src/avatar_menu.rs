@@ -97,6 +97,7 @@ use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
 use crate::land_menu::OpenLandMenu;
+use crate::menu::UNIMPLEMENTED;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
@@ -119,15 +120,6 @@ pub(crate) const AVATAR_MENU_ELEMENT: &str = "avatar-menu";
 // The condition vocabulary. Every name here is a compile-time constant; the set
 // that *holds* is built at open time from world / session state.
 // ---------------------------------------------------------------------------
-
-/// The condition marking a slice whose feature does not exist yet.
-///
-/// It is **never** pushed into the live condition set, so any entry gated on it
-/// always resolves disabled — the "declared in its reference place, but not yet
-/// pickable" state. Replacing an entry's `when` with a real condition (or `None`)
-/// is how a slice goes live, in a single deliberate edit that leaves its address
-/// untouched.
-pub(crate) const UNIMPLEMENTED: &str = "unimplemented";
 
 /// Holds when the local avatar is **sitting** — enables self "Stand Up".
 pub(crate) const SELF_SITTING: &str = "self-sitting";

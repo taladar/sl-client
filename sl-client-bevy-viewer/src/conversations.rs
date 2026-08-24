@@ -84,7 +84,9 @@ use crate::ui::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
-use crate::world_api::{AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation};
+use crate::world_api::{
+    AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation, StartConference,
+};
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in [`crate::floater_persist`].
@@ -947,42 +949,6 @@ struct RespondToInvite {
     key: ConversationKey,
     /// Whether to accept (else decline).
     accept: bool,
-}
-
-/// A request to start an **ad-hoc conference** with several residents, or to
-/// invite more people into one that is already open — the reference's
-/// `LLAvatarActions::startConference` (`llavataractions.cpp:423`), and the one
-/// verb every multi-selection of avatars in this viewer routes to: the radar's
-/// multi-row *IM*, the People panel's Friends list, and the inventory's
-/// *Start Conference Chat* on calling cards.
-///
-/// The list is taken as the user picked it — the handler drops our own agent
-/// and any repeats, and a list that leaves **one** resident opens a plain
-/// one-to-one IM instead (what the reference's `Avatar.IM` does by count), so a
-/// caller never has to branch on how many rows are selected.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct StartConference {
-    /// The residents to invite.
-    pub(crate) agents: Vec<AgentKey>,
-    /// The conference to invite them **into**, or `None` to start a new one.
-    /// Inviting into an open conference is the same wire request with the same
-    /// session id (the reference's "Add participants" on an IM floater).
-    pub(crate) into: Option<ImSessionId>,
-}
-
-impl StartConference {
-    /// Start a fresh conference with `agents`.
-    pub(crate) const fn with(agents: Vec<AgentKey>) -> Self {
-        Self { agents, into: None }
-    }
-
-    /// Invite `agents` into the already-open conference `session`.
-    pub(crate) const fn adding(session: ImSessionId, agents: Vec<AgentKey>) -> Self {
-        Self {
-            agents,
-            into: Some(session),
-        }
-    }
 }
 
 /// The conversation whose **add-participants** button opened the shared avatar

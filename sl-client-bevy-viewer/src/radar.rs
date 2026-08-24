@@ -56,7 +56,7 @@ use crate::avatar_complexity::RenderOverride;
 use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED};
 use crate::avatar_render_settings::RequestRenderException;
 use crate::avatars::AvatarState;
-use crate::conversations::{NearbyChatNotice, StartConference};
+use crate::conversations::NearbyChatNotice;
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
@@ -95,6 +95,7 @@ use crate::world_api::MuteModel;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{MapTracking, TrackTarget};
 

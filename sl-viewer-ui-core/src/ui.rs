@@ -1317,6 +1317,23 @@ fn apply_ui_demo_visibility(
     }
 }
 
+/// Whether `focused` is `viewport` or a descendant of it — the focus gate a
+/// list's keyboard shortcuts use so only the list actually clicked-into responds
+/// (its rows focus themselves, so a plain `focus == viewport` test would miss).
+#[must_use]
+pub fn focus_within(focused: Entity, viewport: Entity, child_of: &Query<&ChildOf>) -> bool {
+    let mut node = focused;
+    loop {
+        if node == viewport {
+            return true;
+        }
+        match child_of.get(node) {
+            Ok(parent) => node = parent.parent(),
+            Err(_root) => return false,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

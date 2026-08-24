@@ -68,7 +68,7 @@ use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
 };
 use crate::ui::UiRoot;
-use crate::world_api::{EditTool, EditToolState};
+use crate::world_api::{DragHoverHighlight, EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 
 /// How far (logical pixels) the cursor may wander between press and release
@@ -248,27 +248,6 @@ impl FromWorld for HighlightAssets {
             drop_foreign,
         }
     }
-}
-
-/// The in-world object an inventory drag is currently hovering, if it accepts the
-/// drop — set by [`crate::inventory_drag`] each frame while a drag is active and
-/// consumed by [`apply_drag_hover_highlight`] to draw the accept / foreign
-/// outline (the reference's `highlightObjectAndFamily` during a drag).
-#[derive(Resource, Debug, Default)]
-pub(crate) struct DragHoverHighlight {
-    /// The hovered object's root render entity and whether it is foreign (not
-    /// owned, so the outline is red), or `None` when nothing droppable is hovered.
-    pub(crate) hover: Option<DragHover>,
-}
-
-/// One drag-hover target: the object's root render entity and its ownership tint.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct DragHover {
-    /// The hovered object's root render entity (a [`SceneObject`]).
-    pub(crate) root: Entity,
-    /// Whether the object is **foreign** (not owned / not modifiable but accepts
-    /// the drop) — drawn red rather than the green accept colour.
-    pub(crate) foreign: bool,
 }
 
 /// A drag-drop hover outline overlay, kept apart from the selection's

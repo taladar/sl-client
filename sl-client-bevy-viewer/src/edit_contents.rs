@@ -72,13 +72,14 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::input_context::InputContext;
 use crate::inventory::{InventoryModel, item_icon};
 use crate::objects::ObjectState;
+use crate::ui::focus_within;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
-use crate::world_api::EditToolState;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::SelectionSet;
+use crate::world_api::{ContentsMutated, EditToolState};
 
 /// The uniform height of a contents row, in logical pixels (matches the
 /// inventory list's row metric so the two read the same).
@@ -492,33 +493,6 @@ pub(crate) struct OpenObjectContents {
     pub(crate) scoped: ScopedObjectId,
     /// The grid-wide key of the picked object.
     pub(crate) full: ObjectKey,
-}
-
-/// A description of an item added to a prim's contents, for the pending-add
-/// phantom row shown until the server confirms it.
-#[derive(Debug, Clone)]
-pub(crate) struct PendingAdd {
-    /// The source item's id (the phantom row's key until reconcile).
-    pub(crate) item_id: InventoryKey,
-    /// The added item's display name.
-    pub(crate) name: String,
-    /// The added item's type-icon glyph.
-    pub(crate) icon: &'static str,
-}
-
-/// A signal that an object's task inventory was mutated from outside this module
-/// (a drag-in add resolved by [`crate::inventory_drag`]), so its cached listing
-/// must be reconciled against the server — the same round trip the in-module
-/// mutations do inline. `added` carries the dropped items so a "…adding" phantom
-/// row can stand in until the server's listing includes them.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct ContentsMutated {
-    /// The region-scoped id of the mutated object.
-    pub(crate) scoped: ScopedObjectId,
-    /// The grid-wide key of the mutated object.
-    pub(crate) full: ObjectKey,
-    /// The items added by this mutation (empty for a pure reconcile).
-    pub(crate) added: Vec<PendingAdd>,
 }
 
 /// Marks a viewport as a contents list, carrying which surface it is, so the
@@ -1472,22 +1446,6 @@ fn set_button_enabled(commands: &mut Commands, button: Entity, enabled: bool) {
 // Actions
 // ---------------------------------------------------------------------------
 
-/// Whether `focused` is `viewport` or a descendant of it — the focus gate a
-/// list's keyboard shortcuts use so only the list actually clicked-into responds
-/// (its rows focus themselves, so a plain `focus == viewport` test would miss).
-pub(crate) fn focus_within(focused: Entity, viewport: Entity, child_of: &Query<&ChildOf>) -> bool {
-    let mut node = focused;
-    loop {
-        if node == viewport {
-            return true;
-        }
-        match child_of.get(node) {
-            Ok(parent) => node = parent.parent(),
-            Err(_root) => return false,
-        }
-    }
-}
-
 /// **F2** renames and **Delete / Backspace** removes the selected Content-tab
 /// item — but only while the contents list is the focused widget, so the same
 /// keys over the inventory list or the world hit their own handlers instead. The
@@ -1555,8 +1513,8 @@ fn run_contents_actions(
     translator: Translator,
     mut commands: MessageWriter<SlCommand>,
     mut notices: MessageWriter<LocalChatNotice>,
-    mut notecard_opens: MessageWriter<crate::edit_notecard::OpenNotecard>,
-    mut script_opens: MessageWriter<crate::edit_script::OpenScript>,
+    mut notecard_opens: MessageWriter<crate::world_api::OpenNotecard>,
+    mut script_opens: MessageWriter<crate::world_api::OpenScript>,
 ) {
     for request in requests.read() {
         let view = views.view(request.surface);
@@ -1598,24 +1556,24 @@ fn run_contents_actions(
                 // item opens read-only.
                 let editable = view.perms.can_modify && item_modifiable(item);
                 if item.inv_type == InventoryType::Script {
-                    script_opens.write(crate::edit_script::OpenScript {
+                    script_opens.write(crate::world_api::OpenScript {
                         name: item.name.clone(),
                         asset_id: asset_id.uuid(),
                         editable,
-                        source: crate::edit_script::ScriptSource::Task {
+                        source: crate::world_api::ScriptSource::Task {
                             task_id: full,
                             item_id,
                         },
-                        target: crate::edit_script::target_for(
+                        target: crate::world_api::target_for(
                             sl_client_bevy::ScriptLanguage::from_item_flags(item.flags),
                         ),
                     });
                 } else {
-                    notecard_opens.write(crate::edit_notecard::OpenNotecard {
+                    notecard_opens.write(crate::world_api::OpenNotecard {
                         name: item.name.clone(),
                         asset_id: asset_id.uuid(),
                         editable,
-                        source: crate::edit_notecard::NotecardSource::Task {
+                        source: crate::world_api::NotecardSource::Task {
                             task_id: full,
                             item_id,
                         },
@@ -1984,24 +1942,6 @@ fn end_contents_rename(
     {
         label.display = Display::Flex;
     }
-}
-
-/// Add the dropped inventory item to `object`'s task inventory — the drag-in
-/// path, called from [`crate::inventory_drag`] when a drag ends over a contents
-/// list. Returns the command to send, or `None` when the source is a folder
-/// (task inventory takes single items).
-pub(crate) fn contents_drop_command(
-    item: &sl_client_bevy::ItemInfo,
-    scoped: ScopedObjectId,
-    object: ObjectKey,
-) -> Option<Command> {
-    let inventory_item = item.to_item();
-    let restore = RestoreItem::for_task_drop(&inventory_item, object, Uuid::new_v4()).ok()?;
-    Some(Command::UpdateTaskInventory {
-        target: scoped,
-        key: TaskInventoryKey::Item,
-        item: Box::new(restore),
-    })
 }
 
 #[cfg(test)]

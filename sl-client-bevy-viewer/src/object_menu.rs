@@ -107,10 +107,11 @@ use sl_client_bevy::{
     SlEvent, SlSessionEvent, SurfaceInfo, TransactionId, Uuid, Vector,
 };
 
-use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit, UNIMPLEMENTED};
+use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::hud_pick::surface_info_from_hit;
 use crate::inventory::InventoryModel;
+use crate::menu::UNIMPLEMENTED;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectPickSummary, ObjectState, PrimFaceEntity, SceneObject,
 };
@@ -1226,7 +1227,8 @@ const fn bevy_delta_to_sl(v: Vec3) -> Vec3 {
 #[cfg(test)]
 mod tests {
     use super::{OBJECT_PIE, TAKE_PIE, TARGET_COPYABLE, TARGET_OWNED, TARGET_TOUCHABLE};
-    use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, UNIMPLEMENTED};
+    use crate::avatar_menu::{SELF_SITTING, SELF_STANDING};
+    use crate::menu::UNIMPLEMENTED;
     use crate::pie_menu::{
         Compass, PieAddress, PieConditions, PieContent, PieMenuDef, ResolvedSlot, SlotOutcome,
         addresses, resolve_slots,

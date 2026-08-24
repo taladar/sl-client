@@ -20,10 +20,11 @@ use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, ChatSessionKind, Command, Friend, FriendKey, FriendPresence, FriendRights, GroupKey,
-    GroupMembership, ImSessionId, MuteEntry, MuteFlags, MuteType, ObjectKey, ObjectProperties,
-    PrimFaceId, RegionCoordinates, RegionHandle, ScopedObjectId, SlCommand, TextureKey, Uuid,
-    Vector,
+    AgentKey, AssetUpdateLocation, ChatSessionKind, Command, Friend, FriendKey, FriendPresence,
+    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, MuteEntry, MuteFlags,
+    MuteType, ObjectKey, ObjectProperties, PrimFaceId, RegionCoordinates, RegionHandle,
+    RestoreItem, ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation, SlCommand,
+    TaskInventoryKey, TextureKey, Uuid, Vector,
 };
 use sl_viewer_settings::ViewerSettings;
 
@@ -1725,5 +1726,298 @@ impl OpenAddToContactSet {
     pub fn moving_from(mut self, set: String) -> Self {
         self.move_from = Some(set);
         self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Drag, drop and open-editor vocabulary
+// ---------------------------------------------------------------------------
+//
+// The inventory drags items onto things other features own -- an object's
+// contents, a notecard's body, whatever the cursor is over in the world -- and
+// opens editors it does not implement. The markers, messages and the one
+// command builder that describe those hand-offs live here so neither side has
+// to name the other.
+
+/// A description of an item added to a prim's contents, for the pending-add
+/// phantom row shown until the server confirms it.
+#[derive(Debug, Clone)]
+pub struct PendingAdd {
+    /// The source item's id (the phantom row's key until reconcile).
+    pub item_id: InventoryKey,
+    /// The added item's display name.
+    pub name: String,
+    /// The added item's type-icon glyph.
+    pub icon: &'static str,
+}
+
+/// A signal that an object's task inventory was mutated from outside this module
+/// (a drag-in add resolved by `crate::inventory_drag`), so its cached listing
+/// must be reconciled against the server — the same round trip the in-module
+/// mutations do inline. `added` carries the dropped items so a "…adding" phantom
+/// row can stand in until the server's listing includes them.
+#[derive(Message, Debug, Clone)]
+pub struct ContentsMutated {
+    /// The region-scoped id of the mutated object.
+    pub scoped: ScopedObjectId,
+    /// The grid-wide key of the mutated object.
+    pub full: ObjectKey,
+    /// The items added by this mutation (empty for a pure reconcile).
+    pub added: Vec<PendingAdd>,
+}
+
+/// Add the dropped inventory item to `object`'s task inventory — the drag-in
+/// path, called from `crate::inventory_drag` when a drag ends over a contents
+/// list. Returns the command to send, or `None` when the source is a folder
+/// (task inventory takes single items).
+#[must_use]
+pub fn contents_drop_command(
+    item: &sl_client_bevy::ItemInfo,
+    scoped: ScopedObjectId,
+    object: ObjectKey,
+) -> Option<Command> {
+    let inventory_item = item.to_item();
+    let restore = RestoreItem::for_task_drop(&inventory_item, object, Uuid::new_v4()).ok()?;
+    Some(Command::UpdateTaskInventory {
+        target: scoped,
+        key: TaskInventoryKey::Item,
+        item: Box::new(restore),
+    })
+}
+
+/// Where the notecard being edited lives — the agent's own inventory, or an
+/// in-world object's task inventory. Carried through the editor so Save writes
+/// back to the right place (the reference's "opened-from-task" provenance).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotecardSource {
+    /// A notecard in the agent's own inventory.
+    Agent {
+        /// The agent-inventory item.
+        item_id: InventoryKey,
+    },
+    /// A notecard inside an in-world object's task inventory.
+    Task {
+        /// The object (task) holding the notecard.
+        task_id: ObjectKey,
+        /// The notecard item within that object's inventory.
+        item_id: InventoryKey,
+    },
+}
+
+impl NotecardSource {
+    /// The notecard item's own id, whichever inventory it lives in — the
+    /// `notecard-id` a `CopyInventoryFromNotecard` copy names.
+    #[must_use]
+    pub const fn item_id(self) -> InventoryKey {
+        match self {
+            Self::Agent { item_id } | Self::Task { item_id, .. } => item_id,
+        }
+    }
+
+    /// The asset-update location this source saves back to.
+    #[must_use]
+    pub const fn location(self) -> AssetUpdateLocation {
+        match self {
+            Self::Agent { item_id } => AssetUpdateLocation::AgentInventory { item_id },
+            Self::Task { task_id, item_id } => {
+                AssetUpdateLocation::TaskInventory { task_id, item_id }
+            }
+        }
+    }
+
+    /// The prim holding the notecard when it lives in a task inventory, or
+    /// `None` for an agent-inventory notecard — the `object-id` a
+    /// `CopyInventoryFromNotecard` copy of an embedded item names.
+    #[must_use]
+    pub const fn object_id(self) -> Option<ObjectKey> {
+        match self {
+            Self::Agent { .. } => None,
+            Self::Task { task_id, .. } => Some(task_id),
+        }
+    }
+}
+
+/// Open the notecard editor on a notecard. Written by the inventory **Open**
+/// action (routed here from `crate::inventory_properties`) and by the Object
+/// Contents floater's Open (`crate::edit_contents`) for a task-inventory
+/// notecard.
+#[derive(Message, Debug, Clone)]
+pub struct OpenNotecard {
+    /// The notecard's name, shown as the floater title.
+    pub name: String,
+    /// The notecard asset to fetch and show.
+    pub asset_id: Uuid,
+    /// Whether the notecard is editable (the caller applies the right
+    /// permission rule: an agent item's own modify bit, or an object's modify
+    /// **and** the item's modify bit for a task notecard).
+    pub editable: bool,
+    /// Where the notecard lives, so Save writes back to the right place.
+    pub source: NotecardSource,
+}
+
+/// Marks the notecard editor floater as an **inventory drop target**: dropping
+/// an inventory item on it while [`editable`](Self::editable) adds the item as
+/// an embedded item. `crate::inventory_drag` walks up from the hovered node to
+/// find it; `open_notecard` keeps [`editable`](Self::editable) in step with
+/// the notecard currently shown (a no-modify notecard rejects drops).
+#[derive(Component, Debug, Clone, Copy, Default)]
+pub struct NotecardDropTarget {
+    /// Whether the notecard currently shown accepts an added embedded item.
+    pub editable: bool,
+}
+
+/// Where the script being edited lives — the agent's own inventory, or an
+/// in-world object's task inventory. Carried through the editor so Save writes
+/// back to the right capability (the reference's "opened-from-task" provenance).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScriptSource {
+    /// A script in the agent's own inventory (`UpdateScriptAgent`).
+    Agent {
+        /// The agent-inventory item.
+        item_id: InventoryKey,
+    },
+    /// A script inside an in-world object's task inventory (`UpdateScriptTask`).
+    Task {
+        /// The object (task) holding the script.
+        task_id: ObjectKey,
+        /// The script item within that object's inventory.
+        item_id: InventoryKey,
+    },
+}
+
+impl ScriptSource {
+    /// Whether this source is an in-world object's task inventory (which carries
+    /// a run state the save must preserve).
+    #[must_use]
+    pub const fn is_task(self) -> bool {
+        matches!(self, Self::Task { .. })
+    }
+
+    /// The upload location this source saves back to, carrying `running` for a
+    /// task script (`is_script_running`). No experience is set — a script is not
+    /// associated with an experience through this editor in v1.
+    #[must_use]
+    pub const fn location(self, running: bool) -> ScriptUploadLocation {
+        match self {
+            Self::Agent { item_id } => ScriptUploadLocation::AgentInventory { item_id },
+            Self::Task { task_id, item_id } => ScriptUploadLocation::TaskInventory {
+                task_id,
+                item_id,
+                running,
+                experience: None,
+            },
+        }
+    }
+}
+
+/// Open the script editor on a script. Written by the inventory **Open** action
+/// (routed here from `crate::inventory_properties`) and by the Object Contents
+/// The compile backend to request for a script's [`ScriptLanguage`]. Second Life
+/// honours the token (Mono is its LSL default); OpenSim ignores it and reads the
+/// language from a source-header comment, so an unknown backend does no harm.
+#[must_use]
+pub const fn target_for(language: Option<ScriptLanguage>) -> ScriptTarget {
+    match language {
+        Some(ScriptLanguage::Luau) => ScriptTarget::Luau,
+        // LSL, or an item whose subtype byte we do not recognise.
+        _ => ScriptTarget::Mono,
+    }
+}
+
+/// floater's Open (`crate::edit_contents`) for a task-inventory script.
+#[derive(Message, Debug, Clone)]
+pub struct OpenScript {
+    /// The script's name, shown as the floater title.
+    pub name: String,
+    /// The script source asset to fetch and show.
+    pub asset_id: Uuid,
+    /// Whether the script is editable (the caller applies the right permission
+    /// rule: an agent item's own modify bit, or an object's modify **and** the
+    /// item's modify bit for a task script).
+    pub editable: bool,
+    /// Where the script lives, so Save writes back to the right place.
+    pub source: ScriptSource,
+    /// The compile backend to request, derived from the item's language.
+    pub target: ScriptTarget,
+}
+
+/// The in-world object an inventory drag is currently hovering, if it accepts the
+/// drop — set by `crate::inventory_drag` each frame while a drag is active and
+/// consumed by `apply_drag_hover_highlight` to draw the accept / foreign
+/// outline (the reference's `highlightObjectAndFamily` during a drag).
+#[derive(Resource, Debug, Default)]
+pub struct DragHoverHighlight {
+    /// The hovered object's root render entity and whether it is foreign (not
+    /// owned, so the outline is red), or `None` when nothing droppable is hovered.
+    pub hover: Option<DragHover>,
+}
+
+/// One drag-hover target: the object's root render entity and its ownership tint.
+#[derive(Debug, Clone, Copy)]
+pub struct DragHover {
+    /// The hovered object's root render entity (a `SceneObject`).
+    pub root: Entity,
+    /// Whether the object is **foreign** (not owned / not modifiable but accepts
+    /// the drop) — drawn red rather than the green accept colour.
+    pub foreign: bool,
+}
+
+/// A request to start an **ad-hoc conference** with several residents, or to
+/// invite more people into one that is already open — the reference's
+/// `LLAvatarActions::startConference` (`llavataractions.cpp:423`), and the one
+/// verb every multi-selection of avatars in this viewer routes to: the radar's
+/// multi-row *IM*, the People panel's Friends list, and the inventory's
+/// *Start Conference Chat* on calling cards.
+///
+/// The list is taken as the user picked it — the handler drops our own agent
+/// and any repeats, and a list that leaves **one** resident opens a plain
+/// one-to-one IM instead (what the reference's `Avatar.IM` does by count), so a
+/// caller never has to branch on how many rows are selected.
+#[derive(Message, Debug, Clone)]
+pub struct StartConference {
+    /// The residents to invite.
+    pub agents: Vec<AgentKey>,
+    /// The conference to invite them **into**, or `None` to start a new one.
+    /// Inviting into an open conference is the same wire request with the same
+    /// session id (the reference's "Add participants" on an IM floater).
+    pub into: Option<ImSessionId>,
+}
+
+impl StartConference {
+    /// Start a fresh conference with `agents`.
+    #[must_use]
+    pub const fn with(agents: Vec<AgentKey>) -> Self {
+        Self { agents, into: None }
+    }
+
+    /// Invite `agents` into the already-open conference `session`.
+    #[must_use]
+    pub const fn adding(session: ImSessionId, agents: Vec<AgentKey>) -> Self {
+        Self {
+            agents,
+            into: Some(session),
+        }
+    }
+}
+
+/// The inventory item sent along with every autoresponse, as its item id in
+/// text form; empty = none (the reference `FSAutoresponseItemUUID`). Consumed
+/// by the presence auto-reply (`crate::presence`), which is why it is
+/// account-scoped like the replies themselves.
+pub const SETTING_AUTORESPONSE_ITEM: &str = "AutoresponseItemUUID";
+
+#[cfg(test)]
+mod tests {
+    use super::target_for;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::{ScriptLanguage, ScriptTarget};
+
+    /// The compile backend follows the item's recorded language, defaulting to
+    /// Mono (SL's LSL default) for LSL or an unrecognised subtype.
+    #[test]
+    fn target_follows_language() {
+        assert_eq!(target_for(Some(ScriptLanguage::Luau)), ScriptTarget::Luau);
+        assert_eq!(target_for(Some(ScriptLanguage::Lsl)), ScriptTarget::Mono);
+        assert_eq!(target_for(None), ScriptTarget::Mono);
     }
 }

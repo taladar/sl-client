@@ -1552,13 +1552,13 @@ const GEAR_GALLERY_OPEN: &str = "gear-gallery-open";
 /// way the context menus omit the marketplace block), on [`crate::menu`]'s
 /// reusable widget. Its label is the gear glyph (U+2699). Entries whose
 /// feature does not exist yet keep their reference place greyed on
-/// [`UNIMPLEMENTED`](crate::avatar_menu::UNIMPLEMENTED).
+/// [`UNIMPLEMENTED`](crate::menu::UNIMPLEMENTED).
 static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
     label: "\u{2699}",
     items: &[
         MenuItemDef::Command(
             MenuCommand::new("New Inventory Window", "new-window")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
@@ -1574,7 +1574,7 @@ static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
         MenuItemDef::Command(
             MenuCommand::new("Sort Folders Always by Name", "sort-folders-by-name")
                 .checked_when(GEAR_FOLDERS_BY_NAME)
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Sort System Folders to Top", "sort-system-folders-to-top")
@@ -1595,35 +1595,35 @@ static INVENTORY_GEAR_MENU: MenuDef = MenuDef {
         MenuItemDef::Separator,
         MenuItemDef::Command(
             MenuCommand::new("Save Texture As", "save-texture")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
-            MenuCommand::new("Share", "share").enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+            MenuCommand::new("Share", "share").enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Find Original", "find-original")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Find All Links", "find-links")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Replace Links", "replace-links")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(
             MenuCommand::new("Show Links", "filter-show-links")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Show Only Links", "filter-only-links")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Command(
             MenuCommand::new("Hide Links", "filter-hide-links")
-                .enabled_when(crate::avatar_menu::UNIMPLEMENTED),
+                .enabled_when(crate::menu::UNIMPLEMENTED),
         ),
         MenuItemDef::Separator,
         MenuItemDef::Command(MenuCommand::new("Empty Trash", "empty-trash")),
@@ -3440,6 +3440,50 @@ fn spawn_sample_row(
             ChildOf(row_entity),
         ));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Requests carrying an inventory item
+// ---------------------------------------------------------------------------
+//
+// Each names a surface that opens *something* for an item: the landmark
+// floater, the wearable editor, the material editor, a notecard's embedded
+// attachment. The payload is an `ItemInfo`, which this module owns, so the
+// request lives here and the surface that answers it reads down rather than
+// the inventory reaching up to name a floater it never opens itself.
+
+/// Open the About Landmark floater on a landmark item.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct OpenAboutLandmark {
+    /// The landmark inventory item to show.
+    pub(crate) item: ItemInfo,
+}
+
+/// Open the appearance editor on a worn wearable (the inventory context menu's
+/// **Edit**).
+#[derive(Message, Debug, Clone)]
+pub(crate) struct OpenWearableEditor {
+    /// The wearable item to edit.
+    pub(crate) item: ItemInfo,
+}
+
+/// Open the material editor on a material inventory item.
+#[derive(Message, Debug, Clone)]
+pub(crate) struct OpenMaterialEditor {
+    /// The material item to edit.
+    pub(crate) item: ItemInfo,
+}
+
+/// Add a dropped inventory item to the open notecard as an **embedded item**.
+/// Written by [`crate::inventory_drag`] when an inventory row is dropped onto
+/// the notecard editor; consumed by [`ingest_added_items`], which appends the
+/// item to the baseline item table and its marker to the edit buffer (the
+/// reference's drag-into-notecard, minus the caret-precise placement the
+/// inline-box widget will add).
+#[derive(Message, Debug, Clone)]
+pub(crate) struct AddEmbeddedItem {
+    /// The inventory item to embed.
+    pub(crate) item: ItemInfo,
 }
 
 #[cfg(test)]

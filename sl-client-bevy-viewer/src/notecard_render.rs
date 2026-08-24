@@ -48,11 +48,12 @@ use sl_client_bevy::{
     ObjectKey, OwnerKey, Permissions5, SlCommand, Uuid,
 };
 
-use crate::edit_notecard::{NotecardSource, embedded_icon};
+use crate::edit_notecard::embedded_icon;
 use crate::inventory_properties::OpenItemPreview;
 use crate::linkified_text::{LinkTextStyle, populate_linkified_text};
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::ui_font::UiFont;
+use crate::world_api::NotecardSource;
 use crate::world_api::OpenAvatarProfile;
 
 /// The catalogue template for the copy-embedded-item confirmation — the
@@ -402,7 +403,7 @@ fn on_embedded_out(
 #[cfg(test)]
 mod tests {
     use super::{EmbeddedAction, resolve_action};
-    use crate::edit_notecard::NotecardSource;
+    use crate::world_api::NotecardSource;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{InventoryKey, Uuid};
 

@@ -61,6 +61,7 @@ use sl_settings::SettingValue;
 use crate::notifications::ShowNotification;
 use crate::presence::PRESENCE_SECTION;
 use crate::settings::ViewerSettings;
+use crate::world_api::SETTING_AUTORESPONSE_ITEM;
 
 /// Whether incoming teleport offers and requests are rejected unanswered (the
 /// reference `FSRejectTeleportOffersMode`). Account-scoped and persisted.
@@ -102,12 +103,6 @@ pub(crate) const SETTING_IGNORE_AD_HOC_SESSIONS: &str = "IgnoreAdHocSessions";
 /// [`SETTING_IGNORE_AD_HOC_SESSIONS`] (the reference
 /// `FSDontIgnoreAdHocFromFriends`).
 pub(crate) const SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS: &str = "DontIgnoreAdHocFromFriends";
-
-/// The inventory item sent along with every autoresponse, as its item id in
-/// text form; empty = none (the reference `FSAutoresponseItemUUID`). Consumed
-/// by the presence auto-reply ([`crate::presence`]), which is why it is
-/// account-scoped like the replies themselves.
-pub(crate) const SETTING_AUTORESPONSE_ITEM: &str = "AutoresponseItemUUID";
 
 /// The default rejected-teleport reply (the reference
 /// `RejectTeleportOffersResponseDefault`, without its `[APP_NAME]`

@@ -59,8 +59,8 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AssetKey, AssetType, Command, InventoryKey, ObjectKey, ScriptCompileError, ScriptLanguage,
-    ScriptTarget, ScriptUploadLocation, SlCommand, SlEvent, SlSessionEvent, Uuid,
+    AssetKey, AssetType, Command, InventoryKey, ObjectKey, ScriptCompileError, ScriptTarget,
+    SlCommand, SlEvent, SlSessionEvent, Uuid,
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
@@ -68,6 +68,7 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::ElementCx;
 use crate::ui_font::UiFont;
+use crate::world_api::{OpenScript, ScriptSource};
 
 /// The editor's text font size, in logical pixels.
 const FONT_SIZE: f32 = 14.0;
@@ -102,78 +103,6 @@ const READONLY_BODY_WIDTH: f32 = 520.0;
 // ---------------------------------------------------------------------------
 // Messages.
 // ---------------------------------------------------------------------------
-
-/// Where the script being edited lives — the agent's own inventory, or an
-/// in-world object's task inventory. Carried through the editor so Save writes
-/// back to the right capability (the reference's "opened-from-task" provenance).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ScriptSource {
-    /// A script in the agent's own inventory (`UpdateScriptAgent`).
-    Agent {
-        /// The agent-inventory item.
-        item_id: InventoryKey,
-    },
-    /// A script inside an in-world object's task inventory (`UpdateScriptTask`).
-    Task {
-        /// The object (task) holding the script.
-        task_id: ObjectKey,
-        /// The script item within that object's inventory.
-        item_id: InventoryKey,
-    },
-}
-
-impl ScriptSource {
-    /// Whether this source is an in-world object's task inventory (which carries
-    /// a run state the save must preserve).
-    const fn is_task(self) -> bool {
-        matches!(self, Self::Task { .. })
-    }
-
-    /// The upload location this source saves back to, carrying `running` for a
-    /// task script (`is_script_running`). No experience is set — a script is not
-    /// associated with an experience through this editor in v1.
-    const fn location(self, running: bool) -> ScriptUploadLocation {
-        match self {
-            Self::Agent { item_id } => ScriptUploadLocation::AgentInventory { item_id },
-            Self::Task { task_id, item_id } => ScriptUploadLocation::TaskInventory {
-                task_id,
-                item_id,
-                running,
-                experience: None,
-            },
-        }
-    }
-}
-
-/// The compile backend to request for a script's [`ScriptLanguage`]. Second Life
-/// honours the token (Mono is its LSL default); OpenSim ignores it and reads the
-/// language from a source-header comment, so an unknown backend does no harm.
-pub(crate) const fn target_for(language: Option<ScriptLanguage>) -> ScriptTarget {
-    match language {
-        Some(ScriptLanguage::Luau) => ScriptTarget::Luau,
-        // LSL, or an item whose subtype byte we do not recognise.
-        _ => ScriptTarget::Mono,
-    }
-}
-
-/// Open the script editor on a script. Written by the inventory **Open** action
-/// (routed here from [`crate::inventory_properties`]) and by the Object Contents
-/// floater's Open ([`crate::edit_contents`]) for a task-inventory script.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenScript {
-    /// The script's name, shown as the floater title.
-    pub(crate) name: String,
-    /// The script source asset to fetch and show.
-    pub(crate) asset_id: Uuid,
-    /// Whether the script is editable (the caller applies the right permission
-    /// rule: an agent item's own modify bit, or an object's modify **and** the
-    /// item's modify bit for a task script).
-    pub(crate) editable: bool,
-    /// Where the script lives, so Save writes back to the right place.
-    pub(crate) source: ScriptSource,
-    /// The compile backend to request, derived from the item's language.
-    pub(crate) target: ScriptTarget,
-}
 
 // ---------------------------------------------------------------------------
 // Plugin, resources.
@@ -880,18 +809,10 @@ pub(crate) fn spawn_script_editor_specimen(
 
 #[cfg(test)]
 mod tests {
-    use super::{ScriptSource, ScriptUploadLocation, target_for};
+    use crate::world_api::ScriptSource;
     use pretty_assertions::assert_eq;
-    use sl_client_bevy::{InventoryKey, ObjectKey, ScriptLanguage, ScriptTarget, Uuid};
-
-    /// The compile backend follows the item's recorded language, defaulting to
-    /// Mono (SL's LSL default) for LSL or an unrecognised subtype.
-    #[test]
-    fn target_follows_language() {
-        assert_eq!(target_for(Some(ScriptLanguage::Luau)), ScriptTarget::Luau);
-        assert_eq!(target_for(Some(ScriptLanguage::Lsl)), ScriptTarget::Mono);
-        assert_eq!(target_for(None), ScriptTarget::Mono);
-    }
+    use sl_client_bevy::ScriptUploadLocation;
+    use sl_client_bevy::{InventoryKey, ObjectKey, Uuid};
 
     /// A task upload carries the run state through as `is_script_running`, and no
     /// experience is set; an agent upload has neither.

@@ -55,7 +55,8 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
 use crate::about_land::{AboutLandSubject, OpenAboutLand};
-use crate::avatar_menu::{SelfGroundSit, UNIMPLEMENTED};
+use crate::avatar_menu::SelfGroundSit;
+use crate::menu::UNIMPLEMENTED;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 
@@ -260,7 +261,7 @@ fn handle_land_menu_actions(
 #[cfg(test)]
 mod tests {
     use super::LAND_PIE;
-    use crate::avatar_menu::UNIMPLEMENTED;
+    use crate::menu::UNIMPLEMENTED;
     use crate::pie_menu::{
         Compass, PieAddress, PieConditions, ResolvedSlot, SlotOutcome, addresses, resolve_slots,
     };

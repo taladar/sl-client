@@ -42,6 +42,7 @@ use crate::avatars::AvatarState;
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{Translated, Translator};
+use crate::inventory::OpenAboutLandmark;
 use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
 };
@@ -73,13 +74,6 @@ const RESOLVE_TIMEOUT_SECONDS: f64 = 10.0;
 // ---------------------------------------------------------------------------
 // Messages.
 // ---------------------------------------------------------------------------
-
-/// Open the About Landmark floater on a landmark item.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenAboutLandmark {
-    /// The landmark inventory item to show.
-    pub(crate) item: ItemInfo,
-}
 
 // ---------------------------------------------------------------------------
 // Resources.

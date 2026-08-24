@@ -29,6 +29,7 @@ use sl_client_bevy::{
 };
 
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::inventory::OpenMaterialEditor;
 use crate::material_preview::MaterialPreview;
 use crate::materials::MaterialManager;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, row};
@@ -75,13 +76,6 @@ const UNCHECKED_GLYPH: &str = "\u{2610}";
 // ---------------------------------------------------------------------------
 // Messages, components and resources.
 // ---------------------------------------------------------------------------
-
-/// Open the material editor on a material inventory item.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenMaterialEditor {
-    /// The material item to edit.
-    pub(crate) item: ItemInfo,
-}
 
 /// Which texture channel a picker swatch edits.
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]

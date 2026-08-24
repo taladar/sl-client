@@ -420,7 +420,7 @@ pub(crate) fn build_chat_tab(commands: &mut Commands, panel: Entity) {
         commands,
         panel,
         "preferences-row-autoresponse-item",
-        SettingBinding::account(crate::auto_reject::SETTING_AUTORESPONSE_ITEM),
+        SettingBinding::account(crate::world_api::SETTING_AUTORESPONSE_ITEM),
         TextInputKind::Line,
         1.0,
     );

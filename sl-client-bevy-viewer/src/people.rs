@@ -59,7 +59,7 @@ use sl_client_bevy::{
 
 use sl_settings::SettingValue;
 
-use crate::conversations::{ConversationsUi, StartConference, StripFocus};
+use crate::conversations::{ConversationsUi, StripFocus};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::{ViewerSettings, load_account_settings};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
@@ -72,6 +72,7 @@ use crate::ui_table::{
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendRow, FriendsModel, short_id};
 

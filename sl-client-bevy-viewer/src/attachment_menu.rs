@@ -98,10 +98,11 @@ use sl_client_bevy::{AgentKey, Command, SlAgentParcel, SlCommand, SlIdentity, Su
 
 use crate::avatar_menu::{
     AvatarMenuTarget, OTHER_MUTE_PIE, SELF_RESET_PIE, SELF_SITTING, SELF_STANDING, SelfGroundSit,
-    TARGET_NOT_FRIEND, UNIMPLEMENTED,
+    TARGET_NOT_FRIEND,
 };
 use crate::avatars::AvatarState;
 use crate::derender::{DerenderKind, RequestDerender};
+use crate::menu::UNIMPLEMENTED;
 use crate::object_menu::TARGET_TOUCHABLE;
 use crate::objects::ObjectPickSummary;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
@@ -872,7 +873,8 @@ mod tests {
         ATTACHMENT_OTHER_PIE, ATTACHMENT_SELF_PIE, SELF_MORE_PIE, TARGET_DROPPABLE,
         TARGET_TOUCHABLE,
     };
-    use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, TARGET_NOT_FRIEND, UNIMPLEMENTED};
+    use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, TARGET_NOT_FRIEND};
+    use crate::menu::UNIMPLEMENTED;
     use crate::pie_menu::{
         Compass, PieAddress, PieConditions, PieContent, PieMenuDef, ResolvedSlot, SlotOutcome,
         addresses, resolve_slots,

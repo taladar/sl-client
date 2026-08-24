@@ -2856,6 +2856,15 @@ pub fn spawn_menu_bar_specimen(commands: &mut Commands, parent: Entity, cx: Elem
     spawn_menu_bar(commands, parent, cx, &FIXTURE_MENU_BAR, "menu-bar-specimen")
 }
 
+/// The condition marking a slice whose feature does not exist yet.
+///
+/// It is **never** pushed into the live condition set, so any entry gated on it
+/// always resolves disabled — the "declared in its reference place, but not yet
+/// pickable" state. Replacing an entry's `when` with a real condition (or `None`)
+/// is how a slice goes live, in a single deliberate edit that leaves its address
+/// untouched.
+pub const UNIMPLEMENTED: &str = "unimplemented";
+
 #[cfg(test)]
 mod tests {
     use super::{

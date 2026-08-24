@@ -16,7 +16,7 @@
 //! shows Wear / Detach, the Trash shows Empty Trash, exactly as the reference
 //! decides per bridge. Entries whose feature this viewer does not have yet are
 //! declared in their reference order but gated on
-//! [`UNIMPLEMENTED`](crate::avatar_menu::UNIMPLEMENTED) — visible, greyed, and
+//! [`UNIMPLEMENTED`] — visible, greyed, and
 //! one deliberate edit away from going live (the same pattern as the avatar
 //! pies).
 //!
@@ -53,17 +53,17 @@ use sl_client_bevy::{
 };
 use std::collections::{HashSet, VecDeque};
 
-use crate::avatar_menu::UNIMPLEMENTED;
-use crate::conversations::StartConference;
-use crate::edit_contents::focus_within;
 use crate::input_context::InputContext;
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
     query_folder_page,
 };
+use crate::menu::UNIMPLEMENTED;
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
+use crate::ui::focus_within;
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
+use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The `element` the inventory context menus attribute their [`UiAction`]s to.
@@ -158,7 +158,7 @@ pub(crate) const CAN_OPEN: &str = "can-open";
 pub(crate) const CAN_COPY_UUID: &str = "can-copy-uuid";
 
 /// The target item may be made the **autoresponse item**
-/// ([`crate::auto_reject::SETTING_AUTORESPONSE_ITEM`]) — it must be copyable and
+/// ([`crate::world_api::SETTING_AUTORESPONSE_ITEM`]) — it must be copyable and
 /// transferable, since the autoresponse gives it away again and again (the
 /// reference's preferences drop target accepts copy+transfer items only).
 pub(crate) const CAN_AUTORESPOND_WITH: &str = "can-autorespond-with";
@@ -1694,9 +1694,9 @@ fn handle_inventory_menu_actions(
         MessageWriter<crate::inventory_properties::OpenItemPreview>,
         MessageWriter<crate::inventory_properties::OpenItemProperties>,
         MessageWriter<SlCommand>,
-        MessageWriter<crate::edit_wearable::OpenWearableEditor>,
-        MessageWriter<crate::edit_material_asset::OpenMaterialEditor>,
-        MessageWriter<crate::about_landmark::OpenAboutLandmark>,
+        MessageWriter<crate::inventory::OpenWearableEditor>,
+        MessageWriter<crate::inventory::OpenMaterialEditor>,
+        MessageWriter<crate::inventory::OpenAboutLandmark>,
     ),
 ) {
     let (
@@ -1757,7 +1757,7 @@ fn handle_inventory_menu_actions(
                     && item.inv_type == InventoryType::Landmark
                 {
                     landmark_opens
-                        .write(crate::about_landmark::OpenAboutLandmark { item: item.clone() });
+                        .write(crate::inventory::OpenAboutLandmark { item: item.clone() });
                 }
             }
             "show-in-main" => {
@@ -1772,14 +1772,13 @@ fn handle_inventory_menu_actions(
             "edit-wearable" => {
                 if let MenuTarget::Item(item) = &menu_target {
                     wearable_editor
-                        .write(crate::edit_wearable::OpenWearableEditor { item: item.clone() });
+                        .write(crate::inventory::OpenWearableEditor { item: item.clone() });
                 }
             }
             "edit-material" => {
                 if let MenuTarget::Item(item) = &menu_target {
-                    material_editor.write(crate::edit_material_asset::OpenMaterialEditor {
-                        item: item.clone(),
-                    });
+                    material_editor
+                        .write(crate::inventory::OpenMaterialEditor { item: item.clone() });
                 }
             }
             "copy-asset-uuid" => {
@@ -1792,11 +1791,11 @@ fn handle_inventory_menu_actions(
             }
             "set-autoresponse-item" => {
                 // Make this the item every autoresponse carries
-                // ([`crate::auto_reject::SETTING_AUTORESPONSE_ITEM`]); the chat
+                // ([`crate::world_api::SETTING_AUTORESPONSE_ITEM`]); the chat
                 // preferences tab shows and clears it.
                 if let MenuTarget::Item(item) = &menu_target {
                     settings.set_account(
-                        crate::auto_reject::SETTING_AUTORESPONSE_ITEM,
+                        crate::world_api::SETTING_AUTORESPONSE_ITEM,
                         sl_settings::SettingValue::String(item.item_id.to_string()),
                     );
                     settings.save_async();

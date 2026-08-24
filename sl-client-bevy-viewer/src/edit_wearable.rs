@@ -55,6 +55,7 @@ use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::OwnLocalBake;
 use crate::bake_inputs::OwnBakeInputs;
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
+use crate::inventory::OpenWearableEditor;
 use crate::inventory_actions::{PendingWearableUploads, wearable_param_group, wearable_type_of};
 use crate::inventory_properties::to_wire_item;
 use crate::textures::{TextureDecoded, TextureManager};
@@ -111,14 +112,6 @@ const NEXT_OWNER_DEFAULT: u32 = 0x0008_e000;
 // ---------------------------------------------------------------------------
 // Messages, components and resources.
 // ---------------------------------------------------------------------------
-
-/// Open the appearance editor on a worn wearable (the inventory context menu's
-/// **Edit**).
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenWearableEditor {
-    /// The wearable item to edit.
-    pub(crate) item: ItemInfo,
-}
 
 /// A param slider row: the param it drives, whether that param feeds the bake
 /// (a colour / alpha layer) rather than the body shape, and its value label.

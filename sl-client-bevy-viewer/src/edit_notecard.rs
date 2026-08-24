@@ -54,16 +54,18 @@
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{
-    AssetKey, AssetType, AssetUpdateLocation, Command, InventoryKey, InventoryType, ItemInfo,
-    ObjectKey, OwnerKey, SaleType, SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
+    AssetKey, AssetType, Command, InventoryKey, InventoryType, ItemInfo, OwnerKey, SaleType,
+    SlCommand, SlEvent, SlSessionEvent, UpdatableAssetType, Uuid,
 };
 
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
+use crate::inventory::AddEmbeddedItem;
 use crate::linkified_text::LinkTextStyle;
 use crate::notecard_render::spawn_notecard_body;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::{ElementCx, TextMayClip};
 use crate::ui_font::UiFont;
+use crate::world_api::{NotecardDropTarget, NotecardSource, OpenNotecard};
 
 /// The editor's text font size, in logical pixels.
 const FONT_SIZE: f32 = 14.0;
@@ -89,96 +91,6 @@ const READONLY_BODY_WIDTH: f32 = 460.0;
 // ---------------------------------------------------------------------------
 // Messages.
 // ---------------------------------------------------------------------------
-
-/// Where the notecard being edited lives — the agent's own inventory, or an
-/// in-world object's task inventory. Carried through the editor so Save writes
-/// back to the right place (the reference's "opened-from-task" provenance).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NotecardSource {
-    /// A notecard in the agent's own inventory.
-    Agent {
-        /// The agent-inventory item.
-        item_id: InventoryKey,
-    },
-    /// A notecard inside an in-world object's task inventory.
-    Task {
-        /// The object (task) holding the notecard.
-        task_id: ObjectKey,
-        /// The notecard item within that object's inventory.
-        item_id: InventoryKey,
-    },
-}
-
-impl NotecardSource {
-    /// The notecard item's own id, whichever inventory it lives in — the
-    /// `notecard-id` a `CopyInventoryFromNotecard` copy names.
-    pub(crate) const fn item_id(self) -> InventoryKey {
-        match self {
-            Self::Agent { item_id } | Self::Task { item_id, .. } => item_id,
-        }
-    }
-
-    /// The asset-update location this source saves back to.
-    const fn location(self) -> AssetUpdateLocation {
-        match self {
-            Self::Agent { item_id } => AssetUpdateLocation::AgentInventory { item_id },
-            Self::Task { task_id, item_id } => {
-                AssetUpdateLocation::TaskInventory { task_id, item_id }
-            }
-        }
-    }
-
-    /// The prim holding the notecard when it lives in a task inventory, or
-    /// `None` for an agent-inventory notecard — the `object-id` a
-    /// `CopyInventoryFromNotecard` copy of an embedded item names.
-    pub(crate) const fn object_id(self) -> Option<ObjectKey> {
-        match self {
-            Self::Agent { .. } => None,
-            Self::Task { task_id, .. } => Some(task_id),
-        }
-    }
-}
-
-/// Open the notecard editor on a notecard. Written by the inventory **Open**
-/// action (routed here from [`crate::inventory_properties`]) and by the Object
-/// Contents floater's Open ([`crate::edit_contents`]) for a task-inventory
-/// notecard.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenNotecard {
-    /// The notecard's name, shown as the floater title.
-    pub(crate) name: String,
-    /// The notecard asset to fetch and show.
-    pub(crate) asset_id: Uuid,
-    /// Whether the notecard is editable (the caller applies the right
-    /// permission rule: an agent item's own modify bit, or an object's modify
-    /// **and** the item's modify bit for a task notecard).
-    pub(crate) editable: bool,
-    /// Where the notecard lives, so Save writes back to the right place.
-    pub(crate) source: NotecardSource,
-}
-
-/// Add a dropped inventory item to the open notecard as an **embedded item**.
-/// Written by [`crate::inventory_drag`] when an inventory row is dropped onto
-/// the notecard editor; consumed by [`ingest_added_items`], which appends the
-/// item to the baseline item table and its marker to the edit buffer (the
-/// reference's drag-into-notecard, minus the caret-precise placement the
-/// inline-box widget will add).
-#[derive(Message, Debug, Clone)]
-pub(crate) struct AddEmbeddedItem {
-    /// The inventory item to embed.
-    pub(crate) item: ItemInfo,
-}
-
-/// Marks the notecard editor floater as an **inventory drop target**: dropping
-/// an inventory item on it while [`editable`](Self::editable) adds the item as
-/// an embedded item. [`crate::inventory_drag`] walks up from the hovered node to
-/// find it; [`open_notecard`] keeps [`editable`](Self::editable) in step with
-/// the notecard currently shown (a no-modify notecard rejects drops).
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub(crate) struct NotecardDropTarget {
-    /// Whether the notecard currently shown accepts an added embedded item.
-    pub(crate) editable: bool,
-}
 
 // ---------------------------------------------------------------------------
 // Plugin, resources.
