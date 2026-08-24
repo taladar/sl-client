@@ -1813,7 +1813,7 @@ fn run_session(
         .init_resource::<AvatarState>()
         .init_resource::<AppearanceApplyBudget>()
         .init_resource::<world_api::MuteModel>()
-        .add_message::<mutes::RequestBlock>()
+        .add_message::<world_api::RequestBlock>()
         .init_resource::<name_tag_content::NameTagStatuses>()
         .init_resource::<AvatarRuntimeMorphs>()
         .init_resource::<look_at::LookAtTargets>()
@@ -1868,7 +1868,7 @@ fn run_session(
         .add_message::<MeshDecoded>()
         .add_message::<WearableAssetFetched>()
         .add_message::<RefetchAvatarTextures>()
-        .add_message::<crate::chat::LocalChatNotice>()
+        .add_message::<crate::world_api::LocalChatNotice>()
         // Menu ▸ Quit writes this; `handle_quit_requests` turns it (and a window
         // close) into a graceful logout.
         .add_message::<crate::session::QuitRequested>()

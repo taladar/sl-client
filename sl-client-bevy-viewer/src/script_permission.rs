@@ -71,7 +71,6 @@ use sl_client_bevy::{
 };
 
 use crate::i18n::{TransArgs, Translator};
-use crate::mutes::RequestBlock;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
@@ -79,6 +78,7 @@ use crate::notifications::{
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::world_api::RequestBlock;
 
 /// The catalogue-template sentinel a standard permission card reports as (it is
 /// not a real [`crate::notifications::NOTIFICATIONS`] entry — the card is bespoke

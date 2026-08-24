@@ -37,6 +37,7 @@ use crate::settings::ViewerSettings;
 use crate::ui::BottomArea;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
+use crate::world_api::LocalChatNotice;
 
 /// The most chat lines the overlay ever shows at once when no
 /// [`SETTING_CHAT_MAX_LINES`] value is available. Fading already bounds each
@@ -110,24 +111,6 @@ const CHAT_BOTTOM_INSET: f32 = 48.0;
 /// The gap kept between the top of the bottom area and the overlay's lowest line,
 /// in logical pixels.
 const CHAT_OVERLAY_GAP: f32 = 6.0;
-
-/// A client-generated local-chat notice — a line the viewer itself posts to the
-/// overlay (not a `ChatReceived` from the grid), for feedback like a build-tool
-/// no-permission alert. Written by whichever system produced the notice
-/// (e.g. [`crate::gizmos::dispatch_shift_drag_copy`]) and rendered by
-/// [`update_chat_overlay`] alongside received chat.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct LocalChatNotice {
-    /// The already-formatted line to show.
-    text: String,
-}
-
-impl LocalChatNotice {
-    /// A notice carrying `text`.
-    pub(crate) const fn new(text: String) -> Self {
-        Self { text }
-    }
-}
 
 /// A marker component tagging the overlay's column container, so the positioning
 /// system can find and re-anchor it and new lines can be parented to it.

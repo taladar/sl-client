@@ -52,7 +52,6 @@ use sl_client_bevy::{
     SlSessionEvent, TextureKey, Uuid,
 };
 
-use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::avatars::AvatarState;
 use crate::environment::EnvironmentState;
 use crate::floater::{
@@ -75,9 +74,10 @@ use crate::ui_table::{
     set_table_cell, spawn_table, spawn_table_row,
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::ui_texture_picker::{OpenTexturePicker, PickerKind, TexturePicked};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::GroupsModel;
+use crate::world_api::{AvatarPicked, OpenAvatarPicker};
+use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 
 /// The floater's body font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;

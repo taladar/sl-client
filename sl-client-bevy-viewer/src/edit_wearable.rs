@@ -62,7 +62,8 @@ use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSyste
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
-use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
+use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
+use crate::world_api::TexturePicked;
 
 /// The Shape gender radio group's element id.
 const GENDER_ELEMENT: &str = "wearable-gender";

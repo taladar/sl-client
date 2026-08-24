@@ -34,7 +34,8 @@ use crate::materials::MaterialManager;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
-use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
+use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
+use crate::world_api::TexturePicked;
 
 /// The chrome font size, in logical pixels.
 const FONT: f32 = 13.0;

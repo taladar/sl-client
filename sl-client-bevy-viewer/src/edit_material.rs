@@ -46,7 +46,6 @@ use sl_client_bevy::{
     encode_override_gltf_json,
 };
 
-use crate::chat::LocalChatNotice;
 use crate::edit_texture::{
     PrimFaceLookup, ShowWhen, node_face_indices, parse_tex_value, primary_face_index,
     representative_face, spawn_row,
@@ -67,12 +66,13 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{
-    MaterialSwatchValue, TexturePicked, TextureSwatchValue, spawn_material_swatch,
-    spawn_texture_swatch,
+    MaterialSwatchValue, TextureSwatchValue, spawn_material_swatch, spawn_texture_swatch,
 };
 use crate::web_floater::set_editor_text;
 use crate::world_api::EditToolState;
+use crate::world_api::LocalChatNotice;
 use crate::world_api::SelectionSet;
+use crate::world_api::TexturePicked;
 use crate::world_api::{MatModeState, PbrChannel};
 
 /// The width, in `"0"`-glyph advances, of a material-channel numeric field

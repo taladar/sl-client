@@ -24,6 +24,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::OpenWebBrowser;
 
 /// The [`UiAction`] element name of the floater's toolbar.
 pub(crate) const WEB_BROWSER_ELEMENT: &str = "web-browser";
@@ -44,14 +45,6 @@ const BUTTON_LABEL: Color = Color::srgb(0.9, 0.9, 0.92);
 const BUTTON_LABEL_DIM: Color = Color::srgb(0.45, 0.45, 0.5);
 /// Status-row text colour.
 const STATUS_COLOR: Color = Color::srgb(0.7, 0.72, 0.78);
-
-/// Open (and optionally navigate) the web browser floater.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenWebBrowser {
-    /// The URL to show; `None` keeps the current page (or the home page on
-    /// first open).
-    pub(crate) url: Option<String>,
-}
 
 /// The floater's entities.
 #[derive(Resource)]

@@ -77,12 +77,12 @@ use sl_client_bevy::{
 use crate::i18n::{TransArgs, Translator};
 use crate::inventory::InventoryModel;
 use crate::inventory_actions::default_folder_type;
-use crate::mutes::RequestBlock;
 use crate::notification_host::{NotificationChannelRoot, ResolveNotification, adopt_toast};
 use crate::notifications::{NotificationKind, NotificationManager, NotificationPriority};
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
+use crate::world_api::RequestBlock;
 
 /// The catalogue-template sentinel an inventory-offer card reports as. Like the
 /// sibling bespoke cards these are not real [`crate::notifications::NOTIFICATIONS`]

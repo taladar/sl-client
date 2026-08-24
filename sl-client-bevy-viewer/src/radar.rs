@@ -53,12 +53,11 @@ use sl_settings::SettingValue;
 
 use crate::animations::AnimationPlayback;
 use crate::avatar_complexity::RenderOverride;
-use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED, OpenAvatarProfile};
+use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED};
 use crate::avatar_render_settings::RequestRenderException;
 use crate::avatars::AvatarState;
-use crate::chat::LocalChatNotice;
 use crate::contact_sets_panel::OpenAddToContactSet;
-use crate::conversations::{ConversationKey, NearbyChatNotice, OpenConversation, StartConference};
+use crate::conversations::{NearbyChatNotice, StartConference};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, floater_shown, spawn_floater,
@@ -68,7 +67,6 @@ use crate::menu::{
     MenuCommand, MenuDef, MenuDynamicPick, MenuItemDef, OpenContextMenu, SetMenuDynamicLabels,
 };
 use crate::minimap::{ChatRanges, MARK_COLORS, MinimapMarks, global_from_bevy, origin_global};
-use crate::mutes::RequestBlock;
 use crate::name_tag_content::{AWAY_ANIM, NameTagStatuses};
 use crate::notifications::ShowNotification;
 use crate::radar_model::{
@@ -93,7 +91,11 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
 use crate::world_api::FriendsModel;
+use crate::world_api::LocalChatNotice;
 use crate::world_api::MuteModel;
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::RequestBlock;
+use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{MapTracking, TrackTarget};
 
 /// The radar floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).

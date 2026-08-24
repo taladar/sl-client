@@ -48,12 +48,12 @@ use sl_client_bevy::{
     ObjectKey, OwnerKey, Permissions5, SlCommand, Uuid,
 };
 
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::edit_notecard::{NotecardSource, embedded_icon};
 use crate::inventory_properties::OpenItemPreview;
 use crate::linkified_text::{LinkTextStyle, populate_linkified_text};
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::ui_font::UiFont;
+use crate::world_api::OpenAvatarProfile;
 
 /// The catalogue template for the copy-embedded-item confirmation — the
 /// reference `ConfirmItemCopy` alertmodal ("Copy this item to your inventory?").

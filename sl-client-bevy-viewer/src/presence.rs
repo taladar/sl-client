@@ -83,9 +83,10 @@ use sl_client_bevy::{
 use sl_settings::SettingValue;
 
 use crate::contact_sets::{ContactSets, SetAutoresponseMode};
-use crate::conversations::{ConversationKey, ConversationModel, ConversationNotice};
+use crate::conversations::{ConversationModel, ConversationNotice};
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
+use crate::world_api::ConversationKey;
 use crate::world_api::{
     PresenceState, SETTING_AUTORESPOND_MODE, SETTING_AUTORESPOND_NON_FRIENDS_MODE,
 };
@@ -688,7 +689,7 @@ mod tests {
         AWAY_ANIMATION, ContactSets, DND_ANIMATION, PresenceState, ReplyMode, ReplyModes,
         SetAutoresponseMode, direct_peer, reply_for,
     };
-    use crate::conversations::ConversationKey;
+    use crate::world_api::ConversationKey;
     use crate::world_api::MIN_AFK_SECS;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::AgentKey;

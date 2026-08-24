@@ -58,7 +58,7 @@ use crate::i18n::Translated;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
-use crate::world_api::FriendsModel;
+use crate::world_api::{AvatarPicked, FriendsModel, OpenAvatarPicker, PickedAvatar};
 
 /// The floater's [`crate::floater::FloaterSpec::id`].
 const PICKER_FLOATER_ID: &str = "avatar-picker";
@@ -90,68 +90,6 @@ const LIST_HEIGHT: f32 = 220.0;
 /// friends / nearby lists are clamped the same so the plain column stays
 /// cheap).
 const MAX_ROWS: usize = 100;
-
-/// Ask the picker to open for a feature. `requester` tags the eventual
-/// [`AvatarPicked`] so only the asking feature consumes it.
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenAvatarPicker {
-    /// The feature tag echoed back in [`AvatarPicked`].
-    pub(crate) requester: &'static str,
-    /// Whether the user may choose several residents at once — the reference's
-    /// `allow_multiple`. Build one with [`OpenAvatarPicker::one`] or
-    /// [`OpenAvatarPicker::many`] rather than by hand, so the choice reads at
-    /// the call site.
-    pub(crate) allow_multiple: bool,
-}
-
-impl OpenAvatarPicker {
-    /// Ask for exactly one resident.
-    pub(crate) const fn one(requester: &'static str) -> Self {
-        Self {
-            requester,
-            allow_multiple: false,
-        }
-    }
-
-    /// Ask for any number of residents at once.
-    pub(crate) const fn many(requester: &'static str) -> Self {
-        Self {
-            requester,
-            allow_multiple: true,
-        }
-    }
-}
-
-/// One resident the picker returned.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct PickedAvatar {
-    /// The chosen avatar.
-    pub(crate) agent: AgentKey,
-    /// The label the picked row carried — the avatar's name as the source that
-    /// produced the row knew it (a search reply's legacy name, the friend's
-    /// name, or the nearby avatar's name). Consumers that must *record* a name
-    /// against the id (the block list writes it into the mute entry) take it
-    /// from here rather than re-resolving.
-    pub(crate) name: String,
-}
-
-/// The confirmed pick: every chosen resident, in list order. A picker opened
-/// with [`OpenAvatarPicker::one`] answers with exactly one element.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct AvatarPicked {
-    /// The tag of the feature that opened the picker.
-    pub(crate) requester: &'static str,
-    /// The chosen residents — never empty (the picker does not confirm an empty
-    /// selection).
-    pub(crate) picks: Vec<PickedAvatar>,
-}
-
-impl AvatarPicked {
-    /// The first chosen resident — for a single-resident requester, *the* pick.
-    pub(crate) fn first(&self) -> Option<&PickedAvatar> {
-        self.picks.first()
-    }
-}
 
 /// Which source tab is active.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]

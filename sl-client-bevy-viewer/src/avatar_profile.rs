@@ -46,16 +46,13 @@ use sl_client_bevy::{
 };
 
 use crate::avatars::AvatarState;
-use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     spawn_floater,
 };
-use crate::group_profile::OpenGroupProfile;
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
-use crate::mutes::RequestBlock;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
 use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -67,6 +64,9 @@ use crate::ui_tab::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::FriendsModel;
 use crate::world_api::GroupsModel;
+use crate::world_api::OpenGroupProfile;
+use crate::world_api::RequestBlock;
+use crate::world_api::{ConversationKey, OpenAvatarProfile, OpenConversation};
 
 /// The chrome font size, in logical pixels.
 const PROFILE_FONT_SIZE: f32 = 14.0;
@@ -152,14 +152,6 @@ const LIST_STRIP_WIDTH: f32 = 110.0;
 // ---------------------------------------------------------------------------
 // Messages.
 // ---------------------------------------------------------------------------
-
-/// Open the profile floater on an avatar (from the pie menu's Profile slice,
-/// the People list, or a repaint after an edit).
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenAvatarProfile {
-    /// The avatar whose profile to show.
-    pub(crate) agent: AgentKey,
-}
 
 // ---------------------------------------------------------------------------
 // State.

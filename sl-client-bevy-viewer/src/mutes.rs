@@ -44,7 +44,7 @@ use sl_client_bevy::{
 };
 
 use crate::notifications::ShowNotification;
-use crate::world_api::{MUTE_LIST_LIMIT, MuteModel};
+use crate::world_api::{MUTE_LIST_LIMIT, MuteModel, RequestBlock};
 
 /// Request the mute list once the session is up (the login handshake has
 /// produced an agent id).
@@ -103,49 +103,6 @@ pub(crate) fn note_local_mutes(
 // ---------------------------------------------------------------------------
 // The guarded block request — the one way into the mute list.
 // ---------------------------------------------------------------------------
-
-/// A request to block a target: the single **guarded** entry point every Block
-/// surface writes instead of putting a `Command::Mute` on the wire itself.
-///
-/// [`apply_block_requests`] runs the reference's `LLMuteList::add` checks and
-/// only then sends, so every Block in the viewer — the avatar / object pie
-/// menus, the radar, the minimap, the profile floater, the inspector, the
-/// friends list, the offer / dialog / URL toasts, a `secondlife:///…/mute`
-/// link, and the block list's own add paths — refuses a Linden, the agent
-/// itself, a malformed or duplicate by-name entry and an over-full list
-/// identically, and reports the refusal with the same notification.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct RequestBlock {
-    /// The blocked entity's id (nil for a [`MuteType::ByName`] block).
-    pub(crate) id: Uuid,
-    /// The blocked entity's name, as the asking surface knows it.
-    pub(crate) name: String,
-    /// What kind of entity is blocked.
-    pub(crate) mute_type: MuteType,
-    /// The per-aspect *exception* flags ([`MuteFlags::default`] mutes all).
-    pub(crate) flags: MuteFlags,
-}
-
-impl RequestBlock {
-    /// Block `id` as `mute_type` under `name`, with every aspect muted — what a
-    /// menu's plain "Block" does.
-    pub(crate) fn new(id: Uuid, name: impl Into<String>, mute_type: MuteType) -> Self {
-        Self {
-            id,
-            name: name.into(),
-            mute_type,
-            flags: MuteFlags::default(),
-        }
-    }
-
-    /// The same request with explicit exception flags — the block list's
-    /// per-aspect toggles re-sending an edited entry.
-    #[must_use]
-    pub(crate) const fn with_flags(mut self, flags: MuteFlags) -> Self {
-        self.flags = flags;
-        self
-    }
-}
 
 /// Why a block was refused, mirroring the `LLMuteList::add` early-outs.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

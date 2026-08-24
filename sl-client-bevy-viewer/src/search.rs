@@ -44,13 +44,10 @@ use sl_client_bevy::{
 };
 use sl_settings::SettingValue;
 
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
-use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
-use crate::group_profile::OpenGroupProfile;
 use crate::i18n::{Translated, UiLocale};
 use crate::media_engine::MediaSurfaces;
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
@@ -71,6 +68,9 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow};
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::OpenGroupProfile;
+use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
 
 // ---------------------------------------------------------------------------

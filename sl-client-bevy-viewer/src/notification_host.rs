@@ -51,7 +51,6 @@ use sl_client_bevy::{SlEvent, SlSessionEvent};
 use sl_settings::SettingValue;
 use tracing::{debug, warn};
 
-use crate::chat::LocalChatNotice;
 use crate::i18n::Translator;
 use crate::notification_persist::{PersistNotification, PersistedKind};
 use crate::notifications::{
@@ -65,6 +64,7 @@ use crate::ui::{LogicalInset, LogicalRect, UiRoot, UiScaffoldSystems, column, ro
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::LocalChatNotice;
 
 /// The element id the gallery specimen and its inert actions report under.
 const NOTIFICATION_ELEMENT: &str = "notification-toast";

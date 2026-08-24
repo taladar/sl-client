@@ -54,6 +54,7 @@ use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 use sl_client_bevy::SlCommand;
 
 /// The blank / white texture (`IMG_WHITE`) the **Blank** quick choice picks.
@@ -118,19 +119,6 @@ const FOLDER_COLOR: Color = Color::srgb(0.82, 0.86, 0.95);
 
 /// The skin class for value text.
 const VALUE_CLASS: &str = "sk-build-value";
-
-/// What a picker open browses: **textures** (the default — the reference's
-/// `LLTextureCtrl` `PICK_TEXTURE`) or **materials** (GLTF render materials, the
-/// reference's `PICK_MATERIAL`). It drives the inventory filter, the floater
-/// title, and which quick choices show.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum PickerKind {
-    /// Browse texture / snapshot items.
-    #[default]
-    Texture,
-    /// Browse GLTF render-material items ([`InventoryType::Material`]).
-    Material,
-}
 
 /// A reusable texture swatch's current value; this module paints the swatch's
 /// thumbnail from it, and a consumer reads / writes it.
@@ -224,32 +212,6 @@ fn open_picker_from_swatch(
             kind,
         });
     }
-}
-
-/// Open the texture picker for `requester`, seeded with `current`.
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenTexturePicker {
-    /// The swatch (or other widget) the reply is tagged back to.
-    pub(crate) requester: Entity,
-    /// The texture (or, in material mode, material id) to open on.
-    pub(crate) current: TextureKey,
-    /// Whether to browse textures or materials.
-    pub(crate) kind: PickerKind,
-}
-
-/// The chosen texture, tagged back to the [`requester`](Self::requester). Emitted
-/// **non-final** on each selection so a consumer can live-preview it, once on
-/// **OK** with [`final_pick`](Self::final_pick) true, and on **Cancel** as the
-/// original (a revert), mirroring the colour picker.
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct TexturePicked {
-    /// The widget that opened the picker.
-    pub(crate) requester: Entity,
-    /// The chosen texture.
-    pub(crate) texture: TextureKey,
-    /// Whether this is the committed choice (**OK**) rather than a live-preview
-    /// or revert update.
-    pub(crate) final_pick: bool,
 }
 
 /// The picker's live state while open.

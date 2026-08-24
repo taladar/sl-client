@@ -67,16 +67,17 @@ use sl_client_bevy::{
     SlSessionEvent, Vector,
 };
 
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
-use crate::conversations::{ConversationKey, OpenConversation};
-use crate::group_profile::OpenGroupProfile;
 use crate::linkified_text::LinkActivated;
-use crate::mutes::RequestBlock;
 use crate::notifications::{NotificationResponse, ShowNotification};
 use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::url_linkify::{LinkTarget, LocationCoords, LocationKind, TextRun, linkify};
-use crate::web_floater::{OpenWebBrowser, open_in_system_browser};
+use crate::web_floater::open_in_system_browser;
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::OpenGroupProfile;
+use crate::world_api::OpenWebBrowser;
+use crate::world_api::RequestBlock;
+use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
 
 /// The catalogue template the teleport-SLURL confirmation raises (the reference

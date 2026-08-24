@@ -20,9 +20,9 @@ use std::collections::{BTreeMap, HashSet};
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, Command, Friend, FriendKey, FriendPresence, FriendRights, GroupKey, GroupMembership,
-    MuteEntry, ObjectKey, ObjectProperties, PrimFaceId, ScopedObjectId, SlCommand, TextureKey,
-    Uuid,
+    AgentKey, ChatSessionKind, Command, Friend, FriendKey, FriendPresence, FriendRights, GroupKey,
+    GroupMembership, ImSessionId, MuteEntry, MuteFlags, MuteType, ObjectKey, ObjectProperties,
+    PrimFaceId, ScopedObjectId, SlCommand, TextureKey, Uuid,
 };
 use sl_viewer_settings::ViewerSettings;
 
@@ -1373,4 +1373,265 @@ pub enum TrackTarget {
     },
     /// An avatar, followed while it is known.
     Avatar(AgentKey),
+}
+
+// ---------------------------------------------------------------------------
+// Cross-tier intents
+// ---------------------------------------------------------------------------
+//
+// Messages a surface writes to ask for something it does not own: block this
+// resident, open that profile, pick a texture. Each is read by a feature that
+// sits far from the ones asking -- `RequestBlock` alone is written from avatar
+// menus, the radar, the minimap, the profile, the inspector, the friends list,
+// three kinds of toast and a `secondlife:///` link.
+//
+// They live here rather than with the floater that answers them, so asking
+// does not mean depending on the answer. Every payload is an id or a string
+// this crate or `sl-client-bevy` already owns.
+
+/// A request to block a target: the single **guarded** entry point every Block
+/// surface writes instead of putting a `Command::Mute` on the wire itself.
+///
+/// `apply_block_requests` runs the reference's `LLMuteList::add` checks and
+/// only then sends, so every Block in the viewer — the avatar / object pie
+/// menus, the radar, the minimap, the profile floater, the inspector, the
+/// friends list, the offer / dialog / URL toasts, a `secondlife:///…/mute`
+/// link, and the block list's own add paths — refuses a Linden, the agent
+/// itself, a malformed or duplicate by-name entry and an over-full list
+/// identically, and reports the refusal with the same notification.
+#[derive(Message, Debug, Clone)]
+pub struct RequestBlock {
+    /// The blocked entity's id (nil for a [`MuteType::ByName`] block).
+    pub id: Uuid,
+    /// The blocked entity's name, as the asking surface knows it.
+    pub name: String,
+    /// What kind of entity is blocked.
+    pub mute_type: MuteType,
+    /// The per-aspect *exception* flags ([`MuteFlags::default`] mutes all).
+    pub flags: MuteFlags,
+}
+
+impl RequestBlock {
+    /// Block `id` as `mute_type` under `name`, with every aspect muted — what a
+    /// menu's plain "Block" does.
+    pub fn new(id: Uuid, name: impl Into<String>, mute_type: MuteType) -> Self {
+        Self {
+            id,
+            name: name.into(),
+            mute_type,
+            flags: MuteFlags::default(),
+        }
+    }
+
+    /// The same request with explicit exception flags — the block list's
+    /// per-aspect toggles re-sending an edited entry.
+    #[must_use]
+    pub const fn with_flags(mut self, flags: MuteFlags) -> Self {
+        self.flags = flags;
+        self
+    }
+}
+
+/// Open the profile floater on an avatar (from the pie menu's Profile slice,
+/// the People list, or a repaint after an edit).
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenAvatarProfile {
+    /// The avatar whose profile to show.
+    pub agent: AgentKey,
+}
+
+/// Open the group profile floater on a group (from the Groups list's Info button).
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenGroupProfile {
+    /// The group whose profile to show.
+    pub group: GroupKey,
+}
+
+/// A client-generated local-chat notice — a line the viewer itself posts to the
+/// overlay (not a `ChatReceived` from the grid), for feedback like a build-tool
+/// no-permission alert. Written by whichever system produced the notice
+/// (e.g. `crate::gizmos::dispatch_shift_drag_copy`) and rendered by
+/// `update_chat_overlay` alongside received chat.
+#[derive(Message, Debug, Clone)]
+pub struct LocalChatNotice {
+    /// The already-formatted line to show.
+    pub text: String,
+}
+
+impl LocalChatNotice {
+    /// A notice carrying `text`.
+    #[must_use]
+    pub const fn new(text: String) -> Self {
+        Self { text }
+    }
+}
+
+/// Ask the picker to open for a feature. `requester` tags the eventual
+/// [`AvatarPicked`] so only the asking feature consumes it.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenAvatarPicker {
+    /// The feature tag echoed back in [`AvatarPicked`].
+    pub requester: &'static str,
+    /// Whether the user may choose several residents at once — the reference's
+    /// `allow_multiple`. Build one with [`OpenAvatarPicker::one`] or
+    /// [`OpenAvatarPicker::many`] rather than by hand, so the choice reads at
+    /// the call site.
+    pub allow_multiple: bool,
+}
+
+impl OpenAvatarPicker {
+    /// Ask for exactly one resident.
+    #[must_use]
+    pub const fn one(requester: &'static str) -> Self {
+        Self {
+            requester,
+            allow_multiple: false,
+        }
+    }
+
+    /// Ask for any number of residents at once.
+    #[must_use]
+    pub const fn many(requester: &'static str) -> Self {
+        Self {
+            requester,
+            allow_multiple: true,
+        }
+    }
+}
+
+/// The confirmed pick: every chosen resident, in list order. A picker opened
+/// One resident the picker returned.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PickedAvatar {
+    /// The chosen avatar.
+    pub agent: AgentKey,
+    /// The label the picked row carried — the avatar's name as the source that
+    /// produced the row knew it (a search reply's legacy name, the friend's
+    /// name, or the nearby avatar's name). Consumers that must *record* a name
+    /// against the id (the block list writes it into the mute entry) take it
+    /// from here rather than re-resolving.
+    pub name: String,
+}
+
+/// with [`OpenAvatarPicker::one`] answers with exactly one element.
+#[derive(Message, Debug, Clone)]
+pub struct AvatarPicked {
+    /// The tag of the feature that opened the picker.
+    pub requester: &'static str,
+    /// The chosen residents — never empty (the picker does not confirm an empty
+    /// selection).
+    pub picks: Vec<PickedAvatar>,
+}
+
+impl AvatarPicked {
+    /// The first chosen resident — for a single-resident requester, *the* pick.
+    #[must_use]
+    pub fn first(&self) -> Option<&PickedAvatar> {
+        self.picks.first()
+    }
+}
+
+/// What a picker open browses: **textures** (the default — the reference's
+/// `LLTextureCtrl` `PICK_TEXTURE`) or **materials** (GLTF render materials, the
+/// reference's `PICK_MATERIAL`). It drives the inventory filter, the floater
+/// title, and which quick choices show.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PickerKind {
+    /// Browse texture / snapshot items.
+    #[default]
+    Texture,
+    /// Browse GLTF render-material items (`InventoryType::Material`).
+    Material,
+}
+
+/// Open the texture picker for `requester`, seeded with `current`.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenTexturePicker {
+    /// The swatch (or other widget) the reply is tagged back to.
+    pub requester: Entity,
+    /// The texture (or, in material mode, material id) to open on.
+    pub current: TextureKey,
+    /// Whether to browse textures or materials.
+    pub kind: PickerKind,
+}
+
+/// The chosen texture, tagged back to the [`requester`](Self::requester). Emitted
+/// **non-final** on each selection so a consumer can live-preview it, once on
+/// **OK** with [`final_pick`](Self::final_pick) true, and on **Cancel** as the
+/// original (a revert), mirroring the colour picker.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct TexturePicked {
+    /// The widget that opened the picker.
+    pub requester: Entity,
+    /// The chosen texture.
+    pub texture: TextureKey,
+    /// Whether this is the committed choice (**OK**) rather than a live-preview
+    /// or revert update.
+    pub final_pick: bool,
+}
+
+/// A conversation's stable identity — the per-tab key. `Nearby` is the singleton
+/// local-chat tab; the rest key on the peer, group or conference.
+///
+/// Derives [`Ord`] so it can key the `ConversationsUi` view map (sl-types gives
+/// the newtypes their ordering).
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
+pub enum ConversationKey {
+    /// The local (nearby) chat tab — always present, always first.
+    Nearby,
+    /// A one-to-one instant-message conversation with a peer.
+    Direct(AgentKey),
+    /// A group IM session.
+    Group(GroupKey),
+    /// An ad-hoc conference IM session.
+    Conference(ImSessionId),
+}
+
+impl ConversationKey {
+    /// Whether this is the un-closable Nearby tab.
+    #[must_use]
+    pub const fn is_nearby(self) -> bool {
+        matches!(self, Self::Nearby)
+    }
+
+    /// The runtime chat-session kind behind a keyed tab, or `None` for Nearby
+    /// (local chat is not a [`ChatSessionKind`] session).
+    #[must_use]
+    pub const fn session_kind(self) -> Option<ChatSessionKind> {
+        match self {
+            Self::Nearby => None,
+            Self::Direct(peer) => Some(ChatSessionKind::Direct { peer }),
+            Self::Group(group_id) => Some(ChatSessionKind::Group { group_id }),
+            Self::Conference(id) => Some(ChatSessionKind::Conference { id }),
+        }
+    }
+
+    /// The tab key for a runtime chat-session kind (the inverse of
+    /// [`Self::session_kind`]).
+    #[must_use]
+    pub const fn from_session_kind(kind: ChatSessionKind) -> Self {
+        match kind {
+            ChatSessionKind::Direct { peer } => Self::Direct(peer),
+            ChatSessionKind::Group { group_id } => Self::Group(group_id),
+            ChatSessionKind::Conference { id } => Self::Conference(id),
+        }
+    }
+}
+
+/// A request to open (create if needed) and activate `key`'s conversation — the
+/// hook another module uses to start an IM from outside the floater. The
+/// `crate::people` Friends list writes this to open a one-to-one IM tab for a
+/// selected friend in this same floater.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct OpenConversation {
+    /// The conversation to open and select.
+    pub key: ConversationKey,
+}
+
+/// Open (and optionally navigate) the web browser floater.
+#[derive(Message, Debug, Clone)]
+pub struct OpenWebBrowser {
+    /// The URL to show; `None` keeps the current page (or the home page on
+    /// first open).
+    pub url: Option<String>,
 }

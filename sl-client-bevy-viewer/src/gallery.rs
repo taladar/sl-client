@@ -287,7 +287,7 @@ pub fn run() {
         // fixed-label links. The two session messages it writes to are declared so
         // its `MessageWriter`s have somewhere inert to go.
         .add_message::<sl_client_bevy::SlCommand>()
-        .add_message::<crate::web_floater::OpenWebBrowser>()
+        .add_message::<crate::world_api::OpenWebBrowser>()
         .add_plugins(crate::linkified_text::LinkifiedTextPlugin)
         // Seeded from `SL_VIEWER_UI_DIRECTION`, as the viewer does, so the gallery
         // can be started straight into RTL rather than only reached by pressing `D`.

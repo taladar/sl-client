@@ -54,7 +54,7 @@ use sl_client_bevy::{
 use std::collections::{HashSet, VecDeque};
 
 use crate::avatar_menu::UNIMPLEMENTED;
-use crate::conversations::{ConversationKey, OpenConversation, StartConference};
+use crate::conversations::StartConference;
 use crate::edit_contents::focus_within;
 use crate::input_context::InputContext;
 use crate::inventory::{
@@ -64,6 +64,7 @@ use crate::inventory::{
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
+use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The `element` the inventory context menus attribute their [`UiAction`]s to.
 pub(crate) const INVENTORY_MENU_ELEMENT: &str = "inventory-menu";
@@ -1689,7 +1690,7 @@ fn handle_inventory_menu_actions(
         MessageWriter<crate::inventory::InventoryUiAction>,
         MessageWriter<OpenConversation>,
         MessageWriter<StartConference>,
-        MessageWriter<crate::avatar_picker::OpenAvatarPicker>,
+        MessageWriter<crate::world_api::OpenAvatarPicker>,
         MessageWriter<crate::inventory_properties::OpenItemPreview>,
         MessageWriter<crate::inventory_properties::OpenItemProperties>,
         MessageWriter<SlCommand>,
@@ -1733,9 +1734,7 @@ fn handle_inventory_menu_actions(
                 pending_share.targets.clone_from(&targets);
                 // The reference shares with several residents at once
                 // (`give_inventory` opens the picker with `allow_multiple`).
-                picker_opens.write(crate::avatar_picker::OpenAvatarPicker::many(
-                    SHARE_REQUESTER,
-                ));
+                picker_opens.write(crate::world_api::OpenAvatarPicker::many(SHARE_REQUESTER));
             }
             "open" => {
                 for target_row in &targets {
@@ -2749,7 +2748,7 @@ const SHARE_REQUESTER: &str = "inventory-share";
 /// Complete a Share when the avatar picker confirms: give the stashed item /
 /// folder to every chosen avatar (the same wire path as drag-to-give).
 fn handle_share_picks(
-    mut picks: MessageReader<crate::avatar_picker::AvatarPicked>,
+    mut picks: MessageReader<crate::world_api::AvatarPicked>,
     mut pending: ResMut<PendingShare>,
     mut commands: MessageWriter<SlCommand>,
 ) {

@@ -36,7 +36,6 @@ use bevy::text::EditableText;
 use sl_client_bevy::AgentKey;
 
 use crate::avatar_complexity::RenderOverride;
-use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::avatar_render_settings::{
     AvatarRenderSettings, RenderException, RequestRenderException,
 };
@@ -55,6 +54,7 @@ use crate::ui_table::{
     spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 
 /// The floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
 pub(crate) const RENDER_SETTINGS_FLOATER_ID: &str = "avatar-render-settings";

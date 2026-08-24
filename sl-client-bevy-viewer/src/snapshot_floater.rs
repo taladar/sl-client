@@ -73,7 +73,6 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 
-use crate::chat::LocalChatNotice;
 use crate::hud::HudScreen;
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::settings::ViewerSettings;
@@ -85,6 +84,7 @@ use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabContainerHandle, TabPlacement, TabSpec, fill_tab_container,
     spawn_tab_container,
 };
+use crate::world_api::LocalChatNotice;
 
 use sl_settings::SettingValue;
 

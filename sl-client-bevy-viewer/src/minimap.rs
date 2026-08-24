@@ -43,11 +43,9 @@ use sl_client_bevy::{
 use sl_settings::{Scope, SettingValue};
 use sl_terrain::TerrainComposition;
 
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::AvatarState;
 use crate::camera::{CameraMode, ViewerCamera};
 use crate::contact_sets_panel::OpenAddToContactSet;
-use crate::conversations::{ConversationKey, OpenConversation};
 use crate::coords::bevy_to_sl_vec;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -60,7 +58,6 @@ use crate::minimap_math::{
     COLOR_WHISPER_RING, DoubleClickAction, LayerRaster, MapView, ObjectAccents, ParcelCell, Rgba,
     Surface,
 };
-use crate::mutes::RequestBlock;
 use crate::objects::{ObjectDebugInfo, ObjectState};
 use crate::settings::ViewerSettings;
 use crate::terrain::TerrainState;
@@ -68,6 +65,9 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::RequestBlock;
+use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, MapTracking, TrackTarget};
 
 /// The `element` tag the minimap attributes its [`UiAction`]s to.
@@ -3429,8 +3429,8 @@ mod tests {
         handle_minimap_profile_picks, location_reached, phantom_alpha, range_metres,
         region_handle_at,
     };
-    use crate::avatar_profile::OpenAvatarProfile;
     use crate::minimap_math::{FLAG_YOU_OWNER, ObjectAccents};
+    use crate::world_api::OpenAvatarProfile;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{AgentKey, Uuid};

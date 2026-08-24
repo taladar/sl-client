@@ -75,7 +75,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
-use crate::world_api::GroupsModel;
+use crate::world_api::{GroupsModel, OpenGroupProfile};
 
 /// The chrome font size, in logical pixels.
 const FONT_SIZE: f32 = 13.0;
@@ -355,13 +355,6 @@ const ABILITIES: [(u64, &str); 14] = [
 // ---------------------------------------------------------------------------
 // Message.
 // ---------------------------------------------------------------------------
-
-/// Open the group profile floater on a group (from the Groups list's Info button).
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenGroupProfile {
-    /// The group whose profile to show.
-    pub(crate) group: GroupKey,
-}
 
 /// The set of group-notice ids the Notices tab has explicitly **requested** (by
 /// clicking a notice in the list). The reply arrives as an

@@ -59,12 +59,10 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use sl_client_bevy::{AgentKey, Command, MuteEntry, MuteFlags, MuteType, SlCommand, Uuid};
 
-use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
-use crate::mutes::{RequestBlock, flags_apply};
+use crate::mutes::flags_apply;
 use crate::people::PeopleUi;
 use crate::settings::ViewerSettings;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -79,6 +77,9 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
 use crate::world_api::MuteModel;
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::RequestBlock;
+use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 
 /// The `element` the block list's menu / UI actions are attributed to.
 const BLOCKED_ELEMENT: &str = "blocked";

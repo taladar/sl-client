@@ -55,7 +55,7 @@
 //!
 //! Nothing here mutates the sets: every button, floater and pick writes a
 //! [`RequestContactSet`], so the model's guards decide — the same arrangement the
-//! block list has with [`RequestBlock`](crate::mutes::RequestBlock).
+//! block list has with [`RequestBlock`](crate::world_api::RequestBlock).
 //!
 //! Reference (Firestorm, read-only): `fspanelcontactsets`,
 //! `fsfloateraddtocontactset`, `fsfloatercontactsetconfiguration`,
@@ -70,13 +70,10 @@ use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{AgentKey, Command, SlCommand};
 
-use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::contact_sets::{
     ALL_SETS_LABEL, ContactSet, ContactSets, NO_SETS_LABEL, PSEUDONYMS_KEY, RequestContactSet,
     SetAutoresponseMode, apply_contact_set_requests,
 };
-use crate::conversations::{ConversationKey, OpenConversation};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::notifications::{NotificationResponse, ShowNotification};
@@ -95,6 +92,9 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
 use crate::world_api::FriendsModel;
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::{AvatarPicked, OpenAvatarPicker};
+use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The tag the panel opens the shared avatar picker under, so only its own pick
 /// is consumed.

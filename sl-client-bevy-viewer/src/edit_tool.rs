@@ -34,7 +34,6 @@ use bevy::text::{EditableText, FontCx, LayoutCx};
 use bevy_flair::style::components::ClassList;
 use sl_client_bevy::{Command, ObjectTransform, Permissions, SlCommand, Vector};
 
-use crate::chat::LocalChatNotice;
 use crate::edit_math::{clamp_scale, euler_deg_to_rotation, rotation_to_euler_deg};
 use crate::edit_params::set_disabled_class;
 use crate::floater::{
@@ -52,6 +51,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::web_floater::set_editor_text;
+use crate::world_api::LocalChatNotice;
 use crate::world_api::SelectionSet;
 
 /// The floater's font size, in logical pixels.
@@ -1236,7 +1236,7 @@ fn commit_numeric_fields(
     mut motions: Query<(&mut ObjectSlMotion, &SceneObject)>,
     mut transforms: crate::gizmos::EditTransformQuery,
     mut commands: MessageWriter<SlCommand>,
-    mut notices: MessageWriter<crate::chat::LocalChatNotice>,
+    mut notices: MessageWriter<crate::world_api::LocalChatNotice>,
 ) {
     let Some(ui) = ui else {
         return;

@@ -38,7 +38,7 @@
 //!   Trash / return-to-owner). The enable gates are deliberately simpler than
 //!   the reference's full predicates: you-owner for take / delete / return,
 //!   the copy permission bit for take-copy (see the condition constants).
-//! - **Mute** → a guarded [`crate::mutes::RequestBlock`] for the object (id +
+//! - **Mute** → a guarded [`crate::world_api::RequestBlock`] for the object (id +
 //!   name). The name is not in
 //!   the object update stream, so opening the menu fires a
 //!   [`Command::RequestObjectPropertiesFamily`] and the reply's name is held on
@@ -111,12 +111,12 @@ use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit, UNIMPLEMENT
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::hud_pick::surface_info_from_hit;
 use crate::inventory::InventoryModel;
-use crate::mutes::RequestBlock;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectPickSummary, ObjectState, PrimFaceEntity, SceneObject,
 };
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
+use crate::world_api::RequestBlock;
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
 pub(crate) const OBJECT_MENU_ELEMENT: &str = "object-menu";

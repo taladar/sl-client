@@ -63,10 +63,11 @@ use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
 use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_text_input};
-use crate::ui_texture_picker::{TexturePicked, TextureSwatchValue, spawn_texture_swatch};
+use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::web_floater::set_editor_text;
 use crate::world_api::EditToolState;
 use crate::world_api::SelectionSet;
+use crate::world_api::TexturePicked;
 
 /// The tab index the Texture-tab widgets start their focus order at (well past
 /// the Object / Features tabs' fields).

@@ -24,18 +24,18 @@
 //! The handful that already have a home in this viewer are wired for real:
 //!
 //! - **IM** (other) → opens a one-to-one conversation tab
-//!   ([`crate::conversations::OpenConversation`]), exactly as the People list's IM
+//!   ([`crate::world_api::OpenConversation`]), exactly as the People list's IM
 //!   action does.
 //! - **Stand Up / Sit Down** (self) → [`Command::Stand`] / [`Command::SitOnGround`],
 //!   each enabled only in the state where it makes sense (you cannot stand up
 //!   unless you are sitting), gated on [`SELF_SITTING`] / [`SELF_STANDING`].
-//! - **Mute** (other) → a guarded [`crate::mutes::RequestBlock`] for the picked
+//! - **Mute** (other) → a guarded [`crate::world_api::RequestBlock`] for the picked
 //!   agent.
 //! - **Add as Friend** (other) → [`Command::OfferFriendship`], disabled via
 //!   [`TARGET_NOT_FRIEND`] when the agent already is a friend, matching the
 //!   reference's `on_enable`.
 //! - **Profile** (self and other) → opens the avatar profile floater
-//!   ([`crate::avatar_profile::OpenAvatarProfile`]).
+//!   ([`crate::world_api::OpenAvatarProfile`]).
 //! - **More ▸ Derender ▸ Blacklist / Temporary** (other) → a guarded
 //!   [`crate::derender::RequestDerender`] for the picked agent: this viewer
 //!   stops drawing them (and, through the scene mirror's suppression index,
@@ -90,22 +90,22 @@ use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, MuteType, SlAgentParcel, SlCommand, SlIdentity};
 
 use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
-use crate::avatar_profile::OpenAvatarProfile;
 use crate::avatars::{AvatarState, RefetchAvatarTextures};
-use crate::conversations::{ConversationKey, OpenConversation};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud::{HudCamera, on_hud_layer};
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
 use crate::land_menu::OpenLandMenu;
-use crate::mutes::RequestBlock;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::object_menu::{ObjectPicker, OpenObjectMenu};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::world_api::FriendsModel;
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::RequestBlock;
+use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The `element` both avatar pies attribute their [`UiAction`]s to.
 ///

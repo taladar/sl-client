@@ -38,7 +38,7 @@
 //! surfaces is front is arbitrated by [`crate::conversations::StripFocus`] so
 //! exactly one pane ever shows. Selecting the People tab takes the strip; the
 //! Friends "IM" action hands it back by opening a one-to-one conversation
-//! ([`crate::conversations::OpenConversation`]).
+//! ([`crate::world_api::OpenConversation`]).
 //!
 //! Reference (Firestorm, read-only): `llpanelpeople`, `llavatarlist`,
 //! Vintage `floater_fs_contacts` / `panel_fs_contacts_friends`.
@@ -59,12 +59,8 @@ use sl_client_bevy::{
 
 use sl_settings::SettingValue;
 
-use crate::avatar_profile::OpenAvatarProfile;
-use crate::conversations::{
-    ConversationKey, ConversationsUi, OpenConversation, StartConference, StripFocus,
-};
+use crate::conversations::{ConversationsUi, StartConference, StripFocus};
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::mutes::RequestBlock;
 use crate::settings::{ViewerSettings, load_account_settings};
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
@@ -74,6 +70,9 @@ use crate::ui_table::{
     TableState, register_table_settings, spawn_table, spawn_table_row,
 };
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::world_api::OpenAvatarProfile;
+use crate::world_api::RequestBlock;
+use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendRow, FriendsModel, short_id};
 
 /// A friend-list row's uniform height, in logical pixels — matched to the
@@ -855,7 +854,7 @@ impl FriendAction {
 /// actions that are not a plain command: [`FriendAction::Im`] and
 /// [`FriendAction::Profile`] open a conversation tab / the profile floater, and
 /// [`FriendAction::Block`] goes out as a guarded
-/// [`RequestBlock`](crate::mutes::RequestBlock) instead of a `Command::Mute`
+/// [`RequestBlock`] instead of a `Command::Mute`
 /// (see [`crate::mutes`]). Pure so the routing is unit-testable.
 fn friend_command(action: FriendAction, friend: FriendKey) -> Option<Command> {
     let agent = AgentKey::from(friend);

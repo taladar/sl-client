@@ -65,11 +65,10 @@ use bevy::ecs::system::SystemParam;
 use bevy::input::mouse::{AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AgentKey, ChatSessionKind, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId,
-    MessageCursor, ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
+    AgentKey, ChatSource, ChatType, Command, GroupKey, ImDialog, ImSessionId, MessageCursor,
+    ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
-use crate::avatar_picker::{AvatarPicked, OpenAvatarPicker};
 use crate::bottom_toolbar::BOTTOM_BAR_Z;
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
 use crate::floater::{
@@ -85,6 +84,7 @@ use crate::ui::{
 };
 use crate::ui_font::UiFont;
 use crate::ui_tab::{TabDivider, TabPlacement, TabStrip, TabStripWidth, resize_strip_width};
+use crate::world_api::{AvatarPicked, ConversationKey, OpenAvatarPicker, OpenConversation};
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in [`crate::floater_persist`].
@@ -191,7 +191,7 @@ const CLOSE_GLYPH: &str = "\u{2715}";
 /// The add-participants glyph (a small ✚), on a one-to-one or conference pane.
 const ADD_PARTICIPANTS_GLYPH: &str = "\u{271A}";
 
-/// The [`crate::avatar_picker::OpenAvatarPicker::requester`] tag the
+/// The [`crate::world_api::OpenAvatarPicker::requester`] tag the
 /// add-participants button opens the shared picker under.
 const ADD_PARTICIPANTS_REQUESTER: &str = "conversations-add-participants";
 
@@ -302,51 +302,6 @@ const INVITE_DECLINE_KEY: &str = "conversations-invite-decline";
 // ---------------------------------------------------------------------------
 // Pure model
 // ---------------------------------------------------------------------------
-
-/// A conversation's stable identity — the per-tab key. `Nearby` is the singleton
-/// local-chat tab; the rest key on the peer, group or conference.
-///
-/// Derives [`Ord`] so it can key the [`ConversationsUi`] view map (sl-types gives
-/// the newtypes their ordering).
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
-pub(crate) enum ConversationKey {
-    /// The local (nearby) chat tab — always present, always first.
-    Nearby,
-    /// A one-to-one instant-message conversation with a peer.
-    Direct(AgentKey),
-    /// A group IM session.
-    Group(GroupKey),
-    /// An ad-hoc conference IM session.
-    Conference(ImSessionId),
-}
-
-impl ConversationKey {
-    /// Whether this is the un-closable Nearby tab.
-    const fn is_nearby(self) -> bool {
-        matches!(self, Self::Nearby)
-    }
-
-    /// The runtime chat-session kind behind a keyed tab, or `None` for Nearby
-    /// (local chat is not a [`ChatSessionKind`] session).
-    const fn session_kind(self) -> Option<ChatSessionKind> {
-        match self {
-            Self::Nearby => None,
-            Self::Direct(peer) => Some(ChatSessionKind::Direct { peer }),
-            Self::Group(group_id) => Some(ChatSessionKind::Group { group_id }),
-            Self::Conference(id) => Some(ChatSessionKind::Conference { id }),
-        }
-    }
-
-    /// The tab key for a runtime chat-session kind (the inverse of
-    /// [`Self::session_kind`]).
-    const fn from_session_kind(kind: ChatSessionKind) -> Self {
-        match kind {
-            ChatSessionKind::Direct { peer } => Self::Direct(peer),
-            ChatSessionKind::Group { group_id } => Self::Group(group_id),
-            ChatSessionKind::Conference { id } => Self::Conference(id),
-        }
-    }
-}
 
 /// The clickable identity of a transcript line's speaker — what the sender-name
 /// link targets (`viewer-chat-sender-name-links`). An avatar name links to the
@@ -994,16 +949,6 @@ struct RespondToInvite {
     accept: bool,
 }
 
-/// A request to open (create if needed) and activate `key`'s conversation — the
-/// hook another module uses to start an IM from outside the floater. The
-/// [`crate::people`] Friends list writes this to open a one-to-one IM tab for a
-/// selected friend in this same floater.
-#[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenConversation {
-    /// The conversation to open and select.
-    pub(crate) key: ConversationKey,
-}
-
 /// A request to start an **ad-hoc conference** with several residents, or to
 /// invite more people into one that is already open — the reference's
 /// `LLAvatarActions::startConference` (`llavataractions.cpp:423`), and the one
@@ -1050,7 +995,7 @@ struct PendingParticipantPick(Option<ConversationKey>);
 /// A viewer-generated system line for the **Nearby Chat transcript** — e.g. a
 /// radar enter / leave report ([`crate::radar`]). This is deliberately a
 /// separate channel from the transient overlay
-/// ([`crate::chat::LocalChatNotice`]); a producer that wants the line in both
+/// ([`crate::world_api::LocalChatNotice`]); a producer that wants the line in both
 /// places writes both messages.
 #[derive(Message, Debug, Clone)]
 pub(crate) struct NearbyChatNotice {
