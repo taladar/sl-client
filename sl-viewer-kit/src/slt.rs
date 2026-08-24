@@ -41,7 +41,7 @@ const fn mul(a: i64, b: i64) -> i64 {
 /// system clock is set before the epoch (which the caller then renders as the
 /// epoch — a harmless clock read, never a panic).
 #[must_use]
-pub(crate) fn now_unix() -> i64 {
+pub fn now_unix() -> i64 {
     let secs = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0_u64, |elapsed| elapsed.as_secs());
@@ -130,7 +130,7 @@ const fn slt_offset_seconds(unix: i64) -> i64 {
 /// Convert a Unix instant to the SLT (US Pacific) wall-clock components the
 /// status area's clock renders.
 #[must_use]
-pub(crate) fn current_slt(unix: i64) -> CivilDateTime {
+pub fn current_slt(unix: i64) -> CivilDateTime {
     let local = add(unix, slt_offset_seconds(unix));
     let days = local / SECS_PER_DAY;
     let secs = local % SECS_PER_DAY;

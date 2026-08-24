@@ -5,10 +5,10 @@
 //! # The four modes
 //!
 //! - **Away** — session state, set by hand from Comm ▸ Online Status or
-//!   automatically after [`SETTING_AFK_TIMEOUT`] seconds without input, and
+//!   automatically after `SETTING_AFK_TIMEOUT` seconds without input, and
 //!   cleared by the next input once it has held [`MIN_AFK_SECS`](crate::world_api::MIN_AFK_SECS) (so a stray
 //!   mouse twitch while the screen-saver runs does not un-away you). Going away
-//!   starts `ANIM_AGENT_AWAY` and raises [`ControlFlags::AWAY`] in the
+//!   starts `ANIM_AGENT_AWAY` and raises `ControlFlags::AWAY` in the
 //!   `AgentUpdate` the movement driver sends.
 //! - **Do Not Disturb** — session state, a manual mode that starts
 //!   `ANIM_AGENT_DO_NOT_DISTURB` (so every other viewer's tag reads
@@ -16,8 +16,8 @@
 //!   showing them, and answers IMs with the busy reply.
 //! - **Autorespond** and **Autorespond to non-friends** — the Firestorm
 //!   extension: answer IMs but keep receiving them normally. Unlike the first
-//!   two these **persist per account** ([`SETTING_AUTORESPOND_MODE`](crate::world_api::SETTING_AUTORESPOND_MODE) /
-//!   [`SETTING_AUTORESPOND_NON_FRIENDS_MODE`](crate::world_api::SETTING_AUTORESPOND_NON_FRIENDS_MODE)), exactly as the reference stores
+//!   two these **persist per account** ([`SETTING_AUTORESPOND_MODE`] /
+//!   [`SETTING_AUTORESPOND_NON_FRIENDS_MODE`]), exactly as the reference stores
 //!   them, so they survive a relog.
 //!
 //! The two session modes deliberately do **not** persist: the reference resets
@@ -31,7 +31,7 @@
 //! to everyone nearby, whose viewer reads the id out of the signalled set and
 //! writes the status line on our tag — which is also how *we* read *their*
 //! state ([`crate::name_tag_content`]). There is deliberately no local
-//! playback here (unlike [`crate::typing`]): a presence change is not a
+//! playback here (unlike `crate::typing`): a presence change is not a
 //! latency-sensitive gesture, and the simulator's echo of our own
 //! `AgentAnimation` is what the own tag reads, so playing it locally as well
 //! would only risk double-driving the pose. The autorespond modes have no wire
@@ -52,7 +52,7 @@
 //!
 //! The **text** of that reply is not always the global one: a
 //! [contact set](crate::contact_sets) the sender is filed under may carry its
-//! own ([`crate::contact_sets::SetAutoresponseMode`]), and it wins — the
+//! own (`crate::contact_sets::SetAutoresponseMode`), and it wins — the
 //! reference's `getAutoresponseForFriend`, consulted before
 //! `gSavedPerAccountSettings`, which is what makes "my partner gets a different
 //! Unavailable message" work. Only the three *mode* replies can be overridden
@@ -97,33 +97,33 @@ pub(crate) const PRESENCE_SECTION: &[&str] = &["presence"];
 /// Whether an IM received while merely **away** is answered at all (the
 /// reference `FSSendAwayAvatarResponse`; default off — being away is not being
 /// busy).
-pub(crate) const SETTING_SEND_AWAY_RESPONSE: &str = "SendAwayAvatarResponse";
+pub const SETTING_SEND_AWAY_RESPONSE: &str = "SendAwayAvatarResponse";
 
 /// The reply sent to an IM while away, when [`SETTING_SEND_AWAY_RESPONSE`] is
 /// on (the reference `FSAwayAvatarResponse`).
-pub(crate) const SETTING_AWAY_RESPONSE: &str = "AwayAvatarResponse";
+pub const SETTING_AWAY_RESPONSE: &str = "AwayAvatarResponse";
 
 /// Whether a **blocked** resident's IM is answered with
 /// [`SETTING_MUTED_RESPONSE`] (the reference `FSSendMutedAvatarResponse`;
 /// default off — telling someone they are blocked is a deliberate choice).
-pub(crate) const SETTING_SEND_MUTED_RESPONSE: &str = "SendMutedAvatarResponse";
+pub const SETTING_SEND_MUTED_RESPONSE: &str = "SendMutedAvatarResponse";
 
 /// The reply sent to a blocked resident's IM, when
 /// [`SETTING_SEND_MUTED_RESPONSE`] is on (the reference
 /// `FSMutedAvatarResponse`).
-pub(crate) const SETTING_MUTED_RESPONSE: &str = "MutedAvatarResponse";
+pub const SETTING_MUTED_RESPONSE: &str = "MutedAvatarResponse";
 
 /// Whether going away sits the avatar down on the ground, standing it back up
 /// on return (the reference `AvatarSitOnAway`, an anti-grief habit). Default
 /// off.
-pub(crate) const SETTING_SIT_ON_AWAY: &str = "AvatarSitOnAway";
+pub const SETTING_SIT_ON_AWAY: &str = "AvatarSitOnAway";
 
 /// Seconds of *being away* after which the viewer logs out by itself; `0` =
 /// never (the reference `QuitAfterSecondsOfAFK`). Distinct from
-/// [`SETTING_AFK_TIMEOUT`], which is the idle time before going away.
+/// `SETTING_AFK_TIMEOUT`, which is the idle time before going away.
 ///
-/// [`SETTING_AFK_TIMEOUT`]: crate::world_api::SETTING_AFK_TIMEOUT
-pub(crate) const SETTING_QUIT_AFTER_AFK: &str = "QuitAfterSecondsOfAFK";
+/// `SETTING_AFK_TIMEOUT`: crate::world_api::SETTING_AFK_TIMEOUT
+pub const SETTING_QUIT_AFTER_AFK: &str = "QuitAfterSecondsOfAFK";
 
 /// The default away reply (the reference `AwayAvatarResponseDefault`).
 const AWAY_RESPONSE_DEFAULT: &str = "The Resident you messaged is currently away from keyboard. \
@@ -144,7 +144,7 @@ const DND_ANIMATION: &str = "do_not_disturb";
 /// Register the presence settings. The two mode flags bind at account scope
 /// (the reference keeps them per account); the replies live with the other
 /// canned replies on the chat tab; the two away behaviours are global.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_AUTORESPOND_MODE,
@@ -286,7 +286,8 @@ pub(crate) const fn reply_for(
 
 /// The presence plugin: the state, its settings, the AFK clock, the wire
 /// advertisement and the IM auto-reply.
-pub(crate) struct PresencePlugin;
+#[derive(Debug)]
+pub struct PresencePlugin;
 
 impl Plugin for PresencePlugin {
     fn build(&self, app: &mut App) {
@@ -305,13 +306,13 @@ impl Plugin for PresencePlugin {
 }
 
 /// Advance the idle / away clocks, note any user input, and apply the two
-/// timeouts: go away after [`SETTING_AFK_TIMEOUT`] idle seconds, and log out
+/// timeouts: go away after `SETTING_AFK_TIMEOUT` idle seconds, and log out
 /// after [`SETTING_QUIT_AFTER_AFK`] away seconds.
 ///
 /// "Input" is any key held or pressed, any mouse button, and any pointer motion
 /// or scroll — the same breadth the reference's window handlers cover.
 ///
-/// [`SETTING_AFK_TIMEOUT`]: crate::world_api::SETTING_AFK_TIMEOUT
+/// `SETTING_AFK_TIMEOUT`: crate::world_api::SETTING_AFK_TIMEOUT
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its dependencies: the clock, the four input \
@@ -368,7 +369,7 @@ fn track_presence_activity(
 /// other viewer learns the state), and sit / stand the avatar under
 /// [`SETTING_SIT_ON_AWAY`].
 ///
-/// The [`ControlFlags::AWAY`](sl_client_bevy::ControlFlags) bit is not sent
+/// The `ControlFlags::AWAY`(sl_client_bevy::ControlFlags) bit is not sent
 /// here — the movement driver owns the control-flag word and folds the away bit
 /// into it ([`crate::movement::drive_avatar_controls`]), because a separate
 /// writer would just fight it for the same field.
@@ -615,7 +616,7 @@ fn reply_text(
 /// The two session modes live on [`PresenceState`]; the two autorespond modes
 /// are persisted settings, so toggling those writes the store (and saves it) —
 /// which is also what makes them survive a relog.
-pub(crate) fn toggle_presence_mode(
+pub fn toggle_presence_mode(
     action: &str,
     state: &mut PresenceState,
     settings: &mut ViewerSettings,

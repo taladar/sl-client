@@ -98,7 +98,7 @@ const INVENTORY_OFFER_TEMPLATE: &str = "UserGiveItem";
 /// inventory skeleton still loading) falls back to the card — an offer is
 /// never dropped. Lives in the `[notifications]` section with the other
 /// notification preferences.
-pub(crate) const SETTING_AUTO_ACCEPT_INVENTORY: &str = "AutoAcceptNewInventory";
+pub const SETTING_AUTO_ACCEPT_INVENTORY: &str = "AutoAcceptNewInventory";
 
 /// Startup: declare [`SETTING_AUTO_ACCEPT_INVENTORY`] (default off).
 fn register_offers_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {
@@ -221,7 +221,8 @@ const GROUP_GLYPH: &str = "\u{1f465}";
 
 /// The plugin: drives the offer / invite cards into the shared notification
 /// channel.
-pub(crate) struct OffersInvitesPlugin;
+#[derive(Debug)]
+pub struct OffersInvitesPlugin;
 
 impl Plugin for OffersInvitesPlugin {
     /// Ingest received offer / invite `ImprovedInstantMessage`s into the shared
@@ -1115,9 +1116,9 @@ fn spawn_bounded_text(
 
 /// The gallery / `ui_test` specimen (inventory offer): a static agent give, so the
 /// heading / lead / item / action layout is swept login-free (a live card needs
-/// another agent to make the offer). Registered in [`crate::ui_element::ELEMENTS`];
+/// another agent to make the offer). Registered in `crate::ui_element::ELEMENTS`;
 /// its buttons report an inert [`UiAction`].
-pub(crate) fn spawn_inventory_offer_specimen(
+pub fn spawn_inventory_offer_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -1141,7 +1142,7 @@ pub(crate) fn spawn_inventory_offer_specimen(
 }
 
 /// The gallery / `ui_test` specimen (teleport offer).
-pub(crate) fn spawn_teleport_offer_specimen(
+pub fn spawn_teleport_offer_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -1165,7 +1166,7 @@ pub(crate) fn spawn_teleport_offer_specimen(
 }
 
 /// The gallery / `ui_test` specimen (friendship offer).
-pub(crate) fn spawn_friendship_offer_specimen(
+pub fn spawn_friendship_offer_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -1189,7 +1190,7 @@ pub(crate) fn spawn_friendship_offer_specimen(
 }
 
 /// The gallery / `ui_test` specimen (group invitation), with a membership fee.
-pub(crate) fn spawn_group_invite_specimen(
+pub fn spawn_group_invite_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

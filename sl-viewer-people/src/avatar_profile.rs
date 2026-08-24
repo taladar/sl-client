@@ -471,7 +471,8 @@ enum ProfileAction {
 // ---------------------------------------------------------------------------
 
 /// The plugin owning the avatar profile floater.
-pub(crate) struct AvatarProfilePlugin;
+#[derive(Debug)]
+pub struct AvatarProfilePlugin;
 
 impl Plugin for AvatarProfilePlugin {
     /// Register the state, the open message, and the spawn / open / ingest /

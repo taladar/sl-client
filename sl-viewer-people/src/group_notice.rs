@@ -4,8 +4,8 @@
 //! # What it renders
 //!
 //! When a group posts a notice, every member with notices enabled receives it as
-//! an [`ImDialog::GroupNotice`] instant message. This host decodes that IM
-//! ([`InstantMessage::group_notice`]) and raises a card into the **shared
+//! an `ImDialog::GroupNotice` instant message. This host decodes that IM
+//! (`InstantMessage::group_notice`) and raises a card into the **shared
 //! notification-host channel** ([`crate::notification_host`]) — top-trailing,
 //! priority-ordered, overflow-cycled — with the reference panel's five pieces:
 //!
@@ -32,8 +32,8 @@
 //! # Coordinating with the Notices tab
 //!
 //! The group profile's Notices tab also fetches a notice's body on demand, and its
-//! reply is an [`ImDialog::GroupNotice`] IM indistinguishable from a fresh push.
-//! The tab records the ids it requested in [`RequestedGroupNotices`]; this host
+//! reply is an `ImDialog::GroupNotice` IM indistinguishable from a fresh push.
+//! The tab records the ids it requested in `RequestedGroupNotices`; this host
 //! consults it and **suppresses** the toast for a notice the user pulled up to
 //! read — the reference `IM_GROUP_NOTICE_REQUESTED` (no popup) vs. a fresh
 //! `IM_GROUP_NOTICE`.
@@ -61,7 +61,7 @@ use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
 use crate::render_priority::AVATAR_BOOST_PRIORITY;
-use crate::status_bar::slt;
+use crate::slt;
 use crate::textures::TextureManager;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
@@ -82,7 +82,7 @@ const GROUP_NOTICE_TEMPLATE: &str = "GroupNotice";
 /// for relogin re-raise (it stays readable in the group's Notices tab, which
 /// pulls from the server). Lives in the `[notifications]` section with the
 /// other notification preferences.
-pub(crate) const SETTING_GROUP_NOTICE_TOASTS: &str = "ShowGroupNoticeToasts";
+pub const SETTING_GROUP_NOTICE_TOASTS: &str = "ShowGroupNoticeToasts";
 
 /// Startup: declare [`SETTING_GROUP_NOTICE_TOASTS`] (default on).
 fn register_group_notice_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {
@@ -179,7 +179,8 @@ const BUTTON_BORDER: Color = Color::srgb(0.40, 0.50, 0.62);
 const ICON_BACKDROP: Color = Color::srgba(0.0, 0.0, 0.0, 0.35);
 
 /// The plugin: drives the group-notice cards into the shared notification channel.
-pub(crate) struct GroupNoticePlugin;
+#[derive(Debug)]
+pub struct GroupNoticePlugin;
 
 impl Plugin for GroupNoticePlugin {
     /// Ingest received notices (into the shared toast channel), re-raise ones
@@ -996,9 +997,9 @@ fn decode_group_notice(data: &BTreeMap<String, String>) -> Option<GroupNoticeRec
 
 /// The gallery / `ui_test` specimen: a static group-notice card with an
 /// attachment, so its layout is swept by the harness login-free (a live notice
-/// needs a grid). Registered in [`crate::ui_element::ELEMENTS`]; its buttons
+/// needs a grid). Registered in `crate::ui_element::ELEMENTS`; its buttons
 /// report an inert [`UiAction`] rather than opening anything.
-pub(crate) fn spawn_group_notice_specimen(
+pub fn spawn_group_notice_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

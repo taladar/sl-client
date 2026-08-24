@@ -28,7 +28,7 @@
 //!   `floater_fs_contact_set_configuration`). The reply fields commit on losing
 //!   focus, and on the floater turning to another set, as the reference's do.
 //! - **Add Resident…** files someone chosen in the shared
-//!   [avatar picker](crate::avatar_picker); **Move to Set…** opens the
+//!   avatar picker; **Move to Set…** opens the
 //!   add-to-set floater in move mode; **Remove from Set** confirms first.
 //! - **Set Alias… / Rem Alias… / Rem DN…** are the reference's three pseudonym
 //!   buttons: the first raises its `SetAvatarPseudonym` prompt, the other two
@@ -36,7 +36,7 @@
 //!   here alone — an alias is mirrored into the name cache, so the person is
 //!   renamed everywhere at once ([`crate::contact_sets`]).
 //! - Each member row is **tinted with that person's set colour**
-//!   ([`ContactSets::color_of`]) — the same answer the radar, name tags and chat
+//!   (`ContactSets::color_of`) — the same answer the radar, name tags and chat
 //!   will read once they colour by set, so what the panel shows is what the rest
 //!   of the viewer will show.
 //!
@@ -45,8 +45,8 @@
 //! Each action button is **greyed and inert** whenever it does not apply to
 //! what the panel is showing — *Configure…* with a pseudo-set chosen (there is
 //! no *All Sets* to configure), *Rem Alias…* with nobody selected or nobody
-//! aliased, and so on ([`ContactSetsButton::is_enabled`], the one predicate both
-//! [`sync_panel_button_states`] and [`on_panel_button_press`] read, so the look
+//! aliased, and so on (`ContactSetsButton::is_enabled`, the one predicate both
+//! `sync_panel_button_states` and `on_panel_button_press` read, so the look
 //! and the behaviour cannot drift). The greying is the **skin's**: each button
 //! and label carries a base class and gains `.sk-disabled-surface` /
 //! `.sk-disabled-text` on top, so a skin decides what greyed looks like.
@@ -54,7 +54,7 @@
 //! # One way in
 //!
 //! Nothing here mutates the sets: every button, floater and pick writes a
-//! [`RequestContactSet`], so the model's guards decide — the same arrangement the
+//! `RequestContactSet`, so the model's guards decide — the same arrangement the
 //! block list has with [`RequestBlock`](crate::world_api::RequestBlock).
 //!
 //! Reference (Firestorm, read-only): `fspanelcontactsets`,
@@ -505,7 +505,7 @@ enum ContactSetsButton {
     RemoveDisplayName,
 }
 
-/// An action button's label node, so [`sync_panel_button_states`] can grey the
+/// An action button's label node, so `sync_panel_button_states` can grey the
 /// two nodes together (bevy_ui has no style inheritance, so the label carries
 /// its own colour).
 #[derive(Component, Debug, Clone, Copy)]
@@ -531,7 +531,7 @@ impl ContactSetsButton {
     }
 
     /// Whether this button applies to what the panel is showing right now —
-    /// what [`sync_panel_button_states`] greys on, and what the press handler
+    /// what `sync_panel_button_states` greys on, and what the press handler
     /// checks before doing anything.
     ///
     /// Three preconditions between them cover all twelve: a **real** set is
@@ -593,19 +593,19 @@ enum ConfigToggle {
 /// **Add ▸ Set Alias** both write it, so the prompt is raised — and answered —
 /// in one place.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct OpenSetPseudonym {
+pub struct OpenSetPseudonym {
     /// The resident to alias.
-    pub(crate) agent: AgentKey,
+    pub agent: AgentKey,
     /// The best name the opening surface knows for them, shown in the prompt and
     /// remembered beside the alias.
-    pub(crate) name: String,
+    pub name: String,
 }
 
 // --- Plugin ---------------------------------------------------------------
 
 /// Registers the Contact Sets panel, its two floaters and their wiring.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ContactSetsPanelPlugin;
+pub struct ContactSetsPanelPlugin;
 
 impl Plugin for ContactSetsPanelPlugin {
     fn build(&self, app: &mut App) {
@@ -1970,8 +1970,8 @@ fn on_config_button_press(
 /// class (`.sk-button` / `.sk-text`) and gains a disabled one on top, so a skin
 /// decides what "greyed" looks like and dropping the class falls back to the
 /// base rule. `InteractionDisabled` is the state marker beside it — advisory for
-/// our hand-rolled buttons, which is why [`on_panel_button_press`] asks
-/// [`ContactSetsButton::is_enabled`] itself rather than trusting the marker.
+/// our hand-rolled buttons, which is why `on_panel_button_press` asks
+/// `ContactSetsButton::is_enabled` itself rather than trusting the marker.
 fn sync_panel_button_states(
     sets: Res<ContactSets>,
     view: Res<ContactSetsView>,

@@ -49,6 +49,7 @@ members = [
   "sl-viewer-media",
   "sl-viewer-notices",
   "sl-viewer-notifications",
+  "sl-viewer-people",
   "sl-viewer-pickers",
   "sl-viewer-places",
   "sl-viewer-platform",
@@ -125,6 +126,7 @@ sl-viewer-map = { path = "sl-viewer-map", version = "0.1.0" }
 sl-viewer-media = { path = "sl-viewer-media", version = "0.1.0" }
 sl-viewer-notices = { path = "sl-viewer-notices", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }
+sl-viewer-people = { path = "sl-viewer-people", version = "0.1.0" }
 sl-viewer-pickers = { path = "sl-viewer-pickers", version = "0.1.0" }
 sl-viewer-places = { path = "sl-viewer-places", version = "0.1.0" }
 sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }

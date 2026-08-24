@@ -24,18 +24,18 @@
 //! whether it is a pending invite, and a revision stamp, plus the name caches that
 //! resolve a peer / group / conference to a readable tab title. It is fed **only**
 //! from the [`SlEvent`] stream (the viewer never reaches into the session),
-//! mirroring [`crate::chat`]'s overlay but keyed per conversation.
+//! mirroring `crate::chat`'s overlay but keyed per conversation.
 //!
 //! A **resident's** name is the one thing the model does *not* cache: it lives
 //! in the shared avatar cache ([`crate::avatars::AvatarState`]), which every
 //! other surface reads, so a tab shows the same pseudonym / display name a name
 //! tag does. The model contributes to that cache instead — the sender names the
 //! wire stamps on messages and invitations — and asks it for the name of any
-//! one-to-one peer it cannot name yet ([`request_conversation_names`]), which
+//! one-to-one peer it cannot name yet (`request_conversation_names`), which
 //! is what titles a conversation *we* opened from a profile or a radar row
 //! rather than one the peer happened to speak in first.
-//! [`ConversationsUi`] is the parallel ECS side: the floater entities and one
-//! [`ConversationView`] per model entry, spawned lazily as entries appear and
+//! `ConversationsUi` is the parallel ECS side: the floater entities and one
+//! `ConversationView` per model entry, spawned lazily as entries appear and
 //! despawned when they close.
 //!
 //! # Which input widget fronts which tab
@@ -90,7 +90,7 @@ use crate::world_api::{
 
 /// The hosting floater's [`crate::floater::FloaterSpec::id`] — it also keys the
 /// window's remembered geometry in [`crate::floater_persist`].
-pub(crate) const CONVERSATIONS_FLOATER_ID: &str = "conversations";
+pub const CONVERSATIONS_FLOATER_ID: &str = "conversations";
 
 /// The tab strip's element id — the key [`crate::floater_persist`] remembers the
 /// strip / pane split width under (via the reused [`TabStrip`] / [`TabStripWidth`]).
@@ -161,7 +161,7 @@ const SCROLL_TO_BOTTOM: f32 = 1.0e6;
 
 /// The attention flash's frequency, in blinks per second — the tab / button
 /// alternates its highlight at this rate while a conversation has unread lines.
-pub(crate) const BLINK_HZ: f32 = 1.5;
+pub const BLINK_HZ: f32 = 1.5;
 
 /// An inactive tab's background — recessed, matching [`crate::ui_tab`]'s look.
 const TAB_INACTIVE_BACKGROUND: Color = Color::srgb(0.11, 0.13, 0.17);
@@ -405,7 +405,7 @@ pub(crate) enum ConversationTitle {
 /// the name caches that resolve a key to a readable title. Fed only from the
 /// event stream.
 #[derive(Resource, Debug)]
-pub(crate) struct ConversationModel {
+pub struct ConversationModel {
     /// The conversations, in tab order — Nearby is always index 0.
     entries: Vec<Conversation>,
     /// The active conversation — keyed (not indexed) so removing a tab never
@@ -738,7 +738,8 @@ impl ConversationModel {
     /// Whether any **IM / group / conference** conversation (not nearby chat) has
     /// unread lines — what makes the toolbar Conversations button flash while the
     /// window is closed.
-    pub(crate) fn has_im_attention(&self) -> bool {
+    #[must_use]
+    pub fn has_im_attention(&self) -> bool {
         self.entries
             .iter()
             .any(|entry| !entry.key.is_nearby() && entry.unread > 0)
@@ -1065,7 +1066,7 @@ struct KeyedRecallState {
 /// The plugin: the model + UI resources, the floater spawn, and the systems that
 /// ingest events, spawn / close tabs, refresh the view and route input.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ConversationsPlugin;
+pub struct ConversationsPlugin;
 
 impl Plugin for ConversationsPlugin {
     fn build(&self, app: &mut App) {
@@ -1124,7 +1125,7 @@ impl Plugin for ConversationsPlugin {
 
 /// Marker on the Conversations floater's own dock host, so
 /// [`position_conversations_dock_host`] can pin it without going through the
-/// (lazily-inserted) [`ConversationsUi`] resource.
+/// (lazily-inserted) `ConversationsUi` resource.
 #[derive(Component, Debug, Clone, Copy)]
 struct ConversationsDockHost;
 
@@ -1199,7 +1200,7 @@ fn spawn_conversations_floater(mut commands: Commands, root: Res<UiRoot>) {
 
 /// First-open content build (see [`spawn_conversations_floater`]): the
 /// strip/divider/pane split and the seeded Nearby view, ending with the
-/// [`ConversationsUi`] insert — whose appearance wakes the
+/// `ConversationsUi` insert — whose appearance wakes the
 /// `Option<Res<ConversationsUi>>` consumers, including the People/Groups pane
 /// builders that poll for it ([`crate::people`]).
 fn build_conversations_content(In(handle): In<FloaterHandle>, mut commands: Commands) {
@@ -2078,7 +2079,7 @@ fn request_keyed_recall(
 }
 
 /// Whether a nearby chat line should appear: it carries text and is not a
-/// typing-animation trigger (mirrors [`crate::chat`]).
+/// typing-animation trigger (mirrors `crate::chat`).
 const fn is_displayable(chat_type: &ChatType, message: &str) -> bool {
     !matches!(chat_type, ChatType::StartTyping | ChatType::StopTyping) && !message.is_empty()
 }

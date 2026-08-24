@@ -30,11 +30,12 @@ image = { version = "0.25.10", default-features = false, features = ["tga"] }
 # Civil dates, for turning a profile's "born on" string into an age in days.
 jiff = { version = "0.2.35" }
 parry3d = { version = "0.27.0" }
+sl-client-bevy = { workspace = true, features = ["bevy_pbr"] }
 # `bevy_pbr` for `preserve_glow_mask_alpha`, which the alpha-blended materials
 # here must call in `Material::specialize` or they bloom through the glow pass.
 # Enabled unconditionally rather than behind a forwarding feature: these are
 # render materials, so there is no build of this crate that would not want it.
-sl-client-bevy = { workspace = true, features = ["bevy_pbr"] }
+sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

@@ -27,15 +27,15 @@
 //! [`SlSessionEvent::FriendsSnapshot`]), presence
 //! ([`SlSessionEvent::FriendsOnline`] / [`SlSessionEvent::FriendsOffline`]),
 //! rights changes, termination, and name replies — mirroring
-//! [`crate::conversations`]'s pure model. [`FriendsView`] is the ordered,
+//! [`crate::conversations`]'s pure model. `FriendsView` is the ordered,
 //! render-ready projection the virtualized list ([`crate::virtual_list`]) binds
 //! its recycled rows to.
 //!
 //! # Sharing the strip with conversations
 //!
 //! The People tab and pane are added into the conversations floater's own strip /
-//! panel area (via [`crate::conversations::ConversationsUi`]); which of the two
-//! surfaces is front is arbitrated by [`crate::conversations::StripFocus`] so
+//! panel area (via `crate::conversations::ConversationsUi`); which of the two
+//! surfaces is front is arbitrated by `crate::conversations::StripFocus` so
 //! exactly one pane ever shows. Selecting the People tab takes the strip; the
 //! Friends "IM" action hands it back by opening a one-to-one conversation
 //! ([`crate::world_api::OpenConversation`]).
@@ -43,7 +43,7 @@
 //! Reference (Firestorm, read-only): `llpanelpeople`, `llavatarlist`,
 //! Vintage `floater_fs_contacts` / `panel_fs_contacts_friends`.
 //!
-//! [`viewer-social-groups`]: the separate ready roadmap task for the group list.
+//! `viewer-social-groups`: the separate ready roadmap task for the group list.
 
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
@@ -267,18 +267,18 @@ const FRIENDS_WIDTHS_SETTING: &str = "friends_widths";
 
 /// The account setting gating the friend online / offline toasts (the
 /// reference `ChatOnlineNotification`, surfaced on the Preferences alerts
-/// tab): while on, [`notify_friend_presence`] raises a `FriendOnlineOffline`
+/// tab): while on, `notify_friend_presence` raises a `FriendOnlineOffline`
 /// tip as a friend's presence changes. Lives in the `[notifications]` section
 /// with the other notification preferences.
-pub(crate) const SETTING_FRIEND_NOTIFY: &str = "ChatOnlineNotification";
+pub const SETTING_FRIEND_NOTIFY: &str = "ChatOnlineNotification";
 
 /// The account setting that lets a **contact set** ask for its members' online /
 /// offline toasts even while [`SETTING_FRIEND_NOTIFY`] is off (the reference
 /// `FSContactSetsNotificationToast`, default off — one opts in to the per-set
 /// path deliberately). The per-set flag itself lives on the set
-/// ([`crate::contact_sets::ContactSets::notifies`]); this is the master switch
+/// (`crate::contact_sets::ContactSets::notifies`); this is the master switch
 /// over all of them, so the feature can be turned off without editing every set.
-pub(crate) const SETTING_CONTACT_SET_NOTIFY: &str = "ContactSetsNotificationToast";
+pub const SETTING_CONTACT_SET_NOTIFY: &str = "ContactSetsNotificationToast";
 
 /// The friends list, expressed for the reusable table widget. The Name and Status
 /// columns are widget-owned **text** cells (Name gains the locale ellipsis); the
@@ -895,7 +895,7 @@ pub(crate) struct PeopleUi {
     /// spawned here (so the sub-tab switch in [`refresh_people`] can toggle it) but
     /// filled by [`crate::groups`], which owns the group list — the same
     /// deferred-into-another-plugin arrangement this pane itself uses with the
-    /// [`ConversationsUi`] strip.
+    /// `ConversationsUi` strip.
     groups_content: Entity,
     /// The Blocked sub-tab content container, shown for the Blocked tab. Like
     /// [`Self::groups_content`] it is spawned here (so the sub-tab switch owns
@@ -1047,7 +1047,7 @@ struct SelectPeople;
 
 /// Which of the People pane's sub-tabs a request wants fronted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PeopleSubTab {
+pub enum PeopleSubTab {
     /// The Friends list.
     Friends,
     /// The Groups list ([`crate::groups`]).
@@ -1073,7 +1073,7 @@ impl PeopleSubTab {
 /// request is **held** until the pane exists, since both it and the floater
 /// hosting it are built by deferred commands.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenPeopleSubTab(pub(crate) PeopleSubTab);
+pub struct OpenPeopleSubTab(pub PeopleSubTab);
 
 /// A not-yet-applied [`OpenPeopleSubTab`], kept while the People pane is still
 /// being built.
@@ -1120,7 +1120,7 @@ struct CellFriend(Option<FriendKey>);
 /// The People plugin: the model + view + selection resources, the deferred tab
 /// spawn, event ingest, name requests, selection, refresh, and row binding.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct PeoplePlugin;
+pub struct PeoplePlugin;
 
 impl Plugin for PeoplePlugin {
     fn build(&self, app: &mut App) {
@@ -1173,7 +1173,7 @@ impl Plugin for PeoplePlugin {
 
 /// Spawn the People tab and pane into the conversations floater's strip / panel
 /// area, once ([`PeopleUi`] absent) and only after that floater exists
-/// ([`ConversationsUi`] present). Runs each frame until it succeeds, then no-ops —
+/// (`ConversationsUi` present). Runs each frame until it succeeds, then no-ops —
 /// the robust alternative to Startup ordering across two plugins whose resources
 /// are inserted by deferred commands.
 fn spawn_people_tab(
@@ -1729,7 +1729,7 @@ fn spawn_action_button(commands: &mut Commands, actions: Entity, action: FriendA
 /// Groups sub-tab is selected. The group **list** that fills it is
 /// [`crate::groups`]'s job (the `viewer-social-groups` task); this pane only owns
 /// the slot and its Friends / Groups visibility toggle, exactly as the People pane
-/// itself is a slot hosted in the [`ConversationsUi`] strip.
+/// itself is a slot hosted in the `ConversationsUi` strip.
 fn spawn_groups_content(commands: &mut Commands, pane: Entity) -> Entity {
     commands
         .spawn((
@@ -2033,7 +2033,7 @@ fn apply_sort(
     }
 }
 
-/// Rebuild [`FriendsView`] whenever the model's revision advances, resetting the
+/// Rebuild `FriendsView` whenever the model's revision advances, resetting the
 /// list scroll to the top so the new order is read from its start.
 fn rebuild_friends_view(
     model: Res<FriendsModel>,

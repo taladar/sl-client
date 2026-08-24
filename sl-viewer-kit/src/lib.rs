@@ -48,4 +48,5 @@ pub mod raycast_index;
 pub mod shadow_visibility;
 pub mod sit_offset;
 pub mod sky_presets;
+pub mod slt;
 pub mod world_map_math;

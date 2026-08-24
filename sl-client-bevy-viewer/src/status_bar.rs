@@ -75,11 +75,10 @@ use sl_settings::SettingValue;
 
 use crate::i18n::{TransArgs, Translator};
 use crate::settings::ViewerSettings;
+use crate::slt;
 use crate::ui_font::UiFont;
 use crate::ui_perf::FixedSlotContentSize;
 use crate::world_api::AgentRegionPosition;
-
-pub(crate) mod slt;
 
 /// The read-out font size, in logical pixels.
 const STATUS_FONT_SIZE: f32 = 14.0;

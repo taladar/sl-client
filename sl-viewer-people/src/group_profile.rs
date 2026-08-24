@@ -22,7 +22,7 @@
 //!
 //! The **General** tab and the (small) roles list, member/role **details** area,
 //! and notice **compose** / **body** sub-panels are torn down and rebuilt from
-//! [`GroupProfileState`] when the floater opens on a group and when a reply
+//! `GroupProfileState` when the floater opens on a group and when a reply
 //! arrives — the same picker-list pattern as [`crate::avatar_profile`]. The
 //! (potentially large) **member** and **notice** lists are virtualized
 //! ([`crate::virtual_list`]) with persistent viewports driven by view resources,
@@ -358,7 +358,7 @@ const ABILITIES: [(u64, &str); 14] = [
 
 /// The set of group-notice ids the Notices tab has explicitly **requested** (by
 /// clicking a notice in the list). The reply arrives as an
-/// [`ImDialog::GroupNotice`] IM indistinguishable from an unsolicited push, so
+/// `ImDialog::GroupNotice` IM indistinguishable from an unsolicited push, so
 /// the group-notice toast host ([`crate::group_notice`]) consults this set to
 /// suppress a toast for a notice the user pulled up to read here — the reference
 /// distinction between `IM_GROUP_NOTICE_REQUESTED` (no popup) and a fresh
@@ -620,7 +620,7 @@ struct NoticeRow {
 // Dirty flags for the rebuilt sub-panels.
 // ---------------------------------------------------------------------------
 
-/// Which rebuilt sub-panels need repainting from [`GroupProfileState`].
+/// Which rebuilt sub-panels need repainting from `GroupProfileState`.
 #[expect(
     clippy::struct_excessive_bools,
     reason = "one independent repaint flag per rebuilt sub-panel; a bitflags newtype \
@@ -826,7 +826,8 @@ enum GroupProfileAction {
 // ---------------------------------------------------------------------------
 
 /// The plugin owning the group profile floater.
-pub(crate) struct GroupProfilePlugin;
+#[derive(Debug)]
+pub struct GroupProfilePlugin;
 
 impl Plugin for GroupProfilePlugin {
     /// Register the state, the open message, and the spawn / open / ingest /

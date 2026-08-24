@@ -8496,7 +8496,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sl-account-dirs",
- "sl-anim",
  "sl-audio",
  "sl-cef",
  "sl-client-bevy",
@@ -8516,6 +8515,7 @@ dependencies = [
  "sl-viewer-media",
  "sl-viewer-notices",
  "sl-viewer-notifications",
+ "sl-viewer-people",
  "sl-viewer-pickers",
  "sl-viewer-places",
  "sl-viewer-platform",
@@ -9095,6 +9095,7 @@ dependencies = [
  "parry3d",
  "pretty_assertions",
  "sl-client-bevy",
+ "sl-l10n",
  "thiserror 2.0.19",
  "tracing",
 ]
@@ -9176,6 +9177,37 @@ version = "0.1.0"
 dependencies = [
  "bevy_ecs",
  "pretty_assertions",
+]
+
+[[package]]
+name = "sl-viewer-people"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_flair",
+ "fs-err",
+ "jiff",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "sl-anim",
+ "sl-client-bevy",
+ "sl-l10n",
+ "sl-settings",
+ "sl-viewer-chat",
+ "sl-viewer-inventory",
+ "sl-viewer-kit",
+ "sl-viewer-map",
+ "sl-viewer-media",
+ "sl-viewer-notices",
+ "sl-viewer-notifications",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "tracing",
 ]
 
 [[package]]

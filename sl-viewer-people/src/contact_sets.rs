@@ -10,20 +10,20 @@
 //!
 //! # One store, one way in
 //!
-//! [`ContactSets`] is the whole model — the sets, their members, the per-account
+//! `ContactSets` is the whole model — the sets, their members, the per-account
 //! file, and the by-agent index the tinting consumers read. Every surface that
-//! changes something writes a [`RequestContactSet`] rather than touching the
-//! sets ([`apply_contact_set_requests`] runs the guards), the same shape the
+//! changes something writes a `RequestContactSet` rather than touching the
+//! sets (`apply_contact_set_requests` runs the guards), the same shape the
 //! render exceptions ([`crate::avatar_render_settings`]) and the mute list
 //! ([`crate::mutes`]) use. A refused request is logged with **why**
-//! ([`ContactSetRefusal`]), and a refused *rename* additionally raises the
+//! (`ContactSetRefusal`), and a refused *rename* additionally raises the
 //! reference's own `RenameContactSetFailure` notification, since that one is a
 //! user action that visibly did nothing.
 //!
 //! # The colour question: the smallest set wins
 //!
 //! A resident may be in several sets, so "what colour is this person" needs a
-//! rule. [`ContactSets::color_of`] answers with the colour of the **smallest**
+//! rule. `ContactSets::color_of` answers with the colour of the **smallest**
 //! set they belong to — the reference's rule (`LGGContactSets::getFriendColor`),
 //! and the one that reads right: the set with three people in it says more about
 //! someone than the set with eighty. Ties break by set name, so the answer is
@@ -35,9 +35,9 @@
 //! (`viewer-contact-set-pseudonyms`): a name the user gives one resident, and
 //! its special case, **display-name removal** (show me this person's legacy name
 //! and not the display name they chose). Those are per resident rather than per
-//! set, and they are not a panel feature: [`apply_name_aliases`] mirrors them
+//! set, and they are not a panel feature: `apply_name_aliases` mirrors them
 //! into the [name cache](crate::avatars::NameRecord) as a
-//! [`NameAlias`](crate::avatars::NameAlias), so every surface that resolves a
+//! [`NameAlias`], so every surface that resolves a
 //! name — tags, the radar, tooltips, chat — shows the alias without knowing that
 //! contact sets exist.
 //!
@@ -54,16 +54,16 @@
 //! same file:
 //!
 //! - **Notify** — announce this set's members coming and going even when the
-//!   global friend online / offline notice is off ([`ContactSets::notifies`],
+//!   global friend online / offline notice is off (`ContactSets::notifies`,
 //!   read by [`crate::people`]).
 //! - **Sort by online status** — list this set online-first in the panel.
 //! - **Per-set autoresponses** — a canned reply of this set's own for each of
-//!   the three answering modes ([`SetAutoresponseMode`]), consulted by
+//!   the three answering modes (`SetAutoresponseMode`), consulted by
 //!   [`crate::presence`] *before* the global reply, so "my partner gets a
 //!   different Unavailable message" works.
 //!
 //! Someone may be in several sets, so the reply lookup needs the same rule the
-//! colour does, and uses it: [`ContactSets::autoresponse_for`] answers with the
+//! colour does, and uses it: `ContactSets::autoresponse_for` answers with the
 //! **smallest** set that has one, ties broken by name.
 //!
 //! # Names
@@ -72,7 +72,7 @@
 //! most of the time — so, exactly as the render-exception store does, each
 //! member's name is remembered as the surface that filed them knew it, and the
 //! **live name cache** is read over it when it has an answer
-//! ([`refresh_contact_set_names`]). A resolution never rewrites the stored name:
+//! (`refresh_contact_set_names`). A resolution never rewrites the stored name:
 //! a grid answers an id it cannot resolve with a placeholder, and adopting that
 //! would destroy the record of who was filed.
 //!
@@ -83,9 +83,9 @@
 //! a `friends` map — the same layout Firestorm's `settings_friends_groups.xml`
 //! uses, so a list exported from there ports across by transcription. The
 //! reference's own internal keys (`globalSettings`, `extraAvs`) are recognised
-//! and skipped rather than mistaken for sets, its [`PSEUDONYMS_KEY`] map is read
+//! and skipped rather than mistaken for sets, its `PSEUDONYMS_KEY` map is read
 //! and written as the reference writes it, and the member-name memo above is our
-//! addition under [`NAMES_KEY`].
+//! addition under `NAMES_KEY`.
 //!
 //! Reference (Firestorm, read-only): `lggcontactsets`, `fspanelcontactsets`.
 
@@ -135,7 +135,7 @@ const DISPLAY_NAME_REMOVED: &str = "--- ---";
 ///
 /// `globalSettings` (the fallback colour for everyone in no set) and `extraAvs`
 /// (which members are not friends) have no consumer here yet, so they are
-/// skipped on the way in and not written back. ([`PSEUDONYMS_KEY`] used to be
+/// skipped on the way in and not written back. (`PSEUDONYMS_KEY` used to be
 /// one of them and is now read.)
 const REFERENCE_INTERNAL_KEYS: &[&str] = &["globalSettings", "extraAvs"];
 
@@ -318,7 +318,7 @@ impl ContactSet {
     }
 }
 
-/// Why a [`RequestContactSet`] was refused — the guards, named so the caller can
+/// Why a `RequestContactSet` was refused — the guards, named so the caller can
 /// react (the rename failure raises the reference's notification) and the tests
 /// can assert on them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -366,11 +366,11 @@ pub(crate) struct ContactSets {
     names: HashMap<AgentKey, String>,
     /// The user's alias per resident, as the reference stores it: the alias
     /// text, or [`DISPLAY_NAME_REMOVED`] for "show their legacy name only".
-    /// Persisted under [`PSEUDONYMS_KEY`]. Independent of set membership — one
+    /// Persisted under `PSEUDONYMS_KEY`. Independent of set membership — one
     /// may alias someone filed nowhere.
     pseudonyms: HashMap<AgentKey, String>,
     /// What the live name cache last answered for a member, mirrored here by
-    /// [`refresh_contact_set_names`] so a view rebuilds off one revision instead
+    /// `refresh_contact_set_names` so a view rebuilds off one revision instead
     /// of polling the name cache per row. Session state: never persisted.
     live_names: HashMap<AgentKey, String>,
     /// Bumped on every change, so a view rebuilds exactly when something moved.
@@ -544,7 +544,7 @@ impl ContactSets {
     }
 
     /// Every alias, as the name cache takes them — what
-    /// [`apply_name_aliases`] mirrors.
+    /// `apply_name_aliases` mirrors.
     fn aliases(&self) -> HashMap<AgentKey, NameAlias> {
         self.pseudonyms
             .keys()
@@ -926,7 +926,7 @@ pub(crate) enum RequestContactSet {
         /// The resident.
         agent: AgentKey,
         /// The best name the requesting surface knows for them (empty when it
-        /// knows none — [`refresh_contact_set_names`] fills it in later).
+        /// knows none — `refresh_contact_set_names` fills it in later).
         name: String,
     },
     /// Take a resident out of a set.
@@ -977,7 +977,7 @@ pub(crate) enum RequestContactSet {
 /// Registers the contact-set store, its requests and its persistence. The panel
 /// over it is [`crate::contact_sets_panel`].
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ContactSetsPlugin;
+pub struct ContactSetsPlugin;
 
 impl Plugin for ContactSetsPlugin {
     fn build(&self, app: &mut App) {
@@ -997,7 +997,7 @@ impl Plugin for ContactSetsPlugin {
     }
 }
 
-/// Turn each [`RequestContactSet`] into a change to the sets, after the guards.
+/// Turn each `RequestContactSet` into a change to the sets, after the guards.
 /// A refused rename raises the reference's `RenameContactSetFailure`, since a
 /// rename is a user action whose refusal is otherwise invisible; the rest are
 /// logged.

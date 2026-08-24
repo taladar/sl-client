@@ -21,7 +21,7 @@
 //!
 //! The list is **multi-select**, as the reference's is: the table widget's
 //! [`TableSelectionMode::Multi`] supplies the Ctrl / Shift click algebra, the
-//! radar keeps the answer by [`AgentKey`] ([`RadarSelection`]) so it survives the
+//! radar keeps the answer by [`AgentKey`] (`RadarSelection`) so it survives the
 //! every-second re-sort, and a right-click opens one of two menus by how many
 //! rows are in it — the reference's `menu_fs_radar.xml` and its separate
 //! `menu_fs_radar_multiselect.xml`. Both declare over the *same* action arms.
@@ -100,7 +100,7 @@ use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{MapTracking, TrackTarget};
 
 /// The radar floater's stable id (persistence, `SL_VIEWER_OPEN_FLOATER`).
-pub(crate) const RADAR_FLOATER_ID: &str = "radar";
+pub const RADAR_FLOATER_ID: &str = "radar";
 
 /// The `element` the radar's menu / UI actions are attributed to.
 const RADAR_ELEMENT: &str = "radar";
@@ -121,23 +121,23 @@ const DOUBLE_CLICK_SECS: f32 = 0.4;
 const RADAR_SECTION: &[&str] = &["radar"];
 
 /// Report entering chat (say) range.
-pub(crate) const SETTING_CHAT_ENTER: &str = "RadarReportChatRangeEnter";
+pub const SETTING_CHAT_ENTER: &str = "RadarReportChatRangeEnter";
 /// Report leaving chat (say) range.
-pub(crate) const SETTING_CHAT_LEAVE: &str = "RadarReportChatRangeLeave";
+pub const SETTING_CHAT_LEAVE: &str = "RadarReportChatRangeLeave";
 /// Report entering draw distance.
-pub(crate) const SETTING_DRAW_ENTER: &str = "RadarReportDrawRangeEnter";
+pub const SETTING_DRAW_ENTER: &str = "RadarReportDrawRangeEnter";
 /// Report leaving draw distance.
-pub(crate) const SETTING_DRAW_LEAVE: &str = "RadarReportDrawRangeLeave";
+pub const SETTING_DRAW_LEAVE: &str = "RadarReportDrawRangeLeave";
 /// Report entering the own region.
-pub(crate) const SETTING_SIM_ENTER: &str = "RadarReportSimRangeEnter";
+pub const SETTING_SIM_ENTER: &str = "RadarReportSimRangeEnter";
 /// Report leaving the own region.
-pub(crate) const SETTING_SIM_LEAVE: &str = "RadarReportSimRangeLeave";
+pub const SETTING_SIM_LEAVE: &str = "RadarReportSimRangeLeave";
 /// Where alerts go: `"chat"` (Nearby Chat line) or `"toast"`.
-pub(crate) const SETTING_ALERT_OUTPUT: &str = "RadarAlertOutput";
+pub const SETTING_ALERT_OUTPUT: &str = "RadarAlertOutput";
 /// Arm the young-account alert.
-pub(crate) const SETTING_AGE_ALERT: &str = "RadarAgeAlert";
+pub const SETTING_AGE_ALERT: &str = "RadarAgeAlert";
 /// The young-account threshold, days.
-pub(crate) const SETTING_AGE_DAYS: &str = "RadarAgeAlertDays";
+pub const SETTING_AGE_DAYS: &str = "RadarAgeAlertDays";
 /// Limit the radar list to [`SETTING_RANGE`] metres.
 const SETTING_LIMIT: &str = "RadarLimitByRange";
 /// The near-me range limit, metres (the reference's `NearMeRange`).
@@ -216,7 +216,7 @@ const COL_COMPLEXITY: usize = 8;
 ///
 /// Selection is the widget's [`TableSelectionMode::Multi`] — the reference radar
 /// is multi-select and ships a whole second menu for it — but the *identities*
-/// stay radar-owned ([`RadarSelection`]): the widget addresses rows by data
+/// stay radar-owned (`RadarSelection`): the widget addresses rows by data
 /// index, and this list re-sorts every sweep, so the radar re-projects its agents
 /// onto the new indices after each rebuild.
 static RADAR_TABLE: TableSpec = TableSpec {
@@ -655,7 +655,8 @@ struct RadarMenuFacts<'w> {
 // --- Plugin ---------------------------------------------------------------
 
 /// Registers the radar model, sweep systems, floater and settings.
-pub(crate) struct RadarPlugin;
+#[derive(Debug)]
+pub struct RadarPlugin;
 
 impl Plugin for RadarPlugin {
     fn build(&self, app: &mut App) {
@@ -1613,7 +1614,7 @@ type SpecimenRow = (&'static str, Color, &'static str, &'static str, Color);
 /// live floater binds the shared virtualized table widget (swept by its own
 /// consumers); here the radar-specific composition is static so its layout
 /// is swept.
-pub(crate) fn spawn_radar_specimen(
+pub fn spawn_radar_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,

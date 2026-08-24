@@ -15,7 +15,7 @@
 //!
 //! Every Block affordance in the viewer writes a [`RequestBlock`] rather than a
 //! `Command::Mute`; [`apply_block_requests`] runs the reference's
-//! `LLMuteList::add` guards ([`check_block`]) and only then puts the entry on
+//! `LLMuteList::add` guards (`check_block`) and only then puts the entry on
 //! the wire. That is why the checks live here and not in the block-list UI —
 //! a command already written to the outgoing stream cannot be un-sent, so the
 //! refusal has to happen before the surface commits to it.
@@ -24,7 +24,7 @@
 //!
 //! The model keeps the **whole** [`MuteEntry`] (name, type and the per-aspect
 //! [`MuteFlags`] exceptions), because the block-list surface
-//! ([`crate::blocked`]) lists and edits them; a derived [`HashSet`] of muted
+//! ([`crate::blocked`]) lists and edits them; a derived `HashSet` of muted
 //! ids keeps the hot per-frame `is_muted` query (name tags, world sounds) a
 //! single hash lookup, as it was when that was all the model held.
 //!
@@ -48,7 +48,7 @@ use crate::world_api::{MUTE_LIST_LIMIT, MuteModel, RequestBlock};
 
 /// Request the mute list once the session is up (the login handshake has
 /// produced an agent id).
-pub(crate) fn request_mute_list(
+pub fn request_mute_list(
     identity: Res<SlIdentity>,
     mut model: ResMut<MuteModel>,
     mut commands: MessageWriter<SlCommand>,
@@ -62,7 +62,7 @@ pub(crate) fn request_mute_list(
 /// Fold a received mute list into the model (`MuteList` replaces the list;
 /// `MuteListUnchanged` means the cached copy the request named is current —
 /// nothing to do, and the locally-noted entries stay).
-pub(crate) fn ingest_mute_list(mut events: MessageReader<SlEvent>, mut model: ResMut<MuteModel>) {
+pub fn ingest_mute_list(mut events: MessageReader<SlEvent>, mut model: ResMut<MuteModel>) {
     for event in events.read() {
         if let SlSessionEvent::MuteList(entries) = &event.0 {
             model.replace(entries.clone());
@@ -73,10 +73,7 @@ pub(crate) fn ingest_mute_list(mut events: MessageReader<SlEvent>, mut model: Re
 /// Mirror locally-issued mutes/unmutes into the model by watching the outgoing
 /// command stream (every mute menu writes an [`SlCommand`], so no call site
 /// needs to know this model exists).
-pub(crate) fn note_local_mutes(
-    mut outgoing: MessageReader<SlCommand>,
-    mut model: ResMut<MuteModel>,
-) {
+pub fn note_local_mutes(mut outgoing: MessageReader<SlCommand>, mut model: ResMut<MuteModel>) {
     for command in outgoing.read() {
         match &command.0 {
             Command::Mute {
@@ -179,7 +176,7 @@ pub(crate) fn check_block(
 
 /// Turn each [`RequestBlock`] into an `UpdateMuteListEntry` — or, when a guard
 /// refuses it, into the matching notification.
-pub(crate) fn apply_block_requests(
+pub fn apply_block_requests(
     mut requests: MessageReader<RequestBlock>,
     model: Res<MuteModel>,
     identity: Res<SlIdentity>,

@@ -29,13 +29,13 @@
 //! changes), the active group ([`SlSessionEvent::ActiveGroupChanged`]), and the
 //! drop / leave lifecycle events — mirroring [`crate::people`]'s pure model. Unlike
 //! the friends list it needs no name-resolution pass: each membership record
-//! already carries its group name. [`GroupsView`] is the ordered, render-ready
+//! already carries its group name. `GroupsView` is the ordered, render-ready
 //! projection the virtualized list ([`crate::virtual_list`]) binds its recycled
 //! rows to.
 //!
 //! # Sharing the pane with the People surface
 //!
-//! The list is built into [`crate::people::PeopleUi::groups_content`], the slot the
+//! The list is built into `crate::people::PeopleUi::groups_content`, the slot the
 //! People pane already toggles between its Friends and Groups sub-tabs. This module
 //! never touches that visibility — it only owns what is *inside* the Groups slot.
 //! The IM action hands the strip back to a conversation the same way the Friends
@@ -263,7 +263,7 @@ struct GroupRowParts {
 /// The Groups plugin: the model + view + selection resources, the deferred list
 /// spawn (into the People pane), event ingest, selection, refresh, and row binding.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct GroupsPlugin;
+pub struct GroupsPlugin;
 
 impl Plugin for GroupsPlugin {
     fn build(&self, app: &mut App) {
@@ -679,10 +679,7 @@ fn spawn_confirm_button(
 // ---------------------------------------------------------------------------
 
 /// Fold every group-relevant inbound event into [`GroupsModel`].
-pub(crate) fn ingest_group_events(
-    mut events: MessageReader<SlEvent>,
-    mut model: ResMut<GroupsModel>,
-) {
+pub fn ingest_group_events(mut events: MessageReader<SlEvent>, mut model: ResMut<GroupsModel>) {
     for event in events.read() {
         match &event.0 {
             SlSessionEvent::GroupMemberships(memberships) => model.apply_memberships(memberships),
@@ -716,7 +713,7 @@ pub(crate) fn ingest_group_events(
 // View / refresh
 // ---------------------------------------------------------------------------
 
-/// Rebuild [`GroupsView`] whenever the model's revision advances, resetting the
+/// Rebuild `GroupsView` whenever the model's revision advances, resetting the
 /// list scroll to the top so the new order is read from its start.
 fn rebuild_groups_view(
     model: Res<GroupsModel>,

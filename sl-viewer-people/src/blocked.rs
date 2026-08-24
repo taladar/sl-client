@@ -26,7 +26,7 @@
 //!   muted, so (again like the reference) the entry is removed instead. The
 //!   toggles apply only to a **resident** mute, the one kind whose flags the
 //!   grid honours.
-//! - **Block Resident…** opens the shared [avatar picker](crate::avatar_picker)
+//! - **Block Resident…** opens the shared avatar picker
 //!   and blocks the pick; **Block object by name…** opens the small by-name
 //!   floater (the reference's `floater_mute_object.xml`) and adds a
 //!   [`MuteType::ByName`] entry — the way to silence a spammy object you cannot
@@ -412,7 +412,7 @@ impl BlockedButton {
 /// Registers the block list's view state, the deferred panel build, the by-name
 /// floater and the action wiring.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct BlockedPlugin;
+pub struct BlockedPlugin;
 
 impl Plugin for BlockedPlugin {
     fn build(&self, app: &mut App) {

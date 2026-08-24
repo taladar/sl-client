@@ -177,7 +177,6 @@ jiff = { version = "0.2.35" }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sl-account-dirs = { workspace = true }
-sl-anim = { workspace = true }
 sl-audio = { path = "../sl-audio", version = "0.1.0" }
 sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
@@ -199,6 +198,7 @@ sl-viewer-map = { workspace = true }
 sl-viewer-media = { workspace = true }
 sl-viewer-notices = { workspace = true }
 sl-viewer-notifications = { workspace = true }
+sl-viewer-people = { workspace = true }
 sl-viewer-pickers = { workspace = true }
 sl-viewer-places = { workspace = true }
 sl-viewer-platform = { workspace = true }

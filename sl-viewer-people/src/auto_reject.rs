@@ -31,7 +31,7 @@
 //!
 //! # What a rejection does
 //!
-//! [`reject_for`] is the whole decision, a pure function of the mode flags and
+//! `reject_for` is the whole decision, a pure function of the mode flags and
 //! two facts about the offer (is the sender a friend, is the group one we are
 //! already in). Its caller — the offers host ([`crate::offers_invites`]) — then:
 //!
@@ -65,44 +65,43 @@ use crate::world_api::SETTING_AUTORESPONSE_ITEM;
 
 /// Whether incoming teleport offers and requests are rejected unanswered (the
 /// reference `FSRejectTeleportOffersMode`). Account-scoped and persisted.
-pub(crate) const SETTING_REJECT_TELEPORT_OFFERS: &str = "RejectTeleportOffersMode";
+pub const SETTING_REJECT_TELEPORT_OFFERS: &str = "RejectTeleportOffersMode";
 
 /// Whether a **friend's** teleport offer is exempt from
 /// [`SETTING_REJECT_TELEPORT_OFFERS`] (the reference
 /// `FSDontRejectTeleportOffersFromFriends`).
-pub(crate) const SETTING_DONT_REJECT_TELEPORT_FROM_FRIENDS: &str =
-    "DontRejectTeleportOffersFromFriends";
+pub const SETTING_DONT_REJECT_TELEPORT_FROM_FRIENDS: &str = "DontRejectTeleportOffersFromFriends";
 
 /// The canned reply sent to a rejected teleport offer (the reference
 /// `FSRejectTeleportOffersResponse`).
-pub(crate) const SETTING_REJECT_TELEPORT_RESPONSE: &str = "RejectTeleportOffersResponse";
+pub const SETTING_REJECT_TELEPORT_RESPONSE: &str = "RejectTeleportOffersResponse";
 
 /// Whether incoming friendship requests are rejected (the reference
 /// `FSRejectFriendshipRequestsMode`). Account-scoped and persisted.
-pub(crate) const SETTING_REJECT_FRIENDSHIP_REQUESTS: &str = "RejectFriendshipRequestsMode";
+pub const SETTING_REJECT_FRIENDSHIP_REQUESTS: &str = "RejectFriendshipRequestsMode";
 
 /// The canned reply sent to a rejected friendship request (the reference
 /// `FSRejectFriendshipRequestsResponse`).
-pub(crate) const SETTING_REJECT_FRIENDSHIP_RESPONSE: &str = "RejectFriendshipRequestsResponse";
+pub const SETTING_REJECT_FRIENDSHIP_RESPONSE: &str = "RejectFriendshipRequestsResponse";
 
 /// Whether incoming group invitations are rejected (the reference
 /// `FSRejectAllGroupInvitesMode`). Account-scoped and persisted.
-pub(crate) const SETTING_REJECT_ALL_GROUP_INVITES: &str = "RejectAllGroupInvitesMode";
+pub const SETTING_REJECT_ALL_GROUP_INVITES: &str = "RejectAllGroupInvitesMode";
 
 /// Whether an invitation to a group the agent is **already a member of** is
 /// still shown (the reference `FSShowJoinedGroupInvitations`; default off, so
 /// the redundant re-invite is dropped).
-pub(crate) const SETTING_SHOW_JOINED_GROUP_INVITATIONS: &str = "ShowJoinedGroupInvitations";
+pub const SETTING_SHOW_JOINED_GROUP_INVITATIONS: &str = "ShowJoinedGroupInvitations";
 
 /// Whether an ad-hoc conference invitation is silently declined (the reference
 /// `FSIgnoreAdHocSessions`). Group IMs are never touched by it — only the
 /// multi-resident conferences a griefer can pull anyone into.
-pub(crate) const SETTING_IGNORE_AD_HOC_SESSIONS: &str = "IgnoreAdHocSessions";
+pub const SETTING_IGNORE_AD_HOC_SESSIONS: &str = "IgnoreAdHocSessions";
 
 /// Whether a **friend's** conference invitation is exempt from
 /// [`SETTING_IGNORE_AD_HOC_SESSIONS`] (the reference
 /// `FSDontIgnoreAdHocFromFriends`).
-pub(crate) const SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS: &str = "DontIgnoreAdHocFromFriends";
+pub const SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS: &str = "DontIgnoreAdHocFromFriends";
 
 /// The default rejected-teleport reply (the reference
 /// `RejectTeleportOffersResponseDefault`, without its `[APP_NAME]`
@@ -121,7 +120,7 @@ const REJECT_FRIENDSHIP_RESPONSE_DEFAULT: &str = "The Resident you messaged has 
 /// the modes they sit beside in the menu, and every one of them defaults
 /// **off** — a viewer that silently swallowed offers out of the box would be a
 /// trap.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         PRESENCE_SECTION,
         SETTING_REJECT_TELEPORT_OFFERS,
@@ -198,7 +197,7 @@ pub(crate) enum OfferClass {
     GroupInvite,
 }
 
-/// Why an offer was rejected without ever being shown — what [`reject_for`]
+/// Why an offer was rejected without ever being shown — what `reject_for`
 /// decided, so the caller can pick the reply (if any) and log the reason.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RejectKind {
@@ -339,7 +338,7 @@ pub(crate) fn response_text(settings: Option<&ViewerSettings>, kind: RejectKind)
 /// The sibling of [`crate::presence::toggle_presence_mode`], and split from it
 /// for the same reason the modes are separate: these three are pure settings
 /// with no session state and no wire representation at all.
-pub(crate) fn toggle_reject_mode(
+pub fn toggle_reject_mode(
     action: &str,
     settings: &mut ViewerSettings,
     notify: &mut bevy::prelude::MessageWriter<ShowNotification>,
