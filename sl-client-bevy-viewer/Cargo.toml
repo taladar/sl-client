@@ -185,13 +185,12 @@ sl-client-bevy = { workspace = true, features = [
 ] }
 sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
-sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
 sl-repl = { workspace = true }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
   "encode",
 ] }
-sl-types = { workspace = true }
+sl-viewer-asset-editors = { workspace = true }
 sl-viewer-audio = { workspace = true }
 sl-viewer-edit = { workspace = true }
 sl-viewer-inventory = { workspace = true }
@@ -201,6 +200,7 @@ sl-viewer-media = { workspace = true }
 sl-viewer-notices = { workspace = true }
 sl-viewer-notifications = { workspace = true }
 sl-viewer-pickers = { workspace = true }
+sl-viewer-places = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-search = { workspace = true }
 sl-viewer-settings = { workspace = true }

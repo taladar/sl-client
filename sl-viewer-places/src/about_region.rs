@@ -16,8 +16,8 @@
 //! # Build once, update in place (no despawn)
 //!
 //! Every tab's structure is spawned **once** at start-up and never torn down.
-//! Replies update values *in place*: value labels via [`set_value_node`],
-//! checkbox glyphs via [`set_check_visual`], the maturity combo by writing its
+//! Replies update values *in place*: value labels via `set_value_node`,
+//! checkbox glyphs via `set_check_visual`, the maturity combo by writing its
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
 //! `EditableText::editor_mut().set_text` on a fresh region, and the four estate
 //! access lists (managers, allowed residents, allowed groups, banned residents)
@@ -194,7 +194,7 @@ const MATURITY_KEYS: &[&str] = &[
 
 /// A request to open the Region / Estate floater on the agent's current region.
 #[derive(Message, Debug, Clone, Copy, Default)]
-pub(crate) struct OpenAboutRegion;
+pub struct OpenAboutRegion;
 
 // ---------------------------------------------------------------------------
 // State.
@@ -719,7 +719,7 @@ struct TerrainSwatch {
 
 /// The plugin wiring the Region / Estate floater into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AboutRegionPlugin;
+pub struct AboutRegionPlugin;
 
 impl Plugin for AboutRegionPlugin {
     fn build(&self, app: &mut App) {

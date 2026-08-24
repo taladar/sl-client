@@ -1,5 +1,5 @@
 //! The **rich read-only rendering of a notecard body** (part of
-//! [`viewer-notecard-editor`]): draws a decoded [`sl_notecard::Notecard`] as
+//! `viewer-notecard-editor`): draws a decoded [`sl_notecard::Notecard`] as
 //! flowing text with its **embedded inventory items** shown *inline* as
 //! clickable icon-and-name boxes, and its prose URLs / SLURLs / `secondlife://`
 //! app links linkified — the reference `llviewertexteditor`'s embedded-item
@@ -10,7 +10,7 @@
 //! Bevy 0.19's editable text field is `parley::PlainEditor`: one style for the
 //! whole buffer, no inline boxes. Rendering embedded items *inline while
 //! editing* waits on the inline-box rich-text widget
-//! ([`viewer-lsl-editor-widget`], not yet built). But a **read-only** reader
+//! (`viewer-lsl-editor-widget`, not yet built). But a **read-only** reader
 //! needs no caret, so it can lay the body out the way [`crate::linkified_text`]
 //! already does: **discrete pickable nodes** in a wrapping row — each embedded
 //! item a real clickable box, each prose run linkified natively — rather than
@@ -371,7 +371,7 @@ fn handle_embedded_copy_confirmations(
 /// The plugin owning the notecard reader's confirm-to-copy routing (the reader's
 /// per-item observers are attached at spawn and need no registration).
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct NotecardRenderPlugin;
+pub struct NotecardRenderPlugin;
 
 impl Plugin for NotecardRenderPlugin {
     fn build(&self, app: &mut App) {

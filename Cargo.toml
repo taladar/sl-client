@@ -39,6 +39,7 @@ members = [
   "sl-terrain",
   "sl-texture",
   "sl-tree",
+  "sl-viewer-asset-editors",
   "sl-viewer-audio",
   "sl-viewer-edit",
   "sl-viewer-inventory",
@@ -48,6 +49,7 @@ members = [
   "sl-viewer-notices",
   "sl-viewer-notifications",
   "sl-viewer-pickers",
+  "sl-viewer-places",
   "sl-viewer-platform",
   "sl-viewer-search",
   "sl-viewer-settings",
@@ -112,6 +114,7 @@ sl-proto = { path = "sl-proto", version = "0.1.0" }
 sl-repl = { path = "sl-repl", version = "0.1.0" }
 sl-settings = { path = "sl-settings", version = "0.1.0" }
 sl-types = { version = "0.8.0" }
+sl-viewer-asset-editors = { path = "sl-viewer-asset-editors", version = "0.1.0" }
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
 sl-viewer-edit = { path = "sl-viewer-edit", version = "0.1.0" }
 sl-viewer-inventory = { path = "sl-viewer-inventory", version = "0.1.0" }
@@ -121,6 +124,7 @@ sl-viewer-media = { path = "sl-viewer-media", version = "0.1.0" }
 sl-viewer-notices = { path = "sl-viewer-notices", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }
 sl-viewer-pickers = { path = "sl-viewer-pickers", version = "0.1.0" }
+sl-viewer-places = { path = "sl-viewer-places", version = "0.1.0" }
 sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }
 sl-viewer-search = { path = "sl-viewer-search", version = "0.1.0" }
 sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }

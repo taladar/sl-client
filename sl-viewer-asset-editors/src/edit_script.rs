@@ -15,7 +15,7 @@
 //! The reference viewer's script editor is **syntax-highlighted** with a gutter,
 //! line numbers, brace matching and a clickable error list that jumps the caret
 //! to the offending line. All of that needs the per-range-coloured, undo-capable
-//! text widget tracked by [`viewer-lsl-editor-widget`] (a `parley::PlainEditor`
+//! text widget tracked by `viewer-lsl-editor-widget` (a `parley::PlainEditor`
 //! fork), which is not yet built — Bevy 0.19's editable text takes **one style
 //! for the whole buffer**. Until it lands, this editor:
 //!
@@ -29,10 +29,10 @@
 //!   picks the capability.
 //!
 //! Deferred to their own tasks: syntax colour, brace match, folding and the
-//! states/events outline ([`viewer-lsl-editor-highlight`], which drives the
+//! states/events outline (`viewer-lsl-editor-highlight`, which drives the
 //! widget's per-range colour from the LSL lexer); a monospace editing font,
-//! line-number gutter and clickable go-to-line ([`viewer-lsl-editor-widget`]);
-//! and the Firestorm preprocessor ([`viewer-lsl-editor-save-compile`] keeps it
+//! line-number gutter and clickable go-to-line (`viewer-lsl-editor-widget`);
+//! and the Firestorm preprocessor (`viewer-lsl-editor-save-compile` keeps it
 //! out of v1).
 //!
 //! # Read-only when you cannot modify
@@ -109,7 +109,8 @@ const READONLY_BODY_WIDTH: f32 = 520.0;
 // ---------------------------------------------------------------------------
 
 /// The plugin owning the script editor floater.
-pub(crate) struct EditScriptPlugin;
+#[derive(Debug)]
+pub struct EditScriptPlugin;
 
 impl Plugin for EditScriptPlugin {
     /// Register the open message and state, and spawn the (hidden) floater.
@@ -765,9 +766,9 @@ const SPECIMEN_TEXT: &str = "default\n{\n    state_entry()\n    {\n        \
 
 /// Spawn the script editor's content specimen: an editable body, a Running
 /// toggle, a Save & Compile button and one sample compile-error row, built with
-/// no floater / session so [`crate::ui_test`] sweeps its layout across every
+/// no floater / session so `crate::ui_test` sweeps its layout across every
 /// script, scale and font.
-pub(crate) fn spawn_script_editor_specimen(
+pub fn spawn_script_editor_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

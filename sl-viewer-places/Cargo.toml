@@ -1,0 +1,39 @@
+[package]
+name = "sl-viewer-places"
+description = "The Second Life / OpenSim viewer's place information: the About Land, About Region and About Landmark floaters"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "parcel"]
+categories = ["game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+sl-client-bevy = { workspace = true, features = [
+  "bevy_pbr",
+] }
+sl-notecard = { path = "../sl-notecard", version = "0.1.0" }
+sl-types = { workspace = true }
+sl-viewer-inventory = { workspace = true }
+sl-viewer-notices = { workspace = true }
+sl-viewer-pickers = { workspace = true }
+sl-viewer-platform = { workspace = true }
+sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-widgets = { workspace = true }
+sl-viewer-world = { workspace = true }
+sl-viewer-world-api = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

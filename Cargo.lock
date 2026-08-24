@@ -8503,12 +8503,11 @@ dependencies = [
  "sl-emoji",
  "sl-l10n",
  "sl-mesh",
- "sl-notecard",
  "sl-proto",
  "sl-repl",
  "sl-settings",
  "sl-texture",
- "sl-types",
+ "sl-viewer-asset-editors",
  "sl-viewer-audio",
  "sl-viewer-edit",
  "sl-viewer-inventory",
@@ -8518,6 +8517,7 @@ dependencies = [
  "sl-viewer-notices",
  "sl-viewer-notifications",
  "sl-viewer-pickers",
+ "sl-viewer-places",
  "sl-viewer-platform",
  "sl-viewer-search",
  "sl-viewer-settings",
@@ -8990,6 +8990,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-asset-editors"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-notecard",
+ "sl-types",
+ "sl-viewer-inventory",
+ "sl-viewer-kit",
+ "sl-viewer-notices",
+ "sl-viewer-notifications",
+ "sl-viewer-pickers",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+]
+
+[[package]]
 name = "sl-viewer-audio"
 version = "0.1.0"
 dependencies = [
@@ -9154,6 +9174,26 @@ dependencies = [
  "sl-viewer-ui-widgets",
  "sl-viewer-world",
  "sl-viewer-world-api",
+]
+
+[[package]]
+name = "sl-viewer-places"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-notecard",
+ "sl-types",
+ "sl-viewer-inventory",
+ "sl-viewer-notices",
+ "sl-viewer-pickers",
+ "sl-viewer-platform",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "url",
 ]
 
 [[package]]

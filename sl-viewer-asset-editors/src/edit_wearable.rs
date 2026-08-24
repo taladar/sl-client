@@ -203,7 +203,8 @@ struct WearEdit {
 }
 
 /// The appearance-editor plugin.
-pub(crate) struct EditWearablePlugin;
+#[derive(Debug)]
+pub struct EditWearablePlugin;
 
 impl Plugin for EditWearablePlugin {
     /// Register the open message, state and systems; spawn the hidden floater.

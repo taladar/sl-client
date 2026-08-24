@@ -159,7 +159,8 @@ struct AboutLandmarkState {
 
 /// Wires the About Landmark floater: the open message, the resolve chain, the
 /// snapshot poll, the name refreshes, and the title / notes editing.
-pub(crate) struct AboutLandmarkPlugin;
+#[derive(Debug)]
+pub struct AboutLandmarkPlugin;
 
 impl Plugin for AboutLandmarkPlugin {
     /// Register the message, state and systems; spawn the (hidden) floater.

@@ -14,8 +14,8 @@
 //! # Build once, update in place (no despawn)
 //!
 //! Every tab's structure is spawned **once** at start-up and never torn down.
-//! Replies update values *in place*: value labels via [`set_value_node`],
-//! checkbox glyphs via [`set_check_visual`], combos by writing their
+//! Replies update values *in place*: value labels via `set_value_node`,
+//! checkbox glyphs via `set_check_visual`, combos by writing their
 //! [`ComboSelection`](crate::ui_combo), edit fields by seeding
 //! `EditableText::editor_mut().set_text` on a fresh subject, and the three
 //! variable lists (object owners, allow, ban) through the **table widget**
@@ -214,16 +214,16 @@ const fn access_table(element: &'static str) -> TableSpec {
 
 /// A request to open the About Land floater.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenAboutLand {
+pub struct OpenAboutLand {
     /// Which parcel to describe.
-    pub(crate) subject: AboutLandSubject,
+    pub subject: AboutLandSubject,
     /// Open without edit affordances (the read-only "About this location" view).
-    pub(crate) read_only: bool,
+    pub read_only: bool,
 }
 
 /// How the About Land floater's subject parcel is identified.
 #[derive(Debug, Clone, Copy)]
-pub(crate) enum AboutLandSubject {
+pub enum AboutLandSubject {
     /// A known region-local parcel id (the agent's current parcel — the top-bar
     /// read-out and the World menu). Its data is already local.
     CurrentParcel(RegionLocalParcelId),
@@ -755,7 +755,7 @@ struct SwatchTexture {
 
 /// The plugin wiring the About Land floater into the viewer.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct AboutLandPlugin;
+pub struct AboutLandPlugin;
 
 impl Plugin for AboutLandPlugin {
     fn build(&self, app: &mut App) {

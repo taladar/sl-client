@@ -13,7 +13,7 @@
 //! box** in the *editable* text flow (`llviewertexteditor`'s embedded-item
 //! machinery). Rendering them inline *while editing* needs a rich-text editor
 //! with inline boxes and per-range brushes — the parley `PlainEditor` fork
-//! tracked by [`viewer-lsl-editor-widget`], which is not yet built. A
+//! tracked by `viewer-lsl-editor-widget`, which is not yet built. A
 //! **read-only** view needs no caret, so this editor:
 //!
 //! - shows a no-modify notecard as the **rich read-only reader**
@@ -29,14 +29,14 @@
 //!   reachable and clickable until the inline-box editor widget lands (in the
 //!   plain field the markers render as placeholder glyphs);
 //! - lets a resident **drag an inventory item onto the editor to add it** as an
-//!   embedded item ([`crate::inventory_drag`]'s notecard drop target);
+//!   embedded item (`crate::inventory_drag`'s notecard drop target);
 //! - saves back to **agent** inventory over `UpdateNotecardAgentInventory` or,
 //!   for a notecard opened from a prim's contents, to that object's **task**
 //!   inventory over `UpdateNotecardTaskInventory` — one
 //!   [`Command::UpdateInventoryAsset`] whose [`NotecardSource`] picks the
 //!   capability and the "opened-from-task" provenance the reference carries.
 //!
-//! Deferred to [`viewer-lsl-editor-widget`] (needing its inline boxes): drawing
+//! Deferred to `viewer-lsl-editor-widget` (needing its inline boxes): drawing
 //! embedded items **inline in the editable flow** and dropping an item **at the
 //! caret** rather than appended.
 //!
@@ -97,7 +97,8 @@ const READONLY_BODY_WIDTH: f32 = 460.0;
 // ---------------------------------------------------------------------------
 
 /// The plugin owning the notecard editor floater.
-pub(crate) struct EditNotecardPlugin;
+#[derive(Debug)]
+pub struct EditNotecardPlugin;
 
 impl Plugin for EditNotecardPlugin {
     /// Register the open message and state, and spawn the (hidden) floater.
@@ -913,8 +914,8 @@ const SPECIMEN_TEXT: &str = "Welcome! Drop the landmark below to visit us.";
 
 /// Spawn the notecard editor's content specimen: an editable body with one
 /// embedded item and a Save button, built with no floater / session so
-/// [`crate::ui_test`] sweeps its layout across every script, scale and font.
-pub(crate) fn spawn_notecard_editor_specimen(
+/// `crate::ui_test` sweeps its layout across every script, scale and font.
+pub fn spawn_notecard_editor_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,
@@ -938,10 +939,10 @@ pub(crate) fn spawn_notecard_editor_specimen(
 }
 
 /// Spawn the rich read-only reader specimen: prose with a linkified URL and an
-/// inline embedded item, built with no floater / session so [`crate::ui_test`]
+/// inline embedded item, built with no floater / session so `crate::ui_test`
 /// sweeps the interleaved prose-run / item-box layout across every script,
 /// scale and font.
-pub(crate) fn spawn_notecard_reader_specimen(
+pub fn spawn_notecard_reader_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

@@ -29,9 +29,9 @@
 //! was.
 
 mod about_floater;
-mod about_land;
-mod about_landmark;
-mod about_region;
+pub(crate) use sl_viewer_places::about_land;
+pub(crate) use sl_viewer_places::about_landmark;
+pub(crate) use sl_viewer_places::about_region;
 pub(crate) use sl_viewer_world::animations;
 pub(crate) use sl_viewer_world::animesh;
 /// Every module that declares settings, in registration order.
@@ -124,19 +124,19 @@ mod debug_settings;
 pub(crate) use sl_viewer_world::derender;
 pub(crate) use sl_viewer_world::diagnostics;
 mod double_click_teleport;
+pub(crate) use sl_viewer_asset_editors::edit_notecard;
+pub(crate) use sl_viewer_asset_editors::edit_script;
+pub(crate) use sl_viewer_asset_editors::edit_wearable;
 pub(crate) use sl_viewer_edit::edit_contents;
 pub(crate) use sl_viewer_edit::edit_create;
 pub(crate) use sl_viewer_edit::edit_link;
 pub(crate) use sl_viewer_edit::edit_material;
 pub(crate) use sl_viewer_edit::edit_material_asset;
-mod edit_notecard;
 pub(crate) use sl_viewer_edit::edit_params;
-mod edit_script;
 pub(crate) use sl_viewer_edit::edit_selection;
 pub(crate) use sl_viewer_edit::edit_texture;
 pub(crate) use sl_viewer_edit::edit_tool;
 pub(crate) use sl_viewer_edit::edit_undo;
-mod edit_wearable;
 /// The shared world state every feature surface reads: the selection, the
 /// edit modes, the mute and buddy lists, group memberships, presence and map
 /// tracking. Aliased so the call sites read as a module of this crate.
@@ -211,7 +211,7 @@ mod mutes;
 pub(crate) use sl_viewer_world::name_tag_billboard;
 pub(crate) use sl_viewer_world::name_tag_content;
 mod nearby_chat_bar;
-mod notecard_render;
+pub(crate) use sl_viewer_asset_editors::notecard_render;
 pub(crate) use sl_viewer_notices::notification_host;
 pub(crate) use sl_viewer_notices::notification_persist;
 // The notification catalogue is its own crate (~22k lines of declarative data
