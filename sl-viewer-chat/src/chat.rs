@@ -2,7 +2,7 @@
 //! pinned to the bottom-left corner that shows recent nearby chat over the world.
 //!
 //! This is the Phase 11 slice — a read-only overlay, no input box — extended by
-//! [`viewer-chat-overlay-fade`] to decay like the reference viewer's floating
+//! `viewer-chat-overlay-fade` to decay like the reference viewer's floating
 //! nearby-chat toasts. Each
 //! [`ChatReceived`](sl_client_bevy::SlSessionEvent::ChatReceived) message
 //! (`ChatFromSimulator`: a nearby agent or object speaking) is formatted as
@@ -12,13 +12,13 @@
 //! distinguishable; a normal say has none.
 //!
 //! Unlike the Phase 11 single joined-string node, each line is its own entity
-//! carrying its own [`age`](ChatOverlayLine::age): a line appears fully opaque,
-//! holds for [`CHAT_HOLD_TIME`], then fades over [`CHAT_FADE_DURATION`] and is
+//! carrying its own `age`: a line appears fully opaque,
+//! holds for `CHAT_HOLD_TIME`, then fades over `CHAT_FADE_DURATION` and is
 //! despawned once fully transparent, so the corner empties itself again once chat
 //! goes quiet. A newly arriving line never disturbs the ages of lines already
 //! fading — each line's own age drives its alpha independently. The persistent,
 //! interactive scrollback lives in the Conversations Nearby tab
-//! ([`viewer-chat-history-panel`]); this overlay is the transient heads-up display.
+//! (`viewer-chat-history-panel`); this overlay is the transient heads-up display.
 //!
 //! The age advances by frame-time ([`Time::delta_secs`]), never wall-clock, so it
 //! is deterministic under the screenshot harness's manual clock. The overlay needs
@@ -30,14 +30,14 @@ use sl_client_bevy::{
     AgentKey, ChatMessage, ChatSource, ChatType, SlEvent, SlIdentity, SlSessionEvent,
 };
 
-use crate::preferences_chat::{
-    SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
-};
 use crate::settings::ViewerSettings;
 use crate::ui::BottomArea;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 use crate::world_api::LocalChatNotice;
+use crate::world_api::{
+    SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
+};
 
 /// The most chat lines the overlay ever shows at once when no
 /// [`SETTING_CHAT_MAX_LINES`] value is available. Fading already bounds each
@@ -79,7 +79,7 @@ fn font_step(settings: Option<&ViewerSettings>) -> u32 {
 }
 
 /// The stored hold time: [`SETTING_NEARBY_TOAST_LIFETIME`] (the full on-screen
-/// lifetime) minus the fade, floored at zero; [`CHAT_HOLD_TIME`] when no
+/// lifetime) minus the fade, floored at zero; `CHAT_HOLD_TIME` when no
 /// settings are available.
 fn hold_time(settings: Option<&ViewerSettings>) -> f32 {
     settings
@@ -115,7 +115,7 @@ const CHAT_OVERLAY_GAP: f32 = 6.0;
 /// A marker component tagging the overlay's column container, so the positioning
 /// system can find and re-anchor it and new lines can be parented to it.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct ChatOverlayContainer;
+pub struct ChatOverlayContainer;
 
 /// Which palette colour an overlay line renders in, classified once at
 /// arrival — the user-tunable chat colours of the preferences colors & skins
@@ -136,7 +136,7 @@ pub(crate) enum ChatLineSource {
 /// One transient chat line in the overlay: a text node under the
 /// [`ChatOverlayContainer`] that ages, fades, and despawns on its own.
 #[derive(Component, Debug, Clone, Copy)]
-pub(crate) struct ChatOverlayLine {
+pub struct ChatOverlayLine {
     /// Frame-time seconds elapsed since this line arrived. Drives the alpha and,
     /// once it passes hold + fade, the despawn. Only ever advanced by
     /// [`Time::delta_secs`], so it is deterministic under the manual clock.
@@ -152,8 +152,8 @@ pub(crate) struct ChatOverlayLine {
 
 /// The overlay's only mutable state: the next arrival sequence number to stamp on
 /// a line. The lines themselves are entities, not a buffer here.
-#[derive(Resource, Default)]
-pub(crate) struct ChatOverlay {
+#[derive(Debug, Resource, Default)]
+pub struct ChatOverlay {
     /// The sequence number the next arriving line will be stamped with.
     next_seq: u64,
 }
@@ -195,7 +195,7 @@ fn line_color(source: ChatLineSource, settings: Option<&ViewerSettings>) -> Colo
 }
 
 /// A line's alpha from its age: fully opaque through `hold` seconds, then a
-/// linear ramp down to `0.0` over [`CHAT_FADE_DURATION`], clamped to `[0, 1]`.
+/// linear ramp down to `0.0` over `CHAT_FADE_DURATION`, clamped to `[0, 1]`.
 fn line_alpha(age: f32, hold: f32) -> f32 {
     if age <= hold {
         1.0
@@ -233,7 +233,7 @@ const fn is_displayable(message: &ChatMessage) -> bool {
 /// full-window root is identical to anchoring against the window
 /// ([`position_chat_overlay`] finds it by marker, not by parent, so it is
 /// unaffected).
-pub(crate) fn setup_chat_overlay(mut commands: Commands, root: Res<UiRoot>) {
+pub fn setup_chat_overlay(mut commands: Commands, root: Res<UiRoot>) {
     commands.spawn((
         // Anchored at the bottom-left with auto size, so the column grows upward as
         // lines are added; children stack top-to-bottom, newest appended last (and
@@ -264,7 +264,7 @@ pub(crate) fn setup_chat_overlay(mut commands: Commands, root: Res<UiRoot>) {
 /// Reads last frame's [`ComputedNode`] (laid out in `PostUpdate`); the bottom area
 /// changes height rarely, so a frame-old measurement never lets the two overlap by
 /// more than a hair. Inert until the bottom area exists.
-pub(crate) fn position_chat_overlay(
+pub fn position_chat_overlay(
     bottom_area: Option<Res<BottomArea>>,
     computed: Query<&ComputedNode>,
     mut overlays: Query<&mut Node, With<ChatOverlayContainer>>,
@@ -289,7 +289,7 @@ pub(crate) fn position_chat_overlay(
 
 /// Spawn a fresh, fully-opaque [`ChatOverlayLine`] under the container for each
 /// displayable local-chat message that arrives this frame.
-pub(crate) fn update_chat_overlay(
+pub fn update_chat_overlay(
     mut commands: Commands,
     mut events: MessageReader<SlEvent>,
     mut notices: MessageReader<LocalChatNotice>,
@@ -356,7 +356,7 @@ pub(crate) fn update_chat_overlay(
 /// and palette re-resolve from the settings every frame, so a preference
 /// change — including a live colour-picker drag — governs the
 /// already-floating lines too.
-pub(crate) fn tick_chat_overlay(
+pub fn tick_chat_overlay(
     mut commands: Commands,
     time: Res<Time>,
     mut lines: Query<(Entity, &mut ChatOverlayLine, &mut TextColor)>,
@@ -394,7 +394,7 @@ pub(crate) fn tick_chat_overlay(
 /// changes (the combo applies live through the store), so a size change does
 /// not leave a mixed-size column. Guarded on the *step* changing — the
 /// settings resource dirties on every unrelated write too.
-pub(crate) fn restyle_chat_overlay(
+pub fn restyle_chat_overlay(
     settings: Option<Res<ViewerSettings>>,
     mut last_step: Local<Option<u32>>,
     mut lines: Query<&mut TextFont, With<ChatOverlayLine>>,
@@ -419,10 +419,10 @@ mod tests {
         is_faded, line_alpha, setup_chat_overlay,
     };
     use crate::ui::{UiRoot, UiScaffoldSystems};
-    use crate::ui_test::{LayoutTest, TestError, find_by_name, settle};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ChatAudible, ChatMessage, ChatSource, ChatType, RegionCoordinates};
+    use sl_viewer_testkit::{LayoutTest, TestError, find_by_name, settle};
 
     /// Build a minimal received chat message with the given speaker, type, and
     /// text for the formatting tests.
@@ -535,15 +535,26 @@ mod tests {
 
         let store = sl_settings::SettingsStore::new();
         let mut settings = crate::settings::ViewerSettings::from_store_for_test(store);
-        crate::preferences_chat::register_settings(&mut settings);
+        settings.register_in(
+            &["chat"],
+            crate::world_api::SETTING_NEARBY_TOAST_LIFETIME,
+            sl_settings::SettingValue::U32(23),
+            "Seconds a nearby-chat overlay line stays on screen (including the fade)",
+        );
+        settings.register_in(
+            &["chat"],
+            crate::world_api::SETTING_CHAT_MAX_LINES,
+            sl_settings::SettingValue::U32(12),
+            "The most nearby-chat overlay lines shown at once",
+        );
         settings.set(
             sl_settings::Scope::Global,
-            crate::preferences_chat::SETTING_NEARBY_TOAST_LIFETIME,
+            crate::world_api::SETTING_NEARBY_TOAST_LIFETIME,
             sl_settings::SettingValue::U32(10),
         );
         settings.set(
             sl_settings::Scope::Global,
-            crate::preferences_chat::SETTING_CHAT_MAX_LINES,
+            crate::world_api::SETTING_CHAT_MAX_LINES,
             sl_settings::SettingValue::U32(3),
         );
         assert!(close(super::hold_time(Some(&settings)), 7.0));

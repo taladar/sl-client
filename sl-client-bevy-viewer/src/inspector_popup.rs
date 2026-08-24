@@ -124,7 +124,7 @@ const BUTTON_BACKGROUND: Color = Color::srgb(0.16, 0.19, 0.25);
 const BUTTON_BORDER: Color = Color::srgb(0.38, 0.46, 0.58);
 
 /// The card's global z-order: above every UI surface it can be opened over — the
-/// bottom bar ([`crate::bottom_toolbar::BOTTOM_BAR_Z`] = 9000) and any docked /
+/// bottom bar ([`crate::ui::BOTTOM_BAR_Z`] = 9000) and any docked /
 /// floating window — but just below the hover tooltip (`i32::MAX`) so a tip can
 /// still appear over the card. A too-low z was why an inspector opened over the
 /// docked chat window was hidden behind it.

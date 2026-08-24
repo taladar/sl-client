@@ -20,7 +20,7 @@ use crate::browser_widget::{BrowserView, BrowserViewSpec, spawn_browser_view};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::media_engine::{MediaEngineSystems, MediaSurfaces};
-use crate::system_browser::open_in_system_browser;
+use crate::system_browser::{normalize_web_url, open_in_system_browser};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -239,22 +239,6 @@ fn spawn_toolbar_button(
             ChildOf(button),
         ))
         .id()
-}
-
-/// Normalise what a user typed into the address bar into a navigable URL:
-/// scheme kept when present, `https://` assumed otherwise. `None` when it
-/// cannot be a URL at all.
-pub(crate) fn normalize_web_url(input: &str) -> Option<String> {
-    let trimmed = input.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    let candidate = if trimmed.contains("://") {
-        trimmed.to_owned()
-    } else {
-        format!("https://{trimmed}")
-    };
-    url::Url::parse(&candidate).ok().map(|url| url.to_string())
 }
 
 /// `Enter` in the address field navigates the view to the typed URL.

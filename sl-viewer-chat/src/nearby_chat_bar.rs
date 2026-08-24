@@ -21,7 +21,7 @@
 //!    indicator.
 //!
 //! A **toggle button** on the leading end of the bottom button bar shows / hides
-//! the bar (the reference's chat button); [`crate::bottom_toolbar`] owns that
+//! the bar (the reference's chat button); `crate::bottom_toolbar` owns that
 //! button and flips [`NearbyChatBar::toggle`], reading [`NearbyChatBar::is_shown`]
 //! for its lit state.
 //!
@@ -58,7 +58,7 @@ const BAR_FONT_SIZE: f32 = 15.0;
 
 /// The live nearby-chat bar's entities and state, published once it has spawned.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct NearbyChatBar {
+pub struct NearbyChatBar {
     /// The chat field, so the bar's own systems (send, focus, typing) address it.
     field: Entity,
     /// The full-width wrapper node, shown / hidden by the toggle.
@@ -70,23 +70,25 @@ pub(crate) struct NearbyChatBar {
 impl NearbyChatBar {
     /// Whether the bar is currently shown — read by the toolbar toggle for its lit
     /// state.
-    pub(crate) const fn is_shown(&self) -> bool {
+    #[must_use]
+    pub const fn is_shown(&self) -> bool {
         self.shown
     }
 
     /// Flip the bar shown / hidden — called by the toolbar toggle button.
-    pub(crate) const fn toggle(&mut self) {
+    pub const fn toggle(&mut self) {
         self.shown = !self.shown;
     }
 }
 
 /// The plugin that owns the live nearby-chat bar: its one-time spawn once the
 /// bottom area exists, and the send / focus / typing systems.
-pub(crate) struct NearbyChatBarPlugin;
+#[derive(Debug)]
+pub struct NearbyChatBarPlugin;
 
 impl Plugin for NearbyChatBarPlugin {
     /// Wire the bar. The spawn is an `Update` system guarded to run once (the bottom
-    /// area is inserted by [`crate::bottom_toolbar`] in `Startup`, so it is present
+    /// area is inserted by `crate::bottom_toolbar` in `Startup`, so it is present
     /// from the first `Update`); the rest run every frame and are no-ops until the
     /// bar exists.
     fn build(&self, app: &mut App) {

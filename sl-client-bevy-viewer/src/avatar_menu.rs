@@ -104,10 +104,10 @@ use crate::objects::ObjectPicker;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
-use crate::world_api::FriendsModel;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::{ConversationKey, OpenConversation};
+use crate::world_api::{FriendsModel, SelfGroundSit};
 
 /// The `element` both avatar pies attribute their [`UiAction`]s to.
 ///
@@ -778,22 +778,6 @@ struct RightClickGesture {
     down: bool,
     /// Total pointer travel since the press, in logical pixels.
     moved: f32,
-}
-
-/// Tracks whether the local avatar is **ground-sitting**.
-///
-/// The session records object-sits ([`SlAgentParcel::seated_on`]) but keeps *no*
-/// ground-sit state — `sit_on_ground` sends only a transient control bit, so
-/// there is nothing on the wire to read back. The viewer therefore tracks it
-/// here: set when this menu sends Sit Down, cleared when it sends Stand Up or the
-/// avatar walks (which stands it up). Best-effort — a ground sit begun or ended
-/// by something other than this menu or ordinary locomotion is not observed, and
-/// the worst case is a momentarily wrong Stand Up / Sit Down enable that the next
-/// sit / stand / step corrects.
-#[derive(Resource, Debug, Default, Clone, Copy)]
-pub(crate) struct SelfGroundSit {
-    /// Whether the local avatar is currently sitting on the ground.
-    pub(crate) sitting: bool,
 }
 
 /// The agent the currently-open avatar pie acts on.

@@ -31,7 +31,7 @@
 //!
 //! # Line-recall history (`viewer-chat-input-history`)
 //!
-//! Every field carries a per-field [`ChatInputHistory`]: each submitted line is
+//! Every field carries a per-field `ChatInputHistory`: each submitted line is
 //! pushed onto it, and **`Ctrl+Up`** / **`Ctrl+Down`** walk back and forth through
 //! it, replacing the field text (the reference's chat-bar recall). The `Ctrl`
 //! modifier keeps a bare `Up`/`Down` free for the `:`-completer popup and any
@@ -96,7 +96,7 @@ const HISTORY_CAP: usize = 32;
 /// A field's **line-recall history**: the lines submitted from it, plus the recall
 /// cursor and the saved in-progress draft. One per field (inserted by
 /// [`spawn_chat_input`]); [`recall_chat_history`] drives it from `Ctrl+Up` /
-/// `Ctrl+Down` and [`send_chat_input`] pushes each sent line.
+/// `Ctrl+Down` and `send_chat_input` pushes each sent line.
 ///
 /// The logic is pure and unit-tested — the system is only the keyboard-and-field
 /// glue over it.
@@ -167,24 +167,24 @@ impl ChatInputHistory {
 
 /// What [`spawn_chat_input`] hands back: the box and the inner field.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ChatInputHandle {
+pub struct ChatInputHandle {
     /// The bordered container — the chat *box*. A consumer (the local-chat
     /// variant) can parent siblings (a volume selector) into it.
     pub(crate) container: Entity,
     /// The inner [`EditableText`], whose value is the draft message.
-    pub(crate) field: Entity,
+    pub field: Entity,
 }
 
 /// A submitted chat line: the field it came from, its text, and whether `Shift` /
 /// `Ctrl` were held on the `Enter` (a consumer maps those to whisper / shout).
-/// Emitted by [`send_chat_input`] on a non-empty `Enter`, after which the field is
+/// Emitted by `send_chat_input` on a non-empty `Enter`, after which the field is
 /// cleared.
 #[derive(Message, Debug, Clone)]
-pub(crate) struct ChatInputSubmit {
+pub struct ChatInputSubmit {
     /// The field the line was typed in.
-    pub(crate) field: Entity,
+    pub field: Entity,
     /// The text as typed (not trimmed — a consumer decides what to strip).
-    pub(crate) text: String,
+    pub text: String,
     /// Whether a `Shift` key was held on the `Enter`.
     pub(crate) shift: bool,
     /// Whether a `Ctrl` key was held on the `Enter`.
@@ -194,25 +194,26 @@ pub(crate) struct ChatInputSubmit {
 /// Everything a chat input is built from. Build one with [`ChatInputSpec::new`] and
 /// override with struct-update syntax.
 #[derive(Debug, Clone)]
-pub(crate) struct ChatInputSpec {
+pub struct ChatInputSpec {
     /// The prefix of the widget's node [`Name`]s, for the gallery and lookups.
-    pub(crate) element: &'static str,
+    pub element: &'static str,
     /// The field's focus stop.
-    pub(crate) tab_index: i32,
+    pub tab_index: i32,
     /// The field text's font size, in logical pixels.
-    pub(crate) font_size: f32,
+    pub font_size: f32,
     /// The box's least width, in logical pixels — a floor below which it will not
     /// shrink.
-    pub(crate) min_width: f32,
+    pub min_width: f32,
     /// An explicit box width, or `None` (the default) to size to content above
     /// [`min_width`](Self::min_width). The nearby-chat bar sets a percentage so the
     /// bar spans a fraction of the screen.
-    pub(crate) width: Option<Val>,
+    pub width: Option<Val>,
 }
 
 impl ChatInputSpec {
     /// A spec for `element` with the module defaults.
-    pub(crate) const fn new(element: &'static str) -> Self {
+    #[must_use]
+    pub const fn new(element: &'static str) -> Self {
         Self {
             element,
             tab_index: 0,
@@ -226,10 +227,10 @@ impl ChatInputSpec {
 /// Spawn a chat input under `parent`, returning the box and inner field.
 ///
 /// The box is a bordered [`crate::ui::row`] of a bare, filling single-line field
-/// and a trailing emoji button; the field carries [`ChatInputField`] and an
+/// and a trailing emoji button; the field carries `ChatInputField` and an
 /// attached [`crate::emoji_complete`] popup (hung above the box). The emoji button
 /// opens the picker for this field.
-pub(crate) fn spawn_chat_input(
+pub fn spawn_chat_input(
     commands: &mut Commands,
     parent: Entity,
     spec: &ChatInputSpec,
@@ -342,7 +343,7 @@ fn spawn_emoji_button(
 /// [`ColonCompleteSet`] so a press the completer accepted a suggestion with does
 /// not also send.
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct ChatInputPlugin;
+pub struct ChatInputPlugin;
 
 impl Plugin for ChatInputPlugin {
     /// Register the send message and the send / history-recall systems.
@@ -455,7 +456,7 @@ fn recall_chat_history(
 /// direction, and it is genuinely usable in the gallery. Its runtime is inert in
 /// the harness (which adds none of the widget plugins) and live in the gallery
 /// (which adds them all).
-pub(crate) fn spawn_chat_input_specimen(
+pub fn spawn_chat_input_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,
@@ -479,11 +480,11 @@ mod tests {
     };
     use crate::emoji_complete::ColonCompletePlugin;
     use crate::ui::{UiRoot, UiScaffoldSystems};
-    use crate::ui_test::{LayoutTest, TestError, find_by_name, settle};
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::prelude::*;
     use bevy::text::EditableText;
     use pretty_assertions::assert_eq;
+    use sl_viewer_testkit::{LayoutTest, TestError, find_by_name, settle};
 
     /// Build a layout-test app with a chat input and the widget systems, plus the
     /// keyboard resource the layout harness omits and the emoji-picker message the
@@ -611,7 +612,7 @@ mod tests {
         Ok(())
     }
 
-    /// The inner field carries the [`ChatInputField`] marker so the send system
+    /// The inner field carries the `ChatInputField` marker so the send system
     /// finds it.
     #[test]
     fn field_is_marked() -> Result<(), TestError> {

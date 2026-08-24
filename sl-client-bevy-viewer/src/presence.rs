@@ -122,7 +122,7 @@ pub(crate) const SETTING_SIT_ON_AWAY: &str = "AvatarSitOnAway";
 /// never (the reference `QuitAfterSecondsOfAFK`). Distinct from
 /// [`SETTING_AFK_TIMEOUT`], which is the idle time before going away.
 ///
-/// [`SETTING_AFK_TIMEOUT`]: crate::preferences_general::SETTING_AFK_TIMEOUT
+/// [`SETTING_AFK_TIMEOUT`]: crate::world_api::SETTING_AFK_TIMEOUT
 pub(crate) const SETTING_QUIT_AFTER_AFK: &str = "QuitAfterSecondsOfAFK";
 
 /// The default away reply (the reference `AwayAvatarResponseDefault`).
@@ -311,7 +311,7 @@ impl Plugin for PresencePlugin {
 /// "Input" is any key held or pressed, any mouse button, and any pointer motion
 /// or scroll — the same breadth the reference's window handlers cover.
 ///
-/// [`SETTING_AFK_TIMEOUT`]: crate::preferences_general::SETTING_AFK_TIMEOUT
+/// [`SETTING_AFK_TIMEOUT`]: crate::world_api::SETTING_AFK_TIMEOUT
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its dependencies: the clock, the four input \
@@ -347,11 +347,7 @@ fn track_presence_activity(
     }
     let store = settings.as_deref().map(ViewerSettings::store);
     let afk_timeout = store
-        .and_then(|store| {
-            store
-                .get_u32(crate::preferences_general::SETTING_AFK_TIMEOUT)
-                .ok()
-        })
+        .and_then(|store| store.get_u32(crate::world_api::SETTING_AFK_TIMEOUT).ok())
         .unwrap_or(0);
     if afk_timeout > 0 && f64::from(state.idle_secs()) > f64::from(afk_timeout) && !state.is_away()
     {
@@ -379,7 +375,7 @@ fn track_presence_activity(
 fn advertise_presence(
     settings: Option<Res<ViewerSettings>>,
     agent: Res<SlAgentParcel>,
-    mut ground_sit: ResMut<crate::avatar_menu::SelfGroundSit>,
+    mut ground_sit: ResMut<crate::world_api::SelfGroundSit>,
     mut state: ResMut<PresenceState>,
     mut commands: MessageWriter<SlCommand>,
 ) {
@@ -420,7 +416,7 @@ fn apply_sit_on_away(
     away: bool,
     settings: Option<&ViewerSettings>,
     agent: &SlAgentParcel,
-    ground_sit: &mut crate::avatar_menu::SelfGroundSit,
+    ground_sit: &mut crate::world_api::SelfGroundSit,
     state: &mut PresenceState,
     commands: &mut MessageWriter<SlCommand>,
 ) {
@@ -598,11 +594,11 @@ fn reply_text(
     }
     let name = match mode {
         ReplyMode::Muted => SETTING_MUTED_RESPONSE,
-        ReplyMode::DoNotDisturb => crate::preferences_chat::SETTING_BUSY_RESPONSE,
+        ReplyMode::DoNotDisturb => crate::world_api::SETTING_BUSY_RESPONSE,
         ReplyMode::AutorespondNonFriends => {
-            crate::preferences_chat::SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE
+            crate::world_api::SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE
         }
-        ReplyMode::Autorespond => crate::preferences_chat::SETTING_AUTORESPOND_RESPONSE,
+        ReplyMode::Autorespond => crate::world_api::SETTING_AUTORESPOND_RESPONSE,
         ReplyMode::Away => SETTING_AWAY_RESPONSE,
     };
     let text = settings?.store().get_str(name).ok()?;

@@ -55,6 +55,7 @@ use crate::notifications::ShowNotification;
 use crate::preferences::{spawn_pref_combo, spawn_pref_section, spawn_pref_slider};
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
+use crate::world_api::SETTING_AFK_TIMEOUT;
 
 /// The settings section the general tab's own keys live in.
 const GENERAL_SECTION: &[&str] = &["general"];
@@ -76,11 +77,6 @@ pub(crate) const SETTING_LOGIN_START_LOCATION: &str = "LoginStartLocation";
 
 /// The UI scale factor applied to every logical pixel (Bevy's [`UiScale`]).
 pub(crate) const SETTING_UI_SCALE: &str = "UiScale";
-
-/// Seconds of inactivity before the viewer marks the avatar away; `0` = never.
-/// Registered here, consumed by the away-mode task
-/// (`viewer-do-not-disturb-away`).
-pub(crate) const SETTING_AFK_TIMEOUT: &str = "AfkTimeoutSeconds";
 
 /// The UI-scale slider's bounds and step (the reference `UIScaleFactor` range).
 const UI_SCALE_MIN: f32 = 0.75;

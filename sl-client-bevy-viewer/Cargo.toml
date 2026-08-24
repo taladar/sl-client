@@ -183,7 +183,6 @@ sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
-sl-emoji = { path = "../sl-emoji", version = "0.1.0" }
 sl-l10n = { path = "../sl-l10n", version = "0.1.0" }
 sl-repl = { workspace = true }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
@@ -192,6 +191,7 @@ sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
 ] }
 sl-viewer-asset-editors = { workspace = true }
 sl-viewer-audio = { workspace = true }
+sl-viewer-chat = { workspace = true }
 sl-viewer-edit = { workspace = true }
 sl-viewer-inventory = { workspace = true }
 sl-viewer-kit = { workspace = true }

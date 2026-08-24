@@ -41,6 +41,7 @@ members = [
   "sl-tree",
   "sl-viewer-asset-editors",
   "sl-viewer-audio",
+  "sl-viewer-chat",
   "sl-viewer-edit",
   "sl-viewer-inventory",
   "sl-viewer-kit",
@@ -116,6 +117,7 @@ sl-settings = { path = "sl-settings", version = "0.1.0" }
 sl-types = { version = "0.8.0" }
 sl-viewer-asset-editors = { path = "sl-viewer-asset-editors", version = "0.1.0" }
 sl-viewer-audio = { path = "sl-viewer-audio", version = "0.1.0" }
+sl-viewer-chat = { path = "sl-viewer-chat", version = "0.1.0" }
 sl-viewer-edit = { path = "sl-viewer-edit", version = "0.1.0" }
 sl-viewer-inventory = { path = "sl-viewer-inventory", version = "0.1.0" }
 sl-viewer-kit = { path = "sl-viewer-kit", version = "0.1.0" }

@@ -24,3 +24,19 @@ pub fn open_in_system_browser(url: &str) {
         warn!("open-in-system-browser is not wired on this platform yet ({url})");
     }
 }
+/// Normalise what a user typed into the address bar into a navigable URL:
+/// scheme kept when present, `https://` assumed otherwise. `None` when it
+/// cannot be a URL at all.
+#[must_use]
+pub fn normalize_web_url(input: &str) -> Option<String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let candidate = if trimmed.contains("://") {
+        trimmed.to_owned()
+    } else {
+        format!("https://{trimmed}")
+    };
+    url::Url::parse(&candidate).ok().map(|url| url.to_string())
+}

@@ -8500,7 +8500,6 @@ dependencies = [
  "sl-audio",
  "sl-cef",
  "sl-client-bevy",
- "sl-emoji",
  "sl-l10n",
  "sl-mesh",
  "sl-proto",
@@ -8509,6 +8508,7 @@ dependencies = [
  "sl-texture",
  "sl-viewer-asset-editors",
  "sl-viewer-audio",
+ "sl-viewer-chat",
  "sl-viewer-edit",
  "sl-viewer-inventory",
  "sl-viewer-kit",
@@ -9031,6 +9031,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-chat"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-emoji",
+ "sl-settings",
+ "sl-viewer-settings",
+ "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+]
+
+[[package]]
 name = "sl-viewer-edit"
 version = "0.1.0"
 dependencies = [
@@ -9209,6 +9226,7 @@ dependencies = [
  "sl-audio",
  "sl-client-bevy",
  "tracing",
+ "url",
 ]
 
 [[package]]

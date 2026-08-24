@@ -1493,7 +1493,7 @@ fn build_web_tab(
     // below the URL line (`LLPanelProfileWeb`), with a load-status string —
     // navigation driven by code, no visible URL bar
     // (`viewer-profile-web-tab-browser`).
-    if let Some(page) = crate::web_floater::normalize_web_url(&url) {
+    if let Some(page) = crate::system_browser::normalize_web_url(&url) {
         ui.web_view = Some(crate::browser_widget::spawn_browser_view(
             commands,
             panel,

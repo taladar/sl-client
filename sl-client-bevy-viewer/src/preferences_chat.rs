@@ -67,26 +67,16 @@ use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
 use crate::ui::UiPanelShown;
 use crate::ui_text_input::TextInputKind;
+use crate::world_api::{
+    SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE, SETTING_AUTORESPOND_RESPONSE, SETTING_BUSY_RESPONSE,
+    SETTING_CHAT_FONT_SIZE, SETTING_CHAT_MAX_LINES, SETTING_NEARBY_TOAST_LIFETIME,
+};
 
 /// The stable id of this tab in [`crate::preferences::PREF_TABS`].
 pub(crate) const TAB_ID: &str = "chat";
 
 /// The settings section the chat tab's keys live in.
 const CHAT_SECTION: &[&str] = &["chat"];
-
-/// The chat font-size step: `0` small, `1` medium, `2` large. Consumed by the
-/// overlay ([`crate::chat`]) and the conversations transcript
-/// ([`crate::conversations`]); the reference `ChatFontSize` radio group.
-pub(crate) const SETTING_CHAT_FONT_SIZE: &str = "ChatFontSize";
-
-/// Seconds a nearby-chat overlay line lives before it has fully faded (the
-/// reference `NearbyToastLifeTime`); the fade itself takes the last
-/// [`crate::chat`] fade-duration seconds of it.
-pub(crate) const SETTING_NEARBY_TOAST_LIFETIME: &str = "NearbyChatToastLifetime";
-
-/// The most lines the nearby-chat overlay shows at once (the burst safety
-/// valve; the reference console's `ConsoleMaxLines`).
-pub(crate) const SETTING_CHAT_MAX_LINES: &str = "ChatOverlayMaxLines";
 
 /// Whether nearby chat is written to the per-avatar transcript directory (the
 /// reference `LogNearbyChat`). Account-scoped, like every logging key here.
@@ -134,18 +124,6 @@ pub(crate) const SETTING_ONLINE_STATUS_HIDDEN: &str = "OnlineStatusHidden";
 /// state (`UserInfo` `im_via_email`, meaningful on OpenSim), never persisted
 /// locally.
 pub(crate) const SETTING_IM_VIA_EMAIL: &str = "ImViaEmail";
-
-/// The auto-reply sent to an IM sender while in Do Not Disturb (busy) mode.
-/// Account-scoped; consumed by `viewer-do-not-disturb-away`.
-pub(crate) const SETTING_BUSY_RESPONSE: &str = "BusyResponse";
-
-/// The auto-reply sent while in autorespond mode (the Firestorm extension).
-/// Account-scoped; consumed by `viewer-do-not-disturb-away`.
-pub(crate) const SETTING_AUTORESPOND_RESPONSE: &str = "AutorespondResponse";
-
-/// The auto-reply sent to non-friends while in autorespond-to-non-friends
-/// mode. Account-scoped; consumed by `viewer-do-not-disturb-away`.
-pub(crate) const SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE: &str = "AutorespondNonFriendsResponse";
 
 /// The default Do Not Disturb auto-reply (the reference
 /// `DoNotDisturbModeResponseDefault`).

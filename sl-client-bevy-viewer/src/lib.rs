@@ -110,11 +110,11 @@ mod bottom_toolbar;
 // path in the viewer still resolves.
 pub(crate) use sl_viewer_media::browser_widget;
 mod build_info;
+pub(crate) use sl_viewer_chat::chat;
+pub(crate) use sl_viewer_chat::chat_input;
+pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_world::bump;
 pub(crate) use sl_viewer_world::camera;
-mod chat;
-mod chat_input;
-pub(crate) use sl_viewer_platform::clipboard;
 mod contact_sets;
 mod contact_sets_panel;
 mod conversations;
@@ -144,13 +144,13 @@ pub(crate) use sl_viewer_world_api as world_api;
 // The widgets (floaters, menus, inputs, tabs, tables) are their own crate;
 // each module is aliased under its old name so every `crate::<module>::…`
 // path in the viewer still resolves.
-pub(crate) use sl_viewer_ui_widgets::emoji_complete;
-mod emoji_picker;
+pub(crate) use sl_viewer_chat::emoji_picker;
 pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_kit::flexi;
 pub(crate) use sl_viewer_notices::experience_permission;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
+pub(crate) use sl_viewer_ui_widgets::emoji_complete;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_world::environment;
@@ -189,7 +189,7 @@ pub(crate) use sl_viewer_notices::linkified_text;
 pub(crate) use sl_viewer_world::legacy_materials;
 pub(crate) use sl_viewer_world::lights;
 mod load_url;
-mod local_chat_input;
+pub(crate) use sl_viewer_chat::local_chat_input;
 pub(crate) use sl_viewer_world::locomotion;
 pub(crate) use sl_viewer_world::locomotion_ik;
 pub(crate) use sl_viewer_world::look_at;
@@ -208,12 +208,12 @@ pub(crate) use sl_viewer_map::minimap;
 pub(crate) use sl_viewer_world::meshes;
 pub(crate) use sl_viewer_world::movement;
 mod mutes;
-pub(crate) use sl_viewer_world::name_tag_billboard;
-pub(crate) use sl_viewer_world::name_tag_content;
-mod nearby_chat_bar;
 pub(crate) use sl_viewer_asset_editors::notecard_render;
+pub(crate) use sl_viewer_chat::nearby_chat_bar;
 pub(crate) use sl_viewer_notices::notification_host;
 pub(crate) use sl_viewer_notices::notification_persist;
+pub(crate) use sl_viewer_world::name_tag_billboard;
+pub(crate) use sl_viewer_world::name_tag_content;
 // The notification catalogue is its own crate (~22k lines of declarative data
 // with no dependency on anything else here), aliased under its old module name
 // so every `crate::notifications::…` path in the viewer still resolves.

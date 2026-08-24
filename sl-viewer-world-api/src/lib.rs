@@ -2029,6 +2029,63 @@ impl AgentRegionPosition {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Settings the behaviour reads, not the tab that shows them
+// ---------------------------------------------------------------------------
+//
+// A preferences tab draws a control; the setting it writes is read somewhere
+// else entirely -- the chat overlay sizes itself from the font setting, the
+// auto-reply picks its text by mode, the idle timer reads the AFK seconds.
+// The keys live with the behaviour, so a tab is never something the behaviour
+// has to depend on.
+
+/// The chat font-size step: `0` small, `1` medium, `2` large. Consumed by the
+/// overlay (`crate::chat`) and the conversations transcript
+/// (`crate::conversations`); the reference `ChatFontSize` radio group.
+pub const SETTING_CHAT_FONT_SIZE: &str = "ChatFontSize";
+
+/// Seconds a nearby-chat overlay line lives before it has fully faded (the
+/// reference `NearbyToastLifeTime`); the fade itself takes the last
+/// `crate::chat` fade-duration seconds of it.
+pub const SETTING_NEARBY_TOAST_LIFETIME: &str = "NearbyChatToastLifetime";
+
+/// The most lines the nearby-chat overlay shows at once (the burst safety
+/// valve; the reference console's `ConsoleMaxLines`).
+pub const SETTING_CHAT_MAX_LINES: &str = "ChatOverlayMaxLines";
+
+/// The auto-reply sent to an IM sender while in Do Not Disturb (busy) mode.
+/// Account-scoped; consumed by `viewer-do-not-disturb-away`.
+pub const SETTING_BUSY_RESPONSE: &str = "BusyResponse";
+
+/// The auto-reply sent while in autorespond mode (the Firestorm extension).
+/// Account-scoped; consumed by `viewer-do-not-disturb-away`.
+pub const SETTING_AUTORESPOND_RESPONSE: &str = "AutorespondResponse";
+
+/// The auto-reply sent to non-friends while in autorespond-to-non-friends
+/// mode. Account-scoped; consumed by `viewer-do-not-disturb-away`.
+pub const SETTING_AUTORESPOND_NON_FRIENDS_RESPONSE: &str = "AutorespondNonFriendsResponse";
+
+/// Seconds of inactivity before the viewer marks the avatar away; `0` = never.
+/// Registered here, consumed by the away-mode task
+/// (`viewer-do-not-disturb-away`).
+pub const SETTING_AFK_TIMEOUT: &str = "AfkTimeoutSeconds";
+
+/// Tracks whether the local avatar is **ground-sitting**.
+///
+/// The session records object-sits (`SlAgentParcel::seated_on`) but keeps *no*
+/// ground-sit state — `sit_on_ground` sends only a transient control bit, so
+/// there is nothing on the wire to read back. The viewer therefore tracks it
+/// here: set when this menu sends Sit Down, cleared when it sends Stand Up or the
+/// avatar walks (which stands it up). Best-effort — a ground sit begun or ended
+/// by something other than this menu or ordinary locomotion is not observed, and
+/// the worst case is a momentarily wrong Stand Up / Sit Down enable that the next
+/// sit / stand / step corrects.
+#[derive(Resource, Debug, Default, Clone, Copy)]
+pub struct SelfGroundSit {
+    /// Whether the local avatar is currently sitting on the ground.
+    pub sitting: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::target_for;

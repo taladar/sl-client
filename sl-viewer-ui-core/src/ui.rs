@@ -1334,6 +1334,14 @@ pub fn focus_within(focused: Entity, viewport: Entity, child_of: &Query<&ChildOf
     }
 }
 
+/// The z-index the bottom area renders at — above the floaters (so a window never
+/// hides the persistent toolbar), matching the top menu bar's
+/// `crate::menu::TOP_MENU_ELEMENT` strip. `pub(crate)` so the Conversations
+/// floater's bottom-left dock host can lift a docked window just above the bar (a
+/// window docked *against* the bar must still take clicks, else its input reads as
+/// dead — the bar would win the pick at `9000` over a docked floater at `0`).
+pub const BOTTOM_BAR_Z: i32 = 9_000;
+
 #[cfg(test)]
 mod tests {
     use super::{

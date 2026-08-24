@@ -69,7 +69,6 @@ use sl_client_bevy::{
     ObjectKey, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
-use crate::bottom_toolbar::BOTTOM_BAR_Z;
 use crate::chat_input::{ChatInputSpec, ChatInputSubmit, spawn_chat_input};
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
@@ -78,6 +77,7 @@ use crate::i18n::{TransArgs, Translator};
 use crate::linkified_text::{LinkTextStyle, spawn_linkified_text};
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::skin::SkinChatBands;
+use crate::ui::BOTTOM_BAR_Z;
 use crate::ui::BottomArea;
 use crate::ui::{
     LogicalInset, LogicalPadding, LogicalRect, UiDirection, UiRoot, UiScaffoldSystems, column, row,
@@ -123,7 +123,7 @@ const MIN_SIZE: Vec2 = Vec2::new(360.0, 210.0);
 const CHROME_FONT_SIZE: f32 = 13.0;
 
 /// The transcript font size, in logical pixels, at the medium
-/// [`crate::preferences_chat::SETTING_CHAT_FONT_SIZE`] step (and when no
+/// [`crate::world_api::SETTING_CHAT_FONT_SIZE`] step (and when no
 /// settings are available).
 const TRANSCRIPT_FONT_SIZE: f32 = 13.0;
 
@@ -144,7 +144,7 @@ fn transcript_font_step(settings: Option<&crate::settings::ViewerSettings>) -> u
         .and_then(|settings| {
             settings
                 .store()
-                .get_u32(crate::preferences_chat::SETTING_CHAT_FONT_SIZE)
+                .get_u32(crate::world_api::SETTING_CHAT_FONT_SIZE)
                 .ok()
         })
         .unwrap_or(1)
@@ -270,7 +270,7 @@ const DOCK_INSET: f32 = 0.0;
 const DOCK_HOST_BACKGROUND: Color = Color::srgba(0.06, 0.07, 0.10, 0.85);
 
 /// The dock host's z-index — one above the bottom bar
-/// ([`crate::bottom_toolbar::BOTTOM_BAR_Z`]). This host sits *against* that bar, so
+/// ([`crate::ui::BOTTOM_BAR_Z`]). This host sits *against* that bar, so
 /// a floater docked here (which shares its host's z-plane, see
 /// [`crate::floater`]'s `dock`) must out-rank the bar or the bar swallows clicks on
 /// the docked floater's bottom-most control — its chat input.

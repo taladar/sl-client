@@ -12,14 +12,14 @@
 //!
 //! - a [`LocalChatSubmit`] — the resolved channel, chat type (volume) and message,
 //!   which a live consumer maps to `Command::Chat`; or
-//! - a [`SlashCommandInvoked`] — when the line is `/<name> …` and `<name>` (a
-//!   **non-numeric** token) is in the [`SlashCommands`] registry, so the
+//! - a `SlashCommandInvoked` — when the line is `/<name> …` and `<name>` (a
+//!   **non-numeric** token) is in the `SlashCommands` registry, so the
 //!   registrant handles it.
 //!
 //! The nearby-chat bar and the conversations floater are the intended live
 //! consumers (each its own follow-up); both spawn this widget and wire its output.
 //!
-//! # The parse ([`classify_line`])
+//! # The parse (`classify_line`)
 //!
 //! - `/<number> rest` → channel `number`, **Normal** type (whisper/shout apply
 //!   only to channel 0), message `rest`.
@@ -136,7 +136,7 @@ pub(crate) struct VolumeOption {
 
 /// The registry of **non-numeric** `/command` names other parts of the viewer
 /// claim. A local-chat line `/<name> …` whose `<name>` is registered here becomes
-/// a [`SlashCommandInvoked`] instead of chat; an unregistered one is said
+/// a `SlashCommandInvoked` instead of chat; an unregistered one is said
 /// verbatim.
 #[derive(Resource, Debug, Clone, Default)]
 pub(crate) struct SlashCommands {
@@ -146,7 +146,7 @@ pub(crate) struct SlashCommands {
 
 impl SlashCommands {
     /// Register `name` (case-insensitively) as a slash command, so `/name …` in a
-    /// local-chat input routes to a [`SlashCommandInvoked`] rather than chat.
+    /// local-chat input routes to a `SlashCommandInvoked` rather than chat.
     #[expect(
         dead_code,
         reason = "the registration API for other parts of the viewer; its callers are the \
@@ -167,15 +167,15 @@ impl SlashCommands {
 /// message. A live consumer maps this to `Command::Chat` (the nearby-chat bar,
 /// [`crate::nearby_chat_bar`], does).
 #[derive(Message, Debug, Clone)]
-pub(crate) struct LocalChatSubmit {
+pub struct LocalChatSubmit {
     /// The field the line came from.
-    pub(crate) field: Entity,
+    pub field: Entity,
     /// The channel to say on (`0` for local chat).
-    pub(crate) channel: ChatChannel,
+    pub channel: ChatChannel,
     /// The wire chat type (volume) to say at.
-    pub(crate) chat_type: ChatType,
+    pub chat_type: ChatType,
     /// The message text.
-    pub(crate) message: String,
+    pub message: String,
 }
 
 /// An invoked `/command`: the field, the command name (lower-cased) and the
@@ -198,13 +198,13 @@ pub(crate) struct SlashCommandInvoked {
 /// What [`spawn_local_chat_input`] hands back: the chat box, the inner field, and
 /// the volume select button.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct LocalChatInputHandle {
+pub struct LocalChatInputHandle {
     /// The chat box (from [`crate::chat_input`]).
     pub(crate) container: Entity,
     /// The inner [`bevy::text::EditableText`] field. Used by the nearby-chat bar
     /// ([`crate::nearby_chat_bar`]) to focus it and read its value; the specimen
-    /// uses only [`container`](Self::container).
-    pub(crate) field: Entity,
+    /// uses only `container`.
+    pub field: Entity,
 }
 
 // ---------------------------------------------------------------------------
@@ -290,7 +290,7 @@ fn classify_line(
 
 /// Spawn a local-chat input under `parent` — a [`crate::chat_input`] with a volume
 /// select box appended after its emoji button — returning the box and field.
-pub(crate) fn spawn_local_chat_input(
+pub fn spawn_local_chat_input(
     commands: &mut Commands,
     parent: Entity,
     spec: &ChatInputSpec,
@@ -434,7 +434,7 @@ fn spawn_volume_option(
 /// dispatch. Requires [`crate::chat_input::ChatInputPlugin`] (whose
 /// [`ChatInputSubmit`] it reads).
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct LocalChatInputPlugin;
+pub struct LocalChatInputPlugin;
 
 impl Plugin for LocalChatInputPlugin {
     /// Register the registry, the output messages, and the systems.
@@ -447,8 +447,8 @@ impl Plugin for LocalChatInputPlugin {
 }
 
 /// Turn each [`ChatInputSubmit`] from a local-chat field into a [`LocalChatSubmit`]
-/// or a [`SlashCommandInvoked`], resolving the volume from the select box and the
-/// `Enter` modifiers and classifying the line against the [`SlashCommands`]
+/// or a `SlashCommandInvoked`, resolving the volume from the select box and the
+/// `Enter` modifiers and classifying the line against the `SlashCommands`
 /// registry.
 fn dispatch_local_chat(
     mut submits: MessageReader<ChatInputSubmit>,
@@ -527,7 +527,7 @@ fn reflect_volume_select(
 /// Spawn the **live** local-chat-input specimen for the gallery / harness: the real
 /// widget, so its bar (with the volume select box) is swept and it is usable in the
 /// gallery. Its runtime is inert in the harness and live in the gallery.
-pub(crate) fn spawn_local_chat_input_specimen(
+pub fn spawn_local_chat_input_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: crate::ui_element::ElementCx,

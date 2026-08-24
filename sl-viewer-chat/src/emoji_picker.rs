@@ -17,12 +17,12 @@
 //!   pooled *row of cells* per list row, so the whole ~1800-glyph dataset costs
 //!   the viewport, not the item count;
 //! - the emoji **data** ([`sl_emoji`]) — the grouped list and the free-text
-//!   [`search`](sl_emoji::search) the grid draws from.
+//!   [`search`] the grid draws from.
 //!
 //! # How a chosen glyph reaches a field
 //!
 //! The picker does not own a text field of its own to type into (its search box
-//! is for filtering). Instead it remembers, in [`EmojiTarget`], the last
+//! is for filtering). Instead it remembers, in `EmojiTarget`, the last
 //! [`EditableText`] *outside the picker* to hold focus, and a cell press inserts
 //! the chosen glyph there through the field's own [`EditableText::editor`] — at
 //! the caret, replacing any selection, grapheme- and IME-correctly, because it is
@@ -151,7 +151,8 @@ const fn group_icon(group: Group) -> &'static str {
 /// spawn (after the scaffold root exists), and the systems that toggle it, track
 /// the target field, mirror the search / group selection into the view, recycle
 /// the grid rows, and apply the chosen tone.
-pub(crate) struct EmojiPickerPlugin;
+#[derive(Debug)]
+pub struct EmojiPickerPlugin;
 
 impl Plugin for EmojiPickerPlugin {
     /// Wire the picker up. The model half (target tracking, search / tab reads,
@@ -280,7 +281,7 @@ struct PendingEmojiAnchor(Option<Vec2>);
 /// shows itself, targets `field` (so the next glyph lands there rather than in
 /// whatever last held focus), moves next to `near`, and raises to the front.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenEmojiPicker {
+pub struct OpenEmojiPicker {
     /// The field a chosen glyph should be inserted into.
     pub(crate) field: Entity,
     /// Where to anchor the picker, in logical window pixels (the emoji button's
@@ -338,7 +339,7 @@ pub(crate) struct EmojiToneSwatch {
 // ---------------------------------------------------------------------------
 
 /// The emoji list a group index and query select: the free-text
-/// [`search`](sl_emoji::search) across every group when the query is non-blank,
+/// [`search`] across every group when the query is non-blank,
 /// otherwise the active group's own list. A group index past the end yields an
 /// empty list rather than panicking.
 fn build_view(group: usize, query: &str) -> Vec<Emoji> {
@@ -1057,7 +1058,7 @@ fn spawn_tone_swatch(
 /// they are not duplicated here. The grid cells are content-sized (padded around
 /// the glyph) rather than the live grid's fixed tiles, so a large font grows them
 /// rather than being clipped by the containment check.
-pub(crate) fn spawn_emoji_picker_specimen(
+pub fn spawn_emoji_picker_specimen(
     commands: &mut Commands,
     parent: Entity,
     cx: ElementCx,

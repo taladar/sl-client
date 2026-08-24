@@ -55,10 +55,10 @@ use bevy::prelude::*;
 use sl_client_bevy::{Command, SlAgentParcel, SlCommand};
 
 use crate::about_land::{AboutLandSubject, OpenAboutLand};
-use crate::avatar_menu::SelfGroundSit;
 use crate::menu::UNIMPLEMENTED;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
+use crate::world_api::SelfGroundSit;
 
 /// The `element` the land pie attributes its [`UiAction`]s to.
 pub(crate) const LAND_MENU_ELEMENT: &str = "land-menu";

@@ -70,7 +70,7 @@ use crate::world_api::LocalChatNotice;
 const NOTIFICATION_ELEMENT: &str = "notification-toast";
 
 /// The z-order the toast channel renders at — above the floaters **and** the
-/// top menu / status bar ([`crate::bottom_toolbar::BOTTOM_BAR_Z`]) so a toast is
+/// top menu / status bar ([`crate::ui::BOTTOM_BAR_Z`]) so a toast is
 /// never hidden by a window or a bar; the channel's own top inset keeps it clear
 /// of the bar rather than overlapping it.
 const TOAST_CHANNEL_Z: i32 = 9_500;

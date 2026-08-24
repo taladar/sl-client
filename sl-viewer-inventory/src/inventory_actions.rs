@@ -650,7 +650,7 @@ pub(crate) struct InventoryClipboard {
 
 /// The attachments this viewer session knows to be worn, by inventory item id.
 ///
-/// Best-effort, like [`crate::avatar_menu::SelfGroundSit`]: seeded from the
+/// Best-effort, like [`crate::world_api::SelfGroundSit`]: seeded from the
 /// Current Outfit Folder's links when the grid maintains one, and tracked
 /// through the wear / detach commands this viewer itself sends. An attachment
 /// worn by another viewer mid-session is not observed; the worst case is a

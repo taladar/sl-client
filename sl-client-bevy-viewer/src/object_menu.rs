@@ -104,7 +104,7 @@ use sl_client_bevy::{
     SlSessionEvent, TransactionId, Uuid, Vector,
 };
 
-use crate::avatar_menu::{SELF_SITTING, SELF_STANDING, SelfGroundSit};
+use crate::avatar_menu::{SELF_SITTING, SELF_STANDING};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::inventory::InventoryModel;
 use crate::menu::UNIMPLEMENTED;
@@ -112,6 +112,7 @@ use crate::objects::{ObjectRayHit, ObjectState};
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::world_api::RequestBlock;
+use crate::world_api::SelfGroundSit;
 
 /// The `element` the object pie attributes its [`UiAction`]s to.
 pub(crate) const OBJECT_MENU_ELEMENT: &str = "object-menu";

@@ -97,7 +97,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, SlAgentParcel, SlCommand, SlIdentity, SurfaceInfo};
 
 use crate::avatar_menu::{
-    AvatarMenuTarget, OTHER_MUTE_PIE, SELF_RESET_PIE, SELF_SITTING, SELF_STANDING, SelfGroundSit,
+    AvatarMenuTarget, OTHER_MUTE_PIE, SELF_RESET_PIE, SELF_SITTING, SELF_STANDING,
     TARGET_NOT_FRIEND,
 };
 use crate::avatars::AvatarState;
@@ -108,6 +108,7 @@ use crate::objects::ObjectPickSummary;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::world_api::FriendsModel;
+use crate::world_api::SelfGroundSit;
 
 /// The `element` both attachment pies attribute their [`UiAction`]s to.
 ///
