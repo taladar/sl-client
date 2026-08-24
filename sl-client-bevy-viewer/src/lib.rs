@@ -258,10 +258,10 @@ pub(crate) use sl_viewer_world::render_scene;
 mod render_test;
 pub(crate) use sl_viewer_notices::script_dialog;
 pub(crate) use sl_viewer_notices::script_permission;
+pub(crate) use sl_viewer_search::search;
 pub(crate) use sl_viewer_world::replay_bundle;
 pub(crate) use sl_viewer_world::scene_reset;
 pub(crate) use sl_viewer_world::screenshot;
-mod search;
 pub(crate) use sl_viewer_world::session;
 // The settings store is its own crate now that it no longer names the
 // features that register with it — that list is `REGISTRARS` above.

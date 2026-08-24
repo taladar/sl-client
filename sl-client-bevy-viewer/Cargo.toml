@@ -199,6 +199,7 @@ sl-viewer-media = { workspace = true }
 sl-viewer-notices = { workspace = true }
 sl-viewer-notifications = { workspace = true }
 sl-viewer-platform = { workspace = true }
+sl-viewer-search = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
 sl-viewer-ui-core = { workspace = true }

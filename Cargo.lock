@@ -8516,6 +8516,7 @@ dependencies = [
  "sl-viewer-notices",
  "sl-viewer-notifications",
  "sl-viewer-platform",
+ "sl-viewer-search",
  "sl-viewer-settings",
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
@@ -9116,6 +9117,24 @@ dependencies = [
  "sl-audio",
  "sl-client-bevy",
  "tracing",
+]
+
+[[package]]
+name = "sl-viewer-search"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-settings",
+ "sl-viewer-map",
+ "sl-viewer-media",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "url",
 ]
 
 [[package]]

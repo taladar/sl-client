@@ -78,7 +78,7 @@ use crate::world_map::OpenWorldMap;
 // ---------------------------------------------------------------------------
 
 /// The floater's [`FloaterSpec::id`].
-pub(crate) const SEARCH_FLOATER_ID: &str = "search";
+pub const SEARCH_FLOATER_ID: &str = "search";
 
 /// The `[search]` settings section.
 const SEARCH_SECTION: &[&str] = &["search"];
@@ -962,7 +962,7 @@ struct SearchRow(SearchCategory);
 // ---------------------------------------------------------------------------
 
 /// Register the floater's maturity / online settings.
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         SEARCH_SECTION,
         SETTING_ONLINE_ONLY,
@@ -1054,7 +1054,8 @@ fn maturity_flags(category: SearchCategory, settings: Option<&ViewerSettings>) -
 // ---------------------------------------------------------------------------
 
 /// The plugin owning the Search floater.
-pub(crate) struct SearchFloaterPlugin;
+#[derive(Debug)]
+pub struct SearchFloaterPlugin;
 
 impl Plugin for SearchFloaterPlugin {
     /// Register the state and systems, and spawn the (hidden) floater.

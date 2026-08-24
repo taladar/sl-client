@@ -46,6 +46,7 @@ members = [
   "sl-viewer-notices",
   "sl-viewer-notifications",
   "sl-viewer-platform",
+  "sl-viewer-search",
   "sl-viewer-settings",
   "sl-viewer-spacenav",
   "sl-viewer-testkit",
@@ -115,6 +116,7 @@ sl-viewer-media = { path = "sl-viewer-media", version = "0.1.0" }
 sl-viewer-notices = { path = "sl-viewer-notices", version = "0.1.0" }
 sl-viewer-notifications = { path = "sl-viewer-notifications", version = "0.1.0" }
 sl-viewer-platform = { path = "sl-viewer-platform", version = "0.1.0" }
+sl-viewer-search = { path = "sl-viewer-search", version = "0.1.0" }
 sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }
 sl-viewer-spacenav = { path = "sl-viewer-spacenav", version = "0.1.0" }
 sl-viewer-testkit = { path = "sl-viewer-testkit", version = "0.1.0" }
