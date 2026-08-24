@@ -45,7 +45,6 @@ use sl_terrain::TerrainComposition;
 
 use crate::avatars::AvatarState;
 use crate::camera::{CameraMode, ViewerCamera};
-use crate::contact_sets_panel::OpenAddToContactSet;
 use crate::coords::bevy_to_sl_vec;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -65,6 +64,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
+use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::{ConversationKey, OpenConversation};
@@ -75,7 +75,7 @@ pub(crate) const MINIMAP_ELEMENT: &str = "minimap";
 
 /// The minimap floater's stable [`crate::floater::Floater::id`], the key the
 /// openers (toolbar, menu bar) look the panel up by.
-pub(crate) const MINIMAP_FLOATER_ID: &str = "minimap";
+pub const MINIMAP_FLOATER_ID: &str = "minimap";
 
 /// The settings section every minimap setting registers under.
 const MINIMAP_SECTION: &[&str] = &["minimap"];
@@ -83,19 +83,19 @@ const MINIMAP_SECTION: &[&str] = &["minimap"];
 /// The map scale setting (pixels per 256 m region), shared by all instances.
 /// `pub(crate)` for the preferences floater's bound controls, like every
 /// promoted setting name below.
-pub(crate) const SETTING_SCALE: &str = "MiniMapScale";
+pub const SETTING_SCALE: &str = "MiniMapScale";
 
 /// Whether the map rotates so the camera heading points up.
-pub(crate) const SETTING_ROTATE: &str = "MiniMapRotate";
+pub const SETTING_ROTATE: &str = "MiniMapRotate";
 
 /// Whether the pan offset eases back to centre each frame.
-pub(crate) const SETTING_AUTO_CENTER: &str = "MiniMapAutoCenter";
+pub const SETTING_AUTO_CENTER: &str = "MiniMapAutoCenter";
 
 /// The minimap surface opacity.
-pub(crate) const SETTING_OPACITY: &str = "MiniMapOpacity";
+pub const SETTING_OPACITY: &str = "MiniMapOpacity";
 
 /// Whether the object layer draws at all.
-pub(crate) const SETTING_OBJECTS: &str = "MiniMapObjects";
+pub const SETTING_OBJECTS: &str = "MiniMapObjects";
 
 /// Accent toggle: highlight physical objects.
 const SETTING_PHYSICAL: &str = "NetMapPhysical";
@@ -110,13 +110,13 @@ const SETTING_TEMP_ON_REZ: &str = "NetMapTempOnRez";
 const SETTING_PHANTOM_OPACITY: &str = "NetMapPhantomOpacity";
 
 /// Whether the parcel layer (property lines) draws at all.
-pub(crate) const SETTING_PROPERTY_LINES: &str = "MiniMapShowPropertyLines";
+pub const SETTING_PROPERTY_LINES: &str = "MiniMapShowPropertyLines";
 
 /// Whether for-sale / auction parcels are filled.
-pub(crate) const SETTING_FOR_SALE: &str = "MiniMapForSaleParcels";
+pub const SETTING_FOR_SALE: &str = "MiniMapForSaleParcels";
 
 /// Master toggle for the chat-range rings.
-pub(crate) const SETTING_CHAT_RING: &str = "MiniMapChatRing";
+pub const SETTING_CHAT_RING: &str = "MiniMapChatRing";
 
 /// Per-ring toggle: the whisper-range ring.
 const SETTING_WHISPER_RING: &str = "MiniMapWhisperRing";
@@ -141,7 +141,7 @@ const SETTING_PRIM_MAX_VERT: &str = "MiniMapPrimMaxVertDistance";
 
 /// Register every minimap setting (called from
 /// [`crate::settings::ViewerSettings`]'s `FromWorld`).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         MINIMAP_SECTION,
         SETTING_SCALE,
@@ -354,7 +354,7 @@ struct MenuContext {
     agents: Vec<AgentKey>,
     /// Whether a name of one of [`agents`](Self::agents) was still unresolved
     /// when the menu opened, so the lines are re-labelled as the names land
-    /// ([`refresh_minimap_menu_names`]). Cleared once every name is known.
+    /// (`refresh_minimap_menu_names`). Cleared once every name is known.
     names_pending: bool,
 }
 
@@ -566,8 +566,8 @@ struct CompositeStamp {
 /// one surface: the minimap's own menu and the radar's row menu
 /// (`viewer-radar-multi-select`) write the same marks, exactly as the reference's
 /// radar menu writes `LLNetMap`'s.
-#[derive(Resource, Default)]
-pub(crate) struct MinimapMarks {
+#[derive(Debug, Resource, Default)]
+pub struct MinimapMarks {
     /// The colour each marked avatar carries.
     colors: HashMap<AgentKey, Rgba>,
     /// Bumped on every change, and folded into [`CompositeStamp`] — which is how
@@ -579,12 +579,13 @@ pub(crate) struct MinimapMarks {
 
 impl MinimapMarks {
     /// The colour `agent` is marked with, if any.
-    pub(crate) fn color_of(&self, agent: AgentKey) -> Option<Rgba> {
+    #[must_use]
+    pub fn color_of(&self, agent: AgentKey) -> Option<Rgba> {
         self.colors.get(&agent).copied()
     }
 
     /// Mark every one of `agents` in `color`.
-    pub(crate) fn mark(&mut self, agents: &[AgentKey], color: Rgba) {
+    pub fn mark(&mut self, agents: &[AgentKey], color: Rgba) {
         for agent in agents {
             self.colors.insert(*agent, color);
         }
@@ -592,7 +593,7 @@ impl MinimapMarks {
     }
 
     /// Drop the marks on `agents` (the reference's *Clear Mark(s)*).
-    pub(crate) fn clear(&mut self, agents: &[AgentKey]) {
+    pub fn clear(&mut self, agents: &[AgentKey]) {
         for agent in agents {
             self.colors.remove(agent);
         }
@@ -600,7 +601,7 @@ impl MinimapMarks {
     }
 
     /// Drop every mark (the reference's *Clear all Marks*).
-    pub(crate) fn clear_all(&mut self) {
+    pub fn clear_all(&mut self) {
         self.colors.clear();
         self.touch();
     }
@@ -619,13 +620,13 @@ impl MinimapMarks {
 /// The chat ranges the rings draw at — the viewer defaults unless the grid's
 /// `SimulatorFeatures` extras override them.
 #[derive(Resource, Debug, Clone, Copy)]
-pub(crate) struct ChatRanges {
+pub struct ChatRanges {
     /// Whisper range in metres (default 10).
     pub(crate) whisper: f32,
     /// Say range in metres (default 20).
-    pub(crate) say: f32,
+    pub say: f32,
     /// Shout range in metres (default 100).
-    pub(crate) shout: f32,
+    pub shout: f32,
 }
 
 impl Default for ChatRanges {
@@ -669,7 +670,8 @@ const COMPASS_MINOR: [bool; 8] = [false, true, false, true, false, true, false, 
 
 /// The minimap plugin: the floater, the per-frame surface pipeline, and the
 /// context-menu / interaction wiring.
-pub(crate) struct MinimapPlugin;
+#[derive(Debug)]
+pub struct MinimapPlugin;
 
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
@@ -906,7 +908,8 @@ const fn vec2_scale(v: Vec2, s: f32) -> Vec2 {
 /// Narrow an `f64` metre offset to `f32` (offsets near the camera are small,
 /// so the narrowing is exact enough for pixel placement). Shared with the
 /// in-world double-click teleport, which resolves a picked point the same way.
-pub(crate) const fn narrow(value: f64) -> f32 {
+#[must_use]
+pub const fn narrow(value: f64) -> f32 {
     #[expect(
         clippy::as_conversions,
         clippy::cast_possible_truncation,
@@ -919,7 +922,8 @@ pub(crate) const fn narrow(value: f64) -> f32 {
 
 /// The scene origin's global coordinates in metres, as `f64`. Shared with
 /// the avatar radar, which samples the same global positions.
-pub(crate) fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
+#[must_use]
+pub fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
     let Some(origin) = origin else {
         return (0.0, 0.0);
     };
@@ -929,7 +933,8 @@ pub(crate) fn origin_global(origin: Option<RegionHandle>) -> (f64, f64) {
 
 /// A Bevy world translation as global metres (east, north, up). Shared with
 /// the avatar radar.
-pub(crate) fn global_from_bevy(origin: (f64, f64), translation: Vec3) -> (f64, f64, f32) {
+#[must_use]
+pub fn global_from_bevy(origin: (f64, f64), translation: Vec3) -> (f64, f64, f32) {
     let sl = bevy_to_sl_vec(translation);
     (origin.0 + f64::from(sl.x), origin.1 + f64::from(sl.y), sl.z)
 }
@@ -956,7 +961,7 @@ fn location_reached(agent_east: f64, agent_north: f64, east: f64, north: f64) ->
 /// ([`on_minimap_click`], "unless already tracking"); without an arrival-clear it
 /// lingers as a **red** map dot at the spot after the agent arrives (and
 /// teleports on again) — a stale "ghost" that looks exactly like an avatar dot,
-/// because [`COLOR_TRACK`](crate::minimap_math::COLOR_TRACK) is byte-identical to
+/// because [`COLOR_TRACK`] is byte-identical to
 /// the avatar-dot red. An **avatar** track is left alone (it follows its avatar
 /// until stopped from the menu).
 pub(crate) fn clear_reached_location_track(
@@ -1548,7 +1553,8 @@ fn grid_index_at(value: f64) -> Option<u32> {
 
 /// The region handle containing a global position, if it is on the grid. Shared
 /// with the in-world double-click teleport.
-pub(crate) fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
+#[must_use]
+pub fn region_handle_at(east: f64, north: f64) -> Option<RegionHandle> {
     Some(RegionHandle::from_grid(
         grid_index_at(east)?,
         grid_index_at(north)?,
@@ -2532,7 +2538,7 @@ fn on_minimap_click(
     identity: Res<SlIdentity>,
     mut tracking: ResMut<MapTracking>,
     mut commands: MessageWriter<SlCommand>,
-    mut begin: MessageWriter<crate::teleport_progress::BeginTeleportFlow>,
+    mut begin: MessageWriter<crate::world_api::BeginTeleportFlow>,
     mut world_map: MessageWriter<crate::world_map::OpenWorldMap>,
 ) {
     if click.button != PointerButton::Primary {
@@ -2596,10 +2602,10 @@ fn on_minimap_click(
         );
         let _current = identity.region_handle;
         let label = format!("{local_x:.0}, {local_y:.0}, {up:.0}");
-        crate::teleport_progress::issue_teleport(
+        crate::world_api::issue_teleport(
             &mut commands,
             &mut begin,
-            crate::teleport_progress::TeleportTarget {
+            crate::world_api::TeleportTarget {
                 region_handle: handle,
                 position: RegionCoordinates::new(local_x, local_y, up),
                 look_at: look,
@@ -2686,7 +2692,7 @@ fn on_minimap_scroll(
 /// multi-avatar shape: the single-avatar entries stand down and a *View
 /// Profiles* list takes their place, one line per avatar, labelled with whatever
 /// name is known now and re-labelled as the rest arrive
-/// ([`refresh_minimap_menu_names`]).
+/// (`refresh_minimap_menu_names`).
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy observer's parameters are its injected world: the press, the minimap state \
@@ -2800,13 +2806,13 @@ fn on_minimap_context(
 /// A name that is not known yet is *asked for* and drawn as the reference's
 /// `LoadingData` placeholder rather than as a UUID: the list exists to say who
 /// is under the cursor, and a key says nothing. The pending flag is what keeps
-/// [`refresh_minimap_menu_names`] running only until the answers arrive.
+/// `refresh_minimap_menu_names` running only until the answers arrive.
 ///
 /// Shared with the radar's multi-selection menu
 /// (`viewer-radar-multi-select`), whose **View Profiles** lines want exactly
 /// this — a name where one is known, the placeholder plus a request where one is
 /// not.
-pub(crate) fn menu_agent_labels(
+pub fn menu_agent_labels(
     agents: &[AgentKey],
     avatars: &mut AvatarState,
     translator: &Translator,
@@ -3081,7 +3087,7 @@ static MINIMAP_MENU: MenuDef = MenuDef {
 /// The mark colours by action name — the one table, shared with every surface
 /// that offers the reference's *Mark…* submenu (the radar's row menu writes the
 /// same [`MinimapMarks`] with the same five colours).
-pub(crate) const MARK_COLORS: [(&str, Rgba); 5] = [
+pub const MARK_COLORS: [(&str, Rgba); 5] = [
     ("mark-red", [255, 64, 64, 255]),
     ("mark-green", [64, 255, 64, 255]),
     ("mark-blue", [64, 96, 255, 255]),
@@ -3332,11 +3338,7 @@ fn apply_minimap_mouselook(
 /// A static minimap look for the gallery / harness: the surface panel with a
 /// terrain-ish background, a few avatar dots, the self marker and the compass
 /// labels — no live session, no image compositing.
-pub(crate) fn spawn_minimap_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    _cx: ElementCx,
-) -> Entity {
+pub fn spawn_minimap_specimen(commands: &mut Commands, parent: Entity, _cx: ElementCx) -> Entity {
     let root = commands
         .spawn((
             Node {

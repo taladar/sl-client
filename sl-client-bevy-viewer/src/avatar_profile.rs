@@ -2498,7 +2498,7 @@ fn on_profile_action(
     mut sl_commands: MessageWriter<SlCommand>,
     mut blocks: MessageWriter<RequestBlock>,
     mut conversations: MessageWriter<OpenConversation>,
-    mut contact_sets: MessageWriter<crate::contact_sets_panel::OpenAddToContactSet>,
+    mut contact_sets: MessageWriter<crate::world_api::OpenAddToContactSet>,
 ) {
     if press.button != PointerButton::Primary {
         return;
@@ -2533,7 +2533,7 @@ fn on_profile_action(
             }));
         }
         ProfileAction::AddToContactSet => {
-            contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet::one(
+            contact_sets.write(crate::world_api::OpenAddToContactSet::one(
                 target,
                 avatars
                     .name_of(target)

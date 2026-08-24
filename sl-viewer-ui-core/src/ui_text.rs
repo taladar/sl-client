@@ -47,7 +47,7 @@
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
-use bevy::text::EditableText;
+use bevy::text::{EditableText, FontCx, LayoutCx};
 
 use crate::ui::{LogicalMargin, LogicalRect, UiPanelShown, UiRoot, column};
 use crate::ui_font::UiFont;
@@ -258,6 +258,21 @@ pub fn apply_text_demo_visibility(
             shown.0 = visible.0;
         }
     }
+}
+
+/// Programmatically replace an [`EditableText`]'s content: parley `set_text`
+/// plus a layout refresh and caret-to-end, the same sequence the numeric
+/// fields revert with.
+pub fn set_editor_text(
+    editable: &mut EditableText,
+    text: &str,
+    font_cx: &mut FontCx,
+    layout_cx: &mut LayoutCx,
+) {
+    editable.editor.set_text(text);
+    let mut driver = editable.editor.driver(font_cx, layout_cx);
+    driver.refresh_layout();
+    driver.move_to_text_end();
 }
 
 #[cfg(test)]

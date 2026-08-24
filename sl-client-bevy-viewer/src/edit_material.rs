@@ -64,11 +64,11 @@ use crate::render_priority::TERRAIN_BOOST_PRIORITY;
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
+use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{
     MaterialSwatchValue, TextureSwatchValue, spawn_material_swatch, spawn_texture_swatch,
 };
-use crate::web_floater::set_editor_text;
 use crate::world_api::EditToolState;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::SelectionSet;

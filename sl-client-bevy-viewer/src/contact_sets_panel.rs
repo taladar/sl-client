@@ -91,10 +91,10 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
-use crate::world_api::FriendsModel;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::{AvatarPicked, OpenAvatarPicker};
 use crate::world_api::{ConversationKey, OpenConversation};
+use crate::world_api::{FriendsModel, OpenAddToContactSet};
 
 /// The tag the panel opens the shared avatar picker under, so only its own pick
 /// is consumed.
@@ -599,47 +599,6 @@ pub(crate) struct OpenSetPseudonym {
     /// The best name the opening surface knows for them, shown in the prompt and
     /// remembered beside the alias.
     pub(crate) name: String,
-}
-
-/// Ask for the add-to-set floater. The avatar pie's **Add ▸ Add to Set**, the
-/// panel's **Move to Set…** and the minimap's multi-avatar **Add to Set** all
-/// write this.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct OpenAddToContactSet {
-    /// The residents to file, each with the best name the opening surface knows
-    /// for them (empty when it knows none). Usually one; the reference's
-    /// multi-avatar entries hand over several, and the floater then asks for one
-    /// set to file the lot under.
-    pub(crate) agents: Vec<(AgentKey, String)>,
-    /// The set to take them out of once they are filed — the reference's move
-    /// mode. `None` for a plain add.
-    pub(crate) move_from: Option<String>,
-}
-
-impl OpenAddToContactSet {
-    /// File one resident.
-    pub(crate) fn one(agent: AgentKey, name: String) -> Self {
-        Self {
-            agents: vec![(agent, name)],
-            move_from: None,
-        }
-    }
-
-    /// File several residents at once.
-    pub(crate) const fn many(agents: Vec<(AgentKey, String)>) -> Self {
-        Self {
-            agents,
-            move_from: None,
-        }
-    }
-
-    /// The same request in the reference's *move* mode: take them out of `set`
-    /// once they are filed.
-    #[must_use]
-    pub(crate) fn moving_from(mut self, set: String) -> Self {
-        self.move_from = Some(set);
-        self
-    }
 }
 
 // --- Plugin ---------------------------------------------------------------
@@ -2240,7 +2199,7 @@ fn sync_config_floater(
     }
     *shown_for = Some(name.clone());
     if let Ok(mut editor) = editors.get_mut(ui.name_field) {
-        crate::web_floater::set_editor_text(&mut editor, &name, &mut font_cx, &mut layout_cx);
+        crate::ui_text::set_editor_text(&mut editor, &name, &mut font_cx, &mut layout_cx);
     }
     // The reply fields are seeded on the same edge as the name field, for the
     // same reason: they are edited in place, and re-seeding them every frame
@@ -2248,7 +2207,7 @@ fn sync_config_floater(
     for mode in AUTORESPONSE_MODES {
         let text = set.autoresponse(*mode).text().to_owned();
         if let Ok(mut editor) = editors.get_mut(ui.autoresponse(*mode).field) {
-            crate::web_floater::set_editor_text(&mut editor, &text, &mut font_cx, &mut layout_cx);
+            crate::ui_text::set_editor_text(&mut editor, &text, &mut font_cx, &mut layout_cx);
         }
     }
     let title = translator.format(

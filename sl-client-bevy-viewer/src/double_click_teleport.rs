@@ -48,7 +48,7 @@ use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_context::InputContext;
 use crate::minimap::{narrow, region_handle_at};
 use crate::settings::ViewerSettings;
-use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
+use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 
 /// The persisted setting section — shared with other input-behaviour settings.
 const INPUT_SECTION: &[&str] = &["input"];

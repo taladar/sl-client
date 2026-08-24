@@ -1296,7 +1296,7 @@ fn handle_avatar_menu_actions(
     mut conversations: MessageWriter<OpenConversation>,
     mut profiles: MessageWriter<OpenAvatarProfile>,
     mut refetch: MessageWriter<RefetchAvatarTextures>,
-    mut contact_sets: MessageWriter<crate::contact_sets_panel::OpenAddToContactSet>,
+    mut contact_sets: MessageWriter<crate::world_api::OpenAddToContactSet>,
     mut aliases: MessageWriter<crate::contact_sets_panel::OpenSetPseudonym>,
 ) {
     for action in actions.read() {
@@ -1377,7 +1377,7 @@ fn handle_avatar_menu_actions(
             // (`viewer-contact-sets`) — the floater asks which, since the pie
             // cannot grow a slice per set.
             "add-to-set" if action.element == AVATAR_MENU_ELEMENT => {
-                contact_sets.write(crate::contact_sets_panel::OpenAddToContactSet::one(
+                contact_sets.write(crate::world_api::OpenAddToContactSet::one(
                     agent,
                     avatars
                         .name_of(agent)

@@ -1,0 +1,46 @@
+[package]
+name = "sl-viewer-map"
+description = "The Second Life / OpenSim viewer's maps: the corner minimap, the full world map with its tile fetching, and the tracking beacon they share"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+readme.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords = ["secondlife", "opensim", "viewer", "map"]
+categories = ["game-development"]
+exclude.workspace = true
+publish.workspace = true
+
+[dependencies]
+arboard = { version = "3.6.1", default-features = false, features = [
+  "wayland-data-control",
+] }
+# Not a workspace dependency: members disagree about `default-features`, so the
+# spec stays per-crate (see the root manifest).
+bevy = { version = "0.19.0" }
+crossbeam-channel = { workspace = true }
+fs-err = { workspace = true }
+sl-client-bevy = { workspace = true, features = [
+  "bevy_pbr",
+] }
+sl-map-apis = { version = "0.8.0" }
+sl-settings = { path = "../sl-settings", version = "0.1.0" }
+sl-terrain = { path = "../sl-terrain", version = "0.1.0" }
+sl-types = { workspace = true }
+sl-viewer-kit = { workspace = true }
+sl-viewer-platform = { workspace = true }
+sl-viewer-settings = { workspace = true }
+sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-widgets = { workspace = true }
+sl-viewer-world = { workspace = true }
+sl-viewer-world-api = { workspace = true }
+tokio = { workspace = true, features = ["net", "rt", "time"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

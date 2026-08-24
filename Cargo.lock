@@ -8483,12 +8483,10 @@ dependencies = [
 name = "sl-client-bevy-viewer"
 version = "0.1.0"
 dependencies = [
- "arboard",
  "bevy",
  "bevy_flair",
  "bevy_fluent",
  "clap",
- "crossbeam-channel",
  "fluent",
  "fluent_content",
  "fs-err",
@@ -8504,17 +8502,16 @@ dependencies = [
  "sl-client-bevy",
  "sl-emoji",
  "sl-l10n",
- "sl-map-apis",
  "sl-mesh",
  "sl-notecard",
  "sl-proto",
  "sl-repl",
  "sl-settings",
- "sl-terrain",
  "sl-texture",
  "sl-types",
  "sl-viewer-audio",
  "sl-viewer-kit",
+ "sl-viewer-map",
  "sl-viewer-media",
  "sl-viewer-notices",
  "sl-viewer-notifications",
@@ -8527,7 +8524,6 @@ dependencies = [
  "sl-viewer-world",
  "sl-viewer-world-api",
  "thiserror 2.0.19",
- "tokio",
  "tracing",
  "tracing-chrome",
  "tracing-subscriber",
@@ -9025,6 +9021,31 @@ dependencies = [
  "pretty_assertions",
  "sl-client-bevy",
  "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
+name = "sl-viewer-map"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "bevy",
+ "crossbeam-channel",
+ "fs-err",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-map-apis",
+ "sl-settings",
+ "sl-terrain",
+ "sl-types",
+ "sl-viewer-kit",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-ui-widgets",
+ "sl-viewer-world",
+ "sl-viewer-world-api",
+ "tokio",
  "tracing",
 ]
 

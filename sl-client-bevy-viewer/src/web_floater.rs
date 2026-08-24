@@ -24,6 +24,7 @@ use crate::system_browser::open_in_system_browser;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
+use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::OpenWebBrowser;
 
@@ -450,21 +451,6 @@ fn sync_web_floater(
             text.0 = want;
         }
     }
-}
-
-/// Programmatically replace an [`EditableText`]'s content: parley `set_text`
-/// plus a layout refresh and caret-to-end, the same sequence the numeric
-/// fields revert with.
-pub(crate) fn set_editor_text(
-    editable: &mut EditableText,
-    text: &str,
-    font_cx: &mut FontCx,
-    layout_cx: &mut LayoutCx,
-) {
-    editable.editor.set_text(text);
-    let mut driver = editable.editor.driver(font_cx, layout_cx);
-    driver.refresh_layout();
-    driver.move_to_text_end();
 }
 
 #[cfg(test)]

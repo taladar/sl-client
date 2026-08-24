@@ -49,8 +49,8 @@ use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group}
 use crate::ui_tab::{
     DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, fill_tab_container, spawn_tab_container,
 };
+use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::web_floater::set_editor_text;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::SelectionSet;
 

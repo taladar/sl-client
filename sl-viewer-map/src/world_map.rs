@@ -56,13 +56,13 @@ use crate::i18n::{TransArgs, Translated, Translator};
 use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::minimap_math::{self, REGION_WIDTH_METRES, Rgba, Surface};
 use crate::settings::{AccountContext, ViewerSettings};
-use crate::teleport_progress::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
+use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
-use crate::web_floater::set_editor_text;
+use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::world_api::{MapTracking, TrackTarget};
 use crate::world_map_math::{
     self, TileRaster, WorldMapView, tile_corner, tile_level, tile_span_regions,
@@ -74,7 +74,7 @@ pub(crate) const WORLD_MAP_ELEMENT: &str = "worldmap";
 
 /// The world-map floater's stable [`crate::floater::Floater::id`], the key the
 /// openers (toolbar, menu bar) look the panel up by.
-pub(crate) const WORLD_MAP_FLOATER_ID: &str = "worldmap";
+pub const WORLD_MAP_FLOATER_ID: &str = "worldmap";
 
 /// The settings section every world-map setting registers under.
 const WORLD_MAP_SECTION: &[&str] = &["worldmap"];
@@ -84,16 +84,16 @@ const SETTING_SCALE: &str = "WorldMapScale";
 
 /// Layer toggle: avatar ("people") markers. `pub(crate)` for the preferences
 /// floater's bound controls, like the other promoted names below.
-pub(crate) const SETTING_PEOPLE: &str = "WorldMapShowPeople";
+pub const SETTING_PEOPLE: &str = "WorldMapShowPeople";
 
 /// Layer toggle: telehub / infohub markers.
-pub(crate) const SETTING_INFOHUBS: &str = "WorldMapShowInfohubs";
+pub const SETTING_INFOHUBS: &str = "WorldMapShowInfohubs";
 
 /// Layer toggle: land-for-sale markers.
-pub(crate) const SETTING_LAND_SALE: &str = "WorldMapShowLandForSale";
+pub const SETTING_LAND_SALE: &str = "WorldMapShowLandForSale";
 
 /// Layer toggle: PG event markers.
-pub(crate) const SETTING_EVENTS: &str = "WorldMapShowEvents";
+pub const SETTING_EVENTS: &str = "WorldMapShowEvents";
 
 /// Layer toggle: Moderate event markers.
 const SETTING_MATURE_EVENTS: &str = "WorldMapShowMatureEvents";
@@ -102,11 +102,11 @@ const SETTING_MATURE_EVENTS: &str = "WorldMapShowMatureEvents";
 const SETTING_ADULT_EVENTS: &str = "WorldMapShowAdultEvents";
 
 /// Whether region-name labels draw in the detail regime.
-pub(crate) const SETTING_REGION_NAMES: &str = "WorldMapShowRegionNames";
+pub const SETTING_REGION_NAMES: &str = "WorldMapShowRegionNames";
 
 /// Register every world-map setting (called from
 /// [`crate::settings::ViewerSettings`]'s `FromWorld`).
-pub(crate) fn register_settings(settings: &mut ViewerSettings) {
+pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         WORLD_MAP_SECTION,
         SETTING_SCALE,
@@ -193,11 +193,11 @@ pub(crate) struct WorldMapUi {
 /// Open the world-map floater centred on a global position — the hand-off
 /// another surface (the minimap's double-click "world map" action) writes.
 #[derive(Message, Debug, Clone, Copy)]
-pub(crate) struct OpenWorldMap {
+pub struct OpenWorldMap {
     /// Global metres east of the point to centre on.
-    pub(crate) east: f64,
+    pub east: f64,
     /// Global metres north of the point to centre on.
-    pub(crate) north: f64,
+    pub north: f64,
 }
 
 /// The OS clipboard handle for Copy SLURL, kept alive so the copied selection
@@ -381,7 +381,8 @@ struct WorldMapStamp {
 
 /// The world-map plugin: the floater, the data mirror, the tile service, and
 /// the per-frame pipeline.
-pub(crate) struct WorldMapPlugin;
+#[derive(Debug)]
+pub struct WorldMapPlugin;
 
 impl Plugin for WorldMapPlugin {
     fn build(&self, app: &mut App) {
@@ -2815,11 +2816,7 @@ fn copy_to_clipboard(clipboard: &WorldMapClipboard, text: &str) {
 
 /// A static world-map look for the gallery / harness: a tile-ish backdrop with
 /// grid lines, a few markers, and a search side panel — no live session.
-pub(crate) fn spawn_world_map_specimen(
-    commands: &mut Commands,
-    parent: Entity,
-    _cx: ElementCx,
-) -> Entity {
+pub fn spawn_world_map_specimen(commands: &mut Commands, parent: Entity, _cx: ElementCx) -> Entity {
     let root = commands
         .spawn((
             Node {

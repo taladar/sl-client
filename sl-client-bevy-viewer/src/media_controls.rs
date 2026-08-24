@@ -718,7 +718,7 @@ fn update_media_controls(
             && let Ok(mut editor) = chrome.editors.get_mut(ui.url_field)
             && editor.value().to_string() != status.url
         {
-            crate::web_floater::set_editor_text(
+            crate::ui_text::set_editor_text(
                 &mut editor,
                 &status.url,
                 &mut chrome.font_cx,

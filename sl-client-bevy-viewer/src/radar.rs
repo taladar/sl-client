@@ -56,7 +56,6 @@ use crate::avatar_complexity::RenderOverride;
 use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED};
 use crate::avatar_render_settings::RequestRenderException;
 use crate::avatars::AvatarState;
-use crate::contact_sets_panel::OpenAddToContactSet;
 use crate::conversations::{NearbyChatNotice, StartConference};
 use crate::derender::{DerenderKind, RequestDerender};
 use crate::floater::{
@@ -93,6 +92,7 @@ use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_v
 use crate::world_api::FriendsModel;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::MuteModel;
+use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::{ConversationKey, OpenConversation};

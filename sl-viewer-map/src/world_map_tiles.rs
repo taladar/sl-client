@@ -7,7 +7,7 @@
 //! writing a third tile fetcher. That API is async (tokio + reqwest), while
 //! the viewer's I/O convention is plain worker threads, so a dedicated worker
 //! thread owns a small current-thread tokio runtime and the cache, and talks
-//! to the ECS over std mpsc channels: the ECS side sends [`TileKey`]s, the
+//! to the ECS over std mpsc channels: the ECS side sends `TileKey`s, the
 //! worker answers with decoded RGBA rasters (or a definitive "missing").
 //!
 //! The tile **base URL** is grid-specific: the login response's
@@ -193,7 +193,7 @@ impl WorldMapTiles {
 }
 
 /// The worker loop: owns a current-thread tokio runtime and the shared
-/// [`MapTileCache`]; answers each requested [`TileKey`] with a decoded raster
+/// [`MapTileCache`]; answers each requested `TileKey` with a decoded raster
 /// (`None` for a definitively missing tile). Ends when the request channel
 /// closes (the ECS side dropped or restarted the service).
 fn tile_worker(

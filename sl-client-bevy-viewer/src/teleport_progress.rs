@@ -41,12 +41,11 @@ use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, Button};
 
-use sl_client_bevy::{
-    Command, RegionCoordinates, RegionHandle, SlCommand, SlEvent, SlSessionEvent, Vector,
-};
+use sl_client_bevy::{Command, SlCommand, SlEvent, SlSessionEvent};
 
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
+use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 
 /// Seconds a live teleport may run before the overlay flags it as slow (and
 /// nudges the user that they can cancel). Below the server's 30 s timeout so the
@@ -90,54 +89,6 @@ const BUTTON_BG: Color = Color::srgb(0.22, 0.25, 0.31);
 /// The Retry button's background — the toolbar's lit blue, so it reads as the
 /// affirmative recovery action.
 const RETRY_BG: Color = Color::srgb(0.22, 0.40, 0.60);
-
-/// A concrete teleport target, kept so the overlay's **Retry** button can
-/// re-issue the exact same teleport after a failure.
-#[derive(Debug, Clone)]
-pub(crate) struct TeleportTarget {
-    /// The destination region handle.
-    pub(crate) region_handle: RegionHandle,
-    /// The destination region-local arrival position.
-    pub(crate) position: RegionCoordinates,
-    /// The arrival look-at direction.
-    pub(crate) look_at: Vector,
-}
-
-/// A request to open the teleport overlay for a teleport this frame's surface is
-/// initiating. Emitting it is optional — the overlay also opens from the incoming
-/// teleport events — but it lets a surface pre-fill the destination label and
-/// enable Retry. Prefer the [`issue_teleport`] helper, which writes this and the
-/// [`Command::Teleport`] together.
-#[derive(Message, Debug, Clone)]
-pub(crate) struct BeginTeleportFlow {
-    /// A human-readable destination label (e.g. a region name or `Region (128, 128)`),
-    /// shown on the overlay. `None` leaves the destination line blank.
-    pub(crate) destination: Option<String>,
-    /// The target to re-issue if the user hits Retry. `None` (landmark / lure
-    /// teleports, whose destination is not known until arrival) disables Retry.
-    pub(crate) retry: Option<TeleportTarget>,
-}
-
-/// Fire a location teleport **and** open the progress overlay in one call: writes
-/// [`Command::Teleport`] and a [`BeginTeleportFlow`] carrying the destination
-/// label and a Retry payload. The shared entry point every location-teleport
-/// surface (double-click, minimap, world map) routes through.
-pub(crate) fn issue_teleport(
-    commands: &mut MessageWriter<SlCommand>,
-    begin: &mut MessageWriter<BeginTeleportFlow>,
-    target: TeleportTarget,
-    destination: Option<String>,
-) {
-    begin.write(BeginTeleportFlow {
-        destination,
-        retry: Some(target.clone()),
-    });
-    commands.write(SlCommand(Command::Teleport {
-        region_handle: target.region_handle,
-        position: target.position,
-        look_at: target.look_at,
-    }));
-}
 
 /// Which phase of the handshake the teleport is currently in, for the status line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

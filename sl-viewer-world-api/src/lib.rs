@@ -22,7 +22,8 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, ChatSessionKind, Command, Friend, FriendKey, FriendPresence, FriendRights, GroupKey,
     GroupMembership, ImSessionId, MuteEntry, MuteFlags, MuteType, ObjectKey, ObjectProperties,
-    PrimFaceId, ScopedObjectId, SlCommand, TextureKey, Uuid,
+    PrimFaceId, RegionCoordinates, RegionHandle, ScopedObjectId, SlCommand, TextureKey, Uuid,
+    Vector,
 };
 use sl_viewer_settings::ViewerSettings;
 
@@ -1634,4 +1635,95 @@ pub struct OpenWebBrowser {
     /// The URL to show; `None` keeps the current page (or the home page on
     /// first open).
     pub url: Option<String>,
+}
+
+/// A concrete teleport target, kept so the overlay's **Retry** button can
+/// re-issue the exact same teleport after a failure.
+#[derive(Debug, Clone)]
+pub struct TeleportTarget {
+    /// The destination region handle.
+    pub region_handle: RegionHandle,
+    /// The destination region-local arrival position.
+    pub position: RegionCoordinates,
+    /// The arrival look-at direction.
+    pub look_at: Vector,
+}
+
+/// A request to open the teleport overlay for a teleport this frame's surface is
+/// initiating. Emitting it is optional — the overlay also opens from the incoming
+/// teleport events — but it lets a surface pre-fill the destination label and
+/// enable Retry. Prefer the [`issue_teleport`] helper, which writes this and the
+/// [`Command::Teleport`] together.
+#[derive(Message, Debug, Clone)]
+pub struct BeginTeleportFlow {
+    /// A human-readable destination label (e.g. a region name or `Region (128, 128)`),
+    /// shown on the overlay. `None` leaves the destination line blank.
+    pub destination: Option<String>,
+    /// The target to re-issue if the user hits Retry. `None` (landmark / lure
+    /// teleports, whose destination is not known until arrival) disables Retry.
+    pub retry: Option<TeleportTarget>,
+}
+
+/// Fire a location teleport **and** open the progress overlay in one call: writes
+/// [`Command::Teleport`] and a [`BeginTeleportFlow`] carrying the destination
+/// label and a Retry payload. The shared entry point every location-teleport
+/// surface (double-click, minimap, world map) routes through.
+pub fn issue_teleport(
+    commands: &mut MessageWriter<SlCommand>,
+    begin: &mut MessageWriter<BeginTeleportFlow>,
+    target: TeleportTarget,
+    destination: Option<String>,
+) {
+    begin.write(BeginTeleportFlow {
+        destination,
+        retry: Some(target.clone()),
+    });
+    commands.write(SlCommand(Command::Teleport {
+        region_handle: target.region_handle,
+        position: target.position,
+        look_at: target.look_at,
+    }));
+}
+
+/// Ask for the add-to-set floater. The avatar pie's **Add ▸ Add to Set**, the
+/// panel's **Move to Set…** and the minimap's multi-avatar **Add to Set** all
+/// write this.
+#[derive(Message, Debug, Clone)]
+pub struct OpenAddToContactSet {
+    /// The residents to file, each with the best name the opening surface knows
+    /// for them (empty when it knows none). Usually one; the reference's
+    /// multi-avatar entries hand over several, and the floater then asks for one
+    /// set to file the lot under.
+    pub agents: Vec<(AgentKey, String)>,
+    /// The set to take them out of once they are filed — the reference's move
+    /// mode. `None` for a plain add.
+    pub move_from: Option<String>,
+}
+
+impl OpenAddToContactSet {
+    /// File one resident.
+    #[must_use]
+    pub fn one(agent: AgentKey, name: String) -> Self {
+        Self {
+            agents: vec![(agent, name)],
+            move_from: None,
+        }
+    }
+
+    /// File several residents at once.
+    #[must_use]
+    pub const fn many(agents: Vec<(AgentKey, String)>) -> Self {
+        Self {
+            agents,
+            move_from: None,
+        }
+    }
+
+    /// The same request in the reference's *move* mode: take them out of `set`
+    /// once they are filed.
+    #[must_use]
+    pub fn moving_from(mut self, set: String) -> Self {
+        self.move_from = Some(set);
+        self
+    }
 }
