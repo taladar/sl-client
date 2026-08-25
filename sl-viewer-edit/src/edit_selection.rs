@@ -58,17 +58,17 @@ use sl_client_bevy::{
 use crate::edit_math::rect_selects;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gizmos::GizmoInteraction;
-use crate::hud_pick::pointer_over_blocking_ui;
-use crate::input_context::InputContext;
 use crate::inventory::InventoryModel;
 use crate::objects::ObjectPicker;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectSlMotion, PrimFaceEntity, SceneObject,
 };
 use crate::ui::UiRoot;
+use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::ViewerCamera;
 use crate::world_api::on_hud_layer;
+use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{DragHoverHighlight, EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 
@@ -689,7 +689,7 @@ fn hide_rubber_band(band: &RubberBandNode, band_nodes: &mut Query<(&mut Node, &m
 /// the reference's escape-out of an edit selection.
 fn clear_selection_on_escape(
     tool: Res<EditToolState>,
-    context: Res<crate::input_context::InputContext>,
+    context: Res<crate::world_api::InputContext>,
     focus: Res<InputFocus>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut selection: ResMut<SelectionSet>,

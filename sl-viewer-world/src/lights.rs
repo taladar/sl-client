@@ -2,7 +2,7 @@
 //! scene mirror and render it as a Bevy light.
 //!
 //! **Ingest (P25.1).** Each in-world prim may carry a light extra-param
-//! ([`LightData`]) marking it as a light source, and — when it is a spotlight
+//! ([`LightData`](sl_client_bevy::LightData)) marking it as a light source, and — when it is a spotlight
 //! (projector) — a companion light-image extra-param
 //! ([`LightImage`](sl_client_bevy::LightImage)) holding the projected texture and
 //! its cone parameters. `light_from_object` decodes those two blocks into an
@@ -32,10 +32,9 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use sl_client_bevy::{LightData, Object, TextureKey};
 
 use crate::sky::SCENE_LIGHT_ILLUMINANCE;
-use crate::world_api::ViewerCamera;
+use crate::world_api::{LightProjection, ObjectLight, ViewerCamera};
 
 /// The maximum number of local prim lights rendered at once (P25.2). Second
 /// Life's legacy fixed-function path capped hardware lights at
@@ -138,113 +137,6 @@ pub struct LocalLights {
     /// skip a prim whose light is unchanged, so a stable scene does no per-frame
     /// component churn at all.
     assigned: HashMap<Entity, (Entity, ObjectLight)>,
-}
-
-/// The projector parameters of a **spotlight** — a light that carries a
-/// light-image ([`LightImage`](sl_client_bevy::LightImage)) extra-param and so
-/// projects a texture within a cone (`LLVOVolume::isLightSpotlight`). A plain
-/// point light has none of this.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct LightProjection {
-    /// The projected texture id (`LLLightImageParams::getLightTexture`).
-    pub(crate) texture: TextureKey,
-    /// The projector cone field-of-view, in radians (`params.mV[0]`).
-    pub(crate) fov: f32,
-    /// The projector focus / blur (`params.mV[1]`).
-    pub(crate) focus: f32,
-    /// The projector ambiance — the diffuse spill outside the cone
-    /// (`params.mV[2]`).
-    pub(crate) ambiance: f32,
-}
-
-/// A component marking an object entity as a **light source**, carrying the
-/// decoded `LLLightParams` (and, for a spotlight, `LLLightImageParams`)
-/// parameters in Second Life semantics — ready for P25.2 to convert into a Bevy
-/// `PointLight` / `SpotLight`.
-///
-/// Attached to (and refreshed / cleared on) each object entity by
-/// `apply_object`(crate::objects) as its updates arrive.
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub struct ObjectLight {
-    /// The light's **linear** RGB colour, each channel in `0.0..=1.0`. The wire
-    /// bytes are the linear (not gamma-corrected) colour — Firestorm's
-    /// `LLLightParams::unpack` feeds them straight into `setLinearColor` — so no
-    /// sRGB decode is applied here.
-    pub(crate) linear_color: [f32; 3],
-    /// The light intensity in `0.0..=1.0` — the alpha channel of the wire colour
-    /// (`LLVOVolume::getLightIntensity` reads `getLinearColor().mV[3]`). The
-    /// effective emitted colour is `linear_color * intensity`.
-    pub(crate) intensity: f32,
-    /// The light radius, in metres (`LIGHT_MIN_RADIUS`..=`LIGHT_MAX_RADIUS`,
-    /// i.e. `0.0..=20.0`).
-    pub(crate) radius: f32,
-    /// The falloff exponent (`LIGHT_MIN_FALLOFF`..=`LIGHT_MAX_FALLOFF`, i.e.
-    /// `0.0..=2.0`): how sharply the light dims toward its radius.
-    pub(crate) falloff: f32,
-    /// The spotlight cutoff cone half-angle, in degrees
-    /// (`LIGHT_MIN_CUTOFF`..=`LIGHT_MAX_CUTOFF`, i.e. `0.0..=180.0`). Sent for
-    /// every light but only meaningful for a projector.
-    pub(crate) cutoff: f32,
-    /// The projector parameters when this is a **spotlight** (it carries a
-    /// light-image block); `None` for a plain point light.
-    pub(crate) projection: Option<LightProjection>,
-}
-
-impl ObjectLight {
-    /// Whether this light is a **spotlight** (projector) rather than a plain
-    /// point light — true exactly when it carries projector parameters, mirroring
-    /// `LLVOVolume::isLightSpotlight` (a light-image block is present).
-    pub(crate) const fn is_spotlight(&self) -> bool {
-        self.projection.is_some()
-    }
-
-    /// The light's effective emitted linear colour: its base colour scaled by its
-    /// intensity, mirroring `LLVOVolume::getLightLinearColor`
-    /// (`color * color.mV[3]`).
-    pub(crate) const fn effective_linear_color(&self) -> [f32; 3] {
-        [
-            self.linear_color[0] * self.intensity,
-            self.linear_color[1] * self.intensity,
-            self.linear_color[2] * self.intensity,
-        ]
-    }
-}
-
-/// Convert one wire colour byte to a normalized `0.0..=1.0` float. The workspace
-/// denies `as` casts, so the widening goes through [`f32::from`].
-fn channel(byte: u8) -> f32 {
-    f32::from(byte) / 255.0
-}
-
-/// Decode an object's light extra-params into an [`ObjectLight`], or `None` if the
-/// object is not a light source (it carries no `LLLightParams` block).
-///
-/// A spotlight additionally carries a light-image block; when present it becomes
-/// the [`projection`](ObjectLight::projection).
-pub(crate) fn light_from_object(object: &Object) -> Option<ObjectLight> {
-    let light: LightData = object.extra.light?;
-    let projection = object
-        .extra
-        .light_image
-        .as_ref()
-        .map(|image| LightProjection {
-            texture: image.texture,
-            fov: image.params.x,
-            focus: image.params.y,
-            ambiance: image.params.z,
-        });
-    Some(ObjectLight {
-        linear_color: [
-            channel(light.color[0]),
-            channel(light.color[1]),
-            channel(light.color[2]),
-        ],
-        intensity: channel(light.color[3]),
-        radius: light.radius,
-        falloff: light.falloff,
-        cutoff: light.cutoff,
-        projection,
-    })
 }
 
 /// The Rec. 709 relative luminance of a linear RGB colour — used to rank lights
@@ -428,9 +320,8 @@ pub fn drive_local_lights(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        ObjectLight, legacy_distance_attenuation, light_from_object, local_light_lumens, luminance,
-    };
+    use super::{ObjectLight, legacy_distance_attenuation, local_light_lumens, luminance};
+    use crate::world_api::light_from_object;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{LightData, LightImage, Object, TextureKey, Uuid, Vector};
 

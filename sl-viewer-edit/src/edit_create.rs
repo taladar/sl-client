@@ -41,7 +41,6 @@ use sl_client_bevy::{Command, PrimShape, SlCommand, Vector, pcode};
 use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::{LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS, spawn_row_label};
 use crate::gizmos::{GizmoInteraction, on_gizmo_layer};
-use crate::hud_pick::pointer_over_blocking_ui;
 use crate::i18n::Translated;
 use crate::objects::{ObjectCategory, ObjectSlMotion, SceneObject};
 use crate::ui::UiPointerClaim;
@@ -53,6 +52,7 @@ use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use crate::world_api::ViewerCamera;
 use crate::world_api::on_hud_layer;
+use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{EditTool, EditToolState};
 
 /// The uniform scale (metres) a Linden tree is rezzed at — its vector length

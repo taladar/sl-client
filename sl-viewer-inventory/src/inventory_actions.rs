@@ -53,7 +53,6 @@ use sl_client_bevy::{
 };
 use std::collections::{HashSet, VecDeque};
 
-use crate::input_context::InputContext;
 use crate::inventory::{
     InlineRename, InventoryModel, InventorySelection, InventoryUi, InventoryView, RowKey,
     query_folder_page,
@@ -63,6 +62,7 @@ use crate::menu::{MenuCommand, MenuDef, MenuItemDef, OpenContextMenu};
 use crate::ui::focus_within;
 use crate::ui_element::UiAction;
 use crate::virtual_list::VirtualRow;
+use crate::world_api::InputContext;
 use crate::world_api::StartConference;
 use crate::world_api::{ConversationKey, OpenConversation};
 

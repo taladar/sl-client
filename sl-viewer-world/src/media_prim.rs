@@ -36,14 +36,15 @@ use sl_client_bevy::{
 
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
-use crate::hud_pick::{pointer_over_blocking_ui, surface_info_from_hit};
-use crate::input_context::InputContext;
 use crate::media_engine::{
     MediaEngine, MediaEngineKind, MediaEngineSystems, MediaSurfaceId, MediaSurfaces,
 };
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
+use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
+use crate::world_api::pointer_over_blocking_ui;
+use crate::world_api::surface_info_from_hit;
 use crate::world_api::{
     FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
 };

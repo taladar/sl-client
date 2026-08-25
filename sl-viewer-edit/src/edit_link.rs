@@ -48,10 +48,10 @@
 use bevy::prelude::*;
 use sl_client_bevy::{Command, Permissions, ScopedObjectId, SlCommand};
 
-use crate::input_context::InputContext;
 use crate::menu::TOP_MENU_ELEMENT;
 use crate::ui_element::UiAction;
 use crate::world_api::EditToolState;
+use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::{SelectedNode, SelectionSet};
 

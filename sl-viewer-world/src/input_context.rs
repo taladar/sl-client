@@ -80,7 +80,7 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::window::{CursorGrabMode, CursorOptions};
 
-use crate::world_api::CameraMode;
+use crate::world_api::{CameraMode, InputContext};
 
 /// The key that hands the keyboard back to the world from a focused UI.
 const RELEASE_FOCUS_KEY: KeyCode = KeyCode::Escape;
@@ -113,39 +113,6 @@ impl Plugin for InputContextPlugin {
 /// the first place. Without this the context would helpfully re-grab it.
 #[derive(Resource, Debug, Clone, Copy)]
 pub struct CursorGrabAllowed(pub bool);
-
-/// Who input belongs to this frame.
-///
-/// Derived from `InputFocus` by `compute_input_context`; never assigned by
-/// hand.
-#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub enum InputContext {
-    /// Nothing in the UI holds focus: the world has the keyboard and the mouse.
-    ///
-    /// The seam the camera / movement modes (mouselook, third-person, sitting —
-    /// Firestorm's `keys.xml` modes) subdivide when they arrive.
-    #[default]
-    World,
-    /// A focusable UI node that does not take text holds focus — a button, a
-    /// checkbox. `Enter` / `Space` activate it, and the world gets no keys.
-    UiWidget,
-    /// A text-accepting node holds focus. Characters, the arrows and `Backspace`
-    /// are all its; the world gets nothing.
-    TextEntry,
-    /// An in-world **media face** holds keyboard focus
-    /// ([`crate::world_api::MediaFocus`]): keys go to the embedded page, so
-    /// the world gets nothing — the reference's `LLViewerMediaFocus` taking
-    /// `gFocusMgr`'s keyboard focus.
-    Media,
-}
-
-impl InputContext {
-    /// Whether the world owns input right now.
-    #[must_use]
-    pub const fn is_world(self) -> bool {
-        matches!(self, Self::World)
-    }
-}
 
 /// Derive [`InputContext`] from what currently holds focus.
 ///

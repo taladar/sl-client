@@ -45,8 +45,6 @@ pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world::camera;
-pub(crate) use sl_viewer_world::hud_pick;
-pub(crate) use sl_viewer_world::input_context;
 pub(crate) use sl_viewer_world::legacy_materials;
 pub(crate) use sl_viewer_world::material_preview;
 pub(crate) use sl_viewer_world::materials;

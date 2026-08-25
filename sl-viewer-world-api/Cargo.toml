@@ -20,6 +20,9 @@ bevy = { version = "0.19.0" }
 serde = { workspace = true, features = ["derive"] }
 sl-client-bevy = { workspace = true }
 sl-terrain = { path = "../sl-terrain", version = "0.1.0" }
+# Tier-0 leaf helpers, for the coordinate conversions the dead-reckoning state
+# here is seeded with. Depends on nothing in this crate, so the tier order holds.
+sl-viewer-kit = { path = "../sl-viewer-kit", version = "0.1.0" }
 sl-viewer-settings = { workspace = true }
 
 [dev-dependencies]

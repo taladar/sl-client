@@ -419,7 +419,7 @@ use crate::glow::{SlGlow, SlGlowPlugin};
 use crate::group_notice::GroupNoticePlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
-use crate::hud::{HudState, apply_hud_fullbright, fit_hud_points, setup_hud_screen};
+use crate::hud::{apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
 use crate::i18n::ViewerI18nPlugin;
 use crate::input_action::InputActionPlugin;
@@ -446,7 +446,7 @@ use crate::materials::{
     revert_removed_render_materials, update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
-use crate::movement::{AvatarControls, drive_avatar_controls};
+use crate::movement::drive_avatar_controls;
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::notification_host::{
     NotificationHostPlugin, ingest_alert_messages, spawn_notification_demo,
@@ -515,7 +515,9 @@ use crate::water_exclusion::{
     bind_water_exclusion_mask, convert_water_exclusion_faces, setup_water_exclusion,
     sync_water_exclusion_camera,
 };
+use crate::world_api::AvatarControls;
 use crate::world_api::AvatarState;
+use crate::world_api::HudState;
 use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, CameraRig, ViewerCamera};

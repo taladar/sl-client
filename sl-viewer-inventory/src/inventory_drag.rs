@@ -50,7 +50,6 @@ use sl_client_bevy::{
 
 use crate::coords::bevy_to_sl_vec;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
-use crate::hud_pick::pointer_over_blocking_ui;
 use crate::inventory::{
     InventoryModel, InventorySelection, InventoryUi, InventoryUiAction, InventoryView, RowKey,
     query_folder_page,
@@ -61,6 +60,7 @@ use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::AvatarPickTarget;
 use crate::world_api::ViewerCamera;
+use crate::world_api::pointer_over_blocking_ui;
 
 /// The ghost's offset from the pointer, in logical pixels — clear of the hot
 /// pixel so the pointer, not the ghost, decides the drop target.

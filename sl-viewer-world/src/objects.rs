@@ -45,13 +45,13 @@ use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
     JointOverrides, MeshKey, MeshSkin, Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh,
-    PrimShapeFloat, PrimShapeParams, Priority, RegionHandle, Rotation, ScopedObjectId,
-    SculptOrMeshKey, SlEvent, SlIdentity, SlSessionEvent, SurfaceInfo, TREE_RADIUS_SCALE_FACTOR,
-    TREE_YAW_DEGREES, TextureFace, TextureKey, Uuid, Vector, avatar_texture, decode_texture_entry,
-    grass_geometry, grass_species, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
-    tessellate_sculpt, tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh,
-    to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh,
-    tree_billboard_geometry, tree_geometry, tree_species,
+    PrimShapeFloat, PrimShapeParams, Priority, ReflectionProbeFlags, RegionHandle, Rotation,
+    ScopedObjectId, SculptOrMeshKey, SlEvent, SlIdentity, SlSessionEvent, SurfaceInfo,
+    TREE_RADIUS_SCALE_FACTOR, TREE_YAW_DEGREES, TextureFace, TextureKey, Uuid, Vector,
+    avatar_texture, decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
+    rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
+    texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh,
+    to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
 };
 
 use crate::animesh::ControlAvatarState;
@@ -64,26 +64,22 @@ use crate::coords::{
 use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
-use crate::hud_pick::surface_info_from_hit;
 use crate::world_api::AvatarState;
 use crate::world_api::{
-    AVATAR_BOOST_PRIORITY, AvatarPickTarget, HUD_RENDER_LAYER, INITIAL_TREE_TIER, MAX_PARENT_WALK,
-    ObjectPickSummary, ObjectState, ShapeFingerprint, TrackedObject, TreeTier, ViewerCamera,
-    despawn_prim_faces, is_hud_point,
+    AVATAR_BOOST_PRIORITY, AvatarPickTarget, HUD_RENDER_LAYER, HudState, INITIAL_TREE_TIER,
+    MAX_PARENT_WALK, ObjectLight, ObjectParticleSystem, ObjectPickSummary, ObjectReflectionProbe,
+    ObjectState, PhysicalObject, ShapeFingerprint, TrackedObject, TreeTier, ViewerCamera,
+    despawn_prim_faces, is_hud_point, light_from_object, particles_from_object,
+    reflection_probe_from_object, surface_info_from_hit,
 };
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
 
-use crate::hud::HudState;
 use crate::legacy_materials::LegacyMaterialManager;
-use crate::lights::{ObjectLight, light_from_object};
 use crate::material_cache::{MaterialCache, MaterialInternContext, SharedFaceMaterial};
 use crate::materials::ObjectRenderMaterials;
 use crate::meshes::{MeshDecoded, MeshManager};
-use crate::particles::{apply_particles, particles_from_object};
-use crate::physics::apply_physics;
 use crate::probe_layers::{dynamic_render_layers, world_geom_render_layers};
-use crate::probes::{apply_reflection_probe, reflection_probe_from_object};
 use crate::render_priority::HUD_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{
@@ -2733,6 +2729,135 @@ fn apply_floating_text(entity: Entity, object: &Object, is_hud: bool, commands: 
     }
 }
 
+/// The `FLAGS_USE_PHYSICS` bit of an object's update flags (`object_flags.h`):
+/// the object is simulated by the server's physics engine. This is the "physical
+/// object" flag the reference viewer reads (`LLViewerObject::flagUsePhysics`).
+const FLAGS_USE_PHYSICS: u32 = 1 << 0;
+
+/// Whether `object` is a server-flagged **physical root prim** the viewer drives
+/// kinematically: it carries `FLAGS_USE_PHYSICS`, is a linkset root (its
+/// children ride along via the Bevy hierarchy), is not a worn attachment (the
+/// reference viewer skips linear interpolation for attachments — they follow
+/// their wearer's skeleton joint instead), and is **not an avatar**.
+///
+/// The avatar guard matters: the simulator can flag avatars (`pcode` 47)
+/// `FLAGS_USE_PHYSICS` — they have a (server-simulated) physical presence — so
+/// without this check an avatar object would become a kinematic "physical prim"
+/// with a cuboid collider at head height, which the third-person camera then
+/// collides with, yanking the eye into the avatar's head. Avatars are driven by
+/// `drive_avatar_motion` (the `avatars.rs` path), never this prim path, and carry
+/// **no** collider by design (so the camera does not pull in for them). Whether an
+/// avatar update carries the flag appears to be region / parcel dependent (it
+/// surfaced on one test grid and not another), so the guard keys on the `pcode`,
+/// not on the flag — the viewer never fabricates a client-side collider for an
+/// avatar regardless of what drives the flag (the sim owns avatar bump physics).
+const fn is_physical_root(object: &Object) -> bool {
+    object.update_flags & FLAGS_USE_PHYSICS != 0
+        && object.parent_id.get() == 0
+        && object.attachment_point_id().is_none()
+        && object.pcode != pcode::AVATAR
+}
+
+/// Attach, refresh, or remove the [`PhysicalObject`] marker on an object entity to
+/// match its current physical-root status — the physics counterpart of
+/// [`apply_light`] / [`apply_particles`], called from
+/// [`apply_object`] on every add and update so a prim toggled
+/// physical / non-physical (or moved by a terse update) is reflected. The avian
+/// [`RigidBody`] / [`Collider`] themselves are managed by
+/// `drive_physical_objects` from this marker's presence.
+fn apply_physics(entity: Entity, object: &Object, commands: &mut Commands) {
+    if is_physical_root(object) {
+        refresh_physical_motion(entity, object, commands);
+    } else {
+        commands.entity(entity).remove::<PhysicalObject>();
+    }
+}
+
+/// Re-seed a **physical** root prim's authoritative motion snapshot (a fresh
+/// [`PhysicalObject`] insert restarts the dead-reckoning from it) without the
+/// `apply_physics` remove side — the motion-only fast path in the object
+/// update, where the physics flag is known unchanged, calls this so a
+/// non-physical mover no longer pays a no-op remove per motion packet. A
+/// no-op for a non-physical object.
+fn refresh_physical_motion(entity: Entity, object: &Object, commands: &mut Commands) {
+    if is_physical_root(object) {
+        commands.entity(entity).insert(PhysicalObject {
+            full_key: object.full_id,
+            position: object.motion.position.clone(),
+            velocity: object.motion.velocity.clone(),
+            acceleration: object.motion.acceleration.clone(),
+            rotation: object.motion.rotation.clone(),
+            angular_velocity: object.motion.angular_velocity.clone(),
+            region_handle: object.region_handle,
+            scale: object.scale.clone(),
+        });
+    }
+}
+
+/// Reconcile an object entity's [`ObjectParticleSystem`] component (P30.1) with
+/// its current particle-system block: insert / refresh it when the object is a
+/// live particle source, remove it when the source was cleared in-world (a null
+/// system) or the object stopped carrying one. Called on both the spawn and
+/// update paths so a source toggled on or off between updates is tracked, the way
+/// [`apply_light`] is for lights.
+fn apply_particles(
+    entity: Entity,
+    particles: Option<ObjectParticleSystem>,
+    commands: &mut Commands,
+) {
+    match particles {
+        Some(particles) => {
+            let system = &particles.system;
+            debug!(
+                "object particle source: pattern={:#04x} flags={:#x} burst_rate={:.2}s \
+                 burst_count={} part_max_age={:.2}s texture={:?} target={:?}",
+                system.pattern,
+                system.flags,
+                system.burst_rate,
+                system.burst_part_count,
+                system.part_max_age,
+                system.texture_id,
+                system.target_id,
+            );
+            commands.entity(entity).insert(particles);
+        }
+        None => {
+            commands.entity(entity).remove::<ObjectParticleSystem>();
+        }
+    }
+}
+
+/// Reconcile an object entity's `ObjectReflectionProbe` component with its
+/// current reflection-probe block: insert / refresh it when the prim is a probe,
+/// remove it when the prim was changed to non-probe in-world (the block dropped) or
+/// never was one. Called on both the spawn and update paths so a prim toggled probe
+/// on or off between updates is tracked, the way [`apply_flexi`](crate::flexi) /
+/// [`apply_light`] / [`apply_particles`] are.
+fn apply_reflection_probe(
+    entity: Entity,
+    probe: Option<ObjectReflectionProbe>,
+    commands: &mut Commands,
+) {
+    match probe {
+        Some(probe) => {
+            let data = &probe.data;
+            debug!(
+                "object reflection probe: ambiance={:.2} clip_distance={:.2}m \
+                 box_volume={} dynamic={} mirror={}",
+                data.ambiance,
+                data.clip_distance,
+                data.flags.contains(ReflectionProbeFlags::BOX_VOLUME),
+                data.flags.contains(ReflectionProbeFlags::DYNAMIC),
+                data.flags.contains(ReflectionProbeFlags::MIRROR),
+            );
+            commands.entity(entity).insert(probe);
+        }
+        None => {
+            commands.entity(entity).remove::<ObjectReflectionProbe>();
+        }
+    }
+}
+
 /// Reconcile an object entity's [`ObjectLight`] component (P25.1) with its current
 /// light block: insert / refresh it when the object is a light source, remove it
 /// when the light was cleared in-world. Called on both the spawn and update paths
@@ -2966,7 +3091,7 @@ fn apply_object(
             // motion snapshot re-seeded (a fresh `PhysicalObject` insert
             // restarts the dead-reckoning); the physics flag itself is known
             // unchanged, so the non-physical case pays nothing.
-            crate::physics::refresh_physical_motion(existing.entity, object, commands);
+            refresh_physical_motion(existing.entity, object, commands);
         }
         if rebuilt {
             // A genuine shape (or category) change, or a texture change: drop the

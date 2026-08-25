@@ -24,7 +24,7 @@
 //!
 //! **P31.2 — physical objects.** Every server-flagged physical root prim
 //! (`FLAGS_USE_PHYSICS`, marked by `apply_physics` from
-//! `apply_object`(crate::objects)) is a kinematic mover. The simulator stays
+//! `apply_object`, both in [`crate::objects`]) is a kinematic mover. The simulator stays
 //! authoritative: `drive_physical_objects` snaps the pose to each
 //! `ObjectUpdate` and, between updates, dead-reckons it forward exactly as the
 //! reference viewer's `LLViewerObject::interpolateLinearMotion` does — the
@@ -75,8 +75,8 @@ use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use parry3d::math::{Pose as ParryPose, Vector as ParryVec};
 use parry3d::shape::SharedShape;
 use sl_client_bevy::{
-    Command, MeshKey, MeshPhysics, Object, ObjectKey, ObjectPhysicsData, PhysicsShapeType,
-    RegionHandle, Rotation, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector, pcode,
+    Command, MeshKey, MeshPhysics, ObjectKey, ObjectPhysicsData, PhysicsShapeType, RegionHandle,
+    SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector,
 };
 
 use crate::avatars::update_avatar_objects;
@@ -88,7 +88,9 @@ use crate::world_api::ObjectState;
 
 use crate::world_api::AvatarState;
 use crate::world_api::TerrainState;
-use crate::world_api::{AvatarMotion, ViewerCamera};
+use crate::world_api::{
+    AvatarInterp, AvatarMotion, MotionState, PhysicalObject, ViewerCamera, bevy_rotation_of,
+};
 
 /// Clamp a raw region time dilation into the `0.0..=1.0` speed factor the
 /// dead-reckoning step multiplies by. Guard a non-finite value (falling back to
@@ -222,11 +224,6 @@ pub(crate) fn ingest_time_dilation(
     }
 }
 
-/// The `FLAGS_USE_PHYSICS` bit of an object's update flags (`object_flags.h`):
-/// the object is simulated by the server's physics engine. This is the "physical
-/// object" flag the reference viewer reads (`LLViewerObject::flagUsePhysics`).
-const FLAGS_USE_PHYSICS: u32 = 1 << 0;
-
 /// The simulator's physics timestep, in seconds (`llviewerobject.cpp`
 /// `PHYSICS_TIMESTEP = 1/45`). The dead-reckoning correction below uses it to
 /// account for the fact that an object update's velocity is the *average* over
@@ -281,142 +278,6 @@ const OBJECT_SMOOTHING_TAU_SECS: f32 = 0.1;
 /// across the gap. A normal per-update prediction correction is far smaller than a
 /// region-scale jump, so this cleanly separates the two.
 const OBJECT_SNAP_DISTANCE_M: f32 = 32.0;
-
-/// Whether `object` is a server-flagged **physical root prim** the viewer drives
-/// kinematically: it carries `FLAGS_USE_PHYSICS`, is a linkset root (its
-/// children ride along via the Bevy hierarchy), is not a worn attachment (the
-/// reference viewer skips linear interpolation for attachments — they follow
-/// their wearer's skeleton joint instead), and is **not an avatar**.
-///
-/// The avatar guard matters: the simulator can flag avatars (`pcode` 47)
-/// `FLAGS_USE_PHYSICS` — they have a (server-simulated) physical presence — so
-/// without this check an avatar object would become a kinematic "physical prim"
-/// with a cuboid collider at head height, which the third-person camera then
-/// collides with, yanking the eye into the avatar's head. Avatars are driven by
-/// `drive_avatar_motion` (the `avatars.rs` path), never this prim path, and carry
-/// **no** collider by design (so the camera does not pull in for them). Whether an
-/// avatar update carries the flag appears to be region / parcel dependent (it
-/// surfaced on one test grid and not another), so the guard keys on the `pcode`,
-/// not on the flag — the viewer never fabricates a client-side collider for an
-/// avatar regardless of what drives the flag (the sim owns avatar bump physics).
-const fn is_physical_root(object: &Object) -> bool {
-    object.update_flags & FLAGS_USE_PHYSICS != 0
-        && object.parent_id.get() == 0
-        && object.attachment_point_id().is_none()
-        && object.pcode != pcode::AVATAR
-}
-
-/// The authoritative kinematic state of a server-flagged physical root prim as of
-/// its last `ObjectUpdate`, attached to the object entity by `apply_physics` and
-/// change-detected: a fresh insert on every update reseeds the interpolation. The
-/// component is absent on any object that is not a physical root, so its presence
-/// alone marks the entities `drive_physical_objects` gives a kinematic body.
-#[derive(Component, Clone)]
-pub(crate) struct PhysicalObject {
-    /// The object's full (grid-wide) key — the id the `GetObjectPhysicsData`
-    /// capability request and its reply use, and the key
-    /// `ObjectPhysicsShapes` stores this object's physics data under.
-    full_key: ObjectKey,
-    /// Region-local position (metres, Second Life Z-up frame).
-    position: Vector,
-    /// Linear velocity (metres/second).
-    velocity: Vector,
-    /// Linear acceleration (metres/second²) — usually gravity for a falling prim.
-    acceleration: Vector,
-    /// Orientation (a Second Life unit quaternion).
-    rotation: Rotation,
-    /// Angular velocity (rotation axis scaled by radians/second).
-    angular_velocity: Vector,
-    /// The region this object lives in, for the region-edge / neighbour lookups.
-    region_handle: RegionHandle,
-    /// The object's size (metres per axis), the source for its cuboid collider.
-    scale: Vector,
-}
-
-/// Attach, refresh, or remove the [`PhysicalObject`] marker on an object entity to
-/// match its current physical-root status — the physics counterpart of
-/// [`apply_light`](crate::lights) / `apply_particles`, called from
-/// `apply_object`(crate::objects) on every add and update so a prim toggled
-/// physical / non-physical (or moved by a terse update) is reflected. The avian
-/// [`RigidBody`] / [`Collider`] themselves are managed by
-/// `drive_physical_objects` from this marker's presence.
-pub(crate) fn apply_physics(entity: Entity, object: &Object, commands: &mut Commands) {
-    if is_physical_root(object) {
-        refresh_physical_motion(entity, object, commands);
-    } else {
-        commands.entity(entity).remove::<PhysicalObject>();
-    }
-}
-
-/// Re-seed a **physical** root prim's authoritative motion snapshot (a fresh
-/// [`PhysicalObject`] insert restarts the dead-reckoning from it) without the
-/// `apply_physics` remove side — the motion-only fast path in the object
-/// update, where the physics flag is known unchanged, calls this so a
-/// non-physical mover no longer pays a no-op remove per motion packet. A
-/// no-op for a non-physical object.
-pub(crate) fn refresh_physical_motion(entity: Entity, object: &Object, commands: &mut Commands) {
-    if is_physical_root(object) {
-        commands.entity(entity).insert(PhysicalObject {
-            full_key: object.full_id,
-            position: object.motion.position.clone(),
-            velocity: object.motion.velocity.clone(),
-            acceleration: object.motion.acceleration.clone(),
-            rotation: object.motion.rotation.clone(),
-            angular_velocity: object.motion.angular_velocity.clone(),
-            region_handle: object.region_handle,
-            scale: object.scale.clone(),
-        });
-    }
-}
-
-/// The evolving dead-reckoning prediction shared by the object
-/// ([`PhysicsInterp`]) and avatar ([`AvatarInterp`]) motion drivers: the
-/// extrapolated (predicted) region-local pose plus the motion state that
-/// `advance_motion` steps forward each frame between authoritative server
-/// updates. All of it is in Second Life space (Z-up, pre basis-change), so the
-/// same math serves both paths — they differ only in the ground floor they apply
-/// (permissive for objects, stricter for avatars).
-#[derive(Debug)]
-struct MotionState {
-    /// The predicted region-local position (Second Life Z-up metres).
-    position: [f32; 3],
-    /// The predicted orientation, in Second Life space (pre basis-change).
-    rotation: Quat,
-    /// The current linear velocity (metres/second), decaying under the phase-out.
-    velocity: [f32; 3],
-    /// The current linear acceleration (metres/second²); zeroed on a region cross
-    /// or an empty-edge clip, matching the reference viewer.
-    acceleration: [f32; 3],
-    /// The angular velocity (axis·radians/second).
-    angular_velocity: [f32; 3],
-    /// The object's / avatar's region, for the region-edge / neighbour lookups.
-    region_handle: RegionHandle,
-    /// While predicted to be crossing a border, the elapsed-seconds deadline after
-    /// which motion is stopped (`mRegionCrossExpire`); `None` when not crossing.
-    region_cross_expire: Option<f64>,
-}
-
-impl MotionState {
-    /// Seed the prediction from an authoritative update's motion fields.
-    fn new(
-        position: &Vector,
-        velocity: &Vector,
-        acceleration: &Vector,
-        rotation: &Rotation,
-        angular_velocity: &Vector,
-        region_handle: RegionHandle,
-    ) -> Self {
-        Self {
-            position: vector_to_array(position),
-            rotation: sl_rotation_to_quat(rotation),
-            velocity: vector_to_array(velocity),
-            acceleration: vector_to_array(acceleration),
-            angular_velocity: vector_to_array(angular_velocity),
-            region_handle,
-            region_cross_expire: None,
-        }
-    }
-}
 
 /// Advance a `MotionState` one dead-reckoning frame, exactly as the reference
 /// viewer's `LLViewerObject::interpolateLinearMotion` does: extrapolate the
@@ -547,13 +408,6 @@ impl PhysicsInterp {
         // Fresh server truth wakes a latched prim: the update may set it moving.
         self.rest = None;
     }
-}
-
-/// A [`Vector`]'s components as a plain `[f32; 3]` for the per-component
-/// dead-reckoning math (Bevy's `Vec3` arithmetic operators are forbidden by the
-/// workspace `arithmetic_side_effects` lint — see [`crate::camera`]).
-const fn vector_to_array(vector: &Vector) -> [f32; 3] {
-    [vector.x, vector.y, vector.z]
 }
 
 /// The per-axis motion magnitude (m/s, m/s², rad/s) below which a dead-reckoned
@@ -721,13 +575,6 @@ fn angular_step(rotation: Quat, angular_velocity: [f32; 3], dt: f32) -> Quat {
     rotation
         .mul_quat(Quat::from_axis_angle(axis, angle))
         .normalize()
-}
-
-/// The Bevy-world orientation of a predicted motion: its Second Life-space rotation
-/// composed with the Second Life → Bevy basis change, matching the root transform
-/// [`body_root_transform`](crate::avatars) writes on an authoritative update.
-fn bevy_rotation_of(motion: &MotionState) -> Quat {
-    sl_to_bevy_rotation().mul_quat(motion.rotation)
 }
 
 /// Exponential-smoothing time constant (seconds) for easing the avatar's *rendered*
@@ -1255,7 +1102,8 @@ fn reaim_residual(
 }
 
 /// Strip the dead-reckoning state from an entity that is no longer a physical
-/// root (its [`PhysicalObject`] marker was removed by `apply_physics` — e.g. a
+/// root (its [`PhysicalObject`] marker was removed by `apply_physics`
+/// ([`crate::objects`]) — e.g. a
 /// prim made non-physical, relinked as a child, or attached), so it stops being
 /// driven. Dropping [`RefinedCollider`] also drops it from the moving-collider
 /// set on the next [`sync_dynamic_colliders`] pass.
@@ -1330,116 +1178,6 @@ fn avatar_collision_floor(
         (None, None) => None,
     };
     ground.map(|ground| ground + 0.5 * height)
-}
-
-/// The viewer-side interpolation state for one avatar, owned entirely by
-/// `drive_avatar_motion`: the shared dead-reckoning prediction plus the avatar's
-/// ground-floor height and whether its anchor carries the object rotation. Unlike
-/// the object path, this driver moves the anchor by the *delta* between successive
-/// predictions, so the root-drop vertical render offset (R23, owned by
-/// `apply_object`(crate::avatars) and refreshed by the appearance path) is left
-/// untouched.
-#[derive(Debug, Component)]
-pub struct AvatarInterp {
-    /// The shared dead-reckoning prediction (pose + motion) advanced each frame.
-    motion: MotionState,
-    /// Elapsed seconds when the last server update was ingested.
-    last_message_secs: f64,
-    /// Elapsed seconds at the last interpolation step.
-    last_interp_secs: f64,
-    /// The avatar's bounding-box height, for the stricter ground floor.
-    height: f32,
-    /// Whether to write the predicted orientation onto the anchor (a rigged body).
-    apply_rotation: bool,
-    /// The orientation actually written to the anchor this frame (Bevy space), eased
-    /// toward the authoritative / dead-reckoned facing each frame rather than snapped
-    /// to it (P31.7). This decouples the rendered turn from the sparse authoritative
-    /// rotation updates — the own avatar's facing arrives only as terse
-    /// `ObjectUpdate`s echoing the client-driven `SetRotation` (P31.5), so without
-    /// this easing a turn snaps between those updates while translation stays smooth.
-    rendered_rotation: Quat,
-    /// The anchor **translation** actually written this frame (Bevy space,
-    /// including the R23 root-drop offset baked in by `apply_object`(crate::avatars)),
-    /// eased toward the authoritative / dead-reckoned position each update rather
-    /// than snapped to it. This is the translation counterpart of
-    /// [`rendered_rotation`](Self::rendered_rotation): on each terse `ObjectUpdate`
-    /// the authoritative position jumps a little (fast motion, sparse updates), and
-    /// snapping the anchor to it made the world visibly shake against a rigid
-    /// follow camera — easing spreads the correction across a few frames. A
-    /// region crossing / teleport still snaps (see [`TRANSLATION_SNAP_DISTANCE_M`]).
-    rendered_translation: Vec3,
-    /// The **authoritative / dead-reckoned** anchor translation (Bevy space, with
-    /// the root-drop offset) that [`rendered_translation`](Self::rendered_translation)
-    /// eases toward every frame: captured from the anchor on each server update and
-    /// advanced by the prediction delta between updates. Tracking it separately (vs.
-    /// easing only on update frames) is what lets a short teleport that leaves the
-    /// avatar standing still converge fully to the destination instead of freezing
-    /// part-way once updates stop arriving.
-    target_translation: Vec3,
-}
-
-impl AvatarInterp {
-    /// Seed the interpolation state from an authoritative update at time `now`,
-    /// starting the eased translation at the anchor's current position `anchor`
-    /// (already placed by `apply_object`(crate::avatars)).
-    fn seeded(motion: &AvatarMotion, now: f64, anchor: Vec3) -> Self {
-        let motion_state = MotionState::new(
-            &motion.position,
-            &motion.velocity,
-            &motion.acceleration,
-            &motion.rotation,
-            &motion.angular_velocity,
-            motion.region_handle,
-        );
-        // Start the eased orientation at the authoritative facing so the avatar does
-        // not visibly rotate into place from identity on its first frame.
-        let rendered_rotation = bevy_rotation_of(&motion_state);
-        Self {
-            motion: motion_state,
-            last_message_secs: now,
-            last_interp_secs: now,
-            height: motion.height,
-            apply_rotation: motion.apply_rotation,
-            rendered_rotation,
-            rendered_translation: anchor,
-            target_translation: anchor,
-        }
-    }
-
-    /// Re-base the eased translation onto a moved scene origin: a region crossing
-    /// (or a teleport to an already-connected region) shifts every origin-anchored
-    /// entity by the same `delta`, so shift both the rendered and target
-    /// translations to keep the avatar in the same world spot across the re-base
-    /// ([`recenter_avatars`](crate::avatars::recenter_avatars)). The region-local
-    /// [`motion`](Self::motion) is unaffected — its dead-reckoned deltas are
-    /// origin-invariant.
-    pub(crate) fn rebase(&mut self, delta: Vec3) {
-        // Per-component to avoid the `arithmetic_side_effects` lint on the glam
-        // `Vec3` operator.
-        self.rendered_translation.x += delta.x;
-        self.rendered_translation.y += delta.y;
-        self.rendered_translation.z += delta.z;
-        self.target_translation.x += delta.x;
-        self.target_translation.y += delta.y;
-        self.target_translation.z += delta.z;
-    }
-
-    /// Re-seed the predicted pose to a fresh authoritative update at time `now`,
-    /// snapping the prediction back to the server truth and restarting the timers.
-    fn reseed(&mut self, motion: &AvatarMotion, now: f64) {
-        self.motion = MotionState::new(
-            &motion.position,
-            &motion.velocity,
-            &motion.acceleration,
-            &motion.rotation,
-            &motion.angular_velocity,
-            motion.region_handle,
-        );
-        self.last_message_secs = now;
-        self.last_interp_secs = now;
-        self.height = motion.height;
-        self.apply_rotation = motion.apply_rotation;
-    }
 }
 
 /// Dead-reckon every full-object avatar between server updates (P31.4), the avatar

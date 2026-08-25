@@ -59,10 +59,10 @@ use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 use crate::avatars::{SeatChainQuery, seat_world_transform};
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
-use crate::input_context::InputContext;
 use crate::spacenav::{FlycamAxisSettings, SpacenavInput};
 use crate::water::{WaterOcean, WaterRegionPlane};
 use crate::world_api::AvatarState;
+use crate::world_api::InputContext;
 use crate::world_api::{
     AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
     ViewerCamera,
@@ -619,7 +619,7 @@ pub(crate) fn orbit_third_person(
     // list does not leave the world context, and without this the wheel would
     // both scroll the list and zoom the camera. The wheel-zoom preference gates
     // only the wheel: an alt-drag zoom still works with it off.
-    let over_ui = crate::hud_pick::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
+    let over_ui = crate::world_api::pointer_over_blocking_ui(&hover_map, &pickables, &node_sizes);
     let scroll = if over_ui || tuning.wheel_zoom_disabled {
         0.0
     } else {

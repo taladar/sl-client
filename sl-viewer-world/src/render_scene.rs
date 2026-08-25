@@ -123,7 +123,6 @@ use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simu
 use crate::legacy_materials::{apply_legacy_scalars, build_linear_image, build_srgb_image};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::particles::{ParticleSim, drive_particles, float_to_u8};
-use crate::probes::ObjectReflectionProbe;
 use crate::sky::{
     MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
     build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
@@ -134,6 +133,7 @@ use crate::terrain::{build_patch_mesh, placeholder_image as terrain_placeholder_
 use crate::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
 use crate::textures::TextureManager;
 use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
+use crate::world_api::ObjectReflectionProbe;
 use crate::world_api::PatchKey;
 use crate::world_api::{ObjectParticleSystem, TerrainSurface};
 

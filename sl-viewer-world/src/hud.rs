@@ -33,8 +33,6 @@
 //! them at all, but a HUD worn by someone else must not turn into world geometry
 //! if one arrives. [`crate::objects::adopt_pending_attachments`] hides those.
 
-use std::collections::HashMap;
-
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Hdr, ScalingMode};
@@ -44,7 +42,7 @@ use bevy::prelude::*;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
 use crate::face_material::FaceMaterial;
-use crate::world_api::{HUD_RENDER_LAYER, on_hud_layer};
+use crate::world_api::{HUD_RENDER_LAYER, HudState, on_hud_layer};
 
 /// The HUD screen: the root of the screen-space HUD hierarchy, standing in for the
 /// reference viewer's `mScreen` pseudo-joint (`LLVOAvatarSelf::buildSkeletonSelf`).
@@ -75,27 +73,6 @@ pub struct HudPointNode {
 /// HUD layer — and only it — over the finished world frame.
 #[derive(Component, Debug)]
 pub struct HudCamera;
-
-/// The spawned HUD point nodes, keyed by raw attachment-point id, so an
-/// attachment can be routed to the node for its point.
-///
-/// Empty when the run has no avatar assets (no `--viewer-assets`): the HUD point
-/// offsets come from `avatar_lad.xml`, so without it there is no HUD screen and a
-/// HUD attachment is hidden rather than routed (the same degradation that leaves
-/// avatars as placeholder spheres).
-#[derive(Resource, Debug, Default)]
-pub struct HudState {
-    /// The HUD point node entities, keyed by raw attachment-point id.
-    points: HashMap<u8, Entity>,
-}
-
-impl HudState {
-    /// The node entity a HUD attachment worn on `point_id` parents to, or `None`
-    /// if there is no HUD screen (no avatar assets) or the id is not a HUD point.
-    pub(crate) fn point_entity(&self, point_id: u8) -> Option<Entity> {
-        self.points.get(&point_id).copied()
-    }
-}
 
 /// Startup system: spawn the [`HudScreen`] and its eight HUD point nodes from the
 /// loaded avatar assets (P35.1).

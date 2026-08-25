@@ -41,7 +41,6 @@ use crate::floater::{
 };
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::input_context::InputContext;
 use crate::objects::{ObjectSlMotion, SceneObject};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
@@ -51,6 +50,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::InputContext;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
@@ -1491,7 +1491,7 @@ pub fn spawn_build_tools_specimen(
 
 /// Run condition: true while the build tool is **inactive** — the gate that
 /// hands the left click back to the touch pick
-/// ([`crate::hud_pick::pick_and_touch`]) outside edit mode.
+/// ([`sl_viewer_world::hud_pick::pick_and_touch`]) outside edit mode.
 #[must_use]
 pub fn edit_tool_inactive(state: Res<EditToolState>) -> bool {
     !state.active

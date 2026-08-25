@@ -20,19 +20,23 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
-    Command, DisplayName, Friend, FriendKey, FriendPresence, FriendRights, GroupKey,
-    GroupMembership, ImSessionId, InventoryKey, JointOverrides, MAX_FACES, MeshKey, MuteEntry,
-    MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey, ObjectProperties, ParticleSystem,
-    PrimFaceId, PrimLod, PrimShapeParams, Priority, RegionCoordinates, RegionHandle, RestoreItem,
-    Rotation, ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation, SculptOrMeshKey,
-    SkeletalDeformations, SlCommand, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureKey,
-    TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry, pcode,
+    Command, ControlFlags, DisplayName, Friend, FriendKey, FriendPresence, FriendRights, GroupKey,
+    GroupMembership, ImSessionId, InventoryKey, JointOverrides, LightData, MAX_FACES, MeshKey,
+    MuteEntry, MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey, ObjectProperties,
+    ParticleSystem, PrimFaceId, PrimLod, PrimShapeParams, Priority, ReflectionProbe,
+    ReflectionProbeFlags, RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId,
+    ScriptLanguage, ScriptTarget, ScriptUploadLocation, SculptOrMeshKey, SkeletalDeformations,
+    SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace,
+    TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry,
+    pcode, texture_face_uv_transform,
 };
 use sl_terrain::TerrainComposition;
+use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
 use sl_viewer_settings::ViewerSettings;
 
 /// Whether the autorespond mode is on (the reference `FSAutorespondMode`).
@@ -5443,6 +5447,749 @@ pub fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
     for &face in face_entities {
         commands.entity(face).try_despawn();
     }
+}
+
+// ---------------------------------------------------------------------------
+// Object-entity components the world's ingest path attaches, and the state the
+// input / motion drivers keep. Each is *described* here and *produced* above in
+// the world layer: the object update path lifts a light / particle / probe /
+// physics block onto its component, and the movement, picking and HUD drivers
+// own the resources.
+// ---------------------------------------------------------------------------
+
+/// A component marking an object entity as a **reflection probe**, carrying the
+/// decoded `LLReflectionProbeParams` parameters (in Second Life semantics) plus
+/// the prim's metre scale — the inputs the capture / volume side needs.
+///
+/// Attached to (and refreshed / cleared on) each object entity by
+/// `apply_object` (the object ingest path) as its updates arrive. See
+/// `reflection_probe_from_object` for the present-vs-absent lift.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ObjectReflectionProbe {
+    /// The decoded reflection-probe parameters: the ambiance (irradiance) scale,
+    /// the reflection-capture near-clip distance in metres, and the flag set
+    /// (box-vs-sphere volume, dynamic capture, mirror).
+    pub data: ReflectionProbe,
+    /// The prim's Second Life metre scale, refreshed every update so a **resized**
+    /// probe's influence volume (a box of these half-extents, or a sphere of the
+    /// bounding radius) stays correct. The reference viewer likewise derives the
+    /// probe volume from the prim's dimensions, not from the probe params.
+    pub scale: [f32; 3],
+}
+
+impl ObjectReflectionProbe {
+    /// Whether this probe's influence volume is a **box** (the prim's oriented
+    /// bounding box) rather than a **sphere** — the `BOX_VOLUME` flag, which the
+    /// reference reads as `LLVOVolume::getReflectionProbeIsBox`.
+    #[must_use]
+    pub const fn is_box_volume(&self) -> bool {
+        self.data.flags.contains(ReflectionProbeFlags::BOX_VOLUME)
+    }
+
+    /// Whether this probe drives a **realtime mirror** — the `MIRROR` flag, which the
+    /// reference reads as `LLVOVolume::isMirror` to hand the prim to the hero-probe
+    /// manager. A mirror is captured sharp and live (all six faces every frame,
+    /// dynamic content included) by the `hero` path rather than the amortized
+    /// P33 local pool; see the reflection-probe plugin.
+    #[must_use]
+    pub const fn is_mirror(&self) -> bool {
+        self.data.flags.contains(ReflectionProbeFlags::MIRROR)
+    }
+
+    /// The influence volume as a scale for Bevy's unit-cube `LightProbe` volume,
+    /// in the prim's **local** frame (the frame below the object entity, i.e. still
+    /// Second Life axes — the object entity carries the basis change, exactly as the
+    /// geometry holder's scale does).
+    ///
+    /// A **box** probe scales the unit cube by the prim's metre scale, so the volume
+    /// is the prim's own oriented box (`LLReflectionMap::getBox`: half-extents
+    /// `scale * 0.5`). A **sphere** probe has no cuboid counterpart in Bevy, so it
+    /// becomes the smallest cube containing the reference's sphere — whose radius is
+    /// `scale.x * 0.5`, the *X* extent alone (`LLReflectionMap::update`) — and the
+    /// corners the cube adds beyond that sphere are taken back out by
+    /// `SPHERE_FALLOFF`.
+    #[must_use]
+    pub const fn volume_scale(&self) -> Vec3 {
+        let [x, y, z] = self.scale;
+        if self.is_box_volume() {
+            Vec3::new(x, y, z)
+        } else {
+            Vec3::splat(x)
+        }
+    }
+
+    /// The `LightProbe` falloff (per axis, as a fraction of the volume) this
+    /// probe's influence tapers over: a hard-edged [`BOX_FALLOFF`] for a box volume,
+    /// the far softer `SPHERE_FALLOFF` for a sphere approximated by a cube.
+    #[must_use]
+    pub const fn falloff(&self) -> Vec3 {
+        if self.is_box_volume() {
+            Vec3::splat(BOX_FALLOFF)
+        } else {
+            Vec3::splat(SPHERE_FALLOFF)
+        }
+    }
+
+    /// The probe's influence radius in metres, as `LLReflectionMap::update` computes
+    /// it: the half-diagonal of the prim's box for a box volume, half the prim's *X*
+    /// extent for a sphere. Used to rank probes by distance (the reference's
+    /// `mDistance = |eye - origin| - radius`), so a large probe the camera is just
+    /// outside of outranks a tiny one the same distance away.
+    #[must_use]
+    pub fn radius(&self) -> f32 {
+        let [x, y, z] = self.scale;
+        if self.is_box_volume() {
+            Vec3::new(x * 0.5, y * 0.5, z * 0.5).length()
+        } else {
+            x * 0.5
+        }
+    }
+
+    /// The near-clip distance the probe's capture cameras render with — the probe's
+    /// own clip distance, floored at [`MIN_NEAR_CLIP`] the way
+    /// `LLReflectionMap::getNearClip` floors it at `MINIMUM_NEAR_CLIP`. It is how a
+    /// probe inside a room excludes the walls of the prim (or the furniture) it sits
+    /// in from its own reflection.
+    #[must_use]
+    pub const fn near_clip(&self) -> f32 {
+        self.data.clip_distance.max(MIN_NEAR_CLIP)
+    }
+}
+
+/// Lift an object's reflection-probe block onto an `ObjectReflectionProbe`, or
+/// `None` when the object is not (or is no longer) a probe.
+///
+/// Mirrors the reference viewer's `LLViewerObject::getReflectionProbeParams`: a
+/// prim is a probe exactly when it carries a reflection-probe extra-param block, so
+/// this is a straight `Option` lift with no sentinel to reject.
+#[must_use]
+pub fn reflection_probe_from_object(object: &Object) -> Option<ObjectReflectionProbe> {
+    object
+        .extra
+        .reflection_probe
+        .map(|data| ObjectReflectionProbe {
+            data,
+            scale: [object.scale.x, object.scale.y, object.scale.z],
+        })
+}
+
+/// The smallest near-clip distance a probe's capture cameras may use, in metres —
+/// `LLReflectionMap::getNearClip`'s `MINIMUM_NEAR_CLIP`.
+pub const MIN_NEAR_CLIP: f32 = 0.1;
+
+/// The `LightProbe` falloff of a **box**-volume local probe: the fraction of the
+/// volume over which its influence tapers out toward the faces of the box. Small, so
+/// a box probe's reflection fills the room it bounds (as the reference's box probes
+/// do) and only blends out right at the boundary rather than fading across it.
+pub const BOX_FALLOFF: f32 = 0.1;
+
+/// The `LightProbe` falloff of a **sphere**-volume local probe. Bevy's influence
+/// volume is always a cuboid, so a sphere probe is bound as the cube circumscribing
+/// its sphere; a broad taper pulls the influence back in toward the sphere, so the
+/// corners the cube adds contribute little.
+pub const SPHERE_FALLOFF: f32 = 0.5;
+
+/// The projector parameters of a **spotlight** — a light that carries a
+/// light-image ([`LightImage`](sl_client_bevy::LightImage)) extra-param and so
+/// projects a texture within a cone (`LLVOVolume::isLightSpotlight`). A plain
+/// point light has none of this.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LightProjection {
+    /// The projected texture id (`LLLightImageParams::getLightTexture`).
+    pub texture: TextureKey,
+    /// The projector cone field-of-view, in radians (`params.mV[0]`).
+    pub fov: f32,
+    /// The projector focus / blur (`params.mV[1]`).
+    pub focus: f32,
+    /// The projector ambiance — the diffuse spill outside the cone
+    /// (`params.mV[2]`).
+    pub ambiance: f32,
+}
+
+/// A component marking an object entity as a **light source**, carrying the
+/// decoded `LLLightParams` (and, for a spotlight, `LLLightImageParams`)
+/// parameters in Second Life semantics — ready for P25.2 to convert into a Bevy
+/// `PointLight` / `SpotLight`.
+///
+/// Attached to (and refreshed / cleared on) each object entity by
+/// `apply_object` (the object ingest path) as its updates arrive.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ObjectLight {
+    /// The light's **linear** RGB colour, each channel in `0.0..=1.0`. The wire
+    /// bytes are the linear (not gamma-corrected) colour — Firestorm's
+    /// `LLLightParams::unpack` feeds them straight into `setLinearColor` — so no
+    /// sRGB decode is applied here.
+    pub linear_color: [f32; 3],
+    /// The light intensity in `0.0..=1.0` — the alpha channel of the wire colour
+    /// (`LLVOVolume::getLightIntensity` reads `getLinearColor().mV[3]`). The
+    /// effective emitted colour is `linear_color * intensity`.
+    pub intensity: f32,
+    /// The light radius, in metres (`LIGHT_MIN_RADIUS`..=`LIGHT_MAX_RADIUS`,
+    /// i.e. `0.0..=20.0`).
+    pub radius: f32,
+    /// The falloff exponent (`LIGHT_MIN_FALLOFF`..=`LIGHT_MAX_FALLOFF`, i.e.
+    /// `0.0..=2.0`): how sharply the light dims toward its radius.
+    pub falloff: f32,
+    /// The spotlight cutoff cone half-angle, in degrees
+    /// (`LIGHT_MIN_CUTOFF`..=`LIGHT_MAX_CUTOFF`, i.e. `0.0..=180.0`). Sent for
+    /// every light but only meaningful for a projector.
+    pub cutoff: f32,
+    /// The projector parameters when this is a **spotlight** (it carries a
+    /// light-image block); `None` for a plain point light.
+    pub projection: Option<LightProjection>,
+}
+
+impl ObjectLight {
+    /// Whether this light is a **spotlight** (projector) rather than a plain
+    /// point light — true exactly when it carries projector parameters, mirroring
+    /// `LLVOVolume::isLightSpotlight` (a light-image block is present).
+    #[must_use]
+    pub const fn is_spotlight(&self) -> bool {
+        self.projection.is_some()
+    }
+
+    /// The light's effective emitted linear colour: its base colour scaled by its
+    /// intensity, mirroring `LLVOVolume::getLightLinearColor`
+    /// (`color * color.mV[3]`).
+    #[must_use]
+    pub const fn effective_linear_color(&self) -> [f32; 3] {
+        [
+            self.linear_color[0] * self.intensity,
+            self.linear_color[1] * self.intensity,
+            self.linear_color[2] * self.intensity,
+        ]
+    }
+}
+
+/// Convert one wire colour byte to a normalized `0.0..=1.0` float. The workspace
+/// denies `as` casts, so the widening goes through [`f32::from`].
+fn channel(byte: u8) -> f32 {
+    f32::from(byte) / 255.0
+}
+
+/// Decode an object's light extra-params into an [`ObjectLight`], or `None` if the
+/// object is not a light source (it carries no `LLLightParams` block).
+///
+/// A spotlight additionally carries a light-image block; when present it becomes
+/// the [`projection`](ObjectLight::projection).
+#[must_use]
+pub fn light_from_object(object: &Object) -> Option<ObjectLight> {
+    let light: LightData = object.extra.light?;
+    let projection = object
+        .extra
+        .light_image
+        .as_ref()
+        .map(|image| LightProjection {
+            texture: image.texture,
+            fov: image.params.x,
+            focus: image.params.y,
+            ambiance: image.params.z,
+        });
+    Some(ObjectLight {
+        linear_color: [
+            channel(light.color[0]),
+            channel(light.color[1]),
+            channel(light.color[2]),
+        ],
+        intensity: channel(light.color[3]),
+        radius: light.radius,
+        falloff: light.falloff,
+        cutoff: light.cutoff,
+        projection,
+    })
+}
+
+/// Lift a live particle system off an object into an [`ObjectParticleSystem`], or
+/// `None` when the object is not (or is no longer) a particle source.
+///
+/// Returns `None` in the two cases the reference viewer treats as "no source":
+/// the object carries no particle-system block at all (`Object::particles` is
+/// `None` — sl-proto already yields `None` for an empty `PSBlock`, matching
+/// `isNullPS`'s zero-size check), or it carries a **null** system whose CRC is
+/// zero (`LLPartSysData::isNullPS` — the `llParticleSystem([])` stop sentinel).
+#[must_use]
+pub fn particles_from_object(object: &Object) -> Option<ObjectParticleSystem> {
+    let system = object.particles.clone()?;
+    // A zero-CRC system is the reference viewer's "null" particle system: the
+    // sentinel a script sends to stop emitting. `isNullPS` rejects it, so it is
+    // not a live source.
+    if system.crc == 0 {
+        return None;
+    }
+    Some(ObjectParticleSystem { system })
+}
+
+/// The authoritative kinematic state of a server-flagged physical root prim as of
+/// its last `ObjectUpdate`, attached to the object entity by `apply_physics` and
+/// change-detected: a fresh insert on every update reseeds the interpolation. The
+/// component is absent on any object that is not a physical root, so its presence
+/// alone marks the entities `drive_physical_objects` gives a kinematic body.
+#[derive(Component, Clone, Debug)]
+pub struct PhysicalObject {
+    /// The object's full (grid-wide) key — the id the `GetObjectPhysicsData`
+    /// capability request and its reply use, and the key
+    /// `ObjectPhysicsShapes` stores this object's physics data under.
+    pub full_key: ObjectKey,
+    /// Region-local position (metres, Second Life Z-up frame).
+    pub position: Vector,
+    /// Linear velocity (metres/second).
+    pub velocity: Vector,
+    /// Linear acceleration (metres/second²) — usually gravity for a falling prim.
+    pub acceleration: Vector,
+    /// Orientation (a Second Life unit quaternion).
+    pub rotation: Rotation,
+    /// Angular velocity (rotation axis scaled by radians/second).
+    pub angular_velocity: Vector,
+    /// The region this object lives in, for the region-edge / neighbour lookups.
+    pub region_handle: RegionHandle,
+    /// The object's size (metres per axis), the source for its cuboid collider.
+    pub scale: Vector,
+}
+
+/// The evolving dead-reckoning prediction shared by the object
+/// (`PhysicsInterp`) and avatar ([`AvatarInterp`]) motion drivers: the
+/// extrapolated (predicted) region-local pose plus the motion state that
+/// `advance_motion` steps forward each frame between authoritative server
+/// updates. All of it is in Second Life space (Z-up, pre basis-change), so the
+/// same math serves both paths — they differ only in the ground floor they apply
+/// (permissive for objects, stricter for avatars).
+#[derive(Debug)]
+pub struct MotionState {
+    /// The predicted region-local position (Second Life Z-up metres).
+    pub position: [f32; 3],
+    /// The predicted orientation, in Second Life space (pre basis-change).
+    pub rotation: Quat,
+    /// The current linear velocity (metres/second), decaying under the phase-out.
+    pub velocity: [f32; 3],
+    /// The current linear acceleration (metres/second²); zeroed on a region cross
+    /// or an empty-edge clip, matching the reference viewer.
+    pub acceleration: [f32; 3],
+    /// The angular velocity (axis·radians/second).
+    pub angular_velocity: [f32; 3],
+    /// The object's / avatar's region, for the region-edge / neighbour lookups.
+    pub region_handle: RegionHandle,
+    /// While predicted to be crossing a border, the elapsed-seconds deadline after
+    /// which motion is stopped (`mRegionCrossExpire`); `None` when not crossing.
+    pub region_cross_expire: Option<f64>,
+}
+
+impl MotionState {
+    /// Seed the prediction from an authoritative update's motion fields.
+    #[must_use]
+    pub fn new(
+        position: &Vector,
+        velocity: &Vector,
+        acceleration: &Vector,
+        rotation: &Rotation,
+        angular_velocity: &Vector,
+        region_handle: RegionHandle,
+    ) -> Self {
+        Self {
+            position: vector_to_array(position),
+            rotation: sl_rotation_to_quat(rotation),
+            velocity: vector_to_array(velocity),
+            acceleration: vector_to_array(acceleration),
+            angular_velocity: vector_to_array(angular_velocity),
+            region_handle,
+            region_cross_expire: None,
+        }
+    }
+}
+
+/// A [`Vector`]'s components as a plain `[f32; 3]` for the per-component
+/// dead-reckoning math (Bevy's `Vec3` arithmetic operators are forbidden by the
+/// workspace `arithmetic_side_effects` lint).
+const fn vector_to_array(vector: &Vector) -> [f32; 3] {
+    [vector.x, vector.y, vector.z]
+}
+
+/// The Bevy-world orientation of a predicted motion: its Second Life-space rotation
+/// composed with the Second Life → Bevy basis change, matching the root transform
+/// `body_root_transform` (the avatar path) writes on an authoritative update.
+#[must_use]
+pub fn bevy_rotation_of(motion: &MotionState) -> Quat {
+    sl_to_bevy_rotation().mul_quat(motion.rotation)
+}
+
+/// The viewer-side interpolation state for one avatar, owned entirely by
+/// `drive_avatar_motion`: the shared dead-reckoning prediction plus the avatar's
+/// ground-floor height and whether its anchor carries the object rotation. Unlike
+/// the object path, this driver moves the anchor by the *delta* between successive
+/// predictions, so the root-drop vertical render offset (R23, owned by
+/// `apply_object` (the avatar path) and refreshed by the appearance path) is left
+/// untouched.
+#[derive(Debug, Component)]
+pub struct AvatarInterp {
+    /// The shared dead-reckoning prediction (pose + motion) advanced each frame.
+    pub motion: MotionState,
+    /// Elapsed seconds when the last server update was ingested.
+    pub last_message_secs: f64,
+    /// Elapsed seconds at the last interpolation step.
+    pub last_interp_secs: f64,
+    /// The avatar's bounding-box height, for the stricter ground floor.
+    pub height: f32,
+    /// Whether to write the predicted orientation onto the anchor (a rigged body).
+    pub apply_rotation: bool,
+    /// The orientation actually written to the anchor this frame (Bevy space), eased
+    /// toward the authoritative / dead-reckoned facing each frame rather than snapped
+    /// to it (P31.7). This decouples the rendered turn from the sparse authoritative
+    /// rotation updates — the own avatar's facing arrives only as terse
+    /// `ObjectUpdate`s echoing the client-driven `SetRotation` (P31.5), so without
+    /// this easing a turn snaps between those updates while translation stays smooth.
+    pub rendered_rotation: Quat,
+    /// The anchor **translation** actually written this frame (Bevy space,
+    /// including the R23 root-drop offset baked in by the avatar path),
+    /// eased toward the authoritative / dead-reckoned position each update rather
+    /// than snapped to it. This is the translation counterpart of
+    /// [`rendered_rotation`](Self::rendered_rotation): on each terse `ObjectUpdate`
+    /// the authoritative position jumps a little (fast motion, sparse updates), and
+    /// snapping the anchor to it made the world visibly shake against a rigid
+    /// follow camera — easing spreads the correction across a few frames. A
+    /// region crossing / teleport still snaps (see `TRANSLATION_SNAP_DISTANCE_M`).
+    pub rendered_translation: Vec3,
+    /// The **authoritative / dead-reckoned** anchor translation (Bevy space, with
+    /// the root-drop offset) that [`rendered_translation`](Self::rendered_translation)
+    /// eases toward every frame: captured from the anchor on each server update and
+    /// advanced by the prediction delta between updates. Tracking it separately (vs.
+    /// easing only on update frames) is what lets a short teleport that leaves the
+    /// avatar standing still converge fully to the destination instead of freezing
+    /// part-way once updates stop arriving.
+    pub target_translation: Vec3,
+}
+
+impl AvatarInterp {
+    /// Seed the interpolation state from an authoritative update at time `now`,
+    /// starting the eased translation at the anchor's current position `anchor`
+    /// (already placed by the avatar path).
+    #[must_use]
+    pub fn seeded(motion: &AvatarMotion, now: f64, anchor: Vec3) -> Self {
+        let motion_state = MotionState::new(
+            &motion.position,
+            &motion.velocity,
+            &motion.acceleration,
+            &motion.rotation,
+            &motion.angular_velocity,
+            motion.region_handle,
+        );
+        // Start the eased orientation at the authoritative facing so the avatar does
+        // not visibly rotate into place from identity on its first frame.
+        let rendered_rotation = bevy_rotation_of(&motion_state);
+        Self {
+            motion: motion_state,
+            last_message_secs: now,
+            last_interp_secs: now,
+            height: motion.height,
+            apply_rotation: motion.apply_rotation,
+            rendered_rotation,
+            rendered_translation: anchor,
+            target_translation: anchor,
+        }
+    }
+
+    /// Re-base the eased translation onto a moved scene origin: a region crossing
+    /// (or a teleport to an already-connected region) shifts every origin-anchored
+    /// entity by the same `delta`, so shift both the rendered and target
+    /// translations to keep the avatar in the same world spot across the re-base
+    /// (`recenter_avatars`). The region-local
+    /// [`motion`](Self::motion) is unaffected — its dead-reckoned deltas are
+    /// origin-invariant.
+    pub fn rebase(&mut self, delta: Vec3) {
+        // Per-component to avoid the `arithmetic_side_effects` lint on the glam
+        // `Vec3` operator.
+        self.rendered_translation.x += delta.x;
+        self.rendered_translation.y += delta.y;
+        self.rendered_translation.z += delta.z;
+        self.target_translation.x += delta.x;
+        self.target_translation.y += delta.y;
+        self.target_translation.z += delta.z;
+    }
+
+    /// Re-seed the predicted pose to a fresh authoritative update at time `now`,
+    /// snapping the prediction back to the server truth and restarting the timers.
+    pub fn reseed(&mut self, motion: &AvatarMotion, now: f64) {
+        self.motion = MotionState::new(
+            &motion.position,
+            &motion.velocity,
+            &motion.acceleration,
+            &motion.rotation,
+            &motion.angular_velocity,
+            motion.region_handle,
+        );
+        self.last_message_secs = now;
+        self.last_interp_secs = now;
+        self.height = motion.height;
+        self.apply_rotation = motion.apply_rotation;
+    }
+}
+
+/// The minimum interval, in seconds, between the body-rotation `AgentUpdate`s sent
+/// while turning (~20 Hz), so a held turn key does not flood the circuit — the
+/// heading still advances every frame client-side, it is just broadcast at this
+/// rate.
+pub const ROTATION_SEND_INTERVAL_SECS: f32 = 0.05;
+
+/// The per-key state of the tap-tap-hold-to-run detector: how recently the key
+/// was last tapped and whether a double-tap's run is currently latched (held).
+#[derive(Debug, Clone)]
+pub struct DoubleTapRun {
+    /// Seconds since the key was last freshly pressed; starts beyond the window
+    /// so the first tap of a session can never pair with "before the session".
+    pub since_last_tap: f32,
+    /// Whether the second tap of a double-tap is still held, running the avatar.
+    pub latched: bool,
+}
+
+impl Default for DoubleTapRun {
+    fn default() -> Self {
+        Self {
+            since_last_tap: f32::INFINITY,
+            latched: false,
+        }
+    }
+}
+
+/// The persistent state of the avatar movement controls: the client-tracked walk
+/// heading, whether flying is toggled on, and the bookkeeping that keeps the viewer
+/// from re-sending an unchanged intent every frame.
+#[derive(Debug, Resource)]
+pub struct AvatarControls {
+    /// The walk heading (yaw about the Second Life up axis, radians) the body faces;
+    /// seeded once from the own avatar's reported facing so the first step does not
+    /// snap it.
+    pub yaw: f32,
+    /// Whether flying is toggled on ([`ControlFlags::FLY`] is advertised).
+    pub flying: bool,
+    /// Whether `yaw` has been seeded from the own avatar yet.
+    pub seeded: bool,
+    /// Whether the seeded heading has been advertised to the simulator at least
+    /// once, so a walk before the first turn moves in the right direction.
+    pub sent_initial_rotation: bool,
+    /// The control-flag set last advertised, so a [`Command::SetControls`] is emitted
+    /// only when the flags actually change.
+    pub last_controls: ControlFlags,
+    /// Seconds accumulated since the last rotation send, for the turning throttle.
+    pub rotation_send_accum: f32,
+    /// Seconds the ascend key has been held while standing and not flying, for the
+    /// P31.16 hold-to-take-off; reset whenever that precondition lapses.
+    pub ascend_hold_secs: f32,
+    /// The tap-tap-hold-to-run detector for the walk-forward key.
+    pub tap_run_forward: DoubleTapRun,
+    /// The tap-tap-hold-to-run detector for the walk-backward key.
+    pub tap_run_backward: DoubleTapRun,
+}
+
+impl AvatarControls {
+    /// The [`ControlFlags`] set last advertised to the simulator (walk / run /
+    /// fly / ascend / descend). The client-side locomotion fallback
+    /// (the `locomotion` module) reads the same advertised intent that moves the
+    /// avatar to pick which built-in animation to play for immediate feedback.
+    ///
+    /// The set includes [`ControlFlags::FLY`] while flying is toggled on, so the
+    /// locomotion fallback reads the fly / hover states straight off it.
+    #[must_use]
+    pub const fn advertised(&self) -> ControlFlags {
+        self.last_controls
+    }
+}
+
+impl Default for AvatarControls {
+    fn default() -> Self {
+        Self {
+            yaw: 0.0,
+            flying: false,
+            seeded: false,
+            sent_initial_rotation: false,
+            last_controls: ControlFlags::empty(),
+            rotation_send_accum: ROTATION_SEND_INTERVAL_SECS,
+            ascend_hold_secs: 0.0,
+            tap_run_forward: DoubleTapRun::default(),
+            tap_run_backward: DoubleTapRun::default(),
+        }
+    }
+}
+
+/// Who input belongs to this frame.
+///
+/// Derived from `InputFocus` by `compute_input_context`; never assigned by
+/// hand.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum InputContext {
+    /// Nothing in the UI holds focus: the world has the keyboard and the mouse.
+    ///
+    /// The seam the camera / movement modes (mouselook, third-person, sitting —
+    /// Firestorm's `keys.xml` modes) subdivide when they arrive.
+    #[default]
+    World,
+    /// A focusable UI node that does not take text holds focus — a button, a
+    /// checkbox. `Enter` / `Space` activate it, and the world gets no keys.
+    UiWidget,
+    /// A text-accepting node holds focus. Characters, the arrows and `Backspace`
+    /// are all its; the world gets nothing.
+    TextEntry,
+    /// An in-world **media face** holds keyboard focus
+    /// ([`MediaFocus`]): keys go to the embedded page, so
+    /// the world gets nothing — the reference's `LLViewerMediaFocus` taking
+    /// `gFocusMgr`'s keyboard focus.
+    Media,
+}
+
+impl InputContext {
+    /// Whether the world owns input right now.
+    #[must_use]
+    pub const fn is_world(self) -> bool {
+        matches!(self, Self::World)
+    }
+}
+
+/// The spawned HUD point nodes, keyed by raw attachment-point id, so an
+/// attachment can be routed to the node for its point.
+///
+/// Empty when the run has no avatar assets (no `--viewer-assets`): the HUD point
+/// offsets come from `avatar_lad.xml`, so without it there is no HUD screen and a
+/// HUD attachment is hidden rather than routed (the same degradation that leaves
+/// avatars as placeholder spheres).
+#[derive(Resource, Debug, Default)]
+pub struct HudState {
+    /// The HUD point node entities, keyed by raw attachment-point id.
+    pub points: HashMap<u8, Entity>,
+}
+
+impl HudState {
+    /// The node entity a HUD attachment worn on `point_id` parents to, or `None`
+    /// if there is no HUD screen (no avatar assets) or the id is not a HUD point.
+    #[must_use]
+    pub fn point_entity(&self, point_id: u8) -> Option<Entity> {
+        self.points.get(&point_id).copied()
+    }
+}
+
+/// Component-wise vector subtraction (`a - b`), avoiding the glam `-` operator the
+/// workspace `arithmetic_side_effects` lint trips on.
+#[must_use]
+pub fn vsub(a: Vec3, b: Vec3) -> Vec3 {
+    Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
+}
+
+/// Component-wise vector scaling (`v * s`).
+#[must_use]
+pub fn vscale(v: Vec3, s: f32) -> Vec3 {
+    Vec3::new(v.x * s, v.y * s, v.z * s)
+}
+
+/// Build the [`SurfaceInfo`] a touch carries from a ray hit, the picked face, and
+/// the touched object's world transform — the viewer's `LLPickInfo::getSurfaceInfo`.
+///
+/// - **Face** is the Linden face index the ray struck (`-1` when the hit is not on
+///   a textured face, the reference's "no intersection" value).
+/// - **ST** is the face's own `[0, 1]` surface coordinate: the mesh's stored
+///   texture coordinate, un-flipped from the bottom-up→top-down convention this
+///   viewer bakes into `ATTRIBUTE_UV_0` back into Second Life's bottom-up space.
+/// - **UV** is `ST` with the face's texture placement (repeats / offset /
+///   rotation, [`texture_face_uv_transform`]) applied — the coordinate as the
+///   texture is actually sampled, matching the reference's `surfaceToTexture`.
+/// - **Position / normal / binormal** are given in the object's own Second Life
+///   frame (its global's inverse carries the world hit back into it). A HUD lives
+///   in screen space with no meaningful region position, so the object-local
+///   frame is the sensible finite choice; the reference instead reports region /
+///   HUD-matrix coordinates, a deliberate simplification here. The binormal is
+///   derived geometrically (perpendicular to the normal, along the hit triangle)
+///   rather than from a texture tangent the ray hit does not carry.
+#[must_use]
+pub fn surface_info_from_hit(
+    hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
+    face_id: Option<PrimFaceId>,
+    texture_face: Option<&TextureFace>,
+    object_global: &GlobalTransform,
+) -> SurfaceInfo {
+    let inverse = object_global.affine().inverse();
+    // The hit point / normal in the object's own Second Life frame (the object
+    // subtree lives in Second Life space under the root's basis change, so the
+    // inverse of its global lands here directly).
+    let position = inverse.transform_point3(hit.point);
+    let normal = inverse.transform_vector3(hit.normal).normalize_or_zero();
+
+    // The binormal: perpendicular to the normal and along the surface, derived
+    // from the hit triangle's first edge projected off the normal.
+    let binormal = hit
+        .triangle
+        .map(|tri| {
+            let edge = inverse.transform_vector3(vsub(tri[1], tri[0]));
+            let along = vsub(edge, vscale(normal, edge.dot(normal)));
+            normal.cross(along).normalize_or_zero()
+        })
+        .filter(|binormal| *binormal != Vec3::ZERO)
+        .unwrap_or_else(|| normal.any_orthonormal_vector());
+
+    // ST: the mesh's stored surface coordinate, back in Second Life bottom-up
+    // space (this viewer flips `v` when building the Bevy mesh).
+    let bevy_uv = hit.uv.unwrap_or(Vec2::ZERO);
+    let st = Vec2::new(bevy_uv.x, 1.0 - bevy_uv.y);
+    // UV: ST with the face's texture placement applied, as sampled — the
+    // `uv_transform` acts in the Bevy (flipped) UV space, so flip back after.
+    let placed = texture_face.map_or(bevy_uv, |tf| {
+        texture_face_uv_transform(tf).transform_point2(bevy_uv)
+    });
+    let uv = Vec2::new(placed.x, 1.0 - placed.y);
+
+    SurfaceInfo {
+        uv: [uv.x, uv.y],
+        st: [st.x, st.y],
+        face_index: face_id.map_or(-1, |face| i32::from(face.get())),
+        position: Vector {
+            x: position.x,
+            y: position.y,
+            z: position.z,
+        },
+        normal: Vector {
+            x: normal.x,
+            y: normal.y,
+            z: normal.z,
+        },
+        binormal: Vector {
+            x: binormal.x,
+            y: binormal.y,
+            z: binormal.z,
+        },
+    }
+}
+
+/// Whether the pointer is over a **blocking** UI element — a hovered `bevy_ui`
+/// node that occludes what is behind it.
+///
+/// A node **without** a [`Pickable`] component blocks by default in `bevy_ui`
+/// (`should_block_lower` defaults to `true`) — and most pane content (the pane
+/// column, the group-list body, the transcript text) has no explicit `Pickable`,
+/// so it must count as blocking. Only nodes that opt **out** with an explicit
+/// `Pickable { should_block_lower: false, .. }` — the full-window
+/// UI root and the (empty) dock host — are transparent to the pick,
+/// so an empty-UI click still touches the world / HUD through them.
+///
+/// A hovered entry only occludes if it is an **actual UI node with positive
+/// area** — it has a [`ComputedNode`] whose laid-out size is non-zero. Two kinds
+/// of hover-map entry are *not* a UI surface and must never suppress a world pick:
+/// a hover entry that is not a `bevy_ui` node at all (it has no `ComputedNode`),
+/// and a degenerate zero-area node (e.g. an empty, collapsed text node). Without
+/// this guard such an entry — hovered everywhere, covering nothing — reported the
+/// whole world as "blocked", silently killing every world pick (touch, and the
+/// avatar context menu's body pick).
+#[must_use]
+pub fn pointer_over_blocking_ui(
+    hover_map: &HoverMap,
+    pickables: &Query<&Pickable>,
+    sizes: &Query<&ComputedNode>,
+) -> bool {
+    hover_map
+        .values()
+        .flat_map(|hits| hits.keys())
+        .any(|entity| {
+            let blocks = pickables
+                .get(*entity)
+                .map_or(true, |pickable| pickable.should_block_lower);
+            let has_area = sizes
+                .get(*entity)
+                .is_ok_and(|computed| computed.size().x > 0.0 && computed.size().y > 0.0);
+            blocks && has_area
+        })
 }
 
 #[cfg(test)]

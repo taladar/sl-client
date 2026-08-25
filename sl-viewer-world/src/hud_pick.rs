@@ -20,7 +20,7 @@
 //!   touched; only if nothing HUD-ward is under the cursor does the click fall
 //!   through to a perspective world ray from the fly camera, exactly the
 //!   reference's HUD-first order.
-//! - **The surface the sim needs.** A touch carries a [`SurfaceInfo`] built from
+//! - **The surface the sim needs.** A touch carries a [`SurfaceInfo`](sl_client_bevy::SurfaceInfo) built from
 //!   the hit ([`surface_info_from_hit`]): the picked face index, its texture
 //!   (`UV`) and surface (`ST`) coordinates, and the intersection point / normal /
 //!   binormal — the reference's `LLPickInfo::getSurfaceInfo`, which is what a
@@ -37,13 +37,13 @@ use std::collections::HashSet;
 use bevy::camera::visibility::RenderLayers;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
-use sl_client_bevy::{
-    Command, PrimFaceId, SlCommand, SurfaceInfo, TextureFace, Vector, texture_face_uv_transform,
-};
+use sl_client_bevy::{Command, SlCommand};
 
 use crate::hud::HudCamera;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
-use crate::world_api::{MediaWorldClick, on_hud_layer};
+use crate::world_api::{
+    MediaWorldClick, on_hud_layer, pointer_over_blocking_ui, surface_info_from_hit,
+};
 
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;
@@ -251,45 +251,6 @@ pub fn pointer_over_hud(
     !ray_cast.cast_ray(ray, &settings).is_empty()
 }
 
-/// Whether the pointer is over a **blocking** UI element — a hovered `bevy_ui`
-/// node that occludes what is behind it.
-///
-/// A node **without** a [`Pickable`] component blocks by default in `bevy_ui`
-/// (`should_block_lower` defaults to `true`) — and most pane content (the pane
-/// column, the group-list body, the transcript text) has no explicit `Pickable`,
-/// so it must count as blocking. Only nodes that opt **out** with an explicit
-/// `Pickable { should_block_lower: false, .. }` — the full-window
-/// [`crate::ui::UiRoot`] and the (empty) dock host — are transparent to the pick,
-/// so an empty-UI click still touches the world / HUD through them.
-///
-/// A hovered entry only occludes if it is an **actual UI node with positive
-/// area** — it has a [`ComputedNode`] whose laid-out size is non-zero. Two kinds
-/// of hover-map entry are *not* a UI surface and must never suppress a world pick:
-/// a hover entry that is not a `bevy_ui` node at all (it has no `ComputedNode`),
-/// and a degenerate zero-area node (e.g. an empty, collapsed text node). Without
-/// this guard such an entry — hovered everywhere, covering nothing — reported the
-/// whole world as "blocked", silently killing every world pick (touch, and the
-/// avatar context menu's body pick).
-#[must_use]
-pub fn pointer_over_blocking_ui(
-    hover_map: &HoverMap,
-    pickables: &Query<&Pickable>,
-    sizes: &Query<&ComputedNode>,
-) -> bool {
-    hover_map
-        .values()
-        .flat_map(|hits| hits.keys())
-        .any(|entity| {
-            let blocks = pickables
-                .get(*entity)
-                .map_or(true, |pickable| pickable.should_block_lower);
-            let has_area = sizes
-                .get(*entity)
-                .is_ok_and(|computed| computed.size().x > 0.0 && computed.size().y > 0.0);
-            blocks && has_area
-        })
-}
-
 /// Resolve a ray hit to its object and touch it, carrying the surface the ray
 /// struck. Returns whether a touch was sent (a hit that resolves to no object —
 /// e.g. an avatar's own mesh — sends nothing).
@@ -360,97 +321,9 @@ fn touch_hit(
     true
 }
 
-/// Component-wise vector subtraction (`a - b`), avoiding the glam `-` operator the
-/// workspace `arithmetic_side_effects` lint trips on.
-fn vsub(a: Vec3, b: Vec3) -> Vec3 {
-    Vec3::new(a.x - b.x, a.y - b.y, a.z - b.z)
-}
-
-/// Component-wise vector scaling (`v * s`).
-fn vscale(v: Vec3, s: f32) -> Vec3 {
-    Vec3::new(v.x * s, v.y * s, v.z * s)
-}
-
-/// Build the [`SurfaceInfo`] a touch carries from a ray hit, the picked face, and
-/// the touched object's world transform — the viewer's `LLPickInfo::getSurfaceInfo`.
-///
-/// - **Face** is the Linden face index the ray struck (`-1` when the hit is not on
-///   a textured face, the reference's "no intersection" value).
-/// - **ST** is the face's own `[0, 1]` surface coordinate: the mesh's stored
-///   texture coordinate, un-flipped from the bottom-up→top-down convention this
-///   viewer bakes into `ATTRIBUTE_UV_0` back into Second Life's bottom-up space.
-/// - **UV** is `ST` with the face's texture placement (repeats / offset /
-///   rotation, [`texture_face_uv_transform`]) applied — the coordinate as the
-///   texture is actually sampled, matching the reference's `surfaceToTexture`.
-/// - **Position / normal / binormal** are given in the object's own Second Life
-///   frame (its global's inverse carries the world hit back into it). A HUD lives
-///   in screen space with no meaningful region position, so the object-local
-///   frame is the sensible finite choice; the reference instead reports region /
-///   HUD-matrix coordinates, a deliberate simplification here. The binormal is
-///   derived geometrically (perpendicular to the normal, along the hit triangle)
-///   rather than from a texture tangent the ray hit does not carry.
-#[must_use]
-pub fn surface_info_from_hit(
-    hit: &bevy::picking::mesh_picking::ray_cast::RayMeshHit,
-    face_id: Option<PrimFaceId>,
-    texture_face: Option<&TextureFace>,
-    object_global: &GlobalTransform,
-) -> SurfaceInfo {
-    let inverse = object_global.affine().inverse();
-    // The hit point / normal in the object's own Second Life frame (the object
-    // subtree lives in Second Life space under the root's basis change, so the
-    // inverse of its global lands here directly).
-    let position = inverse.transform_point3(hit.point);
-    let normal = inverse.transform_vector3(hit.normal).normalize_or_zero();
-
-    // The binormal: perpendicular to the normal and along the surface, derived
-    // from the hit triangle's first edge projected off the normal.
-    let binormal = hit
-        .triangle
-        .map(|tri| {
-            let edge = inverse.transform_vector3(vsub(tri[1], tri[0]));
-            let along = vsub(edge, vscale(normal, edge.dot(normal)));
-            normal.cross(along).normalize_or_zero()
-        })
-        .filter(|binormal| *binormal != Vec3::ZERO)
-        .unwrap_or_else(|| normal.any_orthonormal_vector());
-
-    // ST: the mesh's stored surface coordinate, back in Second Life bottom-up
-    // space (this viewer flips `v` when building the Bevy mesh).
-    let bevy_uv = hit.uv.unwrap_or(Vec2::ZERO);
-    let st = Vec2::new(bevy_uv.x, 1.0 - bevy_uv.y);
-    // UV: ST with the face's texture placement applied, as sampled — the
-    // `uv_transform` acts in the Bevy (flipped) UV space, so flip back after.
-    let placed = texture_face.map_or(bevy_uv, |tf| {
-        texture_face_uv_transform(tf).transform_point2(bevy_uv)
-    });
-    let uv = Vec2::new(placed.x, 1.0 - placed.y);
-
-    SurfaceInfo {
-        uv: [uv.x, uv.y],
-        st: [st.x, st.y],
-        face_index: face_id.map_or(-1, |face| i32::from(face.get())),
-        position: Vector {
-            x: position.x,
-            y: position.y,
-            z: position.z,
-        },
-        normal: Vector {
-            x: normal.x,
-            y: normal.y,
-            z: normal.z,
-        },
-        binormal: Vector {
-            x: binormal.x,
-            y: binormal.y,
-            z: binormal.z,
-        },
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{surface_info_from_hit, vscale, vsub};
+    use crate::world_api::{surface_info_from_hit, vscale, vsub};
     use bevy::math::{Affine3A, Quat, Vec2, Vec3};
     use bevy::picking::mesh_picking::ray_cast::RayMeshHit;
     use bevy::transform::components::GlobalTransform;

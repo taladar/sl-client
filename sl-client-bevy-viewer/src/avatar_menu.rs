@@ -94,7 +94,7 @@ use crate::avatars::RefetchAvatarTextures;
 use crate::derender::RequestDerender;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud::HudCamera;
-use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
+use crate::hud_pick::pointer_over_hud;
 use crate::input_action::Action;
 use crate::land_menu::OpenLandMenu;
 use crate::menu::UNIMPLEMENTED;
@@ -109,6 +109,7 @@ use crate::world_api::DerenderKind;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::on_hud_layer;
+use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, SelfGroundSit};
 

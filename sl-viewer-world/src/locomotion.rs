@@ -33,7 +33,7 @@ use bevy::prelude::*;
 use sl_client_bevy::{AssetKey, ControlFlags, SlIdentity};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::movement::AvatarControls;
+use crate::world_api::AvatarControls;
 use crate::world_api::AvatarMotion;
 use crate::world_api::AvatarState;
 

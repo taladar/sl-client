@@ -931,10 +931,10 @@ fn update_status_text(
 /// field owns the keyboard.
 fn snapshot_hotkey(
     keyboard: Res<ButtonInput<KeyCode>>,
-    context: Res<crate::input_context::InputContext>,
+    context: Res<crate::world_api::InputContext>,
     mut requests: MessageWriter<RequestSnapshotCapture>,
 ) {
-    if *context == crate::input_context::InputContext::TextEntry {
+    if *context == crate::world_api::InputContext::TextEntry {
         return;
     }
     let ctrl = keyboard.pressed(KeyCode::ControlLeft) || keyboard.pressed(KeyCode::ControlRight);

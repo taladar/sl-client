@@ -97,7 +97,7 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::batching::NoAutomaticBatching;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use sl_client_bevy::{DecodedTexture, Object, ParticleSystem, particle_pattern, to_bevy_image};
+use sl_client_bevy::{DecodedTexture, ParticleSystem, particle_pattern, to_bevy_image};
 
 use crate::coords::sl_to_bevy_rotation;
 use crate::particle_render::{
@@ -108,58 +108,6 @@ use crate::textures::TextureManager;
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, HUD_RENDER_LAYER, ObjectParticleSystem, ViewerCamera, on_hud_layer,
 };
-
-/// Lift a live particle system off an object into an [`ObjectParticleSystem`], or
-/// `None` when the object is not (or is no longer) a particle source.
-///
-/// Returns `None` in the two cases the reference viewer treats as "no source":
-/// the object carries no particle-system block at all (`Object::particles` is
-/// `None` — sl-proto already yields `None` for an empty `PSBlock`, matching
-/// `isNullPS`'s zero-size check), or it carries a **null** system whose CRC is
-/// zero (`LLPartSysData::isNullPS` — the `llParticleSystem([])` stop sentinel).
-pub(crate) fn particles_from_object(object: &Object) -> Option<ObjectParticleSystem> {
-    let system = object.particles.clone()?;
-    // A zero-CRC system is the reference viewer's "null" particle system: the
-    // sentinel a script sends to stop emitting. `isNullPS` rejects it, so it is
-    // not a live source.
-    if system.crc == 0 {
-        return None;
-    }
-    Some(ObjectParticleSystem { system })
-}
-
-/// Reconcile an object entity's [`ObjectParticleSystem`] component (P30.1) with
-/// its current particle-system block: insert / refresh it when the object is a
-/// live particle source, remove it when the source was cleared in-world (a null
-/// system) or the object stopped carrying one. Called on both the spawn and
-/// update paths so a source toggled on or off between updates is tracked, the way
-/// [`apply_light`](crate::objects) is for lights.
-pub(crate) fn apply_particles(
-    entity: Entity,
-    particles: Option<ObjectParticleSystem>,
-    commands: &mut Commands,
-) {
-    match particles {
-        Some(particles) => {
-            let system = &particles.system;
-            debug!(
-                "object particle source: pattern={:#04x} flags={:#x} burst_rate={:.2}s \
-                 burst_count={} part_max_age={:.2}s texture={:?} target={:?}",
-                system.pattern,
-                system.flags,
-                system.burst_rate,
-                system.burst_part_count,
-                system.part_max_age,
-                system.texture_id,
-                system.target_id,
-            );
-            commands.entity(entity).insert(particles);
-        }
-        None => {
-            commands.entity(entity).remove::<ObjectParticleSystem>();
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // P30.2 — CPU particle simulation + camera-facing billboard render.
@@ -1183,10 +1131,10 @@ fn build_particle_image(decoded: &DecodedTexture) -> Image {
 #[cfg(test)]
 mod tests {
     use super::{
-        MAX_PARTICLES, ObjectParticleSystem, SETTING_MAX_PARTICLES, particle_cap,
-        particles_from_object, register_settings,
+        MAX_PARTICLES, ObjectParticleSystem, SETTING_MAX_PARTICLES, particle_cap, register_settings,
     };
     use crate::settings::ViewerSettings;
+    use crate::world_api::particles_from_object;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{Object, ParticleSystem, Vector};
 

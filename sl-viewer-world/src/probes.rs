@@ -8,13 +8,13 @@
 //! is a probe exactly when it carries the `LLReflectionProbeParams` extra-param block
 //! (`ExtraParams` type `0x90`), the way `LLViewerObject::getReflectionProbeParams`
 //! keys off the block's presence. sl-proto already decodes that block into a
-//! [`ReflectionProbe`] on `Object::extra.reflection_probe` (the two packed floats —
+//! [`ReflectionProbe`](sl_client_bevy::ReflectionProbe) on `Object::extra.reflection_probe` (the two packed floats —
 //! ambiance and clip distance — plus the flag byte: box-vs-sphere influence
 //! volume, dynamic-object capture, and mirror). `reflection_probe_from_object`
 //! lifts a present block onto an `ObjectReflectionProbe` component that
 //! `apply_object` attaches to (or clears from) each object entity as its updates
 //! arrive, exactly the way [`apply_flexi`](crate::flexi) /
-//! [`apply_light`](crate::lights) / [`apply_particles`](crate::particles) do — a
+//! [`apply_light`](crate::objects) / [`apply_particles`](crate::objects) do — a
 //! prim toggled probe on or off in-world flips the block present / absent, so the
 //! component is refreshed every update. The component also carries the prim's metre
 //! scale, from which the local probe's influence volume is derived.
@@ -115,7 +115,7 @@
 
 use crate::probe_layers::{default_probe_camera_render_layers, local_probe_camera_render_layers};
 use crate::settings::ViewerSettings;
-use crate::world_api::ViewerCamera;
+use crate::world_api::{BOX_FALLOFF, MIN_NEAR_CLIP, ObjectReflectionProbe, ViewerCamera};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::CUBE_MAP_FACES;
 use bevy::camera::visibility::RenderLayers;
@@ -131,150 +131,9 @@ use bevy::render::render_resource::{
 use bevy::render::renderer::{RenderDevice, RenderQueue};
 use bevy::render::texture::GpuImage;
 use bevy::render::{Render, RenderApp, RenderSystems};
-use sl_client_bevy::{Object, ReflectionProbe, ReflectionProbeFlags};
 use sl_settings::SettingValue;
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
-
-/// A component marking an object entity as a **reflection probe**, carrying the
-/// decoded `LLReflectionProbeParams` parameters (in Second Life semantics) plus
-/// the prim's metre scale — the inputs the capture / volume side needs.
-///
-/// Attached to (and refreshed / cleared on) each object entity by
-/// `apply_object`(crate::objects) as its updates arrive. See
-/// `reflection_probe_from_object` for the present-vs-absent lift.
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct ObjectReflectionProbe {
-    /// The decoded reflection-probe parameters: the ambiance (irradiance) scale,
-    /// the reflection-capture near-clip distance in metres, and the flag set
-    /// (box-vs-sphere volume, dynamic capture, mirror).
-    pub(crate) data: ReflectionProbe,
-    /// The prim's Second Life metre scale, refreshed every update so a **resized**
-    /// probe's influence volume (a box of these half-extents, or a sphere of the
-    /// bounding radius) stays correct. The reference viewer likewise derives the
-    /// probe volume from the prim's dimensions, not from the probe params.
-    pub(crate) scale: [f32; 3],
-}
-
-impl ObjectReflectionProbe {
-    /// Whether this probe's influence volume is a **box** (the prim's oriented
-    /// bounding box) rather than a **sphere** — the `BOX_VOLUME` flag, which the
-    /// reference reads as `LLVOVolume::getReflectionProbeIsBox`.
-    const fn is_box_volume(&self) -> bool {
-        self.data.flags.contains(ReflectionProbeFlags::BOX_VOLUME)
-    }
-
-    /// Whether this probe drives a **realtime mirror** — the `MIRROR` flag, which the
-    /// reference reads as `LLVOVolume::isMirror` to hand the prim to the hero-probe
-    /// manager. A mirror is captured sharp and live (all six faces every frame,
-    /// dynamic content included) by the `hero` path rather than the amortized
-    /// P33 local pool; see [`ReflectionProbePlugin`].
-    pub(crate) const fn is_mirror(&self) -> bool {
-        self.data.flags.contains(ReflectionProbeFlags::MIRROR)
-    }
-
-    /// The influence volume as a scale for Bevy's unit-cube [`LightProbe`] volume,
-    /// in the prim's **local** frame (the frame below the object entity, i.e. still
-    /// Second Life axes — the object entity carries the basis change, exactly as the
-    /// geometry holder's scale does).
-    ///
-    /// A **box** probe scales the unit cube by the prim's metre scale, so the volume
-    /// is the prim's own oriented box (`LLReflectionMap::getBox`: half-extents
-    /// `scale * 0.5`). A **sphere** probe has no cuboid counterpart in Bevy, so it
-    /// becomes the smallest cube containing the reference's sphere — whose radius is
-    /// `scale.x * 0.5`, the *X* extent alone (`LLReflectionMap::update`) — and the
-    /// corners the cube adds beyond that sphere are taken back out by
-    /// `SPHERE_FALLOFF`.
-    const fn volume_scale(&self) -> Vec3 {
-        let [x, y, z] = self.scale;
-        if self.is_box_volume() {
-            Vec3::new(x, y, z)
-        } else {
-            Vec3::splat(x)
-        }
-    }
-
-    /// The [`LightProbe`] falloff (per axis, as a fraction of the volume) this
-    /// probe's influence tapers over: a hard-edged [`BOX_FALLOFF`] for a box volume,
-    /// the far softer `SPHERE_FALLOFF` for a sphere approximated by a cube.
-    const fn falloff(&self) -> Vec3 {
-        if self.is_box_volume() {
-            Vec3::splat(BOX_FALLOFF)
-        } else {
-            Vec3::splat(SPHERE_FALLOFF)
-        }
-    }
-
-    /// The probe's influence radius in metres, as `LLReflectionMap::update` computes
-    /// it: the half-diagonal of the prim's box for a box volume, half the prim's *X*
-    /// extent for a sphere. Used to rank probes by distance (the reference's
-    /// `mDistance = |eye - origin| - radius`), so a large probe the camera is just
-    /// outside of outranks a tiny one the same distance away.
-    fn radius(&self) -> f32 {
-        let [x, y, z] = self.scale;
-        if self.is_box_volume() {
-            Vec3::new(x * 0.5, y * 0.5, z * 0.5).length()
-        } else {
-            x * 0.5
-        }
-    }
-
-    /// The near-clip distance the probe's capture cameras render with — the probe's
-    /// own clip distance, floored at [`MIN_NEAR_CLIP`] the way
-    /// `LLReflectionMap::getNearClip` floors it at `MINIMUM_NEAR_CLIP`. It is how a
-    /// probe inside a room excludes the walls of the prim (or the furniture) it sits
-    /// in from its own reflection.
-    const fn near_clip(&self) -> f32 {
-        self.data.clip_distance.max(MIN_NEAR_CLIP)
-    }
-}
-
-/// Lift an object's reflection-probe block onto an `ObjectReflectionProbe`, or
-/// `None` when the object is not (or is no longer) a probe.
-///
-/// Mirrors the reference viewer's `LLViewerObject::getReflectionProbeParams`: a
-/// prim is a probe exactly when it carries a reflection-probe extra-param block, so
-/// this is a straight `Option` lift with no sentinel to reject.
-pub(crate) fn reflection_probe_from_object(object: &Object) -> Option<ObjectReflectionProbe> {
-    object
-        .extra
-        .reflection_probe
-        .map(|data| ObjectReflectionProbe {
-            data,
-            scale: [object.scale.x, object.scale.y, object.scale.z],
-        })
-}
-
-/// Reconcile an object entity's `ObjectReflectionProbe` component with its
-/// current reflection-probe block: insert / refresh it when the prim is a probe,
-/// remove it when the prim was changed to non-probe in-world (the block dropped) or
-/// never was one. Called on both the spawn and update paths so a prim toggled probe
-/// on or off between updates is tracked, the way [`apply_flexi`](crate::flexi) /
-/// [`apply_light`](crate::lights) / [`apply_particles`](crate::particles) are.
-pub(crate) fn apply_reflection_probe(
-    entity: Entity,
-    probe: Option<ObjectReflectionProbe>,
-    commands: &mut Commands,
-) {
-    match probe {
-        Some(probe) => {
-            let data = &probe.data;
-            debug!(
-                "object reflection probe: ambiance={:.2} clip_distance={:.2}m \
-                 box_volume={} dynamic={} mirror={}",
-                data.ambiance,
-                data.clip_distance,
-                data.flags.contains(ReflectionProbeFlags::BOX_VOLUME),
-                data.flags.contains(ReflectionProbeFlags::DYNAMIC),
-                data.flags.contains(ReflectionProbeFlags::MIRROR),
-            );
-            commands.entity(entity).insert(probe);
-        }
-        None => {
-            commands.entity(entity).remove::<ObjectReflectionProbe>();
-        }
-    }
-}
 
 /// The per-face cubemap capture resolution, in texels. Must be a power of two
 /// (and ≤ 8192) for [`GeneratedEnvironmentMapLight`]'s filter to accept the cube.
@@ -312,22 +171,6 @@ const DEFAULT_PROBE_PERIOD_SECS: f32 = 2.0;
 /// nearer probe is refreshed a touch more eagerly than a distant one of the same
 /// age.
 const PROBE_DISTANCE_WEIGHT: f32 = 0.1;
-
-/// The smallest near-clip distance a probe's capture cameras may use, in metres —
-/// `LLReflectionMap::getNearClip`'s `MINIMUM_NEAR_CLIP`.
-const MIN_NEAR_CLIP: f32 = 0.1;
-
-/// The [`LightProbe`] falloff of a **box**-volume local probe: the fraction of the
-/// volume over which its influence tapers out toward the faces of the box. Small, so
-/// a box probe's reflection fills the room it bounds (as the reference's box probes
-/// do) and only blends out right at the boundary rather than fading across it.
-const BOX_FALLOFF: f32 = 0.1;
-
-/// The [`LightProbe`] falloff of a **sphere**-volume local probe. Bevy's influence
-/// volume is always a cuboid, so a sphere probe is bound as the cube circumscribing
-/// its sphere; a broad taper pulls the influence back in toward the sphere, so the
-/// corners the cube adds contribute little.
-const SPHERE_FALLOFF: f32 = 0.5;
 
 /// The **gain** on a probe's image-based lighting (P33.3): how bright its
 /// contribution is relative to the scene radiance it captured. `1.0` is the
@@ -2206,8 +2049,9 @@ mod tests {
     }
     use super::{
         BOX_FALLOFF, DEFAULT_PROBE_PERIOD_SECS, MIN_NEAR_CLIP, ObjectReflectionProbe, PROBE_GAIN,
-        SPHERE_FALLOFF, pick_next_rig, probe_intensity, reflection_probe_from_object,
+        pick_next_rig, probe_intensity,
     };
+    use crate::world_api::{SPHERE_FALLOFF, reflection_probe_from_object};
     use bevy::camera::Exposure;
     use bevy::prelude::Vec3;
     use pretty_assertions::assert_eq;

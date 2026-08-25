@@ -50,7 +50,7 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 use sl_client_bevy::Uuid;
 
-use crate::input_context::InputContext;
+use crate::world_api::InputContext;
 
 /// A named viewer action a binding can drive — the stable target the camera and
 /// avatar-movement systems consume instead of a raw key.
@@ -337,7 +337,7 @@ mod tests {
     use super::{
         Action, BindingProfile, BindingTarget, InputBindings, InputMode, update_action_input,
     };
-    use crate::input_context::InputContext;
+    use crate::world_api::InputContext;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 

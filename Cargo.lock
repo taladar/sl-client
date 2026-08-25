@@ -9421,6 +9421,7 @@ dependencies = [
  "serde",
  "sl-client-bevy",
  "sl-terrain",
+ "sl-viewer-kit",
  "sl-viewer-settings",
 ]
 

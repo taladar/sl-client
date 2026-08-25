@@ -46,7 +46,9 @@ use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, ava
 
 use crate::world_api::AvatarState;
 use crate::world_api::TerrainState;
-use crate::world_api::{AvatarMotion, CameraMode};
+use crate::world_api::{
+    AvatarControls, AvatarMotion, CameraMode, DoubleTapRun, ROTATION_SEND_INTERVAL_SECS,
+};
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second
 /// (~183°/s — a brisk turn that feels responsive rather than sluggish).
@@ -69,12 +71,6 @@ const LANDING_DESCENT_SPEED_MPS: f32 = -0.1;
 /// is a jump / hop, a sustained hold takes off. It also debounces the take-off
 /// from the P31.11 auto-land, so a landing does not instantly re-launch.
 const TAKE_OFF_HOLD_SECS: f32 = 0.5;
-
-/// The minimum interval, in seconds, between the body-rotation `AgentUpdate`s sent
-/// while turning (~20 Hz), so a held turn key does not flood the circuit — the
-/// heading still advances every frame client-side, it is just broadcast at this
-/// rate.
-const ROTATION_SEND_INTERVAL_SECS: f32 = 0.05;
 
 /// The window (seconds) within which a second tap of the same walk key counts as
 /// a double-tap for tap-tap-hold-to-run. Deliberately its own constant — the
@@ -116,26 +112,6 @@ impl Default for MovementTuning {
     }
 }
 
-/// The per-key state of the tap-tap-hold-to-run detector: how recently the key
-/// was last tapped and whether a double-tap's run is currently latched (held).
-#[derive(Debug, Clone)]
-struct DoubleTapRun {
-    /// Seconds since the key was last freshly pressed; starts beyond the window
-    /// so the first tap of a session can never pair with "before the session".
-    since_last_tap: f32,
-    /// Whether the second tap of a double-tap is still held, running the avatar.
-    latched: bool,
-}
-
-impl Default for DoubleTapRun {
-    fn default() -> Self {
-        Self {
-            since_last_tap: f32::INFINITY,
-            latched: false,
-        }
-    }
-}
-
 /// Advance one walk key's tap-tap-hold-to-run state by a frame and return
 /// whether it is running: a fresh press within
 /// [`DOUBLE_TAP_RUN_WINDOW_SECS`] of the previous one latches the run, and the
@@ -154,66 +130,6 @@ fn double_tap_run(state: &mut DoubleTapRun, just_pressed: bool, held: bool, dt: 
         state.since_last_tap += dt;
     }
     state.latched && held
-}
-
-/// The persistent state of the avatar movement controls: the client-tracked walk
-/// heading, whether flying is toggled on, and the bookkeeping that keeps the viewer
-/// from re-sending an unchanged intent every frame.
-#[derive(Debug, Resource)]
-pub struct AvatarControls {
-    /// The walk heading (yaw about the Second Life up axis, radians) the body faces;
-    /// seeded once from the own avatar's reported facing so the first step does not
-    /// snap it.
-    yaw: f32,
-    /// Whether flying is toggled on ([`ControlFlags::FLY`] is advertised).
-    flying: bool,
-    /// Whether `yaw` has been seeded from the own avatar yet.
-    seeded: bool,
-    /// Whether the seeded heading has been advertised to the simulator at least
-    /// once, so a walk before the first turn moves in the right direction.
-    sent_initial_rotation: bool,
-    /// The control-flag set last advertised, so a [`Command::SetControls`] is emitted
-    /// only when the flags actually change.
-    last_controls: ControlFlags,
-    /// Seconds accumulated since the last rotation send, for the turning throttle.
-    rotation_send_accum: f32,
-    /// Seconds the ascend key has been held while standing and not flying, for the
-    /// P31.16 hold-to-take-off; reset whenever that precondition lapses.
-    ascend_hold_secs: f32,
-    /// The tap-tap-hold-to-run detector for the walk-forward key.
-    tap_run_forward: DoubleTapRun,
-    /// The tap-tap-hold-to-run detector for the walk-backward key.
-    tap_run_backward: DoubleTapRun,
-}
-
-impl AvatarControls {
-    /// The [`ControlFlags`] set last advertised to the simulator (walk / run /
-    /// fly / ascend / descend). The client-side locomotion fallback
-    /// ([`crate::locomotion`]) reads the same advertised intent that moves the
-    /// avatar to pick which built-in animation to play for immediate feedback.
-    ///
-    /// The set includes [`ControlFlags::FLY`] while flying is toggled on, so the
-    /// locomotion fallback reads the fly / hover states straight off it.
-    #[must_use]
-    pub(crate) const fn advertised(&self) -> ControlFlags {
-        self.last_controls
-    }
-}
-
-impl Default for AvatarControls {
-    fn default() -> Self {
-        Self {
-            yaw: 0.0,
-            flying: false,
-            seeded: false,
-            sent_initial_rotation: false,
-            last_controls: ControlFlags::empty(),
-            rotation_send_accum: ROTATION_SEND_INTERVAL_SECS,
-            ascend_hold_secs: 0.0,
-            tap_run_forward: DoubleTapRun::default(),
-            tap_run_backward: DoubleTapRun::default(),
-        }
-    }
 }
 
 /// A Second Life body [`Rotation`] for a heading `yaw` (radians about the up axis):

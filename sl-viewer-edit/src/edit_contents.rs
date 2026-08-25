@@ -69,13 +69,13 @@ use sl_client_bevy::{
 use crate::edit_tool::{BuildTabPages, LABEL_CLASS, TOOL_FONT_SIZE, VALUE_CLASS};
 use crate::floater::{FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::input_context::InputContext;
 use crate::inventory::{InventoryModel, item_icon};
 use crate::ui::focus_within;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, VirtualViewport};
+use crate::world_api::InputContext;
 use crate::world_api::LocalChatNotice;
 use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;

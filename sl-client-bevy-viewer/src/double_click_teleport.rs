@@ -44,10 +44,11 @@ use crate::coords::bevy_to_sl_vec;
 use crate::edit_tool::edit_tool_inactive;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
 use crate::hud::HudCamera;
-use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
-use crate::input_context::InputContext;
+use crate::hud_pick::pointer_over_hud;
 use crate::minimap::{narrow, region_handle_at};
 use crate::settings::ViewerSettings;
+use crate::world_api::InputContext;
+use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::{
     BeginTeleportFlow, SETTING_DOUBLE_CLICK_ACTION, TeleportTarget, issue_teleport,
 };
