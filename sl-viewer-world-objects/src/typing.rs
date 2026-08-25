@@ -45,6 +45,8 @@
 //! — the UI-sound bus (`viewer-ui-sound-effects`) closed the gap this module used
 //! to record.
 
+pub use crate::world_api::TypingState;
+
 use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, AssetKey, Command, SlCommand, SlIdentity};
 
@@ -55,34 +57,6 @@ use crate::world_api::AvatarState;
 /// The short name of the built-in `ANIM_AGENT_TYPE` animation in the [`sl_anim`]
 /// registry — the hands-on-keyboard gesture played and requested while typing.
 const TYPE_ANIMATION: &str = "type";
-
-/// Whether the own avatar is currently typing into local chat — driven by the
-/// nearby-chat bar (`crate::nearby_chat_bar`) through [`set`](Self::set): active
-/// while the bar is focused and holds a draft, inactive on send / blur.
-#[derive(Debug, Resource, Default)]
-pub struct TypingState {
-    /// Whether typing is active this frame.
-    active: bool,
-    /// The `active` value last advertised to the simulator, so a `StartTyping` /
-    /// `StopTyping` `ChatFromViewer` is emitted only on the *edge* rather than every
-    /// frame — the simulator holds the state until the opposite signal arrives.
-    advertised: bool,
-}
-
-impl TypingState {
-    /// Whether the own avatar is typing this frame.
-    #[must_use]
-    pub const fn is_active(&self) -> bool {
-        self.active
-    }
-
-    /// Set the typing state (the nearby-chat bar calls this while a draft is being
-    /// typed, and clears it on send / blur). The wire edge is reconciled by
-    /// [`drive_own_typing`], so this only records intent.
-    pub const fn set(&mut self, active: bool) {
-        self.active = active;
-    }
-}
 
 /// Drive the own avatar's typing state each frame (P31.9): on the typing edge, send
 /// both wire signals — an `AgentAnimation` request that starts / stops
@@ -123,7 +97,7 @@ pub fn drive_own_typing(
     // re-sending every frame would flood the circuit — advertise the typing state:
     // the `AgentAnimation` request that drives the animation on other viewers and
     // the `ChatFromViewer` "is typing" indicator.
-    if active != state.advertised {
+    if let Some(active) = state.take_edge() {
         if let Some(id) = type_id {
             let anim = AnimationKey::from(id);
             writer.write(SlCommand(if active {
@@ -137,7 +111,6 @@ pub fn drive_own_typing(
         if active {
             ui_sound.write(PlayUiSound(UiSound::Typing));
         }
-        state.advertised = active;
         if std::env::var("SL_VIEWER_LOG_TYPING").as_deref() == Ok("1") {
             info!("P31.9 own typing -> {active}");
         }

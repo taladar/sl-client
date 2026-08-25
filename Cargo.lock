@@ -9025,7 +9025,6 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-objects",
  "url",
 ]
 
@@ -9043,7 +9042,6 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-objects",
  "sl-viewer-world-view",
 ]
 
@@ -9122,7 +9120,6 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-objects",
  "sl-viewer-world-scene",
  "tokio",
  "tracing",

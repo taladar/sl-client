@@ -6192,6 +6192,173 @@ pub fn pointer_over_blocking_ui(
         })
 }
 
+// ---- moved down from the object layer (step 19) ----
+/// The broad render classification of an in-world object, decided from its
+/// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
+/// (later-phase) rendering path; P5.1 only records it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ObjectCategory {
+    /// An avatar (`pcode` 47) — a placeholder sphere in Phase 10.
+    Avatar,
+    /// A plain volume prim — tessellated with `sl_prim` in Phase 5.2.
+    Prim,
+    /// A sculpted prim (its shape comes from a sculpt texture) — Phase 9.
+    Sculpt,
+    /// A mesh object (its shape comes from a mesh asset) — Phase 7.
+    Mesh,
+    /// A Linden tree (`PCODE_TREE` / `PCODE_NEW_TREE`) — its branch / leaf
+    /// geometry is generated procedurally from its species (P26.2).
+    Tree,
+    /// A Linden grass clump (`PCODE_GRASS`) — its crossed-quad blade geometry is
+    /// generated procedurally from its species and scale (P26.3).
+    Grass,
+    /// Anything else (particle-system object, …); not rendered by the current
+    /// phases.
+    Other,
+}
+
+/// A marker component tagging an entity as an in-world object, carrying its
+/// scoped id and render classification for the rendering phases to query — the
+/// `pick_object` crosshair tool (both fields) and the `drive_render_priority`
+/// prim LOD pass (P21.3, keyed off the classification and scoped id).
+///
+/// Both readers live in the object layer (`sl_viewer_world_objects`, modules
+/// `objects` and `render_priority`), which depends on this crate rather than
+/// the other way round, so they cannot be linked from here.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct SceneObject {
+    /// The object's scoped (circuit + region-local) id.
+    pub scoped_id: ScopedObjectId,
+    /// The object's render classification.
+    pub category: ObjectCategory,
+}
+
+/// Debug identity carried on each object's root entity so the `pick_object`
+/// crosshair tool (in the object layer) can report exactly what the camera is
+/// looking at — the object's
+/// full id, its mesh/sculpt asset id (the thing to fetch and decode offline when
+/// its geometry looks wrong), and its Second Life scale/position.
+#[derive(Component, Debug, Clone, Copy, PartialEq)]
+pub struct ObjectDebugInfo {
+    /// The object's full (asset) id.
+    full_id: Uuid,
+    /// The mesh or sculpt-map asset id, when the object has one.
+    asset: Option<Uuid>,
+    /// The object's Second Life scale (metres per axis).
+    scale: [f32; 3],
+    /// The object's Second Life region-local position.
+    position: [f32; 3],
+    /// The object's quantized prim shape parameters, so a wrongly tessellated plain
+    /// prim can be reproduced offline exactly as the simulator described it.
+    shape: PrimShapeParams,
+}
+
+impl ObjectDebugInfo {
+    /// The object's mesh or sculpt-map asset id, or `None` for a plain prim. Used
+    /// by the P20.2 render-priority driver to rank a mesh object's still-fetching
+    /// geometry (or a sculpt's map) from the object's on-screen size before its
+    /// face entities exist.
+    #[must_use]
+    pub const fn render_asset(&self) -> Option<Uuid> {
+        self.asset
+    }
+
+    /// Build the debug identity for an object's root entity from what the
+    /// simulator described: its full id, its mesh / sculpt asset id if it has
+    /// one, and its Second Life scale, position and prim shape.
+    ///
+    /// The fields stay private so the object layer records this identity
+    /// through one call rather than reaching into five fields from another
+    /// crate.
+    #[must_use]
+    pub const fn new(
+        full_id: Uuid,
+        asset: Option<Uuid>,
+        scale: [f32; 3],
+        position: [f32; 3],
+        shape: PrimShapeParams,
+    ) -> Self {
+        Self {
+            full_id,
+            asset,
+            scale,
+            position,
+            shape,
+        }
+    }
+
+    /// The object's Second Life scale (metres per axis), whose half-diagonal is
+    /// its bounding radius for the P20.2 pixel-area computation.
+    #[must_use]
+    pub const fn scale(&self) -> [f32; 3] {
+        self.scale
+    }
+
+    /// The object's full (asset) id, as the crosshair pick tool reports it.
+    #[must_use]
+    pub const fn full_id(&self) -> Uuid {
+        self.full_id
+    }
+
+    /// The object's Second Life region-local position.
+    #[must_use]
+    pub const fn position(&self) -> [f32; 3] {
+        self.position
+    }
+
+    /// The object's quantized prim shape parameters, so a wrongly tessellated
+    /// plain prim can be reproduced offline exactly as the simulator described
+    /// it.
+    #[must_use]
+    pub const fn shape(&self) -> PrimShapeParams {
+        self.shape
+    }
+}
+
+/// Whether the own avatar is currently typing into local chat — driven by the
+/// nearby-chat bar (`crate::nearby_chat_bar`) through [`set`](Self::set): active
+/// while the bar is focused and holds a draft, inactive on send / blur.
+#[derive(Debug, Resource, Default)]
+pub struct TypingState {
+    /// Whether typing is active this frame.
+    active: bool,
+    /// The `active` value last advertised to the simulator, so a `StartTyping` /
+    /// `StopTyping` `ChatFromViewer` is emitted only on the *edge* rather than every
+    /// frame — the simulator holds the state until the opposite signal arrives.
+    advertised: bool,
+}
+
+impl TypingState {
+    /// Whether the own avatar is typing this frame.
+    #[must_use]
+    pub const fn is_active(&self) -> bool {
+        self.active
+    }
+
+    /// Set the typing state (the nearby-chat bar calls this while a draft is being
+    /// typed, and clears it on send / blur). The wire edge is reconciled by the
+    /// object layer's typing driver, so this only records intent.
+    pub const fn set(&mut self, active: bool) {
+        self.active = active;
+    }
+
+    /// Take the un-advertised typing edge, if there is one: `Some(active)` the
+    /// first time the state differs from what the simulator was last told, and
+    /// `None` on every frame after. The simulator holds each state between
+    /// signals, so re-sending every frame would flood the circuit.
+    ///
+    /// Taking the edge records it as advertised, so the caller must actually
+    /// send the wire signals when this returns `Some`.
+    pub const fn take_edge(&mut self) -> Option<bool> {
+        if self.active == self.advertised {
+            None
+        } else {
+            self.advertised = self.active;
+            Some(self.active)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;

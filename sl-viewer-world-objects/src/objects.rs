@@ -82,83 +82,13 @@ use crate::meshes::{MeshDecoded, MeshManager};
 use crate::probe_layers::{dynamic_render_layers, world_geom_render_layers};
 use crate::render_priority::HUD_BOOST_PRIORITY;
 use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
+// These moved down to the world API so the crates that only name them no
+// longer depend on the object layer's systems; re-exported here so the
+// call sites that address them through this module are unchanged.
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material, intern_face_material,
 };
-
-/// The broad render classification of an in-world object, decided from its
-/// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
-/// (later-phase) rendering path; P5.1 only records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ObjectCategory {
-    /// An avatar (`pcode` 47) — a placeholder sphere in Phase 10.
-    Avatar,
-    /// A plain volume prim — tessellated with `sl_prim` in Phase 5.2.
-    Prim,
-    /// A sculpted prim (its shape comes from a sculpt texture) — Phase 9.
-    Sculpt,
-    /// A mesh object (its shape comes from a mesh asset) — Phase 7.
-    Mesh,
-    /// A Linden tree (`PCODE_TREE` / `PCODE_NEW_TREE`) — its branch / leaf
-    /// geometry is generated procedurally from its species (P26.2).
-    Tree,
-    /// A Linden grass clump (`PCODE_GRASS`) — its crossed-quad blade geometry is
-    /// generated procedurally from its species and scale (P26.3).
-    Grass,
-    /// Anything else (particle-system object, …); not rendered by the current
-    /// phases.
-    Other,
-}
-
-/// A marker component tagging an entity as an in-world object, carrying its
-/// scoped id and render classification for the rendering phases to query — the
-/// [`pick_object`] crosshair tool (both fields) and the [`drive_render_priority`]
-/// prim LOD pass (P21.3, keyed off the classification and scoped id).
-///
-/// [`drive_render_priority`]: crate::render_priority::drive_render_priority
-#[derive(Component, Debug, Clone, Copy)]
-pub struct SceneObject {
-    /// The object's scoped (circuit + region-local) id.
-    pub scoped_id: ScopedObjectId,
-    /// The object's render classification.
-    pub category: ObjectCategory,
-}
-
-/// Debug identity carried on each object's root entity so the [`pick_object`]
-/// crosshair tool can report exactly what the camera is looking at — the object's
-/// full id, its mesh/sculpt asset id (the thing to fetch and decode offline when
-/// its geometry looks wrong), and its Second Life scale/position.
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
-pub struct ObjectDebugInfo {
-    /// The object's full (asset) id.
-    full_id: Uuid,
-    /// The mesh or sculpt-map asset id, when the object has one.
-    asset: Option<Uuid>,
-    /// The object's Second Life scale (metres per axis).
-    scale: [f32; 3],
-    /// The object's Second Life region-local position.
-    position: [f32; 3],
-    /// The object's quantized prim shape parameters, so a wrongly tessellated plain
-    /// prim can be reproduced offline exactly as the simulator described it.
-    shape: PrimShapeParams,
-}
-
-impl ObjectDebugInfo {
-    /// The object's mesh or sculpt-map asset id, or `None` for a plain prim. Used
-    /// by the P20.2 render-priority driver to rank a mesh object's still-fetching
-    /// geometry (or a sculpt's map) from the object's on-screen size before its
-    /// face entities exist.
-    pub(crate) const fn render_asset(&self) -> Option<Uuid> {
-        self.asset
-    }
-
-    /// The object's Second Life scale (metres per axis), whose half-diagonal is
-    /// its bounding radius for the P20.2 pixel-area computation.
-    #[must_use]
-    pub const fn scale(&self) -> [f32; 3] {
-        self.scale
-    }
-}
+pub use crate::world_api::{ObjectCategory, ObjectDebugInfo, SceneObject};
 
 /// A marker component tagging one child entity as a single tessellated
 /// [`PrimFace`](sl_client_bevy::PrimFace) of its parent prim, carrying the
@@ -1375,24 +1305,24 @@ pub fn pick_object(
             warn!(
                 "pick: {kind} full_id={} asset={:?} scale=({:.2},{:.2},{:.2}) \
                  world_scale={:?} pos=({:.1},{:.1},{:.1}) hit_dist={:.2}m shape={:?}",
-                info.full_id,
-                info.asset,
-                info.scale[0],
-                info.scale[1],
-                info.scale[2],
+                info.full_id(),
+                info.render_asset(),
+                info.scale()[0],
+                info.scale()[1],
+                info.scale()[2],
                 world_scale,
-                info.position[0],
-                info.position[1],
-                info.position[2],
+                info.position()[0],
+                info.position()[1],
+                info.position()[2],
                 hit.distance,
-                info.shape,
+                info.shape(),
             );
             // The live mesh level of detail (P21.2): for a mesh object, its decoded
             // geometry block should move toward `High` as the camera approaches. A
             // boosted (worn attachment) mesh stays at the finest level and is not
             // LOD managed.
             if matches!(scene.get(current), Ok(obj) if obj.category == ObjectCategory::Mesh)
-                && let Some(asset) = info.asset
+                && let Some(asset) = info.render_asset()
                 && let Some((lod, managed)) = mesh_manager.lod_debug(MeshKey::from(asset))
             {
                 warn!("pick mesh {asset}: lod={lod:?} managed={managed}");
@@ -1405,7 +1335,7 @@ pub fn pick_object(
                 && obj.category == ObjectCategory::Prim
                 && let Some(tracked) = state.objects.get(&obj.scoped_id)
             {
-                warn!("pick prim {}: lod={:?}", info.full_id, tracked.prim_lod);
+                warn!("pick prim {}: lod={:?}", info.full_id(), tracked.prim_lod);
             }
             // The ingested light block (P25.1): a light-source prim reports its
             // decoded colour / intensity / radius / falloff and, for a spotlight,
@@ -1417,7 +1347,7 @@ pub fn pick_object(
                     "pick light {}: spotlight={} linear_color=[{:.3},{:.3},{:.3}] \
                      intensity={:.3} emitted=[{:.3},{:.3},{:.3}] radius={:.2}m \
                      falloff={:.2} cutoff={:.1}deg projection={:?}",
-                    info.full_id,
+                    info.full_id(),
                     light.is_spotlight(),
                     light.linear_color[0],
                     light.linear_color[1],
@@ -1445,7 +1375,7 @@ pub fn pick_object(
                 warn!(
                     "pick texture-anim {}: mode=0x{:02x} face={} grid={}x{} \
                      start={:.3} length={:.3} rate={:.3} targets_picked_face={:?}",
-                    info.full_id,
+                    info.full_id(),
                     anim.mode,
                     anim.face,
                     anim.size_x,
@@ -2943,19 +2873,19 @@ fn apply_object(
 
     // The crosshair pick tool's identity for this object (full id, mesh/sculpt
     // asset, Second Life scale/position), refreshed with each update.
-    let debug_info = ObjectDebugInfo {
-        full_id: object.full_id.uuid(),
-        asset: mesh_key(object)
+    let debug_info = ObjectDebugInfo::new(
+        object.full_id.uuid(),
+        mesh_key(object)
             .map(|key| key.uuid())
             .or_else(|| sculpt_key(object).map(|(key, _type)| key.uuid())),
-        scale: [object.scale.x, object.scale.y, object.scale.z],
-        position: [
+        [object.scale.x, object.scale.y, object.scale.z],
+        [
             object.motion.position.x,
             object.motion.position.y,
             object.motion.position.z,
         ],
-        shape: object.shape,
-    };
+        object.shape,
+    );
     // The Second Life transform mirror the object-editing surfaces read (and
     // the frame an edit sends back over `MultipleObjectUpdate`).
     let sl_motion = ObjectSlMotion {

@@ -16,7 +16,7 @@
 //!    `Command::Chat` (message / channel / chat type straight through).
 //! 3. **Focus & typing** — `Enter` while the **World** owns the keyboard focuses
 //!    the bar (`Esc` blurs back, via [`crate::input_context`]); while the bar is
-//!    focused and holds a draft, [`crate::typing::TypingState`] is driven so the
+//!    focused and holds a draft, [`crate::world_api::TypingState`] is driven so the
 //!    own avatar plays the typing animation and neighbours see the "is typing"
 //!    indicator.
 //!
@@ -42,9 +42,9 @@ use sl_client_bevy::{Command, SlCommand};
 use crate::chat_input::ChatInputSpec;
 use crate::input_context::world_has_keyboard;
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
-use crate::typing::TypingState;
 use crate::ui::BottomArea;
 use crate::ui::row;
+use crate::world_api::TypingState;
 
 /// The bar's least width, in logical pixels — a floor so it stays usable on a very
 /// narrow window where half the screen would be too little. The leading/trailing
