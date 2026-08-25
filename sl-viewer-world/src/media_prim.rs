@@ -30,8 +30,8 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use sl_client_bevy::{
-    Command, MEDIA_PERM_ANYONE, MEDIA_PERM_OWNER, MediaEntry, ObjectKey, PrimFaceId,
-    ScopedObjectId, SlCommand, SlEvent, SlSessionEvent, texture_face_uv_transform,
+    Command, MEDIA_PERM_ANYONE, MEDIA_PERM_OWNER, MediaEntry, ObjectKey, PrimFaceId, SlCommand,
+    SlEvent, SlSessionEvent, texture_face_uv_transform,
 };
 
 use crate::face_material::{FaceMaterial, inert_face_material};
@@ -43,7 +43,9 @@ use crate::media_engine::{
 };
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
-use crate::world_api::{FLAGS_OBJECT_YOU_OWNER, ViewerCamera};
+use crate::world_api::{
+    FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
+};
 use sl_cef::{KeyInput, MediaKind, SurfaceConfig, classify_url};
 
 /// The hard cap on simultaneously live in-world media surfaces (the
@@ -54,55 +56,6 @@ pub(crate) const MAX_MEDIA_SURFACES: usize = 8;
 /// scaled to CEF's 60 fps ceiling): the focused / nearest surfaces paint
 /// fast, far ones idle.
 const FPS_TIERS: [u8; 3] = [30, 15, 5];
-
-/// One media face: the object (grid-wide key) and the Linden face index.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct MediaTarget {
-    /// The object carrying the face.
-    pub object: ObjectKey,
-    /// The face index.
-    pub face: PrimFaceId,
-}
-
-/// A left click on a media-capable prim face, claimed from the world touch
-/// pick ([`crate::hud_pick::pick_and_touch`]) before it becomes a touch.
-#[derive(Message, Debug, Clone)]
-pub struct MediaWorldClick {
-    /// The face entity the ray struck.
-    pub(crate) entity: Entity,
-    /// The picked object's scoped id.
-    pub(crate) scoped: ScopedObjectId,
-    /// The struck face.
-    pub(crate) face: PrimFaceId,
-    /// The **sampled** texture coordinate of the hit (the `SurfaceInfo` UV:
-    /// texture placement applied, Second Life bottom-up `v`).
-    pub(crate) uv: Vec2,
-}
-
-/// The in-world media focus / hover state. Read by
-/// `crate::input_context::compute_input_context` (a focused media face
-/// takes the keyboard away from the world) and by the floating controls bar
-/// (`crate::media_controls`).
-#[derive(Resource, Debug, Default)]
-pub struct MediaFocus {
-    /// The face holding media keyboard focus, if any.
-    pub focused: Option<MediaTarget>,
-    /// Whether the focused face is a browser page that takes the keyboard
-    /// away from the world ([`crate::input_context`]); a focused *video*
-    /// face keeps the bar visible but leaves the keyboard with the world —
-    /// there is nothing to type at a video.
-    pub(crate) focused_takes_keyboard: bool,
-    /// The media face under the cursor this frame, if any.
-    pub hover: Option<MediaTarget>,
-    /// The surface pixel under the cursor on the hover face.
-    pub(crate) hover_pixel: Option<(i32, i32)>,
-    /// The world-space face normal at the **last** media hover hit (not
-    /// cleared when the hover leaves), for the controls bar's camera zoom.
-    pub hover_normal: Option<Vec3>,
-    /// Whether a forwarded button press is outstanding (its release is
-    /// forwarded to the same surface).
-    pressed: Option<MediaTarget>,
-}
 
 /// Per-object media data from the `ObjectMedia` capability.
 #[derive(Debug, Clone)]

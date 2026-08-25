@@ -39,9 +39,10 @@ use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::text::TextBounds;
 
+use crate::name_tag_billboard::tag_render_layers;
 use crate::name_tag_billboard::{
     HoverTextMaterials, NEUTRAL_MESH_TAG, NameTagMaterial, NameTagPixelSize, NameTagPullRadius,
-    TagText, WorldTextStyle, tag_render_layers,
+    TagText, WorldTextStyle,
 };
 use crate::name_tag_content::{TagContent, TagLine, TagLineSize};
 use crate::objects::{ObjectSlMotion, SceneObject};

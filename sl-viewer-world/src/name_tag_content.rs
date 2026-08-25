@@ -776,7 +776,7 @@ pub fn compose_name_tags(
     complexity: Option<Res<crate::avatar_complexity::AvatarComplexityModel>>,
     identity: Option<Res<sl_client_bevy::SlIdentity>>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
-    anchors: Query<&Transform, With<crate::avatars::AvatarAnchor>>,
+    anchors: Query<&Transform, With<crate::world_api::AvatarAnchor>>,
     mut contents: Query<&mut TagContent, With<crate::avatars::NameTag>>,
 ) {
     let toggles = TagToggles::from_settings(settings.as_deref());

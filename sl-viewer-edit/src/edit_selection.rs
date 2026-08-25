@@ -58,7 +58,6 @@ use sl_client_bevy::{
 use crate::edit_math::rect_selects;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::gizmos::GizmoInteraction;
-use crate::hud::on_hud_layer;
 use crate::hud_pick::pointer_over_blocking_ui;
 use crate::input_context::InputContext;
 use crate::inventory::InventoryModel;
@@ -68,6 +67,7 @@ use crate::objects::{
 };
 use crate::ui::UiRoot;
 use crate::world_api::ViewerCamera;
+use crate::world_api::on_hud_layer;
 use crate::world_api::{DragHoverHighlight, EditTool, EditToolState};
 use crate::world_api::{SelectedNode, SelectionSet};
 

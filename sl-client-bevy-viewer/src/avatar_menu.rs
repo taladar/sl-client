@@ -64,7 +64,7 @@
 //!
 //! Picking is deliberately reusable: every pickable piece of an avatar — the
 //! placeholder sphere, each rigged body part, each worn rigged submesh, and the
-//! floating name tag — carries [`crate::avatars::AvatarPickTarget`] with the
+//! floating name tag — carries [`crate::world_api::AvatarPickTarget`] with the
 //! avatar's agent id. [`request_avatar_menu_on_right_click`] resolves a
 //! right-click to an agent two ways, mirroring the reference's "name tag or the
 //! avatar itself": the on-screen tag rect test
@@ -93,7 +93,7 @@ use crate::attachment_menu::{ATTACHMENT_MENU_ELEMENT, OpenAttachmentMenu};
 use crate::avatars::{AvatarState, RefetchAvatarTextures};
 use crate::derender::RequestDerender;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PickPurpose, PickResolution};
-use crate::hud::{HudCamera, on_hud_layer};
+use crate::hud::HudCamera;
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::input_action::Action;
 use crate::land_menu::OpenLandMenu;
@@ -107,6 +107,7 @@ use crate::ui_font::UiFont;
 use crate::world_api::DerenderKind;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::on_hud_layer;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, SelfGroundSit};
 

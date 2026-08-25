@@ -117,7 +117,7 @@ use crate::asset_budget::MeshUploadBudget;
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::probe_layers::environment_render_layers;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::ViewerCamera;
+use crate::world_api::{TerrainSurface, ViewerCamera};
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
 /// 256 m (16×16 patches of 16×16 cells).
@@ -145,17 +145,6 @@ const DEFAULT_WEIGHTS: [f32; DETAIL_COUNT] = [1.0, 0.0, 0.0, 0.0];
 
 /// A patch's key: its region plus grid position within that region.
 pub(crate) type PatchKey = (RegionHandle, u32, u32);
-
-/// Marks a rendered land-patch entity as a **walkable ground surface**, so the
-/// avatar ground probe ([`crate::ground`], P31.14) can accept it as something the
-/// feet may plant on — the same role the reference viewer's
-/// `LLWorld::resolveStepHeightGlobal` gives the land when its object raycast misses.
-///
-/// The probe only ever accepts geometry that is explicitly ground-like (this, and
-/// object faces), so it never plants an avatar's feet on the water plane, a particle
-/// billboard, the sky dome, or another avatar.
-#[derive(Component)]
-pub(crate) struct TerrainSurface;
 
 /// Resolve the land height at region-local `(x, y)` from a patch map (the live
 /// [`TerrainState::raw_patches`] or the retained [`TerrainState::land_cache`]).

@@ -45,8 +45,7 @@ use crate::camera::CameraAim;
 use crate::input_action::Action;
 use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
 use crate::terrain::TerrainState;
-use crate::world_api::AvatarMotion;
-use crate::world_api::CameraMode;
+use crate::world_api::{AvatarMotion, CameraMode};
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second
 /// (~183°/s — a brisk turn that feels responsive rather than sluggish).

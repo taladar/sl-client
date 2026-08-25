@@ -48,7 +48,6 @@ use sl_client_bevy::{
     Uuid, Vector,
 };
 
-use crate::avatars::AvatarPickTarget;
 use crate::coords::bevy_to_sl_vec;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud_pick::pointer_over_blocking_ui;
@@ -60,6 +59,7 @@ use crate::inventory_actions::{MenuTarget, WornAttachments, wear_commands};
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
 use crate::virtual_list::{VirtualList, VirtualRow};
+use crate::world_api::AvatarPickTarget;
 use crate::world_api::ViewerCamera;
 
 /// The ghost's offset from the pointer, in logical pixels — clear of the hot
@@ -1257,8 +1257,8 @@ mod tests {
         AgentDropTarget, FolderDrop, agent_target_at, classify_folder_drop, give_command,
         rez_object_command, row_index_at,
     };
-    use crate::avatars::AvatarPickTarget;
     use crate::inventory_actions::MenuTarget;
+    use crate::world_api::AvatarPickTarget;
     use bevy::ecs::system::SystemState;
     use bevy::prelude::{ChildOf, Query, World};
     use pretty_assertions::assert_eq;

@@ -27,9 +27,9 @@ use bevy::ecs::entity::Entities;
 use bevy::prelude::*;
 use bevy::render::{Render, RenderApp};
 
-use crate::avatars::AvatarAnchor;
 use crate::floater::Floater;
 use crate::objects::{PrimFaceEntity, SceneObject};
+use crate::world_api::AvatarAnchor;
 
 /// UI-node entities (`bevy_ui`).
 const ENTITY_UI: DiagnosticPath = DiagnosticPath::const_new("entity/ui");

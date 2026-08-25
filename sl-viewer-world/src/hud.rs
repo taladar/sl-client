@@ -44,31 +44,7 @@ use bevy::prelude::*;
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
 use crate::face_material::FaceMaterial;
-
-/// The render layer the whole HUD subtree lives on, and which the world (fly)
-/// camera — on the default layer `0` — therefore does not render. P35.2's HUD
-/// camera renders this layer and nothing else, so the HUD is drawn exactly once,
-/// in screen space, and never leaks into the world pass (or into a reflection
-/// probe's capture, which is likewise a default-layer camera).
-pub(crate) const HUD_RENDER_LAYER: usize = 1;
-
-/// Whether an entity's render layers put it on the HUD layer — i.e. whether it is
-/// part of the HUD subtree rather than the world scene.
-///
-/// The HUD screen propagates `HUD_RENDER_LAYER` down its hierarchy, so every
-/// entity of a routed HUD attachment (its object entity, its geometry holder, and
-/// each face) carries it. The world's pixel-area render-priority / level-of-detail
-/// pass uses this to recognise geometry it must not rank by on-screen size: a HUD
-/// sits in its own space, where the world camera's distance to it is meaningless
-/// (the reference viewer special-cases it the same way, treating every HUD face as
-/// full-screen and pinning it to the finest level of detail).
-///
-/// `layers` is the entity's [`RenderLayers`] component, absent on a world entity
-/// (which is then implicitly on the default layer `0`).
-#[must_use]
-pub fn on_hud_layer(layers: Option<&RenderLayers>) -> bool {
-    layers.is_some_and(|layers| layers.intersects(&RenderLayers::layer(HUD_RENDER_LAYER)))
-}
+use crate::world_api::{HUD_RENDER_LAYER, on_hud_layer};
 
 /// The HUD screen: the root of the screen-space HUD hierarchy, standing in for the
 /// reference viewer's `mScreen` pseudo-joint (`LLVOAvatarSelf::buildSkeletonSelf`).

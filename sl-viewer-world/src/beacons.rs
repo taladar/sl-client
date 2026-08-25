@@ -62,9 +62,7 @@ use crate::name_tag_billboard::tag_render_layers;
 use crate::terrain::TerrainState;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
-use crate::world_api::FriendsModel;
-use crate::world_api::ViewerCamera;
-use crate::world_api::{MapTracking, TrackTarget};
+use crate::world_api::{FriendsModel, MapTracking, TrackTarget, ViewerCamera};
 
 /// The internal handle the beacon-beam shader (`beacon_beam.wgsl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.

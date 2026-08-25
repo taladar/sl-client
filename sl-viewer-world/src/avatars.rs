@@ -66,7 +66,7 @@ use crate::objects::ObjectState;
 use crate::physics::AvatarInterp;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
-use crate::world_api::AvatarMotion;
+use crate::world_api::{AvatarAnchor, AvatarMotion, AvatarPickTarget};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -120,51 +120,6 @@ const PROVISIONAL_ID_CHARS: usize = 8;
 /// A marker component tagging an entity as an avatar placeholder sphere.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AvatarSphere;
-
-/// A marker component on the transform-bearing *anchor* entity of an avatar —
-/// its placeholder sphere or the root of its rigged body — whose world position
-/// the name-tag placement ([`crate::name_tag_billboard::follow_tag_anchors`])
-/// follows to float the tag.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct AvatarAnchor;
-
-/// A component tagging an entity as **part of** a specific avatar, carrying that
-/// avatar's [`AgentKey`] — the reusable "what avatar is this?" identity that
-/// picking reads.
-///
-/// It sits on every pickable piece of an avatar: the placeholder sphere, each
-/// rigged base-body part, each **worn rigged-mesh submesh** (on a modern
-/// mesh-body avatar the base body is hidden, so the worn mesh *is* the
-/// silhouette), and the floating name tag. That breadth is the point — a ray
-/// that hits any body part, or a pointer over the name tag (resolved by the
-/// [`crate::name_tag_billboard::NameTagHitTest`] rect test — tags are custom
-/// billboard meshes no picking backend covers), resolves to the
-/// same agent through one component, so a caller never has to know *which* piece
-/// it hit. Kept separate from [`AvatarBodyPart`] (which also holds an agent) so
-/// non-mesh pieces (the sphere, the name tag) can carry the identity too, and
-/// so consumers — the GPU pick-tag assignment
-/// (`crate::gpu_pick::assign_avatar_pick_tags`) is the main one — read a
-/// single, purpose-named component rather than three different markers.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct AvatarPickTarget {
-    /// The avatar this entity is part of.
-    agent: AgentKey,
-}
-
-impl AvatarPickTarget {
-    /// Tag a pickable piece of `agent` (used by the rigged-attachment spawn in
-    /// [`crate::objects`], where the wearer is known only sometimes).
-    #[must_use]
-    pub const fn new(agent: AgentKey) -> Self {
-        Self { agent }
-    }
-
-    /// The avatar this entity belongs to.
-    #[must_use]
-    pub const fn agent(&self) -> AgentKey {
-        self.agent
-    }
-}
 
 /// A marker on one rigged base-part render entity, tying it back to its avatar
 /// and its index in `AvatarBody::parts` / [`AvatarAssetLibrary::parts`] so the

@@ -45,14 +45,13 @@ use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use crate::face_material::FaceMaterial;
-use crate::hud::on_hud_layer;
 use crate::materials::ObjectRenderMaterials;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::texture_anim::{
     ObjectTextureAnimation, anim_applies_to_face, running_texture_animation,
 };
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, face_material};
-use crate::world_api::SelectionSet;
+use crate::world_api::{SelectionSet, on_hud_layer};
 
 /// The content key of one internable face material: every input
 /// `face_material` composes from, with the float fields stored as their exact

@@ -100,14 +100,14 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Object, ParticleSystem, particle_pattern, to_bevy_image};
 
 use crate::coords::sl_to_bevy_rotation;
-use crate::hud::{HUD_RENDER_LAYER, on_hud_layer};
 use crate::particle_render::{
     ParticleBlend, ParticleDrawParams, ParticleInstance, ParticleInstances, ParticleQuad,
 };
 use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
-use crate::world_api::AVATAR_BOOST_PRIORITY;
-use crate::world_api::{ObjectParticleSystem, ViewerCamera};
+use crate::world_api::{
+    AVATAR_BOOST_PRIORITY, HUD_RENDER_LAYER, ObjectParticleSystem, ViewerCamera, on_hud_layer,
+};
 
 /// Lift a live particle system off an object into an [`ObjectParticleSystem`], or
 /// `None` when the object is not (or is no longer) a particle source.

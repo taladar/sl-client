@@ -45,9 +45,10 @@ use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{AgentKey, SlIdentity};
 
-use crate::avatars::{AvatarAnchor, AvatarPickTarget, NameTag};
+use crate::avatars::NameTag;
 use crate::name_tag_content::TagContent;
 use crate::ui_font::UiFont;
+use crate::world_api::{AvatarAnchor, AvatarPickTarget};
 
 /// The internal handle the name-tag shader (`name_tag.wgsl`) is loaded under,
 /// so the material can reference it without an on-disk asset path.
@@ -109,13 +110,6 @@ pub(crate) const NEUTRAL_MESH_TAG: u32 = 0x8000_8000;
 /// The bias added to each signed offset component when packing into a
 /// [`MeshTag`] half (mirrors `TAG_OFFSET_BIAS` in `name_tag.wgsl`).
 const TAG_OFFSET_BIAS: i32 = 0x8000;
-
-/// The render layers a tag entity lives on: the main viewpoint layer **only**.
-/// Deliberately not derived from any avatar subtree propagation — probe
-/// cameras (layers 4/5/6) and the HUD camera (layer 1) must never see tags.
-pub(crate) const fn tag_render_layers() -> RenderLayers {
-    RenderLayers::layer(crate::probe_layers::MAIN_LAYER)
-}
 
 /// Pack a billboard-local anti-overlap offset (physical px, +y up) into a
 /// [`MeshTag`] value: each component rounded to whole pixels, offset-biased by
@@ -1779,6 +1773,13 @@ impl Plugin for NameTagBillboardPlugin {
     }
 }
 
+/// The render layers a tag entity lives on: the main viewpoint layer **only**.
+/// Deliberately not derived from any avatar subtree propagation — probe
+/// cameras (layers 4/5/6) and the HUD camera (layer 1) must never see tags.
+pub(crate) const fn tag_render_layers() -> RenderLayers {
+    RenderLayers::layer(crate::probe_layers::MAIN_LAYER)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -2102,7 +2103,7 @@ mod tests {
         let anchor = app
             .world_mut()
             .spawn((
-                crate::avatars::AvatarAnchor,
+                crate::world_api::AvatarAnchor,
                 Transform::from_translation(anchor_at),
             ))
             .id();
@@ -2113,7 +2114,7 @@ mod tests {
                     anchor,
                     tag_height: 0.3,
                 },
-                crate::avatars::AvatarPickTarget::new(agent),
+                crate::world_api::AvatarPickTarget::new(agent),
             ))
             .id()
     }

@@ -133,7 +133,7 @@ pub enum InputContext {
     /// are all its; the world gets nothing.
     TextEntry,
     /// An in-world **media face** holds keyboard focus
-    /// ([`crate::media_prim::MediaFocus`]): keys go to the embedded page, so
+    /// ([`crate::world_api::MediaFocus`]): keys go to the embedded page, so
     /// the world gets nothing — the reference's `LLViewerMediaFocus` taking
     /// `gFocusMgr`'s keyboard focus.
     Media,
@@ -161,7 +161,7 @@ impl InputContext {
 pub(crate) fn compute_input_context(
     focus: Res<InputFocus>,
     ui_nodes: Query<Has<EditableText>, With<Node>>,
-    media: Option<Res<crate::media_prim::MediaFocus>>,
+    media: Option<Res<crate::world_api::MediaFocus>>,
     mut context: ResMut<InputContext>,
 ) {
     let next = match focus.get().map(|entity| ui_nodes.get(entity)) {

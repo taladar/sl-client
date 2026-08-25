@@ -41,9 +41,9 @@ use sl_client_bevy::{
     Command, PrimFaceId, SlCommand, SurfaceInfo, TextureFace, Vector, texture_face_uv_transform,
 };
 
-use crate::hud::{HudCamera, on_hud_layer};
-use crate::media_prim::MediaWorldClick;
+use crate::hud::HudCamera;
 use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
+use crate::world_api::{MediaWorldClick, on_hud_layer};
 
 /// The mouse button a HUD (or fall-through world) touch is made with.
 const TOUCH_BUTTON: MouseButton = MouseButton::Left;

@@ -94,7 +94,7 @@ use crate::world_api::{EditTool, EditToolState};
 pub(crate) const EDIT_GIZMO_RENDER_LAYER: usize = 3;
 
 /// Whether an entity's [`RenderLayers`] put it on the gizmo layer — the
-/// counterpart of [`crate::hud::on_hud_layer`], used to keep gizmo handles out
+/// counterpart of [`crate::world_api::on_hud_layer`], used to keep gizmo handles out
 /// of world picks.
 pub(crate) fn on_gizmo_layer(layers: Option<&RenderLayers>) -> bool {
     layers.is_some_and(|layers| layers.intersects(&RenderLayers::layer(EDIT_GIZMO_RENDER_LAYER)))

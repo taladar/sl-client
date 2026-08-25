@@ -19,6 +19,7 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
@@ -2891,6 +2892,146 @@ pub const FLAGS_PHANTOM: u32 = 1 << 10;
 #[must_use]
 pub const fn is_hud_point(point_id: u8) -> bool {
     AttachmentPoint::from_code(point_id).is_hud()
+}
+
+// ---------------------------------------------------------------------------
+// Small world vocabulary the world's own layers share
+// ---------------------------------------------------------------------------
+//
+// Which render layer the HUD draws on and whether an entity sits on it, the
+// markers on an avatar's anchor and its pick target, a region's terrain
+// surface, the name-tag render layers, and what a click on a media prim
+// carries. Each is named by parts of the world that do not otherwise know
+// about each other, and none of them names anything back.
+
+/// The render layer the whole HUD subtree lives on, and which the world (fly)
+/// camera — on the default layer `0` — therefore does not render. P35.2's HUD
+/// camera renders this layer and nothing else, so the HUD is drawn exactly once,
+/// in screen space, and never leaks into the world pass (or into a reflection
+/// probe's capture, which is likewise a default-layer camera).
+pub const HUD_RENDER_LAYER: usize = 1;
+
+/// Whether an entity's render layers put it on the HUD layer — i.e. whether it is
+/// part of the HUD subtree rather than the world scene.
+///
+/// The HUD screen propagates `HUD_RENDER_LAYER` down its hierarchy, so every
+/// entity of a routed HUD attachment (its object entity, its geometry holder, and
+/// each face) carries it. The world's pixel-area render-priority / level-of-detail
+/// pass uses this to recognise geometry it must not rank by on-screen size: a HUD
+/// sits in its own space, where the world camera's distance to it is meaningless
+/// (the reference viewer special-cases it the same way, treating every HUD face as
+/// full-screen and pinning it to the finest level of detail).
+///
+/// `layers` is the entity's [`RenderLayers`] component, absent on a world entity
+/// (which is then implicitly on the default layer `0`).
+#[must_use]
+pub fn on_hud_layer(layers: Option<&RenderLayers>) -> bool {
+    layers.is_some_and(|layers| layers.intersects(&RenderLayers::layer(HUD_RENDER_LAYER)))
+}
+
+/// A marker component on the transform-bearing *anchor* entity of an avatar —
+/// its placeholder sphere or the root of its rigged body — whose world position
+/// the name-tag placement (`name_tag_billboard::follow_tag_anchors`)
+/// follows to float the tag.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AvatarAnchor;
+
+/// A component tagging an entity as **part of** a specific avatar, carrying that
+/// avatar's [`AgentKey`] — the reusable "what avatar is this?" identity that
+/// picking reads.
+///
+/// It sits on every pickable piece of an avatar: the placeholder sphere, each
+/// rigged base-body part, each **worn rigged-mesh submesh** (on a modern
+/// mesh-body avatar the base body is hidden, so the worn mesh *is* the
+/// silhouette), and the floating name tag. That breadth is the point — a ray
+/// that hits any body part, or a pointer over the name tag (resolved by the
+/// `name_tag_billboard::NameTagHitTest` rect test — tags are custom
+/// billboard meshes no picking backend covers), resolves to the
+/// same agent through one component, so a caller never has to know *which* piece
+/// it hit. Kept separate from `AvatarBodyPart` (which also holds an agent) so
+/// non-mesh pieces (the sphere, the name tag) can carry the identity too, and
+/// so consumers — the GPU pick-tag assignment
+/// (`crate::gpu_pick::assign_avatar_pick_tags`) is the main one — read a
+/// single, purpose-named component rather than three different markers.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct AvatarPickTarget {
+    /// The avatar this entity is part of.
+    pub agent: AgentKey,
+}
+
+impl AvatarPickTarget {
+    /// Tag a pickable piece of `agent` (used by the rigged-attachment spawn in
+    /// `objects`, where the wearer is known only sometimes).
+    #[must_use]
+    pub const fn new(agent: AgentKey) -> Self {
+        Self { agent }
+    }
+
+    /// The avatar this entity belongs to.
+    #[must_use]
+    pub const fn agent(&self) -> AgentKey {
+        self.agent
+    }
+}
+
+/// Marks a rendered land-patch entity as a **walkable ground surface**, so the
+/// avatar ground probe (`ground`, P31.14) can accept it as something the
+/// feet may plant on — the same role the reference viewer's
+/// `LLWorld::resolveStepHeightGlobal` gives the land when its object raycast misses.
+///
+/// The probe only ever accepts geometry that is explicitly ground-like (this, and
+/// object faces), so it never plants an avatar's feet on the water plane, a particle
+/// billboard, the sky dome, or another avatar.
+#[derive(Debug, Component)]
+pub struct TerrainSurface;
+
+/// One media face: the object (grid-wide key) and the Linden face index.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MediaTarget {
+    /// The object carrying the face.
+    pub object: ObjectKey,
+    /// The face index.
+    pub face: PrimFaceId,
+}
+
+/// A left click on a media-capable prim face, claimed from the world touch
+/// pick (`hud_pick::pick_and_touch`) before it becomes a touch.
+#[derive(Message, Debug, Clone)]
+pub struct MediaWorldClick {
+    /// The face entity the ray struck.
+    pub entity: Entity,
+    /// The picked object's scoped id.
+    pub scoped: ScopedObjectId,
+    /// The struck face.
+    pub face: PrimFaceId,
+    /// The **sampled** texture coordinate of the hit (the `SurfaceInfo` UV:
+    /// texture placement applied, Second Life bottom-up `v`).
+    pub uv: Vec2,
+}
+
+/// The in-world media focus / hover state. Read by
+/// `crate::input_context::compute_input_context` (a focused media face
+/// takes the keyboard away from the world) and by the floating controls bar
+/// (`crate::media_controls`).
+#[derive(Resource, Debug, Default)]
+pub struct MediaFocus {
+    /// The face holding media keyboard focus, if any.
+    pub focused: Option<MediaTarget>,
+    /// Whether the focused face is a browser page that takes the keyboard
+    /// away from the world (`input_context`); a focused *video*
+    /// face keeps the bar visible but leaves the keyboard with the world —
+    /// there is nothing to type at a video.
+    pub focused_takes_keyboard: bool,
+    /// The media face under the cursor this frame, if any.
+    pub hover: Option<MediaTarget>,
+    /// The surface pixel under the cursor on the hover face.
+    pub hover_pixel: Option<(i32, i32)>,
+    /// The world-space face normal at the **last** media hover hit (not
+    /// cleared when the hover leaves), for the controls bar's camera zoom.
+    pub hover_normal: Option<Vec3>,
+    /// Whether a forwarded button press is outstanding (its release is
+    /// forwarded to the same surface).
+    pub pressed: Option<MediaTarget>,
 }
 
 #[cfg(test)]

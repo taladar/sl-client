@@ -54,10 +54,7 @@ use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject}
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
 };
-use crate::world_api::EditToolState;
-use crate::world_api::MatModeState;
-use crate::world_api::SelectionSet;
-use crate::world_api::TERRAIN_BOOST_PRIORITY;
+use crate::world_api::{EditToolState, MatModeState, SelectionSet, TERRAIN_BOOST_PRIORITY};
 
 /// A face-material identity: the scoped object id and its Linden face index — the
 /// key both a registered face material and an incoming per-face GLTF override

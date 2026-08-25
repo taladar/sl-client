@@ -59,8 +59,7 @@ use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::WaterSurface;
-use crate::world_api::SKY_BOOST_PRIORITY;
-use crate::world_api::ViewerCamera;
+use crate::world_api::{SKY_BOOST_PRIORITY, ViewerCamera};
 
 /// A standard Second Life / OpenSim region edge length, in metres.
 const REGION_SIZE_METRES: f32 = 256.0;

@@ -59,8 +59,7 @@ use crate::look_at::{
     BLINK_LEFT_PARAM, BLINK_RIGHT_PARAM, LookAtJoints, LookAtMotion, LookAtTargets,
 };
 use crate::reach::{PointAtTargets, ReachInput, ReachJoints, ReachMotion};
-use crate::world_api::AvatarMotion;
-use crate::world_api::DerenderKind;
+use crate::world_api::{AvatarMotion, DerenderKind};
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -1319,7 +1318,7 @@ pub fn pose_avatar_skeletons(
     // socket) are avatar-root children the socket writer places by their **local**
     // `Transform` (§5.4), so ordinary propagation seats the worn/rigid subtrees.
     // A different component from `globals`.
-    mut socket_transforms: Query<&mut Transform, Without<crate::avatars::AvatarAnchor>>,
+    mut socket_transforms: Query<&mut Transform, Without<crate::world_api::AvatarAnchor>>,
     mut gpu: GpuAvatarHooks<'_, '_>,
 ) {
     let (Some(library), Some(body)) = (library, body) else {
@@ -1696,7 +1695,7 @@ pub fn pose_avatar_skeletons(
               only move the argument list into a struct literal at the call sites"
 )]
 fn write_socket_locals(
-    socket_transforms: &mut Query<&mut Transform, Without<crate::avatars::AvatarAnchor>>,
+    socket_transforms: &mut Query<&mut Transform, Without<crate::world_api::AvatarAnchor>>,
     parts: &Query<(Entity, &AvatarBodyPart)>,
     hooks: &GpuAvatarHooks<'_, '_>,
     state: &AvatarState,

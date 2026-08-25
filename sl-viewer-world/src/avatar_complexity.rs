@@ -124,8 +124,7 @@ use crate::meshes::{MeshDecoded, MeshManager};
 use crate::objects::{ObjectState, PrimComplexityFacts};
 use crate::settings::ViewerSettings;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::FriendsModel;
-use crate::world_api::ObjectParticleSystem;
+use crate::world_api::{FriendsModel, ObjectParticleSystem};
 
 // ---------------------------------------------------------------------------
 // Settings.

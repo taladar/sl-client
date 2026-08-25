@@ -57,7 +57,7 @@ use sl_client_bevy::{
 use crate::animesh::ControlAvatarState;
 use crate::asset_budget::MeshUploadBudget;
 use crate::avatars::{
-    AvatarBody, AvatarPickTarget, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
+    AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
 };
 use crate::coords::{
     origin_shift_bevy, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_object_rotation,
@@ -68,13 +68,14 @@ use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flex
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::hud_pick::surface_info_from_hit;
 use crate::world_api::{
-    FLAGS_ALLOW_INVENTORY_DROP, FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE,
-    FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM, ViewerCamera, is_hud_point,
+    AVATAR_BOOST_PRIORITY, AvatarPickTarget, FLAGS_ALLOW_INVENTORY_DROP, FLAGS_OBJECT_COPY,
+    FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE, FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM,
+    HUD_RENDER_LAYER, ViewerCamera, is_hud_point,
 };
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
 
-use crate::hud::{HUD_RENDER_LAYER, HudState};
+use crate::hud::HudState;
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::lights::{ObjectLight, light_from_object};
 use crate::material_cache::{MaterialCache, MaterialInternContext, SharedFaceMaterial};
@@ -89,7 +90,6 @@ use crate::texture_anim::{ObjectTextureAnimation, running_texture_animation};
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureDecoded, TextureManager, face_material, intern_face_material,
 };
-use crate::world_api::AVATAR_BOOST_PRIORITY;
 
 /// The broad render classification of an in-world object, decided from its
 /// `pcode` and sculpt/mesh extra parameters. It routes the object to the right
