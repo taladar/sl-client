@@ -59,7 +59,7 @@ use crate::legacy_materials::{
 };
 use crate::material_preview::MaterialPreview;
 use crate::materials::{MaterialManager, ObjectRenderMaterials};
-use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
+use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 use crate::textures::{PrimTextures, TextureAlpha, TextureManager, compose_face_material};
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
@@ -70,6 +70,7 @@ use crate::ui_texture_picker::{
 };
 use crate::world_api::EditToolState;
 use crate::world_api::LocalChatNotice;
+use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use crate::world_api::TERRAIN_BOOST_PRIORITY;
 use crate::world_api::TexturePicked;

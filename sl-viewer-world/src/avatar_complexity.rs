@@ -121,10 +121,10 @@ use crate::avatar_assets::BodyRegion;
 use crate::avatars::AvatarBodyPart;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::meshes::{MeshDecoded, MeshManager};
-use crate::objects::{ObjectState, PrimComplexityFacts};
 use crate::settings::ViewerSettings;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::world_api::{AvatarState, FriendsModel, ObjectParticleSystem};
+use crate::world_api::{ObjectState, PrimComplexityFacts};
 
 // ---------------------------------------------------------------------------
 // Settings.
@@ -1602,7 +1602,7 @@ mod tests {
         ParticleBurst, PendingCostAssets, RenderOverride, avatar_complexity, est_tris_by_lod,
         jelly_reason, radius_weighted_tris, texture_cost,
     };
-    use crate::objects::PrimComplexityFacts;
+    use crate::world_api::PrimComplexityFacts;
     use bevy::prelude::{Entity, Vec3};
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{AgentKey, MeshKey, PRIM_LOD_COUNT, PrimShapeParams, TextureKey, Uuid};

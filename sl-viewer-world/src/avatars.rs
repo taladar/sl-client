@@ -61,10 +61,10 @@ use crate::coords::{
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::name_tag_billboard::name_tag_render_bundle;
 use crate::name_tag_content::TagContent;
-use crate::objects::ObjectState;
 use crate::physics::AvatarInterp;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
+use crate::world_api::ObjectState;
 use crate::world_api::{
     AppearanceDirtyStamps, AvatarAnchor, AvatarEntities, AvatarMotion, AvatarPickTarget,
     AvatarState, NameRecord, Seated, SeatedTarget, despawn_avatar,

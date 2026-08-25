@@ -43,9 +43,10 @@ use crate::hud::HudCamera;
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::i18n::Translator;
 use crate::name_tag_billboard::NameTagHitTest;
-use crate::objects::{ObjectSlMotion, ObjectState};
+use crate::objects::ObjectSlMotion;
 use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
+use crate::world_api::ObjectState;
 
 /// Master toggle: show in-world hover tooltips (object + avatar). Default on.
 pub(crate) const SETTING_SHOW_HOVER_TIPS: &str = "ShowHoverTips";

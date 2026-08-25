@@ -11,7 +11,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 97 |
+| ideas | 98 |
 | ready | 256 |
 | blocked | 68 |
 | in-progress | 18 |
@@ -19,9 +19,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | done | 863 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1371** |
+| **total** | **1372** |
 
-## ideas (97)
+## ideas (98)
 
 ### viewer
 
@@ -48,6 +48,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   opt-in reporting
 - [`viewer-derender-all-animesh`](ideas/viewer-derender-all-animesh.md) —
   One-click derender of all animated objects
+- [`viewer-ecs-idiom-audit`](ideas/viewer-ecs-idiom-audit.md) — Audit the viewer
+  for state modelled beside the ECS rather than in it
 - [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
   — Rethink the flycam mode's key bindings
 - [`viewer-gltf-scene-editor`](ideas/viewer-gltf-scene-editor.md) — GLTF scene /

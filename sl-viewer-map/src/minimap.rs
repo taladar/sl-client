@@ -55,13 +55,14 @@ use crate::minimap_math::{
     COLOR_WHISPER_RING, DoubleClickAction, LayerRaster, MapView, ObjectAccents, ParcelCell, Rgba,
     Surface,
 };
-use crate::objects::{ObjectDebugInfo, ObjectState};
+use crate::objects::ObjectDebugInfo;
 use crate::settings::ViewerSettings;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
 use crate::world_api::AvatarState;
+use crate::world_api::ObjectState;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;

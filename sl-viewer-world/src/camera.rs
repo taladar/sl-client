@@ -1024,7 +1024,7 @@ pub fn position_camera(
     camera_state: (Res<CameraMode>, Res<FocusTarget>, Res<CameraTuning>),
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
-    objects: Res<crate::objects::ObjectState>,
+    objects: Res<crate::world_api::ObjectState>,
     sit_camera: Res<crate::sit_camera::SitCamera>,
     time: Res<Time>,
     globals: AvatarPoseQuery,
@@ -1421,7 +1421,7 @@ fn own_avatar_pose(
 /// ([[viewer-physical-object-motion-not-smooth]]).
 fn sit_camera_pose(
     sit_camera: &crate::sit_camera::SitCamera,
-    objects: &crate::objects::ObjectState,
+    objects: &crate::world_api::ObjectState,
     chain: &SeatChainQuery,
 ) -> Option<(Vec3, Vec3)> {
     let (seat, eye_offset, at_offset) = sit_camera.offsets()?;

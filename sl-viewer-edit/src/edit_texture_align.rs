@@ -29,7 +29,7 @@ use sl_client_bevy::{
 };
 
 use crate::edit_texture::PrimFaceLookup;
-use crate::objects::ObjectState;
+use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 
 /// A face's planar projection frame: the rotation that orients the planar

@@ -52,9 +52,9 @@ use sl_client_bevy::{
 use crate::meshes::MeshManager;
 use crate::objects::{
     FaceTextureDebug, ObjectCategory, ObjectDebugInfo, PrimLodTargets, SceneObject, TreeLodTargets,
-    TreeTier,
 };
 use crate::textures::TextureManager;
+use crate::world_api::TreeTier;
 use crate::world_api::{PIXEL_AREA_CAP, ViewerCamera, on_hud_layer};
 
 /// How often (seconds) the render-priority pass re-ranks the queued fetches. The

@@ -44,14 +44,14 @@ use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
 use bevy::prelude::*;
 use sl_client_bevy::{
     AgentKey, DecodedMesh, DecodedTexture, FlexiAttributes, FlexiChain, GRASS_MAX_BLADES,
-    JointOverrides, MeshKey, MeshSkin, Object, ObjectExtraParams, ObjectKey, PrimFaceId, PrimLod,
-    PrimMesh, PrimShapeFloat, PrimShapeParams, Priority, RegionHandle, Rotation, ScopedObjectId,
+    JointOverrides, MeshKey, MeshSkin, Object, ObjectKey, PrimFaceId, PrimLod, PrimMesh,
+    PrimShapeFloat, PrimShapeParams, Priority, RegionHandle, Rotation, ScopedObjectId,
     SculptOrMeshKey, SlEvent, SlIdentity, SlSessionEvent, SurfaceInfo, TREE_RADIUS_SCALE_FACTOR,
-    TREE_YAW_DEGREES, TextureAnimation, TextureFace, TextureKey, TreeLod, Uuid, Vector,
-    avatar_texture, decode_texture_entry, grass_geometry, grass_species, pcode, planar_texgen_uv,
-    rigged_inverse_bindposes, tessellate, tessellate_sculpt, tessellate_with_path,
-    texture_face_uv_transform, to_bevy_grass_mesh, to_bevy_mesh, to_bevy_prim_mesh,
-    to_bevy_rigged_mesh, to_bevy_tree_mesh, tree_billboard_geometry, tree_geometry, tree_species,
+    TREE_YAW_DEGREES, TextureFace, TextureKey, Uuid, Vector, avatar_texture, decode_texture_entry,
+    grass_geometry, grass_species, pcode, planar_texgen_uv, rigged_inverse_bindposes, tessellate,
+    tessellate_sculpt, tessellate_with_path, texture_face_uv_transform, to_bevy_grass_mesh,
+    to_bevy_mesh, to_bevy_prim_mesh, to_bevy_rigged_mesh, to_bevy_tree_mesh,
+    tree_billboard_geometry, tree_geometry, tree_species,
 };
 
 use crate::animesh::ControlAvatarState;
@@ -67,9 +67,9 @@ use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::hud_pick::surface_info_from_hit;
 use crate::world_api::AvatarState;
 use crate::world_api::{
-    AVATAR_BOOST_PRIORITY, AvatarPickTarget, FLAGS_ALLOW_INVENTORY_DROP, FLAGS_OBJECT_COPY,
-    FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE, FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM,
-    HUD_RENDER_LAYER, ViewerCamera, is_hud_point,
+    AVATAR_BOOST_PRIORITY, AvatarPickTarget, HUD_RENDER_LAYER, INITIAL_TREE_TIER, MAX_PARENT_WALK,
+    ObjectPickSummary, ObjectState, ShapeFingerprint, TrackedObject, TreeTier, ViewerCamera,
+    despawn_prim_faces, is_hud_point,
 };
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
@@ -112,61 +112,6 @@ pub enum ObjectCategory {
     /// Anything else (particle-system object, …); not rendered by the current
     /// phases.
     Other,
-}
-
-/// The shape-defining parameters of an object, compared between updates so a
-/// motion-only update never triggers a re-tessellation. Deliberately excludes
-/// the object's position/rotation/scale (which live in the `Transform`, not the
-/// mesh) — only a change here means the geometry must be rebuilt.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ShapeFingerprint {
-    /// The object class byte.
-    pcode: u8,
-    /// The quantized path/profile shape parameters of a volume prim.
-    shape: PrimShapeParams,
-    /// The sculpt/mesh key and type byte, when the object is a sculpt or mesh.
-    sculpt: Option<(SculptOrMeshKey, u8)>,
-    /// For a **grass** clump only: the object's X/Y scale (in millimetres) that
-    /// sets the blade-centre spread. `None` for every other category, so a resize
-    /// rebuilds only a grass patch — whose blade geometry is generated with the
-    /// scale baked in (P26.3) — and never a prim / mesh / sculpt / tree (whose
-    /// scale rides the geometry holder, so a resize needs no rebuild).
-    grass_spread: Option<(i32, i32)>,
-    /// For a **flexi** prim (P32.2): the flexible block's softness (`Some(0..3)`),
-    /// else `None`. A flexi prim's geometry is built at a section count of
-    /// `1 << softness`, so toggling flexi on / off or changing the softness must
-    /// rebuild the faces (and re-seed the chain state); the other flexi params
-    /// (tension / gravity / …) drive the sim live and need no rebuild, so they are
-    /// deliberately excluded.
-    flexi_softness: Option<u8>,
-}
-
-impl ShapeFingerprint {
-    /// The shape fingerprint of `object`.
-    fn of(object: &Object) -> Self {
-        Self {
-            pcode: object.pcode,
-            shape: object.shape,
-            sculpt: object
-                .extra
-                .sculpt
-                .map(|sculpt| (sculpt.texture, sculpt.sculpt_type)),
-            grass_spread: (object.pcode == pcode::GRASS).then(|| {
-                // Quantise to millimetres so the fingerprint stays `Eq`; grass is
-                // rebuilt when its clump-defining scale changes by ≥ 1 mm.
-                #[expect(
-                    clippy::as_conversions,
-                    clippy::cast_possible_truncation,
-                    reason = "object scale in mm is far inside i32 range"
-                )]
-                (
-                    (object.scale.x * 1000.0).round() as i32,
-                    (object.scale.y * 1000.0).round() as i32,
-                )
-            }),
-            flexi_softness: object.extra.flexible.as_ref().map(|flexi| flexi.softness),
-        }
-    }
 }
 
 /// A marker component tagging an entity as an in-world object, carrying its
@@ -298,161 +243,6 @@ pub(crate) struct WornPickTarget {
     pub(crate) scoped: ScopedObjectId,
 }
 
-/// Per-object viewer-side bookkeeping, paired with the object's [`SceneObject`]
-/// entity.
-#[derive(Debug)]
-struct TrackedObject {
-    /// The entity rendering this object: carries its position/rotation and is the
-    /// parent linkset children and attachments hang off. It has **no scale** (see
-    /// `object_transform`).
-    entity: Entity,
-    /// The object's full asset [`ObjectKey`] (the region-independent UUID), kept so
-    /// an animesh root can be matched to the `ObjectAnimation` (`object_id`) that
-    /// drives its control avatar (P29) and its control avatar pruned when the object
-    /// is gone. Distinct from the region-scoped local id this object is keyed by.
-    full_key: ObjectKey,
-    /// The per-object geometry holder — a child of [`entity`](Self::entity)
-    /// carrying the object's Second Life scale, onto which this object's own faces
-    /// are parented so the scale never reaches the child prims below it.
-    geometry: Entity,
-    /// The object's last-seen shape fingerprint, to detect a shape change.
-    shape: ShapeFingerprint,
-    /// The scoped id of this object's parent (a linkset root or the avatar it is
-    /// attached to); its own scoped id when it is a root (parent-local id 0).
-    parent: ScopedObjectId,
-    /// Whether this object is a root (has no parent object).
-    is_root: bool,
-    /// Whether this object's entity has been parented to its root entity yet (a
-    /// child whose root has not arrived stays `false` until it does). For an
-    /// attachment (see [`attachment_point`](Self::attachment_point)) this instead
-    /// tracks whether it has been parented to its avatar's skeleton joint (P16.1)
-    /// — or, for one worn on a HUD point, whether it has been *routed*: parented
-    /// to the HUD screen or hidden as another avatar's (P35.1, terminal either
-    /// way).
-    parented: bool,
-    /// The raw attachment-point id if this object is an attachment worn on an
-    /// avatar (its `parent` is the avatar), else `None`. An attachment is parented
-    /// to its avatar's skeleton joint rather than a linkset root, by
-    /// [`adopt_pending_attachments`] (P16.1).
-    attachment_point: Option<u8>,
-    /// The object's owner (`owner_id` from the object update). For a worn
-    /// attachment this is its wearer, so a stuck attachment can be attributed to
-    /// the avatar it belongs to (the `SL_VIEWER_LOG_ATTACHMENT_BIND` diagnostic).
-    owner_id: AgentKey,
-    /// The object's last-seen `PrimFlags` bitfield (the update's `UpdateFlags`),
-    /// kept for the object context menu's enable gates
-    /// ([`ObjectState::pick_summary`]): the agent-relative permission bits
-    /// (you-owner, copy) and the touch-handler flag decide which pie slices are
-    /// live for this object.
-    update_flags: u32,
-    /// The object's physical-material byte (`LL_MCODE_*`), kept for the build
-    /// floater's material editor ([`ObjectState::edit_data`]).
-    material: u8,
-    /// The object's complete last-received extra parameters, kept so an
-    /// `ObjectExtraParams` edit (the build floater's Features tab) can resend
-    /// the **full** set — the message states the object's complete
-    /// extra-parameter state, so a partial send would clear whatever it
-    /// omitted (sculpt, animesh, render materials, …). Also a
-    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input.
-    extra: ObjectExtraParams,
-    /// The last-applied texture-animation block — a
-    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input,
-    /// so a motion-only update skips the texture-animation refresh.
-    texture_animation: Option<TextureAnimation>,
-    /// The last-applied floating text (`llSetText`) — a
-    /// [`non_motion_blocks_changed`](Self::non_motion_blocks_changed) input.
-    text: String,
-    /// The last-applied floating-text colour (alongside
-    /// [`text`](Self::text)).
-    text_color: [u8; 4],
-    /// The per-face child entities carrying this object's geometry: one per
-    /// non-empty [`PrimFace`](sl_client_bevy::PrimFace) for a plain prim or a
-    /// sculpt, or one per non-empty submesh for a mesh object. Rebuilt on a shape
-    /// change. Empty for an object not yet tessellated (a mesh or sculpt still
-    /// waiting on its asset, or a non-rendered category).
-    face_entities: Vec<Entity>,
-    /// For an object still waiting on an asset fetch to decode (a mesh's `LLMesh`
-    /// asset or a sculpt's map texture), the pending build request; `None` once
-    /// the geometry is built or for an object whose geometry needs no fetch.
-    pending: Option<PendingGeometry>,
-    /// For a **built static** (non-rigged, pixel-area LOD managed) mesh object, the
-    /// inputs needed to rebuild its submesh entities when the mesh store swaps its
-    /// geometry to a different level of detail (P21.2): the mesh key, texture
-    /// entry, scale, and fetch priority. `None` for a prim, sculpt, worn rigged
-    /// mesh, or a mesh still pending its first decode. Retained so a LOD swap can
-    /// despawn the old submeshes and rebuild from the new block.
-    mesh_rebuild: Option<PendingMesh>,
-    /// For a **plain prim**, the inputs needed to re-tessellate its face entities
-    /// when the pixel-area LOD driver picks a different [`PrimLod`] for its
-    /// on-screen size (P21.3). `None` for a sculpt, mesh, or non-rendered
-    /// category (none of which is client-tessellation LOD managed).
-    prim_rebuild: Option<PendingPrim>,
-    /// A plain prim's currently tessellated [`PrimLod`] (P21.3), compared against
-    /// the driver's desired level to decide whether to re-tessellate. Meaningless
-    /// (and left at [`PrimLod::FINEST`]) for a non-prim.
-    prim_lod: PrimLod,
-    /// For a **tree**, the inputs needed to regenerate its geometry when the
-    /// pixel-area LOD driver picks a different `TreeTier` for its on-screen size
-    /// (P26.2). `None` for a non-tree.
-    tree_rebuild: Option<PendingTree>,
-    /// A tree's currently generated `TreeTier` (P26.2), compared against the
-    /// driver's desired tier to decide whether to regenerate. Meaningless (and left
-    /// at [`INITIAL_TREE_TIER`]) for a non-tree.
-    tree_tier: TreeTier,
-    /// Whether this object is an **animated object** (animesh) — its
-    /// `ExtendedMesh` param carries the `ANIMATED_MESH_ENABLED` flag. Set on the
-    /// linkset root; a worn animesh drives its own control-avatar skeleton, so its
-    /// rig joint positions must NOT override the wearer's skeleton (R1), matching
-    /// the reference viewer's `!vo->isAnimatedObject()` filter.
-    animated: bool,
-    /// The object's last-received raw `TextureEntry` bytes, retained so the build
-    /// floater's Texture tab (`crate::edit_texture`) can read the current
-    /// per-face placement and re-send a modified entry (`ObjectImage`). A
-    /// non-empty full update overwrites it; a terse (motion-only) update, which
-    /// carries no texture entry, leaves it untouched.
-    texture_entry: Vec<u8>,
-    /// The object's last-received legacy media URL, round-tripped on an
-    /// `ObjectImage` send so a texture edit does not clear it (the wire message
-    /// carries the whole media-URL field, so omitting it would blank it).
-    media_url: Option<String>,
-    /// The object's size along each axis, in Second Life metres, exactly as sent
-    /// ([`Object::scale`]). The rendered scale rides the geometry holder's
-    /// transform (in the Bevy frame), so the wire value is kept here for the
-    /// consumers that reason in Second Life units — the avatar render-cost model
-    /// ([`crate::avatar_complexity`]), whose triangle estimate is weighted by the
-    /// prim's radius and whose surface-area trigger is in square metres.
-    scale: Vec3,
-}
-
-impl TrackedObject {
-    /// Whether any **non-motion** input of the known-object component refresh
-    /// differs from the last applied update — the gate that lets a terse
-    /// motion update (whose merged snapshot changes only the motion fields)
-    /// skip the per-block component helpers and their no-op removes entirely.
-    /// Compares exactly what those helpers read: the extra params (light /
-    /// particles / flexi / reflection probe / render materials), the texture
-    /// animation, the floating text, the update flags (the physics toggle
-    /// among them), the material byte, and the linkset / attachment identity
-    /// (which decides the HUD routing and root marker).
-    fn non_motion_blocks_changed(
-        &self,
-        object: &Object,
-        is_root: bool,
-        parent: ScopedObjectId,
-        attachment_point: Option<u8>,
-    ) -> bool {
-        self.update_flags != object.update_flags
-            || self.material != object.material
-            || self.is_root != is_root
-            || self.parent != parent
-            || self.attachment_point != attachment_point
-            || self.text != object.text
-            || self.text_color != object.text_color
-            || self.texture_animation != object.texture_animation
-            || self.extra != object.extra
-    }
-}
-
 /// The `ExtendedMesh` `ANIMATED_MESH_ENABLED` flag (`llprimitive.h`): the object
 /// is an animated object (animesh).
 const ANIMATED_MESH_ENABLED_FLAG: u32 = 0x1;
@@ -490,11 +280,6 @@ const fn worn_base_priority(object: &Object) -> Priority {
         None => Priority::IDLE,
     }
 }
-
-/// How far up a parent chain `in_hud_attachment` walks before giving up. An
-/// attachment's chain is short — object → (linkset root) → avatar — so this only
-/// guards against a malformed (cyclic) parent link in the object stream.
-const MAX_PARENT_WALK: usize = 8;
 
 /// Whether the tracked object `scoped` belongs to a **HUD attachment**: it is
 /// itself worn on a HUD point, or it is a linkset child of an object that is (the
@@ -654,25 +439,6 @@ struct PendingPrim {
 /// initial geometry small and only refines the prims the camera looks at.
 const INITIAL_MANAGED_PRIM_LOD: PrimLod = PrimLod::Low;
 
-/// The rendered level of detail of a Linden tree (P26.2): one of the four
-/// [`TreeLod`] branching-geometry tiers, or the far [`TreeTier::Billboard`]
-/// imposter that stands in for the whole tree once it is small on screen. Selected
-/// by the render-priority driver from the tree's on-screen size, mirroring the
-/// reference viewer's `LLVOTree::mTrunkLOD` selection plus its billboard fallback.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TreeTier {
-    /// Procedural branch / leaf geometry at the given trunk level of detail.
-    Lod(TreeLod),
-    /// The distant crossed-quad billboard imposter (`tree_billboard_geometry`).
-    Billboard,
-}
-
-/// The tree tier a new tree is first built at (P26.2), before the render-priority
-/// driver has a camera to size it against — a mid branching level the driver
-/// refines toward the tier the tree's on-screen size warrants, like a plain prim's
-/// [`INITIAL_MANAGED_PRIM_LOD`].
-const INITIAL_TREE_TIER: TreeTier = TreeTier::Lod(TreeLod::High);
-
 /// The alpha-test cutoff for tree foliage (P26.2): a leaf-card / trunk texel with
 /// alpha below this is discarded, clipping each leaf to its shape. Matches the
 /// reference viewer's alpha-mask tree rendering (a mid cutoff for crisp cutout
@@ -694,735 +460,159 @@ struct PendingTree {
     priority: Priority,
 }
 
-/// Viewer-side object bookkeeping: the entity and metadata for every in-world
-/// object currently in the scene, keyed by scoped id.
+/// One object's outstanding deferred geometry work: the asset fetch its first
+/// build is waiting on, and the inputs each of its level-of-detail rebuilds needs
+/// to run again without the live [`Object`].
+///
+/// All four are the *same* object's build state and are re-established together
+/// on a re-tessellation, so they live in one record rather than four parallel
+/// maps — which also makes forgetting a removed object exactly one deletion.
+#[derive(Debug, Default)]
+struct ObjectBuilds {
+    /// For an object still waiting on an asset fetch to decode (a mesh's `LLMesh`
+    /// asset or a sculpt's map texture), the pending build request; `None` once
+    /// the geometry is built or for an object whose geometry needs no fetch.
+    pending: Option<PendingGeometry>,
+    /// For a **built static** (non-rigged, pixel-area LOD managed) mesh object, the
+    /// inputs needed to rebuild its submesh entities when the mesh store swaps its
+    /// geometry to a different level of detail (P21.2): the mesh key, texture
+    /// entry, scale, and fetch priority. `None` for a prim, sculpt, worn rigged
+    /// mesh, or a mesh still pending its first decode. Retained so a LOD swap can
+    /// despawn the old submeshes and rebuild from the new block.
+    mesh_rebuild: Option<PendingMesh>,
+    /// For a **plain prim**, the inputs needed to re-tessellate its face entities
+    /// when the pixel-area LOD driver picks a different [`PrimLod`] for its
+    /// on-screen size (P21.3). `None` for a sculpt, mesh, or non-rendered
+    /// category (none of which is client-tessellation LOD managed).
+    prim_rebuild: Option<PendingPrim>,
+    /// For a **tree**, the inputs needed to regenerate its geometry when the
+    /// pixel-area LOD driver picks a different `TreeTier` for its on-screen size
+    /// (P26.2). `None` for a non-tree.
+    tree_rebuild: Option<PendingTree>,
+}
+
+impl ObjectBuilds {
+    /// Whether this object has no outstanding build work left at all — the state
+    /// an entry is dropped in rather than kept as four `None`s.
+    const fn is_empty(&self) -> bool {
+        self.pending.is_none()
+            && self.mesh_rebuild.is_none()
+            && self.prim_rebuild.is_none()
+            && self.tree_rebuild.is_none()
+    }
+}
+
+/// The deferred geometry builds of every object that still has some, keyed by
+/// scoped id — the queue side of the object graph.
+///
+/// This is machinery, not world state: each entry holds an in-flight asset fetch
+/// or the retained inputs of a level-of-detail rebuild, so it stays in the world
+/// crate while [`ObjectState`] describes the scene from below. The split has one
+/// hazard: an object's builds used to die implicitly with its
+/// [`TrackedObject`], and now every removal path has to say so — `forget` /
+/// `forget_all` on a removal, `clear` on a world reset. A missed one leaks a
+/// queue entry for an object that no longer exists, which nothing else would
+/// notice.
 #[derive(Debug, Resource, Default)]
-pub struct ObjectState {
-    /// Every tracked object, keyed by its scoped id.
-    objects: HashMap<ScopedObjectId, TrackedObject>,
-    /// The region the Bevy scene is currently anchored at (origin `<0,0,0>`), so
-    /// a **root** object in a neighbour region is offset onto the right terrain
-    /// (`object_transform`) and every root is re-based when this moves
-    /// ([`recenter_objects`]). `None` until the first region is known; kept in
-    /// lockstep with [`crate::terrain::TerrainState`]'s origin (both follow
-    /// [`SlIdentity`]'s root handle).
-    origin: Option<RegionHandle>,
+pub struct PendingBuilds {
+    /// Every object with outstanding build work. An object whose builds have all
+    /// resolved holds no entry at all.
+    builds: HashMap<ScopedObjectId, ObjectBuilds>,
 }
 
-impl ObjectState {
-    /// Despawn **every** tracked object entity (and its faces) and forget them —
-    /// the object half of the scene-mirror purge a **fresh-circuit** teleport
-    /// needs. The session cleared its object cache with no per-object
-    /// `KillObject`, so the incremental [`remove_object`] path never fires;
-    /// without this the old region's objects linger forever, at offsets that no
-    /// longer correspond to any connected region
-    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
-    ///
-    /// The own avatar's **object** entity is purged along with the rest — it is
-    /// only a position-only mirror; the agent's *visible body* is kept across the
-    /// purge by [`AvatarState::purge`](crate::world_api::AvatarState::purge) (keyed
-    /// by agent, so it does not flash), and the destination re-streams the object
-    /// entity. Keeping it here would instead strand it as a ghost dot at the spot
-    /// we left, because the same avatar is streamed by *every* connected region so
-    /// no single copy is authoritative.
-    ///
-    /// Also drops the origin anchor so [`recenter_objects`] re-anchors on the
-    /// destination without a spurious re-base shift.
-    pub(crate) fn purge(&mut self, commands: &mut Commands) {
-        for tracked in self.objects.values() {
-            // Bevy's hierarchy despawn takes the geometry holder + parented
-            // linkset children; `try_despawn` tolerates an entity a parent already
-            // reaped. A rigged mesh's faces hang off the avatar body root, so
-            // despawn them explicitly (a no-op for a static mesh).
-            commands.entity(tracked.entity).try_despawn();
-            despawn_prim_faces(&tracked.face_entities, commands);
-        }
-        self.objects.clear();
-        self.origin = None;
+impl PendingBuilds {
+    /// The outstanding builds of `scoped`, or `None` when it has none.
+    fn get(&self, scoped: &ScopedObjectId) -> Option<&ObjectBuilds> {
+        self.builds.get(scoped)
     }
 
-    /// The region the Bevy scene is currently anchored at (scene origin), or
-    /// [`None`] before the first root region streams. In-world sounds
-    /// (`viewer-in-world-sounds`) need it to place a `SoundTrigger`'s
-    /// region-local position into absolute scene space
-    /// ([`region_offset_bevy`]).
-    #[must_use]
-    pub const fn origin(&self) -> Option<RegionHandle> {
-        self.origin
-    }
-
-    /// The full (grid-wide) [`ObjectKey`] of a tracked object, looked up by its
-    /// region-scoped id. Used by the physics module (P31.3) to translate a pushed
-    /// `ObjectPhysicsProperties` event — which keys by [`ScopedObjectId`] — onto the
-    /// same [`ObjectKey`] the `GetObjectPhysicsData` capability reply uses.
-    #[must_use]
-    pub fn full_key(&self, scoped: &ScopedObjectId) -> Option<ObjectKey> {
-        self.objects.get(scoped).map(|tracked| tracked.full_key)
-    }
-
-    /// The entity of the object with region-scoped id `scoped`, or [`None`] if
-    /// this viewer does not track it. Used by the object-selection core
-    /// (`viewer-object-selection-core`) to resolve a simulator-forced selection
-    /// (`ForceObjectSelect`) onto scene entities.
-    #[must_use]
-    pub fn entity_by_scoped(&self, scoped: &ScopedObjectId) -> Option<Entity> {
-        self.objects.get(scoped).map(|tracked| tracked.entity)
-    }
-
-    /// The object's physical-material byte (`LL_MCODE_*`), looked up by its
-    /// region-scoped id. In-world collision sounds (`viewer-in-world-sounds`)
-    /// read it to pick the reference default material collision sound.
-    #[must_use]
-    pub fn material_by_scoped(&self, scoped: &ScopedObjectId) -> Option<u8> {
-        self.objects.get(scoped).map(|tracked| tracked.material)
-    }
-
-    /// The geometry-holder child entity of the object with region-scoped id
-    /// `scoped` — the entity carrying the object's Second Life scale — or
-    /// [`None`] if untracked. The transform gizmos (`viewer-transform-gizmos`)
-    /// write a live scale edit there so the resize shows before the simulator
-    /// echoes it.
-    #[must_use]
-    pub fn geometry_of(&self, scoped: &ScopedObjectId) -> Option<Entity> {
-        self.objects.get(scoped).map(|tracked| tracked.geometry)
-    }
-
-    /// The **parent object's** entity of the linked part with region-scoped id
-    /// `scoped`, or [`None`] for a root / attachment / untracked parent. The
-    /// transform gizmos fold a linked part's world-space edit back into its
-    /// parent's frame through this entity's global transform.
-    #[must_use]
-    pub fn parent_entity_of(&self, scoped: &ScopedObjectId) -> Option<Entity> {
-        let tracked = self.objects.get(scoped)?;
-        if tracked.is_root || tracked.attachment_point.is_some() {
-            return None;
-        }
-        self.objects
-            .get(&tracked.parent)
-            .map(|parent| parent.entity)
-    }
-
-    /// Every prim of the in-world linkset rooted at `root`: the root itself
-    /// first, then every tracked child prim whose parent is it in a **stable**
-    /// order (by region-local id — attachments excluded, as they hang off an
-    /// avatar, not a linkset root). An untracked or non-root `root` yields the
-    /// object alone if present, else nothing.
-    ///
-    /// Second Life linksets are one level deep — a child's parent is always the
-    /// linkset root — so a single pass over the object table finds the whole
-    /// set. The child order is the local-id sort, not the simulator's true link
-    /// order (the wire carries no per-child link position; even the reference
-    /// notes its child order "is not always the same as sim's idea of link
-    /// order"), but it is stable frame to frame, which the prim-navigation
-    /// buttons (`crate::edit_tool`) and link-number read-out rely on.
-    ///
-    /// Used by prim unlinking (`viewer-prim-linking`): a whole-linkset unlink
-    /// sends an `ObjectDelink` naming **every** prim of the set
-    /// (`SEND_INDIVIDUALS`) to break it fully apart; naming only the root would
-    /// leave the simulator re-linking the orphaned children into a new set
-    /// (OpenSim's `SceneGraph::DelinkObjects`).
-    #[must_use]
-    pub fn linkset_members(&self, root: &ScopedObjectId) -> Vec<ScopedObjectId> {
-        let mut members = Vec::new();
-        if !self.objects.contains_key(root) {
-            return members;
-        }
-        members.push(*root);
-        let mut children: Vec<ScopedObjectId> = self
-            .objects
-            .iter()
-            .filter(|(scoped, tracked)| {
-                *scoped != root
-                    && !tracked.is_root
-                    && tracked.attachment_point.is_none()
-                    && tracked.parent == *root
-            })
-            .map(|(scoped, _tracked)| *scoped)
-            .collect();
-        children.sort_by_key(|scoped| scoped.id);
-        members.extend(children);
-        members
-    }
-
-    /// The scoped id of the linkset **root** that the object `scoped` belongs to
-    /// — the object itself when it is a root, its parent when it is a linked
-    /// child, or `None` when untracked or a worn attachment. The edit surfaces
-    /// resolve a picked linked part back to its linkset this way.
-    #[must_use]
-    pub fn linkset_root_of(&self, scoped: &ScopedObjectId) -> Option<ScopedObjectId> {
-        let tracked = self.objects.get(scoped)?;
-        if tracked.attachment_point.is_some() {
-            return None;
-        }
-        if tracked.is_root {
-            Some(*scoped)
+    /// Replace `scoped`'s whole build record — what a (re-)tessellation
+    /// establishes in one go. An all-resolved record is dropped rather than
+    /// stored, so an object that needs no deferred work holds no entry.
+    fn set(&mut self, scoped: ScopedObjectId, builds: ObjectBuilds) {
+        if builds.is_empty() {
+            let _resolved = self.builds.remove(&scoped);
         } else {
-            Some(tracked.parent)
+            let _previous = self.builds.insert(scoped, builds);
         }
     }
 
-    /// The number of prims in the linkset rooted at `root` — the reference's
-    /// per-linkset prim count. Drives the link-limit guard
-    /// (`viewer-prim-linking`): a Second Life linkset may hold at most 255
-    /// children, so the summed prim count of a link operation is capped.
-    #[must_use]
-    pub fn linkset_prim_count(&self, root: &ScopedObjectId) -> usize {
-        self.linkset_members(root).len()
+    /// Take `scoped`'s pending asset build, leaving its rebuild inputs in place
+    /// (and dropping the entry when nothing else is outstanding).
+    fn take_pending(&mut self, scoped: &ScopedObjectId) -> Option<PendingGeometry> {
+        let entry = self.builds.get_mut(scoped)?;
+        let taken = entry.pending.take();
+        if entry.is_empty() {
+            let _resolved = self.builds.remove(scoped);
+        }
+        taken
     }
 
-    /// The region-scoped ids of every tracked object whose persistent id is `id`
-    /// — normally one, but an object streamed by two connected regions has one
-    /// per circuit. The derender path (`viewer-derender-blacklist`) uses it to
-    /// despawn what a fresh blacklist entry names: it knows the target's full
-    /// id, not its (transient) region-scoped one.
-    ///
-    /// A scan, like [`entity_of`](Self::entity_of), and run only per derender —
-    /// never per frame.
-    pub(crate) fn scoped_by_full_id(&self, id: Uuid) -> Vec<ScopedObjectId> {
-        self.objects
+    /// Set `scoped`'s pending asset build, creating its record if needed.
+    fn set_pending(&mut self, scoped: ScopedObjectId, pending: PendingGeometry) {
+        self.builds.entry(scoped).or_default().pending = Some(pending);
+    }
+
+    /// Set `scoped`'s static-mesh LOD rebuild inputs, creating its record if
+    /// needed.
+    fn set_mesh_rebuild(&mut self, scoped: ScopedObjectId, rebuild: PendingMesh) {
+        self.builds.entry(scoped).or_default().mesh_rebuild = Some(rebuild);
+    }
+
+    /// Every object whose pending asset build satisfies `wanted`.
+    fn scoped_pending_on(&self, wanted: impl Fn(&PendingGeometry) -> bool) -> Vec<ScopedObjectId> {
+        self.builds
             .iter()
-            .filter(|(_scoped, tracked)| tracked.full_key.uuid() == id)
-            .map(|(scoped, _tracked)| *scoped)
+            .filter(|(_scoped, builds)| builds.pending.as_ref().is_some_and(&wanted))
+            .map(|(&scoped, _builds)| scoped)
             .collect()
     }
 
-    /// Despawn the tracked object `scoped` and its tracked descendants — the
-    /// derender path's way in to the same removal a `KillObject` drives, so a
-    /// derendered linkset root takes its child prims (and a derendered avatar
-    /// its attachments) with it.
-    ///
-    /// Returns every region-scoped id it removed (the root first, then its
-    /// descendants), which the caller records as suppressed: those ids are the
-    /// only handle left on objects the simulator has already streamed and will
-    /// not send again, so they are what a later un-derender re-fetches
-    /// ([`crate::derender`]). Empty when `scoped` was not tracked.
-    pub(crate) fn derender_remove(
-        &mut self,
-        scoped: ScopedObjectId,
-        commands: &mut Commands,
-    ) -> Vec<ScopedObjectId> {
-        if !self.objects.contains_key(&scoped) {
-            return Vec::new();
-        }
-        // Collected before the removal, which drops the parent links it walks.
-        let mut removed = vec![scoped];
-        removed.extend(tracked_descendants(self, scoped));
-        remove_object(self, scoped, commands);
-        removed
-    }
-
-    /// The entity of the object with grid-wide key `key`, or [`None`] if this viewer does
-    /// not have it. The reverse of [`full_key`](Self::full_key), used by the point-at
-    /// receive path (P31.15) to resolve another avatar's point-at effect — whose target is
-    /// named by its full key — against the target object's current transform.
-    ///
-    /// Objects are keyed by their region-scoped id, so this is a scan; it runs only per
-    /// received effect (a handful a second at most), not per frame.
-    #[must_use]
-    pub fn entity_of(&self, key: ObjectKey) -> Option<Entity> {
-        self.objects
-            .values()
-            .find(|tracked| tracked.full_key == key)
-            .map(|tracked| tracked.entity)
-    }
-
-    /// The region-scoped ids of the tracked objects whose full [`ObjectKey`] is
-    /// in `keys`, in one pass over the object table. The bulk counterpart of
-    /// [`entity_of`](Self::entity_of), for the animesh drivers (P29.2): an
-    /// `ObjectAnimation` names the linkset **part** holding the animations by
-    /// full key, and every signalled part must resolve each frame — a per-key
-    /// scan would be quadratic.
-    pub(crate) fn scoped_by_full_keys(
-        &self,
-        keys: &HashSet<ObjectKey>,
-    ) -> HashMap<ObjectKey, ScopedObjectId> {
-        if keys.is_empty() {
-            return HashMap::new();
-        }
-        self.objects
+    /// Every object that has already built its static mesh from `key` and holds
+    /// the inputs to rebuild it at another level of detail — nothing pending, and
+    /// retained rebuild inputs naming that key.
+    fn scoped_mesh_rebuild_on(&self, key: MeshKey) -> Vec<ScopedObjectId> {
+        self.builds
             .iter()
-            .filter(|(_scoped, tracked)| keys.contains(&tracked.full_key))
-            .map(|(&scoped, tracked)| (tracked.full_key, scoped))
+            .filter(|(_scoped, builds)| {
+                builds.pending.is_none()
+                    && builds
+                        .mesh_rebuild
+                        .as_ref()
+                        .is_some_and(|rebuild| rebuild.key == key)
+            })
+            .map(|(&scoped, _builds)| scoped)
             .collect()
     }
 
-    /// Everything the object context menu needs to know about a picked object
-    /// (`crate::object_menu`), resolved by walking the linkset parent chain up
-    /// to its root: the picked prim itself (the touch / sit target), the linkset
-    /// root (the derez target — take / delete / return act on roots), the
-    /// combined permission flags, and whether the chain is a worn attachment
-    /// (which gets an attachment pie — `crate::attachment_menu` — rather than
-    /// the object one).
-    ///
-    /// The flags are the **union** of the picked prim's and the root's, because
-    /// the agent-relative bits (you-owner, copy) ride the root while the
-    /// touch-handler flag can sit on either. For an attachment the walk stops at
-    /// the **attachment root** (the object carrying the attachment point), whose
-    /// parent is the avatar wearing it — surfaced as
-    /// [`wearer`](ObjectPickSummary::wearer) so the attachment pies can decide
-    /// self vs other. The walk is bounded like `in_hud_attachment`'s, against
-    /// a malformed (cyclic) parent link.
-    #[must_use]
-    pub fn pick_summary(&self, scoped: ScopedObjectId) -> Option<ObjectPickSummary> {
-        let picked = self.objects.get(&scoped)?;
-        let mut root_scoped = scoped;
-        let mut root = picked;
-        let mut attachment = picked.attachment_point.is_some();
-        for _step in 0..MAX_PARENT_WALK {
-            if root.is_root || attachment {
-                break;
-            }
-            let next = root.parent;
-            let Some(parent) = self.objects.get(&next) else {
-                break;
-            };
-            root_scoped = next;
-            root = parent;
-            attachment = root.attachment_point.is_some();
-        }
-        Some(ObjectPickSummary {
-            picked_scoped: scoped,
-            picked_full: picked.full_key,
-            root_scoped,
-            root_full: root.full_key,
-            flags: picked.update_flags | root.update_flags,
-            attachment,
-            wearer: attachment.then_some(root.parent),
-        })
-    }
-
-    /// The per-face child entities of the object with grid-wide key `key`, or
-    /// `None` if the object is unknown (or not yet tessellated). Used by the
-    /// media-on-a-prim driver ([`crate::media_prim`]) to find the face entity a
-    /// The per-face child entities carrying `scoped`'s geometry, or an empty
-    /// slice if it is untracked or not yet tessellated.
-    ///
-    /// A **rigged** attachment's faces are parented to the wearer's body root
-    /// rather than to the object entity, so hiding the object alone does not hide
-    /// them — the jelly render ([`crate::avatar_complexity`]) needs the faces
-    /// themselves.
-    pub(crate) fn face_entities_of(&self, scoped: &ScopedObjectId) -> &[Entity] {
-        self.objects
-            .get(scoped)
-            .map_or(&[], |tracked| &tracked.face_entities)
-    }
-
-    /// The per-face child entities of the object with grid-wide key `key`, or
-    /// `None` if the object is unknown (or not yet tessellated). Used by the
-    /// media-on-a-prim driver ([`crate::media_prim`]) to find the face entity a
-    /// media surface's texture goes onto. A scan like [`entity_of`](Self::entity_of),
-    /// run only when media data changes — not per frame.
-    pub(crate) fn face_entities_by_key(&self, key: ObjectKey) -> Option<&[Entity]> {
-        self.objects
+    /// Whether any object is waiting on a pending asset build satisfying
+    /// `wanted` — the cheap gate in front of a decode-backlog scan.
+    fn any_pending_on(&self, wanted: impl Fn(&PendingGeometry) -> bool) -> bool {
+        self.builds
             .values()
-            .find(|tracked| tracked.full_key == key)
-            .map(|tracked| tracked.face_entities.as_slice())
+            .any(|builds| builds.pending.as_ref().is_some_and(&wanted))
     }
 
-    /// The `UpdateFlags` bits of the object with grid-wide key `key` (its own,
-    /// not OR-ed with its root's), or `None` if unknown. The media permission
-    /// check reads the you-owner bit from these.
-    #[must_use]
-    pub fn update_flags_by_key(&self, key: ObjectKey) -> Option<u32> {
-        self.objects
-            .values()
-            .find(|tracked| tracked.full_key == key)
-            .map(|tracked| tracked.update_flags)
+    /// Forget every deferred build of `scoped`. **Every** path that drops a
+    /// [`TrackedObject`] must call this (or [`forget_all`](Self::forget_all)):
+    /// the build state used to die with the tracked object and no longer does.
+    fn forget(&mut self, scoped: &ScopedObjectId) {
+        let _dropped = self.builds.remove(scoped);
     }
 
-    /// The agent-relative `UpdateFlags` of `scoped` — its own bits OR-ed with its
-    /// linkset **root's** (the agent-relative modify / move / copy / you-owner
-    /// bits ride the root, exactly as [`pick_summary`](Self::pick_summary) reads
-    /// them), or `None` if untracked. The simulator computes these for *this*
-    /// agent (OpenSim's `GenerateClientFlags`), so they already fold in owner /
-    /// group / everyone permissions and the object's "anyone can move" flag —
-    /// the same signal the reference viewer's `permModify` / `permMove` read.
-    pub(crate) fn agent_flags(&self, scoped: &ScopedObjectId) -> Option<u32> {
-        let picked = self.objects.get(scoped)?;
-        let mut flags = picked.update_flags;
-        let mut attachment = picked.attachment_point.is_some();
-        let mut current = picked;
-        for _step in 0..MAX_PARENT_WALK {
-            if current.is_root || attachment {
-                break;
-            }
-            let Some(parent) = self.objects.get(&current.parent) else {
-                break;
-            };
-            current = parent;
-            flags |= current.update_flags;
-            attachment = current.attachment_point.is_some();
-        }
-        Some(flags)
-    }
-
-    /// Whether this agent may **modify** `scoped` (shape / scale / texture /
-    /// material / name / flags) — the `FLAGS_OBJECT_MODIFY` bit. An untracked
-    /// object reads modifiable (optimistic: the simulator arbitrates), so a
-    /// transient tracking gap never wrongly greys a control.
-    #[must_use]
-    pub fn agent_can_modify(&self, scoped: &ScopedObjectId) -> bool {
-        self.agent_flags(scoped)
-            .is_none_or(|flags| flags & FLAGS_OBJECT_MODIFY != 0)
-    }
-
-    /// Whether this agent may **move** `scoped` (position / rotation) — modify
-    /// permission, or the `FLAGS_OBJECT_MOVE` bit the simulator sets for the
-    /// owner and for an "anyone can move" object. Untracked reads movable.
-    #[must_use]
-    pub fn agent_can_move(&self, scoped: &ScopedObjectId) -> bool {
-        self.agent_flags(scoped)
-            .is_none_or(|flags| flags & (FLAGS_OBJECT_MODIFY | FLAGS_OBJECT_MOVE) != 0)
-    }
-
-    /// Whether this agent may **copy** `scoped` — the `FLAGS_OBJECT_COPY` bit.
-    /// Untracked reads copyable.
-    #[must_use]
-    pub fn agent_can_copy(&self, scoped: &ScopedObjectId) -> bool {
-        self.agent_flags(scoped)
-            .is_none_or(|flags| flags & FLAGS_OBJECT_COPY != 0)
-    }
-
-    /// Whether this agent **owns** `scoped` — the `FLAGS_OBJECT_YOU_OWNER` bit
-    /// (the reference viewer's `permYouOwner`). Unlike the modify / move / copy
-    /// helpers this is **not** optimistic: an untracked object reads *not owned*,
-    /// because ownership is a positive grant that gates owner-only affordances
-    /// (the contents rename / remove menu items), where a wrong "yes" would offer
-    /// an action the simulator then refuses.
-    #[must_use]
-    pub fn agent_owns(&self, scoped: &ScopedObjectId) -> bool {
-        self.agent_flags(scoped)
-            .is_some_and(|flags| flags & FLAGS_OBJECT_YOU_OWNER != 0)
-    }
-
-    /// Whether `scoped` lets **anyone** add inventory to its contents — the
-    /// `FLAGS_ALLOW_INVENTORY_DROP` bit (the reference's `flagAllowInventoryAdd`),
-    /// the one exception to needing modify on the object to drop an item in.
-    /// Untracked reads *false* (the drop still needs modify then).
-    #[must_use]
-    pub fn agent_allows_inventory_drop(&self, scoped: &ScopedObjectId) -> bool {
-        self.agent_flags(scoped)
-            .is_some_and(|flags| flags & FLAGS_ALLOW_INVENTORY_DROP != 0)
-    }
-
-    /// Locally echo an edited `PrimFlags` bit (the build floater's
-    /// physical / temporary / phantom toggles) so the checkbox flips
-    /// immediately; the simulator's own `ObjectUpdate` echo confirms (or
-    /// reverts) it. Display-only: the physics / render systems re-sync from
-    /// the echoed update, not from this.
-    pub fn apply_local_flag_edit(&mut self, scoped: &ScopedObjectId, bit: u32, on: bool) {
-        if let Some(tracked) = self.objects.get_mut(scoped) {
-            if on {
-                tracked.update_flags |= bit;
-            } else {
-                tracked.update_flags &= !bit;
-            }
+    /// Forget the deferred builds of every id in `scoped` — the removal paths
+    /// that take a whole linkset report what they dropped.
+    pub(crate) fn forget_all(&mut self, scoped: &[ScopedObjectId]) {
+        for id in scoped {
+            self.forget(id);
         }
     }
 
-    /// Locally echo an edited material byte (the build floater's material
-    /// cycle); display-only, confirmed by the simulator's echo.
-    pub fn apply_local_material_edit(&mut self, scoped: &ScopedObjectId, material: u8) {
-        if let Some(tracked) = self.objects.get_mut(scoped) {
-            tracked.material = material;
-        }
+    /// Forget every deferred build there is: the queue half of the scene-mirror
+    /// purge [`ObjectState::purge`] performs on a fresh-circuit teleport.
+    pub(crate) fn clear(&mut self) {
+        self.builds.clear();
     }
-
-    /// Locally echo an edited extra-parameter set (the build floater's flexi /
-    /// light editors) so the Features tab reflects the send immediately;
-    /// display-only — the renderers' components re-sync from the simulator's
-    /// echoed update, and the shape fingerprint is deliberately untouched so
-    /// that echo still triggers the re-tessellation it needs.
-    pub fn apply_local_extra_edit(&mut self, scoped: &ScopedObjectId, extra: ObjectExtraParams) {
-        if let Some(tracked) = self.objects.get_mut(scoped) {
-            tracked.extra = extra;
-        }
-    }
-
-    /// Everything the build floater's parameter tabs
-    /// (`viewer-prim-parameter-editing`) read for one selected object: its
-    /// object class, quantized shape, material byte, `PrimFlags` bits, and its
-    /// complete extra parameters (borrowed — clone only what an edit resends).
-    #[must_use]
-    pub fn edit_data(&self, scoped: &ScopedObjectId) -> Option<ObjectEditData<'_>> {
-        self.objects.get(scoped).map(|tracked| ObjectEditData {
-            pcode: tracked.shape.pcode,
-            shape: tracked.shape.shape,
-            material: tracked.material,
-            update_flags: tracked.update_flags,
-            extra: &tracked.extra,
-        })
-    }
-
-    /// The object's last-received raw `TextureEntry` bytes, for the Texture-tab
-    /// editor (`crate::edit_texture`) to decode the current per-face placement
-    /// and re-send a modified entry. `None` if untracked, an empty slice if the
-    /// object has not carried a texture entry yet.
-    #[must_use]
-    pub fn texture_entry_of(&self, scoped: &ScopedObjectId) -> Option<&[u8]> {
-        self.objects
-            .get(scoped)
-            .map(|tracked| tracked.texture_entry.as_slice())
-    }
-
-    /// The object's last-received legacy media URL, round-tripped on an
-    /// `ObjectImage` send so a Texture-tab edit does not clear it.
-    #[must_use]
-    pub fn media_url_of(&self, scoped: &ScopedObjectId) -> Option<String> {
-        self.objects
-            .get(scoped)
-            .and_then(|tracked| tracked.media_url.clone())
-    }
-
-    /// Every tracked in-world (non-attachment) prim for the minimap's object
-    /// layer: its entity (for the transform), its own `PrimFlags` bits, and its
-    /// root's flags OR-ed in (the agent-relative you-owner / group-owned bits
-    /// ride the root, exactly as [`pick_summary`](Self::pick_summary) reads
-    /// them). Worn objects — anything whose parent walk reaches an attachment
-    /// point — are excluded, as the reference's map membership excludes them.
-    ///
-    /// **Avatars** (`pcode` 47) are excluded too: an avatar belongs on the minimap
-    /// *avatar* layer (drawn from [`AvatarState`],
-    /// deduplicated by agent), not the object layer. The same avatar is streamed
-    /// as a separate object by *every* connected region (root and each neighbour
-    /// child circuit), so admitting them here would plot one object dot per region
-    /// — and leave a ghost dot at a region left behind whose copy has not been
-    /// reaped (viewer-crossing-stale-minimap-self-dot).
-    #[must_use]
-    pub fn minimap_objects(&self) -> Vec<(Entity, u32)> {
-        let mut out = Vec::with_capacity(self.objects.len());
-        for tracked in self.objects.values() {
-            if tracked.shape.pcode == pcode::AVATAR {
-                continue;
-            }
-            let mut flags = tracked.update_flags;
-            let mut attachment = tracked.attachment_point.is_some();
-            let mut current = tracked;
-            for _step in 0..MAX_PARENT_WALK {
-                if current.is_root || attachment {
-                    break;
-                }
-                let Some(parent) = self.objects.get(&current.parent) else {
-                    break;
-                };
-                current = parent;
-                flags |= current.update_flags;
-                attachment = current.attachment_point.is_some();
-            }
-            if attachment {
-                continue;
-            }
-            out.push((tracked.entity, flags));
-        }
-        out
-    }
-
-    /// The facts the static collider index ([`crate::physics::build_static_colliders`])
-    /// needs about one tracked prim, keyed by its scoped id, or `None` if the prim
-    /// is not tracked. Reads the wire-side state the resource already holds so the
-    /// collider builder does not need its own per-entity component mirror.
-    pub(crate) fn static_collider_facts(
-        &self,
-        scoped: &ScopedObjectId,
-    ) -> Option<StaticColliderFacts> {
-        let tracked = self.objects.get(scoped)?;
-        Some(StaticColliderFacts {
-            full_key: tracked.full_key,
-            phantom: tracked.update_flags & FLAGS_PHANTOM != 0,
-            // A mesh prim's collider comes from its uploaded physics shape; a plain
-            // prim / sculpt from its tessellated geometry (mesh key `None`).
-            mesh: match tracked.extra.sculpt.map(|sculpt| sculpt.texture) {
-                Some(SculptOrMeshKey::Mesh(key)) => Some(key),
-                _other => None,
-            },
-            // A flexi prim's geometry is baked in absolute metres (its holder
-            // applies no scale — see [`holder_transform`]), so scaling it by the
-            // object scale would be wrong; the collider builder skips it (it is also
-            // phantom, so nothing collides with it anyway).
-            flexi: tracked.extra.flexible.is_some(),
-        })
-    }
-
-    /// Every tracked **worn attachment root**, grouped by the scoped id of the
-    /// avatar object wearing it — the index the avatar render-cost model walks
-    /// (`viewer-avatar-complexity-limit`).
-    ///
-    /// Only an attachment *root* carries an attachment point, so this is exactly
-    /// the set of worn linksets; each one's prims come from
-    /// [`linkset_members`](Self::linkset_members). **HUD attachments are
-    /// excluded**: they hang off your own screen, are drawn for nobody else, and
-    /// the reference likewise leaves them out of the wearer's complexity
-    /// (`!attached_object->isHUDAttachment()`).
-    pub(crate) fn attachment_roots_by_wearer(
-        &self,
-    ) -> HashMap<ScopedObjectId, Vec<ScopedObjectId>> {
-        let mut worn: HashMap<ScopedObjectId, Vec<ScopedObjectId>> = HashMap::new();
-        for (scoped, tracked) in &self.objects {
-            let Some(point) = tracked.attachment_point else {
-                continue;
-            };
-            if is_hud_point(point) {
-                continue;
-            }
-            worn.entry(tracked.parent).or_default().push(*scoped);
-        }
-        worn
-    }
-
-    /// The scoped id of the **avatar object** that tracked object `scoped` is
-    /// worn on — walking up the linkset to the attachment root and taking its
-    /// parent — or `None` when it is not (part of) a worn, non-HUD attachment.
-    ///
-    /// The render-cost model marks a wearer's score stale from any object event
-    /// in their attachments, and only the attachment *root* names the avatar, so
-    /// a linked child prim has to be chased up to it. The walk is bounded exactly
-    /// like `in_hud_attachment`'s, against a malformed parent cycle.
-    pub(crate) fn wearer_of(&self, scoped: ScopedObjectId) -> Option<ScopedObjectId> {
-        let mut current = scoped;
-        for _ in 0..MAX_PARENT_WALK {
-            let tracked = self.objects.get(&current)?;
-            if let Some(point) = tracked.attachment_point {
-                return (!is_hud_point(point)).then_some(tracked.parent);
-            }
-            if tracked.is_root {
-                return None;
-            }
-            current = tracked.parent;
-        }
-        None
-    }
-
-    /// The wire-side facts the avatar render-cost model needs about one tracked
-    /// prim ([`crate::avatar_complexity`]), or `None` if it is not tracked.
-    ///
-    /// Like [`static_collider_facts`](Self::static_collider_facts) this reads
-    /// state the resource already holds rather than adding a per-entity mirror —
-    /// the cost is evaluated for a handful of avatars at a time, never per frame
-    /// for the whole scene.
-    pub(crate) fn complexity_facts(
-        &self,
-        scoped: &ScopedObjectId,
-    ) -> Option<PrimComplexityFacts<'_>> {
-        let tracked = self.objects.get(scoped)?;
-        let sculpt = tracked.extra.sculpt.map(|sculpt| sculpt.texture);
-        Some(PrimComplexityFacts {
-            entity: tracked.entity,
-            scale: tracked.scale,
-            shape: tracked.shape.shape,
-            mesh: match sculpt {
-                Some(SculptOrMeshKey::Mesh(key)) => Some(key),
-                _other => None,
-            },
-            sculpt_map: match sculpt {
-                Some(SculptOrMeshKey::Sculpt(key)) => Some(key),
-                _other => None,
-            },
-            texture_entry: &tracked.texture_entry,
-            flexi: tracked.extra.flexible.is_some(),
-            light: tracked.extra.light.is_some(),
-            animated: tracked.animated,
-            is_root: tracked.is_root,
-            texture_animated: tracked.texture_animation.is_some(),
-        })
-    }
-}
-
-/// The wire-side facts [`ObjectState::complexity_facts`] surfaces for the avatar
-/// render-cost model: everything the reference's `LLVOVolume::getRenderCost`
-/// reads off one prim, without exposing the tracked object itself.
-#[derive(Debug, Clone, Copy)]
-#[expect(
-    clippy::struct_excessive_bools,
-    reason = "one flag per input the reference's render-cost formula reads off a prim"
-)]
-pub(crate) struct PrimComplexityFacts<'state> {
-    /// The prim's scene entity — the handle the jelly render uses to hide it (and
-    /// the key its particle-system component is queried by).
-    pub(crate) entity: Entity,
-    /// The prim's size along each axis, in Second Life metres.
-    pub(crate) scale: Vec3,
-    /// The prim's path / profile shape parameters, from which a non-mesh prim's
-    /// per-level triangle counts are estimated.
-    pub(crate) shape: PrimShapeParams,
-    /// The mesh asset key when the prim is a mesh, else `None`.
-    pub(crate) mesh: Option<MeshKey>,
-    /// The sculpt-map texture when the prim is a legacy sculpt, else `None` (it
-    /// counts as one of the prim's textures, as in the reference).
-    pub(crate) sculpt_map: Option<TextureKey>,
-    /// The prim's raw `TextureEntry` bytes (per-face texture, tint, glow, bump,
-    /// shiny, tex-gen and media flags).
-    pub(crate) texture_entry: &'state [u8],
-    /// Whether the prim is flexible (the reference's heaviest multiplier).
-    pub(crate) flexi: bool,
-    /// Whether the prim emits light.
-    pub(crate) light: bool,
-    /// Whether the prim is an animated object (animesh).
-    pub(crate) animated: bool,
-    /// Whether the prim is a linkset root.
-    pub(crate) is_root: bool,
-    /// Whether the prim carries a texture animation (`llSetTextureAnim`).
-    pub(crate) texture_animated: bool,
-}
-
-/// The wire-side facts [`ObjectState::static_collider_facts`] surfaces for the
-/// static collider index: enough to pick a prim's collision layer and shape source
-/// without a dedicated per-entity component.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct StaticColliderFacts {
-    /// The object's full (grid-wide) key — how its physics-shape data is keyed in
-    /// `ObjectPhysicsShapes`(crate::physics::ObjectPhysicsShapes).
-    pub(crate) full_key: ObjectKey,
-    /// Whether the prim is phantom (`FLAGS_PHANTOM`): indexed but not collidable.
-    pub(crate) phantom: bool,
-    /// The mesh asset key when the prim is a mesh, else `None` (a plain prim or
-    /// sculpt whose collider comes from its tessellated geometry).
-    pub(crate) mesh: Option<MeshKey>,
-    /// Whether the prim is a flexi prim (skip — its geometry is not holder-scaled).
-    pub(crate) flexi: bool,
-}
-
-/// What [`ObjectState::edit_data`] reports for one tracked object — the
-/// last-received wire-side state the build floater's parameter tabs edit.
-#[derive(Debug, Clone, Copy)]
-pub struct ObjectEditData<'state> {
-    /// The object class byte (`PCode`); only a [`pcode::PRIMITIVE`] is
-    /// shape-editable.
-    pub pcode: u8,
-    /// The quantized path/profile shape parameters.
-    pub shape: PrimShapeParams,
-    /// The physical-material byte (`LL_MCODE_*`).
-    pub material: u8,
-    /// The object's `PrimFlags` bits (physical / temporary / phantom live
-    /// here).
-    pub update_flags: u32,
-    /// The object's complete extra parameters (flexi, light, sculpt, …).
-    pub extra: &'state ObjectExtraParams,
-}
-
-/// What [`ObjectState::pick_summary`] resolves a picked prim to: the identities
-/// the object context menu's actions need, and the flag bits its enable gates
-/// read. See `crate::object_menu`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ObjectPickSummary {
-    /// The picked prim itself — the touch and sit target.
-    pub picked_scoped: ScopedObjectId,
-    /// The picked prim's full (grid-wide) key — what `AgentRequestSit` targets.
-    pub picked_full: ObjectKey,
-    /// The linkset root — what take / delete / return derez.
-    pub root_scoped: ScopedObjectId,
-    /// The root's full key — what a properties(-family) request queries.
-    pub root_full: ObjectKey,
-    /// The union of the picked prim's and the root's `PrimFlags` bits.
-    pub flags: u32,
-    /// Whether the picked chain is worn on an avatar (including HUDs) — such a
-    /// pick belongs to the attachment pies (`crate::attachment_menu`), not the
-    /// object one.
-    pub attachment: bool,
-    /// For a worn chain, the scoped id of the **avatar object** the attachment
-    /// root hangs on (its wearer), resolvable to an agent via
-    /// [`AvatarState::agent_of`](crate::world_api::AvatarState::agent_of); `None`
-    /// for an ordinary in-world object.
-    pub wearer: Option<ScopedObjectId>,
 }
 
 /// Marker for the per-object **geometry holder** entity — the child of an object
@@ -1833,6 +1023,7 @@ fn drain_budgeted<T>(
 pub fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
+    mut builds: ResMut<PendingBuilds>,
     derender: Res<crate::world_api::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
@@ -1871,6 +1062,7 @@ pub fn update_objects(
                 }
                 apply_object(
                     &mut state,
+                    &mut builds,
                     &object,
                     &mut commands,
                     &mut meshes,
@@ -1889,7 +1081,7 @@ pub fn update_objects(
                         let _empty = queued_removes.remove(&scoped);
                     }
                 }
-                remove_object(&mut state, scoped, &mut commands);
+                builds.forget_all(&state.remove_object(scoped, &mut commands));
                 false
             }
         })
@@ -1917,6 +1109,7 @@ pub fn update_objects(
                 SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
                     apply_object(
                         &mut state,
+                        &mut builds,
                         object,
                         &mut commands,
                         &mut meshes,
@@ -1929,7 +1122,7 @@ pub fn update_objects(
                     )
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                    remove_object(&mut state, *local_id, &mut commands);
+                    builds.forget_all(&state.remove_object(*local_id, &mut commands));
                     false
                 }
                 _other => false,
@@ -3521,14 +2714,6 @@ fn build_mesh_submeshes(
     face_entities
 }
 
-/// Despawn every face child entity of a prim (used before rebuilding on a shape
-/// change), leaving the caller to clear the tracked list.
-fn despawn_prim_faces(face_entities: &[Entity], commands: &mut Commands) {
-    for &face in face_entities {
-        commands.entity(face).try_despawn();
-    }
-}
-
 /// Mirror the object's `llSetText` floating text onto its entity as an
 /// [`ObjectFloatingText`], which [`crate::hover_text`] renders as a world-space
 /// billboard. Removed when the text is cleared (`llSetText("")` — an empty
@@ -3572,28 +2757,6 @@ fn apply_light(entity: Entity, light: Option<ObjectLight>, commands: &mut Comman
     }
 }
 
-/// Drop the tracked object under `scoped` when its entity has been despawned out
-/// from under the map — a linkset child or worn attachment that Bevy's recursive
-/// despawn took with its parent (a removed linkset root, or a departed avatar whose
-/// skeleton-joint node it hangs off), with no `remove_object` to clean the entry.
-///
-/// `is_alive` reports whether an entity is still spawned (in the viewer,
-/// `Commands::get_entity(..).is_ok()`). A live entity is left untouched — this never
-/// drops an object still on screen, so no live transform / material write is lost.
-/// Returns the dropped entity when a stale entry was removed, else `None`.
-fn drop_stale_tracked_entity(
-    state: &mut ObjectState,
-    scoped: ScopedObjectId,
-    mut is_alive: impl FnMut(Entity) -> bool,
-) -> Option<Entity> {
-    let entity = state.objects.get(&scoped)?.entity;
-    if is_alive(entity) {
-        return None;
-    }
-    let _stale = state.objects.remove(&scoped);
-    Some(entity)
-}
-
 /// Spawn or update the entity for `object`, keeping its transform, classification,
 /// and linkset parenting current.
 #[expect(
@@ -3607,6 +2770,7 @@ fn drop_stale_tracked_entity(
 /// a component-only refresh, or anything that touched no geometry.
 fn apply_object(
     state: &mut ObjectState,
+    builds: &mut PendingBuilds,
     object: &Object,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -3689,8 +2853,13 @@ fn apply_object(
     // is gone: drop the stale entry and fall through to the spawn path, re-creating
     // it if the simulator still streams it (else its imminent `KillObject` reaps it).
     if let Some(stale) =
-        drop_stale_tracked_entity(state, scoped, |entity| commands.get_entity(entity).is_ok())
+        state.drop_stale_tracked_entity(scoped, |entity| commands.get_entity(entity).is_ok())
     {
+        // The stale entry's deferred builds went with it while they lived inside
+        // the tracked object; now they have to be dropped by name, or the queue
+        // would keep an entry (and its retained texture entry) for an object the
+        // spawn path is about to re-create from scratch below.
+        builds.forget(&scoped);
         debug!(
             "object {scoped}: tracked entity {stale:?} was despawned externally (parent hierarchy gone); respawning"
         );
@@ -3832,19 +3001,25 @@ fn apply_object(
                 commands,
             );
             existing.face_entities = face_entities;
-            existing.pending = pending;
-            // The geometry was re-requested from scratch; any prior LOD-rebuild
-            // inputs are stale (the mesh key, scale, or category may have changed)
-            // and are re-established from the new build: a cold-cache mesh's on its
-            // next decode (P21.2), a warm-cache mesh's immediately here (built now,
-            // so `mesh_rebuild` is set from the build — the stuck-low-LOD fix), a
-            // plain prim's immediately here (P21.3), a tree's here (P26.2). An object
-            // that changed category drops the rebuild inputs it no longer has (each
-            // is `None`).
-            existing.mesh_rebuild = mesh_rebuild;
-            existing.prim_rebuild = prim_rebuild;
+            // The geometry was re-requested from scratch; any prior deferred build
+            // is stale (the mesh key, scale, or category may have changed) and the
+            // whole record is replaced by what the new build asked for: a
+            // cold-cache mesh's fetch, a warm-cache mesh's LOD-rebuild inputs
+            // (built now, so `mesh_rebuild` is set from the build — the
+            // stuck-low-LOD fix), a plain prim's re-tessellation inputs (P21.3), a
+            // tree's (P26.2). An object that changed category drops the rebuild
+            // inputs it no longer has (each is `None`), and one that now needs no
+            // deferred work at all drops its entry entirely.
+            builds.set(
+                scoped,
+                ObjectBuilds {
+                    pending,
+                    mesh_rebuild,
+                    prim_rebuild,
+                    tree_rebuild,
+                },
+            );
             existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
-            existing.tree_rebuild = tree_rebuild;
             existing.tree_tier = INITIAL_TREE_TIER;
             existing.shape = shape;
         }
@@ -3970,6 +3145,22 @@ fn apply_object(
     // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
     // (P32.2); a rigid prim gets nothing.
     apply_flexi_sim(entity, flexi_chain, object, &face_entities, commands);
+    // What this build still owes: a cold-cache mesh / sculpt's fetch (`pending`),
+    // a warm-cache mesh's LOD-rebuild inputs (`mesh_rebuild` — set only when the
+    // mesh built immediately, since a cold-cache one has it set on decode in
+    // `apply_object_meshes`), a plain prim's re-tessellation inputs
+    // (`prim_rebuild`, first tessellated at the coarse placeholder level), and a
+    // tree's regeneration inputs (`tree_rebuild`). An object that owes none —
+    // an avatar, a grass clump — gets no entry at all.
+    builds.set(
+        scoped,
+        ObjectBuilds {
+            pending,
+            mesh_rebuild,
+            prim_rebuild,
+            tree_rebuild,
+        },
+    );
     state.objects.insert(
         scoped,
         TrackedObject {
@@ -3986,19 +3177,7 @@ fn apply_object(
             material: object.material,
             extra: object.extra.clone(),
             face_entities,
-            pending,
-            // Set when this object built a warm-cache mesh immediately (so no
-            // later decode sets it): lets the pixel-area driver rebuild it on an
-            // LOD swap. A cold-cache mesh keeps `None` here and has it set on decode
-            // in `apply_object_meshes`; a non-mesh keeps `None`.
-            mesh_rebuild,
-            // A plain prim is first tessellated at the coarse placeholder level
-            // (P21.3); a non-prim keeps `prim_rebuild` None and stays at FINEST.
-            prim_rebuild,
             prim_lod: INITIAL_MANAGED_PRIM_LOD,
-            // A tree is first generated at the placeholder tier (P26.2); a non-tree
-            // keeps `tree_rebuild` None.
-            tree_rebuild,
             tree_tier: INITIAL_TREE_TIER,
             animated: is_animated_object(object),
             texture_entry: object.texture_entry.clone(),
@@ -4220,53 +3399,6 @@ fn route_hud_attachment(
     }
 }
 
-/// Despawn the entity for `scoped` and every tracked descendant, dropping them
-/// all from the map. Bevy's hierarchy despawns the entity's parented children
-/// with it; any tracked-but-not-yet-parented descendants are despawned
-/// explicitly so a lingering child update can never touch a dead entity.
-fn remove_object(state: &mut ObjectState, scoped: ScopedObjectId, commands: &mut Commands) {
-    let Some(removed) = state.objects.remove(&scoped) else {
-        return;
-    };
-    // Bevy despawns the parented sub-hierarchy together with the root entity.
-    // `try_despawn` because this entity may already be dead — a linkset child or
-    // attachment can be taken by its parent's hierarchy despawn before its own
-    // `KillObject` arrives here (the same race [`drop_stale_tracked_entity`] guards
-    // on the update path), and a plain `despawn` on it would itself warn.
-    commands.entity(removed.entity).try_despawn();
-    // A rigged mesh's skinned faces hang off the *avatar body root*, not this
-    // object entity (P17.2), so Bevy's hierarchy despawn above does not take them —
-    // despawn them explicitly (a no-op for a static mesh's faces, already gone with
-    // their object entity).
-    despawn_prim_faces(&removed.face_entities, commands);
-    // Drop tracked descendants; despawn any that were still waiting to be
-    // parented (Bevy did not despawn those with the root), and their faces.
-    for descendant in tracked_descendants(state, scoped) {
-        if let Some(entry) = state.objects.remove(&descendant) {
-            despawn_prim_faces(&entry.face_entities, commands);
-            if !entry.parented {
-                commands.entity(entry.entity).try_despawn();
-            }
-        }
-    }
-}
-
-/// The scoped ids of every tracked transitive descendant of `root` (children,
-/// grandchildren, …), following the stored parent links.
-fn tracked_descendants(state: &ObjectState, root: ScopedObjectId) -> Vec<ScopedObjectId> {
-    let mut descendants = Vec::new();
-    let mut frontier = vec![root];
-    while let Some(parent) = frontier.pop() {
-        for (&scoped, tracked) in &state.objects {
-            if !tracked.is_root && tracked.parent == parent {
-                descendants.push(scoped);
-                frontier.push(scoped);
-            }
-        }
-    }
-    descendants
-}
-
 /// Build the deferred geometry of every mesh object waiting on a mesh that just
 /// decoded: for each [`MeshDecoded`], spawn the submesh entities of every tracked
 /// object pending on that key (texturing them via the Phase 6 pipeline). A decode
@@ -4287,6 +3419,7 @@ pub fn apply_object_meshes(
     mut pending_keys: ResMut<PendingDecodedMeshes>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
+    mut builds: ResMut<PendingBuilds>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -4317,6 +3450,16 @@ pub fn apply_object_meshes(
         // skinned to a skeleton. It defers to [`apply_rigged_attachments`], which
         // finds its wearer by walking the parent chain to an avatar root.
         let is_rigged = mesh_manager.skin(key).is_some();
+        // The objects this key resolves for, snapshotted before any of them is
+        // built: those waiting on its first build, and those already built from it
+        // whose stored block the mesh store just swapped for another level of
+        // detail. The two sets are disjoint (the first has a pending build, the
+        // second none), and taking both up front keeps an object that builds here
+        // from being rebuilt again by the LOD pass in the same turn.
+        let waiting = builds.scoped_pending_on(
+            |pending| matches!(pending, PendingGeometry::Mesh(build) if build.key == key),
+        );
+        let swapped = builds.scoped_mesh_rebuild_on(key);
         // …except on a HUD (P35.1), which has no skeleton: the reference viewer
         // warns the user outright that a rigged mesh does not belong on a HUD
         // (the `RiggedMeshAttachedToHUD` notification). Binding it would skin its
@@ -4324,13 +3467,9 @@ pub fn apply_object_meshes(
         // into the world scene this phase routes it out of — so a HUD-worn rigged
         // mesh is built as static geometry in the HUD's own space instead.
         let hud_rigged: HashSet<ScopedObjectId> = if is_rigged {
-            state
-                .objects
+            waiting
                 .iter()
-                .filter(|(_scoped, tracked)| {
-                    matches!(&tracked.pending, Some(PendingGeometry::Mesh(pending)) if pending.key == key)
-                })
-                .map(|(&scoped, _tracked)| scoped)
+                .copied()
                 .filter(|&scoped| in_hud_attachment(&state, scoped))
                 .collect()
         } else {
@@ -4342,98 +3481,107 @@ pub fn apply_object_meshes(
                  (the reference viewer warns the user this is unsupported)"
             );
         }
-        for (&scoped, tracked) in &mut state.objects {
-            // First build: an object pending on this mesh key. A build pending on a
-            // *different* asset (another mesh, or a sculpt) is left untouched.
-            if matches!(&tracked.pending, Some(PendingGeometry::Mesh(pending)) if pending.key == key)
-            {
-                let Some(PendingGeometry::Mesh(pending)) = tracked.pending.take() else {
-                    continue;
-                };
-                if is_rigged && !hud_rigged.contains(&scoped) {
-                    // Defer the skinned build to `apply_rigged_attachments`. This is
-                    // gated on the mesh being rigged, NOT on `attachment_point`: an
-                    // attachment's point can arrive in a later update than the mesh
-                    // decode, and that race used to strand a far / late-rezzing
-                    // avatar's body in a static, un-skinned T-pose with coarse,
-                    // pixel-area-managed textures that never recovered on approach
-                    // (R22). The rigged bind resolves the wearer by parent chain, so
-                    // it does not need the point. A rigged mesh's skinned transform
-                    // also cannot be ranked by the pixel-area pass, so its geometry
-                    // must render at the finest block and never be LOD reduced —
-                    // upgrade it now in case its worn status was unknown when the
-                    // fetch began and it started on the managed, coarse-block path.
-                    mesh_manager.upgrade_to_finest(key);
-                    tracked.pending = Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
+        // First build: an object pending on this mesh key. A build pending on a
+        // *different* asset (another mesh, or a sculpt) was never collected.
+        for scoped in waiting {
+            let Some(PendingGeometry::Mesh(pending)) = builds.take_pending(&scoped) else {
+                continue;
+            };
+            if is_rigged && !hud_rigged.contains(&scoped) {
+                // Defer the skinned build to `apply_rigged_attachments`. This is
+                // gated on the mesh being rigged, NOT on `attachment_point`: an
+                // attachment's point can arrive in a later update than the mesh
+                // decode, and that race used to strand a far / late-rezzing
+                // avatar's body in a static, un-skinned T-pose with coarse,
+                // pixel-area-managed textures that never recovered on approach
+                // (R22). The rigged bind resolves the wearer by parent chain, so
+                // it does not need the point. A rigged mesh's skinned transform
+                // also cannot be ranked by the pixel-area pass, so its geometry
+                // must render at the finest block and never be LOD reduced —
+                // upgrade it now in case its worn status was unknown when the
+                // fetch began and it started on the managed, coarse-block path.
+                mesh_manager.upgrade_to_finest(key);
+                builds.set_pending(
+                    scoped,
+                    PendingGeometry::RiggedMesh(PendingRiggedMesh {
                         key,
                         texture_entry: pending.texture_entry,
-                    }));
-                } else {
-                    tracked.face_entities = build_mesh_submeshes(
-                        &mesh,
-                        key,
-                        &pending.texture_entry,
-                        pending.scale,
-                        tracked.geometry,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut manager,
-                        &mut prim_textures,
-                        pending.priority,
-                        &mut cache,
-                        &pending.intern,
-                        &mut material_cache,
-                    );
-                    budget.remaining = budget.remaining.saturating_sub(1);
-                    debug!(
-                        "built mesh {key}: {} submesh entities",
-                        tracked.face_entities.len()
-                    );
-                    // Remember how to rebuild on a later LOD swap (P21.2); a rigged
-                    // mesh (handled above) is boosted and never LOD managed.
-                    tracked.mesh_rebuild = Some(pending);
-                }
+                    }),
+                );
                 continue;
             }
-            // LOD swap (P21.2): this object already built this static mesh, and the
-            // store just swapped its geometry to a different level of detail.
-            // Despawn the old submesh entities and rebuild from the new block.
-            if !is_rigged
-                && tracked.pending.is_none()
-                && matches!(&tracked.mesh_rebuild, Some(rebuild) if rebuild.key == key)
-            {
-                let Some(rebuild) = tracked.mesh_rebuild.as_ref() else {
-                    continue;
-                };
-                let texture_entry = rebuild.texture_entry.clone();
-                let scale = rebuild.scale;
-                let priority = rebuild.priority;
-                let intern = rebuild.intern.clone();
-                let geometry = tracked.geometry;
-                despawn_prim_faces(&tracked.face_entities, &mut commands);
-                tracked.face_entities = build_mesh_submeshes(
-                    &mesh,
-                    key,
-                    &texture_entry,
-                    scale,
-                    geometry,
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    &mut manager,
-                    &mut prim_textures,
-                    priority,
-                    &mut cache,
-                    &intern,
-                    &mut material_cache,
-                );
-                budget.remaining = budget.remaining.saturating_sub(1);
-                debug!(
-                    "rebuilt mesh {key} at new LOD: {} submesh entities",
-                    tracked.face_entities.len()
-                );
+            let Some(geometry) = state.objects.get(&scoped).map(|tracked| tracked.geometry) else {
+                continue;
+            };
+            let face_entities = build_mesh_submeshes(
+                &mesh,
+                key,
+                &pending.texture_entry,
+                pending.scale,
+                geometry,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                pending.priority,
+                &mut cache,
+                &pending.intern,
+                &mut material_cache,
+            );
+            budget.remaining = budget.remaining.saturating_sub(1);
+            debug!("built mesh {key}: {} submesh entities", face_entities.len());
+            if let Some(tracked) = state.objects.get_mut(&scoped) {
+                tracked.face_entities = face_entities;
             }
+            // Remember how to rebuild on a later LOD swap (P21.2); a rigged
+            // mesh (handled above) is boosted and never LOD managed.
+            builds.set_mesh_rebuild(scoped, pending);
+        }
+        // LOD swap (P21.2): these objects already built this static mesh, and the
+        // store just swapped its geometry to a different level of detail. Despawn
+        // the old submesh entities and rebuild from the new block. A rigged mesh is
+        // never LOD managed, so a rigged key swaps nothing.
+        if is_rigged {
+            continue;
+        }
+        for scoped in swapped {
+            let Some(rebuild) = builds
+                .get(&scoped)
+                .and_then(|entry| entry.mesh_rebuild.as_ref())
+            else {
+                continue;
+            };
+            let texture_entry = rebuild.texture_entry.clone();
+            let scale = rebuild.scale;
+            let priority = rebuild.priority;
+            let intern = rebuild.intern.clone();
+            let Some(tracked) = state.objects.get_mut(&scoped) else {
+                continue;
+            };
+            let geometry = tracked.geometry;
+            despawn_prim_faces(&tracked.face_entities, &mut commands);
+            tracked.face_entities = build_mesh_submeshes(
+                &mesh,
+                key,
+                &texture_entry,
+                scale,
+                geometry,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                priority,
+                &mut cache,
+                &intern,
+                &mut material_cache,
+            );
+            budget.remaining = budget.remaining.saturating_sub(1);
+            debug!(
+                "rebuilt mesh {key} at new LOD: {} submesh entities",
+                tracked.face_entities.len()
+            );
         }
     }
 }
@@ -4459,6 +3607,7 @@ pub fn apply_prim_lod(
     mut targets: ResMut<PrimLodTargets>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
+    builds: Res<PendingBuilds>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -4479,7 +3628,10 @@ pub fn apply_prim_lod(
             };
             // Only a plain prim carries re-tessellation inputs; a sculpt / mesh /
             // avatar has none and is left untouched.
-            let Some(rebuild) = tracked.prim_rebuild.as_ref() else {
+            let Some(rebuild) = builds
+                .get(&scoped)
+                .and_then(|entry| entry.prim_rebuild.as_ref())
+            else {
                 return LodOutcome::Resolved;
             };
             if tracked.prim_lod == desired {
@@ -4540,6 +3692,7 @@ pub fn apply_tree_lod(
     mut targets: ResMut<TreeLodTargets>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
+    builds: Res<PendingBuilds>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -4555,7 +3708,10 @@ pub fn apply_tree_lod(
                 return LodOutcome::Resolved;
             };
             // Only a tree carries regeneration inputs; anything else is left untouched.
-            let Some(rebuild) = tracked.tree_rebuild.as_ref() else {
+            let Some(rebuild) = builds
+                .get(&scoped)
+                .and_then(|entry| entry.tree_rebuild.as_ref())
+            else {
                 return LodOutcome::Resolved;
             };
             if tracked.tree_tier == desired {
@@ -4710,6 +3866,7 @@ const fn pending_kind(pending: Option<&PendingGeometry>) -> &'static str {
 )]
 pub fn apply_rigged_attachments(
     mut state: ResMut<ObjectState>,
+    mut builds: ResMut<PendingBuilds>,
     mut avatars: ResMut<AvatarState>,
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
@@ -4732,14 +3889,9 @@ pub fn apply_rigged_attachments(
         return;
     };
     // Snapshot the objects whose rigged build is pending, so the per-object reads
-    // below can borrow `state.objects` immutably before the final update.
-    let pending: Vec<ScopedObjectId> = state
-        .objects
-        .iter()
-        .filter_map(|(&scoped, tracked)| {
-            matches!(tracked.pending, Some(PendingGeometry::RiggedMesh(_))).then_some(scoped)
-        })
-        .collect();
+    // below can borrow `builds` immutably before the final update.
+    let pending =
+        builds.scoped_pending_on(|pending| matches!(pending, PendingGeometry::RiggedMesh(_)));
     for scoped in pending {
         // A skinned build is among the heaviest per-object costs (submesh
         // meshes + inverse bindposes + skeleton binding); spend from the
@@ -4749,10 +3901,12 @@ pub fn apply_rigged_attachments(
         if budget.remaining == 0 {
             break;
         }
-        let Some(tracked) = state.objects.get(&scoped) else {
+        if !state.objects.contains_key(&scoped) {
             continue;
-        };
-        let Some(PendingGeometry::RiggedMesh(build)) = &tracked.pending else {
+        }
+        let Some(PendingGeometry::RiggedMesh(build)) =
+            builds.get(&scoped).and_then(|entry| entry.pending.as_ref())
+        else {
             continue;
         };
         let key = build.key;
@@ -4808,7 +3962,11 @@ pub fn apply_rigged_attachments(
                                     "tracked in-world object (is_root={}, attach_point={:?}, {})",
                                     tracked.is_root,
                                     tracked.attachment_point,
-                                    pending_kind(tracked.pending.as_ref()),
+                                    pending_kind(
+                                        builds
+                                            .get(&terminus)
+                                            .and_then(|entry| entry.pending.as_ref()),
+                                    ),
                                 ),
                                 None => {
                                     "UNTRACKED — its parent/root object never arrived".to_owned()
@@ -4953,9 +4111,12 @@ pub fn apply_rigged_attachments(
             // that): stop tracing this attachment so a later re-attach starts fresh.
             skip_log.bound(scoped);
         }
+        // The rigged build is done with (a re-tessellation would establish a fresh
+        // one); dropping it also drops the object's whole queue entry, since a
+        // rigged mesh carries no LOD-rebuild inputs.
+        let _built = builds.take_pending(&scoped);
         if let Some(tracked) = state.objects.get_mut(&scoped) {
             tracked.face_entities = face_entities;
-            tracked.pending = None;
             // The skinned mesh follows the skeleton joints directly, so the object
             // must not also be pinned to a rigid attachment-point node.
             tracked.parented = true;
@@ -5359,6 +4520,7 @@ pub fn apply_object_sculpts(
     mut pending_keys: ResMut<PendingDecodedSculpts>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
+    mut builds: ResMut<PendingBuilds>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -5378,11 +4540,7 @@ pub fn apply_object_sculpts(
     // Most decoded textures are ordinary face textures; when no sculpt build is
     // pending at all, the whole backlog is irrelevant — drop it with one scan
     // instead of burning the per-frame scan cap on it.
-    if !state
-        .objects
-        .values()
-        .any(|tracked| matches!(tracked.pending, Some(PendingGeometry::Sculpt(_))))
-    {
+    if !builds.any_pending_on(|pending| matches!(pending, PendingGeometry::Sculpt(_))) {
         pending_keys.queue.clear();
         pending_keys.queued.clear();
         return;
@@ -5400,36 +4558,41 @@ pub fn apply_object_sculpts(
             // The fetch failed: sculpts pending on this map stay geometry-less.
             continue;
         };
-        for tracked in state.objects.values_mut() {
-            // Take the pending build so a built object is not rebuilt; a build
-            // pending on a *different* asset (a mesh, or another sculpt map) is put
-            // back untouched.
-            match tracked.pending.take() {
-                Some(PendingGeometry::Sculpt(pending)) if pending.map == id => {
-                    tracked.face_entities = build_sculpt_faces(
-                        &map,
-                        pending.map,
-                        pending.sculpt_type,
-                        &pending.texture_entry,
-                        pending.scale,
-                        tracked.geometry,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                        &mut manager,
-                        &mut prim_textures,
-                        pending.priority,
-                        &mut cache,
-                        &pending.intern,
-                        &mut material_cache,
-                    );
-                    budget.remaining = budget.remaining.saturating_sub(1);
-                    debug!(
-                        "built sculpt {id}: {} face entities",
-                        tracked.face_entities.len()
-                    );
-                }
-                other => tracked.pending = other,
+        // Only the sculpts waiting on *this* map: a build pending on a different
+        // asset (a mesh, or another sculpt map) is never collected, so it is
+        // never taken and put back.
+        let waiting = builds.scoped_pending_on(
+            |pending| matches!(pending, PendingGeometry::Sculpt(sculpt) if sculpt.map == id),
+        );
+        for scoped in waiting {
+            // Take the pending build so a built object is not rebuilt.
+            let Some(PendingGeometry::Sculpt(pending)) = builds.take_pending(&scoped) else {
+                continue;
+            };
+            let Some(geometry) = state.objects.get(&scoped).map(|tracked| tracked.geometry) else {
+                continue;
+            };
+            let face_entities = build_sculpt_faces(
+                &map,
+                pending.map,
+                pending.sculpt_type,
+                &pending.texture_entry,
+                pending.scale,
+                geometry,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                pending.priority,
+                &mut cache,
+                &pending.intern,
+                &mut material_cache,
+            );
+            budget.remaining = budget.remaining.saturating_sub(1);
+            debug!("built sculpt {id}: {} face entities", face_entities.len());
+            if let Some(tracked) = state.objects.get_mut(&scoped) {
+                tracked.face_entities = face_entities;
             }
         }
     }
@@ -6113,11 +5276,7 @@ mod tests {
             text: object.text.clone(),
             text_color: object.text_color,
             face_entities: Vec::new(),
-            pending: None,
-            mesh_rebuild: None,
-            prim_rebuild: None,
             prim_lod: super::INITIAL_MANAGED_PRIM_LOD,
-            tree_rebuild: None,
             tree_tier: super::INITIAL_TREE_TIER,
             animated: false,
             texture_entry: Vec::new(),
@@ -6199,8 +5358,7 @@ mod tests {
             "the child dies with its root — the premise of the race"
         );
 
-        let dropped =
-            super::drop_stale_tracked_entity(&mut state, scoped, |e| world.get_entity(e).is_ok());
+        let dropped = state.drop_stale_tracked_entity(scoped, |e| world.get_entity(e).is_ok());
         assert_eq!(dropped, Some(child), "the stale entry is reported dropped");
         assert!(
             state.objects.is_empty(),
@@ -6226,8 +5384,7 @@ mod tests {
             .objects
             .insert(scoped, tracked_stub(&object, entity, geometry));
 
-        let dropped =
-            super::drop_stale_tracked_entity(&mut state, scoped, |e| world.get_entity(e).is_ok());
+        let dropped = state.drop_stale_tracked_entity(scoped, |e| world.get_entity(e).is_ok());
         assert_eq!(dropped, None, "a live entity is not dropped");
         assert!(
             state.objects.contains_key(&scoped),
@@ -6275,6 +5432,7 @@ mod tests {
         world.init_resource::<MaterialCache>();
 
         let mut state = super::ObjectState::default();
+        let mut builds = super::PendingBuilds::default();
         let root_obj = bare_object(pcode::PRIMITIVE);
         let mut child_obj = bare_object(pcode::PRIMITIVE);
         child_obj.local_id = RegionLocalObjectId(2);
@@ -6288,6 +5446,7 @@ mod tests {
         // to inspect / despawn between invocations.
         let apply = |world: &mut World,
                      state: &mut super::ObjectState,
+                     builds: &mut super::PendingBuilds,
                      object: &Object|
          -> Result<(), Box<dyn core::error::Error>> {
             let mut params: SystemState<ApplyParams> = SystemState::new(world);
@@ -6305,6 +5464,7 @@ mod tests {
                 .map_err(|error| format!("system params: {error}"))?;
             super::apply_object(
                 state,
+                builds,
                 object,
                 &mut commands,
                 &mut meshes,
@@ -6320,8 +5480,8 @@ mod tests {
         };
 
         // Spawn the root then the child; the child parents to the root's entity.
-        apply(&mut world, &mut state, &root_obj)?;
-        apply(&mut world, &mut state, &child_obj)?;
+        apply(&mut world, &mut state, &mut builds, &root_obj)?;
+        apply(&mut world, &mut state, &mut builds, &child_obj)?;
         let root_entity = state
             .objects
             .get(&root_scoped)
@@ -6349,7 +5509,7 @@ mod tests {
 
         // A later ObjectUpdated for the child: the guard drops the stale entry and the
         // spawn path re-creates the object, re-parented to the still-live root.
-        apply(&mut world, &mut state, &child_obj)?;
+        apply(&mut world, &mut state, &mut builds, &child_obj)?;
         let new_child = state
             .objects
             .get(&child_scoped)
@@ -6364,6 +5524,154 @@ mod tests {
             world.get::<ChildOf>(new_child).map(ChildOf::parent),
             Some(root_entity),
             "the respawned child re-parents to its still-live root"
+        );
+        Ok(())
+    }
+
+    /// Every path that drops a tracked object must also drop its deferred builds.
+    ///
+    /// While the build queues lived *inside* `TrackedObject`, removing the object
+    /// from the map dropped them implicitly; with the queues in the side table
+    /// they only go if the removal says so, and nothing fails to compile when one
+    /// path forgets. This pins all three ways an entry leaves the map — a
+    /// `KillObject`-style removal (which takes the linkset's children too), the
+    /// stale-entity guard, and the world-reset purge — against a leak that would
+    /// otherwise keep a plain prim's retained texture entry alive for every
+    /// object the session has ever seen.
+    #[test]
+    fn every_removal_path_forgets_the_deferred_builds() -> Result<(), Box<dyn core::error::Error>> {
+        use crate::face_material::FaceMaterial;
+        use crate::geometry_cache::GeometryCache;
+        use crate::material_cache::MaterialCache;
+        use crate::meshes::MeshManager;
+        use crate::textures::{PrimTextures, TextureManager};
+        use bevy::ecs::system::SystemState;
+        use bevy::prelude::{Assets, Commands, Mesh, ResMut, World};
+
+        /// The resources `apply_object`(super::apply_object) takes, as one
+        /// `SystemState` tuple (named to satisfy `type_complexity`).
+        type ApplyParams<'w, 's> = (
+            Commands<'w, 's>,
+            ResMut<'w, Assets<Mesh>>,
+            ResMut<'w, Assets<FaceMaterial>>,
+            ResMut<'w, TextureManager>,
+            ResMut<'w, PrimTextures>,
+            ResMut<'w, MeshManager>,
+            ResMut<'w, GeometryCache>,
+            ResMut<'w, MaterialCache>,
+        );
+
+        let mut world = World::new();
+        world.init_resource::<Assets<Mesh>>();
+        world.init_resource::<Assets<FaceMaterial>>();
+        world.init_resource::<TextureManager>();
+        world.init_resource::<PrimTextures>();
+        world.init_resource::<MeshManager>();
+        world.init_resource::<GeometryCache>();
+        world.init_resource::<MaterialCache>();
+
+        let root_obj = bare_object(pcode::PRIMITIVE);
+        let mut child_obj = bare_object(pcode::PRIMITIVE);
+        child_obj.local_id = RegionLocalObjectId(2);
+        child_obj.parent_id = RegionLocalObjectId(1);
+        let root_scoped = root_obj.scoped_id();
+
+        let apply = |world: &mut World,
+                     state: &mut super::ObjectState,
+                     builds: &mut super::PendingBuilds,
+                     object: &Object|
+         -> Result<(), Box<dyn core::error::Error>> {
+            let mut params: SystemState<ApplyParams> = SystemState::new(world);
+            let (
+                mut commands,
+                mut meshes,
+                mut materials,
+                mut manager,
+                mut prim_textures,
+                mut mesh_manager,
+                mut cache,
+                mut material_cache,
+            ) = params
+                .get_mut(world)
+                .map_err(|error| format!("system params: {error}"))?;
+            super::apply_object(
+                state,
+                builds,
+                object,
+                &mut commands,
+                &mut meshes,
+                &mut materials,
+                &mut manager,
+                &mut prim_textures,
+                &mut mesh_manager,
+                &mut cache,
+                &mut material_cache,
+            );
+            params.apply(world);
+            Ok(())
+        };
+
+        // A two-prim linkset. Both are plain prims, so each keeps its
+        // re-tessellation inputs — the queue tracks exactly the two of them.
+        let mut state = super::ObjectState::default();
+        let mut builds = super::PendingBuilds::default();
+        apply(&mut world, &mut state, &mut builds, &root_obj)?;
+        apply(&mut world, &mut state, &mut builds, &child_obj)?;
+        assert_eq!(
+            builds.builds.len(),
+            2,
+            "both plain prims queued their re-tessellation inputs"
+        );
+
+        // 1. The `KillObject` / derender removal: the root takes its linkset
+        //    child's builds with it, because it reports both ids.
+        let mut removals: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = removals
+            .get_mut(&mut world)
+            .map_err(|error| format!("system params: {error}"))?;
+        let removed = state.remove_object(root_scoped, &mut commands);
+        removals.apply(&mut world);
+        assert_eq!(removed.len(), 2, "the removal reports the child as well");
+        builds.forget_all(&removed);
+        assert!(
+            builds.builds.is_empty(),
+            "removing the linkset forgets both prims' deferred builds"
+        );
+
+        // 2. The stale-entity guard: an object whose entity a parent's hierarchy
+        //    despawn already took leaves no queue entry behind either.
+        let mut state = super::ObjectState::default();
+        let mut builds = super::PendingBuilds::default();
+        apply(&mut world, &mut state, &mut builds, &root_obj)?;
+        let entity = state
+            .objects
+            .get(&root_scoped)
+            .ok_or("root tracked")?
+            .entity;
+        world.entity_mut(entity).despawn();
+        let dropped = state.drop_stale_tracked_entity(root_scoped, |e| world.get_entity(e).is_ok());
+        assert_eq!(dropped, Some(entity), "the stale entry is dropped");
+        builds.forget(&root_scoped);
+        assert!(
+            builds.builds.is_empty(),
+            "the stale entry's deferred builds go with it"
+        );
+
+        // 3. The world-reset purge: the whole queue goes, like the whole map.
+        let mut state = super::ObjectState::default();
+        let mut builds = super::PendingBuilds::default();
+        apply(&mut world, &mut state, &mut builds, &root_obj)?;
+        apply(&mut world, &mut state, &mut builds, &child_obj)?;
+        let mut purge: SystemState<Commands> = SystemState::new(&mut world);
+        let mut commands = purge
+            .get_mut(&mut world)
+            .map_err(|error| format!("system params: {error}"))?;
+        state.purge(&mut commands);
+        purge.apply(&mut world);
+        builds.clear();
+        assert!(
+            builds.builds.is_empty(),
+            "a world reset clears the deferred builds with the object mirror"
         );
         Ok(())
     }

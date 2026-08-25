@@ -54,7 +54,7 @@ use crate::edit_tool::{
 };
 use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity};
+use crate::objects::{FaceTextureDebug, PrimFaceEntity};
 use crate::ui::row;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
@@ -66,6 +66,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_t
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::EditToolState;
+use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use crate::world_api::TexturePicked;
 

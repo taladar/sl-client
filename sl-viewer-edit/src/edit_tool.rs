@@ -42,7 +42,7 @@ use crate::floater::{
 use crate::gizmos::{EditPerm, perm_notice};
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::input_context::InputContext;
-use crate::objects::{ObjectSlMotion, ObjectState, SceneObject};
+use crate::objects::{ObjectSlMotion, SceneObject};
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
@@ -52,6 +52,7 @@ use crate::ui_tab::{
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::LocalChatNotice;
+use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 
 /// The floater's font size, in logical pixels.

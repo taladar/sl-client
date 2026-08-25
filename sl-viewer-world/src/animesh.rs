@@ -300,7 +300,7 @@ pub fn drive_control_avatars(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     manager: Res<AnimationManager>,
-    state: Res<crate::objects::ObjectState>,
+    state: Res<crate::world_api::ObjectState>,
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
 ) {

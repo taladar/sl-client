@@ -42,7 +42,6 @@ use crate::camera::FocusTarget;
 use crate::media_diagnostics::MediaDiagnostics;
 use crate::media_engine::{MediaEngineKind, MediaEngineSystems, MediaSurfaces};
 use crate::media_prim::{MediaData, MediaPrimState, media_permission_allows};
-use crate::objects::ObjectState;
 use crate::system_browser::normalize_web_url;
 use crate::system_browser::open_in_system_browser;
 use crate::ui::{LogicalInset, LogicalRect, UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
@@ -51,6 +50,7 @@ use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::MediaFocus;
 use crate::world_api::MediaTarget;
+use crate::world_api::ObjectState;
 use crate::world_api::{CameraRig, ViewerCamera};
 
 /// The [`UiAction`] element name of the bar.

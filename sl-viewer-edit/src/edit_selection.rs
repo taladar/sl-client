@@ -63,9 +63,10 @@ use crate::input_context::InputContext;
 use crate::inventory::InventoryModel;
 use crate::objects::ObjectPicker;
 use crate::objects::{
-    FaceTextureDebug, ObjectCategory, ObjectSlMotion, ObjectState, PrimFaceEntity, SceneObject,
+    FaceTextureDebug, ObjectCategory, ObjectSlMotion, PrimFaceEntity, SceneObject,
 };
 use crate::ui::UiRoot;
+use crate::world_api::ObjectState;
 use crate::world_api::ViewerCamera;
 use crate::world_api::on_hud_layer;
 use crate::world_api::{DragHoverHighlight, EditTool, EditToolState};
@@ -1392,7 +1393,7 @@ mod tests {
     /// child→root jump needs a populated `ObjectState` and is exercised live.)
     #[test]
     fn promote_to_roots_is_a_noop_when_all_roots() {
-        let objects = crate::objects::ObjectState::default();
+        let objects = crate::world_api::ObjectState::default();
         let mut set = SelectionSet::default();
         set.insert(scoped(1), full(1), Entity::PLACEHOLDER);
         set.insert(scoped(2), full(2), Entity::PLACEHOLDER);

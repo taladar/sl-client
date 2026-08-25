@@ -602,7 +602,7 @@ pub(crate) fn on_row_drag_end(
     resolve: (
         Res<ButtonInput<KeyCode>>,
         Query<&crate::objects::SceneObject>,
-        Res<crate::objects::ObjectState>,
+        Res<crate::world_api::ObjectState>,
     ),
     outputs: (
         MessageWriter<InventoryUiAction>,
@@ -1169,7 +1169,7 @@ fn drive_drag_object_hover(
     world_pick: Res<DragWorldPick>,
     scene: Query<&crate::objects::SceneObject>,
     child_of: Query<&ChildOf>,
-    objects: Res<crate::objects::ObjectState>,
+    objects: Res<crate::world_api::ObjectState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     occlusion: (Res<HoverMap>, Query<&Pickable>, Query<&ComputedNode>),
     mut hover_out: ResMut<crate::world_api::DragHoverHighlight>,
@@ -1234,7 +1234,7 @@ fn resolve_hover_entity(
     entity: Entity,
     scene: &Query<&crate::objects::SceneObject>,
     child_of: &Query<&ChildOf>,
-    objects: &crate::objects::ObjectState,
+    objects: &crate::world_api::ObjectState,
 ) -> Option<(Entity, ScopedObjectId)> {
     let mut node = entity;
     loop {

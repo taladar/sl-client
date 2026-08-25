@@ -454,10 +454,10 @@ use crate::notification_host::{
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
-    ObjectState, PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents, PrimLodTargets,
-    RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
-    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
-    log_suspicious_objects, pick_object, prune_control_avatars, recenter_objects,
+    PendingBuilds, PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents,
+    PrimLodTargets, RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments,
+    apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_rigged_attachments,
+    apply_tree_lod, log_suspicious_objects, pick_object, prune_control_avatars, recenter_objects,
     spawn_animesh_control_avatars, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
@@ -516,6 +516,7 @@ use crate::water_exclusion::{
     sync_water_exclusion_camera,
 };
 use crate::world_api::AvatarState;
+use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
@@ -1788,6 +1789,10 @@ fn run_session(
         .init_resource::<MeshUploadBudget>()
         .init_resource::<crate::terrain::CurrentTerrainLighting>()
         .init_resource::<ObjectState>()
+        // The deferred geometry builds of the objects `ObjectState` tracks, kept
+        // beside it rather than inside a tracked object: an in-flight asset fetch
+        // or a retained LOD rebuild is machinery, not world state.
+        .init_resource::<PendingBuilds>()
         .init_resource::<PendingObjectEvents>()
         .init_resource::<RiggedBindSkipLog>()
         .init_resource::<PendingDecodedMeshes>()

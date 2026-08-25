@@ -82,10 +82,9 @@ use sl_client_bevy::{
 use crate::avatars::update_avatar_objects;
 use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::meshes::MeshManager;
-use crate::objects::{
-    GeometryHolder, ObjectCategory, ObjectSlMotion, ObjectState, SceneObject, update_objects,
-};
+use crate::objects::{GeometryHolder, ObjectCategory, ObjectSlMotion, SceneObject, update_objects};
 use crate::raycast_index::{DynamicColliders, RaycastIndexColliders};
+use crate::world_api::ObjectState;
 
 use crate::world_api::AvatarState;
 use crate::world_api::TerrainState;

@@ -37,7 +37,7 @@ use sl_client_bevy::{
     SlCapabilities, SlCommand, SlEvent, SlSessionEvent,
 };
 
-use crate::objects::ObjectState;
+use crate::world_api::ObjectState;
 
 /// The state of a linkset's land impact in the shared model.
 #[derive(Debug, Clone, Copy, PartialEq)]

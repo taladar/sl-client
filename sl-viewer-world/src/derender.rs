@@ -91,9 +91,10 @@ use sl_settings::SettingValue;
 use tracing::{debug, info, warn};
 
 use crate::avatars::{AvatarPlaceholderAssets, derender_agent};
-use crate::objects::ObjectState;
+use crate::objects::PendingBuilds;
 use crate::settings::ViewerSettings;
 use crate::world_api::AvatarState;
+use crate::world_api::ObjectState;
 use crate::world_api::{DerenderEntry, DerenderKind, DerenderList, FriendsModel, HiddenBy};
 
 /// The per-account file the permanent blacklist is stored in (a sibling of the
@@ -441,7 +442,7 @@ pub(crate) fn index_derendered_objects(
 /// avatar it hangs off).
 ///
 /// Removing an object also removes its tracked descendants
-/// ([`ObjectState::derender_remove`]), so a linkset or an avatar's attachments
+/// ([`ObjectState::remove_object`]), so a linkset or an avatar's attachments
 /// go with their root.
 ///
 /// Every removed region-scoped id is **recorded** in the suppression index, not
@@ -461,6 +462,7 @@ pub(crate) fn index_derendered_objects(
 pub(crate) fn enforce_derender(
     mut list: ResMut<DerenderList>,
     mut objects: ResMut<ObjectState>,
+    mut builds: ResMut<PendingBuilds>,
     mut avatars: ResMut<AvatarState>,
     mut placeholders: ResMut<AvatarPlaceholderAssets>,
     poses: Query<&Transform>,
@@ -473,7 +475,8 @@ pub(crate) fn enforce_derender(
     }
     for source in core::mem::take(&mut list.pending_ids) {
         for scoped in objects.scoped_by_full_id(source.id()) {
-            let removed = objects.derender_remove(scoped, &mut commands);
+            let removed = objects.remove_object(scoped, &mut commands);
+            builds.forget_all(&removed);
             list.note_hidden(removed, source);
         }
         // Where the body stands right now, so its placeholder can take over in
@@ -497,7 +500,8 @@ pub(crate) fn enforce_derender(
         // Descendants of an already-indexed object inherit its root, so the
         // whole subtree is released (and re-fetched) together.
         let root = list.suppressing_root(scoped);
-        let removed = objects.derender_remove(scoped, &mut commands);
+        let removed = objects.remove_object(scoped, &mut commands);
+        builds.forget_all(&removed);
         if let Some(root) = root {
             list.note_hidden(removed, root);
         }

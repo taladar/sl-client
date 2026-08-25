@@ -82,9 +82,10 @@ use crate::edit_math::{
     vsub,
 };
 use crate::hud_pick::pointer_over_blocking_ui;
-use crate::objects::{ObjectCategory, ObjectSlMotion, ObjectState, SceneObject};
+use crate::objects::{ObjectCategory, ObjectSlMotion, SceneObject};
 use crate::world_api::GridFrame;
 use crate::world_api::LocalChatNotice;
+use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 use crate::world_api::ViewerCamera;
 use crate::world_api::{EditTool, EditToolState};

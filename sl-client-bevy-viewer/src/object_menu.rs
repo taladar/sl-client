@@ -108,10 +108,11 @@ use crate::avatar_menu::{SELF_SITTING, SELF_STANDING};
 use crate::derender::RequestDerender;
 use crate::inventory::InventoryModel;
 use crate::menu::UNIMPLEMENTED;
-use crate::objects::{ObjectRayHit, ObjectState};
+use crate::objects::ObjectRayHit;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::world_api::DerenderKind;
+use crate::world_api::ObjectState;
 use crate::world_api::RequestBlock;
 use crate::world_api::SelfGroundSit;
 

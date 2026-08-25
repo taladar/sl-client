@@ -42,7 +42,8 @@ use crate::media_engine::{
     MediaEngine, MediaEngineKind, MediaEngineSystems, MediaSurfaceId, MediaSurfaces,
 };
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
-use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
+use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
+use crate::world_api::ObjectState;
 use crate::world_api::{
     FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
 };

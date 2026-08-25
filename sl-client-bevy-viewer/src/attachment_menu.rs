@@ -103,12 +103,12 @@ use crate::avatar_menu::{
 use crate::derender::RequestDerender;
 use crate::menu::UNIMPLEMENTED;
 use crate::object_menu::TARGET_TOUCHABLE;
-use crate::objects::ObjectPickSummary;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
 use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::FriendsModel;
+use crate::world_api::ObjectPickSummary;
 use crate::world_api::SelfGroundSit;
 
 /// The `element` both attachment pies attribute their [`UiAction`]s to.

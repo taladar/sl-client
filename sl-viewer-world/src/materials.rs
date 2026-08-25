@@ -50,10 +50,11 @@ use crate::face_material::{
     FaceMaterial, MAP_FLAG_EMISSIVE, MAP_FLAG_MR, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, SL_FACE_MODE_PBR,
 };
 use crate::legacy_materials::{LegacyMaterialManager, preview_legacy_material};
-use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
+use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
 };
+use crate::world_api::ObjectState;
 use crate::world_api::{EditToolState, MatModeState, SelectionSet, TERRAIN_BOOST_PRIORITY};
 
 /// A face-material identity: the scoped object id and its Linden face index — the

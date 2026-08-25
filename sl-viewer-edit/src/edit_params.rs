@@ -58,7 +58,6 @@ use crate::edit_tool::{
     spawn_row_label,
 };
 use crate::i18n::{Translated, Translator};
-use crate::objects::ObjectState;
 use crate::ui::{UiPanelShown, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text::set_editor_text;
@@ -66,6 +65,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, TextInputValue, spawn_t
 use crate::world_api::AvatarState;
 use crate::world_api::EditToolState;
 use crate::world_api::GroupsModel;
+use crate::world_api::ObjectState;
 use crate::world_api::SelectionSet;
 
 // ---------------------------------------------------------------------------
