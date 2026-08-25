@@ -56,12 +56,12 @@ use bevy::shader::ShaderRef;
 
 use sl_client_bevy::{AgentKey, RegionHandle, SlIdentity, Vector};
 
-use crate::avatars::AvatarState;
 use crate::coords::{metres_to_f32, sl_to_bevy_vec};
 use crate::name_tag_billboard::tag_render_layers;
 use crate::terrain::TerrainState;
 use crate::ui::UiRoot;
 use crate::ui_font::UiFont;
+use crate::world_api::AvatarState;
 use crate::world_api::{FriendsModel, MapTracking, TrackTarget, ViewerCamera};
 
 /// The internal handle the beacon-beam shader (`beacon_beam.wgsl`) is loaded under,

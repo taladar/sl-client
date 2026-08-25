@@ -9163,7 +9163,6 @@ dependencies = [
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
- "sl-viewer-world",
  "sl-viewer-world-api",
  "tracing",
 ]

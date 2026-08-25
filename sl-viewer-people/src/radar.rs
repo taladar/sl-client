@@ -55,7 +55,6 @@ use crate::animations::AnimationPlayback;
 use crate::avatar_complexity::RenderOverride;
 use crate::avatar_profile::{FLAG_IDENTIFIED, FLAG_TRANSACTED};
 use crate::avatar_render_settings::RequestRenderException;
-use crate::avatars::AvatarState;
 use crate::conversations::NearbyChatNotice;
 use crate::derender::RequestDerender;
 use crate::floater::{
@@ -89,6 +88,7 @@ use crate::ui_table::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists, spawn_virtual_scrollbar};
+use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::FriendsModel;
 use crate::world_api::LocalChatNotice;

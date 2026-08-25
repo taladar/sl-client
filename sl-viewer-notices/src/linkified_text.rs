@@ -41,7 +41,6 @@ use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{AgentKey, Command, GroupKey, SlCommand};
 
-use crate::avatars::{AvatarState, NameRecord};
 use crate::i18n::Translator;
 use crate::parcel_names::ParcelNames;
 use crate::system_browser::open_in_system_browser;
@@ -52,6 +51,7 @@ use crate::ui_name_link::{NAME_LINK_COLOR, NAME_PLAIN_COLOR};
 use crate::url_linkify::{AgentNameStyle, LinkIcon, LinkLabel, LinkTarget, TextRun, linkify};
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenWebBrowser;
+use crate::world_api::{AvatarState, NameRecord};
 
 /// The leading-icon size, in logical pixels, relative to the label font size.
 const ICON_SCALE: f32 = 1.0;
@@ -747,9 +747,9 @@ pub fn spawn_linkified_text_specimen(
 #[cfg(test)]
 mod tests {
     use super::{LinkTextStyle, agent_label, spawn_linkified_text};
-    use crate::avatars::NameRecord;
     use crate::ui::{UiRoot, UiScaffoldSystems};
     use crate::url_linkify::AgentNameStyle;
+    use crate::world_api::NameRecord;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_viewer_testkit::{LayoutTest, TestError, settle};

@@ -39,9 +39,9 @@
 use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, Command, GroupKey, OwnerKey, SlCommand};
 
-use crate::avatars::AvatarState;
 use crate::i18n::Translator;
 use crate::ui_font::UiFont;
+use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;

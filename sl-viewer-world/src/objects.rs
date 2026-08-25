@@ -56,9 +56,7 @@ use sl_client_bevy::{
 
 use crate::animesh::ControlAvatarState;
 use crate::asset_budget::MeshUploadBudget;
-use crate::avatars::{
-    AvatarBody, AvatarState, BomFace, bom_face_material, log_avatar_faces_enabled,
-};
+use crate::avatars::{AvatarBody, BomFace, bom_face_material, log_avatar_faces_enabled};
 use crate::coords::{
     origin_shift_bevy, region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_object_rotation,
     sl_to_bevy_vec,
@@ -67,6 +65,7 @@ use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::hud_pick::surface_info_from_hit;
+use crate::world_api::AvatarState;
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, AvatarPickTarget, FLAGS_ALLOW_INVENTORY_DROP, FLAGS_OBJECT_COPY,
     FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE, FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM,
@@ -721,7 +720,7 @@ impl ObjectState {
     ///
     /// The own avatar's **object** entity is purged along with the rest — it is
     /// only a position-only mirror; the agent's *visible body* is kept across the
-    /// purge by [`AvatarState::purge`](crate::avatars::AvatarState::purge) (keyed
+    /// purge by [`AvatarState::purge`](crate::world_api::AvatarState::purge) (keyed
     /// by agent, so it does not flash), and the destination re-streams the object
     /// entity. Keeping it here would instead strand it as a ghost dot at the spot
     /// we left, because the same avatar is streamed by *every* connected region so
@@ -1421,7 +1420,7 @@ pub struct ObjectPickSummary {
     pub attachment: bool,
     /// For a worn chain, the scoped id of the **avatar object** the attachment
     /// root hangs on (its wearer), resolvable to an agent via
-    /// [`AvatarState::agent_of`](crate::avatars::AvatarState::agent_of); `None`
+    /// [`AvatarState::agent_of`](crate::world_api::AvatarState::agent_of); `None`
     /// for an ordinary in-world object.
     pub wearer: Option<ScopedObjectId>,
 }

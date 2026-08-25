@@ -40,7 +40,6 @@ use bevy::prelude::*;
 use bevy::ui_widgets::{Activate, SliderRange, SliderStep};
 use sl_settings::{Scope, SettingValue};
 
-use crate::avatars::AvatarState;
 use crate::camera::CameraTuning;
 use crate::movement::MovementTuning;
 use crate::preferences::{
@@ -49,6 +48,7 @@ use crate::preferences::{
 };
 use crate::settings::ViewerSettings;
 use crate::settings_binding::SettingBinding;
+use crate::world_api::AvatarState;
 use crate::world_api::{CameraMode, ViewerCamera};
 use sl_client_bevy::SlIdentity;
 

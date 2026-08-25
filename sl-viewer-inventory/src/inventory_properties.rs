@@ -290,7 +290,7 @@ fn open_properties(
     mut state: ResMut<ItemPropertiesState>,
     mut ui: ResMut<ItemPropertiesUi>,
     identity: Res<SlIdentity>,
-    avatars: Res<crate::avatars::AvatarState>,
+    avatars: Res<crate::world_api::AvatarState>,
     children: Query<&Children>,
     mut panels: Query<&mut UiPanelShown>,
     mut commands: Commands,

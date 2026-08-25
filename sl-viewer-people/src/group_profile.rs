@@ -52,7 +52,6 @@ use sl_client_bevy::{
     TextureKey, UpdateGroupInfoParams, Uuid, group_powers, to_bevy_image,
 };
 
-use crate::avatars::AvatarState;
 use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     spawn_floater,
@@ -75,6 +74,7 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
+use crate::world_api::AvatarState;
 use crate::world_api::{GroupsModel, OpenGroupProfile};
 
 /// The chrome font size, in logical pixels.

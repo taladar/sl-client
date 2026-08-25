@@ -79,7 +79,7 @@ use sl_client_bevy::{
     RegionHandle, Rotation, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Submesh, Vector, pcode,
 };
 
-use crate::avatars::{AvatarState, update_avatar_objects};
+use crate::avatars::update_avatar_objects;
 use crate::coords::{region_offset_bevy, sl_rotation_to_quat, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::meshes::MeshManager;
 use crate::objects::{
@@ -87,6 +87,7 @@ use crate::objects::{
 };
 use crate::raycast_index::{DynamicColliders, RaycastIndexColliders};
 use crate::terrain::TerrainState;
+use crate::world_api::AvatarState;
 use crate::world_api::{AvatarMotion, ViewerCamera};
 
 /// Clamp a raw region time dilation into the `0.0..=1.0` speed factor the
@@ -1470,7 +1471,7 @@ pub(crate) fn drive_avatar_motion(
         ),
         // A seated avatar rides its seat, not the region: `place_seated_avatars`
         // drives its anchor, so the region-space dead-reckoner must leave it be.
-        Without<crate::avatars::Seated>,
+        Without<crate::world_api::Seated>,
     >,
     mut commands: Commands,
 ) {

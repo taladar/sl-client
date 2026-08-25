@@ -100,13 +100,13 @@ use crate::avatar_menu::{
     AvatarMenuTarget, OTHER_MUTE_PIE, SELF_RESET_PIE, SELF_SITTING, SELF_STANDING,
     TARGET_NOT_FRIEND,
 };
-use crate::avatars::AvatarState;
 use crate::derender::RequestDerender;
 use crate::menu::UNIMPLEMENTED;
 use crate::object_menu::TARGET_TOUCHABLE;
 use crate::objects::ObjectPickSummary;
 use crate::pie_menu::{Compass, OpenPieMenu, PieAction, PieContent, PieEntry, PieMenuDef};
 use crate::ui_element::UiAction;
+use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::FriendsModel;
 use crate::world_api::SelfGroundSit;

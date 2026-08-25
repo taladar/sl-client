@@ -33,9 +33,9 @@ use bevy::prelude::*;
 use sl_client_bevy::{AssetKey, ControlFlags, SlIdentity};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::avatars::AvatarState;
 use crate::movement::AvatarControls;
 use crate::world_api::AvatarMotion;
+use crate::world_api::AvatarState;
 
 /// Vertical speed (metres/second) beyond which a *flying* avatar counts as
 /// ascending / descending rather than hovering.

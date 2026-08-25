@@ -43,12 +43,11 @@ use bevy::prelude::*;
 use bevy::tasks::{AsyncComputeTaskPool, Task, block_on, poll_once};
 use bytes::Bytes;
 use sl_client_bevy::{
-    AgentKey, AnimationPose, AvatarName, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton,
-    BodyPhysics, BodySizeMetrics, CoarseLocation, Command, DecodedTexture, DiscardLevel,
-    DisplayName, JointOverrides, Layer, MAX_FACES, MaskTexture, MeshSkin, MorphWeights, Object,
-    PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle, ResolvedParams, ScopedObjectId,
-    SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent, TextureEntry, TextureKey,
-    Uuid, VolumeDeformations, avatar_texture, composite_region, decode_texture_entry,
+    AgentKey, AnimationPose, BakeRegion, BaseMesh, BaseMeshSkin, BevySkeleton, BodyPhysics,
+    BodySizeMetrics, CoarseLocation, Command, DecodedTexture, DiscardLevel, JointOverrides, Layer,
+    MaskTexture, MeshSkin, MorphWeights, Object, PartMorphMask, RUNTIME_MORPH_PARAMS, RegionHandle,
+    ResolvedParams, SkeletalDeformations, SlCommand, SlEvent, SlIdentity, SlSessionEvent,
+    TextureEntry, TextureKey, VolumeDeformations, avatar_texture, composite_region,
     joint_position_overrides, pcode, to_bevy_base_mesh, to_bevy_image, to_bevy_morphed_mesh,
     to_bevy_runtime_morph_targets,
 };
@@ -66,7 +65,10 @@ use crate::objects::ObjectState;
 use crate::physics::AvatarInterp;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
-use crate::world_api::{AvatarAnchor, AvatarMotion, AvatarPickTarget};
+use crate::world_api::{
+    AppearanceDirtyStamps, AvatarAnchor, AvatarEntities, AvatarMotion, AvatarPickTarget,
+    AvatarState, NameRecord, Seated, SeatedTarget, despawn_avatar,
+};
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -112,10 +114,6 @@ const BOM_FALLBACK_COLOR: Color = Color::srgb(0.75, 0.75, 0.75);
 /// The channel count of a decoded RGBA8 texture — the pixel stride used when
 /// sampling a bake's alpha for the clothing-morph masks (P14.5).
 const RGBA_CHANNELS: usize = 4;
-
-/// How many leading hex characters of the agent id to show as a provisional tag
-/// before the real name resolves.
-const PROVISIONAL_ID_CHARS: usize = 8;
 
 /// A marker component tagging an entity as an avatar placeholder sphere.
 #[derive(Component, Debug, Clone, Copy)]
@@ -332,97 +330,6 @@ pub struct NameTag {
     pub(crate) tag_height: f32,
 }
 
-/// The user's **own** naming of a resident, overriding what the grid answers:
-/// a contact-set pseudonym or display-name removal
-/// (`crate::contact_sets`, `viewer-contact-set-pseudonyms`).
-///
-/// It is mirrored into the name cache rather than consulted beside it, so every
-/// surface that resolves a name through a [`NameRecord`] — name tags, the radar,
-/// tooltips, the inspectors, linkified names — shows the alias without knowing
-/// that contact sets exist. The grid's own answer is never overwritten; it stays
-/// in the record's fields and [`NameRecord::grid_name`] returns it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum NameAlias {
-    /// Show this text in place of the resident's name. It carries the
-    /// reference's **quoted** form (`'Nickname'`), which is what keeps an alias
-    /// from being read as the grid's own answer.
-    Pseudonym(String),
-    /// Show this resident's legacy name only — the reference's display-name
-    /// removal (`hasDisplayNameRemoved`), for someone whose chosen display name
-    /// the user would rather not see.
-    LegacyOnly,
-}
-
-/// One agent's resolved names, merged from every source: the instant
-/// `ObjectUpdate` NameValue seed, the legacy `UUIDNameReply`, and the
-/// `GetDisplayNames` cap (SL only — OpenSim generally lacks the cap, so the
-/// legacy fields must always work on their own) — plus the user's own
-/// [alias](NameAlias) for them, if they gave one.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct NameRecord {
-    /// The legacy `"First Last"` name (`"First"` alone for a single-name
-    /// account), from whichever source arrived first.
-    pub legacy: Option<String>,
-    /// The immutable dotted SLID (`"first.last"`), display-name cap only.
-    pub username: Option<String>,
-    /// The chosen display name, display-name cap only (`None` on OpenSim).
-    pub display_name: Option<String>,
-    /// Whether the display name is just the legacy-derived default (a custom
-    /// display name shows with the username line under it, the reference's
-    /// `is_display_name_default` behaviour).
-    pub is_display_name_default: bool,
-    /// The user's own name for this resident, mirrored from the contact-set
-    /// store by `crate::contact_sets::apply_name_aliases`. Not a grid answer,
-    /// and never written by an ingest path.
-    pub alias: Option<NameAlias>,
-}
-
-impl NameRecord {
-    /// The name to show for this resident: the user's own alias when they gave
-    /// one, else the display name when one resolved, else the legacy name.
-    #[must_use]
-    pub fn preferred_name(&self) -> Option<&str> {
-        match self.alias {
-            Some(NameAlias::Pseudonym(ref shown)) => Some(shown),
-            Some(NameAlias::LegacyOnly) => self.legacy.as_deref(),
-            None => self.grid_name(),
-        }
-    }
-
-    /// [`Self::preferred_name`] with display names switched off (the name tags'
-    /// `ShowDisplayNames`): the legacy name, but a **pseudonym still wins** —
-    /// the toggle says which of the grid's two names to believe, and an alias is
-    /// not one of the grid's answers.
-    pub(crate) fn legacy_display_name(&self) -> Option<&str> {
-        match self.alias {
-            Some(NameAlias::Pseudonym(ref shown)) => Some(shown),
-            Some(NameAlias::LegacyOnly) | None => self.legacy.as_deref(),
-        }
-    }
-
-    /// The **grid's** own answer, with no alias applied — what a surface shows
-    /// when the person's real identity is the point (a profile), and what a
-    /// name filed in a store must remember.
-    #[must_use]
-    pub fn grid_name(&self) -> Option<&str> {
-        self.display_name.as_deref().or(self.legacy.as_deref())
-    }
-
-    /// Whether the shown name is something other than this resident's legacy
-    /// name — a custom display name, or a pseudonym. It is what puts the
-    /// username line under a name tag: the shown name does not say who this is,
-    /// so the username has to.
-    pub(crate) const fn has_custom_display_name(&self) -> bool {
-        match self.alias {
-            Some(NameAlias::Pseudonym(_)) => true,
-            // The point of display-name removal is to be shown the legacy name,
-            // which is the one name that needs no username under it.
-            Some(NameAlias::LegacyOnly) => false,
-            None => self.display_name.is_some() && !self.is_display_name_default,
-        }
-    }
-}
-
 /// The master name-tag toggle (the preferences General tab's headline switch;
 /// the reference `AvatarNameTagMode` off/on axis). Honoured by
 /// [`crate::name_tag_billboard::follow_tag_anchors`]; the full reference toggle set is the separate
@@ -547,265 +454,20 @@ struct AvatarAssets {
     material: Handle<FaceMaterial>,
 }
 
-/// One nearby avatar as the map surfaces (minimap, radar) consume it — see
-/// [`AvatarState::map_avatars`].
-#[derive(Debug, Clone, Copy)]
-pub struct MapAvatar {
-    /// The avatar's agent id.
-    pub agent: AgentKey,
-    /// The world entity whose transform places the avatar.
-    pub anchor: Entity,
-    /// For a coarse-only avatar, its last coarse altitude in metres (`0` /
-    /// `1020` are the "unknown" sentinels); `None` for a precisely-known
-    /// full-object avatar.
-    pub coarse_z: Option<f32>,
-}
-
-/// The pair of entities rendering one avatar: its world-space anchor (a
-/// placeholder sphere or the root of a rigged body) and its screen-space
-/// name-tag text node.
-#[derive(Debug, Clone, Copy)]
-struct AvatarEntities {
-    /// The anchor entity — a placeholder sphere or a rigged-body root. Despawned
-    /// recursively, so a body's whole joint / mesh sub-hierarchy goes with it.
-    anchor: Entity,
-    /// The floating name-tag UI text entity.
-    label: Entity,
-}
-
-/// Viewer-side avatar bookkeeping: the placeholder entities for every nearby
-/// avatar, split by which stream it came from, plus a legacy-name cache.
+/// The lazily-built placeholder-sphere render assets, held beside
+/// [`AvatarState`] rather than inside it.
 ///
-/// A full-object avatar's `ObjectRemoved` carries only its scoped local id (not
-/// its agent id), so `by_scoped` maps back to the agent id the
-/// avatar is keyed by.
+/// The avatar bookkeeping is pure data — entity ids, names, positions, flags —
+/// and belongs below the world with everything that reads it. A mesh handle and
+/// a material handle are not: they are render machinery, built from
+/// [`Assets<Mesh>`] and [`Assets<FaceMaterial>`] and meaningful only to the
+/// layer that spawns entities. Keeping them in a resource of their own is what
+/// lets the state travel down while the spawning stays here.
 #[derive(Debug, Resource, Default)]
-pub struct AvatarState {
-    /// The region the Bevy scene is anchored at (origin `<0,0,0>`), so a **full
-    /// object** avatar in a neighbour region is offset onto the right terrain
-    /// (mirroring the coarse-dot and object offsets) and every avatar is re-based
-    /// when this moves ([`recenter_avatars`]). `None` until the first region is
-    /// known; kept in lockstep with the object/terrain origins (all follow
-    /// [`SlIdentity`]'s root handle).
-    origin: Option<RegionHandle>,
-    /// Avatars known as a full in-world object (`pcode` 47), keyed by agent id;
-    /// their sphere follows the object's precise position.
-    objects: HashMap<AgentKey, AvatarEntities>,
-    /// Avatars known only from coarse (minimap) locations — not (currently) a full
-    /// object — keyed by agent id; their sphere sits at the 1 m coarse position.
-    coarse: HashMap<AgentKey, AvatarEntities>,
-    /// The source region of each coarse-only avatar (R24). `CoarseLocationUpdate`
-    /// arrives per-region (root *and* each neighbour child circuit), so a coarse
-    /// dot is reconciled only against its own region's update — a neighbour's
-    /// update must not despawn the root region's dots. Also lets a region's dots be
-    /// dropped when that region is disabled (an empty update for the region).
-    coarse_region: HashMap<AgentKey, RegionHandle>,
-    /// A reverse map from an object's scoped id to its agent id, so an
-    /// `ObjectRemoved` can find the avatar to despawn.
-    by_scoped: HashMap<ScopedObjectId, AgentKey>,
-    /// The per-avatar attachment-point node entities, keyed by agent id then by
-    /// raw attachment-point id (P16.2). Each node is a child of its skeleton joint
-    /// carrying the fixed `avatar_lad.xml` offset; a worn attachment parents to the
-    /// node for its point so it seats at the stored local offset from the joint.
-    /// Absent for a sphere-only (no `--viewer-assets`) avatar.
-    attachment_nodes: HashMap<AgentKey, HashMap<u8, Entity>>,
-    /// The camera's head-focus socket entity per rigged avatar (Phase 4 §5.4):
-    /// a root child the pose driver's socket writer places at the posed `mHead`
-    /// joint each frame, so the camera holds the animated head without a head
-    /// joint entity. Absent for a sphere-only avatar; despawned with the anchor.
-    head_sockets: HashMap<AgentKey, Entity>,
-    /// Resolved names, keyed by agent id — the "simple name cache" that keeps
-    /// a repeatedly-seen avatar from being re-requested; merged from the
-    /// NameValue seed, the legacy `UUIDNameReply` and the display-name cap.
-    names: HashMap<AgentKey, NameRecord>,
-    /// The user's own [aliases](NameAlias), mirrored from the contact-set store
-    /// by `crate::contact_sets::apply_name_aliases`. Held beside the records
-    /// (as well as folded into them) so an avatar seen *after* the alias was
-    /// given still shows it: [`Self::name_entry`] folds it in as the record is
-    /// created. Session state — the store is what persists.
-    name_aliases: HashMap<AgentKey, NameAlias>,
-    /// Group titles from each avatar object's NameValue `Title` — the classic
-    /// mechanism the reference reads for other avatars' tags. (The own
-    /// avatar's fresher title comes from `ActiveGroupChanged` via
-    /// [`crate::world_api::GroupsModel`].)
-    titles: HashMap<AgentKey, String>,
-    /// Agents whose name has already been requested (but has not necessarily
-    /// arrived), so the same request is never sent twice.
-    requested: HashSet<AgentKey>,
-    /// Agents queued for this frame's batched name request
-    /// ([`flush_name_requests`]): one `UUIDNameRequest` **and** one
-    /// `GetDisplayNames` cap call per frame, however many avatars appeared
-    /// (each cap call costs an HTTP request; cap absence — OpenSim — is a
-    /// silent no-op, which is why the legacy request always goes out too).
-    pending_name_requests: HashSet<AgentKey>,
-    /// The latest `AvatarAppearance.visual_params` byte vector per avatar, kept so
-    /// a body spawned after (or re-spawned) can be morphed from the last known
-    /// appearance (P13.3).
-    appearances: HashMap<AgentKey, Vec<u8>>,
-    /// Avatars whose rigged body needs its appearance (re)applied — its morphs
-    /// re-blended and its skeleton re-deformed — set on a fresh appearance and on
-    /// a newly spawned body, drained by [`apply_avatar_appearance`].
-    appearance_dirty: HashSet<AgentKey>,
-    /// The debounce ledger behind [`appearance_dirty`](Self::appearance_dirty):
-    /// per still-unserviced avatar, when (app elapsed seconds) it was first and
-    /// last marked dirty. [`apply_avatar_appearance`] folds fresh marks in each
-    /// frame and picks avatars from here under its per-frame budget — a
-    /// never-shaped avatar immediately, a re-marked one only after a quiet
-    /// window, so the appearance → body-spawn → bake-decode trigger cascade
-    /// resolves once instead of once per trigger.
-    appearance_pending: HashMap<AgentKey, AppearanceDirtyStamps>,
-    /// A generation counter over every input the skeleton pose fold consumes from
-    /// this state (deformations, volume deformations, joint overrides, body
-    /// physics): bumped by [`bump_pose_inputs`](Self::bump_pose_inputs) whenever
-    /// one is (re)applied. The pose gate re-evaluates **all** avatars for one
-    /// frame on any bump — coarse but simple, and these are rare events.
-    pose_inputs_generation: u64,
-    /// The joint position overrides each avatar's worn rigged meshes impose (R1),
-    /// keyed by agent id then by the contributing **mesh asset id**. Kept per-mesh
-    /// (rather than pre-merged) so the set can be rebuilt as meshes come and go — the
-    /// reference viewer's `clearAttachmentOverrides` + rebuild — and so a per-joint
-    /// conflict resolves to the highest-mesh-id override (`findActiveOverride`), via
-    /// [`effective_joint_overrides`](Self::effective_joint_overrides). Absent for an
-    /// avatar wearing no position-carrying rig — its skeleton stays on the plain
-    /// appearance shape. `apply_avatar_appearance` folds the effective set in.
-    joint_overrides: HashMap<AgentKey, HashMap<Uuid, JointOverrides>>,
-    /// Every worn **rigged mesh asset id** bound to each avatar's skeleton, kept so
-    /// the avatar-state dump (viewer-avatar-state-dump-replay) can record which
-    /// meshes make up an avatar — the heavy geometry itself already persists in the
-    /// mesh cache, so only the id set is needed to reconstruct it offline.
-    worn_rigged_meshes: HashMap<AgentKey, HashSet<Uuid>>,
-    /// Whether each avatar's `TEX_SKIRT_BAKED` slot holds a visible bake, from its
-    /// latest appearance — the reference viewer's skirt-worn test. Absent means
-    /// not yet known, treated as no skirt (the base skirt mesh stays hidden).
-    skirt_visible: HashMap<AgentKey, bool>,
-    /// Each avatar's ingested body-physics (`WT_PHYSICS`) configuration (P34.1),
-    /// resolved from its latest appearance: the six breast / belly / butt
-    /// spring-damper motions, their settings, and the runtime morph params each
-    /// one drives. The per-frame simulation (P34.2) reads it; an avatar whose
-    /// appearance switches physics off keeps an entry whose motions are all
-    /// inactive.
-    body_physics: HashMap<AgentKey, BodyPhysics>,
-    /// The visible baked-texture id in each base-body region slot per avatar,
-    /// from its latest appearance (P14.1): the published baked UUIDs the viewer
-    /// fetches through the shared [`TextureManager`] and (from P14.2) drapes over
-    /// the system body. Keyed by baked slot (`BODY_BAKE_SLOTS`); a slot with no
-    /// real bake is simply absent.
-    baked_textures: HashMap<AgentKey, HashMap<usize, TextureKey>>,
-    /// The base-body region slots each avatar has baked **invisible**
-    /// (`IMG_INVISIBLE`) via a worn system alpha layer, from its latest appearance
-    /// (R22). These regions are hidden outright ([`apply_avatar_part_visibility`]),
-    /// matching the reference viewer's `isTextureVisible`, so the system body does
-    /// not render and z-fight a non-BOM mesh body worn over it.
-    invisible_regions: HashMap<AgentKey, HashSet<usize>>,
-    /// The Current Outfit Folder version whose bakes were last fetched per avatar
-    /// (P14.4), so a later `AvatarAppearance` with a strictly-older `cof_version`
-    /// (an out-of-order / duplicate resend) is skipped and cannot clobber a newer
-    /// bake. Absent means none seen yet; an appearance with no `cof_version`
-    /// (OpenSim / the older path) is always ingested.
-    baked_cof_version: HashMap<AgentKey, i32>,
-    /// Avatars whose body-region bake materials need (re)assigning — set on a
-    /// fresh appearance and on a newly spawned body, drained by
-    /// [`assign_avatar_bake_materials`] (P14.2).
-    bake_dirty: HashSet<AgentKey>,
-    /// The parent scoped id of every tracked non-root object (linkset children and
-    /// attachments), so an attachment's chain can be chased up to its avatar root
-    /// (P13.5 `IMG_USE_BAKED_*` region hide).
-    object_parents: HashMap<ScopedObjectId, ScopedObjectId>,
-    /// For every tracked non-root object whose texture entry carries
-    /// `IMG_USE_BAKED_*` sentinels, the baked slots it replaces — aggregated up the
-    /// attachment chain to hide the matching base-avatar mesh regions.
-    baked_hides: HashMap<ScopedObjectId, Vec<usize>>,
-    /// Non-root objects whose texture entry has already been scanned for
-    /// `IMG_USE_BAKED_*` sentinels, so a motion-only update never re-decodes it.
-    scanned_objects: HashSet<ScopedObjectId>,
-    /// Each rigged avatar's resolved skeletal deformations, the shape
-    /// [`apply_avatar_appearance`] last applied — kept so the animation driver
-    /// (P18.3) can re-run the Second Life skeletal recurrence with the playing
-    /// motion folded in and write each joint's world matrix straight to its
-    /// `GlobalTransform` (avoiding the limb-shear a rotation overlaid onto the
-    /// baked-scale rest transform would cause). Absent for a sphere-only
-    /// (no `--viewer-assets`) avatar, or before its first appearance.
-    deformations: HashMap<AgentKey, SkeletalDeformations>,
-    /// Each rigged avatar's resolved **collision-volume** displacements (P34.3):
-    /// the shape morphs' `<volume_morph>` children, which move the volumes a worn
-    /// rigged-mesh body is rigged to. Resolved and folded into the skeletal
-    /// recurrence alongside [`deformations`](Self::deformations).
-    volume_deformations: HashMap<AgentKey, VolumeDeformations>,
-    /// Each avatar's resolved **root drop** (R23): how far below the reported
-    /// wire Z its body-root entity is planted, in Second Life Z-up metres —
-    /// [`root_drop_from_metrics`] of the shape's `computeBodySize` quantities
-    /// (the wire Z is the physics-capsule *centre*, so the drop is half the
-    /// shape-scaled body height, corrected for the pelvis sitting above the
-    /// root and any hover). Shoe heel / platform offsets (R17) fold in through
-    /// the foot term of those metrics, as in the reference. Absent (the rest
-    /// shape's [`AvatarBody::rest_root_drop`] applies) until an appearance
-    /// resolves, or for a sphere-only avatar.
-    root_drops: HashMap<AgentKey, f32>,
-    /// Each avatar's resolved **seat drop** (R23 counterpart): the pelvis's
-    /// shape-scaled local height above the body root (`pelvis_local_z`), keyed by
-    /// agent. A sit offset targets the avatar **root** (hips), so a seated avatar's
-    /// anchor is dropped by this so the hips land on the sit target
-    /// (`place_seated_avatars`) — unlike the standing [`root_drops`](Self::root_drops),
-    /// which also folds in the capsule-centre correction that does not apply while
-    /// seated. Absent (the rest [`AvatarBody::rest_seat_drop`] applies, seeded on
-    /// body spawn) until an appearance resolves, or for a sphere-only avatar.
-    seat_drops: HashMap<AgentKey, f32>,
-    /// R22b diagnostic: every agent the session has *ever* surfaced a full avatar
-    /// object (`pcode` 47) for, so the [`log_avatar_interest`]-gated census can
-    /// tell a "the simulator never streamed this avatar" case (agent absent here)
-    /// from a "we received it but failed to render it" case (agent present here yet
-    /// still a coarse sphere). Never pruned — it is a cumulative diagnostic marker.
-    ever_full_object: HashSet<AgentKey>,
-    /// The last coarse (minimap) position `(x, y, z)` seen per coarse-only
-    /// agent — `x`/`y` region-local metres (0..255), `z` already in metres
-    /// (0..1020, the `u8 × 4` coarse scale). A `z` at the 1020 ceiling is the
-    /// simulator's "height unknown / off this region" sentinel; a `0` from some
-    /// simulators means the same. Read by the R22b census diagnostic and by the
-    /// minimap's dot layer (the unknown-altitude glyph).
-    coarse_pos: HashMap<AgentKey, (u8, u8, u16)>,
-    /// Avatars currently **seated on an object** (their full-object `ObjectUpdate`
-    /// carries a non-zero `ParentID`), keyed by agent id — self and others alike
-    /// (several avatars share one boat). The value is the seat and the avatar's
-    /// pose **in the seat's frame** (the parent-relative wire transform, the
-    /// `llSitTarget` offset): `place_seated_avatars` composes it onto the seat's
-    /// live world transform each frame so the avatar rides the moving seat, and
-    /// `drive_avatar_motion` leaves a
-    /// [`Seated`] anchor alone (its motion is the seat's, not region dead-reckoned).
-    /// Entries clear the instant an update arrives with `ParentID` zero (a stand).
-    seated: HashMap<AgentKey, SeatedTarget>,
+pub struct AvatarPlaceholderAssets {
     /// The shared placeholder sphere mesh + material, built lazily on first use.
     assets: Option<AvatarAssets>,
 }
-
-/// Where a seated avatar sits: the seat object and the avatar's pose **relative to
-/// the seat**, both taken from the seated avatar's `ObjectUpdate` (whose
-/// `ParentID` is the seat and whose `motion` is parent-relative — the reference's
-/// `sitOnObject` `rel_pos` / `rel_rot`). Kept in pure Second Life space (no axis
-/// swap): the seat entity carries the single SL→Bevy basis change, so composing
-/// this onto the seat's world transform places the avatar exactly as a linkset
-/// child prim at the same offset would sit. **No root drop** is applied — the
-/// reference skips the pelvis/capsule correction entirely while sitting on an
-/// object (`LLVOAvatar::updateRootPositionAndRotation` takes the parent transform
-/// directly).
-#[derive(Debug, Clone, Copy)]
-struct SeatedTarget {
-    /// The seat object's scoped id — resolved to its scene entity through
-    /// [`ObjectState::entity_by_scoped`](crate::objects::ObjectState::entity_by_scoped)
-    /// each frame (the seat may stream in after, or independently of, the avatar).
-    seat: ScopedObjectId,
-    /// The avatar's pose in the seat's local frame, as a pure-SL [`Transform`].
-    offset: Transform,
-}
-
-/// Marker on a seated avatar's anchor: its world pose is driven by
-/// `place_seated_avatars` from its seat, so the region-space dead-reckoner
-/// (`drive_avatar_motion`) must leave it be.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct Seated;
-
-/// The maximum attachment/linkset depth chased when attributing an object's
-/// `IMG_USE_BAKED_*` hide to its avatar, a guard against a malformed parent cycle.
-const MAX_ATTACHMENT_DEPTH: usize = 32;
 
 /// The shared, per-avatar-invariant render assets for the rigged base body,
 /// built once from [`AvatarAssetLibrary`] and reused by every avatar body: one
@@ -1608,1272 +1270,541 @@ fn coarse_translation(location: &CoarseLocation, offset_east: f32, offset_north:
     sl_to_bevy_vec(&position)
 }
 
-/// The provisional tag text for an agent before its real name resolves: a short
-/// leading fragment of its id, so the avatars are distinguishable immediately.
-fn provisional_label(agent: AgentKey) -> String {
-    agent
-        .uuid()
-        .simple()
-        .to_string()
-        .chars()
-        .take(PROVISIONAL_ID_CHARS)
-        .collect()
-}
-
-impl AvatarState {
+impl AvatarPlaceholderAssets {
     /// The shared placeholder mesh and material handles, building them on first
-    /// use. Borrows only [`assets`](Self::assets), so a caller can hold a
-    /// disjoint borrow of the other maps.
-    fn asset_handles(
-        assets: &mut Option<AvatarAssets>,
+    /// use.
+    fn handles(
+        &mut self,
         meshes: &mut Assets<Mesh>,
         materials: &mut Assets<FaceMaterial>,
     ) -> (Handle<Mesh>, Handle<FaceMaterial>) {
-        let built = assets.get_or_insert_with(|| AvatarAssets {
+        let built = self.assets.get_or_insert_with(|| AvatarAssets {
             mesh: meshes.add(placeholder_sphere_mesh()),
             material: materials.add(placeholder_material()),
         });
         (built.mesh.clone(), built.material.clone())
     }
+}
 
-    /// The tag text for an agent: its display name when resolved, else its
-    /// legacy name, else a provisional id fragment until either arrives.
-    pub fn label_text(&self, agent: AgentKey) -> String {
-        self.names
-            .get(&agent)
-            .and_then(NameRecord::preferred_name)
-            .map_or_else(|| provisional_label(agent), str::to_owned)
+/// Spawn the floating world-space name-tag billboard for `agent`, anchored
+/// to `anchor`, floating `tag_height` metres above it, and pulled toward
+/// the camera by `pull_radius` metres so the avatar's own body cannot
+/// occlude it ([`crate::name_tag_billboard`]).
+fn spawn_label(
+    state: &AvatarState,
+    agent: AgentKey,
+    anchor: Entity,
+    tag_height: f32,
+    pull_radius: f32,
+    commands: &mut Commands,
+) -> Entity {
+    commands
+        .spawn((
+            name_tag_render_bundle(pull_radius),
+            // The initial content: the resolved (or provisional) name as a
+            // plain white line; the content composer refines it.
+            TagContent::plain_name(state.label_text(agent)),
+            NameTag { anchor, tag_height },
+            // The name tag is a valid avatar pick target (a right-click on it
+            // opens the avatar menu, matching the reference) — resolved by the
+            // `NameTagHitTest` rect test, since no picking backend covers the
+            // custom tag meshes.
+            AvatarPickTarget { agent },
+        ))
+        .id()
+}
+
+/// Spawn a placeholder sphere and its floating name tag for `agent` at
+/// `translation`, returning both entities.
+fn spawn_sphere(
+    state: &AvatarState,
+    assets: &mut AvatarPlaceholderAssets,
+    agent: AgentKey,
+    translation: Vec3,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+) -> AvatarEntities {
+    let (mesh, material) = assets.handles(meshes, materials);
+    let sphere = commands
+        .spawn((
+            Mesh3d(mesh),
+            MeshMaterial3d(material),
+            Transform::from_translation(translation),
+            AvatarSphere,
+            AvatarAnchor,
+            // Avatars are dynamic content for reflection probes: this whole
+            // subtree (here just the placeholder sphere) rides the dynamic
+            // probe layer, so local probes capture it only when the setting
+            // includes dynamic content (the object entity's own `Propagate`
+            // does not reach here — the avatar body is a separate root).
+            Propagate(dynamic_render_layers()),
+            // The whole sphere *is* the avatar here, so a ray that hits it
+            // resolves straight to this agent.
+            AvatarPickTarget { agent },
+        ))
+        .id();
+    let label = spawn_label(
+        state,
+        agent,
+        sphere,
+        AVATAR_SPHERE_RADIUS + NAME_TAG_GAP,
+        AVATAR_SPHERE_RADIUS,
+        commands,
+    );
+    AvatarEntities {
+        anchor: sphere,
+        label,
     }
+}
 
-    /// Every labelled avatar: `(agent, anchor entity, label entity)` — full
-    /// objects first, then the coarse-only spheres (the object path despawns
-    /// a coarse twin, but the filter keeps a mid-frame overlap harmless).
-    /// The tag-content composer iterates this.
-    pub fn labelled_avatars(&self) -> impl Iterator<Item = (AgentKey, Entity, Entity)> + '_ {
-        self.objects
-            .iter()
-            .map(|(agent, entities)| (*agent, entities.anchor, entities.label))
-            .chain(
-                self.coarse
-                    .iter()
-                    .filter(|(agent, _)| !self.objects.contains_key(agent))
-                    .map(|(agent, entities)| (*agent, entities.anchor, entities.label)),
-            )
+/// Spawn a rigged base body for `agent` from the shared [`AvatarBody`]
+/// assets: a fresh joint-entity skeleton instance under a body-root anchor,
+/// with each base part skinned or pinned to it, plus the floating name tag.
+///
+/// Returns the pair of avatar entities, the fresh joint-entity list (in joint
+/// order), and the attachment-point node entities (keyed by raw point id),
+/// which the caller records so a worn attachment can be parented to the right
+/// joint at its stored offset (P16.1/P16.2).
+fn spawn_body(
+    state: &AvatarState,
+    agent: AgentKey,
+    object: &Object,
+    body: &AvatarBody,
+    region_offset: Vec3,
+    commands: &mut Commands,
+) -> (AvatarEntities, HashMap<u8, Entity>, Entity) {
+    let root_drop = state
+        .root_drops
+        .get(&agent)
+        .copied()
+        .unwrap_or(body.rest_root_drop);
+    let root = commands
+        .spawn((
+            body_root_transform(object, root_drop, region_offset),
+            Visibility::default(),
+            AvatarAnchor,
+            // Avatars are dynamic content for reflection probes: propagate the
+            // dynamic probe layer to the whole body-part / worn-attachment
+            // subtree hanging off this body root (a separate root, so the
+            // object entity's own `Propagate` does not reach it). A worn
+            // attachment carries its own `Propagate` and so overrides this with
+            // the static-geometry layer — acceptable, and only visible when the
+            // dynamic-content setting is off.
+            Propagate(dynamic_render_layers()),
+        ))
+        .id();
+    // Phase 4: no per-avatar joint entities are spawned — each skinned base
+    // part binds its palette slots to the single shared dummy joint and is
+    // GPU-posed in place (`crate::gpu_avatars`).
+    for (index, part) in body.parts.iter().enumerate() {
+        spawn_body_part(part, index, agent, body, root, commands);
     }
-
-    /// This agent's resolved legacy name, if one has arrived yet.
-    ///
-    /// The avatar context menu reads it for actions that carry a name on the wire
-    /// (a mute entry names the muted avatar); a `None` means the name has not
-    /// resolved, and the caller falls back to a provisional label.
-    #[must_use]
-    pub fn name_of(&self, agent: AgentKey) -> Option<&str> {
-        self.names
-            .get(&agent)
-            .and_then(|record| record.legacy.as_deref())
-    }
-
-    /// Record a name learned from **traffic** rather than a name lookup — an
-    /// instant message's sender, a chat-session invitation's inviter, a
-    /// server-history line's speaker. The wire carries these names alongside
-    /// the message, so the person is nameable without asking.
-    ///
-    /// Only fills a name that is **not** already known: a lookup reply (and the
-    /// display-name cap behind it) is the better-defined answer, and this must
-    /// not overwrite it with whatever a message happened to be stamped with.
-    pub fn note_legacy_name(&mut self, agent: AgentKey, name: &str) {
-        if name.is_empty() {
-            return;
-        }
-        let record = self.name_entry(agent);
-        if record.legacy.is_none() {
-            record.legacy = Some(name.to_owned());
-        }
-    }
-
-    /// This agent's full name record, if any of its sources answered yet —
-    /// the tag-content composer reads the display name / username / default
-    /// flag from it.
-    #[must_use]
-    pub fn name_record(&self, agent: AgentKey) -> Option<&NameRecord> {
-        self.names.get(&agent)
-    }
-
-    /// The name to **show** for this agent — the user's alias, else the display
-    /// name, else the legacy name — or `None` while nothing has resolved.
-    ///
-    /// This is the accessor a drawn name wants; [`Self::name_of`] is the grid's
-    /// legacy answer, which is what a wire action (a mute entry naming the muted
-    /// avatar) has to carry.
-    pub fn shown_name_of(&self, agent: AgentKey) -> Option<&str> {
-        self.names.get(&agent).and_then(NameRecord::preferred_name)
-    }
-
-    /// Replace the user's name aliases, re-folding every cached record so a
-    /// pseudonym given (or cleared) now shows (or stops showing) everywhere at
-    /// once. The one way an alias reaches the name cache.
-    pub fn set_name_aliases(&mut self, aliases: HashMap<AgentKey, NameAlias>) {
-        for (agent, record) in &mut self.names {
-            record.alias = aliases.get(agent).cloned();
-        }
-        self.name_aliases = aliases;
-    }
-
-    /// The record for `agent`, created if this is the first thing known about
-    /// them, with the user's alias folded in — the one way an ingest path takes
-    /// a record, so a name that arrives after the alias was given is aliased
-    /// too.
-    fn name_entry(&mut self, agent: AgentKey) -> &mut NameRecord {
-        let alias = self.name_aliases.get(&agent).cloned();
-        let record = self.names.entry(agent).or_default();
-        if record.alias != alias {
-            record.alias = alias;
-        }
-        record
-    }
-
-    /// This agent's group title (from its avatar object's NameValue `Title`),
-    /// if it has one.
-    pub fn title_of(&self, agent: AgentKey) -> Option<&str> {
-        self.titles.get(&agent).map(String::as_str)
-    }
-
-    /// The agent whose avatar object carries the region-scoped id `scoped`, if
-    /// this viewer tracks one — the reverse of the object stream's view of an
-    /// avatar. An attachment names its wearer only by that scoped id, so this is
-    /// how a worn linkset is attributed to the avatar it is worn on
-    /// ([`crate::avatar_complexity`]).
-    pub(crate) fn agent_of_scoped(&self, scoped: ScopedObjectId) -> Option<AgentKey> {
-        self.by_scoped.get(&scoped).copied()
-    }
-
-    /// Mark this avatar's body-region materials for (re)assignment by
-    /// [`assign_avatar_bake_materials`] — how a pass that borrowed those
-    /// materials hands them back. The jellydoll render
-    /// ([`crate::avatar_complexity`]) paints a limited avatar's body flat and
-    /// calls this when it stops, so the real bakes are draped again.
-    pub(crate) fn mark_bake_dirty(&mut self, agent: AgentKey) {
-        let _fresh = self.bake_dirty.insert(agent);
-    }
-
-    /// How many base-body regions this avatar has a **visible** bake in, from its
-    /// latest appearance — the count the render-cost model charges its per-region
-    /// body cost for. Zero before an appearance arrives (or for a sphere-only
-    /// avatar); a region baked invisible by a worn system alpha layer was already
-    /// filtered out when the appearance was ingested, exactly as the reference
-    /// skips an `IMG_INVISIBLE` slot.
-    pub(crate) fn visible_bake_count(&self, agent: AgentKey) -> usize {
-        self.baked_textures.get(&agent).map_or(0, HashMap::len)
-    }
-
-    /// Every avatar this viewer currently knows in-world, with the anchor
-    /// entity whose transform places it — full objects first, then the
-    /// coarse-only dots. The avatar picker's Near Me tab reads this.
-    #[must_use]
-    pub fn known_agents(&self) -> Vec<(AgentKey, Entity)> {
-        let mut agents: Vec<(AgentKey, Entity)> = self
-            .objects
-            .iter()
-            .map(|(agent, entities)| (*agent, entities.anchor))
-            .collect();
-        for (agent, entities) in &self.coarse {
-            if !self.objects.contains_key(agent) {
-                agents.push((*agent, entities.anchor));
+    // One attachment-point node per point, hanging off the avatar root at the
+    // fixed `avatar_lad.xml` offset (Phase 4 §5.4). A worn attachment then
+    // parents to the node for its point and carries only its own local
+    // transform; the socket writer places the node at its joint each frame,
+    // matching the reference viewer's joint → attachment-point → object chain.
+    let attachment_nodes: HashMap<u8, Entity> = body
+        .attachment_points
+        .iter()
+        .filter_map(|(&point_id, point)| {
+            // Skip a point whose joint the skeleton lacks.
+            if point.joint_index >= body.joint_parents.len() {
+                return None;
             }
-        }
-        agents
-    }
-
-    /// Every nearby avatar as the map surfaces (minimap, radar) consume it:
-    /// full-object avatars first (precise positions from their anchor
-    /// transforms), then the coarse-only dots, deduplicated by agent — the
-    /// reference's `LLWorld::getAvatars` merge. A coarse-only entry carries its
-    /// last coarse altitude so the consumer can detect the "altitude unknown"
-    /// sentinel (`crate::minimap_math::coarse_altitude_unknown`).
-    #[must_use]
-    pub fn map_avatars(&self) -> Vec<MapAvatar> {
-        let mut avatars: Vec<MapAvatar> = self
-            .objects
-            .iter()
-            .map(|(agent, entities)| MapAvatar {
-                agent: *agent,
-                anchor: entities.anchor,
-                coarse_z: None,
-            })
-            .collect();
-        for (agent, entities) in &self.coarse {
-            if !self.objects.contains_key(agent) {
-                avatars.push(MapAvatar {
-                    agent: *agent,
-                    anchor: entities.anchor,
-                    coarse_z: Some(f32::from(
-                        self.coarse_pos.get(agent).map_or(0, |&(_, _, z)| z),
-                    )),
+            // Seed the node at its unshaped rest joint × the fixed offset, so
+            // it sits at the joint from frame 1 (the socket writer refines it
+            // to the shaped/animated pose once the appearance resolves).
+            let initial = body
+                .rest_world
+                .get(point.joint_index)
+                .map_or(point.offset, |world| {
+                    Transform::from_matrix(world.mul_mat4(&point.offset.to_matrix()))
                 });
-            }
-        }
-        avatars
-    }
-
-    /// The anchor entity of an agent's in-world presence (a full object
-    /// preferred over a coarse dot), if any.
-    #[must_use]
-    pub fn root_entity_of(&self, agent: AgentKey) -> Option<Entity> {
-        self.objects
-            .get(&agent)
-            .or_else(|| self.coarse.get(&agent))
-            .map(|entities| entities.anchor)
-    }
-
-    /// Spawn the floating world-space name-tag billboard for `agent`, anchored
-    /// to `anchor`, floating `tag_height` metres above it, and pulled toward
-    /// the camera by `pull_radius` metres so the avatar's own body cannot
-    /// occlude it ([`crate::name_tag_billboard`]).
-    fn spawn_label(
-        &self,
-        agent: AgentKey,
-        anchor: Entity,
-        tag_height: f32,
-        pull_radius: f32,
-        commands: &mut Commands,
-    ) -> Entity {
-        commands
-            .spawn((
-                name_tag_render_bundle(pull_radius),
-                // The initial content: the resolved (or provisional) name as a
-                // plain white line; the content composer refines it.
-                TagContent::plain_name(self.label_text(agent)),
-                NameTag { anchor, tag_height },
-                // The name tag is a valid avatar pick target (a right-click on it
-                // opens the avatar menu, matching the reference) — resolved by the
-                // `NameTagHitTest` rect test, since no picking backend covers the
-                // custom tag meshes.
-                AvatarPickTarget { agent },
-            ))
-            .id()
-    }
-
-    /// Spawn a placeholder sphere and its floating name tag for `agent` at
-    /// `translation`, returning both entities.
-    fn spawn_sphere(
-        &mut self,
-        agent: AgentKey,
-        translation: Vec3,
-        commands: &mut Commands,
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<FaceMaterial>,
-    ) -> AvatarEntities {
-        let (mesh, material) = Self::asset_handles(&mut self.assets, meshes, materials);
-        let sphere = commands
-            .spawn((
-                Mesh3d(mesh),
-                MeshMaterial3d(material),
-                Transform::from_translation(translation),
-                AvatarSphere,
-                AvatarAnchor,
-                // Avatars are dynamic content for reflection probes: this whole
-                // subtree (here just the placeholder sphere) rides the dynamic
-                // probe layer, so local probes capture it only when the setting
-                // includes dynamic content (the object entity's own `Propagate`
-                // does not reach here — the avatar body is a separate root).
-                Propagate(dynamic_render_layers()),
-                // The whole sphere *is* the avatar here, so a ray that hits it
-                // resolves straight to this agent.
-                AvatarPickTarget { agent },
-            ))
-            .id();
-        let label = self.spawn_label(
-            agent,
-            sphere,
-            AVATAR_SPHERE_RADIUS + NAME_TAG_GAP,
-            AVATAR_SPHERE_RADIUS,
-            commands,
-        );
+            let node = commands
+                .spawn((
+                    initial,
+                    Visibility::default(),
+                    AttachmentPointNode,
+                    ChildOf(root),
+                ))
+                .id();
+            Some((point_id, node))
+        })
+        .collect();
+    // The camera's head-focus socket (Phase 4 §5.4): a root child whose
+    // local `Transform` the socket writer sets to the posed `mHead` joint
+    // each frame, so the camera holds the animated head without a head joint
+    // entity. Seeded at the unshaped rest `mHead` world so the camera focuses
+    // the head — never the avatar root/feet — from frame 1, before the pose
+    // driver first runs (the feet-then-jump fix).
+    let head_local = body
+        .joint_index("mHead")
+        .and_then(|index| body.rest_world.get(index).copied())
+        .map_or_else(Transform::default, Transform::from_matrix);
+    let head_socket = commands
+        .spawn((head_local, Visibility::default(), ChildOf(root)))
+        .id();
+    // (The old invisible pick-collider box is gone: the GPU ID-buffer
+    // pick — `crate::gpu_pick` — picks the drawn, GPU-posed pixels
+    // directly, so no rigid stand-in volume is needed.)
+    // A rigged body is roughly half a metre across at head height — the
+    // camera pull that keeps the avatar's own head from occluding its tag.
+    let label = spawn_label(state, agent, root, BODY_TAG_HEIGHT, 0.5, commands);
+    (
         AvatarEntities {
-            anchor: sphere,
+            anchor: root,
             label,
-        }
-    }
+        },
+        attachment_nodes,
+        head_socket,
+    )
+}
 
-    /// Spawn a rigged base body for `agent` from the shared [`AvatarBody`]
-    /// assets: a fresh joint-entity skeleton instance under a body-root anchor,
-    /// with each base part skinned or pinned to it, plus the floating name tag.
-    ///
-    /// Returns the pair of avatar entities, the fresh joint-entity list (in joint
-    /// order), and the attachment-point node entities (keyed by raw point id),
-    /// which the caller records so a worn attachment can be parented to the right
-    /// joint at its stored offset (P16.1/P16.2).
-    fn spawn_body(
-        &self,
-        agent: AgentKey,
-        object: &Object,
-        body: &AvatarBody,
-        region_offset: Vec3,
-        commands: &mut Commands,
-    ) -> (AvatarEntities, HashMap<u8, Entity>, Entity) {
-        let root_drop = self
-            .root_drops
-            .get(&agent)
-            .copied()
-            .unwrap_or(body.rest_root_drop);
-        let root = commands
-            .spawn((
-                body_root_transform(object, root_drop, region_offset),
-                Visibility::default(),
-                AvatarAnchor,
-                // Avatars are dynamic content for reflection probes: propagate the
-                // dynamic probe layer to the whole body-part / worn-attachment
-                // subtree hanging off this body root (a separate root, so the
-                // object entity's own `Propagate` does not reach it). A worn
-                // attachment carries its own `Propagate` and so overrides this with
-                // the static-geometry layer — acceptable, and only visible when the
-                // dynamic-content setting is off.
-                Propagate(dynamic_render_layers()),
-            ))
-            .id();
-        // Phase 4: no per-avatar joint entities are spawned — each skinned base
-        // part binds its palette slots to the single shared dummy joint and is
-        // GPU-posed in place (`crate::gpu_avatars`).
-        for (index, part) in body.parts.iter().enumerate() {
-            spawn_body_part(part, index, agent, body, root, commands);
-        }
-        // One attachment-point node per point, hanging off the avatar root at the
-        // fixed `avatar_lad.xml` offset (Phase 4 §5.4). A worn attachment then
-        // parents to the node for its point and carries only its own local
-        // transform; the socket writer places the node at its joint each frame,
-        // matching the reference viewer's joint → attachment-point → object chain.
-        let attachment_nodes: HashMap<u8, Entity> = body
-            .attachment_points
-            .iter()
-            .filter_map(|(&point_id, point)| {
-                // Skip a point whose joint the skeleton lacks.
-                if point.joint_index >= body.joint_parents.len() {
-                    return None;
-                }
-                // Seed the node at its unshaped rest joint × the fixed offset, so
-                // it sits at the joint from frame 1 (the socket writer refines it
-                // to the shaped/animated pose once the appearance resolves).
-                let initial = body
-                    .rest_world
-                    .get(point.joint_index)
-                    .map_or(point.offset, |world| {
-                        Transform::from_matrix(world.mul_mat4(&point.offset.to_matrix()))
-                    });
-                let node = commands
-                    .spawn((
-                        initial,
-                        Visibility::default(),
-                        AttachmentPointNode,
-                        ChildOf(root),
-                    ))
-                    .id();
-                Some((point_id, node))
-            })
-            .collect();
-        // The camera's head-focus socket (Phase 4 §5.4): a root child whose
-        // local `Transform` the socket writer sets to the posed `mHead` joint
-        // each frame, so the camera holds the animated head without a head joint
-        // entity. Seeded at the unshaped rest `mHead` world so the camera focuses
-        // the head — never the avatar root/feet — from frame 1, before the pose
-        // driver first runs (the feet-then-jump fix).
-        let head_local = body
-            .joint_index("mHead")
-            .and_then(|index| body.rest_world.get(index).copied())
-            .map_or_else(Transform::default, Transform::from_matrix);
-        let head_socket = commands
-            .spawn((head_local, Visibility::default(), ChildOf(root)))
-            .id();
-        // (The old invisible pick-collider box is gone: the GPU ID-buffer
-        // pick — `crate::gpu_pick` — picks the drawn, GPU-posed pixels
-        // directly, so no rigid stand-in volume is needed.)
-        // A rigged body is roughly half a metre across at head height — the
-        // camera pull that keeps the avatar's own head from occluding its tag.
-        let label = self.spawn_label(agent, root, BODY_TAG_HEIGHT, 0.5, commands);
-        (
-            AvatarEntities {
-                anchor: root,
-                label,
-            },
-            attachment_nodes,
-            head_socket,
-        )
+/// Spawn or move a full-object avatar (`pcode` 47): its rigged base body when
+/// the [`AvatarBody`] assets are loaded, else the placeholder sphere.
+///
+/// A full object supersedes any coarse placeholder for the same agent (the
+/// object position is precise), so an existing coarse sphere is despawned.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "spawning or moving one avatar needs the state it is recorded in, \
+              the placeholder assets, the object update, the loaded body assets, \
+              the own-agent id, and the Commands / mesh / material sinks"
+)]
+fn apply_object(
+    state: &mut AvatarState,
+    assets: &mut AvatarPlaceholderAssets,
+    object: &Object,
+    body: Option<&AvatarBody>,
+    own: Option<AgentKey>,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+) {
+    let agent = AgentKey::from(object.full_id.uuid());
+    let scoped = object.scoped_id();
+    // The **own** avatar is authoritative in the root region (the scene
+    // origin) only. A non-root circuit that streams it — most notably the
+    // destination during a deferred-teardown teleport handshake, which begins
+    // streaming our full object as soon as we send `CompleteAgentMovement`,
+    // *before* the commit shifts the origin — reports it in that region's
+    // frame. Applying that update would offset the body by a whole inter-
+    // region delta (`region_offset` below) and the camera, following it, would
+    // leave the visible world: the "own avatar vanishes on a slow / failed
+    // teleport, and snaps back on the next move" bug. Ignore an own-avatar
+    // update whose region is not the current origin; the root region's stream
+    // (and, on commit, the shifted origin) place it correctly.
+    if own == Some(agent)
+        && state
+            .origin
+            .is_some_and(|origin| origin != object.region_handle)
+    {
+        return;
     }
-
-    /// Seed the name cache and title map from an avatar object's NameValue
-    /// pairs (`FirstName` / `LastName` / `Title` — the classic mechanism; the
-    /// simulator sends them with every avatar `ObjectUpdate`, so the legacy
-    /// name and group title arrive *with the object*, zero round trips).
-    /// Never clobbers a legacy name another source already resolved, and only
-    /// touches the title when a `Title` pair is actually present (a present
-    /// but empty title means "title taken off").
-    fn seed_from_name_values(&mut self, agent: AgentKey, object: &Object) {
-        self.seed_name_fields(
+    // A neighbour region's avatar is offset onto the right terrain, exactly
+    // like the coarse dots and world objects (zero for the root region).
+    let region_offset = region_offset_bevy(object.region_handle, state.origin);
+    state.seed_from_name_values(agent, object);
+    // The authoritative motion the P31.4 dead-reckoner (`drive_avatar_motion`)
+    // extrapolates between updates; re-inserted on every update so its change
+    // detection reseeds the prediction. A rigged body root carries the object
+    // rotation, a placeholder sphere does not.
+    let avatar_motion = AvatarMotion::from_object(object, body.is_some());
+    // Seated on an object? A non-zero `ParentID` means this avatar's wire
+    // position / rotation are **relative to the seat**, not region-local, and
+    // it rides the seat. Record the seat + seat-relative pose so
+    // `place_seated_avatars` drives the anchor from the seat's live world
+    // transform; a `ParentID` of zero (a stand) clears it, restoring region
+    // placement. Self and others alike — several avatars can share one seat.
+    let seated = object.parent_id.get() != 0;
+    if seated {
+        state.seated.insert(
             agent,
-            object.name_value_data("FirstName"),
-            object.name_value_data("LastName"),
-            object.name_value_data("Title"),
+            SeatedTarget {
+                seat: object.scoped_parent_id(),
+                offset: seated_offset(object),
+            },
         );
+    } else {
+        state.seated.remove(&agent);
     }
-
-    /// The merge rules of [`Self::seed_from_name_values`], on the extracted
-    /// NameValue fields (split out so they are unit-testable without
-    /// constructing a full [`Object`]).
-    fn seed_name_fields(
-        &mut self,
-        agent: AgentKey,
-        first: Option<String>,
-        last: Option<String>,
-        title: Option<String>,
-    ) {
-        if let Some(first) = first {
-            let legacy = match last {
-                Some(last) if !last.is_empty() && !last.eq_ignore_ascii_case("Resident") => {
-                    format!("{first} {last}")
-                }
-                _ => first,
-            };
-            if !legacy.is_empty() {
-                let record = self.name_entry(agent);
-                if record.legacy.is_none() {
-                    record.legacy = Some(legacy);
-                }
-            }
-        }
-        if let Some(title) = title {
-            // The reference strips control characters from titles.
-            let cleaned: String = title.chars().filter(|c| !c.is_control()).collect();
-            if cleaned.is_empty() {
-                self.titles.remove(&agent);
-            } else {
-                self.titles.insert(agent, cleaned);
-            }
-        }
+    // A precise full object takes over from any coarse dot for this agent.
+    if let Some(entities) = state.coarse.remove(&agent) {
+        despawn_avatar(entities, commands);
     }
-
-    /// Fold one display-name record from the `GetDisplayNames` cap (or a
-    /// pushed `DisplayNameUpdate`) into the cache. A `missing` placeholder
-    /// (the grid could not resolve the id) changes nothing — the legacy
-    /// fallback stays. (The tag refreshes via the content composer.)
-    fn set_display_name(&mut self, resolved: &DisplayName) {
-        if !self.merge_display_name_record(resolved) {
-            return;
-        }
-        debug!(
-            "resolved display name {} = {:?} (@{})",
-            resolved.id, resolved.display_name, resolved.username
-        );
-    }
-
-    /// Fold one non-`missing` display-name record into the name cache;
-    /// returns whether anything was (potentially) updated. Split from
-    /// [`Self::set_display_name`] so the merge rules are unit-testable
-    /// without an ECS world.
-    fn merge_display_name_record(&mut self, resolved: &DisplayName) -> bool {
-        if resolved.missing {
-            return false;
-        }
-        let record = self.name_entry(resolved.id);
-        record.legacy = Some(resolved.legacy_name());
-        record.username = Some(resolved.username.clone());
-        record.display_name = Some(resolved.display_name.clone());
-        record.is_display_name_default = resolved.is_display_name_default;
-        true
-    }
-
-    /// Queue a name request for `agent` once — a no-op if it is already in
-    /// flight or answered. The actual wire traffic goes out batched, once per
-    /// frame, in [`flush_name_requests`]. `pub(crate)` for the build
-    /// floater's General tab, which resolves a selected object's creator /
-    /// owner through the same cache.
-    pub fn request_name(&mut self, agent: AgentKey) {
-        if !self.requested.insert(agent) {
-            return;
-        }
-        self.pending_name_requests.insert(agent);
-    }
-
-    /// Spawn or move a full-object avatar (`pcode` 47): its rigged base body when
-    /// the [`AvatarBody`] assets are loaded, else the placeholder sphere.
-    ///
-    /// A full object supersedes any coarse placeholder for the same agent (the
-    /// object position is precise), so an existing coarse sphere is despawned.
-    fn apply_object(
-        &mut self,
-        object: &Object,
-        body: Option<&AvatarBody>,
-        own: Option<AgentKey>,
-        commands: &mut Commands,
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<FaceMaterial>,
-    ) {
-        let agent = AgentKey::from(object.full_id.uuid());
-        let scoped = object.scoped_id();
-        // The **own** avatar is authoritative in the root region (the scene
-        // origin) only. A non-root circuit that streams it — most notably the
-        // destination during a deferred-teardown teleport handshake, which begins
-        // streaming our full object as soon as we send `CompleteAgentMovement`,
-        // *before* the commit shifts the origin — reports it in that region's
-        // frame. Applying that update would offset the body by a whole inter-
-        // region delta (`region_offset` below) and the camera, following it, would
-        // leave the visible world: the "own avatar vanishes on a slow / failed
-        // teleport, and snaps back on the next move" bug. Ignore an own-avatar
-        // update whose region is not the current origin; the root region's stream
-        // (and, on commit, the shifted origin) place it correctly.
-        if own == Some(agent)
-            && self
-                .origin
-                .is_some_and(|origin| origin != object.region_handle)
-        {
-            return;
-        }
-        // A neighbour region's avatar is offset onto the right terrain, exactly
-        // like the coarse dots and world objects (zero for the root region).
-        let region_offset = region_offset_bevy(object.region_handle, self.origin);
-        self.seed_from_name_values(agent, object);
-        // The authoritative motion the P31.4 dead-reckoner (`drive_avatar_motion`)
-        // extrapolates between updates; re-inserted on every update so its change
-        // detection reseeds the prediction. A rigged body root carries the object
-        // rotation, a placeholder sphere does not.
-        let avatar_motion = AvatarMotion::from_object(object, body.is_some());
-        // Seated on an object? A non-zero `ParentID` means this avatar's wire
-        // position / rotation are **relative to the seat**, not region-local, and
-        // it rides the seat. Record the seat + seat-relative pose so
-        // `place_seated_avatars` drives the anchor from the seat's live world
-        // transform; a `ParentID` of zero (a stand) clears it, restoring region
-        // placement. Self and others alike — several avatars can share one seat.
-        let seated = object.parent_id.get() != 0;
+    state.coarse_region.remove(&agent);
+    if let Some(existing) = state.objects.get(&agent) {
+        let mut anchor = commands.entity(existing.anchor);
+        anchor.insert(avatar_motion);
         if seated {
-            self.seated.insert(
-                agent,
-                SeatedTarget {
-                    seat: object.scoped_parent_id(),
-                    offset: seated_offset(object),
-                },
-            );
+            // The seat owns the anchor's world pose; just tag it so
+            // `place_seated_avatars` drives it and the dead-reckoner leaves it
+            // be. The transform is written each frame from the seat, so none is
+            // set here.
+            anchor.insert(Seated);
         } else {
-            self.seated.remove(&agent);
+            // Move the existing anchor: a body root gets the full position +
+            // orientation transform, a sphere just its translation. Standing up
+            // drops the seated tag so the dead-reckoner resumes.
+            let transform = match body {
+                Some(body) => {
+                    let root_drop = state
+                        .root_drops
+                        .get(&agent)
+                        .copied()
+                        .unwrap_or(body.rest_root_drop);
+                    body_root_transform(object, root_drop, region_offset)
+                }
+                None => Transform::from_translation(sphere_translation(object, region_offset)),
+            };
+            // `set_if_neq` via `entry`, NOT a plain `insert`: the simulator
+            // streams updates for the own avatar continuously even when it
+            // stands still, and re-inserting an identical Transform marks it
+            // changed — which re-propagated the whole avatar subtree and
+            // woke the pose gate every frame (the "anchor wake, delta 0"
+            // signature in the gate meter).
+            anchor
+                .entry::<Transform>()
+                .and_modify(move |mut existing| {
+                    existing.set_if_neq(transform);
+                })
+                .or_insert(transform);
+            anchor.remove::<Seated>();
         }
-        // A precise full object takes over from any coarse dot for this agent.
-        if let Some(entities) = self.coarse.remove(&agent) {
-            despawn_avatar(entities, commands);
+        return;
+    }
+    state.request_name(agent);
+    let entities = match body {
+        Some(body) => {
+            let (entities, attachment_nodes, head_socket) =
+                spawn_body(state, agent, object, body, region_offset, commands);
+            // Record the per-point attachment nodes so a worn attachment can be
+            // seated at the right joint offset once it arrives (P16.2), plus
+            // the camera's head-focus socket. The head socket's presence is the
+            // rigged-avatar marker (Phase 4 removed the joint entities).
+            state.attachment_nodes.insert(agent, attachment_nodes);
+            let _prev = state.head_sockets.insert(agent, head_socket);
+            entities
         }
-        self.coarse_region.remove(&agent);
-        if let Some(existing) = self.objects.get(&agent) {
-            let mut anchor = commands.entity(existing.anchor);
-            anchor.insert(avatar_motion);
-            if seated {
-                // The seat owns the anchor's world pose; just tag it so
-                // `place_seated_avatars` drives it and the dead-reckoner leaves it
-                // be. The transform is written each frame from the seat, so none is
-                // set here.
-                anchor.insert(Seated);
-            } else {
-                // Move the existing anchor: a body root gets the full position +
-                // orientation transform, a sphere just its translation. Standing up
-                // drops the seated tag so the dead-reckoner resumes.
-                let transform = match body {
-                    Some(body) => {
-                        let root_drop = self
-                            .root_drops
-                            .get(&agent)
-                            .copied()
-                            .unwrap_or(body.rest_root_drop);
-                        body_root_transform(object, root_drop, region_offset)
-                    }
-                    None => Transform::from_translation(sphere_translation(object, region_offset)),
-                };
-                // `set_if_neq` via `entry`, NOT a plain `insert`: the simulator
-                // streams updates for the own avatar continuously even when it
-                // stands still, and re-inserting an identical Transform marks it
-                // changed — which re-propagated the whole avatar subtree and
-                // woke the pose gate every frame (the "anchor wake, delta 0"
-                // signature in the gate meter).
-                anchor
-                    .entry::<Transform>()
-                    .and_modify(move |mut existing| {
-                        existing.set_if_neq(transform);
-                    })
-                    .or_insert(transform);
-                anchor.remove::<Seated>();
-            }
-            return;
+        None => spawn_sphere(
+            state,
+            assets,
+            agent,
+            sphere_translation(object, region_offset),
+            commands,
+            meshes,
+            materials,
+        ),
+    };
+    commands.entity(entities.anchor).insert(avatar_motion);
+    if seated {
+        // A freshly-streamed avatar that is already seated: tag it so
+        // `place_seated_avatars` drives its world pose from the seat.
+        commands.entity(entities.anchor).insert(Seated);
+    }
+    // Seed the seat drop with the rest pelvis height for a rigged body, so a
+    // seated body lands hips-on-target before its own appearance resolves (a
+    // sphere has no skeleton, so no drop — its centre sits on the target).
+    if let Some(body) = body {
+        state.seat_drops.entry(agent).or_insert(body.rest_seat_drop);
+    }
+    state.by_scoped.insert(scoped, agent);
+    state.objects.insert(agent, entities);
+    debug!(
+        "spawned avatar for {agent} ({} tracked)",
+        state.objects.len()
+    );
+}
+
+/// Despawn the **body** this viewer built for `agent`, because the agent is
+/// no longer to be drawn — derendered (`viewer-derender-blacklist`) or hidden
+/// by the friends-only filter (`viewer-render-friends-only`) — and put the
+/// cheap coarse placeholder in its place, hidden, at `at`.
+///
+/// The hand-off is the whole point of the `at` argument. Presence and
+/// rendering are separate concerns here: the radar and the minimap track an
+/// avatar through whatever entity represents it, so if the body simply
+/// vanished the avatar would be **absent** until the next
+/// `CoarseLocationUpdate` (up to a second later) spawned a dot — and the
+/// radar, sweeping in between, would report a leave and then an enter, plus
+/// the range-crossing alerts that go with them. Swapping body for
+/// placeholder in the same frame keeps the agent continuously present; only
+/// its visibility changes.
+///
+/// The per-agent name / appearance bookkeeping stays too: it costs nothing,
+/// is invisible, and makes coming back cheap. A no-op for an avatar that has
+/// no body (a coarse-only one already has the placeholder).
+pub(crate) fn derender_agent(
+    state: &mut AvatarState,
+    assets: &mut AvatarPlaceholderAssets,
+    agent: AgentKey,
+    at: Option<Vec3>,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+) {
+    let scoped = state
+        .by_scoped
+        .iter()
+        .find(|(_scoped, tracked)| **tracked == agent)
+        .map(|(scoped, _tracked)| *scoped);
+    let Some(scoped) = scoped else {
+        return;
+    };
+    state.remove_object(scoped, commands);
+    // Hand over to a placeholder, unless a coarse dot already stands in.
+    // Spawned hidden: `hide_suppressed_avatars` would hide it a moment later
+    // anyway, and a frame of a visible sphere where a body just was is
+    // exactly the flicker this feature must not produce. It is cleaned up
+    // like any other dot — `apply_object` despawns it when a full body takes
+    // over again.
+    if let Some(at) = at
+        && !state.coarse.contains_key(&agent)
+    {
+        let entities = spawn_sphere(state, assets, agent, at, commands, meshes, materials);
+        commands.entity(entities.anchor).insert(Visibility::Hidden);
+        state.coarse.insert(agent, entities);
+    }
+}
+
+/// Reconcile the coarse-only avatar placeholders with one region's
+/// `CoarseLocationUpdate`: spawn/move a sphere for every coarse avatar that is
+/// not already a full object (and is not the agent's own `you` entry), and
+/// despawn any coarse placeholder **from this region** that has dropped out of
+/// its list.
+///
+/// `region` is the region these locations belong to and `origin` the scene
+/// origin (the agent's own region); a neighbour region's coarse `x`/`y` are
+/// relative to *its* south-west corner, so its dots are offset by
+/// `region − origin` (mirroring the terrain placement) to land on the right
+/// neighbour terrain (R24). The reconcile is scoped to `region`, so a
+/// neighbour's update never despawns another region's dots — and an empty
+/// update for a region (emitted when it is disabled) drops exactly its dots.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "reconciling one region's coarse dots needs the state they are \
+              recorded in, the placeholder assets, the region + scene origin (to \
+              offset), the update's locations + you index, and the Commands / \
+              mesh / material sinks to spawn spheres"
+)]
+fn apply_coarse(
+    state: &mut AvatarState,
+    assets: &mut AvatarPlaceholderAssets,
+    region: RegionHandle,
+    origin: Option<RegionHandle>,
+    own: Option<AgentKey>,
+    locations: &[CoarseLocation],
+    you: Option<usize>,
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<FaceMaterial>,
+) {
+    // The neighbour region's south-west corner relative to the scene origin, in
+    // Second Life east/north metres (0 for the root region itself).
+    let (region_x, region_y) = region.global_coordinates();
+    let (origin_x, origin_y) = origin.unwrap_or(region).global_coordinates();
+    let offset_east = metres_to_f32(region_x) - metres_to_f32(origin_x);
+    let offset_north = metres_to_f32(region_y) - metres_to_f32(origin_y);
+    let mut present: HashSet<AgentKey> = HashSet::new();
+    for (index, location) in locations.iter().enumerate() {
+        let agent = location.agent_id;
+        // The agent's own coarse dot is left to the (precise) self-marker
+        // path. Skip it by the update's `you` index *and* by the agent id: a
+        // region we became a **child** of after a crossing (the region we left)
+        // still lists us in its coarse update — sometimes without setting
+        // `you` — and without the id check that stale entry would spawn a ghost
+        // self-dot back in the old region (viewer-crossing-stale-minimap-self-dot).
+        if Some(index) == you || own == Some(agent) {
+            continue;
         }
-        self.request_name(agent);
-        let entities = match body {
-            Some(body) => {
-                let (entities, attachment_nodes, head_socket) =
-                    self.spawn_body(agent, object, body, region_offset, commands);
-                // Record the per-point attachment nodes so a worn attachment can be
-                // seated at the right joint offset once it arrives (P16.2), plus
-                // the camera's head-focus socket. The head socket's presence is the
-                // rigged-avatar marker (Phase 4 removed the joint entities).
-                self.attachment_nodes.insert(agent, attachment_nodes);
-                let _prev = self.head_sockets.insert(agent, head_socket);
-                entities
-            }
-            None => self.spawn_sphere(
+        // A full-object avatar renders from its precise object position.
+        if state.objects.contains_key(&agent) {
+            continue;
+        }
+        present.insert(agent);
+        state
+            .coarse_pos
+            .insert(agent, (location.x, location.y, location.z));
+        let translation = coarse_translation(location, offset_east, offset_north);
+        if let Some(existing) = state.coarse.get(&agent) {
+            commands
+                .entity(existing.anchor)
+                .insert(Transform::from_translation(translation));
+        } else {
+            state.request_name(agent);
+            let entities = spawn_sphere(
+                state,
+                assets,
                 agent,
-                sphere_translation(object, region_offset),
+                translation,
                 commands,
                 meshes,
                 materials,
-            ),
-        };
-        commands.entity(entities.anchor).insert(avatar_motion);
-        if seated {
-            // A freshly-streamed avatar that is already seated: tag it so
-            // `place_seated_avatars` drives its world pose from the seat.
-            commands.entity(entities.anchor).insert(Seated);
+            );
+            state.coarse.insert(agent, entities);
         }
-        // Seed the seat drop with the rest pelvis height for a rigged body, so a
-        // seated body lands hips-on-target before its own appearance resolves (a
-        // sphere has no skeleton, so no drop — its centre sits on the target).
-        if let Some(body) = body {
-            self.seat_drops.entry(agent).or_insert(body.rest_seat_drop);
-        }
-        self.by_scoped.insert(scoped, agent);
-        self.objects.insert(agent, entities);
-        debug!(
-            "spawned avatar for {agent} ({} tracked)",
-            self.objects.len()
-        );
+        state.coarse_region.insert(agent, region);
     }
-
-    /// Despawn the **body** this viewer built for `agent`, because the agent is
-    /// no longer to be drawn — derendered (`viewer-derender-blacklist`) or hidden
-    /// by the friends-only filter (`viewer-render-friends-only`) — and put the
-    /// cheap coarse placeholder in its place, hidden, at `at`.
-    ///
-    /// The hand-off is the whole point of the `at` argument. Presence and
-    /// rendering are separate concerns here: the radar and the minimap track an
-    /// avatar through whatever entity represents it, so if the body simply
-    /// vanished the avatar would be **absent** until the next
-    /// `CoarseLocationUpdate` (up to a second later) spawned a dot — and the
-    /// radar, sweeping in between, would report a leave and then an enter, plus
-    /// the range-crossing alerts that go with them. Swapping body for
-    /// placeholder in the same frame keeps the agent continuously present; only
-    /// its visibility changes.
-    ///
-    /// The per-agent name / appearance bookkeeping stays too: it costs nothing,
-    /// is invisible, and makes coming back cheap. A no-op for an avatar that has
-    /// no body (a coarse-only one already has the placeholder).
-    pub(crate) fn derender_agent(
-        &mut self,
-        agent: AgentKey,
-        at: Option<Vec3>,
-        commands: &mut Commands,
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<FaceMaterial>,
-    ) {
-        let scoped = self
-            .by_scoped
-            .iter()
-            .find(|(_scoped, tracked)| **tracked == agent)
-            .map(|(scoped, _tracked)| *scoped);
-        let Some(scoped) = scoped else {
-            return;
-        };
-        self.remove_object(scoped, commands);
-        // Hand over to a placeholder, unless a coarse dot already stands in.
-        // Spawned hidden: `hide_suppressed_avatars` would hide it a moment later
-        // anyway, and a frame of a visible sphere where a body just was is
-        // exactly the flicker this feature must not produce. It is cleaned up
-        // like any other dot — `apply_object` despawns it when a full body takes
-        // over again.
-        if let Some(at) = at
-            && !self.coarse.contains_key(&agent)
-        {
-            let entities = self.spawn_sphere(agent, at, commands, meshes, materials);
-            commands.entity(entities.anchor).insert(Visibility::Hidden);
-            self.coarse.insert(agent, entities);
-        }
-    }
-
-    /// Despawn the full-object avatar tracked under `scoped` because it was
-    /// derendered — the scoped-id counterpart of [`derender_agent`](Self::derender_agent),
-    /// for the suppression index (which works in region-scoped ids). A no-op
-    /// when `scoped` is not an avatar.
-    pub(crate) fn derender_scoped(&mut self, scoped: ScopedObjectId, commands: &mut Commands) {
-        self.remove_object(scoped, commands);
-    }
-
-    /// Despawn the placeholder of the full-object avatar that left the scene under
-    /// `scoped`, if one is tracked.
-    fn remove_object(&mut self, scoped: ScopedObjectId, commands: &mut Commands) {
-        let Some(agent) = self.by_scoped.remove(&scoped) else {
-            return;
-        };
-        if let Some(entities) = self.objects.remove(&agent) {
+    // Despawn coarse placeholders from THIS region that dropped out of its
+    // list; leave other regions' dots untouched.
+    let stale: Vec<AgentKey> = state
+        .coarse
+        .keys()
+        .copied()
+        .filter(|agent| state.coarse_region.get(agent) == Some(&region) && !present.contains(agent))
+        .collect();
+    for agent in stale {
+        if let Some(entities) = state.coarse.remove(&agent) {
             despawn_avatar(entities, commands);
         }
-        // The body's attachment-point nodes and head socket are despawned with
-        // its anchor; drop the stores so a later attachment can no longer resolve
-        // them (P16.2). The recorded joint overrides go too, so a re-spawn
-        // rebuilds them from the meshes that re-bind (R1).
-        let _dropped_nodes = self.attachment_nodes.remove(&agent);
-        let _dropped_head = self.head_sockets.remove(&agent);
-        let _dropped_deform = self.deformations.remove(&agent);
-        let _dropped_volumes = self.volume_deformations.remove(&agent);
-        let _dropped_physics = self.body_physics.remove(&agent);
-        let _dropped_seat = self.seated.remove(&agent);
-        let _dropped_seat_drop = self.seat_drops.remove(&agent);
-        self.clear_joint_overrides(agent);
+        state.coarse_region.remove(&agent);
+        state.coarse_pos.remove(&agent);
     }
+}
 
-    /// Whether `agent`'s avatar is currently seated on an object — its latest
-    /// full-object update carried a non-zero `ParentID`. The camera reads this to
-    /// take a seated own avatar's world pose from its (seat-driven) global
-    /// transform rather than its region-space motion.
-    #[must_use]
-    pub fn is_seated(&self, agent: AgentKey) -> bool {
-        self.seated.contains_key(&agent)
-    }
-
-    /// Unseat any avatars seated on the object `seat` that was just removed
-    /// (`ObjectRemoved`) — drop their seated state and the [`Seated`] tag so the
-    /// dead-reckoner resumes owning their anchor. Their anchor stays at its last
-    /// seat-driven world pose until the simulator's own stand / motion update lands.
-    ///
-    /// The simulator normally unseats a rider before (or as) it kills the seat, so
-    /// the avatar's own `ObjectUpdate` (with `ParentID` zero) already cleared the
-    /// seat; this covers the seat vanishing — deleted, or culled from the interest
-    /// list — *without* or *before* that update, so an avatar is never left frozen,
-    /// invisibly parented, to a seat that no longer exists. Returns the agents it
-    /// unseated (empty when the removed object was not anyone's seat).
-    fn unseat_from_seat(&mut self, seat: ScopedObjectId, commands: &mut Commands) {
-        let riders: Vec<AgentKey> = self
-            .seated
-            .iter()
-            .filter(|(_agent, target)| target.seat == seat)
-            .map(|(agent, _target)| *agent)
-            .collect();
-        for agent in riders {
-            let _unseated = self.seated.remove(&agent);
-            if let Some(entities) = self.objects.get(&agent) {
-                commands.entity(entities.anchor).remove::<Seated>();
+/// Re-issue the baked-texture fetches for `agent` — the avatar pies' manual
+/// **Tex Refresh**. Each recorded bake slot is re-requested through the
+/// [`TextureManager`], which clears any retry-exhausted state and spawns a
+/// fresh fetch (`request_from` drops the id
+/// from its `retry` map and starts a new task), so an avatar left grey by a
+/// transient bake-service failure gets another set of tries without waiting
+/// for a fresh `AvatarAppearance`. The recorded COF version is also forgotten
+/// so the next appearance resend re-fetches too. A no-op for an agent with no
+/// bakes recorded yet. Slots are re-requested by the same rule the initial
+/// ingest uses ([`bake_service_slot_name`]): the server bake service when the
+/// grid central-bakes and the slot has a service name, else a by-UUID fetch.
+pub(crate) fn refetch_bakes(
+    state: &mut AvatarState,
+    agent: AgentKey,
+    manager: &mut TextureManager,
+    appearance_service: Option<&url::Url>,
+) {
+    let Some(bakes) = state.baked_textures.get(&agent) else {
+        debug!("tex refresh: no baked textures recorded for {agent} yet");
+        return;
+    };
+    let count = bakes.len();
+    // Snapshot the ids: `forget` + the re-request borrow `manager` mutably, so
+    // the immutable borrow of `state.baked_textures` must end first.
+    let slots: Vec<(usize, TextureKey)> = bakes.iter().map(|(&slot, &id)| (slot, id)).collect();
+    for (slot, id) in slots {
+        // Evict first so a cached (or retry-exhausted) bake actually re-fetches
+        // rather than the request short-circuiting on the cache — a true refresh.
+        manager.forget(id);
+        match appearance_service.zip(bake_service_slot_name(slot)) {
+            Some((service, name)) => {
+                let url = format!("{service}texture/{}/{name}/{id}", agent.uuid());
+                manager.request_server_bake(id, url);
+            }
+            None => {
+                manager.request_boosted(id, crate::world_api::AVATAR_BOOST_PRIORITY);
             }
         }
     }
-
-    /// Each seated avatar's `(anchor entity, seat scoped id, seat-relative pose,
-    /// seat drop)`, for `place_seated_avatars` to drive the anchor from its seat's
-    /// live world transform. The seat drop is the pelvis's height above the body
-    /// root (zero for a sphere), applied so the hips land on the sit target. Skips
-    /// any avatar whose anchor is not (yet) a tracked full object.
-    fn seated_placements(
-        &self,
-    ) -> impl Iterator<Item = (Entity, ScopedObjectId, Transform, f32)> + '_ {
-        self.seated.iter().filter_map(|(agent, target)| {
-            let anchor = self.objects.get(agent)?.anchor;
-            let seat_drop = self.seat_drops.get(agent).copied().unwrap_or(0.0);
-            Some((anchor, target.seat, target.offset, seat_drop))
-        })
-    }
-
-    /// The agent whose avatar is tracked under the scoped object id `avatar_scoped`
-    /// — the wearer of an attachment whose parent is that object. `None` if no
-    /// avatar object with that scoped id is tracked (yet).
-    ///
-    /// The HUD routing (P35.1) needs it to tell the agent's **own** HUD attachments
-    /// (which go to the screen-space HUD layer) from another avatar's (which are
-    /// hidden: the reference viewer gives a non-self avatar no HUD joints at all).
-    #[must_use]
-    pub fn agent_of(&self, avatar_scoped: ScopedObjectId) -> Option<AgentKey> {
-        self.by_scoped.get(&avatar_scoped).copied()
-    }
-
-    /// The attachment-point node entity a worn attachment parents to (P16.2): the
-    /// node for raw attachment-point `point_id` on the rigged body of the avatar
-    /// tracked under `avatar_scoped`, carrying the fixed `avatar_lad.xml` offset
-    /// from its skeleton joint. `None` if that avatar is not a tracked full-object
-    /// rigged body yet, or the point has no body joint (a HUD point) — in which
-    /// case the caller holds the attachment pending and retries.
-    pub(crate) fn attachment_point_entity(
-        &self,
-        avatar_scoped: ScopedObjectId,
-        point_id: u8,
-    ) -> Option<Entity> {
-        let agent = self.by_scoped.get(&avatar_scoped)?;
-        self.attachment_nodes.get(agent)?.get(&point_id).copied()
-    }
-
-    /// The rigged-body root (anchor) entity of `agent`'s avatar (P17.2): the entity
-    /// a worn rigged mesh's skinned submeshes are parented to so they despawn with
-    /// the avatar and inherit its visibility. `None` if that avatar is not a tracked
-    /// full-object avatar yet.
-    /// The name-tag (label) entity of `agent`, if it is currently rendered.
-    pub(crate) fn label_of(&self, agent: AgentKey) -> Option<Entity> {
-        self.objects
-            .get(&agent)
-            .or_else(|| self.coarse.get(&agent))
-            .map(|entities| entities.label)
-    }
-
-    /// The rigged-body root (anchor) entity of `agent`'s full-object avatar,
-    /// if one is rendered.
-    #[must_use]
-    pub fn body_root_of(&self, agent: AgentKey) -> Option<Entity> {
-        self.objects.get(&agent).map(|entities| entities.anchor)
-    }
-
-    /// Whether `agent` has a spawned rigged body (Phase 4: keyed on the presence
-    /// of the head socket, spawned with the body — the joint entities the old
-    /// `joint_entities_of` returned are gone). `false` for a sphere-only
-    /// (no-`--viewer-assets`) avatar or one not spawned yet.
-    pub(crate) fn is_rigged(&self, agent: AgentKey) -> bool {
-        self.head_sockets.contains_key(&agent)
-    }
-
-    /// The per-point attachment-point node entities of `agent`'s rigged avatar
-    /// as `(raw attachment-point id, node entity)` pairs — the socket writer
-    /// (§5.4) places each worn node at its joint's posed world composed with the
-    /// point's fixed `avatar_lad.xml` offset each frame. Empty for an avatar
-    /// with no rigged body.
-    pub(crate) fn attachment_nodes_of(
-        &self,
-        agent: AgentKey,
-    ) -> impl Iterator<Item = (u8, Entity)> + '_ {
-        self.attachment_nodes
-            .get(&agent)
-            .into_iter()
-            .flat_map(|nodes| nodes.iter().map(|(&point_id, &entity)| (point_id, entity)))
-    }
-
-    /// The camera's head-focus socket entity of `agent`'s rigged avatar
-    /// (Phase 4 §5.4): a root child the socket writer places at the posed
-    /// `mHead` joint each frame, so the camera reads the animated head without a
-    /// head joint entity. `None` for a sphere-only avatar or before the body
-    /// spawns.
-    pub(crate) fn head_socket_of(&self, agent: AgentKey) -> Option<Entity> {
-        self.head_sockets.get(&agent).copied()
-    }
-
-    /// The resolved skeletal deformations the animation driver (P18.3) folds a
-    /// playing motion into when recomputing each joint's world matrix, as last
-    /// shaped by [`apply_avatar_appearance`]. `None` for an avatar with no rigged
-    /// body, or before its first appearance.
-    pub(crate) fn deformations(&self, agent: AgentKey) -> Option<&SkeletalDeformations> {
-        self.deformations.get(&agent)
-    }
-
-    /// The resolved collision-volume displacements (P34.3) the animation driver
-    /// folds into the same recurrence, as last shaped by
-    /// [`apply_avatar_appearance`]. An avatar whose shape displaces no volume has
-    /// no entry, which is the same as the (empty) default.
-    pub(crate) fn volume_deformations(&self, agent: AgentKey) -> Option<&VolumeDeformations> {
-        self.volume_deformations.get(&agent)
-    }
-
-    /// Every avatar with a spawned rigged body (Phase 4: keyed on the head
-    /// socket, since the joint entities are gone). The pose driver publishes each
-    /// one's root + adjuster corrections and places its sockets every frame; the
-    /// GPU samples, blends and FK-poses the skinning in place.
-    pub(crate) fn rigged_agents(&self) -> Vec<AgentKey> {
-        self.head_sockets.keys().copied().collect()
-    }
-
-    /// Note that `agent` wears the rigged mesh asset `mesh` (for the avatar-state
-    /// dump). Idempotent; forgotten with the avatar on despawn.
-    pub(crate) fn record_worn_rigged_mesh(&mut self, agent: AgentKey, mesh: Uuid) {
-        let _new = self
-            .worn_rigged_meshes
-            .entry(agent)
-            .or_default()
-            .insert(mesh);
-    }
-
-    /// The anchor entity (rigged-body root, or placeholder sphere) of `agent`'s
-    /// full-object avatar, if one is tracked — the world pose the replay test rig
-    /// (an orbiting light, a reflection probe) centres itself on.
-    pub(crate) fn anchor_of(&self, agent: AgentKey) -> Option<Entity> {
-        self.objects.get(&agent).map(|entities| entities.anchor)
-    }
-
-    /// Record the joint position overrides that worn rigged `mesh` imposes on
-    /// `agent`'s skeleton (R1), replacing any previous contribution from that mesh
-    /// (a rebind is idempotent). Flags the avatar for a skeleton re-deform **only
-    /// when the contribution actually changed**, so re-binding identical rig parts
-    /// (a mesh body's many same-rigged pieces) does not thrash the appearance pass.
-    pub(crate) fn record_joint_overrides(
-        &mut self,
-        agent: AgentKey,
-        mesh: Uuid,
-        overrides: JointOverrides,
-    ) {
-        let per_mesh = self.joint_overrides.entry(agent).or_default();
-        if per_mesh.get(&mesh) == Some(&overrides) {
-            return;
-        }
-        if overrides.is_empty() {
-            // A mesh that used to override but no longer does: drop its entry so the
-            // rebuilt effective set no longer carries it.
-            if per_mesh.remove(&mesh).is_none() {
-                return;
-            }
-        } else {
-            let _prev = per_mesh.insert(mesh, overrides);
-        }
-        self.appearance_dirty.insert(agent);
-    }
-
-    /// The body-physics configuration ingested from `agent`'s latest appearance
-    /// (P34.1), or `None` before one arrived. Every motion it holds is ready to
-    /// simulate: a motion whose `Max_Effect` is zero is present but
-    /// [inactive](sl_client_bevy::PhysicsSettings::is_active).
-    pub(crate) fn body_physics(&self, agent: AgentKey) -> Option<&BodyPhysics> {
-        self.body_physics.get(&agent)
-    }
-
-    /// The current pose-inputs generation (see the field doc): the pose gate
-    /// stores it per avatar and re-evaluates when it moved.
-    pub(crate) const fn pose_inputs_generation(&self) -> u64 {
-        self.pose_inputs_generation
-    }
-
-    /// Record that an input the skeleton pose fold consumes (deformations, volume
-    /// deformations, joint overrides, body physics) was (re)applied. Over-bumping
-    /// is harmless — an extra bump costs one frame of full re-evaluation.
-    pub(crate) const fn bump_pose_inputs(&mut self) {
-        self.pose_inputs_generation = self.pose_inputs_generation.wrapping_add(1);
-    }
-
-    /// The effective joint position overrides for `agent` (R1): the per-joint winner
-    /// across every worn rigged mesh, resolved to the **highest mesh id** on a
-    /// conflict (the reference viewer's `findActiveOverride`) with the scale lock
-    /// sticky. `None` when the avatar wears no position-carrying rig.
-    pub(crate) fn effective_joint_overrides(&self, agent: AgentKey) -> Option<JointOverrides> {
-        let per_mesh = self.joint_overrides.get(&agent)?;
-        if per_mesh.is_empty() {
-            return None;
-        }
-        // Merge in ascending mesh-id order so the highest mesh id wins each joint.
-        let mut meshes: Vec<(&Uuid, &JointOverrides)> = per_mesh.iter().collect();
-        meshes.sort_by_key(|(mesh, _)| **mesh);
-        let mut effective = JointOverrides::default();
-        for (_mesh, overrides) in meshes {
-            effective.merge(overrides);
-        }
-        Some(effective)
-    }
-
-    /// Forget every joint position override recorded for `agent` (R1) — e.g. when
-    /// the avatar despawns, so a re-spawn rebuilds them from scratch.
-    pub(crate) fn clear_joint_overrides(&mut self, agent: AgentKey) {
-        let _prev = self.joint_overrides.remove(&agent);
-        let _worn = self.worn_rigged_meshes.remove(&agent);
-        self.bump_pose_inputs();
-    }
-
-    /// The agent whose avatar a worn object `scoped` hangs off — chasing parent
-    /// links up to the tracked avatar root, so a rigged mesh that is a *child link*
-    /// of a multi-prim attachment linkset (a mesh body, whose parts parent to the
-    /// linkset root prim, not the avatar) still resolves to its wearer (P17.2).
-    /// `None` if the chain does not reach an avatar.
-    pub(crate) fn wearer_of(&self, scoped: ScopedObjectId) -> Option<AgentKey> {
-        self.avatar_root_of(scoped)
-    }
-
-    /// Reconcile the coarse-only avatar placeholders with one region's
-    /// `CoarseLocationUpdate`: spawn/move a sphere for every coarse avatar that is
-    /// not already a full object (and is not the agent's own `you` entry), and
-    /// despawn any coarse placeholder **from this region** that has dropped out of
-    /// its list.
-    ///
-    /// `region` is the region these locations belong to and `origin` the scene
-    /// origin (the agent's own region); a neighbour region's coarse `x`/`y` are
-    /// relative to *its* south-west corner, so its dots are offset by
-    /// `region − origin` (mirroring the terrain placement) to land on the right
-    /// neighbour terrain (R24). The reconcile is scoped to `region`, so a
-    /// neighbour's update never despawns another region's dots — and an empty
-    /// update for a region (emitted when it is disabled) drops exactly its dots.
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "reconciling one region's coarse dots needs the region + scene \
-                  origin (to offset), the update's locations + you index, and the \
-                  Commands / mesh / material sinks to spawn spheres"
-    )]
-    fn apply_coarse(
-        &mut self,
-        region: RegionHandle,
-        origin: Option<RegionHandle>,
-        own: Option<AgentKey>,
-        locations: &[CoarseLocation],
-        you: Option<usize>,
-        commands: &mut Commands,
-        meshes: &mut Assets<Mesh>,
-        materials: &mut Assets<FaceMaterial>,
-    ) {
-        // The neighbour region's south-west corner relative to the scene origin, in
-        // Second Life east/north metres (0 for the root region itself).
-        let (region_x, region_y) = region.global_coordinates();
-        let (origin_x, origin_y) = origin.unwrap_or(region).global_coordinates();
-        let offset_east = metres_to_f32(region_x) - metres_to_f32(origin_x);
-        let offset_north = metres_to_f32(region_y) - metres_to_f32(origin_y);
-        let mut present: HashSet<AgentKey> = HashSet::new();
-        for (index, location) in locations.iter().enumerate() {
-            let agent = location.agent_id;
-            // The agent's own coarse dot is left to the (precise) self-marker
-            // path. Skip it by the update's `you` index *and* by the agent id: a
-            // region we became a **child** of after a crossing (the region we left)
-            // still lists us in its coarse update — sometimes without setting
-            // `you` — and without the id check that stale entry would spawn a ghost
-            // self-dot back in the old region (viewer-crossing-stale-minimap-self-dot).
-            if Some(index) == you || own == Some(agent) {
-                continue;
-            }
-            // A full-object avatar renders from its precise object position.
-            if self.objects.contains_key(&agent) {
-                continue;
-            }
-            present.insert(agent);
-            self.coarse_pos
-                .insert(agent, (location.x, location.y, location.z));
-            let translation = coarse_translation(location, offset_east, offset_north);
-            if let Some(existing) = self.coarse.get(&agent) {
-                commands
-                    .entity(existing.anchor)
-                    .insert(Transform::from_translation(translation));
-            } else {
-                self.request_name(agent);
-                let entities = self.spawn_sphere(agent, translation, commands, meshes, materials);
-                self.coarse.insert(agent, entities);
-            }
-            self.coarse_region.insert(agent, region);
-        }
-        // Despawn coarse placeholders from THIS region that dropped out of its
-        // list; leave other regions' dots untouched.
-        let stale: Vec<AgentKey> = self
-            .coarse
-            .keys()
-            .copied()
-            .filter(|agent| {
-                self.coarse_region.get(agent) == Some(&region) && !present.contains(agent)
-            })
-            .collect();
-        for agent in stale {
-            if let Some(entities) = self.coarse.remove(&agent) {
-                despawn_avatar(entities, commands);
-            }
-            self.coarse_region.remove(&agent);
-            self.coarse_pos.remove(&agent);
-        }
-    }
-
-    /// Despawn every **other** avatar (full objects and coarse dots) and forget
-    /// their per-agent state — the scene-mirror purge a **distant** teleport
-    /// needs, since the session cleared its object cache with no per-object
-    /// `KillObject` to drive the incremental removal path
-    /// ([`Event::RegionChanged`](sl_client_bevy::SlSessionEvent)'s `world_reset`).
-    ///
-    /// The agent's **own** avatar (`own`) is kept — its body, skeleton, appearance
-    /// and worn state all cross with the agent on a teleport, so despawning it
-    /// would flash the self view and force an appearance / bake refetch. Its
-    /// visible body simply re-anchors when the destination re-streams its
-    /// (agent-keyed) full object. The scoped-id-keyed bookkeeping is dropped
-    /// wholesale (the source region's local-id space is gone) and rebuilt as the
-    /// destination streams. Also drops the origin anchor so [`recenter_avatars`]
-    /// re-anchors on the destination without a spurious re-base shift.
-    pub(crate) fn purge(&mut self, own: Option<AgentKey>, commands: &mut Commands) {
-        let keep = |agent: &AgentKey| own == Some(*agent);
-        // Despawn every non-own avatar's entities (full objects + coarse dots).
-        let others: Vec<AgentKey> = self
-            .objects
-            .keys()
-            .chain(self.coarse.keys())
-            .copied()
-            .filter(|agent| !keep(agent))
-            .collect();
-        for agent in others {
-            if let Some(entities) = self.objects.remove(&agent) {
-                despawn_avatar(entities, commands);
-            }
-            if let Some(entities) = self.coarse.remove(&agent) {
-                despawn_avatar(entities, commands);
-            }
-        }
-        // Retain only the own agent on the per-agent bookkeeping.
-        //
-        // **Names are not scene state and are deliberately kept.** A name is
-        // knowledge about a person, not about a presence: most of the names
-        // this viewer shows are for avatars nowhere near it — group members and
-        // group chat, an object's or parcel's owner and creator, an inventory
-        // item's creator, an open conversation's peer. Dropping the cache
-        // because the *region* changed would re-ask the grid for names it
-        // already knew, and blank every one of those surfaces until the replies
-        // land. It cannot grow enough to matter over a session; if it ever
-        // did, the bound would be least-recently-used, not "is standing near
-        // me". The request bookkeeping stays with it, so a name already
-        // resolved is never re-requested.
-        self.coarse_region.retain(|agent, _| keep(agent));
-        self.coarse_pos.retain(|agent, _| keep(agent));
-        self.attachment_nodes.retain(|agent, _| keep(agent));
-        self.head_sockets.retain(|agent, _| keep(agent));
-        self.titles.retain(|agent, _| keep(agent));
-        self.appearances.retain(|agent, _| keep(agent));
-        self.appearance_dirty.retain(keep);
-        self.appearance_pending.retain(|agent, _| keep(agent));
-        self.joint_overrides.retain(|agent, _| keep(agent));
-        self.worn_rigged_meshes.retain(|agent, _| keep(agent));
-        self.skirt_visible.retain(|agent, _| keep(agent));
-        self.body_physics.retain(|agent, _| keep(agent));
-        self.baked_textures.retain(|agent, _| keep(agent));
-        self.invisible_regions.retain(|agent, _| keep(agent));
-        self.baked_cof_version.retain(|agent, _| keep(agent));
-        self.bake_dirty.retain(keep);
-        self.deformations.retain(|agent, _| keep(agent));
-        self.volume_deformations.retain(|agent, _| keep(agent));
-        self.root_drops.retain(|agent, _| keep(agent));
-        self.seat_drops.retain(|agent, _| keep(agent));
-        self.ever_full_object.retain(keep);
-        self.seated.retain(|agent, _| keep(agent));
-        // The source region's local-id space is gone; drop every scoped-id-keyed
-        // entry (own included — its ids are reassigned when the destination
-        // re-streams it). `by_scoped` is repopulated by `apply_object`, the parent
-        // / hide maps by `track_object`.
-        self.by_scoped.clear();
-        self.object_parents.clear();
-        self.baked_hides.clear();
-        self.scanned_objects.clear();
-        self.origin = None;
-    }
-
-    /// Re-issue the baked-texture fetches for `agent` — the avatar pies' manual
-    /// **Tex Refresh**. Each recorded bake slot is re-requested through the
-    /// [`TextureManager`], which clears any retry-exhausted state and spawns a
-    /// fresh fetch (`request_from` drops the id
-    /// from its `retry` map and starts a new task), so an avatar left grey by a
-    /// transient bake-service failure gets another set of tries without waiting
-    /// for a fresh `AvatarAppearance`. The recorded COF version is also forgotten
-    /// so the next appearance resend re-fetches too. A no-op for an agent with no
-    /// bakes recorded yet. Slots are re-requested by the same rule the initial
-    /// ingest uses ([`bake_service_slot_name`]): the server bake service when the
-    /// grid central-bakes and the slot has a service name, else a by-UUID fetch.
-    pub(crate) fn refetch_bakes(
-        &mut self,
-        agent: AgentKey,
-        manager: &mut TextureManager,
-        appearance_service: Option<&url::Url>,
-    ) {
-        let Some(bakes) = self.baked_textures.get(&agent) else {
-            debug!("tex refresh: no baked textures recorded for {agent} yet");
-            return;
-        };
-        let count = bakes.len();
-        // Snapshot the ids: `forget` + the re-request borrow `manager` mutably, so
-        // the immutable borrow of `self.baked_textures` must end first.
-        let slots: Vec<(usize, TextureKey)> = bakes.iter().map(|(&slot, &id)| (slot, id)).collect();
-        for (slot, id) in slots {
-            // Evict first so a cached (or retry-exhausted) bake actually re-fetches
-            // rather than the request short-circuiting on the cache — a true refresh.
-            manager.forget(id);
-            match appearance_service.zip(bake_service_slot_name(slot)) {
-                Some((service, name)) => {
-                    let url = format!("{service}texture/{}/{name}/{id}", agent.uuid());
-                    manager.request_server_bake(id, url);
-                }
-                None => {
-                    manager.request_boosted(id, crate::world_api::AVATAR_BOOST_PRIORITY);
-                }
-            }
-        }
-        let _forgotten = self.baked_cof_version.remove(&agent);
-        info!("tex refresh: re-requested {count} baked texture(s) for {agent}");
-    }
-
-    /// Record a resolved legacy name. (The tag itself refreshes via the
-    /// content composer, which recomposes whenever this state changes.)
-    fn set_name(&mut self, name: &AvatarName) {
-        let agent = name.id;
-        let resolved = name.legacy_name();
-        self.name_entry(agent).legacy = Some(resolved.clone());
-        debug!("resolved avatar name {agent} = {resolved:?}");
-    }
-
-    /// Record the parenting of an in-world object and, once, scan its texture
-    /// entry for the `IMG_USE_BAKED_*` sentinels a worn attachment uses to hide a
-    /// base-avatar region. Called for every object; a *root* object (no parent)
-    /// can never be an attachment, so it is ignored.
-    fn track_object(&mut self, object: &Object) {
-        if object.parent_id.get() == 0 {
-            return;
-        }
-        let scoped = object.scoped_id();
-        self.object_parents
-            .insert(scoped, object.scoped_parent_id());
-        // Decode + scan a given object's texture entry only once (attachments do
-        // not change their baked-body sentinels under normal wear).
-        if self.scanned_objects.insert(scoped) {
-            let slots = used_baked_slots(&object.texture_entry);
-            if !slots.is_empty() {
-                self.baked_hides.insert(scoped, slots);
-            }
-        }
-    }
-
-    /// Forget a departed object's attachment bookkeeping.
-    fn forget_object(&mut self, scoped: ScopedObjectId) {
-        self.object_parents.remove(&scoped);
-        self.baked_hides.remove(&scoped);
-        self.scanned_objects.remove(&scoped);
-    }
-
-    /// The agent whose avatar `scoped` hangs off, by chasing parent links up to a
-    /// tracked avatar root; `None` if the chain does not reach an avatar (an
-    /// ordinary in-world linkset) or is malformed.
-    fn avatar_root_of(&self, scoped: ScopedObjectId) -> Option<AgentKey> {
-        let mut current = scoped;
-        for _ in 0..MAX_ATTACHMENT_DEPTH {
-            if let Some(&agent) = self.by_scoped.get(&current) {
-                return Some(agent);
-            }
-            match self.object_parents.get(&current) {
-                Some(&parent) => current = parent,
-                None => return None,
-            }
-        }
-        None
-    }
-
-    /// Diagnostic form of [`avatar_root_of`]: `Ok(agent)` when the parent chain
-    /// reaches a recognised avatar, else `Err((terminus, hops))` — the object the
-    /// walk stopped at (a root with no recorded parent, or the last hop when the
-    /// depth cap is hit) and how many hops it took. Lets a stuck rigged
-    /// attachment's `wearer not resolved` failure be classified against the object
-    /// state: a *tracked in-world* terminus means it is genuinely not worn (an
-    /// in-world rigged mesh), while an *untracked* terminus means the wearer /
-    /// linkset-root object never arrived (a parenting / ordering gap).
-    pub(crate) fn avatar_root_walk(
-        &self,
-        scoped: ScopedObjectId,
-    ) -> Result<AgentKey, (ScopedObjectId, usize)> {
-        let mut current = scoped;
-        for hops in 0..MAX_ATTACHMENT_DEPTH {
-            if let Some(&agent) = self.by_scoped.get(&current) {
-                return Ok(agent);
-            }
-            match self.object_parents.get(&current) {
-                Some(&parent) => current = parent,
-                None => return Err((current, hops)),
-            }
-        }
-        Err((current, MAX_ATTACHMENT_DEPTH))
-    }
-
-    /// The set of baked slots to hide for each avatar: every tracked attachment
-    /// whose texture entry carries `IMG_USE_BAKED_*` sentinels is attributed to
-    /// its avatar (by chasing its chain), and its replaced slots unioned in.
-    fn hidden_slots_per_agent(&self) -> HashMap<AgentKey, HashSet<usize>> {
-        let mut hidden: HashMap<AgentKey, HashSet<usize>> = HashMap::new();
-        for (&scoped, slots) in &self.baked_hides {
-            if let Some(agent) = self.avatar_root_of(scoped) {
-                hidden
-                    .entry(agent)
-                    .or_default()
-                    .extend(slots.iter().copied());
-            }
-        }
-        hidden
-    }
+    let _forgotten = state.baked_cof_version.remove(&agent);
+    info!("tex refresh: re-requested {count} baked texture(s) for {agent}");
 }
 
 /// The base-body baked-texture slots draped over the **system** body (P14): the
@@ -2960,34 +1891,12 @@ fn visible_body_bakes(texture_entry: &TextureEntry) -> HashMap<usize, TextureKey
     bakes
 }
 
-/// Scan a raw texture-entry blob for the `IMG_USE_BAKED_*` sentinels and return
-/// the (sorted, de-duplicated) baked slots it signals should be replaced — empty
-/// for an ordinary object.
-fn used_baked_slots(texture_entry: &[u8]) -> Vec<usize> {
-    let entry = decode_texture_entry(texture_entry, MAX_FACES);
-    let mut slots: Vec<usize> = entry
-        .faces
-        .iter()
-        .filter_map(|face| avatar_texture::use_baked_slot(face.texture_id))
-        .collect();
-    slots.sort_unstable();
-    slots.dedup();
-    slots
-}
-
-/// Despawn both entities of an avatar (its anchor — sphere or body root, whose
-/// sub-hierarchy goes with it — and its name tag).
-fn despawn_avatar(entities: AvatarEntities, commands: &mut Commands) {
-    commands.entity(entities.anchor).try_despawn();
-    commands.entity(entities.label).try_despawn();
-}
-
 /// Keep the scene origin on the root region for **avatars**: when the root region
 /// changes — a border crossing, or a teleport to an already-connected region —
 /// shift every (non-seated) avatar anchor, and its dead-reckoning interpolation,
 /// by the same `-shift` the camera, terrain and objects re-base by, and record
 /// the new origin so a freshly-streamed avatar is placed against it
-/// (`AvatarState::apply_object`).
+/// (`apply_object`).
 ///
 /// Like [`recenter_objects`](crate::objects::recenter_objects) this is
 /// belt-and-braces with the per-update placement: a moving avatar re-snaps itself
@@ -3051,6 +1960,7 @@ pub fn update_avatar_objects(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
+    mut assets: ResMut<AvatarPlaceholderAssets>,
     derender: Res<crate::world_api::DerenderList>,
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
@@ -3087,7 +1997,9 @@ pub fn update_avatar_objects(
                     } else {
                         state.ever_full_object.insert(agent);
                     }
-                    state.apply_object(
+                    apply_object(
+                        &mut state,
+                        &mut assets,
                         object,
                         body,
                         identity.agent_id,
@@ -3228,6 +2140,7 @@ pub fn update_coarse_avatars(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
+    mut assets: ResMut<AvatarPlaceholderAssets>,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -3242,7 +2155,9 @@ pub fn update_coarse_avatars(
             ..
         } = &event.0
         {
-            state.apply_coarse(
+            apply_coarse(
+                &mut state,
+                &mut assets,
                 *region_handle,
                 origin,
                 own,
@@ -3343,7 +2258,7 @@ pub struct RefetchAvatarTextures {
 }
 
 /// Handle a [`RefetchAvatarTextures`] request by re-issuing the agent's baked-
-/// texture fetches (`AvatarState::refetch_bakes`), using the same server-bake /
+/// texture fetches (`refetch_bakes`), using the same server-bake /
 /// by-UUID rule the initial ingest does.
 pub fn handle_refetch_avatar_textures(
     mut requests: MessageReader<RefetchAvatarTextures>,
@@ -3353,7 +2268,7 @@ pub fn handle_refetch_avatar_textures(
 ) {
     let service = identity.agent_appearance_service.clone();
     for request in requests.read() {
-        state.refetch_bakes(request.agent, &mut manager, service.as_ref());
+        refetch_bakes(&mut state, request.agent, &mut manager, service.as_ref());
     }
 }
 
@@ -4206,17 +3121,6 @@ pub fn apply_own_shape_from_wearables(
     let _prev = state.appearances.insert(agent, bytes);
     state.appearance_dirty.insert(agent);
     debug!("resolved own avatar shape from worn wearables");
-}
-
-/// When an avatar was first and last marked appearance-dirty, in
-/// [`Time::elapsed_secs_f64`] seconds (see
-/// [`AvatarState::appearance_pending`]).
-#[derive(Debug, Clone, Copy)]
-struct AppearanceDirtyStamps {
-    /// When the avatar entered the pending set (unchanged by re-marks).
-    first: f64,
-    /// When the avatar was most recently marked (each re-mark refreshes it).
-    last: f64,
 }
 
 /// How long a re-marked avatar's dirty state must stay quiet (no further
@@ -5196,21 +4100,21 @@ pub fn apply_bom_face_materials(
 mod tests {
     use super::{
         AvatarEntities, AvatarState, BAKE_ALPHA_MASK_THRESHOLD, BakeAlpha, BodySizeMetrics,
-        HashMap, NameAlias, PROVISIONAL_ID_CHARS, SeatChainQuery, Seated, SeatedTarget,
-        body_root_transform, bom_face_alpha_mode, classify_bake_alpha, coarse_translation,
-        drop_to_hips, invisible_body_slots, provisional_label, root_drop_from_metrics,
-        seat_world_transform, seated_offset, should_refetch_bakes, used_baked_slots,
+        HashMap, SeatChainQuery, Seated, SeatedTarget, body_root_transform, bom_face_alpha_mode,
+        classify_bake_alpha, coarse_translation, drop_to_hips, invisible_body_slots,
+        root_drop_from_metrics, seat_world_transform, seated_offset, should_refetch_bakes,
         visible_body_bakes,
     };
     use crate::avatar_assets::BodyRegion;
     use crate::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
+    use crate::world_api::NameAlias;
     use bevy::math::{Quat, Vec3};
     use bevy::prelude::{AlphaMode, Transform};
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
         AgentKey, BakeRegion, CircuitId, CoarseLocation, Object, ObjectMotion, RegionHandle,
         RegionLocalObjectId, Rotation, ScopedObjectId, TextureEntry, TextureFace, TextureKey, Uuid,
-        Vector, avatar_texture, encode_texture_entry,
+        Vector, avatar_texture,
     };
 
     /// The zero vector (`Vector` does not derive `Default`).
@@ -5528,7 +4432,7 @@ mod tests {
     fn name_value_seed_merges_without_clobbering() {
         use sl_client_bevy::DisplayName;
 
-        let agent: super::AgentKey = super::Uuid::from_u128(0x51).into();
+        let agent: super::AgentKey = Uuid::from_u128(0x51).into();
         let mut state = AvatarState::default();
 
         state.seed_name_fields(
@@ -5583,7 +4487,7 @@ mod tests {
     fn missing_display_name_keeps_legacy_fallback() {
         use sl_client_bevy::DisplayName;
 
-        let agent: super::AgentKey = super::Uuid::from_u128(0x52).into();
+        let agent: super::AgentKey = Uuid::from_u128(0x52).into();
         let mut state = AvatarState::default();
         state.names.entry(agent).or_default().legacy = Some("Old Timer".to_owned());
         let record = DisplayName {
@@ -5603,7 +4507,7 @@ mod tests {
     fn an_alias_renames_the_shown_name_only() -> Result<(), Box<dyn core::error::Error>> {
         use sl_client_bevy::DisplayName;
 
-        let agent: super::AgentKey = super::Uuid::from_u128(0x54).into();
+        let agent: super::AgentKey = Uuid::from_u128(0x54).into();
         let mut state = AvatarState::default();
         let resolved = DisplayName {
             id: agent,
@@ -5656,7 +4560,7 @@ mod tests {
     /// record the ingest path creates picks the alias up as it is made.
     #[test]
     fn an_alias_survives_a_record_that_did_not_exist_yet() {
-        let agent: super::AgentKey = super::Uuid::from_u128(0x55).into();
+        let agent: super::AgentKey = Uuid::from_u128(0x55).into();
         let mut state = AvatarState::default();
         state.set_name_aliases(HashMap::from([(
             agent,
@@ -5676,7 +4580,7 @@ mod tests {
     /// mirroring `legacy_name()`.
     #[test]
     fn resident_last_name_collapses_in_seed() {
-        let agent: super::AgentKey = super::Uuid::from_u128(0x53).into();
+        let agent: super::AgentKey = Uuid::from_u128(0x53).into();
         let mut state = AvatarState::default();
         state.seed_name_fields(
             agent,
@@ -5685,16 +4589,6 @@ mod tests {
             None,
         );
         assert_eq!(state.name_of(agent), Some("bobsmith123"));
-    }
-
-    /// The provisional tag is the agent id's leading hex fragment, so two distinct
-    /// avatars read differently before their names resolve.
-    #[test]
-    fn provisional_label_is_a_short_id_fragment() {
-        let agent = AgentKey::from(Uuid::from_u128(0x1234_5678_9abc));
-        let label = provisional_label(agent);
-        assert_eq!(label.chars().count(), PROVISIONAL_ID_CHARS);
-        assert!(agent.uuid().simple().to_string().starts_with(&label));
     }
 
     /// A body root maps the object position through the Second Life → Bevy axis
@@ -5839,29 +4733,6 @@ mod tests {
         assert!(!super::is_masked_body_slot(avatar_texture::HAIR_BAKED));
         assert!(!super::is_masked_body_slot(avatar_texture::EYES_BAKED));
         assert!(!super::is_masked_body_slot(avatar_texture::SKIRT_BAKED));
-    }
-
-    /// A texture entry carrying an `IMG_USE_BAKED_*` sentinel yields that region's
-    /// baked slot; an ordinary entry yields none.
-    #[test]
-    fn used_baked_slots_reads_the_sentinels() {
-        let with_sentinel = TextureEntry {
-            faces: vec![
-                TextureFace::new(TextureKey::from(Uuid::from_u128(0x1234))),
-                TextureFace::new(TextureKey::from(avatar_texture::IMG_USE_BAKED_UPPER)),
-            ],
-        };
-        assert_eq!(
-            used_baked_slots(&encode_texture_entry(&with_sentinel)),
-            vec![avatar_texture::UPPER_BAKED]
-        );
-
-        let ordinary = TextureEntry {
-            faces: vec![TextureFace::new(TextureKey::from(Uuid::from_u128(0x99)))],
-        };
-        assert!(used_baked_slots(&encode_texture_entry(&ordinary)).is_empty());
-        // An empty blob decodes to no faces, so no slots.
-        assert!(used_baked_slots(&[]).is_empty());
     }
 
     /// `visible_body_bakes` picks out the visible baked texture in each base-body

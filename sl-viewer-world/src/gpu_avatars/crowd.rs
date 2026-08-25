@@ -43,8 +43,9 @@ use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, SlIdentity};
 
 use super::stage::{GpuAvatarPoseFeed, GpuSkinBinding};
-use crate::avatars::{AvatarBody, AvatarState};
+use crate::avatars::AvatarBody;
 use crate::face_material::FaceMaterial;
+use crate::world_api::AvatarState;
 use crate::world_api::PoseSlotKey;
 
 /// The env var selecting the synthetic-crowd copy count (`SL_VIEWER_CROWD=N`).

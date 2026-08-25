@@ -66,7 +66,6 @@ pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world::animations;
 pub(crate) use sl_viewer_world::avatar_complexity;
 pub(crate) use sl_viewer_world::avatar_render_settings;
-pub(crate) use sl_viewer_world::avatars;
 pub(crate) use sl_viewer_world::derender;
 pub(crate) use sl_viewer_world::name_tag_content;
 pub(crate) use sl_viewer_world::session;

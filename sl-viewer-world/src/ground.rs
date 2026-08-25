@@ -27,10 +27,11 @@ use bevy::prelude::*;
 use sl_client_bevy::{AgentKey, AnimationPose, RegionHandle, VolumeDeformations};
 
 use crate::avatar_assets::AvatarAssetLibrary;
-use crate::avatars::{AvatarBody, AvatarState};
+use crate::avatars::AvatarBody;
 use crate::coords::region_offset_bevy;
 use crate::terrain::TerrainState;
 use crate::world_api::AvatarMotion;
+use crate::world_api::AvatarState;
 
 /// How far **above** a sample point a resolved surface may sit and still count as the
 /// ground under it, metres (the reference's `getGround` probes from `+1` on Z).

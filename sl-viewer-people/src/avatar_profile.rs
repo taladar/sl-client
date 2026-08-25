@@ -45,7 +45,6 @@ use sl_client_bevy::{
     SlSessionEvent, TextureKey, Uuid, Vector, to_bevy_image,
 };
 
-use crate::avatars::AvatarState;
 use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     spawn_floater,
@@ -62,6 +61,7 @@ use crate::ui_tab::{
 };
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
+use crate::world_api::AvatarState;
 use crate::world_api::FriendsModel;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;

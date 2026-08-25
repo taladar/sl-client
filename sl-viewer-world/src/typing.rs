@@ -49,8 +49,8 @@ use bevy::prelude::*;
 use sl_client_bevy::{AnimationKey, AssetKey, Command, SlCommand, SlIdentity};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::avatars::AvatarState;
 use crate::ui_sounds::{PlayUiSound, UiSound};
+use crate::world_api::AvatarState;
 
 /// The short name of the built-in `ANIM_AGENT_TYPE` animation in the [`sl_anim`]
 /// registry — the hands-on-keyboard gesture played and requested while typing.

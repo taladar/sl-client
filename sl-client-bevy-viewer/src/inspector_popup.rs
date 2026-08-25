@@ -52,7 +52,6 @@ use sl_client_bevy::{
     AgentKey, Command, MuteType, ObjectKey, OwnerKey, SlCommand, SlEvent, SlSessionEvent,
 };
 
-use crate::avatars::AvatarState;
 use crate::i18n::Translator;
 use crate::linkified_text::LinkActivated;
 use crate::slurl_dispatch::DispatchSlurl;
@@ -60,6 +59,7 @@ use crate::ui::{UiRoot, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_name_link::{NameLink, NameLinkSpec, NameTarget, set_name_link, spawn_name_link};
 use crate::url_linkify::LinkTarget;
+use crate::world_api::AvatarState;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::{ConversationKey, OpenConversation};

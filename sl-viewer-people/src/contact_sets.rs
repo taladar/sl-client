@@ -36,7 +36,7 @@
 //! its special case, **display-name removal** (show me this person's legacy name
 //! and not the display name they chose). Those are per resident rather than per
 //! set, and they are not a panel feature: `apply_name_aliases` mirrors them
-//! into the [name cache](crate::avatars::NameRecord) as a
+//! into the [name cache](crate::world_api::NameRecord) as a
 //! [`NameAlias`], so every surface that resolves a
 //! name — tags, the radar, tooltips, chat — shows the alias without knowing that
 //! contact sets exist.
@@ -45,7 +45,7 @@
 //! the whole reason it can be trusted: a name in quotes is visibly the user's
 //! own, never something the grid answered. Nothing aliased is ever written back
 //! over the filed-name memo below, and a wire action still carries the grid's
-//! name ([`crate::avatars::AvatarState::name_of`]).
+//! name ([`crate::world_api::AvatarState::name_of`]).
 //!
 //! # What a set *does*, beyond its colour
 //!
@@ -98,10 +98,10 @@ use serde::{Deserialize, Serialize};
 use sl_client_bevy::{AgentKey, Uuid};
 use tracing::{debug, info, warn};
 
-use crate::avatars::{AvatarState, NameAlias};
 use crate::notifications::ShowNotification;
 use crate::settings::ViewerSettings;
 use crate::world_api::FriendsModel;
+use crate::world_api::{AvatarState, NameAlias};
 
 /// The per-account file the sets are stored in (a sibling of the account
 /// `settings.toml`, like [`crate::avatar_render_settings`]'s exceptions). The
@@ -1125,7 +1125,7 @@ pub(crate) fn refresh_contact_set_names(
         // would file the user's own name for someone as what they are called.
         let resolved = avatars
             .name_record(agent)
-            .and_then(crate::avatars::NameRecord::grid_name)
+            .and_then(crate::world_api::NameRecord::grid_name)
             .map(ToOwned::to_owned);
         match resolved {
             Some(name) => sets.note_live_name(agent, &name),

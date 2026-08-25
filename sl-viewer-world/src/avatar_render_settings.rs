@@ -63,8 +63,8 @@ use sl_client_bevy::{AgentKey, SlIdentity, Uuid};
 use tracing::{debug, info, warn};
 
 use crate::avatar_complexity::RenderOverride;
-use crate::avatars::AvatarState;
 use crate::settings::ViewerSettings;
+use crate::world_api::AvatarState;
 
 /// The per-account file the exceptions are stored in (a sibling of the account
 /// `settings.toml`, like [`crate::derender`]'s blacklist). Our account directory
@@ -364,7 +364,7 @@ pub(crate) fn refresh_exception_names(
     for agent in agents {
         let resolved = avatars
             .name_record(agent)
-            .and_then(crate::avatars::NameRecord::preferred_name)
+            .and_then(crate::world_api::NameRecord::preferred_name)
             .map(ToOwned::to_owned);
         match resolved {
             Some(name) => settings.note_live_name(agent, &name),

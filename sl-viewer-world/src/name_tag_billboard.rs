@@ -1243,7 +1243,7 @@ pub struct NameTagScreenRect {
 }
 
 /// The renderer-side components of one tag entity, composed by
-/// `AvatarState::spawn_label` alongside the avatar-side identity components
+/// `avatars::spawn_label` alongside the avatar-side identity components
 /// (`NameTag`, `AvatarPickTarget`, `TagContent`).
 pub(crate) fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
     (

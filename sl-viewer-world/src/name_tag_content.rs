@@ -282,7 +282,7 @@ pub(crate) struct TagInputs<'a> {
     /// Whether this is the logged-in avatar's own tag.
     pub(crate) is_self: bool,
     /// The avatar's resolved names, if any source answered yet.
-    pub(crate) record: Option<&'a crate::avatars::NameRecord>,
+    pub(crate) record: Option<&'a crate::world_api::NameRecord>,
     /// The id-fragment fallback shown until a name resolves.
     pub(crate) provisional: String,
     /// The avatar's group title, if any.
@@ -551,7 +551,7 @@ fn scale_rgb(color: Color, factor: f32) -> Color {
 
 /// Whether a legacy name marks grid staff (the reference colours `* Linden`
 /// tags `NameTagLinden`).
-fn is_linden(record: Option<&crate::avatars::NameRecord>) -> bool {
+fn is_linden(record: Option<&crate::world_api::NameRecord>) -> bool {
     record
         .and_then(|record| record.legacy.as_deref())
         .is_some_and(|legacy| legacy.ends_with(" Linden"))
@@ -574,7 +574,7 @@ pub(crate) fn compose_tag(
     let has_custom_display_name = toggles.show_display_names
         && inputs
             .record
-            .is_some_and(crate::avatars::NameRecord::has_custom_display_name);
+            .is_some_and(crate::world_api::NameRecord::has_custom_display_name);
     // A legacy name and a matching display name share the base colour (the
     // reference's NameTagLegacy / NameTagMatch, both White).
     let display_base = if has_custom_display_name {
@@ -767,7 +767,7 @@ pub fn compose_name_tags(
     time: Res<Time>,
     mut next_distance_at: Local<f32>,
     mut distance_cache: Local<std::collections::HashMap<AgentKey, f32>>,
-    avatars: Res<crate::avatars::AvatarState>,
+    avatars: Res<crate::world_api::AvatarState>,
     statuses: Res<NameTagStatuses>,
     playback: Res<crate::animations::AnimationPlayback>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
@@ -874,7 +874,7 @@ mod tests {
         NAME_TAG_MUTED, TEXTURE_AREA_COLOR, TagColors, TagInputs, TagLineSize, TagToggles,
         complexity_color, compose_tag, distance_band_color, shows_complexity,
     };
-    use crate::avatars::NameRecord;
+    use crate::world_api::NameRecord;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 

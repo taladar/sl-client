@@ -37,7 +37,7 @@
 //!   rather than leaving a blank list.
 //! - **Friends** — the held friends roster ([`crate::world_api::FriendsModel`]).
 //! - **Near Me** — the avatars this viewer currently knows in-world
-//!   ([`crate::avatars::AvatarState`]), sorted by distance from the own
+//!   ([`crate::world_api::AvatarState`]), sorted by distance from the own
 //!   avatar (the reference's radius slider is folded into the sort — the
 //!   nearest are on top).
 //!
@@ -52,12 +52,12 @@ use sl_client_bevy::{
     Uuid,
 };
 
-use crate::avatars::AvatarState;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{DEFAULT_ELLIPSIS, TabPlacement, TabSpec, TabStrip, spawn_tab_strip};
+use crate::world_api::AvatarState;
 use crate::world_api::{AvatarPicked, FriendsModel, OpenAvatarPicker, PickedAvatar};
 
 /// The floater's [`crate::floater::FloaterSpec::id`].

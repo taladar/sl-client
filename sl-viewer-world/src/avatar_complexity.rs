@@ -118,13 +118,13 @@ use sl_client_bevy::{
 };
 
 use crate::avatar_assets::BodyRegion;
-use crate::avatars::{AvatarBodyPart, AvatarState};
+use crate::avatars::AvatarBodyPart;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::objects::{ObjectState, PrimComplexityFacts};
 use crate::settings::ViewerSettings;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{FriendsModel, ObjectParticleSystem};
+use crate::world_api::{AvatarState, FriendsModel, ObjectParticleSystem};
 
 // ---------------------------------------------------------------------------
 // Settings.
@@ -490,7 +490,7 @@ pub struct AvatarComplexityModel {
     /// the gate the decision pass skips on — every input it reads bumps it.
     revision: u64,
     /// The avatars currently in-world, mirrored from
-    /// [`AvatarState`](crate::avatars::AvatarState) by the scoring pass so the
+    /// [`AvatarState`] by the scoring pass so the
     /// decision pass needs no query of its own.
     known: HashSet<AgentKey>,
     /// The friends the mode-dependent rules spare, mirrored from

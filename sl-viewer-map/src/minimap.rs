@@ -43,7 +43,6 @@ use sl_client_bevy::{
 use sl_settings::{Scope, SettingValue};
 use sl_terrain::TerrainComposition;
 
-use crate::avatars::AvatarState;
 use crate::coords::bevy_to_sl_vec;
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{TransArgs, Translated, Translator};
@@ -63,6 +62,7 @@ use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::water::WaterState;
+use crate::world_api::AvatarState;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;

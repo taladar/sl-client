@@ -38,7 +38,6 @@ use sl_client_bevy::{
     TextureKey, Uuid, to_bevy_image,
 };
 
-use crate::avatars::AvatarState;
 use crate::clipboard::{ViewerClipboard, copy_to_clipboard};
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::{Translated, Translator};
@@ -50,6 +49,7 @@ use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
+use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 
 /// The floater's font size, in logical pixels.

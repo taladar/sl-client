@@ -39,7 +39,8 @@ use super::types::{
 use crate::animations::{AnimationManager, AnimationPlayback};
 use crate::animesh::ControlAvatarState;
 use crate::avatar_assets::AvatarAssetLibrary;
-use crate::avatars::{AvatarBody, AvatarState};
+use crate::avatars::AvatarBody;
+use crate::world_api::AvatarState;
 use crate::world_api::PoseSlotKey;
 
 /// The GPU-avatar **skin binding** written at skin-build time

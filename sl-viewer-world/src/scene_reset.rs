@@ -19,9 +19,9 @@
 use bevy::prelude::*;
 use sl_client_bevy::{SlEvent, SlIdentity, SlSessionEvent};
 
-use crate::avatars::AvatarState;
 use crate::objects::{ObjectState, PendingObjectEvents};
 use crate::terrain::TerrainState;
+use crate::world_api::AvatarState;
 
 /// On a distant-teleport `world_reset`, despawn the world-object, avatar and
 /// terrain mirrors (keeping the own avatar + attachments) so the stale

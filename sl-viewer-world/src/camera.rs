@@ -56,12 +56,13 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use bevy::window::{CursorIcon, PrimaryWindow, SystemCursorIcon};
 
-use crate::avatars::{AvatarState, SeatChainQuery, seat_world_transform};
+use crate::avatars::{SeatChainQuery, seat_world_transform};
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
 use crate::input_context::InputContext;
 use crate::spacenav::{FlycamAxisSettings, SpacenavInput};
 use crate::water::{WaterOcean, WaterRegionPlane};
+use crate::world_api::AvatarState;
 use crate::world_api::{
     AvatarMotion, CameraMode, CameraRig, MAX_DISTANCE, MAX_PITCH, MOUSELOOK_CROSS_DISTANCE,
     ViewerCamera,

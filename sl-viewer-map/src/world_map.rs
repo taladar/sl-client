@@ -48,7 +48,6 @@ use sl_client_bevy::{
 };
 use sl_settings::{Scope, SettingValue};
 
-use crate::avatars::AvatarState;
 use crate::floater::{
     DeferredFloaterContent, FloaterCaps, FloaterHandle, FloaterSpec, spawn_floater,
 };
@@ -62,6 +61,7 @@ use crate::ui_font::UiFont;
 use crate::ui_search::{SearchFieldSpec, spawn_search_field};
 use crate::ui_text::set_editor_text;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
+use crate::world_api::AvatarState;
 use crate::world_api::{BeginTeleportFlow, TeleportTarget, issue_teleport};
 use crate::world_api::{MapTracking, TrackTarget};
 use crate::world_map_math::{

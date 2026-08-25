@@ -27,7 +27,7 @@
 //! mirroring `crate::chat`'s overlay but keyed per conversation.
 //!
 //! A **resident's** name is the one thing the model does *not* cache: it lives
-//! in the shared avatar cache ([`crate::avatars::AvatarState`]), which every
+//! in the shared avatar cache ([`crate::world_api::AvatarState`]), which every
 //! other surface reads, so a tab shows the same pseudonym / display name a name
 //! tag does. The model contributes to that cache instead — the sender names the
 //! wire stamps on messages and invitations — and asks it for the name of any
@@ -715,7 +715,7 @@ impl ConversationModel {
         match key {
             ConversationKey::Nearby => ConversationTitle::Nearby,
             // A resident's name lives in the one shared cache
-            // ([`crate::avatars::AvatarState`]), not here: the model would
+            // ([`crate::world_api::AvatarState`]), not here: the model would
             // otherwise be a second, poorer copy of it. What the model can say
             // is the placeholder to show while nothing is known — the view
             // resolves the name over the top.
@@ -1748,7 +1748,7 @@ fn ingest_conversation_notices(
 pub(crate) fn ingest_conversation_events(
     mut events: MessageReader<SlEvent>,
     mut model: ResMut<ConversationModel>,
-    mut avatars: ResMut<crate::avatars::AvatarState>,
+    mut avatars: ResMut<crate::world_api::AvatarState>,
     identity: Res<SlIdentity>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     friends: Option<Res<crate::world_api::FriendsModel>>,
@@ -1988,7 +1988,7 @@ pub(crate) fn ingest_conversation_events(
 /// A speaker's name for a stored transcript line: the shared avatar cache's
 /// *shown* name (pseudonym, else display name, else legacy), with the same
 /// short-id placeholder the tab titles use while nothing has resolved.
-fn speaker_name(avatars: &crate::avatars::AvatarState, sender: AgentKey) -> String {
+fn speaker_name(avatars: &crate::world_api::AvatarState, sender: AgentKey) -> String {
     avatars
         .shown_name_of(sender)
         .map_or_else(|| short_id(sender.uuid()), ToOwned::to_owned)
@@ -1999,7 +1999,7 @@ fn speaker_name(avatars: &crate::avatars::AvatarState, sender: AgentKey) -> Stri
 /// name resolves through the shared avatar cache (short-id fallback) and links
 /// to their profile.
 fn transcript_line_for(
-    avatars: &crate::avatars::AvatarState,
+    avatars: &crate::world_api::AvatarState,
     identity: &SlIdentity,
     sender: AgentKey,
     text: &str,
@@ -2262,14 +2262,14 @@ fn apply_participant_picks(
 /// name yet — the other half of titling a conversation *we* opened.
 ///
 /// The request goes through the shared batched cache
-/// ([`crate::avatars::AvatarState::request_name`]), so it costs one entry in
+/// ([`crate::world_api::AvatarState::request_name`]), so it costs one entry in
 /// the frame's `UUIDNameRequest` / `GetDisplayNames` batch and is issued once
 /// per agent however many surfaces ask. Only reached while the model changed,
 /// and the mutable borrow is taken only when something is actually missing, so
 /// an idle conversation list neither re-requests nor marks the cache dirty.
 fn request_conversation_names(
     model: Res<ConversationModel>,
-    mut avatars: ResMut<crate::avatars::AvatarState>,
+    mut avatars: ResMut<crate::world_api::AvatarState>,
 ) {
     if !model.is_changed() {
         return;
@@ -2385,7 +2385,7 @@ struct RefreshContext<'w> {
     /// The contact sets, for a member's set colour and its alias revision.
     sets: Option<Res<'w, crate::contact_sets::ContactSets>>,
     /// The shared avatar cache, for a one-to-one tab's *shown* name.
-    avatars: Option<Res<'w, crate::avatars::AvatarState>>,
+    avatars: Option<Res<'w, crate::world_api::AvatarState>>,
 }
 
 /// Keep the view in step with the model: each tab's label + colours (with the

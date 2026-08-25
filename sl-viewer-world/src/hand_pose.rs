@@ -45,8 +45,9 @@ use sl_anim::HandPose;
 use sl_client_bevy::{AgentKey, HAND_POSE_MORPH_PARAMS, hand_pose_morph_param};
 
 use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::avatars::{AvatarRuntimeMorphs, AvatarState};
+use crate::avatars::AvatarRuntimeMorphs;
 use crate::reach::{EDITING_HAND_POSE, EDITING_HAND_POSE_PRIORITY, PointAtTargets};
+use crate::world_api::AvatarState;
 
 /// Seconds one hand-pose morph takes to fully cross-fade into another (reference
 /// `HAND_MORPH_BLEND_TIME`).

@@ -8,7 +8,7 @@
 //!   debounce and reading the [`ObjectPropertiesFamily`] reply (the command and
 //!   reply are already on the wire; [`crate::object_menu`] uses the same pair).
 //! - **avatar**: the resolved display / legacy name — the same
-//!   [`crate::avatars::AvatarState`] the name tags read.
+//!   [`crate::world_api::AvatarState`] the name tags read.
 //! - **land**: the parcel name / owner when nothing pickable is hit, gated
 //!   behind [`SETTING_SHOW_LAND_TIPS`] (the reference's "Show land tooltips",
 //!   off by default), from the held [`sl_client_bevy::SlAgentParcel`].
@@ -38,13 +38,13 @@ use sl_client_bevy::{
     SlAgentParcel, SlCommand, SlEvent, SlIdentity, SlSessionEvent, Uuid,
 };
 
-use crate::avatars::AvatarState;
 use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::hud::HudCamera;
 use crate::hud_pick::{pointer_over_blocking_ui, pointer_over_hud};
 use crate::i18n::Translator;
 use crate::name_tag_billboard::NameTagHitTest;
 use crate::objects::{ObjectSlMotion, ObjectState};
+use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 
 /// Master toggle: show in-world hover tooltips (object + avatar). Default on.

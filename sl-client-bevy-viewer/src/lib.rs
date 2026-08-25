@@ -374,8 +374,8 @@ use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatar_profile::AvatarProfilePlugin;
 use crate::avatars::RefetchAvatarTextures;
 use crate::avatars::{
-    AppearanceApplyBudget, AvatarBakeMaterials, AvatarRuntimeMorphs, AvatarState, OwnLocalBake,
-    VolumeMorphGain, apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
+    AppearanceApplyBudget, AvatarBakeMaterials, AvatarRuntimeMorphs, OwnLocalBake, VolumeMorphGain,
+    apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
     apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
     apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
     fit_avatar_tag_heights, focus_camera_on_volume_shape, handle_refetch_avatar_textures,
@@ -516,6 +516,7 @@ use crate::water_exclusion::{
     bind_water_exclusion_mask, convert_water_exclusion_faces, setup_water_exclusion,
     sync_water_exclusion_camera,
 };
+use crate::world_api::AvatarState;
 use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
@@ -1808,6 +1809,7 @@ fn run_session(
         .init_resource::<LocalLights>()
         .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
+        .init_resource::<avatars::AvatarPlaceholderAssets>()
         .init_resource::<AppearanceApplyBudget>()
         .init_resource::<world_api::MuteModel>()
         .add_message::<world_api::RequestBlock>()

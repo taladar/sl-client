@@ -54,7 +54,6 @@ use sl_client_bevy::{
     SlCurrentRegion, SlEvent, SlRegionIdentity, SlRegionLimits, SlSessionEvent, TextureKey, Uuid,
 };
 
-use crate::avatars::AvatarState;
 use crate::floater::{
     DeferredFloaterContent, Floater, FloaterCaps, FloaterHandle, FloaterSpec, floater_panel,
     spawn_floater,
@@ -76,6 +75,7 @@ use crate::ui_table::{
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
+use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
 use crate::world_api::TexturePicked;
 use crate::world_api::{AvatarPicked, OpenAvatarPicker};

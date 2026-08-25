@@ -24,9 +24,9 @@ use sl_client_bevy::{
     ReflectionProbeFlags, SlCapabilities, SlEvent, SlIdentity, SlSessionEvent,
 };
 
-use crate::avatars::AvatarState;
 use crate::probes::ObjectReflectionProbe;
 use crate::replay_bundle::ReplayManifest;
+use crate::world_api::AvatarState;
 
 /// The replay configuration and injection latch: the loaded avatar manifests, the
 /// primary avatar the test rig centres on, and which rig extras to spawn.

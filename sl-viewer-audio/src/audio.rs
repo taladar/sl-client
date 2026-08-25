@@ -35,8 +35,8 @@ use bevy::prelude::*;
 use sl_audio::{AudioMixer as _, DeviceSelection, EarMode, Listener, Mixer, MixerConfig};
 use sl_settings::SettingValue;
 
-use crate::avatars::AvatarState;
 use crate::settings::ViewerSettings;
+use crate::world_api::AvatarState;
 use crate::world_api::ViewerCamera;
 use sl_client_bevy::SlIdentity;
 

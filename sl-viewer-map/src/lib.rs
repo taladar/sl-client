@@ -33,7 +33,6 @@ pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
-pub(crate) use sl_viewer_world::avatars;
 pub(crate) use sl_viewer_world::objects;
 pub(crate) use sl_viewer_world::terrain;
 pub(crate) use sl_viewer_world::water;

@@ -37,7 +37,6 @@ pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
-pub(crate) use sl_viewer_world::avatars;
 pub(crate) use sl_viewer_world::gpu_pick;
 pub(crate) use sl_viewer_world::hud_pick;
 pub(crate) use sl_viewer_world::input_context;
