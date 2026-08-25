@@ -22,9 +22,9 @@ use std::path::PathBuf;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
-    AgentKey, AssetUpdateLocation, ChatSessionKind, Command, Friend, FriendKey, FriendPresence,
-    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, MuteEntry, MuteFlags,
-    MuteType, Object, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, Priority,
+    AgentKey, AssetUpdateLocation, AttachmentPoint, ChatSessionKind, Command, Friend, FriendKey,
+    FriendPresence, FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, MuteEntry,
+    MuteFlags, MuteType, Object, ObjectKey, ObjectProperties, ParticleSystem, PrimFaceId, Priority,
     RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId, ScriptLanguage,
     ScriptTarget, ScriptUploadLocation, SlCommand, TaskInventoryKey, TextureKey, Uuid, Vector,
 };
@@ -2843,6 +2843,54 @@ impl DerenderList {
             .collect();
         self.revision = self.revision.wrapping_add(1);
     }
+}
+
+// ---------------------------------------------------------------------------
+// Object flag bits and attachment points
+// ---------------------------------------------------------------------------
+//
+// The `ObjectUpdate` flag word says what may be done with an object and how it
+// behaves: whether this agent owns it, may copy, modify or move it, whether it
+// takes physics or is phantom, whether it accepts a dropped inventory item.
+// Every tier tests against these -- the build tool to grey a control, a menu
+// to enable an entry, the world to decide whether to simulate -- so the bits
+// live here rather than in the module that happens to parse the word.
+
+/// The agent-relative `FLAGS_OBJECT_MODIFY` bit of `PrimFlags` (`object_flags.h`):
+/// this agent may modify the object. The simulator sets it per-agent, folding in
+/// the object's owner / group / everyone modify permission.
+pub const FLAGS_OBJECT_MODIFY: u32 = 1 << 2;
+
+/// The agent-relative `FLAGS_OBJECT_COPY` bit: this agent may copy the object.
+pub const FLAGS_OBJECT_COPY: u32 = 1 << 3;
+
+/// The agent-relative `FLAGS_OBJECT_YOU_OWNER` bit: this agent owns the object.
+pub const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
+
+/// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
+/// rotate) the object — set for the owner and for an "anyone can move" object.
+pub const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
+
+/// The `FLAGS_ALLOW_INVENTORY_DROP` bit of `PrimFlags` (`object_flags.h`): the
+/// object is set to let **anyone** add inventory to its contents, the reference
+/// viewer's `flagAllowInventoryAdd`. Unlike the modify / copy bits this is a
+/// property of the object itself (not agent-relative), and it is the one
+/// exception to needing modify on the object to drop an item into it.
+pub const FLAGS_ALLOW_INVENTORY_DROP: u32 = 1 << 16;
+
+/// The `FLAGS_PHANTOM` bit of `PrimFlags` (`object_flags.h`): the object is
+/// non-solid — nothing collides with it. The static collider index
+/// (`physics::build_static_colliders`) still gives a phantom prim a
+/// collider (so it is in the shared spatial index for proximity queries) but
+/// files it in the non-collidable layer.
+pub const FLAGS_PHANTOM: u32 = 1 << 10;
+
+/// Whether a raw attachment-point id names a HUD (screen-space) slot rather than
+/// a body joint — the reference viewer's `LLVOVolume::isHUDAttachment`, which
+/// tests the same `31..=38` id range.
+#[must_use]
+pub const fn is_hud_point(point_id: u8) -> bool {
+    AttachmentPoint::from_code(point_id).is_hud()
 }
 
 #[cfg(test)]

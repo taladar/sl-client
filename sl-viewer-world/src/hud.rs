@@ -40,7 +40,6 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Hdr, ScalingMode};
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
-use sl_client_bevy::AttachmentPoint;
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
@@ -52,13 +51,6 @@ use crate::face_material::FaceMaterial;
 /// in screen space, and never leaks into the world pass (or into a reflection
 /// probe's capture, which is likewise a default-layer camera).
 pub(crate) const HUD_RENDER_LAYER: usize = 1;
-
-/// Whether a raw attachment-point id names a HUD (screen-space) slot rather than
-/// a body joint — the reference viewer's `LLVOVolume::isHUDAttachment`, which
-/// tests the same `31..=38` id range.
-pub(crate) const fn is_hud_point(point_id: u8) -> bool {
-    AttachmentPoint::from_code(point_id).is_hud()
-}
 
 /// Whether an entity's render layers put it on the HUD layer — i.e. whether it is
 /// part of the HUD subtree rather than the world scene.
@@ -344,10 +336,10 @@ pub fn apply_hud_fullbright(faces: RelitFaces, mut materials: ResMut<Assets<Face
 #[cfg(test)]
 mod tests {
     use super::{
-        HUD_CAMERA_DEPTH, HUD_RENDER_LAYER, HudScreen, anchored_point_offset, is_hud_point,
-        on_hud_layer,
+        HUD_CAMERA_DEPTH, HUD_RENDER_LAYER, HudScreen, anchored_point_offset, on_hud_layer,
     };
     use crate::coords::sl_to_bevy_rotation;
+    use crate::world_api::is_hud_point;
     use bevy::app::{App, HierarchyPropagatePlugin, PostUpdate, Propagate};
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::hierarchy::ChildOf;

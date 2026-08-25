@@ -67,11 +67,14 @@ use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::hud_pick::surface_info_from_hit;
-use crate::world_api::ViewerCamera;
+use crate::world_api::{
+    FLAGS_ALLOW_INVENTORY_DROP, FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE,
+    FLAGS_OBJECT_YOU_OWNER, FLAGS_PHANTOM, ViewerCamera, is_hud_point,
+};
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;
 
-use crate::hud::{HUD_RENDER_LAYER, HudState, is_hud_point};
+use crate::hud::{HUD_RENDER_LAYER, HudState};
 use crate::legacy_materials::LegacyMaterialManager;
 use crate::lights::{ObjectLight, light_from_object};
 use crate::material_cache::{MaterialCache, MaterialInternContext, SharedFaceMaterial};
@@ -493,35 +496,6 @@ const fn worn_base_priority(object: &Object) -> Priority {
 /// attachment's chain is short — object → (linkset root) → avatar — so this only
 /// guards against a malformed (cyclic) parent link in the object stream.
 const MAX_PARENT_WALK: usize = 8;
-
-/// The agent-relative `FLAGS_OBJECT_MODIFY` bit of `PrimFlags` (`object_flags.h`):
-/// this agent may modify the object. The simulator sets it per-agent, folding in
-/// the object's owner / group / everyone modify permission.
-pub const FLAGS_OBJECT_MODIFY: u32 = 1 << 2;
-
-/// The agent-relative `FLAGS_OBJECT_COPY` bit: this agent may copy the object.
-pub const FLAGS_OBJECT_COPY: u32 = 1 << 3;
-
-/// The agent-relative `FLAGS_OBJECT_YOU_OWNER` bit: this agent owns the object.
-pub(crate) const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
-
-/// The agent-relative `FLAGS_OBJECT_MOVE` bit: this agent may move (position /
-/// rotate) the object — set for the owner and for an "anyone can move" object.
-pub const FLAGS_OBJECT_MOVE: u32 = 1 << 8;
-
-/// The `FLAGS_ALLOW_INVENTORY_DROP` bit of `PrimFlags` (`object_flags.h`): the
-/// object is set to let **anyone** add inventory to its contents, the reference
-/// viewer's `flagAllowInventoryAdd`. Unlike the modify / copy bits this is a
-/// property of the object itself (not agent-relative), and it is the one
-/// exception to needing modify on the object to drop an item into it.
-pub(crate) const FLAGS_ALLOW_INVENTORY_DROP: u32 = 1 << 16;
-
-/// The `FLAGS_PHANTOM` bit of `PrimFlags` (`object_flags.h`): the object is
-/// non-solid — nothing collides with it. The static collider index
-/// ([`crate::physics::build_static_colliders`]) still gives a phantom prim a
-/// collider (so it is in the shared spatial index for proximity queries) but
-/// files it in the non-collidable layer.
-pub(crate) const FLAGS_PHANTOM: u32 = 1 << 10;
 
 /// Whether the tracked object `scoped` belongs to a **HUD attachment**: it is
 /// itself worn on a HUD point, or it is a linkset child of an object that is (the

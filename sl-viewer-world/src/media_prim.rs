@@ -43,15 +43,12 @@ use crate::media_engine::{
 };
 use crate::media_keys::{current_modifiers, is_printable_text, vk_for_key_code};
 use crate::objects::{FaceTextureDebug, ObjectState, PrimFaceEntity, SceneObject};
-use crate::world_api::ViewerCamera;
+use crate::world_api::{FLAGS_OBJECT_YOU_OWNER, ViewerCamera};
 use sl_cef::{KeyInput, MediaKind, SurfaceConfig, classify_url};
 
 /// The hard cap on simultaneously live in-world media surfaces (the
 /// reference's `PluginInstancesTotal`).
 pub(crate) const MAX_MEDIA_SURFACES: usize = 8;
-
-/// The `FLAGS_OBJECT_YOU_OWNER` update-flags bit (the agent owns the object).
-const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 /// Paint-rate tiers by interest rank (the reference's 100/50/25/1 Hz idea,
 /// scaled to CEF's 60 fps ceiling): the focused / nearest surfaces paint

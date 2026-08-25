@@ -87,7 +87,7 @@ const FLAGS_CAST_SHADOWS: u32 = 1 << 1;
 
 // The agent-relative permission bits (`FLAGS_OBJECT_MODIFY` / `_COPY` / `_MOVE`)
 // live on [`crate::objects`], shared with the build-tool permission gate.
-use crate::objects::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE};
+use crate::world_api::{FLAGS_OBJECT_COPY, FLAGS_OBJECT_MODIFY, FLAGS_OBJECT_MOVE};
 
 /// The agent-relative `FLAGS_OBJECT_TRANSFER` bit.
 const FLAGS_OBJECT_TRANSFER: u32 = 1 << 17;
