@@ -4202,6 +4202,29 @@ fn used_baked_slots(texture_entry: &[u8]) -> Vec<usize> {
     slots
 }
 
+// ---------------------------------------------------------------------------
+// Ordering phases
+// ---------------------------------------------------------------------------
+
+/// The points in a frame that parts of the world order themselves against.
+///
+/// A system that must run once the objects have been folded in, or once the
+/// avatars have, would otherwise have to name the system that does it -- and
+/// naming a system across a boundary is a dependency on the code that produces
+/// the world, not on the world it produced. These sets are the vocabulary for
+/// that ordering, so the constraint can be stated without the reference.
+#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum WorldPhase {
+    /// This frame's `ObjectUpdate` batch has been folded into the object store
+    /// and its entities spawned, moved or despawned.
+    ObjectsUpdated,
+    /// This frame's avatar updates -- full objects and coarse locations alike --
+    /// have been folded into the avatar store.
+    AvatarsUpdated,
+    /// The third-person camera has consumed this frame's orbit input.
+    CameraOrbited,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{PROVISIONAL_ID_CHARS, provisional_label, target_for, used_baked_slots};

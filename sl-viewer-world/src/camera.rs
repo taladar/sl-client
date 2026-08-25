@@ -416,7 +416,9 @@ impl Plugin for CameraPlugin {
                     // early-returns keep the `context.is_world()` half of the
                     // gate). `focus_on_object` stays ungated: its
                     // movement-resets-focus branch applies in every mode.
-                    orbit_third_person.run_if(resource_equals(CameraMode::ThirdPerson)),
+                    orbit_third_person
+                        .run_if(resource_equals(CameraMode::ThirdPerson))
+                        .in_set(crate::world_api::WorldPhase::CameraOrbited),
                     aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
                     drive_flycam.run_if(resource_equals(CameraMode::Flycam)),

@@ -1040,7 +1040,7 @@ impl Plugin for AvatarComplexityPlugin {
                 // frame's events (a removal still resolves to its wearer then),
                 // and the score / decision follow it.
                 mark_complexity_dirty
-                    .before(crate::objects::update_objects)
+                    .before(crate::world_api::WorldPhase::ObjectsUpdated)
                     .before(crate::avatars::update_avatar_objects),
             )
             .add_systems(
@@ -1053,7 +1053,7 @@ impl Plugin for AvatarComplexityPlugin {
                     decide_avatar_appearance,
                 )
                     .chain()
-                    .after(crate::objects::update_objects)
+                    .after(crate::world_api::WorldPhase::ObjectsUpdated)
                     .after(crate::avatars::update_avatar_objects)
                     // The base-region visibility override reads the decision, so
                     // it must already be made this frame.

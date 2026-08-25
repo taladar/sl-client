@@ -225,7 +225,7 @@ impl Plugin for DerenderPlugin {
                 )
                     .chain()
                     .before(crate::objects::update_objects)
-                    .before(crate::avatars::update_avatar_objects),
+                    .before(crate::world_api::WorldPhase::AvatarsUpdated),
             )
             // …and the scene purge after it, so it only ever has to despawn what
             // was already standing there.
@@ -241,8 +241,8 @@ impl Plugin for DerenderPlugin {
                 )
                     .chain()
                     .after(crate::objects::update_objects)
-                    .after(crate::avatars::update_avatar_objects)
-                    .after(crate::avatars::update_coarse_avatars),
+                    .after(crate::world_api::WorldPhase::AvatarsUpdated)
+                    .after(crate::world_api::WorldPhase::AvatarsUpdated),
             );
     }
 }

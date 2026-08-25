@@ -2006,7 +2006,9 @@ fn run_session(
                     // object events, so a static object stays put and a new object
                     // is placed against the current origin. Chained after the
                     // terrain recenter so it re-bases to the same authoritative root.
-                    (recenter_objects, update_objects).chain(),
+                    (recenter_objects, update_objects)
+                        .chain()
+                        .in_set(world_api::WorldPhase::ObjectsUpdated),
                 ),
                 // Build the geometry of any mesh object whose asset just decoded, and
                 // of any sculpted prim whose sculpt map just decoded — both spend from
@@ -2092,7 +2094,8 @@ fn run_session(
                         // however many avatars just appeared.
                         avatars::flush_name_requests,
                     )
-                        .chain(),
+                        .chain()
+                        .in_set(world_api::WorldPhase::AvatarsUpdated),
                     // The mute list (name-tag colouring + the block-list UI):
                     // request once at session-up, ingest the Xfer'd list, turn
                     // each guarded block request into an entry, and mirror

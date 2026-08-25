@@ -186,7 +186,7 @@ impl Plugin for MediaPrimPlugin {
             // scroll accumulator for its orbit zoom.
             .add_systems(
                 Update,
-                claim_media_wheel.before(crate::camera::orbit_third_person),
+                claim_media_wheel.before(crate::world_api::WorldPhase::CameraOrbited),
             );
     }
 }
