@@ -20,8 +20,9 @@ use bevy::prelude::*;
 use sl_client_bevy::{SlEvent, SlIdentity, SlSessionEvent};
 
 use crate::objects::{ObjectState, PendingObjectEvents};
-use crate::terrain::TerrainState;
+use crate::terrain::TerrainTextures;
 use crate::world_api::AvatarState;
+use crate::world_api::TerrainState;
 
 /// On a distant-teleport `world_reset`, despawn the world-object, avatar and
 /// terrain mirrors (keeping the own avatar + attachments) so the stale
@@ -32,6 +33,11 @@ use crate::world_api::AvatarState;
 /// Runs before the recenter systems so each subsystem's origin, dropped to `None`
 /// by its purge, is re-anchored on the destination without a spurious re-base
 /// shift.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected ECS resources and event \
+              readers; one purge per store the distant teleport clears"
+)]
 pub fn reset_scene_on_world_reset(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
@@ -39,6 +45,7 @@ pub fn reset_scene_on_world_reset(
     mut pending: ResMut<PendingObjectEvents>,
     mut avatars: ResMut<AvatarState>,
     mut terrain: ResMut<TerrainState>,
+    mut terrain_textures: ResMut<TerrainTextures>,
     mut commands: Commands,
 ) {
     // Only the last reset in a frame matters (they all purge the same scene);
@@ -63,4 +70,7 @@ pub fn reset_scene_on_world_reset(
     pending.clear();
     avatars.purge(identity.agent_id, &mut commands);
     terrain.purge(&mut commands);
+    // The region materials belonged to the regions that purge just dropped; the
+    // shared placeholder and the decoded detail textures are kept.
+    terrain_textures.purge_materials();
 }

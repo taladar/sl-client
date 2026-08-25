@@ -43,8 +43,9 @@ use sl_client_bevy::{Command, ControlFlags, Rotation, SlAgentParcel, SlCommand, 
 use crate::camera::CameraAim;
 use crate::input_action::Action;
 use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, avatar_nav_drive};
-use crate::terrain::TerrainState;
+
 use crate::world_api::AvatarState;
+use crate::world_api::TerrainState;
 use crate::world_api::{AvatarMotion, CameraMode};
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second

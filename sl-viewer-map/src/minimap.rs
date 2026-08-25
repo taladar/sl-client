@@ -57,7 +57,6 @@ use crate::minimap_math::{
 };
 use crate::objects::{ObjectDebugInfo, ObjectState};
 use crate::settings::ViewerSettings;
-use crate::terrain::TerrainState;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
@@ -66,6 +65,7 @@ use crate::world_api::AvatarState;
 use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, ViewerCamera};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{FriendsModel, MapTracking, TrackTarget};

@@ -9420,6 +9420,7 @@ dependencies = [
  "pretty_assertions",
  "serde",
  "sl-client-bevy",
+ "sl-terrain",
  "sl-viewer-settings",
 ]
 

@@ -1020,7 +1020,7 @@ fn drive_world_map_view(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,
-    terrain: Res<crate::terrain::TerrainState>,
+    terrain: Res<crate::world_api::TerrainState>,
     transforms: Query<&GlobalTransform>,
     computed: Query<&ComputedNode>,
     cursors: Query<&RelativeCursorPosition>,

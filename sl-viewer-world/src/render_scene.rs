@@ -130,10 +130,11 @@ use crate::sky::{
     placeholder_image as sky_placeholder_image, resolve_sky, shadow_cascades,
 };
 use crate::sky_presets::{MIDDAY, MIDNIGHT, SUNRISE, SUNSET, SkyPreset, sky_settings_from};
-use crate::terrain::{PatchKey, build_patch_mesh, placeholder_image as terrain_placeholder_image};
+use crate::terrain::{build_patch_mesh, placeholder_image as terrain_placeholder_image};
 use crate::texture_anim::{ObjectTextureAnimation, drive_texture_animations};
 use crate::textures::TextureManager;
 use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
+use crate::world_api::PatchKey;
 use crate::world_api::{ObjectParticleSystem, TerrainSurface};
 
 /// The environment variable naming a Linden `character/` directory — **the same

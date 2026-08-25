@@ -486,9 +486,8 @@ use crate::sky::{
 };
 use crate::spacenav::SpacenavPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
-use crate::terrain::TerrainState;
 use crate::terrain::{
-    PendingPatchRebuilds, drain_patch_rebuilds, recenter_terrain, update_terrain,
+    PendingPatchRebuilds, TerrainTextures, drain_patch_rebuilds, recenter_terrain, update_terrain,
 };
 use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
@@ -517,6 +516,7 @@ use crate::water_exclusion::{
     sync_water_exclusion_camera,
 };
 use crate::world_api::AvatarState;
+use crate::world_api::TerrainState;
 use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
@@ -1781,6 +1781,7 @@ fn run_session(
         // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
         .init_resource::<VolumeMorphGain>()
         .init_resource::<TerrainState>()
+        .init_resource::<TerrainTextures>()
         .init_resource::<PendingPatchRebuilds>()
         // One shared per-frame mesh-upload lane spent by object spawn / geometry /
         // LOD / terrain apply (replaces their old independent budgets).

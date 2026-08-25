@@ -86,8 +86,9 @@ use crate::objects::{
     GeometryHolder, ObjectCategory, ObjectSlMotion, ObjectState, SceneObject, update_objects,
 };
 use crate::raycast_index::{DynamicColliders, RaycastIndexColliders};
-use crate::terrain::TerrainState;
+
 use crate::world_api::AvatarState;
+use crate::world_api::TerrainState;
 use crate::world_api::{AvatarMotion, ViewerCamera};
 
 /// Clamp a raw region time dilation into the `0.0..=1.0` speed factor the

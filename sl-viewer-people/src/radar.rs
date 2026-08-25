@@ -75,7 +75,6 @@ use crate::radar_model::{
 use crate::session::SETTING_DRAW_DISTANCE;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
-use crate::terrain::TerrainState;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
@@ -97,6 +96,7 @@ use crate::world_api::OpenAddToContactSet;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::RequestBlock;
 use crate::world_api::StartConference;
+use crate::world_api::TerrainState;
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_api::{MapTracking, TrackTarget};
 
