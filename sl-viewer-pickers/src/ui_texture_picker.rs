@@ -49,11 +49,11 @@ use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::inventory::{InventoryModel, item_icon, query_folder_page};
 use crate::material_preview::MaterialPreview;
-use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
+use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{OpenTexturePicker, PickerKind, TexturePicked};
 use sl_client_bevy::SlCommand;
 
@@ -1081,7 +1081,7 @@ fn select_texture(
 fn request_preview_texture(
     ui: Option<Res<TexturePickerUi>>,
     state: Res<TexturePickerState>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     mut pending: ResMut<PendingTexturePreviews>,
 ) {
     let Some(ui) = ui else {
@@ -1090,7 +1090,10 @@ fn request_preview_texture(
     if !state.is_changed() || state.kind == PickerKind::Material {
         return;
     }
-    textures.request_boosted(state.selected, AVATAR_BOOST_PRIORITY);
+    boost.write(BoostTexture {
+        key: state.selected,
+        priority: AVATAR_BOOST_PRIORITY,
+    });
     pending
         .waiting
         .entry(state.selected)
@@ -1139,7 +1142,7 @@ fn sync_material_preview_pane(
 /// Swap thumbnail nodes for their decoded textures as they land (the preview and
 /// the swatches).
 fn resolve_texture_previews(
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut pending: ResMut<PendingTexturePreviews>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
@@ -1151,10 +1154,10 @@ fn resolve_texture_previews(
         .waiting
         .keys()
         .copied()
-        .filter(|key| manager.decoded(*key).is_some())
+        .filter(|key| store.get(*key).is_some())
         .collect();
     for key in ready {
-        let Some(decoded) = manager.decoded(key) else {
+        let Some(decoded) = store.get(key) else {
             continue;
         };
         let handle = images.add(to_bevy_image(decoded));
@@ -1173,7 +1176,7 @@ fn resolve_texture_previews(
 /// keep showing the last prim's texture.
 fn apply_texture_swatch_thumbnail(
     swatches: Query<(Entity, &TextureSwatchValue), Changed<TextureSwatchValue>>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     mut pending: ResMut<PendingTexturePreviews>,
     mut commands: Commands,
 ) {
@@ -1185,7 +1188,10 @@ fn apply_texture_swatch_thumbnail(
             }
             continue;
         }
-        textures.request_boosted(value.0, AVATAR_BOOST_PRIORITY);
+        boost.write(BoostTexture {
+            key: value.0,
+            priority: AVATAR_BOOST_PRIORITY,
+        });
         pending.waiting.entry(value.0).or_default().push(entity);
     }
 }

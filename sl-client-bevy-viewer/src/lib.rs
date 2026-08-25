@@ -493,7 +493,7 @@ use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
 use crate::textures::{
     DeferredFaceTextures, PrimTextures, TextureApplyBudget, TextureDecoded, TextureManager,
     apply_prim_textures, drain_deferred_face_textures, drain_lod_reuploads, poll_textures,
-    reset_texture_apply_budget, sync_texture_blacklist, update_texture_caps,
+    reset_texture_apply_budget, serve_texture_boosts, sync_texture_blacklist, update_texture_caps,
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
 use crate::typing::{TypingState, drive_own_typing};
@@ -517,6 +517,8 @@ use crate::water_exclusion::{
 };
 use crate::world_api::AvatarControls;
 use crate::world_api::AvatarState;
+use crate::world_api::BoostTexture;
+use crate::world_api::DecodedTextures;
 use crate::world_api::HudState;
 use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
@@ -1838,6 +1840,7 @@ fn run_session(
         .init_resource::<ControlAvatarState>()
         .init_resource::<ChatOverlay>()
         .init_resource::<TextureManager>()
+        .init_resource::<DecodedTextures>()
         .init_resource::<PrimTextures>()
         .init_resource::<TextureApplyBudget>()
         .init_resource::<DeferredFaceTextures>()
@@ -1872,6 +1875,7 @@ fn run_session(
             repeat: repeat_animation,
         })
         .add_message::<TextureDecoded>()
+        .add_message::<BoostTexture>()
         .add_message::<MeshDecoded>()
         .add_message::<WearableAssetFetched>()
         .add_message::<RefetchAvatarTextures>()
@@ -1963,9 +1967,16 @@ fn run_session(
                 // finished fetches before the consumers that apply them. The
                 // blacklist mirror rides along, so a blacklisted texture asset
                 // (viewer-derender-blacklist) is refused before any fetch.
-                update_texture_caps,
-                sync_texture_blacklist,
-                poll_textures,
+                // Nested into one tuple to stay within Bevy's per-tuple system
+                // limit. `serve_texture_boosts` drains the fetch requests raised
+                // by the crates that only show textures and cannot reach the
+                // manager directly.
+                (
+                    update_texture_caps,
+                    sync_texture_blacklist,
+                    poll_textures,
+                    serve_texture_boosts,
+                ),
                 // The same for the mesh store's `GetMesh2` / `GetMesh` cap, plus the
                 // client-side bake inputs (P15.2): keep the wearable-asset store's
                 // `ViewerAsset` cap current, request our own outfit and fetch its

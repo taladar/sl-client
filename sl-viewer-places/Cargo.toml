@@ -29,7 +29,6 @@ sl-viewer-platform = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
-sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
 url = { workspace = true }
 

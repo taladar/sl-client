@@ -61,13 +61,13 @@ use crate::notifications::{
     NotificationId, NotificationKind, NotificationManager, NotificationPriority,
 };
 use crate::slt;
-use crate::textures::TextureManager;
 use crate::ui::{column, row};
 use crate::ui_element::{ElementCx, UiAction};
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;
+use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{ConversationKey, OpenConversation};
 
 /// The catalogue-template sentinel a group-notice toast reports as (it is not a
@@ -222,7 +222,7 @@ fn ingest_group_notices(
     mut manager: ResMut<NotificationManager>,
     groups: Res<GroupsModel>,
     mut requested: ResMut<RequestedGroupNotices>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     translator: Translator,
     mut sl_commands: MessageWriter<SlCommand>,
     mut persist: MessageWriter<PersistNotification>,
@@ -268,7 +268,7 @@ fn ingest_group_notices(
             &notice,
             &groups,
             &translator,
-            &mut textures,
+            &mut boost,
         );
         persist_group_notice(&mut persist, id, &notice);
     }
@@ -290,7 +290,7 @@ fn reload_group_notices(
     channel: Option<Res<NotificationChannelRoot>>,
     mut manager: ResMut<NotificationManager>,
     groups: Res<GroupsModel>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     translator: Translator,
     mut persist: MessageWriter<PersistNotification>,
     mut commands: Commands,
@@ -313,7 +313,7 @@ fn reload_group_notices(
             &notice,
             &groups,
             &translator,
-            &mut textures,
+            &mut boost,
         );
         persist_group_notice(&mut persist, id, &notice);
     }
@@ -535,7 +535,7 @@ fn spawn_group_notice_card(
     notice: &GroupNoticeReceived,
     groups: &GroupsModel,
     translator: &Translator,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) -> NotificationId {
     let group_name = groups
         .group_name(notice.group_id)
@@ -583,7 +583,10 @@ fn spawn_group_notice_card(
 
     // Request the insignia texture the build marked pending.
     if let Some(key) = insignia_key {
-        textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
+        boost.write(BoostTexture {
+            key,
+            priority: AVATAR_BOOST_PRIORITY,
+        });
     }
 
     // OK / close ×: resolve the toast through the host's teardown — a user close,
@@ -674,13 +677,13 @@ fn spawn_insignia(
 /// dropping the loading placeholder.
 fn poll_group_notice_insignia(
     pending: Query<(Entity, &PendingInsignia)>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
 ) {
     for (box_entity, PendingInsignia(key)) in &pending {
-        let Some(decoded) = manager.decoded(*key) else {
+        let Some(decoded) = store.get(*key) else {
             continue;
         };
         let handle = images.add(to_bevy_image(decoded));

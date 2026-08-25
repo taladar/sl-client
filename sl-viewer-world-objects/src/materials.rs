@@ -54,6 +54,7 @@ use crate::objects::{FaceTextureDebug, PrimFaceEntity, SceneObject};
 use crate::textures::{
     PrimTextures, TextureAlpha, TextureApplyBudget, TextureManager, compose_face_material,
 };
+use crate::world_api::DecodedTextures;
 use crate::world_api::ObjectState;
 use crate::world_api::{EditToolState, MatModeState, SelectionSet, TERRAIN_BOOST_PRIORITY};
 
@@ -392,6 +393,7 @@ impl MaterialManager {
         base_uv: Affine2,
         texture_face: &TextureFace,
         textures: &mut TextureManager,
+        store: &DecodedTextures,
         prim_textures: &mut PrimTextures,
         materials: &mut Assets<FaceMaterial>,
     ) {
@@ -402,6 +404,7 @@ impl MaterialManager {
                 handle,
                 texture_face,
                 textures,
+                store,
                 prim_textures,
                 materials,
             );
@@ -438,12 +441,19 @@ impl MaterialManager {
     /// specular/normal material only for a real revert). Used by the picker's
     /// nil-id revert ([`preview_face_material`]) and Phase 3's in-world clear
     /// ([`revert_removed_render_materials`]).
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "reverting one face touches its key, handle and texture entry plus the texture \
+                  manager, the decoded store, the prim-texture bookkeeping and the material \
+                  assets -- splitting them into a struct would only move the same list"
+    )]
     pub(crate) fn revert_face_to_diffuse(
         &mut self,
         key: FaceKey,
         handle: &Handle<FaceMaterial>,
         texture_face: &TextureFace,
         textures: &mut TextureManager,
+        store: &DecodedTextures,
         prim_textures: &mut PrimTextures,
         materials: &mut Assets<FaceMaterial>,
     ) -> bool {
@@ -460,6 +470,7 @@ impl MaterialManager {
             texture_face,
             materials,
             textures,
+            store,
             prim_textures,
             MATERIAL_TEXTURE_PRIORITY,
             TextureAlpha::Mask,
@@ -849,6 +860,7 @@ pub fn revert_removed_render_materials(
     mut manager: ResMut<MaterialManager>,
     mut legacy: ResMut<LegacyMaterialManager>,
     mut textures: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     holders: Query<&ObjectRenderMaterials>,
@@ -897,6 +909,7 @@ pub fn revert_removed_render_materials(
                 &material.0,
                 texture_face,
                 &mut textures,
+                &store,
                 &mut prim_textures,
                 &mut materials,
             ) {
@@ -1073,6 +1086,7 @@ pub fn apply_blinn_phong_hide(
     new_faces: Query<(), Added<PrimFaceEntity>>,
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut legacy: ResMut<LegacyMaterialManager>,
@@ -1150,6 +1164,7 @@ pub fn apply_blinn_phong_hide(
             &texture_face,
             &mut materials,
             &mut textures,
+            &store,
             &mut prim_textures,
             MATERIAL_TEXTURE_PRIORITY,
             TextureAlpha::Mask,
@@ -1391,7 +1406,7 @@ fn drop_texture_patches(
 /// decoded (whether freshly or already cached), so it needs no decode message.
 pub fn apply_pbr_textures(
     mut manager: ResMut<MaterialManager>,
-    textures: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -1399,11 +1414,11 @@ pub fn apply_pbr_textures(
     let ready: Vec<TextureKey> = manager
         .texture_pending
         .keys()
-        .filter(|id| textures.decoded(**id).is_some())
+        .filter(|id| store.get(**id).is_some())
         .copied()
         .collect();
     for id in ready {
-        let Some(decoded) = textures.decoded(id).map(Arc::clone) else {
+        let Some(decoded) = store.get(id).map(Arc::clone) else {
             continue;
         };
         let patches = manager.texture_pending.remove(&id).unwrap_or_default();

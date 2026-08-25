@@ -106,7 +106,8 @@ use crate::particle_render::{
 use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
 use crate::world_api::{
-    AVATAR_BOOST_PRIORITY, HUD_RENDER_LAYER, ObjectParticleSystem, ViewerCamera, on_hud_layer,
+    AVATAR_BOOST_PRIORITY, DecodedTextures, HUD_RENDER_LAYER, ObjectParticleSystem, ViewerCamera,
+    on_hud_layer,
 };
 
 // ---------------------------------------------------------------------------
@@ -890,6 +891,7 @@ pub fn drive_particles(
         Option<&RenderLayers>,
     )>,
     quad: Res<ParticleQuad>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     mut manager: ResMut<TextureManager>,
     default_image: Res<DefaultParticleImage>,
@@ -1043,7 +1045,14 @@ pub fn drive_particles(
 
         // Resolve the source's diffuse texture through the shared pipeline (or keep
         // the default sprite), recording it on the cloud once it decodes.
-        apply_cloud_texture(cloud, system, &mut manager, &mut images, &default_image);
+        apply_cloud_texture(
+            cloud,
+            system,
+            &mut manager,
+            &store,
+            &mut images,
+            &default_image,
+        );
 
         // Update the per-frame render inputs on the cloud entity: the compact instance
         // buffer (the GPU expands each particle into a camera-facing billboard) and the
@@ -1097,6 +1106,7 @@ fn apply_cloud_texture(
     cloud: &mut Cloud,
     system: &ParticleSystem,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     images: &mut Assets<Image>,
     default_image: &DefaultParticleImage,
 ) {
@@ -1108,7 +1118,7 @@ fn apply_cloud_texture(
             // Boosted like an avatar texture so a visible emitter's sprite loads
             // promptly rather than queued behind nearer prims.
             manager.request_boosted(texture_id, AVATAR_BOOST_PRIORITY);
-            if let Some(decoded) = manager.decoded(texture_id) {
+            if let Some(decoded) = store.get(texture_id) {
                 cloud.texture = images.add(build_particle_image(decoded));
                 cloud.texture_applied = true;
             }

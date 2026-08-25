@@ -65,6 +65,7 @@ use crate::face_material::FaceMaterial;
 use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flexi_from_object};
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::world_api::AvatarState;
+use crate::world_api::DecodedTextures;
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, AvatarPickTarget, HUD_RENDER_LAYER, HudState, INITIAL_TREE_TIER,
     MAX_PARENT_WALK, ObjectLight, ObjectParticleSystem, ObjectPickSummary, ObjectReflectionProbe,
@@ -957,6 +958,7 @@ pub fn update_objects(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
     mut cache: ResMut<GeometryCache>,
@@ -994,6 +996,7 @@ pub fn update_objects(
                     &mut meshes,
                     &mut materials,
                     &mut manager,
+                    &store,
                     &mut prim_textures,
                     &mut mesh_manager,
                     &mut cache,
@@ -1041,6 +1044,7 @@ pub fn update_objects(
                         &mut meshes,
                         &mut materials,
                         &mut manager,
+                        &store,
                         &mut prim_textures,
                         &mut mesh_manager,
                         &mut cache,
@@ -1149,6 +1153,20 @@ pub fn log_suspicious_objects(
     }
 }
 
+/// The texture state the crosshair pick tool reports on: the manager, for a
+/// texture's level-of-detail bookkeeping, and the decoded store the pixel
+/// dimensions are read from.
+///
+/// Bundled into one `SystemParam` because a Bevy system takes at most sixteen
+/// parameters, and the pick tool reads very nearly everything in the scene.
+#[derive(SystemParam, Debug)]
+pub struct PickTextures<'w> {
+    /// The fetch manager, for the level-of-detail snapshot.
+    manager: Res<'w, TextureManager>,
+    /// The decoded images the snapshot's dimensions come from.
+    store: Res<'w, DecodedTextures>,
+}
+
 /// Crosshair pick tool (press **`P`**): casts a ray straight out of the camera
 /// and logs the object under the centre of the screen — its full id, mesh/sculpt
 /// asset id, kind, scale, and Second Life position — so a wrongly rendered object can
@@ -1180,7 +1198,7 @@ pub fn pick_object(
     face_materials: Query<&MeshMaterial3d<FaceMaterial>>,
     materials: Res<Assets<FaceMaterial>>,
     legacy: Res<LegacyMaterialManager>,
-    textures: Res<TextureManager>,
+    textures: PickTextures,
     mesh_manager: Res<MeshManager>,
     state: Res<ObjectState>,
 ) {
@@ -1263,7 +1281,7 @@ pub fn pick_object(
         // current discard level should *fall* (toward 0 = full resolution) as the
         // camera moves toward the face. Aim and press the pick key while walking in
         // to confirm the texture actually refines.
-        match textures.lod_debug(tf.texture_id) {
+        match textures.manager.lod_debug(tf.texture_id, &textures.store) {
             Some(lod) => warn!(
                 "pick texture {}: discard={} current={}x{} native={:?} header_native={:?} managed={}",
                 tf.texture_id,
@@ -1523,6 +1541,7 @@ fn build_object_geometry(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
     cache: &mut GeometryCache,
@@ -1545,6 +1564,7 @@ fn build_object_geometry(
                 meshes,
                 materials,
                 manager,
+                store,
                 prim_textures,
                 priority,
                 intern,
@@ -1560,6 +1580,7 @@ fn build_object_geometry(
                 meshes,
                 materials,
                 manager,
+                store,
                 prim_textures,
                 priority,
                 INITIAL_MANAGED_PRIM_LOD,
@@ -1627,6 +1648,7 @@ fn build_object_geometry(
                         meshes,
                         materials,
                         manager,
+                        store,
                         prim_textures,
                         priority,
                         cache,
@@ -1673,7 +1695,7 @@ fn build_object_geometry(
             manager.request_boosted(map, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
             // of `manager` ends before the face build borrows it mutably.
-            match manager.decoded(map).map(Arc::clone) {
+            match store.get(map).map(Arc::clone) {
                 Some(map_image) => (
                     build_sculpt_faces(
                         &map_image,
@@ -1686,6 +1708,7 @@ fn build_object_geometry(
                         meshes,
                         materials,
                         manager,
+                        store,
                         prim_textures,
                         priority,
                         cache,
@@ -1724,6 +1747,7 @@ fn build_object_geometry(
                 meshes,
                 materials,
                 manager,
+                store,
                 prim_textures,
                 priority,
             ),
@@ -1747,6 +1771,7 @@ fn build_object_geometry(
                 meshes,
                 materials,
                 manager,
+                store,
                 prim_textures,
                 priority,
             ),
@@ -1801,6 +1826,7 @@ fn build_prim_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     lod: PrimLod,
@@ -1819,6 +1845,7 @@ fn build_prim_faces(
         meshes,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         cache,
@@ -1873,6 +1900,7 @@ fn build_flexi_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     intern: &MaterialInternContext,
@@ -1913,6 +1941,7 @@ fn build_flexi_faces(
         meshes,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         intern,
@@ -1990,6 +2019,7 @@ fn build_sculpt_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
@@ -2011,6 +2041,7 @@ fn build_sculpt_faces(
         meshes,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         cache,
@@ -2068,6 +2099,7 @@ fn build_tree_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
 ) -> Vec<Entity> {
@@ -2087,6 +2119,7 @@ fn build_tree_faces(
         &texture_face,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         TextureAlpha::Mask,
@@ -2141,6 +2174,7 @@ fn build_grass_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
 ) -> Vec<Entity> {
@@ -2157,6 +2191,7 @@ fn build_grass_faces(
         &texture_face,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         TextureAlpha::Mask,
@@ -2241,6 +2276,7 @@ fn spawn_prim_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     intern: &MaterialInternContext,
@@ -2273,6 +2309,7 @@ fn spawn_prim_faces(
             commands,
             materials,
             manager,
+            store,
             prim_textures,
             priority,
             intern,
@@ -2304,6 +2341,7 @@ fn spawn_face_entity(
     commands: &mut Commands,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     intern: &MaterialInternContext,
@@ -2315,6 +2353,7 @@ fn spawn_face_entity(
         material_cache,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
     );
@@ -2353,6 +2392,7 @@ fn spawn_revived_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
@@ -2401,6 +2441,7 @@ fn spawn_revived_faces(
                 commands,
                 materials,
                 manager,
+                store,
                 prim_textures,
                 priority,
                 intern,
@@ -2433,6 +2474,7 @@ fn spawn_cached_prim_faces(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
@@ -2449,6 +2491,7 @@ fn spawn_cached_prim_faces(
         meshes,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         cache,
@@ -2500,6 +2543,7 @@ fn spawn_cached_prim_faces(
             commands,
             materials,
             manager,
+            store,
             prim_textures,
             priority,
             intern,
@@ -2548,6 +2592,7 @@ fn build_mesh_submeshes(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     cache: &mut GeometryCache,
@@ -2568,6 +2613,7 @@ fn build_mesh_submeshes(
         meshes,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         cache,
@@ -2625,6 +2671,7 @@ fn build_mesh_submeshes(
             commands,
             materials,
             manager,
+            store,
             prim_textures,
             priority,
             intern,
@@ -2831,6 +2878,7 @@ fn apply_object(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     mesh_manager: &mut MeshManager,
     cache: &mut GeometryCache,
@@ -3039,6 +3087,7 @@ fn apply_object(
                     meshes,
                     materials,
                     manager,
+                    store,
                     prim_textures,
                     mesh_manager,
                     cache,
@@ -3191,6 +3240,7 @@ fn apply_object(
             meshes,
             materials,
             manager,
+            store,
             prim_textures,
             mesh_manager,
             cache,
@@ -3479,6 +3529,7 @@ pub fn apply_object_meshes(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut mesh_manager: ResMut<MeshManager>,
     mut cache: ResMut<GeometryCache>,
@@ -3578,6 +3629,7 @@ pub fn apply_object_meshes(
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 pending.priority,
                 &mut cache,
@@ -3626,6 +3678,7 @@ pub fn apply_object_meshes(
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 priority,
                 &mut cache,
@@ -3667,6 +3720,7 @@ pub fn apply_prim_lod(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut cache: ResMut<GeometryCache>,
     mut material_cache: ResMut<MaterialCache>,
@@ -3717,6 +3771,7 @@ pub fn apply_prim_lod(
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 priority,
                 &mut cache,
@@ -3752,6 +3807,7 @@ pub fn apply_tree_lod(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
     // Budgeted from the shared `MeshUploadBudget`, spent after `apply_prim_lod`.
@@ -3787,6 +3843,7 @@ pub fn apply_tree_lod(
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 priority,
             );
@@ -3932,6 +3989,7 @@ pub fn apply_rigged_attachments(
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut cache: ResMut<GeometryCache>,
     mut skip_log: ResMut<RiggedBindSkipLog>,
@@ -4157,6 +4215,7 @@ pub fn apply_rigged_attachments(
             &mut materials,
             &mut bindposes,
             &mut manager,
+            &store,
             &mut prim_textures,
             &mut cache,
         );
@@ -4370,6 +4429,7 @@ fn build_rigged_submeshes(
     materials: &mut Assets<FaceMaterial>,
     bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     cache: &mut GeometryCache,
 ) -> Vec<Entity> {
@@ -4446,6 +4506,7 @@ fn build_rigged_submeshes(
                 texture_face,
                 materials,
                 manager,
+                store,
                 prim_textures,
                 AVATAR_BOOST_PRIORITY,
                 // A rigged face cannot alpha-mask (reference: `canRenderAsMask` is
@@ -4580,6 +4641,7 @@ pub fn apply_object_sculpts(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut cache: ResMut<GeometryCache>,
     mut material_cache: ResMut<MaterialCache>,
@@ -4609,7 +4671,7 @@ pub fn apply_object_sculpts(
         scans = scans.saturating_add(1);
         // The decoded sculpt-map pixels; clone the `Arc` out so the immutable
         // borrow of `manager` ends before the face build borrows it mutably.
-        let Some(map) = manager.decoded(id).map(Arc::clone) else {
+        let Some(map) = store.get(id).map(Arc::clone) else {
             // The fetch failed: sculpts pending on this map stay geometry-less.
             continue;
         };
@@ -4638,6 +4700,7 @@ pub fn apply_object_sculpts(
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 pending.priority,
                 &mut cache,
@@ -5082,9 +5145,10 @@ mod tests {
     #[test]
     fn flexi_faces_stay_aabb_managed() -> Result<(), Box<dyn core::error::Error>> {
         use crate::textures::{PrimTextures, TextureManager};
+        use crate::world_api::DecodedTextures;
         use bevy::camera::visibility::NoFrustumCulling;
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, ResMut, World};
+        use bevy::prelude::{Assets, Commands, Mesh, Mesh3d, Res, ResMut, World};
         use sl_client_bevy::{FlexibleData, Priority};
 
         use crate::face_material::FaceMaterial;
@@ -5096,6 +5160,7 @@ mod tests {
             ResMut<'w, Assets<Mesh>>,
             ResMut<'w, Assets<FaceMaterial>>,
             ResMut<'w, TextureManager>,
+            Res<'w, DecodedTextures>,
             ResMut<'w, PrimTextures>,
         );
 
@@ -5103,6 +5168,7 @@ mod tests {
         world.init_resource::<Assets<Mesh>>();
         world.init_resource::<Assets<FaceMaterial>>();
         world.init_resource::<TextureManager>();
+        world.init_resource::<DecodedTextures>();
         world.init_resource::<PrimTextures>();
         let parent = world.spawn_empty().id();
 
@@ -5117,9 +5183,10 @@ mod tests {
         });
 
         let mut state: SystemState<BuildParams> = SystemState::new(&mut world);
-        let (mut commands, mut meshes, mut materials, mut manager, mut prim_textures) = state
-            .get_mut(&mut world)
-            .map_err(|error| format!("system params: {error}"))?;
+        let (mut commands, mut meshes, mut materials, mut manager, store, mut prim_textures) =
+            state
+                .get_mut(&mut world)
+                .map_err(|error| format!("system params: {error}"))?;
         let intern = crate::material_cache::MaterialInternContext::for_object(&object, false);
         let mut material_cache = crate::material_cache::MaterialCache::default();
         let (faces, _chain) = super::build_flexi_faces(
@@ -5129,6 +5196,7 @@ mod tests {
             &mut meshes,
             &mut materials,
             &mut manager,
+            &store,
             &mut prim_textures,
             Priority::IDLE,
             &intern,
@@ -5461,8 +5529,9 @@ mod tests {
         use crate::material_cache::MaterialCache;
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
+        use crate::world_api::DecodedTextures;
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, ChildOf, Commands, Mesh, ResMut, World};
+        use bevy::prelude::{Assets, ChildOf, Commands, Mesh, Res, ResMut, World};
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).
@@ -5471,6 +5540,7 @@ mod tests {
             ResMut<'w, Assets<Mesh>>,
             ResMut<'w, Assets<FaceMaterial>>,
             ResMut<'w, TextureManager>,
+            Res<'w, DecodedTextures>,
             ResMut<'w, PrimTextures>,
             ResMut<'w, MeshManager>,
             ResMut<'w, GeometryCache>,
@@ -5481,6 +5551,7 @@ mod tests {
         world.init_resource::<Assets<Mesh>>();
         world.init_resource::<Assets<FaceMaterial>>();
         world.init_resource::<TextureManager>();
+        world.init_resource::<DecodedTextures>();
         world.init_resource::<PrimTextures>();
         world.init_resource::<MeshManager>();
         world.init_resource::<GeometryCache>();
@@ -5510,6 +5581,7 @@ mod tests {
                 mut meshes,
                 mut materials,
                 mut manager,
+                store,
                 mut prim_textures,
                 mut mesh_manager,
                 mut cache,
@@ -5525,6 +5597,7 @@ mod tests {
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 &mut mesh_manager,
                 &mut cache,
@@ -5600,8 +5673,9 @@ mod tests {
         use crate::material_cache::MaterialCache;
         use crate::meshes::MeshManager;
         use crate::textures::{PrimTextures, TextureManager};
+        use crate::world_api::DecodedTextures;
         use bevy::ecs::system::SystemState;
-        use bevy::prelude::{Assets, Commands, Mesh, ResMut, World};
+        use bevy::prelude::{Assets, Commands, Mesh, Res, ResMut, World};
 
         /// The resources `apply_object`(super::apply_object) takes, as one
         /// `SystemState` tuple (named to satisfy `type_complexity`).
@@ -5610,6 +5684,7 @@ mod tests {
             ResMut<'w, Assets<Mesh>>,
             ResMut<'w, Assets<FaceMaterial>>,
             ResMut<'w, TextureManager>,
+            Res<'w, DecodedTextures>,
             ResMut<'w, PrimTextures>,
             ResMut<'w, MeshManager>,
             ResMut<'w, GeometryCache>,
@@ -5620,6 +5695,7 @@ mod tests {
         world.init_resource::<Assets<Mesh>>();
         world.init_resource::<Assets<FaceMaterial>>();
         world.init_resource::<TextureManager>();
+        world.init_resource::<DecodedTextures>();
         world.init_resource::<PrimTextures>();
         world.init_resource::<MeshManager>();
         world.init_resource::<GeometryCache>();
@@ -5642,6 +5718,7 @@ mod tests {
                 mut meshes,
                 mut materials,
                 mut manager,
+                store,
                 mut prim_textures,
                 mut mesh_manager,
                 mut cache,
@@ -5657,6 +5734,7 @@ mod tests {
                 &mut meshes,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
                 &mut mesh_manager,
                 &mut cache,

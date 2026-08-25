@@ -18,22 +18,24 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::picking::hover::HoverMap;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use sl_client_bevy::{
     AgentKey, AssetUpdateLocation, AttachmentPoint, AvatarName, BodyPhysics, ChatSessionKind,
-    Command, ControlFlags, DisplayName, Friend, FriendKey, FriendPresence, FriendRights, GroupKey,
-    GroupMembership, ImSessionId, InventoryKey, JointOverrides, LightData, MAX_FACES, MeshKey,
-    MuteEntry, MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey, ObjectProperties,
-    ParticleSystem, PrimFaceId, PrimLod, PrimShapeParams, Priority, ReflectionProbe,
-    ReflectionProbeFlags, RegionCoordinates, RegionHandle, RestoreItem, Rotation, ScopedObjectId,
-    ScriptLanguage, ScriptTarget, ScriptUploadLocation, SculptOrMeshKey, SkeletalDeformations,
-    SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation, TextureFace,
-    TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture, decode_texture_entry,
-    pcode, texture_face_uv_transform,
+    Command, ControlFlags, DecodedTexture, DisplayName, Friend, FriendKey, FriendPresence,
+    FriendRights, GroupKey, GroupMembership, ImSessionId, InventoryKey, JointOverrides, LightData,
+    MAX_FACES, MeshKey, MuteEntry, MuteFlags, MuteType, Object, ObjectExtraParams, ObjectKey,
+    ObjectProperties, ParticleSystem, PrimFaceId, PrimLod, PrimShapeParams, Priority,
+    ReflectionProbe, ReflectionProbeFlags, RegionCoordinates, RegionHandle, RestoreItem, Rotation,
+    ScopedObjectId, ScriptLanguage, ScriptTarget, ScriptUploadLocation, SculptOrMeshKey,
+    SkeletalDeformations, SlCommand, SurfaceInfo, TaskInventoryKey, TerrainPatch, TextureAnimation,
+    TextureFace, TextureKey, TreeLod, Uuid, Vector, VolumeDeformations, avatar_texture,
+    decode_texture_entry, pcode, texture_face_uv_transform, to_bevy_image,
 };
 use sl_terrain::TerrainComposition;
 use sl_viewer_kit::coords::{sl_rotation_to_quat, sl_to_bevy_rotation};
@@ -6357,6 +6359,159 @@ impl TypingState {
             Some(self.active)
         }
     }
+}
+
+/// The id a Second Life GLTF material override uses for "no texture here" (the
+/// reference viewer's `LLGLTFMaterial::GLTF_OVERRIDE_NULL_UUID`): a face
+/// carrying it has no diffuse texture to fetch, so it is treated exactly like
+/// the nil id rather than endlessly re-requested (it is not a fetchable asset
+/// and 503s).
+const GLTF_OVERRIDE_NULL_UUID: Uuid = Uuid::from_u128(u128::MAX);
+
+/// Whether a face texture id denotes "no diffuse texture" — the nil id or the
+/// GLTF override-null sentinel — so it should neither be fetched nor treated as
+/// a textured face.
+#[must_use]
+pub fn is_absent_texture(id: TextureKey) -> bool {
+    let uuid = id.uuid();
+    uuid.is_nil() || uuid == GLTF_OVERRIDE_NULL_UUID
+}
+
+/// Upload a decoded texture as a Bevy image with Second Life's wrap behaviour:
+/// prim faces repeat their texture, which is not Bevy's default.
+#[must_use]
+pub fn build_prim_image(decoded: &Arc<DecodedTexture>) -> Image {
+    let mut image = to_bevy_image(decoded);
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::Repeat,
+        address_mode_v: ImageAddressMode::Repeat,
+        address_mode_w: ImageAddressMode::Repeat,
+        ..ImageSamplerDescriptor::linear()
+    });
+    image
+}
+
+/// The state of a face's diffuse image — see [`DecodedTextures::diffuse_image`].
+#[derive(Debug, Clone)]
+pub enum DiffuseImage {
+    /// The face carries no texture (a nil / null-sentinel id); a material should
+    /// clear its `base_color_texture` and show the flat tint.
+    Absent,
+    /// The texture exists but has not decoded yet — keep the current image and
+    /// try again once it lands.
+    Pending,
+    /// The decoded image, uploaded as a fresh Bevy image ready to paint onto a
+    /// material.
+    Ready(Handle<Image>),
+}
+
+/// Successfully decoded textures by id, shared across every consumer so a
+/// texture is fetched and decoded once no matter how many faces, avatars or UI
+/// panes show it.
+///
+/// This is the *result* half of texture fetching, deliberately split from the
+/// machinery that produces it. The object layer's texture manager owns the
+/// in-flight requests, priorities, retry state and level-of-detail budgets, and
+/// records what it decodes here; everything that merely wants to *show* a
+/// texture reads this resource instead, and so does not depend on the fetch
+/// pipeline or rebuild when it changes.
+///
+/// Ask for a texture that has not been fetched with [`BoostTexture`].
+#[derive(Resource, Default, Debug)]
+pub struct DecodedTextures {
+    /// Decoded images by texture id.
+    decoded: HashMap<TextureKey, Arc<DecodedTexture>>,
+}
+
+impl DecodedTextures {
+    /// The decoded image for `id`, once it has been fetched, or `None` if it is
+    /// still in flight or the fetch failed.
+    #[must_use]
+    pub fn get(&self, id: TextureKey) -> Option<&Arc<DecodedTexture>> {
+        self.decoded.get(&id)
+    }
+
+    /// Whether `id` has decoded.
+    #[must_use]
+    pub fn contains(&self, id: TextureKey) -> bool {
+        self.decoded.contains_key(&id)
+    }
+
+    /// How many textures have decoded.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.decoded.len()
+    }
+
+    /// Whether nothing has decoded yet.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.decoded.is_empty()
+    }
+
+    /// Every decoded texture, for the diagnostics and cost models that walk the
+    /// whole store.
+    pub fn iter(&self) -> impl Iterator<Item = (&TextureKey, &Arc<DecodedTexture>)> {
+        self.decoded.iter()
+    }
+
+    /// Record a freshly decoded image, returning the one it replaced (a texture
+    /// re-decoded at a finer level of detail replaces its coarser image).
+    pub fn insert(
+        &mut self,
+        id: TextureKey,
+        image: Arc<DecodedTexture>,
+    ) -> Option<Arc<DecodedTexture>> {
+        self.decoded.insert(id, image)
+    }
+
+    /// Drop a texture's decoded image, returning it if there was one.
+    pub fn remove(&mut self, id: TextureKey) -> Option<Arc<DecodedTexture>> {
+        self.decoded.remove(&id)
+    }
+
+    /// Classify a diffuse texture for a consumer that paints it onto a material
+    /// directly (the build tool's live texture preview), uploading a fresh Bevy
+    /// image when ready. Distinguishes a genuinely **absent** texture (a nil /
+    /// null-sentinel id — the material should clear its `base_color_texture` and
+    /// show the flat tint) from one that simply has not **decoded** yet (keep the
+    /// old image and wait), which a bare `Option<Handle>` would conflate.
+    pub fn diffuse_image(&self, id: TextureKey, images: &mut Assets<Image>) -> DiffuseImage {
+        if is_absent_texture(id) {
+            DiffuseImage::Absent
+        } else if let Some(decoded) = self.decoded.get(&id) {
+            DiffuseImage::Ready(images.add(build_prim_image(decoded)))
+        } else {
+            DiffuseImage::Pending
+        }
+    }
+}
+
+/// Ask the object layer's texture manager to fetch a texture at a raised
+/// priority, for a surface that is showing it right now — a profile picture, an
+/// inventory thumbnail, the texture picker's grid.
+///
+/// This is a request rather than a call so that the crates which merely *show*
+/// textures do not depend on the fetch machinery. It is a priority hint on an
+/// operation that already spans many frames, so being served on the next frame
+/// rather than this one is not observable.
+#[derive(Message, Debug, Clone, Copy)]
+pub struct BoostTexture {
+    /// The texture to fetch.
+    pub key: TextureKey,
+    /// The priority to fetch it at.
+    pub priority: Priority,
+}
+
+/// A positive per-frame budget from `var`, or `default` when it is unset /
+/// unparsable / zero.
+#[must_use]
+pub fn env_budget(var: &str, default: usize) -> usize {
+    std::env::var(var)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
 }
 
 #[cfg(test)]

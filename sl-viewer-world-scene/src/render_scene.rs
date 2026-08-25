@@ -135,7 +135,7 @@ use crate::textures::TextureManager;
 use crate::water::{DEFAULT_WATER_HEIGHT, water_normal_image, water_params, white_mask_image};
 use crate::world_api::ObjectReflectionProbe;
 use crate::world_api::PatchKey;
-use crate::world_api::{ObjectParticleSystem, TerrainSurface};
+use crate::world_api::{DecodedTextures, ObjectParticleSystem, TerrainSurface};
 
 /// The environment variable naming a Linden `character/` directory — **the same
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
@@ -382,6 +382,7 @@ impl Plugin for SceneRuntimePlugin {
         // (`sl-client-viewer-fetch-defer-until-cap`).
         app.init_resource::<ParticleSim>()
             .init_resource::<TextureManager>()
+            .init_resource::<DecodedTextures>()
             .add_systems(
                 Startup,
                 (

@@ -28,32 +28,24 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     BevyTextureFetcher, CAP_GET_TEXTURE, CacheLimits, DecodedTexture, DiscardLevel, GateStats,
     Priority, RemoteTextureSource, SlCapabilities, StoreStats, TextureFace, TextureFetcher,
-    TextureKey, TextureRequest, TextureStore, Uuid, texture_face_uv_transform, to_bevy_image,
+    TextureKey, TextureRequest, TextureStore, Uuid, texture_face_uv_transform,
 };
+
+// The decoded-texture store and its readers moved down to the world API so
+// the crates that only *show* textures no longer depend on this fetch
+// pipeline; re-exported here so the call sites addressing them through this
+// module are unchanged.
+use crate::world_api::{BoostTexture, DecodedTextures};
+pub use crate::world_api::{DiffuseImage, build_prim_image, env_budget, is_absent_texture};
 
 use crate::asset_retry::RetryState;
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::material_cache::{MaterialCache, MaterialKey};
-
-/// The GLTF material-override "no texture" sentinel (all-`f`, the reference
-/// viewer's `LLGLTFMaterial::GLTF_OVERRIDE_NULL_UUID`): a face carrying it has no
-/// diffuse texture to fetch, so it is treated exactly like the nil id rather than
-/// endlessly re-requested (it is not a fetchable asset and 503s).
-const GLTF_OVERRIDE_NULL_UUID: Uuid = Uuid::from_u128(u128::MAX);
-
-/// Whether a face texture id denotes "no diffuse texture" — the nil id or the
-/// GLTF override-null sentinel — so it should neither be fetched nor treated as a
-/// textured face.
-fn is_absent_texture(id: TextureKey) -> bool {
-    let uuid = id.uuid();
-    uuid.is_nil() || uuid == GLTF_OVERRIDE_NULL_UUID
-}
 
 /// The outcome of one background texture fetch: the decoded RGBA8 image, or
 /// `None` if the texture could not be fetched or decoded.
@@ -113,13 +105,23 @@ pub(crate) struct TextureLodDebug {
 #[derive(Message, Debug, Clone, Copy)]
 pub struct TextureDecoded(pub TextureKey);
 
-/// The shared texture fetch/decode/cache pipeline: one
-/// [`TextureStore`] plus the in-flight background
-/// fetch tasks and the decoded images already in hand.
+/// The shared texture fetch/decode/cache pipeline: one [`TextureStore`] plus
+/// the in-flight background fetch tasks, the retry bookkeeping and the
+/// level-of-detail budgets.
 ///
-/// A consumer calls [`request_boosted`](Self::request_boosted) to ensure a
-/// texture is being fetched, then — once a [`TextureDecoded`] names it — reads
-/// [`decoded`](Self::decoded) for the RGBA8 image to upload.
+/// It *produces* decoded images but does not hold them. Those live in
+/// [`DecodedTextures`], down in the world API, so that the crates which only
+/// show a texture — a profile picture, an inventory thumbnail — read the result
+/// without depending on this pipeline. What stays here is a key-only index of
+/// what has decoded, which is all the request path needs to tell a resident
+/// texture from one worth fetching.
+///
+/// A consumer inside this layer calls
+/// [`request_boosted`](Self::request_boosted) to ensure a texture is being
+/// fetched; one outside it sends a [`BoostTexture`], which
+/// [`serve_texture_boosts`] drains into the same call. Either way, once a
+/// [`TextureDecoded`] names the texture, its RGBA8 image is in
+/// [`DecodedTextures`].
 #[derive(Debug, Resource)]
 pub struct TextureManager {
     /// The LOD-aware store doing the fetch, off-thread decode, dedupe, and
@@ -139,9 +141,10 @@ pub struct TextureManager {
     /// avatar bake) below its base. Cleared alongside [`inflight`](Self::inflight)
     /// once the fetch resolves.
     requests: HashMap<TextureKey, (TextureRequest, Priority)>,
-    /// Successfully decoded images by texture id, shared across all consumers so
-    /// a texture is fetched and decoded once no matter how many faces use it.
-    decoded: HashMap<TextureKey, Arc<DecodedTexture>>,
+    /// The ids that have decoded, so the request path can tell an already-resident
+    /// texture from one worth fetching without borrowing the image store. The
+    /// images themselves live in [`DecodedTextures`]; this is only the index.
+    decoded_ids: HashSet<TextureKey>,
     /// Per-texture level-of-detail state for pixel-area-managed textures (P21.1),
     /// keyed by texture id. Presence marks a texture as LOD-managed; the
     /// render-priority driver upgrades / downgrades it toward the discard level
@@ -227,7 +230,7 @@ impl FromWorld for TextureManager {
             fetcher,
             inflight: HashMap::new(),
             requests: HashMap::new(),
-            decoded: HashMap::new(),
+            decoded_ids: HashSet::new(),
             managed: HashMap::new(),
             lod_inflight: HashMap::new(),
             pending_default: HashMap::new(),
@@ -324,8 +327,9 @@ impl TextureManager {
     /// bookkeeping. The material currently displaying the texture keeps its own
     /// Bevy `Handle`, so the avatar does not blank; the image is replaced when the
     /// fresh fetch re-decodes.
-    pub(crate) fn forget(&mut self, id: TextureKey) {
-        let _decoded = self.decoded.remove(&id);
+    pub(crate) fn forget(&mut self, id: TextureKey, store: &mut DecodedTextures) {
+        self.decoded_ids.remove(&id);
+        let _decoded = store.remove(id);
         let _request = self.requests.remove(&id);
         let _inflight = self.inflight.remove(&id);
         let _lod = self.lod_inflight.remove(&id);
@@ -360,7 +364,7 @@ impl TextureManager {
         if !managed && self.managed.remove(&id).is_some() {
             self.upgrade_to_full(id);
         }
-        if self.decoded.contains_key(&id) || self.inflight.contains_key(&id) {
+        if self.decoded_ids.contains(&id) || self.inflight.contains_key(&id) {
             return;
         }
         // A default (by-UUID `GetTexture`) fetch needs the region's `GetTexture`
@@ -505,7 +509,12 @@ impl TextureManager {
     /// was partial (a truncated resolution-progressive codestream decodes to a
     /// smaller image than its discard level implies), which would cap the texture
     /// coarse; the header dimensions never lie.
-    fn record_decoded(&mut self, id: TextureKey, image: Arc<DecodedTexture>) {
+    fn record_decoded(
+        &mut self,
+        id: TextureKey,
+        image: Arc<DecodedTexture>,
+        store: &mut DecodedTextures,
+    ) {
         let header_native = self
             .requests
             .get(&id)
@@ -520,7 +529,8 @@ impl TextureManager {
             }));
             state.current = Some(image.discard_level);
         }
-        let _previous = self.decoded.insert(id, image);
+        self.decoded_ids.insert(id);
+        let _previous = store.insert(id, image);
     }
 
     /// Re-rank an in-flight texture request from the on-screen pixel area the
@@ -536,39 +546,18 @@ impl TextureManager {
         }
     }
 
-    /// The decoded image for `id`, once it has been fetched, or `None` if it is
-    /// still in flight or the fetch failed.
-    #[must_use]
-    pub fn decoded(&self, id: TextureKey) -> Option<&Arc<DecodedTexture>> {
-        self.decoded.get(&id)
-    }
-
-    /// Classify a diffuse texture for a consumer that paints it onto a material
-    /// directly (the build tool's live texture preview, `crate::edit_texture`),
-    /// uploading a fresh Bevy image when ready. Distinguishes a genuinely
-    /// **absent** texture (a nil / null-sentinel id — the material should clear
-    /// its `base_color_texture` and show the flat tint) from one that simply has
-    /// not **decoded** yet (keep the old image and wait), which a bare
-    /// `Option<Handle>` would conflate. Reads the decode store the preview pane
-    /// uses, so a freshly-picked texture no face yet carries still resolves.
-    pub fn diffuse_image(&self, id: TextureKey, images: &mut Assets<Image>) -> DiffuseImage {
-        if is_absent_texture(id) {
-            DiffuseImage::Absent
-        } else if let Some(decoded) = self.decoded.get(&id) {
-            DiffuseImage::Ready(images.add(build_prim_image(decoded)))
-        } else {
-            DiffuseImage::Pending
-        }
-    }
-
     /// A snapshot of a texture's level-of-detail state for the crosshair pick tool
     /// (P21.1 diagnostics): the currently decoded discard level and pixel
     /// dimensions, its learned native (discard-0) size (only for a LOD-managed
     /// texture), and whether it is pixel-area LOD managed at all. `None` if the
     /// texture has not decoded yet. Aim at a face and press the pick key while
     /// walking toward it to watch the discard level fall (finer) as it should.
-    pub(crate) fn lod_debug(&self, id: TextureKey) -> Option<TextureLodDebug> {
-        let image = self.decoded.get(&id)?;
+    pub(crate) fn lod_debug(
+        &self,
+        id: TextureKey,
+        store: &DecodedTextures,
+    ) -> Option<TextureLodDebug> {
+        let image = store.get(id)?;
         // The true native size lives on the store entry's parsed J2C header; the
         // retained request handle (kept for managed textures) is the way to it.
         let header_native = self
@@ -596,7 +585,11 @@ impl TextureManager {
     /// back-calculation — the same order [`record_decoded`](Self::record_decoded)
     /// uses, and the only route for a boosted texture, which retains no request
     /// handle to reach the header through.
-    pub(crate) fn native_dimensions(&self, id: TextureKey) -> Option<(u32, u32)> {
+    pub(crate) fn native_dimensions(
+        &self,
+        id: TextureKey,
+        store: &DecodedTextures,
+    ) -> Option<(u32, u32)> {
         if let Some(native) = self
             .requests
             .get(&id)
@@ -604,7 +597,7 @@ impl TextureManager {
         {
             return Some(native);
         }
-        let image = self.decoded.get(&id)?;
+        let image = store.get(id)?;
         let scale = u32::from(image.discard_level.get());
         Some((
             image.width.checked_shl(scale).unwrap_or(image.width),
@@ -715,6 +708,19 @@ fn texture_cache_dir() -> Option<PathBuf> {
     crate::paths::asset_cache_dir("texturecache")
 }
 
+/// Serve the [`BoostTexture`] requests raised by the crates that only *show*
+/// textures: a profile picture, an inventory thumbnail, the texture picker's
+/// grid. They cannot call the manager directly without depending on this whole
+/// fetch pipeline, so they ask by message and this drains the queue.
+pub fn serve_texture_boosts(
+    mut requests: MessageReader<BoostTexture>,
+    mut manager: ResMut<TextureManager>,
+) {
+    for &BoostTexture { key, priority } in requests.read() {
+        manager.request_boosted(key, priority);
+    }
+}
+
 /// Mirror the blacklisted **texture** ids into the manager whenever the derender
 /// list changes (`viewer-derender-blacklist`), so
 /// `TextureManager::request_from` can refuse a fetch without reaching for a
@@ -751,6 +757,7 @@ pub fn update_texture_caps(
 pub fn poll_textures(
     time: Res<Time>,
     mut manager: ResMut<TextureManager>,
+    mut store: ResMut<DecodedTextures>,
     mut decoded: MessageWriter<TextureDecoded>,
 ) {
     let now = time.elapsed_secs_f64();
@@ -775,7 +782,7 @@ pub fn poll_textures(
         match result {
             Some(image) => {
                 let _cleared = manager.retry.remove(&id);
-                manager.record_decoded(id, image);
+                manager.record_decoded(id, image, &mut store);
                 decoded.write(TextureDecoded(id));
             }
             None => {
@@ -848,7 +855,7 @@ pub fn poll_textures(
     for (id, result) in lod_finished {
         let _removed = manager.lod_inflight.remove(&id);
         if let Some(image) = result {
-            manager.record_decoded(id, image);
+            manager.record_decoded(id, image, &mut store);
             decoded.write(TextureDecoded(id));
         }
     }
@@ -971,17 +978,6 @@ impl TextureApplyBudget {
     }
 }
 
-/// A positive per-frame budget from `var`, or `default` when it is unset /
-/// unparsable / zero.
-#[must_use]
-pub fn env_budget(var: &str, default: usize) -> usize {
-    std::env::var(var)
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .filter(|value| *value > 0)
-        .unwrap_or(default)
-}
-
 /// A decoded texture's alpha classification, resolved once when it decodes and
 /// carried alongside every parked / deferred drape so the alpha mode need not be
 /// recomputed per face: whether the image carries an alpha channel (component-based)
@@ -1026,20 +1022,6 @@ pub struct DeferredFaceTextures {
 pub fn reset_texture_apply_budget(mut budget: ResMut<TextureApplyBudget>) {
     budget.reprep_remaining = budget.reprep_per_frame;
     budget.image_remaining = budget.image_per_frame;
-}
-
-/// The state of a face's diffuse image — see [`TextureManager::diffuse_image`].
-#[derive(Debug, Clone)]
-pub enum DiffuseImage {
-    /// The face carries no texture (a nil / null-sentinel id); a material should
-    /// clear its `base_color_texture` and show the flat tint.
-    Absent,
-    /// The texture exists but has not decoded yet — keep the current image and
-    /// try again once it lands.
-    Pending,
-    /// The decoded image, uploaded as a fresh Bevy image ready to paint onto a
-    /// material.
-    Ready(Handle<Image>),
 }
 
 /// How a face treats a diffuse texture that carries its **own** alpha channel,
@@ -1100,6 +1082,7 @@ pub(crate) fn face_material(
     face: &TextureFace,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     texture_alpha: TextureAlpha,
@@ -1110,6 +1093,7 @@ pub(crate) fn face_material(
         face,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         texture_alpha,
@@ -1136,12 +1120,18 @@ pub(crate) fn face_material(
 /// since [`drape_face_texture`] is idempotent) and the texture re-requested —
 /// which both bumps the fetch priority for a boosted sharer and revives the
 /// retry after a failed decode consumed the original parking.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "interning a face material needs the face, its internability, the cache, the \
+              material assets, the texture manager, the decoded store and the fetch priority"
+)]
 pub(crate) fn intern_face_material(
     face: &TextureFace,
     internable: bool,
     cache: &mut MaterialCache,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
 ) -> (Handle<FaceMaterial>, bool) {
@@ -1151,6 +1141,7 @@ pub(crate) fn intern_face_material(
             face,
             materials,
             manager,
+            store,
             prim_textures,
             priority,
             TextureAlpha::Mask,
@@ -1178,6 +1169,7 @@ pub(crate) fn intern_face_material(
         face,
         materials,
         manager,
+        store,
         prim_textures,
         priority,
         TextureAlpha::Mask,
@@ -1197,11 +1189,18 @@ pub(crate) fn intern_face_material(
 /// hide, [`crate::materials::apply_blinn_phong_hide`]): the face keeps its one
 /// stable handle (every other system that reads it is unaffected) and only its
 /// composition changes. `face_material` is the fresh-handle wrapper over it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "composing a face material needs the handle, the face, the material assets, the \
+              texture manager, the decoded store, the prim-texture bookkeeping, the fetch \
+              priority and the alpha treatment"
+)]
 pub fn compose_face_material(
     handle: &Handle<FaceMaterial>,
     face: &TextureFace,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
     texture_alpha: TextureAlpha,
@@ -1241,12 +1240,12 @@ pub fn compose_face_material(
         // re-tessellation on approach, a shape change, a derender/re-create)
         // popped back in opaque, losing the alpha-texture transparency its
         // first build had gained when the texture decoded.
-        let has_alpha = manager
-            .decoded(texture_id)
+        let has_alpha = store
+            .get(texture_id)
             .is_some_and(|decoded| texture_has_alpha(decoded));
         let has_transparency = has_alpha
-            && manager
-                .decoded(texture_id)
+            && store
+                .get(texture_id)
                 .is_some_and(|decoded| texture_has_transparency(decoded));
         resolve_texture_alpha_mode(&mut material, texture_alpha, has_alpha, has_transparency);
     }
@@ -1373,13 +1372,13 @@ fn drape_parked_faces(
 /// Whether a decoded texture carries alpha, and whether that alpha is really
 /// transparent — the classification [`resolve_texture_alpha_mode`] needs, computed
 /// once per decode.
-fn decoded_alpha(manager: &TextureManager, id: TextureKey) -> DecodedAlpha {
-    let has_alpha = manager
-        .decoded(id)
+fn decoded_alpha(store: &DecodedTextures, id: TextureKey) -> DecodedAlpha {
+    let has_alpha = store
+        .get(id)
         .is_some_and(|decoded| texture_has_alpha(decoded));
     let has_transparency = has_alpha
-        && manager
-            .decoded(id)
+        && store
+            .get(id)
             .is_some_and(|decoded| texture_has_transparency(decoded));
     DecodedAlpha {
         has_alpha,
@@ -1418,7 +1417,6 @@ fn reserve_image_build(
     reason = "funnels every resource the two texture-apply systems share into one place"
 )]
 fn drape_decoded_texture(
-    manager: &TextureManager,
     legacy: &crate::legacy_materials::LegacyMaterialManager,
     prim_textures: &mut PrimTextures,
     budget: &mut TextureApplyBudget,
@@ -1427,6 +1425,7 @@ fn drape_decoded_texture(
     materials: &mut Assets<FaceMaterial>,
     id: TextureKey,
     parked: Vec<(Handle<FaceMaterial>, TextureAlpha)>,
+    store: &DecodedTextures,
 ) -> bool {
     let already_built = prim_textures.images.contains_key(&id);
     let Some(parked) = reserve_image_build(prim_textures, budget, id, parked) else {
@@ -1434,8 +1433,8 @@ fn drape_decoded_texture(
         // were re-parked for `patch` to build (and drape) in a later frame.
         return false;
     };
-    let alpha = decoded_alpha(manager, id);
-    let Some(image_handle) = prim_image(manager, prim_textures, images, id) else {
+    let alpha = decoded_alpha(store, id);
+    let Some(image_handle) = prim_image(store, prim_textures, images, id) else {
         // The fetch failed: the parked faces keep their flat tint.
         return true;
     };
@@ -1461,7 +1460,7 @@ fn drape_decoded_texture(
 /// material whose face has despawned. A no-op if the texture is not decoded or has no
 /// built image.
 fn refresh_lod_image(
-    manager: &TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     images: &mut Assets<Image>,
     materials: &mut Assets<FaceMaterial>,
@@ -1470,7 +1469,7 @@ fn refresh_lod_image(
     let Some(handle) = prim_textures.images.get(&id).cloned() else {
         return;
     };
-    let Some(image) = manager.decoded(id) else {
+    let Some(image) = store.get(id) else {
         return;
     };
     let refreshed = build_prim_image(image);
@@ -1511,7 +1510,7 @@ fn defer_lod_reupload(
 )]
 pub fn apply_prim_textures(
     mut decoded: MessageReader<TextureDecoded>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut budget: ResMut<TextureApplyBudget>,
@@ -1526,15 +1525,8 @@ pub fn apply_prim_textures(
         // once would otherwise rebuild them all in one frame; the overflow defers to
         // `drain_lod_reuploads`.
         if prim_textures.images.contains_key(&id) {
-            if manager.decoded(id).is_some() && !defer_lod_reupload(&mut prim_textures, &budget, id)
-            {
-                refresh_lod_image(
-                    &manager,
-                    &mut prim_textures,
-                    &mut images,
-                    &mut materials,
-                    id,
-                );
+            if store.get(id).is_some() && !defer_lod_reupload(&mut prim_textures, &budget, id) {
+                refresh_lod_image(&store, &mut prim_textures, &mut images, &mut materials, id);
                 budget.image_remaining = budget.image_remaining.saturating_sub(1);
             }
             continue;
@@ -1547,7 +1539,6 @@ pub fn apply_prim_textures(
         // overflow of either defers to a later frame so a cache-warm decode burst does
         // not upload every texture / re-prep hundreds of materials in one frame.
         let _draped = drape_decoded_texture(
-            &manager,
             &legacy,
             &mut prim_textures,
             &mut budget,
@@ -1556,6 +1547,7 @@ pub fn apply_prim_textures(
             &mut materials,
             id,
             parked,
+            &store,
         );
     }
 }
@@ -1567,7 +1559,7 @@ pub fn apply_prim_textures(
 /// filled and would render as a flat solid tint. This runs after
 /// [`apply_prim_textures`] and drains any such stranded parked faces.
 pub fn patch_parked_decoded_textures(
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     legacy: Res<crate::legacy_materials::LegacyMaterialManager>,
     mut prim_textures: ResMut<PrimTextures>,
     mut budget: ResMut<TextureApplyBudget>,
@@ -1579,7 +1571,7 @@ pub fn patch_parked_decoded_textures(
         .pending
         .keys()
         .copied()
-        .filter(|id| !prim_textures.images.contains_key(id) && manager.decoded(*id).is_some())
+        .filter(|id| !prim_textures.images.contains_key(id) && store.get(*id).is_some())
         .collect();
     for id in ready {
         // Stop once the image-build budget is spent — the rest stay parked for the
@@ -1592,7 +1584,6 @@ pub fn patch_parked_decoded_textures(
             continue;
         };
         let _draped = drape_decoded_texture(
-            &manager,
             &legacy,
             &mut prim_textures,
             &mut budget,
@@ -1601,6 +1592,7 @@ pub fn patch_parked_decoded_textures(
             &mut materials,
             id,
             parked,
+            &store,
         );
     }
 }
@@ -1629,7 +1621,7 @@ pub fn drain_deferred_face_textures(
 /// budget over a mere LOD refinement. A queued id whose store entry is gone (the
 /// texture was evicted) is dropped for free.
 pub fn drain_lod_reuploads(
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
@@ -1639,16 +1631,10 @@ pub fn drain_lod_reuploads(
         let Some(id) = prim_textures.pending_lod.pop_front() else {
             break;
         };
-        if manager.decoded(id).is_none() {
+        if store.get(id).is_none() {
             continue;
         }
-        refresh_lod_image(
-            &manager,
-            &mut prim_textures,
-            &mut images,
-            &mut materials,
-            id,
-        );
+        refresh_lod_image(&store, &mut prim_textures, &mut images, &mut materials, id);
         budget.image_remaining = budget.image_remaining.saturating_sub(1);
     }
 }
@@ -1715,7 +1701,7 @@ fn resolve_texture_alpha_mode(
 /// manager's decoded pixels on first use, or `None` if the texture is not
 /// decoded (the fetch failed).
 fn prim_image(
-    manager: &TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     images: &mut Assets<Image>,
     id: TextureKey,
@@ -1723,33 +1709,10 @@ fn prim_image(
     if let Some(handle) = prim_textures.images.get(&id) {
         return Some(handle.clone());
     }
-    let decoded = manager.decoded(id)?;
+    let decoded = store.get(id)?;
     let handle = images.add(build_prim_image(decoded));
     let _inserted = prim_textures.images.insert(id, handle.clone());
     Some(handle)
-}
-
-/// Build the Bevy [`Image`] for a prim/mesh/sculpt face's decoded diffuse
-/// texture, with the repeating address mode Second Life object faces need.
-///
-/// Second Life object faces tile their texture (the per-face `scale_s` /
-/// `scale_t` repeats push the UVs outside `[0, 1]`), and the reference viewer
-/// samples them with a wrapping address mode. Bevy's default sampler is
-/// clamp-to-edge, which — on a face with repeats above one — smears the edge
-/// texel across every out-of-range tile instead of repeating it (a texture
-/// "coherent in the centre, streaked toward the edges"). Sample prim/mesh face
-/// textures with a repeating sampler so tiled faces render as the reference
-/// viewer does. Shared by the first upload and a level-of-detail re-upload
-/// (P21.1).
-fn build_prim_image(decoded: &Arc<DecodedTexture>) -> Image {
-    let mut image = to_bevy_image(decoded);
-    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
-        address_mode_u: ImageAddressMode::Repeat,
-        address_mode_v: ImageAddressMode::Repeat,
-        address_mode_w: ImageAddressMode::Repeat,
-        ..ImageSamplerDescriptor::linear()
-    });
-    image
 }
 
 /// The alpha mode a face's tint colour alone implies: [`AlphaMode::Blend`] when

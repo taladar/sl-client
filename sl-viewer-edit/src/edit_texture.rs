@@ -1601,7 +1601,7 @@ fn apply_texture_picked(
 fn drive_texture_preview(
     mut preview: ResMut<TexturePreview>,
     selection: Res<SelectionSet>,
-    textures: Res<crate::textures::TextureManager>,
+    store: Res<crate::world_api::DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
@@ -1614,7 +1614,7 @@ fn drive_texture_preview(
     if preview.applied {
         return;
     }
-    let image = match textures.diffuse_image(texture, &mut images) {
+    let image = match store.diffuse_image(texture, &mut images) {
         crate::textures::DiffuseImage::Absent => None,
         crate::textures::DiffuseImage::Ready(handle) => Some(handle),
         // Not decoded yet; try again next frame (the request was already sent).
@@ -1645,7 +1645,7 @@ fn drive_texture_preview(
 fn revert_texture_preview_on_deselect(
     mut preview: ResMut<TexturePreview>,
     selection: Res<SelectionSet>,
-    textures: Res<crate::textures::TextureManager>,
+    store: Res<crate::world_api::DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
@@ -1668,7 +1668,7 @@ fn revert_texture_preview_on_deselect(
             continue;
         }
         if let Ok((FaceTextureDebug(face), material)) = faces.get(entity) {
-            let image = match textures.diffuse_image(face.texture_id, &mut images) {
+            let image = match store.diffuse_image(face.texture_id, &mut images) {
                 crate::textures::DiffuseImage::Absent => None,
                 crate::textures::DiffuseImage::Ready(handle) => Some(handle),
                 // The real texture is not decoded (unusual — it was rendering);

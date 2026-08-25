@@ -59,7 +59,7 @@ use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::WaterSurface;
-use crate::world_api::{SKY_BOOST_PRIORITY, ViewerCamera};
+use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera};
 
 /// A standard Second Life / OpenSim region edge length, in metres.
 const REGION_SIZE_METRES: f32 = 256.0;
@@ -444,7 +444,7 @@ fn region_plane_translation(
 pub fn apply_water_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<WaterState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut materials: ResMut<Assets<WaterMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -452,7 +452,7 @@ pub fn apply_water_textures(
         if state.normal_key != Some(id) {
             continue;
         }
-        let Some(decoded) = manager.decoded(id) else {
+        let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the surface keeps its flat-normal placeholder
             // (still a fresnel-tinted flat sea).
             continue;

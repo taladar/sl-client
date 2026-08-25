@@ -64,7 +64,7 @@ use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::probe_layers::{environment_render_layers, mirror_sun_render_layers};
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{SKY_BOOST_PRIORITY, ViewerCamera};
+use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera};
 
 /// The radius of the sky dome, in metres. The dome's *depth* is forced to the far
 /// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any
@@ -779,7 +779,7 @@ pub fn drive_sky(
 pub fn apply_sky_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<SkyState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut materials: ResMut<Assets<SkyMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -789,7 +789,7 @@ pub fn apply_sky_textures(
         if !is_rainbow && !is_halo {
             continue;
         }
-        let Some(decoded) = manager.decoded(id) else {
+        let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the overlay keeps its placeholder (and the
             // default moisture / ice of 0 makes it a no-op anyway).
             continue;
@@ -1028,7 +1028,7 @@ pub fn drive_sun_moon_discs(
 pub fn apply_disc_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<DiscState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut materials: ResMut<Assets<SunDiscMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -1038,7 +1038,7 @@ pub fn apply_disc_textures(
         if !is_sun && !is_moon {
             continue;
         }
-        let Some(decoded) = manager.decoded(id) else {
+        let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the disc keeps its (transparent) placeholder.
             continue;
         };
@@ -1256,7 +1256,7 @@ pub fn drive_clouds(
 pub fn apply_cloud_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<CloudState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut materials: ResMut<Assets<CloudMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -1264,7 +1264,7 @@ pub fn apply_cloud_textures(
         if state.cloud_key != Some(id) {
             continue;
         }
-        let Some(decoded) = manager.decoded(id) else {
+        let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the layer keeps its (transparent) placeholder.
             if std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
                 warn!("cloud texture {id:?} fetch/decode FAILED (using placeholder)");
@@ -1435,7 +1435,7 @@ pub fn drive_stars(
 pub fn apply_star_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<StarState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut materials: ResMut<Assets<StarMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -1443,7 +1443,7 @@ pub fn apply_star_textures(
         if state.star_key != Some(id) {
             continue;
         }
-        let Some(decoded) = manager.decoded(id) else {
+        let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the field keeps its (transparent) placeholder.
             continue;
         };

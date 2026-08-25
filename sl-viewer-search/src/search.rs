@@ -52,7 +52,6 @@ use crate::i18n::{Translated, UiLocale};
 use crate::media_engine::MediaSurfaces;
 use crate::settings::ViewerSettings;
 use crate::settings_binding::{SettingBinding, bound_checkbox};
-use crate::textures::TextureManager;
 use crate::ui::{UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_combo::{ComboChanged, ComboSpec, spawn_combo};
 use crate::ui_font::UiFont;
@@ -70,6 +69,7 @@ use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::OpenAvatarProfile;
 use crate::world_api::OpenGroupProfile;
+use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{ConversationKey, OpenConversation};
 use crate::world_map::OpenWorldMap;
 
@@ -3054,7 +3054,7 @@ fn drive_search_checkbox_visual(
 fn request_detail_snapshot(
     mut detail: ResMut<SearchDetail>,
     ui: Option<Res<SearchUi>>,
-    textures: Option<ResMut<TextureManager>>,
+    mut boost: MessageWriter<BoostTexture>,
     mut commands: Commands,
 ) {
     if !detail.is_changed() {
@@ -3071,9 +3071,10 @@ fn request_detail_snapshot(
     detail.snapshot_requested = wanted;
     commands.entity(ui.detail_snapshot).remove::<ImageNode>();
     if let Some(id) = wanted {
-        if let Some(mut textures) = textures {
-            textures.request_boosted(id, AVATAR_BOOST_PRIORITY);
-        }
+        boost.write(BoostTexture {
+            key: id,
+            priority: AVATAR_BOOST_PRIORITY,
+        });
         detail.pending_textures.push((id, ui.detail_snapshot));
     }
 }
@@ -3082,20 +3083,17 @@ fn request_detail_snapshot(
 /// `poll_profile_textures` pattern).
 fn poll_detail_snapshot(
     mut detail: ResMut<SearchDetail>,
-    textures: Option<Res<TextureManager>>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     mut commands: Commands,
 ) {
     if detail.pending_textures.is_empty() {
         return;
     }
-    let Some(textures) = textures else {
-        return;
-    };
     let pending = std::mem::take(&mut detail.pending_textures);
     let mut still = Vec::new();
     for (id, node) in pending {
-        if let Some(decoded) = textures.decoded(id) {
+        if let Some(decoded) = store.get(id) {
             let handle = images.add(to_bevy_image(decoded));
             commands.entity(node).insert(ImageNode::new(handle));
         } else {

@@ -38,10 +38,10 @@ use sl_client_bevy::{
 use crate::floater::{FloaterCaps, FloaterSpec, spawn_floater};
 use crate::i18n::Translated;
 use crate::inventory::query_folder_page;
-use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, row};
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
+use crate::world_api::{BoostTexture, DecodedTextures};
 
 /// The chrome font size, in logical pixels.
 const PROPS_FONT_SIZE: f32 = 14.0;
@@ -862,7 +862,7 @@ fn open_previews(
     mut opens: MessageReader<OpenItemPreview>,
     ui: Option<Res<PreviewUi>>,
     mut state: ResMut<PreviewState>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     children: Query<&Children>,
     mut panels: Query<&mut UiPanelShown>,
     mut texts: Query<&mut Text>,
@@ -930,7 +930,10 @@ fn open_previews(
                     ))
                     .id();
                 let key = TextureKey::from(item.asset_id);
-                textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
+                boost.write(BoostTexture {
+                    key,
+                    priority: AVATAR_BOOST_PRIORITY,
+                });
                 state.pending_texture = Some((key, placeholder));
                 show(&mut panels, ui.texture.panel);
             }
@@ -1077,7 +1080,7 @@ pub fn parse_landmark(text: &str) -> Option<LandmarkAsset> {
 /// texture pipeline holds it.
 fn poll_texture_preview(
     mut state: ResMut<PreviewState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
@@ -1085,7 +1088,7 @@ fn poll_texture_preview(
     let Some((key, node)) = state.pending_texture else {
         return;
     };
-    let Some(decoded) = manager.decoded(key) else {
+    let Some(decoded) = store.get(key) else {
         return;
     };
     let handle = images.add(to_bevy_image(decoded));

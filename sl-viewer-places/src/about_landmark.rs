@@ -45,12 +45,12 @@ use crate::inventory::OpenAboutLandmark;
 use crate::inventory_properties::{
     LandmarkAsset, format_unix_date, parse_landmark, send_item_update,
 };
-use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::AvatarState;
 use crate::world_api::GroupsModel;
+use crate::world_api::{BoostTexture, DecodedTextures};
 
 /// The floater's font size, in logical pixels.
 const ABOUT_FONT_SIZE: f32 = 14.0;
@@ -541,7 +541,7 @@ fn ingest_parcel_replies(
     groups: Res<GroupsModel>,
     translator: Translator,
     time: Res<Time>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     mut texts: Query<&mut Text>,
     mut sl_commands: MessageWriter<SlCommand>,
 ) {
@@ -574,7 +574,7 @@ fn ingest_parcel_replies(
                     &avatars,
                     &groups,
                     &translator,
-                    &mut textures,
+                    &mut boost,
                     &mut texts,
                     &mut sl_commands,
                 );
@@ -598,7 +598,7 @@ fn apply_details(
     avatars: &AvatarState,
     groups: &GroupsModel,
     translator: &Translator,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
     texts: &mut Query<&mut Text>,
     sl_commands: &mut MessageWriter<SlCommand>,
 ) {
@@ -652,7 +652,10 @@ fn apply_details(
         .filter(|key| *key != TextureKey::from(Uuid::nil()));
     match (snapshot, ui.snapshot_box) {
         (Some(key), Some(node)) => {
-            textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
+            boost.write(BoostTexture {
+                key,
+                priority: AVATAR_BOOST_PRIORITY,
+            });
             state.pending_snapshot = Some((key, node));
         }
         _no_snapshot => {
@@ -670,7 +673,7 @@ fn apply_details(
 /// node is dropped, not applied.
 fn poll_snapshot(
     mut state: ResMut<AboutLandmarkState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
@@ -678,7 +681,7 @@ fn poll_snapshot(
     let Some((key, node)) = state.pending_snapshot else {
         return;
     };
-    let Some(decoded) = manager.decoded(key) else {
+    let Some(decoded) = store.get(key) else {
         return;
     };
     state.pending_snapshot = None;

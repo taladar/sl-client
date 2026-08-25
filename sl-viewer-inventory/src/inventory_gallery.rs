@@ -34,11 +34,11 @@ use crate::inventory::{
     InventoryModel, InventorySelection, RowKey, folder_icon, item_icon, query_folder_page,
 };
 use crate::inventory_properties::{OpenItemPreview, previewable};
-use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_element::UiAction;
 use crate::ui_font::UiFont;
 use crate::world_api::AVATAR_BOOST_PRIORITY;
+use crate::world_api::{BoostTexture, DecodedTextures};
 
 /// The gallery font size for tile names, in logical pixels.
 const TILE_FONT_SIZE: f32 = 12.0;
@@ -380,7 +380,7 @@ fn rebuild_gallery(
     panels: Query<&UiPanelShown>,
     children: Query<&Children>,
     mut texts: Query<&mut Text>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     mut pending: ResMut<PendingThumbnails>,
     mut commands: Commands,
     mut sl_commands: MessageWriter<SlCommand>,
@@ -427,7 +427,7 @@ fn rebuild_gallery(
             folder_icon(folder_type, false),
             selection.contains(RowKey::Folder(child)),
             None,
-            &mut textures,
+            &mut boost,
             &mut pending,
         );
     }
@@ -445,7 +445,7 @@ fn rebuild_gallery(
             item_icon(item.inv_type),
             selection.contains(RowKey::Item(item.item_id)),
             thumbnail,
-            &mut textures,
+            &mut boost,
             &mut pending,
         );
     }
@@ -468,7 +468,7 @@ fn spawn_tile(
     icon: &'static str,
     selected: bool,
     thumbnail: Option<TextureKey>,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
     pending: &mut PendingThumbnails,
 ) {
     let tile = commands
@@ -513,7 +513,10 @@ fn spawn_tile(
         ))
         .id();
     if let Some(texture) = thumbnail {
-        textures.request_boosted(texture, AVATAR_BOOST_PRIORITY);
+        boost.write(BoostTexture {
+            key: texture,
+            priority: AVATAR_BOOST_PRIORITY,
+        });
         pending.waiting.entry(texture).or_default().push(thumb);
     }
     commands.spawn((
@@ -649,7 +652,7 @@ fn scroll_gallery_grid(
 
 /// Swap tile glyphs for decoded texture thumbnails as they land.
 fn resolve_thumbnails(
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut pending: ResMut<PendingThumbnails>,
     children: Query<&Children>,
     mut images: ResMut<Assets<Image>>,
@@ -662,10 +665,10 @@ fn resolve_thumbnails(
         .waiting
         .keys()
         .copied()
-        .filter(|key| manager.decoded(*key).is_some())
+        .filter(|key| store.get(*key).is_some())
         .collect();
     for key in ready {
-        let Some(decoded) = manager.decoded(key) else {
+        let Some(decoded) = store.get(key) else {
             continue;
         };
         let handle = images.add(to_bevy_image(decoded));

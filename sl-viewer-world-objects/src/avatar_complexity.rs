@@ -123,7 +123,7 @@ use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::meshes::{MeshDecoded, MeshManager};
 use crate::settings::ViewerSettings;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{AvatarState, FriendsModel, ObjectParticleSystem};
+use crate::world_api::{AvatarState, DecodedTextures, FriendsModel, ObjectParticleSystem};
 use crate::world_api::{ObjectState, PrimComplexityFacts};
 
 // ---------------------------------------------------------------------------
@@ -1250,6 +1250,8 @@ struct SceneLookup<'world> {
     meshes: &'world MeshManager,
     /// The texture store, for full-resolution dimensions.
     textures: &'world TextureManager,
+    /// The decoded images, which the full-resolution dimensions are read from.
+    store: &'world DecodedTextures,
     /// Every live particle source in the scene, by prim entity. Collected up
     /// front (there are few of them) rather than held as a query, so the lookup
     /// is a plain borrow-free map.
@@ -1271,7 +1273,7 @@ impl CostLookup for SceneLookup<'_> {
     }
 
     fn texture_dimensions(&self, texture: TextureKey) -> Option<(u32, u32)> {
-        self.textures.native_dimensions(texture)
+        self.textures.native_dimensions(texture, self.store)
     }
 
     fn particles(&self, prim: Entity) -> Option<ParticleBurst> {
@@ -1294,6 +1296,7 @@ pub(crate) fn recompute_avatar_complexity(
     identity: Res<SlIdentity>,
     meshes: Res<MeshManager>,
     textures: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     particles: Query<(Entity, &ObjectParticleSystem)>,
 ) {
     let known: HashSet<AgentKey> = avatars
@@ -1328,6 +1331,7 @@ pub(crate) fn recompute_avatar_complexity(
     let lookup = SceneLookup {
         meshes: &meshes,
         textures: &textures,
+        store: &store,
         particles: particles
             .iter()
             .map(|(prim, source)| (prim, ParticleBurst::of(&source.system)))

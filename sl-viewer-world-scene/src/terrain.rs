@@ -117,7 +117,9 @@ use crate::asset_budget::MeshUploadBudget;
 use crate::coords::{metres_to_f32, sl_to_bevy_rotation, sl_to_bevy_vec};
 use crate::probe_layers::environment_render_layers;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{DETAIL_COUNT, PatchKey, TerrainState, TerrainSurface, ViewerCamera};
+use crate::world_api::{
+    DETAIL_COUNT, DecodedTextures, PatchKey, TerrainState, TerrainSurface, ViewerCamera,
+};
 
 /// The region edge length in metres. A standard Second Life / OpenSim region is
 /// 256 m (16×16 patches of 16×16 cells).
@@ -270,6 +272,7 @@ pub fn update_terrain(
     mut rebuilds: ResMut<PendingPatchRebuilds>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     lighting: Res<CurrentTerrainLighting>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
@@ -320,6 +323,7 @@ pub fn update_terrain(
                     &mut textures,
                     identity,
                     &mut manager,
+                    &store,
                     &mut images,
                     &mut materials,
                 );
@@ -336,7 +340,7 @@ pub fn update_terrain(
             &state,
             &mut textures,
             id,
-            &manager,
+            &store,
             &mut images,
             &mut materials,
         );
@@ -527,6 +531,7 @@ fn learn_composition(
     textures: &mut TerrainTextures,
     identity: &RegionIdentity,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
@@ -580,8 +585,8 @@ fn learn_composition(
         .map(|entry| entry.detail_keys.iter().flatten().copied().collect())
         .unwrap_or_default();
     for key in decoded_keys {
-        if manager.decoded(key).is_some() {
-            apply_detail_texture(state, textures, key, manager, images, materials);
+        if store.get(key).is_some() {
+            apply_detail_texture(state, textures, key, store, images, materials);
         }
     }
 }
@@ -594,7 +599,7 @@ fn apply_detail_texture(
     state: &TerrainState,
     textures: &mut TerrainTextures,
     id: TextureKey,
-    manager: &TextureManager,
+    store: &DecodedTextures,
     images: &mut Assets<Image>,
     materials: &mut Assets<TerrainMaterial>,
 ) {
@@ -606,7 +611,7 @@ fn apply_detail_texture(
         return;
     }
     if let std::collections::hash_map::Entry::Vacant(slot) = textures.decoded.entry(id) {
-        let Some(decoded) = manager.decoded(id) else {
+        let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the region keeps the flat placeholder.
             return;
         };

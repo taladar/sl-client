@@ -1791,12 +1791,13 @@ fn resolve_preview_map(
     id: TextureKey,
     srgb: bool,
     textures: &mut TextureManager,
+    store: &crate::world_api::DecodedTextures,
     images: &mut Assets<Image>,
 ) -> bool {
     if id.uuid().is_nil() || cache.is_some() {
         return true;
     }
-    let Some(decoded) = textures.decoded(id).map(std::sync::Arc::clone) else {
+    let Some(decoded) = store.get(id).map(std::sync::Arc::clone) else {
         if !*requested {
             textures.request_boosted(id, TERRAIN_BOOST_PRIORITY);
             *requested = true;
@@ -1826,6 +1827,7 @@ fn drive_legacy_preview(
     mut preview: ResMut<LegacyPreview>,
     selection: Res<SelectionSet>,
     mut textures: ResMut<TextureManager>,
+    store: Res<crate::world_api::DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     face_materials: Query<(&PrimFaceEntity, &MeshMaterial3d<FaceMaterial>)>,
@@ -1856,6 +1858,7 @@ fn drive_legacy_preview(
         material.normal_map,
         false,
         &mut textures,
+        &store,
         &mut images,
     );
     let spec_ready = resolve_preview_map(
@@ -1864,6 +1867,7 @@ fn drive_legacy_preview(
         material.specular_map,
         true,
         &mut textures,
+        &store,
         &mut images,
     );
     if let Some(image) = preview.normal_image.clone() {
@@ -1904,6 +1908,7 @@ fn revert_legacy_preview(
     selection: Res<SelectionSet>,
     mut legacy_manager: ResMut<LegacyMaterialManager>,
     mut textures: ResMut<TextureManager>,
+    store: Res<crate::world_api::DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     children: Query<&Children>,
     faces: Query<(&FaceTextureDebug, &MeshMaterial3d<FaceMaterial>)>,
@@ -1933,6 +1938,7 @@ fn revert_legacy_preview(
                 texture_face,
                 &mut materials,
                 &mut textures,
+                &store,
                 &mut prim_textures,
                 TERRAIN_BOOST_PRIORITY,
                 TextureAlpha::Mask,
@@ -2111,6 +2117,7 @@ fn preview_pbr_material_picked(
     selection: Res<SelectionSet>,
     mut manager: ResMut<MaterialManager>,
     mut textures: ResMut<TextureManager>,
+    store: Res<crate::world_api::DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     scene: Query<(), With<crate::objects::SceneObject>>,
@@ -2149,6 +2156,7 @@ fn preview_pbr_material_picked(
                     base_uv,
                     &texture_face,
                     &mut textures,
+                    &store,
                     &mut prim_textures,
                     &mut materials,
                 );

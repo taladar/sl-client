@@ -59,7 +59,6 @@ use crate::floater::{
 use crate::i18n::{TransArgs, Translated, Translator};
 use crate::inventory_properties::format_unix_date;
 use crate::settings::ViewerSettings;
-use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
@@ -75,6 +74,7 @@ use crate::ui_text_input::{TextInputKind, TextInputSpec, spawn_text_input};
 use crate::virtual_list::{VirtualList, VirtualRow, layout_virtual_lists};
 use crate::world_api::AVATAR_BOOST_PRIORITY;
 use crate::world_api::AvatarState;
+use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{GroupsModel, OpenGroupProfile};
 
 /// The chrome font size, in logical pixels.
@@ -1575,7 +1575,7 @@ fn build_general_tab(
     ui: Option<ResMut<GroupProfileUi>>,
     avatars: Res<AvatarState>,
     groups: Res<GroupsModel>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     children: Query<&Children>,
     mut texts: Query<(&mut Text, &mut TextColor)>,
     mut commands: Commands,
@@ -1638,7 +1638,7 @@ fn build_general_tab(
             &profile,
             sig,
             &mut state,
-            &mut textures,
+            &mut boost,
             &mut ui,
         );
         ui.general_sig = Some(sig);
@@ -1660,7 +1660,7 @@ fn build_general_structure(
     profile: &GroupProfile,
     sig: GeneralSig,
     state: &mut GroupProfileState,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
     ui: &mut GroupProfileUi,
 ) {
     // Insignia beside the identity facts.
@@ -1673,7 +1673,7 @@ fn build_general_structure(
             ChildOf(panel),
         ))
         .id();
-    spawn_insignia(commands, top, profile.insignia_id, state, textures);
+    spawn_insignia(commands, top, profile.insignia_id, state, boost);
     let facts = commands
         .spawn((
             Node {
@@ -2931,7 +2931,7 @@ fn send_accept_notices(
 /// Swap the group insignia into its box once the pipeline decodes it.
 fn poll_group_profile_texture(
     mut state: ResMut<GroupProfileState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
@@ -2943,7 +2943,7 @@ fn poll_group_profile_texture(
         state.pending_texture = None;
         return;
     };
-    if let Some(decoded) = manager.decoded(key) {
+    if let Some(decoded) = store.get(key) {
         let handle = images.add(to_bevy_image(decoded));
         entity.insert(ImageNode::new(handle));
         // Drop the "(loading)" label under the image.
@@ -2963,7 +2963,7 @@ fn spawn_insignia(
     parent: Entity,
     insignia_id: Option<TextureKey>,
     state: &mut GroupProfileState,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     let node = commands
         .spawn((
@@ -2985,7 +2985,10 @@ fn spawn_insignia(
         return;
     };
     spawn_key_label(commands, node, "group-profile-loading", DIM_LABEL_COLOR);
-    textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
+    boost.write(BoostTexture {
+        key,
+        priority: AVATAR_BOOST_PRIORITY,
+    });
     state.pending_texture = Some((key, node));
 }
 

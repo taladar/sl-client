@@ -50,6 +50,8 @@ use std::sync::Arc;
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
+
+use crate::world_api::DecodedTextures;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, Priority, TextureFace, TextureKey, Uuid};
 
@@ -291,7 +293,7 @@ pub fn register_bump_faces(
 /// needs no decode message.
 pub fn apply_bump_normals(
     mut manager: ResMut<BumpManager>,
-    textures: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -299,11 +301,11 @@ pub fn apply_bump_normals(
     let ready: Vec<TextureKey> = manager
         .pending
         .keys()
-        .filter(|id| textures.decoded(**id).is_some())
+        .filter(|id| store.get(**id).is_some())
         .copied()
         .collect();
     for id in ready {
-        let Some(decoded) = textures.decoded(id).map(Arc::clone) else {
+        let Some(decoded) = store.get(id).map(Arc::clone) else {
             continue;
         };
         let parked = manager.pending.remove(&id).unwrap_or_default();

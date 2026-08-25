@@ -1976,7 +1976,7 @@ struct SkeletonMergeBudget {
 impl Default for SkeletonMergeBudget {
     fn default() -> Self {
         Self {
-            per_frame: crate::textures::env_budget(
+            per_frame: crate::world_api::env_budget(
                 "SL_VIEWER_INVENTORY_MERGE_BUDGET",
                 DEFAULT_INVENTORY_MERGE_BUDGET,
             ),

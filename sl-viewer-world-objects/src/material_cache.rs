@@ -40,6 +40,8 @@
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+
+use crate::world_api::DecodedTextures;
 use sl_client_bevy::{Object, PrimFaceId, Priority, TextureAnimation, TextureFace, TextureKey};
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
@@ -275,12 +277,14 @@ fn detach_face(
     commands: &mut Commands,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
+    store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
 ) {
     let private = face_material(
         texture_face,
         materials,
         manager,
+        store,
         prim_textures,
         Priority::IDLE,
         TextureAlpha::Mask,
@@ -315,6 +319,7 @@ pub fn detach_shared_face_materials(
     selection: Res<SelectionSet>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     mut manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut prim_textures: ResMut<PrimTextures>,
 ) {
     // A face can match several sources at once (an animated face on a selected
@@ -339,6 +344,7 @@ pub fn detach_shared_face_materials(
                     &mut commands,
                     &mut materials,
                     &mut manager,
+                    &store,
                     &mut prim_textures,
                 );
             }
@@ -368,6 +374,7 @@ pub fn detach_shared_face_materials(
                     &mut commands,
                     &mut materials,
                     &mut manager,
+                    &store,
                     &mut prim_textures,
                 );
             }
@@ -388,6 +395,7 @@ pub fn detach_shared_face_materials(
                 &mut commands,
                 &mut materials,
                 &mut manager,
+                &store,
                 &mut prim_textures,
             );
         }
@@ -407,6 +415,7 @@ pub fn detach_shared_face_materials(
                     &mut commands,
                     &mut materials,
                     &mut manager,
+                    &store,
                     &mut prim_textures,
                 );
             }

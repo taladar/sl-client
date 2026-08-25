@@ -64,6 +64,7 @@ use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_font::UiFont;
 use crate::ui_radio::{RadioLayout, RadioSelection, RadioSpec, spawn_radio_group};
 use crate::ui_texture_picker::{TextureSwatchValue, spawn_texture_swatch};
+use crate::world_api::DecodedTextures;
 use crate::world_api::TexturePicked;
 
 /// The Shape gender radio group's element id.
@@ -864,6 +865,7 @@ fn drive_wearable_preview(
     mut state: ResMut<WearEditState>,
     mut inputs: ResMut<OwnBakeInputs>,
     mut texture_manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut local_bake: ResMut<OwnLocalBake>,
     mut texts: Query<&mut Text>,
@@ -895,7 +897,7 @@ fn drive_wearable_preview(
         }
     }
     if edit.bake_dirty {
-        inputs.request_asset_textures(&edit.edited, &mut texture_manager);
+        inputs.request_asset_textures(&edit.edited, &mut texture_manager, &store);
         // Track edited textures still decoding so the composite re-runs once
         // they land.
         edit.pending_textures = edit
@@ -905,9 +907,9 @@ fn drive_wearable_preview(
             .copied()
             .filter(|id| !id.is_nil())
             .map(TextureKey::from)
-            .filter(|key| texture_manager.decoded(*key).is_none())
+            .filter(|key| store.get(*key).is_none())
             .collect();
-        inputs.reassemble(&texture_manager, library.as_deref());
+        inputs.reassemble(&store, library.as_deref());
         local_bake.invalidate();
     }
     edit.shape_dirty = false;
@@ -960,6 +962,7 @@ fn on_wear_button(
     mut state: ResMut<WearEditState>,
     mut inputs: ResMut<OwnBakeInputs>,
     mut texture_manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut local_bake: ResMut<OwnLocalBake>,
     mut pending: ResMut<PendingWearableUploads>,
@@ -1012,8 +1015,8 @@ fn on_wear_button(
             edit.edited.clone_from(&edit.original);
             // Re-derive the preview from the restored asset.
             inputs.set_preview_asset(edit.original.clone());
-            inputs.request_asset_textures(&edit.original, &mut texture_manager);
-            inputs.reassemble(&texture_manager, library.as_deref());
+            inputs.request_asset_textures(&edit.original, &mut texture_manager, &store);
+            inputs.reassemble(&store, library.as_deref());
             local_bake.invalidate();
             edit.shape_dirty = true;
             set_status(&mut texts, edit.status, "Reverted.");

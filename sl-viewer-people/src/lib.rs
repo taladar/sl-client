@@ -69,7 +69,6 @@ pub(crate) use sl_viewer_world_objects::avatar_complexity;
 pub(crate) use sl_viewer_world_objects::avatar_render_settings;
 pub(crate) use sl_viewer_world_objects::derender;
 pub(crate) use sl_viewer_world_objects::name_tag_content;
-pub(crate) use sl_viewer_world_objects::textures;
 pub(crate) use sl_viewer_world_view::session;
 
 pub mod auto_reject;

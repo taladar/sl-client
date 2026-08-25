@@ -64,6 +64,7 @@ use crate::name_tag_content::TagContent;
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
 use crate::world_api::AvatarInterp;
+use crate::world_api::DecodedTextures;
 use crate::world_api::ObjectState;
 use crate::world_api::{
     AppearanceDirtyStamps, AvatarAnchor, AvatarEntities, AvatarMotion, AvatarPickTarget,
@@ -1779,6 +1780,7 @@ pub(crate) fn refetch_bakes(
     state: &mut AvatarState,
     agent: AgentKey,
     manager: &mut TextureManager,
+    store: &mut DecodedTextures,
     appearance_service: Option<&url::Url>,
 ) {
     let Some(bakes) = state.baked_textures.get(&agent) else {
@@ -1792,7 +1794,7 @@ pub(crate) fn refetch_bakes(
     for (slot, id) in slots {
         // Evict first so a cached (or retry-exhausted) bake actually re-fetches
         // rather than the request short-circuiting on the cache — a true refresh.
-        manager.forget(id);
+        manager.forget(id, store);
         match appearance_service.zip(bake_service_slot_name(slot)) {
             Some((service, name)) => {
                 let url = format!("{service}texture/{}/{name}/{id}", agent.uuid());
@@ -2265,11 +2267,18 @@ pub fn handle_refetch_avatar_textures(
     mut requests: MessageReader<RefetchAvatarTextures>,
     mut state: ResMut<AvatarState>,
     mut manager: ResMut<TextureManager>,
+    mut store: ResMut<DecodedTextures>,
     identity: Res<SlIdentity>,
 ) {
     let service = identity.agent_appearance_service.clone();
     for request in requests.read() {
-        refetch_bakes(&mut state, request.agent, &mut manager, service.as_ref());
+        refetch_bakes(
+            &mut state,
+            request.agent,
+            &mut manager,
+            &mut store,
+            service.as_ref(),
+        );
     }
 }
 
@@ -2421,14 +2430,14 @@ impl AvatarBakeMaterials {
     fn ensure_bake(
         &mut self,
         id: TextureKey,
-        manager: &TextureManager,
+        store: &DecodedTextures,
         images: &mut Assets<Image>,
     ) -> Option<(Handle<Image>, BakeAlpha)> {
         if let Some(handle) = self.images.get(&id) {
             let alpha = self.alpha.get(&id).copied().unwrap_or(BakeAlpha::Opaque);
             return Some((handle.clone(), alpha));
         }
-        let decoded = manager.decoded(id)?;
+        let decoded = store.get(id)?;
         let alpha = classify_bake_alpha(decoded);
         if log_avatar_faces_enabled() {
             info!(
@@ -2461,7 +2470,7 @@ impl AvatarBakeMaterials {
         agent: AgentKey,
         slot: usize,
         id: TextureKey,
-        manager: &TextureManager,
+        store: &DecodedTextures,
         images: &mut Assets<Image>,
         materials: &mut Assets<FaceMaterial>,
     ) -> Handle<FaceMaterial> {
@@ -2470,7 +2479,7 @@ impl AvatarBakeMaterials {
             .entry((agent, slot))
             .or_insert_with(|| materials.add(baked_region_material()))
             .clone();
-        match self.ensure_bake(id, manager, images) {
+        match self.ensure_bake(id, store, images) {
             Some((image, alpha)) => {
                 if let Some(mut material) = materials.get_mut(&handle) {
                     apply_bake_image(&mut material.base, image, alpha.alpha_mode());
@@ -2673,7 +2682,7 @@ pub fn assign_avatar_bake_materials(
     mut state: ResMut<AvatarState>,
     body: Option<Res<AvatarBody>>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -2712,14 +2721,9 @@ pub fn assign_avatar_bake_materials(
             .and_then(|bakes| bakes.get(&slot))
         {
             // A published bake for this region: its per-avatar region material.
-            Some(&id) => bake_mats.region_material(
-                part.agent,
-                slot,
-                id,
-                &manager,
-                &mut images,
-                &mut materials,
-            ),
+            Some(&id) => {
+                bake_mats.region_material(part.agent, slot, id, &store, &mut images, &mut materials)
+            }
             // No bake for this region: the shared un-textured skin material.
             None => body.material.clone(),
         };
@@ -2749,7 +2753,7 @@ pub fn assign_avatar_bake_materials(
 /// serial `extract_render_asset<GpuImage>` spike. A bake already uploaded (cached)
 /// is free to reuse, so it always applies even with the budget spent.
 pub fn apply_avatar_bake_textures(
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
@@ -2759,7 +2763,7 @@ pub fn apply_avatar_bake_textures(
         .pending
         .keys()
         .copied()
-        .filter(|id| bake_mats.images.contains_key(id) || manager.decoded(*id).is_some())
+        .filter(|id| bake_mats.images.contains_key(id) || store.get(*id).is_some())
         .collect();
     let mut filled = 0_usize;
     for id in ready {
@@ -2771,7 +2775,7 @@ pub fn apply_avatar_bake_textures(
         let Some(parked) = bake_mats.pending.remove(&id) else {
             continue;
         };
-        let Some((image, alpha)) = bake_mats.ensure_bake(id, &manager, &mut images) else {
+        let Some((image, alpha)) = bake_mats.ensure_bake(id, &store, &mut images) else {
             // The fetch failed: the parked regions keep their flat skin tint.
             continue;
         };
@@ -3194,7 +3198,7 @@ pub fn apply_avatar_appearance(
     mut events: MessageReader<SlEvent>,
     mut decoded: MessageReader<TextureDecoded>,
     library: Option<Res<AvatarAssetLibrary>>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut state: ResMut<AvatarState>,
     volume_gain: Res<VolumeMorphGain>,
     time: Res<Time>,
@@ -3498,7 +3502,7 @@ pub fn apply_avatar_appearance(
         {
             let morphed = match part_clothing_mask(
                 &library,
-                &manager,
+                &store,
                 state.baked_textures.get(&part.agent),
                 part.region,
                 &loaded.mesh,
@@ -3796,7 +3800,7 @@ const fn is_masked_body_slot(slot: usize) -> bool {
 /// then apply unmasked — the full flare — until the bake arrives and re-shapes it).
 fn part_clothing_mask(
     library: &AvatarAssetLibrary,
-    manager: &TextureManager,
+    store: &DecodedTextures,
     baked: Option<&HashMap<usize, TextureKey>>,
     region: BodyRegion,
     mesh: &BaseMesh,
@@ -3806,7 +3810,7 @@ fn part_clothing_mask(
         return None;
     }
     let id = *baked?.get(&region.baked_slot())?;
-    let decoded = manager.decoded(id)?;
+    let decoded = store.get(id)?;
     // The decoded pixels are always expanded to RGBA8 (stride 4, alpha at offset
     // 3) regardless of the source component count; a source with no alpha channel
     // decodes to opaque alpha (255), which masks nothing — the correct fallback
@@ -3947,7 +3951,7 @@ pub fn apply_avatar_part_visibility(
 pub fn apply_bom_face_materials(
     state: Res<AvatarState>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
     parts: Query<(&AvatarBodyPart, &MeshMaterial3d<FaceMaterial>), Without<BomFace>>,
@@ -3985,7 +3989,7 @@ pub fn apply_bom_face_materials(
             .baked_textures
             .get(&agent)
             .and_then(|bakes| bakes.get(&slot))
-            && let Some((image, alpha)) = bake_mats.ensure_bake(id, &manager, &mut images)
+            && let Some((image, alpha)) = bake_mats.ensure_bake(id, &store, &mut images)
         {
             let _prev = region_bake.insert((agent, slot), (image, alpha != BakeAlpha::Opaque));
             continue;

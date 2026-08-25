@@ -43,6 +43,8 @@ use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::math::Affine2;
 use bevy::prelude::*;
+
+use crate::world_api::DecodedTextures;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     Command, DecodedTexture, LegacyMaterial, Priority, SlCommand, SlEvent, SlSessionEvent,
@@ -588,7 +590,7 @@ pub fn preview_legacy_material(
 /// already cached), so it needs no decode message.
 pub fn apply_legacy_normal_maps(
     mut manager: ResMut<LegacyMaterialManager>,
-    textures: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -596,11 +598,11 @@ pub fn apply_legacy_normal_maps(
     let ready: Vec<TextureKey> = manager
         .texture_pending
         .keys()
-        .filter(|id| textures.decoded(**id).is_some())
+        .filter(|id| store.get(**id).is_some())
         .copied()
         .collect();
     for id in ready {
-        let Some(decoded) = textures.decoded(id).map(Arc::clone) else {
+        let Some(decoded) = store.get(id).map(Arc::clone) else {
             continue;
         };
         let handles = manager.texture_pending.remove(&id).unwrap_or_default();
@@ -631,7 +633,7 @@ pub fn apply_legacy_normal_maps(
 /// re-sample bit. Mirrors [`apply_legacy_normal_maps`] for the specular channel.
 pub fn apply_legacy_specular_maps(
     mut manager: ResMut<LegacyMaterialManager>,
-    textures: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut budget: ResMut<TextureApplyBudget>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -639,11 +641,11 @@ pub fn apply_legacy_specular_maps(
     let ready: Vec<TextureKey> = manager
         .spec_pending
         .keys()
-        .filter(|id| textures.decoded(**id).is_some())
+        .filter(|id| store.get(**id).is_some())
         .copied()
         .collect();
     for id in ready {
-        let Some(decoded) = textures.decoded(id).map(Arc::clone) else {
+        let Some(decoded) = store.get(id).map(Arc::clone) else {
             continue;
         };
         let handles = manager.spec_pending.remove(&id).unwrap_or_default();

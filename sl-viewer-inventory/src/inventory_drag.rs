@@ -601,7 +601,7 @@ pub(crate) fn on_row_drag_end(
     ),
     resolve: (
         Res<ButtonInput<KeyCode>>,
-        Query<&crate::objects::SceneObject>,
+        Query<&crate::world_api::SceneObject>,
         Res<crate::world_api::ObjectState>,
     ),
     outputs: (
@@ -932,7 +932,7 @@ fn agent_target_at(
 /// hit that is not part of a tracked scene object (terrain, a gizmo, …).
 fn hit_scene_object(
     entity: Entity,
-    scene: &Query<&crate::objects::SceneObject>,
+    scene: &Query<&crate::world_api::SceneObject>,
     child_of: &Query<&ChildOf>,
 ) -> Option<ScopedObjectId> {
     let mut node = entity;
@@ -1167,7 +1167,7 @@ fn ingest_drag_world_picks(
 fn drive_drag_object_hover(
     state: Res<InventoryDragState>,
     world_pick: Res<DragWorldPick>,
-    scene: Query<&crate::objects::SceneObject>,
+    scene: Query<&crate::world_api::SceneObject>,
     child_of: Query<&ChildOf>,
     objects: Res<crate::world_api::ObjectState>,
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -1232,7 +1232,7 @@ fn drive_drag_object_hover(
 /// or an untracked hit.
 fn resolve_hover_entity(
     entity: Entity,
-    scene: &Query<&crate::objects::SceneObject>,
+    scene: &Query<&crate::world_api::SceneObject>,
     child_of: &Query<&ChildOf>,
     objects: &crate::world_api::ObjectState,
 ) -> Option<(Entity, ScopedObjectId)> {

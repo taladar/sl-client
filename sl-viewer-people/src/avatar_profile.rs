@@ -52,7 +52,6 @@ use crate::floater::{
 use crate::i18n::Translated;
 use crate::inventory_drag::AgentDropTarget;
 use crate::inventory_properties::format_unix_date;
-use crate::textures::TextureManager;
 use crate::ui::{UiPanelShown, UiRoot, UiScaffoldSystems, column, row};
 use crate::ui_font::UiFont;
 use crate::ui_tab::{
@@ -66,6 +65,7 @@ use crate::world_api::FriendsModel;
 use crate::world_api::GroupsModel;
 use crate::world_api::OpenGroupProfile;
 use crate::world_api::RequestBlock;
+use crate::world_api::{BoostTexture, DecodedTextures};
 use crate::world_api::{ConversationKey, OpenAvatarProfile, OpenConversation};
 
 /// The chrome font size, in logical pixels.
@@ -825,7 +825,7 @@ fn rebuild_profile_tabs(
     avatars: Res<AvatarState>,
     friends: Res<FriendsModel>,
     groups_model: Res<GroupsModel>,
-    mut textures: ResMut<TextureManager>,
+    mut boost: MessageWriter<BoostTexture>,
     children: Query<&Children>,
     mut texts: Query<&mut Text>,
     mut commands: Commands,
@@ -889,7 +889,7 @@ fn rebuild_profile_tabs(
                 &build,
                 &mut state,
                 &mut ui,
-                &mut textures,
+                &mut boost,
                 &mut texts,
                 &groups_model,
             );
@@ -914,7 +914,7 @@ fn rebuild_profile_tabs(
                 &build,
                 &mut state,
                 &mut ui,
-                &mut textures,
+                &mut boost,
             ),
             ProfileTab::Classifieds => build_classifieds_tab(
                 &mut commands,
@@ -922,7 +922,7 @@ fn rebuild_profile_tabs(
                 &build,
                 &mut state,
                 &mut ui,
-                &mut textures,
+                &mut boost,
             ),
             ProfileTab::FirstLife => build_first_life_tab(
                 &mut commands,
@@ -930,7 +930,7 @@ fn rebuild_profile_tabs(
                 &build,
                 &mut state,
                 &mut ui,
-                &mut textures,
+                &mut boost,
             ),
             ProfileTab::Notes => build_notes_tab(&mut commands, panel, &state, &mut ui),
             ProfileTab::SecondLife => {}
@@ -1245,7 +1245,7 @@ fn fill_second_life_from_properties(
     build: &BuildContext,
     state: &mut ProfileState,
     ui: &mut ProfileUi,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     let Some(props) = state.properties.clone() else {
         return;
@@ -1254,7 +1254,7 @@ fn fill_second_life_from_properties(
     if !ui.sl_handles.picture_requested
         && let Some(node) = ui.sl_handles.picture
     {
-        request_ui_texture(commands, Some(props.image_id), node, state, textures);
+        request_ui_texture(commands, Some(props.image_id), node, state, boost);
         ui.sl_handles.picture_requested = true;
     }
     // Facts (once).
@@ -1335,12 +1335,12 @@ fn update_second_life(
     build: &BuildContext,
     state: &mut ProfileState,
     ui: &mut ProfileUi,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
     texts: &mut Query<&mut Text>,
     groups_model: &GroupsModel,
 ) {
     set_value_node(texts, ui.sl_handles.name, &build.name_of(build.target));
-    fill_second_life_from_properties(commands, build, state, ui, textures);
+    fill_second_life_from_properties(commands, build, state, ui, boost);
     if let Some(partner) = state.properties.as_ref().and_then(|props| props.partner_id) {
         set_value_node(texts, ui.sl_handles.partner, &build.name_of(partner));
     }
@@ -1527,7 +1527,7 @@ fn build_picks_tab(
     build: &BuildContext,
     state: &mut ProfileState,
     ui: &mut ProfileUi,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     ui.pick_name_field = None;
     ui.pick_desc_field = None;
@@ -1591,7 +1591,7 @@ fn build_picks_tab(
         spawn_key_label(commands, detail_panel, "profile-loading", DIM_LABEL_COLOR);
         return;
     };
-    spawn_snapshot(commands, detail_panel, info.snapshot_id, state, textures);
+    spawn_snapshot(commands, detail_panel, info.snapshot_id, state, boost);
     let name_row = spawn_labeled_row(commands, detail_panel, "profile-pick-name");
     if build.own {
         ui.pick_name_field = Some(spawn_text_input(
@@ -1679,7 +1679,7 @@ fn build_classifieds_tab(
     build: &BuildContext,
     state: &mut ProfileState,
     ui: &mut ProfileUi,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     ui.classified_name_field = None;
     ui.classified_desc_field = None;
@@ -1751,7 +1751,7 @@ fn build_classifieds_tab(
         spawn_key_label(commands, detail_panel, "profile-loading", DIM_LABEL_COLOR);
         return;
     };
-    spawn_snapshot(commands, detail_panel, info.snapshot_id, state, textures);
+    spawn_snapshot(commands, detail_panel, info.snapshot_id, state, boost);
     if build.own {
         // The cycle / toggle edits live in a draft initialised from the stored
         // listing, so a repaint keeps them.
@@ -1955,11 +1955,11 @@ fn build_first_life_tab(
     build: &BuildContext,
     state: &mut ProfileState,
     ui: &mut ProfileUi,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     ui.fl_about_field = None;
     let image_id = state.properties.as_ref().map(|props| props.fl_image_id);
-    spawn_profile_image(commands, panel, image_id, state, textures);
+    spawn_profile_image(commands, panel, image_id, state, boost);
     spawn_section_label(commands, panel, "profile-first-life-about");
     let about = state
         .properties
@@ -2305,10 +2305,10 @@ fn spawn_profile_image(
     parent: Entity,
     image_id: Option<TextureKey>,
     state: &mut ProfileState,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     let node = spawn_image_box(commands, parent, Vec2::splat(PROFILE_IMAGE_EDGE));
-    request_ui_texture(commands, image_id, node, state, textures);
+    request_ui_texture(commands, image_id, node, state, boost);
 }
 
 /// A pick / classified snapshot node, with the texture requested like the
@@ -2318,10 +2318,10 @@ fn spawn_snapshot(
     parent: Entity,
     snapshot_id: Option<TextureKey>,
     state: &mut ProfileState,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     let node = spawn_image_box(commands, parent, SNAPSHOT_SIZE);
-    request_ui_texture(commands, snapshot_id, node, state, textures);
+    request_ui_texture(commands, snapshot_id, node, state, boost);
 }
 
 /// The empty image box a picture / snapshot fills once decoded.
@@ -2350,7 +2350,7 @@ fn request_ui_texture(
     image_id: Option<TextureKey>,
     node: Entity,
     state: &mut ProfileState,
-    textures: &mut TextureManager,
+    boost: &mut MessageWriter<BoostTexture>,
 ) {
     let key = image_id.filter(|key| *key != TextureKey::from(Uuid::nil()));
     let Some(key) = key else {
@@ -2358,7 +2358,10 @@ fn request_ui_texture(
         return;
     };
     spawn_key_label(commands, node, "profile-loading", DIM_LABEL_COLOR);
-    textures.request_boosted(key, AVATAR_BOOST_PRIORITY);
+    boost.write(BoostTexture {
+        key,
+        priority: AVATAR_BOOST_PRIORITY,
+    });
     state.pending_textures.push((key, node));
 }
 
@@ -2852,7 +2855,7 @@ fn teleport_to(pos_global: &GlobalCoordinates, sl_commands: &mut MessageWriter<S
 /// are dropped, not applied.
 fn poll_profile_textures(
     mut state: ResMut<ProfileState>,
-    manager: Res<TextureManager>,
+    store: Res<DecodedTextures>,
     mut images: ResMut<Assets<Image>>,
     children: Query<&Children>,
     mut commands: Commands,
@@ -2865,7 +2868,7 @@ fn poll_profile_textures(
         let Ok(mut entity) = commands.get_entity(node) else {
             continue;
         };
-        if let Some(decoded) = manager.decoded(key) {
+        if let Some(decoded) = store.get(key) {
             let handle = images.add(to_bevy_image(decoded));
             entity.insert(ImageNode::new(handle));
             // Drop the "(loading)" label under the image.

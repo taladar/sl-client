@@ -29,6 +29,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::prelude::*;
+
+use crate::world_api::DecodedTextures;
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::{
     AppearanceValues, AssetCacheLimits, AssetKey, AssetStore, AssetType, BakeRegion,
@@ -181,10 +183,11 @@ impl OwnBakeInputs {
         &mut self,
         asset: &WearableAsset,
         texture_manager: &mut TextureManager,
+        store: &DecodedTextures,
     ) {
         for id in asset.textures.values().copied().filter(|id| !id.is_nil()) {
             let key = TextureKey::from(id);
-            if texture_manager.decoded(key).is_none() {
+            if store.get(key).is_none() {
                 let _new = self.pending_textures.insert(key);
                 texture_manager.request_boosted(key, crate::world_api::AVATAR_BOOST_PRIORITY);
             }
@@ -193,12 +196,8 @@ impl OwnBakeInputs {
 
     /// Re-run the per-region layer assembly after a preview edit, so the bake
     /// composite picks up the substituted asset's textures / tints.
-    pub fn reassemble(
-        &mut self,
-        texture_manager: &TextureManager,
-        library: Option<&AvatarAssetLibrary>,
-    ) {
-        assemble(self, texture_manager, library);
+    pub fn reassemble(&mut self, store: &DecodedTextures, library: Option<&AvatarAssetLibrary>) {
+        assemble(self, store, library);
     }
 }
 
@@ -561,6 +560,12 @@ pub fn poll_wearable_assets(
 /// Drive the assembly half: parse each fetched wearable asset and request its
 /// layer textures; as those decode, once every asset and texture is resolved (or
 /// the grace period lapses) assemble the per-region layer lists.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's params are its dependencies; the bake-input driver reads time, both \
+              asset and texture message streams, the wearable manager, the avatar library, the \
+              texture manager and its decoded store, and writes the bake inputs"
+)]
 pub fn assemble_own_bake(
     time: Res<Time>,
     mut asset_events: MessageReader<WearableAssetFetched>,
@@ -568,6 +573,7 @@ pub fn assemble_own_bake(
     manager: Res<WearableAssetManager>,
     library: Option<Res<AvatarAssetLibrary>>,
     mut texture_manager: ResMut<TextureManager>,
+    store: Res<DecodedTextures>,
     mut state: ResMut<OwnBakeInputs>,
 ) {
     // Parse newly fetched assets and request their layer textures.
@@ -576,7 +582,7 @@ pub fn assemble_own_bake(
             continue;
         }
         if let Some(bytes) = manager.fetched.get(&id) {
-            parse_and_request_textures(&mut state, &mut texture_manager, bytes);
+            parse_and_request_textures(&mut state, &mut texture_manager, &store, bytes);
         }
     }
     // As layer textures decode, clear them from the pending set.
@@ -632,7 +638,7 @@ pub fn assemble_own_bake(
         // appearance editor composites on demand via `reassemble`. Elsewhere
         // (OpenSim) assemble the per-region layer lists the composite drapes.
         if !state.server_bake_grid {
-            assemble(&mut state, &texture_manager, library.as_deref());
+            assemble(&mut state, &store, library.as_deref());
         }
         state.stage = BakeInputStage::Ready;
     }
@@ -643,6 +649,7 @@ pub fn assemble_own_bake(
 fn parse_and_request_textures(
     state: &mut OwnBakeInputs,
     texture_manager: &mut TextureManager,
+    store: &DecodedTextures,
     bytes: &[u8],
 ) {
     let Ok(text) = std::str::from_utf8(bytes) else {
@@ -668,7 +675,7 @@ fn parse_and_request_textures(
             }
             if let Some(id) = asset.layer_texture(slot) {
                 let key = TextureKey::from(id);
-                if texture_manager.decoded(key).is_none() {
+                if store.get(key).is_none() {
                     state.pending_textures.insert(key);
                     // Our own avatar's client-side bake layer textures are boosted
                     // (P20.2): they clothe the own avatar and are not ranked by the
@@ -686,7 +693,7 @@ fn parse_and_request_textures(
 /// params (when the `avatar_lad.xml` table is loaded). Logs a one-line summary.
 fn assemble(
     state: &mut OwnBakeInputs,
-    texture_manager: &TextureManager,
+    store: &DecodedTextures,
     library: Option<&AvatarAssetLibrary>,
 ) {
     let assets = state.assets.clone();
@@ -703,7 +710,7 @@ fn assemble(
         let region_layers = region_layers(
             region,
             |wearable| assets.iter().any(|asset| asset.wearable_type == wearable),
-            |slot| layer_image(&assets, texture_manager, slot),
+            |slot| layer_image(&assets, store, slot),
             |file| library.and_then(|lib| lib.static_texture(file).cloned()),
             |tint, wearable| layer_tint(&assets, params, tint, wearable),
             |param_id, wearable| mask_weight(&resolved, params, param_id, wearable),
@@ -726,7 +733,7 @@ fn assemble(
 /// the slot's wearable type that supplies it, if its texture has decoded.
 fn layer_image(
     assets: &[WearableAsset],
-    texture_manager: &TextureManager,
+    store: &DecodedTextures,
     slot: usize,
 ) -> Option<DecodedTexture> {
     let wearable_type = avatar_texture::layer_wearable_type(slot)?;
@@ -735,7 +742,7 @@ fn layer_image(
             continue;
         }
         if let Some(id) = asset.layer_texture(slot)
-            && let Some(decoded) = texture_manager.decoded(TextureKey::from(id))
+            && let Some(decoded) = store.get(TextureKey::from(id))
         {
             return Some((**decoded).clone());
         }
