@@ -63,6 +63,31 @@ across the workspace.
   that either autorespond mode counts — lived in `presence`, so a name tag had
   to reach up into a feature module to ask.
 
+## Render handles held where the state lives
+
+The placeholder avatar is one shared UV-sphere mesh and one shared soft-blue
+material, reused by every avatar that has no rigged body yet. Those two
+handles were a field *inside* `AvatarState`, while their sibling `AvatarBody`
+-- equally shared, equally per-avatar-invariant -- was already a plain
+resource. Two things with the same lifetime and the same sharing, stored two
+different ways.
+
+The marker is not the problem: `AvatarSphere` already tags the entity, so
+"this avatar is showing a placeholder" is a component. The *handles* are what
+couple the state to the renderer.
+
+The fix is to spawn with the marker and a transform alone, and let a small
+render system attach `Mesh3d` / `MeshMaterial3d` to any `AvatarSphere` that
+lacks them. The avatar store would then never name a handle.
+
+This one has a price tag already attached. Lifting the field out was enough to
+move `AvatarState` below the world, but eight functions had to stay above it
+because they take an `Assets<FaceMaterial>`, a rigged body or the texture
+manager -- and reaching the store from up there is what forced twenty-seven
+of its thirty-four fields to become `pub`. Decouple the handles and most of
+that widening has no reason to exist. `AvatarSphere` itself could follow the
+other avatar markers down once nothing above needs to spawn one.
+
 ## Approach
 
 1. Measure the plugin prize (above) before committing to the rework.
