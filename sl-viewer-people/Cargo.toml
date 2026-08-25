@@ -39,8 +39,9 @@ sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
-sl-viewer-world = { workspace = true }
 sl-viewer-world-api = { workspace = true }
+sl-viewer-world-objects = { workspace = true }
+sl-viewer-world-view = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]

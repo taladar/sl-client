@@ -60,8 +60,10 @@ members = [
   "sl-viewer-testkit",
   "sl-viewer-ui-core",
   "sl-viewer-ui-widgets",
-  "sl-viewer-world",
   "sl-viewer-world-api",
+  "sl-viewer-world-objects",
+  "sl-viewer-world-scene",
+  "sl-viewer-world-view",
   "sl-wire",
 ]
 
@@ -138,8 +140,10 @@ sl-viewer-spacenav = { path = "sl-viewer-spacenav", version = "0.1.0" }
 sl-viewer-testkit = { path = "sl-viewer-testkit", version = "0.1.0" }
 sl-viewer-ui-core = { path = "sl-viewer-ui-core", version = "0.1.0" }
 sl-viewer-ui-widgets = { path = "sl-viewer-ui-widgets", version = "0.1.0" }
-sl-viewer-world = { path = "sl-viewer-world", version = "0.1.0" }
 sl-viewer-world-api = { path = "sl-viewer-world-api", version = "0.1.0" }
+sl-viewer-world-objects = { path = "sl-viewer-world-objects", version = "0.1.0" }
+sl-viewer-world-scene = { path = "sl-viewer-world-scene", version = "0.1.0" }
+sl-viewer-world-view = { path = "sl-viewer-world-view", version = "0.1.0" }
 sl-wire = { path = "sl-wire", version = "0.1.0" }
 thiserror = { version = "2.0.18" }
 time = { version = "0.3.49" }

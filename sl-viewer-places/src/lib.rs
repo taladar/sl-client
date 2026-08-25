@@ -34,9 +34,9 @@ pub(crate) use sl_viewer_ui_widgets::ui_combo;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
-pub(crate) use sl_viewer_world::environment;
-pub(crate) use sl_viewer_world::textures;
 pub(crate) use sl_viewer_world_api as world_api;
+pub(crate) use sl_viewer_world_objects::textures;
+pub(crate) use sl_viewer_world_scene::environment;
 
 pub mod about_land;
 pub mod about_landmark;

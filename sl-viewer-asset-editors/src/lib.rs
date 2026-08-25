@@ -36,10 +36,10 @@ pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_radio;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
-pub(crate) use sl_viewer_world::avatars;
-pub(crate) use sl_viewer_world::bake_inputs;
-pub(crate) use sl_viewer_world::textures;
 pub(crate) use sl_viewer_world_api as world_api;
+pub(crate) use sl_viewer_world_objects::avatars;
+pub(crate) use sl_viewer_world_objects::bake_inputs;
+pub(crate) use sl_viewer_world_objects::textures;
 
 pub mod edit_notecard;
 pub mod edit_script;

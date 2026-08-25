@@ -31,8 +31,8 @@ pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_core::ui_font;
 pub(crate) use sl_viewer_ui_widgets::settings_binding;
-pub(crate) use sl_viewer_world::objects;
 pub(crate) use sl_viewer_world_api as world_api;
+pub(crate) use sl_viewer_world_objects::objects;
 
 pub mod audio;
 pub mod parcel_audio;

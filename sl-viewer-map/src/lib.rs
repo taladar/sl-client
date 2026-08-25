@@ -33,9 +33,9 @@ pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::menu;
 pub(crate) use sl_viewer_ui_widgets::ui_search;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
-pub(crate) use sl_viewer_world::objects;
-pub(crate) use sl_viewer_world::water;
 pub(crate) use sl_viewer_world_api as world_api;
+pub(crate) use sl_viewer_world_objects::objects;
+pub(crate) use sl_viewer_world_scene::water;
 
 pub mod minimap;
 pub mod world_map;

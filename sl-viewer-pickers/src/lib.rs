@@ -30,9 +30,9 @@ pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
-pub(crate) use sl_viewer_world::material_preview;
-pub(crate) use sl_viewer_world::textures;
 pub(crate) use sl_viewer_world_api as world_api;
+pub(crate) use sl_viewer_world_objects::material_preview;
+pub(crate) use sl_viewer_world_objects::textures;
 
 pub mod avatar_picker;
 pub mod ui_texture_picker;

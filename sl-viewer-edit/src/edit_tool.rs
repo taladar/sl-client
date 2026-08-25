@@ -1491,7 +1491,7 @@ pub fn spawn_build_tools_specimen(
 
 /// Run condition: true while the build tool is **inactive** — the gate that
 /// hands the left click back to the touch pick
-/// ([`sl_viewer_world::hud_pick::pick_and_touch`]) outside edit mode.
+/// ([`sl_viewer_world_view::hud_pick::pick_and_touch`]) outside edit mode.
 #[must_use]
 pub fn edit_tool_inactive(state: Res<EditToolState>) -> bool {
     !state.active

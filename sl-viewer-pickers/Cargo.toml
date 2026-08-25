@@ -24,8 +24,8 @@ sl-client-bevy = { workspace = true, features = [
 sl-viewer-inventory = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
-sl-viewer-world = { workspace = true }
 sl-viewer-world-api = { workspace = true }
+sl-viewer-world-objects = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
