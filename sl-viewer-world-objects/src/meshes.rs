@@ -35,7 +35,7 @@ use sl_client_bevy::{
     Priority, SlCapabilities, StoreStats,
 };
 
-use crate::asset_retry::RetryState;
+use crate::asset_retry::{RetryDisposition, RetryState};
 
 /// The outcome of one background mesh fetch: the decoded geometry, the decoded
 /// rig skin (`None` when the mesh carries no skin block) and the parsed asset
@@ -212,6 +212,13 @@ impl MeshManager {
     ///
     /// [`drive_render_priority`]: crate::render_priority::drive_render_priority
     pub fn request(&mut self, id: MeshKey, priority: Priority) {
+        self.request_with(id, priority, RetryDisposition::Supersede);
+    }
+
+    /// [`request`](Self::request), plus what this request means for the id's
+    /// accumulated retry bookkeeping. The store's own re-issues pass
+    /// [`RetryDisposition::Keep`] so the backoff escalates instead of restarting.
+    fn request_with(&mut self, id: MeshKey, priority: Priority, retry: RetryDisposition) {
         if id.uuid().is_nil() {
             return;
         }
@@ -290,8 +297,13 @@ impl MeshManager {
                 .or_insert(ManagedMeshLod { current: target });
         }
         // Record the priority so a transient failure can be retried (`poll_meshes`)
-        // at the same priority; a fresh explicit request supersedes a pending retry.
-        let _retried = self.retry.remove(&id);
+        // at the same priority. A fresh explicit request supersedes a pending retry;
+        // the store's *own* re-issue must not, or it would discard the attempt count
+        // the backoff loop just parked and reset to attempt 1 forever
+        // (see [`RetryDisposition`](crate::asset_retry::RetryDisposition)).
+        if retry.supersedes() {
+            let _retried = self.retry.remove(&id);
+        }
         let _prev_priority = self.in_flight_priority.insert(id, priority);
         self.inflight.insert(id, task);
     }
@@ -512,7 +524,7 @@ impl MeshManager {
         // spawns its fetch now the cap resolves.
         let pending: Vec<(MeshKey, Priority)> = self.pending.drain().collect();
         for (id, priority) in pending {
-            self.request(id, priority);
+            self.request_with(id, priority, RetryDisposition::Keep);
         }
     }
 
@@ -698,7 +710,7 @@ pub fn poll_meshes(
         if let Some((_priority, state)) = manager.retry.get_mut(&id) {
             *state = state.issued();
         }
-        manager.request(id, priority);
+        manager.request_with(id, priority, RetryDisposition::Keep);
     }
 
     // Fold in completed level-of-detail changes (P21.2): the store entry now holds

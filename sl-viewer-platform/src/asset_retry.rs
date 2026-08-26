@@ -38,6 +38,35 @@ pub fn backoff_secs(attempts: u32) -> f64 {
     secs.min(MAX_BACKOFF_SECS)
 }
 
+/// Whether a fetch request supersedes the id's accumulated retry bookkeeping.
+///
+/// A store's request entry point cannot tell the two apart by itself, and
+/// guessing is what broke the counter: the retry loop parks the attempt count
+/// with [`RetryState::issued`] and then calls the same request path a fresh
+/// consumer would, whose first act was to clear the entry. Every failure then saw
+/// no prior state, reset to attempt 1, and the backoff looped forever at
+/// "retry 1/N" without ever reaching [`MAX_RETRY_ATTEMPTS`]. The caller says
+/// which it is instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RetryDisposition {
+    /// A fresh request from a consumer: it supersedes any pending retry, so the
+    /// id starts its attempt budget over.
+    Supersede,
+    /// The store re-issuing a request it already owns — the backoff loop's own
+    /// re-issue, or a request held back for a capability that has now arrived.
+    /// The accumulated attempt count is kept, so the next failure escalates and
+    /// the budget eventually exhausts.
+    Keep,
+}
+
+impl RetryDisposition {
+    /// Whether this request should clear the id's retry bookkeeping.
+    #[must_use]
+    pub fn supersedes(self) -> bool {
+        self == Self::Supersede
+    }
+}
+
 /// The per-asset retry bookkeeping: how many attempts have failed and when the
 /// next one is due (in monotonic [`Time::elapsed_secs_f64`](bevy::time::Time::elapsed_secs_f64) seconds).
 #[derive(Clone, Copy, Debug)]
@@ -89,7 +118,7 @@ impl RetryState {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_RETRY_ATTEMPTS, RetryState, backoff_secs};
+    use super::{MAX_RETRY_ATTEMPTS, RetryDisposition, RetryState, backoff_secs};
     use pretty_assertions::assert_eq;
 
     /// Floats compare with a tolerance (the workspace forbids exact `f64` equality).
@@ -157,5 +186,66 @@ mod tests {
         // Once the budget is spent, an issued-then-failed retry finally gives up —
         // the loop terminates instead of running forever.
         assert!(RetryState::after_failure(Some(state.issued()), 0.0).is_none());
+    }
+
+    /// A whole retry budget driven the way a store drives it — failure, park,
+    /// re-issue, failure — escalates and gives up.
+    ///
+    /// Regression for the counter that stuck at `1/6`: [`RetryState`]'s own tests
+    /// all passed while it was broken, because the state was correct and the
+    /// *store* threw it away on the re-issue. This walks the loop the store runs,
+    /// with [`RetryDisposition`] deciding whether the parked state survives — the
+    /// exact decision that was previously implicit and always wrong.
+    #[test]
+    fn a_store_reissue_loop_escalates_to_exhaustion() {
+        // The store's retry entry for one asset id, `None` once it has none.
+        let mut entry: Option<RetryState> = None;
+        let mut now = 0.0_f64;
+        let mut scheduled = Vec::new();
+
+        // Six attempts: the initial fetch plus retries, each failing.
+        for _attempt in 0..MAX_RETRY_ATTEMPTS {
+            match RetryState::after_failure(entry, now) {
+                Some(state) => {
+                    scheduled.push(state.attempts);
+                    entry = Some(state);
+                }
+                None => {
+                    // Budget exhausted: the store drops the entry and gives up.
+                    entry = None;
+                    break;
+                }
+            }
+            // The backoff elapses and the store re-issues, parking the count. The
+            // re-issue keeps the entry — `Supersede` here is what reset it to 1.
+            let Some(state) = entry else {
+                unreachable!("an entry was just scheduled");
+            };
+            now = state.next_at;
+            assert!(state.due(now));
+            assert!(
+                !RetryDisposition::Keep.supersedes(),
+                "the store's own re-issue keeps the accumulated count"
+            );
+            entry = Some(state.issued());
+        }
+
+        assert_eq!(
+            scheduled,
+            (1..MAX_RETRY_ATTEMPTS).collect::<Vec<_>>(),
+            "each retry escalates instead of repeating attempt 1"
+        );
+        assert!(
+            entry.is_none(),
+            "the budget is exhausted and the id gives up"
+        );
+    }
+
+    /// A fresh consumer request supersedes the bookkeeping, so an id that failed
+    /// long ago and is asked for again starts its budget over.
+    #[test]
+    fn a_fresh_request_supersedes_the_bookkeeping() {
+        assert!(RetryDisposition::Supersede.supersedes());
+        assert!(!RetryDisposition::Keep.supersedes());
     }
 }

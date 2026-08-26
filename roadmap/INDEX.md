@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 256 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 33 |
-| done | 866 |
+| bugs | 32 |
+| done | 867 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1373** |
@@ -1072,7 +1072,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (33)
+## bugs (32)
 
 ### protocol
 
@@ -1091,8 +1091,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-arrival-orientation-snap`](bugs/viewer-arrival-orientation-snap.md) —
   Avatar arrives facing the wrong way then snaps to the correct orientation
   (rotates the whole minimap)
-- [`viewer-asset-retry-counter-stuck`](bugs/viewer-asset-retry-counter-stuck.md)
-  — Asset fetch retry counter stuck at 1/6 — permanent failures retry forever
 - [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
   — Unit tests open real audio devices on the developer's machine
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
@@ -1154,7 +1152,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (866)
+## done (867)
 
 ### protocol
 
@@ -1344,6 +1342,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Appearance editor shell — wearable editing mode, params, save
 - [`viewer-asset-failure-edge-retry`](done/viewer-asset-failure-edge-retry.md) —
   Retry failed asset fetches and make the F3 overlay honest about deferred work
+- [`viewer-asset-retry-counter-stuck`](done/viewer-asset-retry-counter-stuck.md)
+  — Asset fetch retry counter stuck at 1/6 — permanent failures retry forever
 - [`viewer-attachment-context-menu`](done/viewer-attachment-context-menu.md) —
   Attachment context / pie menu entries (worn on self + on others) (blocked by
   `viewer-avatar-context-menu` (done))

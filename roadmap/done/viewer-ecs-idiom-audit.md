@@ -222,7 +222,7 @@ the stuck asset-retry counter, [viewer-asset-retry-counter-stuck][retry]. The
 published `def` column is simply the first place the permanently-deferred
 texture was easy to see.
 
-[retry]: ../bugs/viewer-asset-retry-counter-stuck.md
+[retry]: viewer-asset-retry-counter-stuck.md
 
 The general lesson, for the next time this shape turns up: **the question is not
 whether the data is per-entity — it is whether anything reads it after the

@@ -43,7 +43,7 @@ use sl_client_bevy::{
 use crate::world_api::{BoostTexture, DecodedTextures};
 pub use crate::world_api::{DiffuseImage, build_prim_image, env_budget, is_absent_texture};
 
-use crate::asset_retry::RetryState;
+use crate::asset_retry::{RetryDisposition, RetryState};
 use crate::face_material::{FaceMaterial, inert_face_material};
 use crate::material_cache::{MaterialCache, MaterialKey};
 
@@ -270,6 +270,7 @@ impl TextureManager {
             priority,
             DiscardLevel::FULL,
             false,
+            RetryDisposition::Supersede,
         );
     }
 
@@ -292,6 +293,7 @@ impl TextureManager {
                 priority,
                 DiscardLevel::FULL,
                 false,
+                RetryDisposition::Supersede,
             );
         } else {
             self.request_from(
@@ -300,6 +302,7 @@ impl TextureManager {
                 priority,
                 INITIAL_MANAGED_DISCARD,
                 true,
+                RetryDisposition::Supersede,
             );
         }
     }
@@ -317,6 +320,7 @@ impl TextureManager {
             crate::world_api::AVATAR_BOOST_PRIORITY,
             DiscardLevel::FULL,
             false,
+            RetryDisposition::Supersede,
         );
     }
 
@@ -351,6 +355,7 @@ impl TextureManager {
         priority: Priority,
         initial_lod: DiscardLevel,
         managed: bool,
+        retry: RetryDisposition,
     ) {
         if is_absent_texture(id) || self.blacklist.contains(&id.uuid()) {
             return;
@@ -386,9 +391,14 @@ impl TextureManager {
         }
         self.pending_default.remove(&id);
         // Record how to re-issue this fetch so a transient failure can be retried
-        // (`poll_textures`) with the same source / priority / LOD; a fresh explicit
-        // request supersedes any pending retry for the id.
-        let _retried = self.retry.remove(&id);
+        // (`poll_textures`) with the same source / priority / LOD. A fresh explicit
+        // request supersedes any pending retry for the id; the store's *own*
+        // re-issue must not, or it would discard the attempt count the backoff loop
+        // just parked and reset to attempt 1 forever
+        // (see [`RetryDisposition`](crate::asset_retry::RetryDisposition)).
+        if retry.supersedes() {
+            let _retried = self.retry.remove(&id);
+        }
         let _prev_params = self.in_flight_params.insert(
             id,
             DeferredRequest {
@@ -630,6 +640,7 @@ impl TextureManager {
                 request.priority,
                 request.initial_lod,
                 request.managed,
+                RetryDisposition::Keep,
             );
         }
     }
@@ -840,6 +851,7 @@ pub fn poll_textures(
             params.priority,
             params.initial_lod,
             params.managed,
+            RetryDisposition::Keep,
         );
     }
 
