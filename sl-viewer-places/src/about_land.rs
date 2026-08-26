@@ -302,12 +302,21 @@ impl AboutLandState {
         self.covenant_text = None;
         self.covenant_pending = None;
         self.owners = Vec::new();
-        self.access_allow = Vec::new();
-        self.access_ban = Vec::new();
+        self.clear_access_lists();
         self.draft = ParcelUpdate::default();
         self.draft_ready = false;
         self.pending_sequence = None;
         self.owners_revision = self.owners_revision.wrapping_add(1);
+    }
+
+    /// Empty both access lists and bump their revisions.
+    ///
+    /// A reply to `RequestParcelAccessList` arrives as **one or more** packets
+    /// that [`merge_access_reply`] *unions* into the list, so the accumulator
+    /// has to be emptied when the list is requested — not when a packet lands.
+    fn clear_access_lists(&mut self) {
+        self.access_allow = Vec::new();
+        self.access_ban = Vec::new();
         self.allow_revision = self.allow_revision.wrapping_add(1);
         self.ban_revision = self.ban_revision.wrapping_add(1);
     }
@@ -1418,7 +1427,7 @@ fn open_about_land(
             if let Some(parcel) = parcel {
                 state.bind(parcel, &identity);
                 if let Some(scoped) = state.scoped(&identity) {
-                    request_tab_data(scoped, &mut commands);
+                    request_tab_data(&mut state, scoped, &mut commands);
                 }
             } else {
                 // No local copy — ask the sim for it by id and bind on the reply.
@@ -1462,7 +1471,16 @@ fn open_about_land(
 }
 
 /// Request a bound parcel's per-parcel tab data (owners, dwell, access lists).
-fn request_tab_data(scoped: ScopedParcelId, commands: &mut MessageWriter<SlCommand>) {
+///
+/// Empties the access lists first: their replies are accumulated by
+/// [`merge_access_reply`], so each fresh request has to start from nothing or
+/// entries the grid has since dropped would survive.
+fn request_tab_data(
+    state: &mut AboutLandState,
+    scoped: ScopedParcelId,
+    commands: &mut MessageWriter<SlCommand>,
+) {
+    state.clear_access_lists();
     commands.write(SlCommand(Command::RequestParcelObjectOwners {
         local_id: scoped,
     }));
@@ -1521,7 +1539,7 @@ fn ingest_about_land_events(
                 // and fetch the rest of its tab data.
                 state.bind((**parcel).clone(), &identity);
                 if let Some(scoped) = state.scoped(&identity) {
-                    request_tab_data(scoped, &mut commands);
+                    request_tab_data(&mut state, scoped, &mut commands);
                 }
                 dirty.mark_all();
             }
@@ -1550,17 +1568,30 @@ fn ingest_about_land_events(
                 scope,
                 entries,
             } if Some(local_id.id()) == state.target => {
-                match scope {
-                    ParcelAccessScope::Access => {
-                        state.access_allow.clone_from(entries);
-                        state.allow_revision = state.allow_revision.wrapping_add(1);
+                // One request is answered by **one or more** packets, each
+                // carrying a slice of the list — so a packet is folded in, not
+                // swapped for the list. The accumulator was emptied when the
+                // list was requested (`request_tab_data`).
+                let changed = {
+                    // Deref the `ResMut` once: borrowing two fields through it
+                    // separately would be two whole-resource borrows.
+                    let land = &mut *state;
+                    let (list, revision) = match scope {
+                        ParcelAccessScope::Access => {
+                            (&mut land.access_allow, &mut land.allow_revision)
+                        }
+                        ParcelAccessScope::Ban => (&mut land.access_ban, &mut land.ban_revision),
+                    };
+                    if merge_access_reply(list, entries) {
+                        *revision = revision.wrapping_add(1);
+                        true
+                    } else {
+                        false
                     }
-                    ParcelAccessScope::Ban => {
-                        state.access_ban.clone_from(entries);
-                        state.ban_revision = state.ban_revision.wrapping_add(1);
-                    }
+                };
+                if changed {
+                    request_names_for_access(&state, &mut commands);
                 }
-                request_names_for_access(&state, &mut commands);
             }
             SlSessionEvent::ParcelMediaUpdate(media) => {
                 state.media = Some(media.clone());
@@ -2636,6 +2667,41 @@ fn remove_access_entry(
     send_access_list(state, scope, scoped, commands);
 }
 
+/// Fold one `ParcelAccessListReply` packet into the accumulated list, returning
+/// whether it changed anything.
+///
+/// A parcel's allow / ban list is answered as **one or more** packets, each
+/// carrying a slice of the entries, so a packet is a *union* rather than a
+/// replacement. The reference accumulates the same way — `unpackAccessEntries`
+/// does `(*list)[entry.mID] = entry;` into a map it never clears
+/// (`llparcel.cpp`) — and it likewise ignores the wire `SequenceID`, which
+/// `processParcelAccessListReply` reads into a local marked `//ignored`
+/// (`llviewerparcelmgr.cpp`). The accumulator is emptied when the list is
+/// *requested*, in [`request_tab_data`], not when a packet arrives.
+///
+/// Replacing per packet is what made banning one more resident on a list long
+/// enough to span packets silently drop every entry outside the last packet:
+/// [`send_access_list`] then uploads the truncated list as the parcel's whole
+/// list.
+///
+/// A repeated id updates its existing entry in place, mirroring the reference's
+/// map insert; arrival order is otherwise preserved.
+fn merge_access_reply(existing: &mut Vec<ParcelAccessEntry>, reply: &[ParcelAccessEntry]) -> bool {
+    let mut changed = false;
+    for entry in reply {
+        if let Some(held) = existing.iter_mut().find(|held| held.id == entry.id) {
+            if *held != *entry {
+                *held = *entry;
+                changed = true;
+            }
+        } else {
+            existing.push(*entry);
+            changed = true;
+        }
+    }
+    changed
+}
+
 /// Bump the revision of the given access list, so its table view rebuilds.
 const fn bump_access_revision(state: &mut AboutLandState, scope: AccessScope) {
     match scope {
@@ -3305,5 +3371,84 @@ fn set_combo(combos: &mut Query<&mut ComboSelection>, combo: Option<Entity>, act
         && selection.active != active
     {
         selection.active = active;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AboutLandState, merge_access_reply};
+    use pretty_assertions::{assert_eq, assert_ne};
+    use sl_client_bevy::{ParcelAccessEntry, ParcelAccessFlags, Uuid};
+
+    /// A ban-list entry for the nth synthetic agent.
+    fn entry(n: u8) -> ParcelAccessEntry {
+        ParcelAccessEntry {
+            id: Uuid::from_bytes([n; 16]),
+            time: 0,
+            flags: ParcelAccessFlags::NONE,
+        }
+    }
+
+    /// The ids of a list, in order.
+    fn ids(list: &[ParcelAccessEntry]) -> Vec<Uuid> {
+        list.iter().map(|entry| entry.id).collect()
+    }
+
+    /// The regression this function exists for: one request is answered by
+    /// several packets, and the later ones must not replace the earlier.
+    #[test]
+    fn successive_packets_union_rather_than_replace() {
+        let mut list = Vec::new();
+        assert!(merge_access_reply(&mut list, &[entry(1), entry(2)]));
+        assert!(merge_access_reply(&mut list, &[entry(3)]));
+        assert_eq!(ids(&list), vec![entry(1).id, entry(2).id, entry(3).id]);
+    }
+
+    /// A repeated id updates its entry in place — the reference's map insert —
+    /// rather than appending a duplicate.
+    #[test]
+    fn a_repeated_id_updates_in_place() {
+        let mut list = vec![entry(1)];
+        let mut refreshed = entry(1);
+        refreshed.time = 1_700_000_000;
+        assert!(merge_access_reply(&mut list, &[refreshed]));
+        // One entry, carrying the newer packet's payload.
+        assert_eq!(list, vec![refreshed]);
+    }
+
+    /// Re-delivering an identical packet changes nothing, so the table view is
+    /// not rebuilt for it.
+    #[test]
+    fn an_identical_packet_reports_no_change() {
+        let mut list = Vec::new();
+        assert!(merge_access_reply(&mut list, &[entry(1), entry(2)]));
+        assert!(!merge_access_reply(&mut list, &[entry(1), entry(2)]));
+        assert_eq!(ids(&list), vec![entry(1).id, entry(2).id]);
+    }
+
+    /// An empty list is answered with no entries (the sim's nil-agent sentinel
+    /// is dropped in `sl-proto`), which must leave the accumulator alone.
+    #[test]
+    fn an_empty_packet_leaves_the_list_alone() {
+        let mut list = vec![entry(1)];
+        assert!(!merge_access_reply(&mut list, &[]));
+        assert_eq!(ids(&list), vec![entry(1).id]);
+    }
+
+    /// Because packets accumulate, the emptying happens at request time — so a
+    /// second request cannot inherit entries the grid has since dropped.
+    #[test]
+    fn clearing_empties_both_lists_and_bumps_both_revisions() {
+        let mut state = AboutLandState {
+            access_allow: vec![entry(1)],
+            access_ban: vec![entry(2)],
+            ..AboutLandState::default()
+        };
+        let (allow, ban) = (state.allow_revision, state.ban_revision);
+        state.clear_access_lists();
+        assert!(state.access_allow.is_empty());
+        assert!(state.access_ban.is_empty());
+        assert_ne!(state.allow_revision, allow);
+        assert_ne!(state.ban_revision, ban);
     }
 }

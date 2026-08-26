@@ -2,7 +2,7 @@
 id: viewer-audit-parcel-access-list-accumulate
 title: Editing a multi-packet parcel ban list unbans everyone not in the last packet
 topic: viewer
-status: bugs
+status: done
 origin: static code audit (2026-08-26)
 points: 3
 ---
@@ -33,3 +33,24 @@ Scope: accumulate by id on ingest and clear when the parcel selection changes.
 Extract `fn merge_access_reply(existing: &mut Vec<ParcelAccessEntry>, reply:
 &[ParcelAccessEntry]) -> bool` so the union is a unit test — `about_land.rs` is
 3309 lines with zero tests.
+
+## Fixed (2026-08-27)
+
+`merge_access_reply` folds each `ParcelAccessListReply` packet into the
+accumulated list by id — updating an existing entry in place, mirroring the
+reference's map insert — and returns whether anything changed, so the table
+view rebuilds only when it did. The accumulator is emptied where the list is
+*requested*, in `request_tab_data` via the new
+`AboutLandState::clear_access_lists`, so a second request cannot inherit
+entries the grid has since dropped.
+
+Five unit tests in `about_land.rs` (previously zero for that file): successive
+packets union, a repeated id updates in place, an identical packet reports no
+change, an empty packet leaves the list alone, and clearing empties both lists
+and bumps both revisions.
+
+**Residual, deliberately not addressed:** the wire says nothing about how many
+packets answer one request, so clicking Ban before the last packet lands still
+uploads a partial list. The reference has the same shape and no mechanism to
+close it; the window is the milliseconds between request and reply, against a
+user who has to open the floater, switch tab and pick a resident.

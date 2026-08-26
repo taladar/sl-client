@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 100 |
-| done | 870 |
+| bugs | 99 |
+| done | 871 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1484** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (100)
+## bugs (99)
 
 ### protocol
 
@@ -1271,9 +1271,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The name-tag viewport-changed gate is exactly inverted
 - [`viewer-audit-notification-store-overwrite`](bugs/viewer-audit-notification-store-overwrite.md)
   — A malformed notification store is overwritten, destroying unanswered notices
-- [`viewer-audit-parcel-access-list-accumulate`](bugs/viewer-audit-parcel-access-list-accumulate.md)
-  — Editing a multi-packet parcel ban list unbans everyone not in the last
-  packet
 - [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
   — A transient empty parcel resets the user's stop decision and re-autoplays
 - [`viewer-audit-parcel-borders-retessellation`](bugs/viewer-audit-parcel-borders-retessellation.md)
@@ -1410,7 +1407,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (870)
+## done (871)
 
 ### protocol
 
@@ -1615,6 +1612,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
+  — Editing a multi-packet parcel ban list unbans everyone not in the last
+  packet
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))
