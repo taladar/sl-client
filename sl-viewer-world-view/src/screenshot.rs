@@ -27,9 +27,27 @@ use sl_client_bevy::SlCommand;
 
 use crate::session::{ViewerSession, request_logout};
 
+/// The offline-inspection screenshot harness (R11): capture a numbered PNG
+/// sequence of the window into `dir` after a startup delay, then quit.
+///
+/// Added only in screenshot mode, which is why the schedule resource is carried
+/// on the plugin rather than initialised from the world.
+#[derive(Debug)]
+pub struct ScreenshotPlugin {
+    /// Directory the PNG sequence is written to.
+    pub dir: PathBuf,
+}
+
+impl Plugin for ScreenshotPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(ScreenshotSchedule::new(self.dir.clone()))
+            .add_systems(Update, (capture_screenshots, poll_screenshot_saves));
+    }
+}
+
 /// The screenshot capture schedule, inserted only in screenshot mode.
 #[derive(Debug, Resource)]
-pub struct ScreenshotSchedule {
+pub(crate) struct ScreenshotSchedule {
     /// Directory the PNG sequence is written to.
     dir: PathBuf,
     /// Seconds to wait after startup before the first capture (login + asset
@@ -53,7 +71,7 @@ impl ScreenshotSchedule {
     /// login to a live grid, plus fetching / decoding the worn wearables and
     /// baking, can take many seconds before the animated body is fully on screen.
     #[must_use]
-    pub fn new(dir: PathBuf) -> Self {
+    pub(crate) fn new(dir: PathBuf) -> Self {
         let env_f32 = |key: &str, default: f32| {
             std::env::var(key)
                 .ok()
@@ -82,7 +100,7 @@ impl ScreenshotSchedule {
 /// success, or a formatted error string, so a failed write surfaces in the log
 /// rather than being swallowed.
 #[derive(Debug, Component)]
-pub struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
+pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 
 /// Capture the primary window to `frame_NNN.png` on the schedule, then request a
 /// clean grid logout once the last frame is taken **and** its write has finished.
@@ -96,7 +114,7 @@ pub struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 /// the next login is then rejected until the grid times the stale presence out. The
 /// actual exit is driven by the session systems (on `LoggedOut`, or the quit-deadline
 /// fallback), the same as the `Esc` / `Q` quit key.
-pub fn capture_screenshots(
+pub(crate) fn capture_screenshots(
     time: Res<Time>,
     mut schedule: ResMut<ScreenshotSchedule>,
     mut commands: Commands,
@@ -170,7 +188,7 @@ fn save_off_thread(path: PathBuf) -> impl FnMut(On<ScreenshotCaptured>, Commands
 /// Poll the off-thread screenshot writes; when one finishes, log the saved path
 /// (or the write error), then drop the task entity. Runs every frame; a write in
 /// flight costs one cheap non-blocking poll.
-pub fn poll_screenshot_saves(
+pub(crate) fn poll_screenshot_saves(
     mut commands: Commands,
     mut tasks: Query<(Entity, &mut ScreenshotSaveTask)>,
 ) {

@@ -352,7 +352,7 @@ pub struct SceneAssets<'w> {
 ///
 /// One plugin rather than two lists, and the reason is a failure both apps have
 /// already had. A dynamic scene's renderable does not exist until its driver has
-/// run: the particle fountain's cloud is built by [`drive_particles`], not by its
+/// run: the particle fountain's cloud is built by `drive_particles`, not by its
 /// fixture. So a driver missing from an app is not a compile error and not a
 /// failing check — it is a scene that quietly renders **nothing**, which the
 /// harness reports as a valid empty world and the gallery shows as an empty screen.

@@ -6,38 +6,38 @@
 //! shaders ([`SkyMaterial`] / `sky.wgsl`, `LLVOSky` / `class1/deferred/skyV.glsl`
 //! + `skyF.glsl`). This module drives that material:
 //!
-//! - [`setup_sky`] spawns a large inward-facing dome carrying the sky material,
+//! - `setup_sky` spawns a large inward-facing dome carrying the sky material,
 //!   plus the scene's single directional light (the sun / moon);
-//! - [`center_sky_on_camera`] keeps the dome centred on the camera every frame so
+//! - `center_sky_on_camera` keeps the dome centred on the camera every frame so
 //!   the atmosphere always surrounds the viewpoint;
-//! - [`drive_sky`] selects the active `SkySettings` for the camera's altitude
+//! - `drive_sky` selects the active `SkySettings` for the camera's altitude
 //!   (the reference `LLEnvironment::calculateSkyTrackForAltitude`), computes the
 //!   sun / moon direction and the scene light + ambient the way
 //!   `LLSettingsSky::calculateLightSettings` does, and folds them into the sky
 //!   material, the directional light, and the ambient light. It also fetches the
 //!   sky's rainbow / halo textures **boosted** through the shared texture manager;
-//! - [`apply_sky_textures`] swaps each decoded sky texture into the material.
+//! - `apply_sky_textures` swaps each decoded sky texture into the material.
 //!
 //! On top of the dome it renders the **sun and moon discs** (P22.3), textured
 //! billboards at the computed sun / moon directions (the reference
 //! `LLDrawPoolWLSky::renderHeavenlyBodies` / `sunDiscV/F.glsl` + `moonV/F.glsl`):
 //!
-//! - [`setup_sun_moon_discs`] spawns the two billboard entities (a shared unit
-//!   quad + a [`SunDiscMaterial`] each) and registers [`DiscState`];
-//! - [`drive_sun_moon_discs`] aims, scales, colours, and shows / hides each disc
+//! - `setup_sun_moon_discs` spawns the two billboard entities (a shared unit
+//!   quad + a [`SunDiscMaterial`] each) and registers `DiscState`;
+//! - `drive_sun_moon_discs` aims, scales, colours, and shows / hides each disc
 //!   for the active sky frame, and fetches its sun / moon textures **boosted**;
-//! - [`apply_disc_textures`] swaps each decoded disc texture into its material.
+//! - `apply_disc_textures` swaps each decoded disc texture into its material.
 //!
 //! It also renders the **star field** (P22.5), a sphere of small camera-facing
 //! quads that fade in at night with the sky frame's `star_brightness` (the
 //! reference `LLDrawPoolWLSky::renderStarsDeferred` / `LLVOWLSky::drawStars`):
 //!
-//! - [`setup_stars`] builds the 1000-star quad mesh and spawns it with a
-//!   [`StarMaterial`] (initially hidden) and registers [`StarState`];
-//! - [`drive_stars`] centres and slowly rotates the field on the camera, folds
+//! - `setup_stars` builds the 1000-star quad mesh and spawns it with a
+//!   [`StarMaterial`] (initially hidden) and registers `StarState`;
+//! - `drive_stars` centres and slowly rotates the field on the camera, folds
 //!   `star_brightness` and the twinkle time into the material, shows / hides the
 //!   field for the active sky frame, and fetches its bloom texture **boosted**;
-//! - [`apply_star_textures`] swaps the decoded bloom texture into the material.
+//! - `apply_star_textures` swaps the decoded bloom texture into the material.
 //!
 //! Every frame the sky, discs, clouds, and stars pull the **blended**
 //! `SkySettings` for the current region time
@@ -64,7 +64,51 @@ use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::probe_layers::{environment_render_layers, mirror_sun_render_layers};
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera};
+use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
+
+/// The sky stack's own scheduling: the dome, the sun / moon discs, the cloud
+/// layer and the star field, spawned at `Startup` and driven every frame.
+///
+/// Everything that must see the finished viewpoint orders itself against
+/// [`WorldPhase::CameraPositioned`] rather than naming the system that writes
+/// it — which is what lets the sky live below the camera that drives it, and
+/// lets the dome / disc / cloud / star markers and their state resources stay
+/// private to this crate.
+#[derive(Debug, Default)]
+pub struct SkyPlugin;
+
+impl Plugin for SkyPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Startup,
+            (setup_sky, setup_sun_moon_discs, setup_clouds, setup_stars),
+        )
+        .add_systems(
+            Update,
+            (
+                // Keep the dome centred on the camera, then fold the region
+                // environment + camera altitude into the sky material, the sun /
+                // moon directional light, and the ambient light, and swap each
+                // decoded sky overlay texture into the material.
+                center_sky_on_camera.after(WorldPhase::CameraPositioned),
+                drive_sky.after(WorldPhase::CameraPositioned),
+                apply_sky_textures,
+                // Sun / moon discs (P22.3): aim and colour the billboards from the
+                // same active sky frame, then swap each decoded disc texture in.
+                drive_sun_moon_discs.after(WorldPhase::CameraPositioned),
+                apply_disc_textures,
+                // Cloud layer (P22.4): fold the same active sky frame into the
+                // cloud material, accumulate the scroll, and swap in the noise.
+                drive_clouds.after(WorldPhase::CameraPositioned),
+                apply_cloud_textures,
+                // Star field (P22.5): centre / rotate the field on the camera,
+                // fade it in with `star_brightness`, and swap in the bloom.
+                drive_stars.after(WorldPhase::CameraPositioned),
+                apply_star_textures,
+            ),
+        );
+    }
+}
 
 /// The radius of the sky dome, in metres. The dome's *depth* is forced to the far
 /// clip plane by `sky.wgsl` (a skybox backdrop, occluded by real geometry at any
@@ -298,9 +342,9 @@ const STAR_RNG_SEED: u64 = 0x5142_4152_5354_4152;
 
 /// Marks the sky-dome entity so [`center_sky_on_camera`] can follow the camera.
 #[derive(Debug, Component)]
-pub struct SkyDome;
+pub(crate) struct SkyDome;
 
-/// Marks the scene's sun / moon directional light so [`drive_sky`] can aim and
+/// Marks the scene's sun / moon directional light so `drive_sky` can aim and
 /// colour it from the sky.
 #[derive(Debug, Component)]
 pub struct SceneSun;
@@ -317,12 +361,12 @@ pub struct SceneSun;
 /// (viewer-perf-pipeline-specialization-stalls). The real [`SceneSun`] stays on
 /// the main layer with shadows on, so the main view is unchanged.
 #[derive(Debug, Component)]
-pub struct SceneSunMirror;
+pub(crate) struct SceneSunMirror;
 
 /// The viewer's sky-render state: the shared sky material and the decoded /
 /// requested rainbow / halo overlay textures.
 #[derive(Debug, Resource)]
-pub struct SkyState {
+pub(crate) struct SkyState {
     /// The single sky-dome material, updated each frame by [`drive_sky`].
     material: Handle<SkyMaterial>,
     /// The texture id currently requested for the rainbow overlay (from the active
@@ -334,16 +378,16 @@ pub struct SkyState {
 
 /// Marks the sun-disc billboard entity so [`drive_sun_moon_discs`] can aim it.
 #[derive(Debug, Component)]
-pub struct SunDisc;
+pub(crate) struct SunDisc;
 
 /// Marks the moon-disc billboard entity so [`drive_sun_moon_discs`] can aim it.
 #[derive(Debug, Component)]
-pub struct MoonDisc;
+pub(crate) struct MoonDisc;
 
 /// The viewer's sun / moon disc state: the two disc materials and the disc
 /// textures currently requested for them.
 #[derive(Debug, Resource)]
-pub struct DiscState {
+pub(crate) struct DiscState {
     /// The sun-disc material, updated each frame by [`drive_sun_moon_discs`].
     sun_material: Handle<SunDiscMaterial>,
     /// The moon-disc material.
@@ -357,12 +401,12 @@ pub struct DiscState {
 
 /// Marks the cloud-dome entity so [`center_sky_on_camera`] can follow the camera.
 #[derive(Debug, Component)]
-pub struct CloudDome;
+pub(crate) struct CloudDome;
 
 /// The viewer's cloud-layer state: the cloud material, the requested cloud-noise
 /// texture, and the accumulated scroll offset.
 #[derive(Debug, Resource)]
-pub struct CloudState {
+pub(crate) struct CloudState {
     /// The single cloud-dome material, updated each frame by [`drive_clouds`].
     material: Handle<CloudMaterial>,
     /// The texture id currently requested for the cloud noise (the active sky
@@ -393,12 +437,12 @@ pub struct CloudState {
 
 /// Marks the star-field entity so [`drive_stars`] can centre / rotate it.
 #[derive(Debug, Component)]
-pub struct StarField;
+pub(crate) struct StarField;
 
 /// The viewer's star-field state: the star material and the bloom texture
 /// currently requested for it.
 #[derive(Debug, Resource)]
-pub struct StarState {
+pub(crate) struct StarState {
     /// The single star-field material, updated each frame by [`drive_stars`].
     material: Handle<StarMaterial>,
     /// The texture id currently requested for the bloom / star texture (the active
@@ -516,7 +560,7 @@ pub(crate) fn resolve_sky(sky: &SkySettings) -> ResolvedSky {
 
 /// Startup: spawn the sky dome (with its material) and the scene's directional
 /// light, and register [`SkyState`].
-pub fn setup_sky(
+pub(crate) fn setup_sky(
     mut commands: Commands,
     environment: Res<EnvironmentState>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -590,7 +634,7 @@ pub fn setup_sky(
     clippy::type_complexity,
     reason = "a Bevy query filter selecting both dome markers so they follow the camera together"
 )]
-pub fn center_sky_on_camera(
+pub(crate) fn center_sky_on_camera(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut domes: Query<&mut Transform, Or<(With<SkyDome>, With<CloudDome>)>>,
 ) {
@@ -642,7 +686,7 @@ pub fn sun_shadows_enabled() -> bool {
     reason = "a Bevy system's parameters are its injected resources / queries: the sky \
               material, both suns, the ambient light, and the exposure inputs"
 )]
-pub fn drive_sky(
+pub(crate) fn drive_sky(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<SkyState>,
@@ -776,7 +820,7 @@ pub fn drive_sky(
 
 /// Swap a decoded sky texture into the material when its rainbow / halo id
 /// resolves.
-pub fn apply_sky_textures(
+pub(crate) fn apply_sky_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<SkyState>,
     store: Res<DecodedTextures>,
@@ -809,7 +853,7 @@ pub fn apply_sky_textures(
 
 /// Startup: spawn the sun / moon disc billboards (a shared unit quad + a
 /// [`SunDiscMaterial`] each, initially hidden) and register [`DiscState`].
-pub fn setup_sun_moon_discs(
+pub(crate) fn setup_sun_moon_discs(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<SunDiscMaterial>>,
@@ -883,7 +927,7 @@ pub fn setup_sun_moon_discs(
     reason = "a Bevy system's parameters are its injected resources / queries, plus two `Local` \
               accumulators for the env-gated on-change sky/sun diagnostic"
 )]
-pub fn drive_sun_moon_discs(
+pub(crate) fn drive_sun_moon_discs(
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
     mut state: ResMut<DiscState>,
@@ -1025,7 +1069,7 @@ pub fn drive_sun_moon_discs(
 }
 
 /// Swap a decoded disc texture into the sun / moon material when its id resolves.
-pub fn apply_disc_textures(
+pub(crate) fn apply_disc_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<DiscState>,
     store: Res<DecodedTextures>,
@@ -1100,7 +1144,7 @@ pub fn apply_disc_textures(
 
 /// Startup: spawn the cloud dome (with its material, initially hidden until an
 /// environment selects a sky frame) and register [`CloudState`].
-pub fn setup_clouds(
+pub(crate) fn setup_clouds(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<CloudMaterial>>,
@@ -1135,7 +1179,7 @@ pub fn setup_clouds(
 /// Fold the current environment + camera altitude into the cloud material,
 /// accumulate the cloud scroll, and (re)request the sky's cloud-noise texture
 /// boosted.
-pub fn drive_clouds(
+pub(crate) fn drive_clouds(
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
@@ -1253,7 +1297,7 @@ pub fn drive_clouds(
 }
 
 /// Swap a decoded cloud-noise texture into the cloud material when its id resolves.
-pub fn apply_cloud_textures(
+pub(crate) fn apply_cloud_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<CloudState>,
     store: Res<DecodedTextures>,
@@ -1328,7 +1372,7 @@ fn cloud_noise_image(decoded: &DecodedTexture) -> Image {
 /// Startup: build the star-quad mesh, spawn the star field (with its material,
 /// initially hidden until an environment selects a sky frame), and register
 /// [`StarState`].
-pub fn setup_stars(
+pub(crate) fn setup_stars(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StarMaterial>>,
@@ -1361,7 +1405,7 @@ pub fn setup_stars(
 /// Centre and slowly rotate the star field on the camera, fold the active sky
 /// frame's `star_brightness` and the twinkle time into the material, show / hide
 /// the field, and (re)request the sky's bloom texture boosted.
-pub fn drive_stars(
+pub(crate) fn drive_stars(
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
@@ -1432,7 +1476,7 @@ pub fn drive_stars(
 }
 
 /// Swap the decoded bloom texture into the star material when its id resolves.
-pub fn apply_star_textures(
+pub(crate) fn apply_star_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<StarState>,
     store: Res<DecodedTextures>,

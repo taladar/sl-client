@@ -176,7 +176,7 @@ fn classify_bucket(sorting_info: TransparentSortingInfo3d, is_water: bool, level
 }
 
 /// Wires the water-relative transparency ordering into the app: extract the
-/// `WaterSurface` markers and the [`WaterLevel`] into the render world, and add
+/// `WaterSurface` markers and the `WaterLevel` into the render world, and add
 /// the re-sort after Bevy's transparent sort. Add once, after `DefaultPlugins`,
 /// like the other viewer render plugins.
 #[derive(Debug, Default)]

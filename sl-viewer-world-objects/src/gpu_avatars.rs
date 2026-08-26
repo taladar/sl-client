@@ -61,7 +61,7 @@ use bevy::render::render_resource::DownlevelFlags;
 use bevy::render::renderer::{RenderAdapter, RenderDevice};
 use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 
-pub use stage::GpuAvatarPoseFeed;
+pub(crate) use stage::GpuAvatarPoseFeed;
 pub(crate) use stage::GpuSkinBinding;
 
 /// The internal handle `pose.wgsl` is loaded under.
@@ -79,7 +79,7 @@ const REQUIRED_STORAGE_BUFFERS: u32 = 8;
 /// The pipeline's resolved run mode, read once from the environment at App
 /// build and carried as a resource (never re-read per frame).
 #[derive(Resource, Clone, Copy, Debug)]
-pub struct GpuAvatarsMode {
+pub(crate) struct GpuAvatarsMode {
     /// Whether the pipeline is actually running: `true` from build, flipped
     /// to `false` by `select_gpu_avatar_path` when the device lacks the
     /// required capabilities — every main-world consumer gates on this. With

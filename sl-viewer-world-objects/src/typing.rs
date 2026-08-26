@@ -79,7 +79,7 @@ const TYPE_ANIMATION: &str = "type";
               identity, avatars, its state, the animation manager + playback, and writes both \
               the command stream and the UI-sound stream"
 )]
-pub fn drive_own_typing(
+pub(crate) fn drive_own_typing(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     avatars: Res<AvatarState>,

@@ -14,7 +14,7 @@
 //!
 //! This module owns the other end of that route:
 //!
-//! - [`setup_hud_screen`] spawns the **HUD screen** — the `mScreen` equivalent —
+//! - `setup_hud_screen` spawns the **HUD screen** — the `mScreen` equivalent —
 //!   plus one node per HUD point at the point's fixed `avatar_lad.xml` offset,
 //!   exactly as [`sl_viewer_world_objects::avatars`] spawns the body's attachment-point nodes off
 //!   their joints (P16.2). The screen carries the single Second Life → Bevy basis
@@ -44,6 +44,24 @@ use crate::coords::{sl_euler_deg_to_quat, sl_to_bevy_rotation};
 use crate::face_material::FaceMaterial;
 use crate::world_api::{HUD_RENDER_LAYER, HudState, on_hud_layer};
 
+/// The screen-space HUD's own scheduling (P35.1 / P35.2): the HUD screen and its
+/// attachment-point nodes, kept anchored to the viewport corners as the window's
+/// aspect changes, with every HUD face rendered fullbright.
+///
+/// The reference forces `LLFace::FULLBRIGHT` on a HUD attachment; here a lit one
+/// would also render black, since the world's sun is not on the HUD layer. The
+/// HUD *pick* path stays with the viewer: it is gated on the build tool, which
+/// lives above this crate.
+#[derive(Debug, Default)]
+pub struct HudScreenPlugin;
+
+impl Plugin for HudScreenPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_hud_screen)
+            .add_systems(Update, (fit_hud_points, apply_hud_fullbright));
+    }
+}
+
 /// The HUD screen: the root of the screen-space HUD hierarchy, standing in for the
 /// reference viewer's `mScreen` pseudo-joint (`LLVOAvatarSelf::buildSkeletonSelf`).
 ///
@@ -63,7 +81,7 @@ pub struct HudScreen;
 /// [`fit_hud_points`] re-derives the node's translation from it whenever the window
 /// aspect changes, so the corner points stay in the viewport's corners (P35.2).
 #[derive(Component, Debug)]
-pub struct HudPointNode {
+pub(crate) struct HudPointNode {
     /// The point's fixed `avatar_lad.xml` offset from the screen (Second Life
     /// Z-up: `+y` screen-left, `+z` screen-up), before the aspect anchoring.
     offset: Vec3,
@@ -83,7 +101,7 @@ pub struct HudCamera;
 /// Z-up frame, where `+y` is screen-left and `+z` is screen-up). A run without
 /// avatar assets has no attachment-point table, so no screen is spawned and HUD
 /// attachments are hidden instead of routed.
-pub fn setup_hud_screen(
+pub(crate) fn setup_hud_screen(
     mut commands: Commands,
     library: Option<Res<AvatarAssetLibrary>>,
     mut hud: ResMut<HudState>,
@@ -216,7 +234,10 @@ const HUD_CAMERA_DEPTH: f32 = 64.0;
 /// A Bevy `Transform` scale *would* reach the geometry below, so the anchoring is
 /// applied to the node translations here instead — the same arithmetic, at the only
 /// place the reference actually applies it.
-pub fn fit_hud_points(windows: Query<&Window>, mut points: Query<(&HudPointNode, &mut Transform)>) {
+pub(crate) fn fit_hud_points(
+    windows: Query<&Window>,
+    mut points: Query<(&HudPointNode, &mut Transform)>,
+) {
     let Ok(window) = windows.single() else {
         return;
     };
@@ -273,7 +294,7 @@ type RelitFaces<'world, 'state> = Query<
 /// Deviation, deliberately: the reference exempts a face with a **PBR** material
 /// (`isHUDAttachment() && !is_pbr`), leaving it lit. Here that would render it black,
 /// so every HUD face goes fullbright.
-pub fn apply_hud_fullbright(faces: RelitFaces, mut materials: ResMut<Assets<FaceMaterial>>) {
+pub(crate) fn apply_hud_fullbright(faces: RelitFaces, mut materials: ResMut<Assets<FaceMaterial>>) {
     for (face, layers) in &faces {
         if !on_hud_layer(Some(layers)) {
             continue;

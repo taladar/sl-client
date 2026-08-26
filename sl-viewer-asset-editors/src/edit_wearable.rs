@@ -21,7 +21,7 @@
 //! Editing does not touch the render systems directly: it substitutes the edited
 //! [`WearableAsset`] into [`OwnBakeInputs`] (via
 //! [`set_preview_asset`](OwnBakeInputs::set_preview_asset)), so the shape morph
-//! ([`apply_own_shape_from_wearables`](crate::avatars::apply_own_shape_from_wearables))
+//! (`avatars::apply_own_shape_from_wearables`)
 //! re-derives the body from the edited params and the bake composite re-runs from
 //! the edited textures / tints — the same path that renders the worn outfit.
 //!

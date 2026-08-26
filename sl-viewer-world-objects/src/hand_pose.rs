@@ -213,7 +213,7 @@ fn log_hand_pose() -> bool {
 ///
 /// Every pose's weight is written each frame, not just the two the fade is moving,
 /// so a pose the avatar left behind cannot linger at a stale weight.
-pub fn drive_hand_poses(
+pub(crate) fn drive_hand_poses(
     time: Res<Time>,
     state: Res<AvatarState>,
     playback: Res<AnimationPlayback>,

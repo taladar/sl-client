@@ -9,20 +9,20 @@
 //! and a sun specular highlight. This module drives that material and places the
 //! planes:
 //!
-//! - [`setup_water`] creates the shared water material, spawns the **endless
+//! - `setup_water` creates the shared water material, spawns the **endless
 //!   ocean** plane (a large camera-following plane at the agent-region water
 //!   height, filling the sea everywhere there is no loaded region — the reference
 //!   `LLWorld::updateWaterObjects` hole / edge water), and registers
 //!   [`WaterState`];
-//! - [`update_water`] learns each region's water height from its
+//! - `update_water` learns each region's water height from its
 //!   [`SlSessionEvent::RegionInfoHandshake`];
-//! - [`drive_water`] centres the ocean on the camera, reconciles a **per-region
+//! - `drive_water` centres the ocean on the camera, reconciles a **per-region
 //!   plane** for every loaded region whose water height differs from the agent
 //!   region's (so a neighbour with a different sea level renders at its own
 //!   height), folds the blended EEP water settings + sun direction + sky
 //!   reflection tint + wave-scroll time into the shared material, and requests the
 //!   wave normal map **boosted**;
-//! - [`apply_water_textures`] swaps the decoded normal map into the material.
+//! - `apply_water_textures` swaps the decoded normal map into the material.
 //!
 //! **Model (matches the reference).** Per `LLDrawPoolWater::render`, the water
 //! **colour / waves / fresnel are region-wide** — a single `getCurrentWater()`
@@ -59,7 +59,35 @@ use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::WaterSurface;
-use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera};
+use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
+
+/// The water surface's own scheduling: the endless ocean and the per-region
+/// planes, spawned at `Startup` and driven every frame.
+///
+/// `drive_water` centres the ocean on the viewpoint, so it orders against
+/// [`WorldPhase::CameraPositioned`] rather than naming the camera system —
+/// which is what lets the ocean markers and the water state stay private here.
+#[derive(Debug, Default)]
+pub struct WaterPlugin;
+
+impl Plugin for WaterPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<WaterLevel>()
+            .add_systems(Startup, setup_water)
+            .add_systems(
+                Update,
+                (
+                    // Learn each region's water height, then centre the endless
+                    // ocean on the camera and place a per-region plane where a
+                    // neighbour's sea level differs, and swap in the decoded wave
+                    // normal map.
+                    update_water,
+                    drive_water.after(WorldPhase::CameraPositioned),
+                    apply_water_textures,
+                ),
+            );
+    }
+}
 
 /// A standard Second Life / OpenSim region edge length, in metres.
 const REGION_SIZE_METRES: f32 = 256.0;
@@ -99,7 +127,7 @@ const DEFAULT_WATER_NORMAL: Uuid = Uuid::from_u128(0x822d_ed49_9a6c_f61c_cb89_6d
 /// Extracted into the render world too, where the transparency-ordering re-sort
 /// ([`crate::transparency`]) buckets every translucent item above / below it.
 #[derive(Debug, Resource, Clone, Copy, ExtractResource)]
-pub struct WaterLevel(pub(crate) f32);
+pub(crate) struct WaterLevel(pub(crate) f32);
 
 impl Default for WaterLevel {
     fn default() -> Self {
@@ -107,12 +135,12 @@ impl Default for WaterLevel {
     }
 }
 
-/// Marks the endless-ocean plane so [`drive_water`] can follow the camera with it.
+/// Marks the endless-ocean plane so `drive_water` can follow the camera with it.
 #[derive(Debug, Component)]
 pub struct WaterOcean;
 
 /// Marks a per-region water plane, carrying the region it belongs to and its water
-/// height so [`drive_water`] can (re)place it on the current scene origin.
+/// height so `drive_water` can (re)place it on the current scene origin.
 #[derive(Debug, Component)]
 pub struct WaterRegionPlane {
     /// The region this plane renders the sea for.
@@ -158,7 +186,7 @@ impl WaterState {
 
 /// Startup: create the shared water material (on a flat-normal placeholder), spawn
 /// the endless-ocean plane, and register [`WaterState`].
-pub fn setup_water(
+pub(crate) fn setup_water(
     mut commands: Commands,
     environment: Res<EnvironmentState>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -223,7 +251,7 @@ pub fn setup_water(
 
 /// Learn each region's water height from its handshake, so [`drive_water`] can
 /// place the sea at the right level per region.
-pub fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut<WaterState>) {
+pub(crate) fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut<WaterState>) {
     for event in events.read() {
         if let SlSessionEvent::RegionInfoHandshake(identity) = &event.0 {
             state
@@ -243,7 +271,7 @@ pub fn update_water(mut events: MessageReader<SlEvent>, mut state: ResMut<WaterS
               placing the ocean and per-region planes needs the camera, identity, \
               environment, meshes, and the water material together"
 )]
-pub fn drive_water(
+pub(crate) fn drive_water(
     identity: Res<SlIdentity>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     environment: Res<EnvironmentState>,
@@ -441,7 +469,7 @@ fn region_plane_translation(
 }
 
 /// Swap the decoded wave normal map into the shared material when its id resolves.
-pub fn apply_water_textures(
+pub(crate) fn apply_water_textures(
     mut decoded: MessageReader<TextureDecoded>,
     state: Res<WaterState>,
     store: Res<DecodedTextures>,

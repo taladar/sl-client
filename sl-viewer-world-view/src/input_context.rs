@@ -150,15 +150,11 @@ pub(crate) fn compute_input_context(
     }
 }
 
-/// A run condition: true while the world owns the keyboard.
+/// The world-keyboard run condition, re-exported under its long-standing path.
 ///
-/// Put this on every system that reads a key a focused UI could want — which is
-/// all of them bar the `F`-key overlay toggles. See the
-/// [module documentation](self) for why the arrow keys are in that set.
-#[must_use]
-pub fn world_has_keyboard(context: Res<InputContext>) -> bool {
-    context.is_world()
-}
+/// It moved down to [`crate::world_api`] so the layers below this one can gate on
+/// it too; see [`crate::world_api::world_has_keyboard`].
+pub use crate::world_api::world_has_keyboard;
 
 /// [`RELEASE_FOCUS_KEY`] hands the keyboard back to the world.
 ///

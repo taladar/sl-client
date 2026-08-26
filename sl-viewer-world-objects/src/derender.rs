@@ -90,7 +90,7 @@ use sl_client_bevy::{
 use sl_settings::SettingValue;
 use tracing::{debug, info, warn};
 
-use crate::avatars::{AvatarPlaceholderAssets, derender_agent};
+use crate::avatars::derender_agent;
 use crate::objects::PendingBuilds;
 use crate::settings::ViewerSettings;
 use crate::world_api::AvatarState;
@@ -452,23 +452,13 @@ pub(crate) fn index_derendered_objects(
 /// region-local id — and a later un-derender would have nothing to re-fetch,
 /// leaving the object gone until the region streamed it again. The purge is the
 /// other place that knows those ids, so it seeds the index here.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the suppression \
-              list, the object and avatar mirrors, the placeholder assets a \
-              hand-off sphere is built from, the pose query, and the three ECS \
-              sinks a despawn / spawn writes to"
-)]
 pub(crate) fn enforce_derender(
     mut list: ResMut<DerenderList>,
     mut objects: ResMut<ObjectState>,
     mut builds: ResMut<PendingBuilds>,
     mut avatars: ResMut<AvatarState>,
-    mut placeholders: ResMut<AvatarPlaceholderAssets>,
     poses: Query<&Transform>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<crate::face_material::FaceMaterial>>,
 ) {
     if list.pending_ids.is_empty() && list.pending_scoped.is_empty() {
         return;
@@ -486,15 +476,7 @@ pub(crate) fn enforce_derender(
             .anchor_of(agent)
             .and_then(|anchor| poses.get(anchor).ok())
             .map(|pose| pose.translation);
-        derender_agent(
-            &mut avatars,
-            &mut placeholders,
-            agent,
-            at,
-            &mut commands,
-            &mut meshes,
-            &mut materials,
-        );
+        derender_agent(&mut avatars, agent, at, &mut commands);
     }
     for scoped in core::mem::take(&mut list.pending_scoped) {
         // Descendants of an already-indexed object inherit its root, so the

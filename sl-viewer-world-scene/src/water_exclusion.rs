@@ -52,7 +52,32 @@ use crate::material_cache::SharedFaceMaterial;
 use crate::objects::FaceTextureDebug;
 use crate::probe_layers::WATER_EXCLUSION_LAYER;
 use crate::water::WaterState;
-use crate::world_api::ViewerCamera;
+use crate::world_api::{ViewerCamera, WorldPhase};
+
+/// The water-exclusion mask's own scheduling (`viewer-water-exclusion`): the
+/// mask camera and render target, and the three systems that fill and bind it.
+///
+/// The mask camera is slaved to the main view, so it orders against
+/// [`WorldPhase::CameraPositioned`] — the mask must line up with what the water
+/// samples it against.
+#[derive(Debug, Default)]
+pub struct WaterExclusionPlugin;
+
+impl Plugin for WaterExclusionPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Startup, setup_water_exclusion).add_systems(
+            Update,
+            (
+                // Route faces textured with the invisiprim-successor sentinel
+                // onto the mask layer, slave the mask camera to the main view,
+                // and bind the finished mask into the water material.
+                convert_water_exclusion_faces,
+                sync_water_exclusion_camera.after(WorldPhase::CameraPositioned),
+                bind_water_exclusion_mask,
+            ),
+        );
+    }
+}
 
 /// The mask camera's render order: below the main camera's default `0` so the mask
 /// is finished before the main pass's water fragments sample it (the same slot the
@@ -67,18 +92,18 @@ const FALLBACK_MASK_SIZE: (u32, u32) = (1280, 720);
 /// Marks a face entity that has been converted into a water-exclusion surface, so
 /// [`convert_water_exclusion_faces`] processes each face only once.
 #[derive(Debug, Component)]
-pub struct WaterExclusionFace;
+pub(crate) struct WaterExclusionFace;
 
 /// Marks the mask camera, so [`sync_water_exclusion_camera`] can slave it to the
 /// main [`ViewerCamera`].
 #[derive(Debug, Component)]
-pub struct WaterExclusionCamera;
+pub(crate) struct WaterExclusionCamera;
 
 /// The water-exclusion render assets: the screen-space mask [`Image`] the mask
 /// camera draws into and the water shader samples, and the flat-black material
 /// every exclusion face wears in that mask pass.
 #[derive(Debug, Resource)]
-pub struct WaterExclusionMask {
+pub(crate) struct WaterExclusionMask {
     /// The `R8` mask render target (white = water, black = exclusion), sized to the
     /// window by [`sync_water_exclusion_camera`].
     image: Handle<Image>,
@@ -90,7 +115,7 @@ pub struct WaterExclusionMask {
 /// Startup: create the mask render target and the flat-black exclusion material,
 /// and spawn the mask camera (slaved to the main view by
 /// [`sync_water_exclusion_camera`]).
-pub fn setup_water_exclusion(
+pub(crate) fn setup_water_exclusion(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -173,7 +198,7 @@ pub fn setup_water_exclusion(
     clippy::type_complexity,
     reason = "a Bevy query of newly-textured faces not yet converted to exclusion surfaces"
 )]
-pub fn convert_water_exclusion_faces(
+pub(crate) fn convert_water_exclusion_faces(
     mut commands: Commands,
     faces: Query<
         (Entity, &FaceTextureDebug),
@@ -217,7 +242,7 @@ pub fn convert_water_exclusion_faces(
     reason = "a Bevy query pairing the main camera's pose and projection, kept disjoint \
               from the mask camera it is copied onto"
 )]
-pub fn sync_water_exclusion_camera(
+pub(crate) fn sync_water_exclusion_camera(
     main: Query<
         (&GlobalTransform, &Projection),
         (With<ViewerCamera>, Without<WaterExclusionCamera>),
@@ -264,7 +289,7 @@ pub fn sync_water_exclusion_camera(
 /// water material and the mask exist, replacing the white "water everywhere"
 /// placeholder [`setup_water`](crate::water::setup_water) seeded it with. A one-
 /// shot: the mask target is stable, so once bound there is nothing to update.
-pub fn bind_water_exclusion_mask(
+pub(crate) fn bind_water_exclusion_mask(
     water: Option<Res<WaterState>>,
     mask: Option<Res<WaterExclusionMask>>,
     mut materials: ResMut<Assets<WaterMaterial>>,

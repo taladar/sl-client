@@ -72,7 +72,7 @@
 //!   mesh-body wearer would vanish entirely: their system body is baked
 //!   invisible precisely because a mesh body covers it, and we just hid the mesh
 //!   body. (That override lives in
-//!   [`apply_avatar_part_visibility`](crate::avatars::apply_avatar_part_visibility),
+//!   `apply_avatar_part_visibility`,
 //!   which reads this module's jellied set.)
 //!
 //! Presence is untouched: a jellied avatar keeps its name tag, its place on the

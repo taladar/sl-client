@@ -5,7 +5,7 @@
 //! stores at the bundle's drop-in `cache/` (via
 //! [`crate::paths::set_replay_cache_root`]) and runs the *normal* viewer app with
 //! [`SlClientPlugin`](sl_client_bevy::SlClientPlugin) in **offline** mode, plus
-//! the systems here. [`inject_replay_bundle`] then, once, feeds the session the
+//! the systems here. `inject_replay_bundle` then, once, feeds the session the
 //! captured events — a synthetic [`SlCapabilities`] (so the cap-gated asset
 //! managers serve from the bundle cache), each avatar object and its attachment
 //! tree, each [`AvatarAppearance`](sl_client_bevy::AvatarAppearance), and each
@@ -25,6 +25,29 @@ use sl_client_bevy::{
 };
 
 use crate::replay_bundle::ReplayManifest;
+
+/// Avatar-state replay (viewer-avatar-state-dump-replay): inject a captured
+/// bundle's events once and drive the optional test rig (orbit light /
+/// reflection probe).
+///
+/// Added only in `--replay` mode, alongside the [`ReplayConfig`] the caller
+/// built from the bundle on disk.
+#[derive(Debug, Default)]
+pub struct AvatarReplayPlugin;
+
+impl Plugin for AvatarReplayPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                inject_replay_bundle,
+                drive_replay_orbit_light,
+                follow_replay_probe,
+            ),
+        );
+    }
+}
+
 use crate::world_api::AvatarState;
 use crate::world_api::ObjectReflectionProbe;
 
@@ -93,7 +116,7 @@ const PROBE_DIAMETER: f32 = 6.0;
 
 /// A marker on the orbiting test light, carrying its current orbit angle.
 #[derive(Debug, Component)]
-pub struct ReplayOrbitLight {
+pub(crate) struct ReplayOrbitLight {
     /// The current orbit angle, in radians, advanced each frame.
     angle: f32,
 }
@@ -101,12 +124,12 @@ pub struct ReplayOrbitLight {
 /// A marker on the local test reflection probe, so it can be re-centred on the
 /// avatar each frame.
 #[derive(Debug, Component)]
-pub struct ReplayProbeFollower;
+pub(crate) struct ReplayProbeFollower;
 
 /// Inject the captured session events once, so the live render systems draw the
 /// avatar. Also sets the world identity (region / circuit) from the primary
 /// avatar and spawns the optional test rig.
-pub fn inject_replay_bundle(
+pub(crate) fn inject_replay_bundle(
     mut config: ResMut<ReplayConfig>,
     mut identity: ResMut<SlIdentity>,
     mut events: MessageWriter<SlEvent>,
@@ -225,7 +248,7 @@ fn rig_center(
 
 /// Advance the orbiting test light around the avatar each frame (a slow specular
 /// sweep). A no-op until the avatar has a world transform to orbit.
-pub fn drive_replay_orbit_light(
+pub(crate) fn drive_replay_orbit_light(
     time: Res<Time>,
     config: Res<ReplayConfig>,
     state: Res<AvatarState>,
@@ -249,7 +272,7 @@ pub fn drive_replay_orbit_light(
 }
 
 /// Keep the local test reflection probe centred on the avatar each frame.
-pub fn follow_replay_probe(
+pub(crate) fn follow_replay_probe(
     config: Res<ReplayConfig>,
     state: Res<AvatarState>,
     anchors: Query<&GlobalTransform>,

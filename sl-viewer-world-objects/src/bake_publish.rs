@@ -180,7 +180,7 @@ fn publish_appearance(
 /// Drive the one-shot client-side bake publish (P15.4): once the bake inputs are
 /// ready and the region advertises `UploadBakedTexture`, encode and upload each
 /// region's bake one at a time, then publish an `AgentSetAppearance` naming them.
-pub fn drive_bake_publish(
+pub(crate) fn drive_bake_publish(
     time: Res<Time>,
     inputs: Res<OwnBakeInputs>,
     library: Option<Res<AvatarAssetLibrary>>,

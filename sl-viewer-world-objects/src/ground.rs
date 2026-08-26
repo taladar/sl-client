@@ -74,7 +74,7 @@ pub(crate) struct AgentGround {
 }
 
 /// Each rigged avatar's ground samples, refreshed every frame by
-/// [`probe_avatar_ground`] and read by the locomotion adjusters.
+/// `probe_avatar_ground` and read by the locomotion adjusters.
 #[derive(Debug, Resource, Default)]
 pub struct AvatarGround {
     /// The samples of each rigged avatar seen this frame.
@@ -219,7 +219,7 @@ fn ground_under(
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries"
 )]
-pub fn probe_avatar_ground(
+pub(crate) fn probe_avatar_ground(
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,

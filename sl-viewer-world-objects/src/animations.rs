@@ -25,10 +25,10 @@
 //! and the resulting [`Motion`] is cached by UUID, shared across every avatar
 //! playing it.
 //!
-//! The module also owns the P18.3 skeleton driver: [`drive_avatar_skeletons`]
+//! The module also owns the P18.3 skeleton driver: `drive_avatar_skeletons`
 //! folds each avatar's `AvatarAnimation` set into a playback clock and resolves a
 //! per-joint [`AnimationPose`] from the playing motions, and
-//! [`pose_avatar_skeletons`] writes that pose into the skeleton-instance joints'
+//! `pose_avatar_skeletons` writes that pose into the skeleton-instance joints'
 //! world matrices (in `PostUpdate`, after transform propagation) — recomputing the
 //! Second Life skeletal recurrence so a shaped avatar's limbs keep their length
 //! under animation rather than shearing.
@@ -60,7 +60,127 @@ use crate::look_at::{
 };
 use crate::reach::{PointAtTargets, ReachInput, ReachJoints, ReachMotion};
 use crate::world_api::AvatarState;
-use crate::world_api::{AvatarMotion, DerenderKind};
+use crate::world_api::{AvatarMotion, DerenderKind, WorldPhase, world_has_keyboard};
+
+/// The avatar animation pipeline's own scheduling.
+///
+/// Keep the animation store's `ViewerAsset` cap current, request a motion for
+/// every animation each nearby avatar is playing, and fold finished resolves
+/// into the shared motion cache (P18.2); then drive each rigged avatar's
+/// skeleton from its playing motions, overlaying the sampled keyframe poses onto
+/// the appearance rest pose (P18.3, hence after
+/// [`WorldPhase::AvatarAppearanceApplied`]).
+///
+/// The settled playing set is published as [`WorldPhase::AvatarSkeletonsDriven`]
+/// so the name-tag composer — which also waits on the group store, a crate above
+/// this one — can order against it from up there.
+#[derive(Debug, Default)]
+pub struct AvatarAnimationPlugin;
+
+impl Plugin for AvatarAnimationPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                update_animation_caps,
+                ingest_avatar_animations,
+                poll_animations,
+                // Client-side locomotion / state animations for the own avatar
+                // (P31.6): derive its movement state from the P31.4 velocity +
+                // P31.5 controls and play the matching built-in animation when
+                // the simulator is silent about it. After the controls (so it
+                // reads the freshly advertised intent) and before the skeleton
+                // driver (so its client-driven set is reconciled into the same
+                // frame's pose).
+                crate::locomotion::drive_own_locomotion
+                    .after(WorldPhase::AvatarControlsDriven)
+                    .before(WorldPhase::AvatarSkeletonsDriven)
+                    .run_if(world_has_keyboard),
+                // Typing state animation for the own avatar (P31.9): reconcile
+                // the typing state the nearby-chat bar drives, play
+                // `ANIM_AGENT_TYPE` locally, and broadcast a `StartTyping` /
+                // `StopTyping` `ChatFromViewer`. Not gated on
+                // `world_has_keyboard` — typing happens while the *chat field*
+                // holds the keyboard (the TextEntry context), so that gate would
+                // suppress it. Like locomotion it must reconcile its
+                // client-driven set before the skeleton driver folds it into the
+                // frame's pose.
+                crate::typing::drive_own_typing.before(WorldPhase::AvatarSkeletonsDriven),
+                drive_avatar_skeletons
+                    .in_set(WorldPhase::AvatarSkeletonsDriven)
+                    .after(WorldPhase::AvatarAppearanceApplied),
+                // Hand-pose morph (P31.13): cross-fade each avatar's hands into
+                // the pose its highest-priority playing animation asks for.
+                // After the skeleton driver (whose playing set it reads) and
+                // before the runtime-morph fold, so the cross-faded weights reach
+                // the GPU in the same frame.
+                crate::hand_pose::drive_hand_poses
+                    .after(WorldPhase::AvatarSkeletonsDriven)
+                    .before(WorldPhase::AvatarMorphsFolded),
+                // Head & eye look-at tracking (P31.12): derive the own avatar's
+                // look-at target from the fly-camera, and ingest nearby avatars'
+                // `ViewerEffect` look-at gaze hints. The pose pass (PostUpdate)
+                // reads both.
+                crate::look_at::update_own_look_at_target,
+                crate::look_at::receive_look_at_effects,
+                // Activity-driven reach & aim (P31.15): the own avatar's object
+                // selection (the E key) and the point-at effect it publishes,
+                // other avatars' point-at effects, and the G key that plays an
+                // aim animation through the simulator so the targeting motion
+                // engages the way a scripted weapon would drive it. The pose pass
+                // (PostUpdate) reads the resulting targets.
+                (
+                    crate::reach::select_object_under_crosshair.run_if(world_has_keyboard),
+                    crate::reach::drive_own_point_at
+                        .after(crate::reach::select_object_under_crosshair),
+                    crate::reach::receive_point_at_effects,
+                    crate::reach::drive_aim_animation.run_if(world_has_keyboard),
+                ),
+                // Avatar ground probe (P31.14): resolve what is under each
+                // avatar's root and ankles — the terrain land height combined
+                // with the simulator's collision (foot) plane, as the reference
+                // viewer's `getGround` does — for the foot IK and the landing
+                // recovery. It reads the ankle joint globals the pose pass wrote
+                // *last* frame.
+                crate::ground::probe_avatar_ground,
+                // Animesh (P29): request each animated object's animation
+                // motions, drive its control-avatar skeleton from them (after its
+                // rigged meshes bind in `apply_rigged_attachments`), and drop
+                // control avatars whose object is gone (after the object update
+                // has processed removals).
+                crate::animesh::ingest_object_animations,
+                crate::animesh::drive_control_avatars
+                    .after(crate::objects::apply_rigged_attachments),
+                // Spawn a control avatar as soon as an animesh has an animation
+                // playing (after `drive_control_avatars` folds the
+                // `ObjectAnimation` into the playback clock), so a late mesh bind
+                // does not lose an early animation.
+                crate::objects::spawn_animesh_control_avatars
+                    .after(crate::animesh::drive_control_avatars),
+                crate::objects::prune_control_avatars.after(WorldPhase::ObjectsUpdated),
+            ),
+        );
+    }
+}
+
+/// The avatar pose pass's own scheduling (P18.3).
+///
+/// Write the posed avatars' animated joint world matrices straight into their
+/// [`GlobalTransform`]s, after transform propagation has produced the rest
+/// globals this frame — so the animated pose is what skinning / render
+/// extraction reads, without the limb-shear a rotation overlaid on the
+/// baked-scale local transform would cause.
+#[derive(Debug, Default)]
+pub struct AvatarPosePlugin;
+
+impl Plugin for AvatarPosePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            PostUpdate,
+            pose_avatar_skeletons.after(TransformSystems::Propagate),
+        );
+    }
+}
 
 /// The animation resolve/decode/cache pipeline: an [`AssetStore`] over the
 /// `ViewerAsset` capability (for downloadable `.anim` assets), the optional
@@ -313,7 +433,7 @@ fn animation_cache_dir() -> Option<PathBuf> {
 
 /// Refresh the store fetcher's `ViewerAsset` capability URL each time the region's
 /// capability map is (re)discovered.
-pub fn update_animation_caps(
+pub(crate) fn update_animation_caps(
     mut capabilities: MessageReader<SlCapabilities>,
     mut manager: ResMut<AnimationManager>,
 ) {
@@ -335,7 +455,7 @@ pub fn update_animation_caps(
 /// motion, so it is fetched and decoded ready for the skeleton-driver (P18.3).
 /// The request is idempotent, so re-listing the same animation each update is
 /// cheap.
-pub fn ingest_avatar_animations(
+pub(crate) fn ingest_avatar_animations(
     mut events: MessageReader<SlEvent>,
     mut manager: ResMut<AnimationManager>,
     derender: Res<crate::world_api::DerenderList>,
@@ -378,7 +498,7 @@ pub fn ingest_avatar_animations(
 /// Poll the in-flight resolve tasks; move each completed decode into the shared
 /// motion cache (the skeleton-driver [`drive_avatar_skeletons`] reads it the next
 /// frame), or record the id unavailable when the fetch / decode failed.
-pub fn poll_animations(mut manager: ResMut<AnimationManager>) {
+pub(crate) fn poll_animations(mut manager: ResMut<AnimationManager>) {
     // Collect the finished ids first — the borrow of the task map cannot overlap
     // the mutation of the motions / unavailable maps.
     let mut finished: Vec<(AssetKey, Option<Motion>)> = Vec::new();
@@ -469,7 +589,7 @@ impl PlayState {
 /// Per-avatar animation *playback* state (P18.3 / P18.4), distinct from the
 /// [`AnimationManager`]'s asset resolve/cache: which animations each avatar is
 /// playing, their timing / activation order, and the per-joint pose the driver
-/// blended this frame for [`pose_avatar_skeletons`] to write into the skeleton's
+/// blended this frame for `pose_avatar_skeletons` to write into the skeleton's
 /// world matrices.
 #[derive(Debug, Resource, Default)]
 pub struct AnimationPlayback {
@@ -1037,7 +1157,7 @@ fn mini_pose_subset(
               already bundled into one `GpuAvatarHooks` param, and the rest is the \
               animation pipeline, the adjuster feedback, and the avatar state / assets"
 )]
-pub fn drive_avatar_skeletons(
+pub(crate) fn drive_avatar_skeletons(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     manager: Res<AnimationManager>,
@@ -1176,7 +1296,7 @@ pub(crate) const POSE_IDLE_HZ: f32 = 15.0;
 /// - the attachment-node queries the **socket scan** needs to find which
 ///   attachment-point nodes carry a worn subtree.
 #[derive(Debug, SystemParam)]
-pub struct GpuAvatarHooks<'w, 's> {
+pub(crate) struct GpuAvatarHooks<'w, 's> {
     /// The correction feed pass B consumes.
     feed: Option<ResMut<'w, crate::gpu_avatars::GpuAvatarPoseFeed>>,
     /// The pipeline's capability-checked activity.
@@ -1258,7 +1378,7 @@ fn pose_corrections(
 /// body physics) contributes its own target and state resource, and the runtime-morph
 /// overrides are the channel two of them write their morph params through.
 #[derive(Debug, SystemParam)]
-pub struct AvatarAdjusters<'w> {
+pub(crate) struct AvatarAdjusters<'w> {
     /// Who each avatar is looking at (P31.12).
     look_targets: Res<'w, LookAtTargets>,
     /// The look-at / eye-blink motion state (P31.12, P31.12b).
@@ -1304,7 +1424,7 @@ pub struct AvatarAdjusters<'w> {
               asset library and state, the ground, the part query, the root globals, \
               and the socket transforms"
 )]
-pub fn pose_avatar_skeletons(
+pub(crate) fn pose_avatar_skeletons(
     time: Res<Time>,
     manager: Res<AnimationManager>,
     playback: Res<AnimationPlayback>,

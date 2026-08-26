@@ -66,6 +66,7 @@ use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flex
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::world_api::AvatarState;
 use crate::world_api::DecodedTextures;
+use crate::world_api::world_has_keyboard;
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, AvatarPickTarget, HUD_RENDER_LAYER, HudState, INITIAL_TREE_TIER,
     MAX_PARENT_WALK, ObjectLight, ObjectParticleSystem, ObjectPickSummary, ObjectReflectionProbe,
@@ -106,7 +107,7 @@ pub struct PrimFaceEntity {
 }
 
 /// The decoded [`TextureFace`] a face entity was built from, carried so the
-/// [`pick_object`] crosshair tool can report the exact per-face texture
+/// `pick_object` crosshair tool can report the exact per-face texture
 /// placement (repeats / offset / rotation / texgen / texture id) of whatever is
 /// under the crosshair — the ground truth for debugging a texture-mapping bug.
 #[derive(Component, Debug, Clone, Copy)]
@@ -1098,7 +1099,7 @@ const SUSPICIOUS_HEIGHT_M: f32 = 500.0;
 /// positions with sane (if large) scales, the viewer is simply not culling by
 /// distance the way a reference viewer does (empty OpenSim has none, so it never
 /// showed); if they carry impossible scales/positions, a decode is wrong.
-pub fn log_suspicious_objects(
+pub(crate) fn log_suspicious_objects(
     mut events: MessageReader<SlEvent>,
     mut seen: Local<std::collections::HashSet<Uuid>>,
     mut enabled: Local<Option<bool>>,
@@ -1153,6 +1154,23 @@ pub fn log_suspicious_objects(
     }
 }
 
+/// The crosshair pick tool's own scheduling (press **`P`**), plus the object
+/// diagnostics gated on `SL_VIEWER_LOG_OBJECTS`.
+///
+/// Both read a key or the object mirror and nothing above this crate, so which
+/// gate they carry is this module's business rather than the viewer's.
+#[derive(Debug, Default)]
+pub struct ObjectDiagnosticsPlugin;
+
+impl Plugin for ObjectDiagnosticsPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(Update, pick_object.run_if(world_has_keyboard));
+        if std::env::var_os("SL_VIEWER_LOG_OBJECTS").is_some() {
+            app.add_systems(Update, log_suspicious_objects);
+        }
+    }
+}
+
 /// The texture state the crosshair pick tool reports on: the manager, for a
 /// texture's level-of-detail bookkeeping, and the decoded store the pixel
 /// dimensions are read from.
@@ -1160,7 +1178,7 @@ pub fn log_suspicious_objects(
 /// Bundled into one `SystemParam` because a Bevy system takes at most sixteen
 /// parameters, and the pick tool reads very nearly everything in the scene.
 #[derive(SystemParam, Debug)]
-pub struct PickTextures<'w> {
+pub(crate) struct PickTextures<'w> {
     /// The fetch manager, for the level-of-detail snapshot.
     manager: Res<'w, TextureManager>,
     /// The decoded images the snapshot's dimensions come from.
@@ -1182,7 +1200,7 @@ pub struct PickTextures<'w> {
     clippy::too_many_arguments,
     reason = "a Bevy system querying the several components the pick report reads"
 )]
-pub fn pick_object(
+pub(crate) fn pick_object(
     keyboard: Res<ButtonInput<KeyCode>>,
     // `ViewerCamera`, not `Camera3d`: the probe-capture cameras (P33.2) also carry
     // `Camera3d`, and `single()` fails once more than one matches.
@@ -4343,7 +4361,7 @@ pub fn apply_rigged_attachments(
 /// the animations, which is often a plain (un-flagged) linkset child — keying
 /// the spawn on the root itself being signalled left every such animesh
 /// permanently un-posed.
-pub fn spawn_animesh_control_avatars(
+pub(crate) fn spawn_animesh_control_avatars(
     state: Res<ObjectState>,
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
@@ -4379,7 +4397,10 @@ pub fn spawn_animesh_control_avatars(
 /// gone for good. The reference keeps its signalled map for the session and
 /// re-reads it whenever a control avatar is (re)built; only a safety cap
 /// bounds ours (`ControlAvatarState::bound_signalled`).
-pub fn prune_control_avatars(state: Res<ObjectState>, mut control: ResMut<ControlAvatarState>) {
+pub(crate) fn prune_control_avatars(
+    state: Res<ObjectState>,
+    mut control: ResMut<ControlAvatarState>,
+) {
     let live: HashSet<ObjectKey> = state
         .objects
         .values()

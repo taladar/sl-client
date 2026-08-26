@@ -12,7 +12,7 @@
 //!   sits at `seat + eye_offset` and looks at `seat + at_offset`, both offsets in
 //!   the seat's own frame (so the view rides the seat). Enabled only when the two
 //!   offsets actually differ (the reference's 1 mm threshold), i.e. the script set
-//!   a camera at all. [`crate::camera::position_camera`] reads [`SitCamera`] and
+//!   a camera at all. `crate::camera::position_camera` reads `SitCamera` and
 //!   applies the pose; this module only tracks it.
 //! - **Forced mouselook** — a seat that forces mouselook drops the camera into
 //!   mouselook on sit; standing restores third person (the script-interface
@@ -42,7 +42,7 @@ const OFFSET_THRESHOLD_SQUARED: f32 = 0.001 * 0.001;
 /// The scripted sit camera the current seat imposes (if any), and whether this
 /// module forced the camera into mouselook for it.
 #[derive(Debug, Resource, Default)]
-pub struct SitCamera {
+pub(crate) struct SitCamera {
     /// The active scripted camera: the seat and its eye / focus offsets. `None`
     /// when the seat set no camera, or the avatar is not seated.
     active: Option<SitCameraOffsets>,

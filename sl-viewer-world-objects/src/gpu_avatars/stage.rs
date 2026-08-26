@@ -92,7 +92,7 @@ pub(crate) struct FeedEntry {
 /// animesh's — the root matrix plus the sparse adjuster corrections (empty for
 /// animesh); passes A+B blend the keyframes GPU-side.
 #[derive(Debug, Resource, Default)]
-pub struct GpuAvatarPoseFeed {
+pub(crate) struct GpuAvatarPoseFeed {
     /// The latest published entry per rigged pose slot.
     entries: HashMap<PoseSlotKey, FeedEntry>,
 }

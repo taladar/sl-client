@@ -158,7 +158,7 @@ pub(crate) fn unpack_overlap_offset(packed: u32) -> Vec2 {
 /// entity transform and [`MeshTag`] instead — a material write recreates its
 /// bind group).
 #[derive(Asset, TypePath, AsBindGroup, Clone, Debug)]
-pub struct NameTagMaterial {
+pub(crate) struct NameTagMaterial {
     /// `x` = fade-start distance (m), `y` = fade range (m), `z` = base
     /// screen-space lift (px), `w` = unused.
     #[uniform(0)]
@@ -258,7 +258,7 @@ impl Material for NameTagMaterial {
     TextBounds,
     FontHinting::Disabled
 )]
-pub struct TagText(pub(crate) String);
+pub(crate) struct TagText(pub(crate) String);
 
 impl From<String> for TagText {
     fn from(text: String) -> Self {
@@ -288,7 +288,7 @@ fn tag_line_height(font_size: f32) -> LineHeight {
 /// entities are updated in place so span count churn only happens when the
 /// line count changes; excess spans despawn, missing ones append (appending
 /// keeps [`Children`] order = line order).
-pub fn sync_tag_spans(
+pub(crate) fn sync_tag_spans(
     mut commands: Commands,
     changed: Query<(Entity, &TagContent, Option<&Children>), Changed<TagContent>>,
     mut spans: Query<(
@@ -375,7 +375,7 @@ const DEFAULT_TAG_LAYOUT_BUDGET: usize = 4;
 /// queue next frame. Downstream `build_tag_meshes` is
 /// `Changed<TextLayoutInfo>`-driven, so this cap bounds it too.
 #[derive(Debug, Resource)]
-pub struct TagLayoutBudget {
+pub(crate) struct TagLayoutBudget {
     /// How many dirty blocks may be laid out each frame.
     per_frame: usize,
 }
@@ -406,7 +406,7 @@ impl Default for TagLayoutBudget {
     reason = "a trimmed port of the stock `update_text2d_layout`: the argument list and \
               query row mirror the original's, and the scale-factor math is finite"
 )]
-pub fn layout_tag_text(
+pub(crate) fn layout_tag_text(
     mut last_logical_viewport_size: Local<Vec2>,
     mut reprocess_queue: Local<EntityHashSet>,
     mut textures: ResMut<Assets<Image>>,
@@ -554,7 +554,7 @@ pub fn layout_tag_text(
 /// (`mSourceObject->getVObjRadius()`) so the avatar's own body cannot occlude
 /// its tag. Set at spawn from the avatar representation's rough radius.
 #[derive(Component, Debug, Clone, Copy)]
-pub struct NameTagPullRadius(pub(crate) f32);
+pub(crate) struct NameTagPullRadius(pub(crate) f32);
 
 impl Default for NameTagPullRadius {
     fn default() -> Self {
@@ -569,13 +569,13 @@ impl Default for NameTagPullRadius {
 /// read it (a tag renders at constant on-screen size, so this is valid at any
 /// distance).
 #[derive(Component, Debug, Clone, Copy, Default, PartialEq)]
-pub struct NameTagPixelSize(pub(crate) Vec2);
+pub(crate) struct NameTagPixelSize(pub(crate) Vec2);
 
 /// Marker on a spawned extra atlas-page child of a tag (page 0 rides the tag
 /// entity itself; a tag whose glyphs span several atlas pages gets one child
 /// per further page).
 #[derive(Component, Debug, Clone, Copy)]
-pub struct NameTagPage;
+pub(crate) struct NameTagPage;
 
 /// The extra camera pull, metres, per atlas page beyond the first — a
 /// deterministic transparent-phase tie-break so a multi-page tag's pages
@@ -598,7 +598,7 @@ const BUBBLE_COLOR: Color = Color::BLACK;
 /// system rewrites `NameTagMaterial::params` (and bumps layouts for
 /// opacity changes) only when a preference actually changes.
 #[derive(Resource, Debug)]
-pub struct NameTagMaterials {
+pub(crate) struct NameTagMaterials {
     /// One shared material per glyph-atlas page (keyed by the atlas image).
     by_atlas: bevy::platform::collections::HashMap<AssetId<Image>, Handle<NameTagMaterial>>,
     /// Distance at which tags start fading, metres.
@@ -621,7 +621,7 @@ impl Default for NameTagMaterials {
 /// against the name-tag 20 m / 5 m). Bare text draws no bubble, so the opacity
 /// is unused. See [`crate::hover_text`].
 #[derive(Resource, Debug)]
-pub struct HoverTextMaterials(pub(crate) NameTagMaterials);
+pub(crate) struct HoverTextMaterials(pub(crate) NameTagMaterials);
 
 impl Default for HoverTextMaterials {
     fn default() -> Self {
@@ -639,7 +639,7 @@ impl Default for HoverTextMaterials {
 /// the anchor and fades at the shorter `LLHUDText` range. A tag entity without
 /// this component is treated as a name tag (the historical default).
 #[derive(Component, Debug, Clone, Copy)]
-pub struct WorldTextStyle {
+pub(crate) struct WorldTextStyle {
     /// Whether to draw the rounded-rect bubble backdrop.
     pub(crate) draw_bubble: bool,
     /// The screen-space lift above the anchor, **logical** px.
@@ -964,7 +964,7 @@ fn empty_tag_mesh() -> Mesh {
     reason = "the mesh rebuild is the single fan-in of layout, atlas, material and page \
               state, and its UV / pull math is finite pixel-space geometry"
 )]
-pub fn build_tag_meshes(
+pub(crate) fn build_tag_meshes(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<NameTagMaterial>>,
@@ -1155,7 +1155,7 @@ pub fn build_tag_meshes(
     reason = "the registry stores verbatim copies of the setting values, so exact \
               equality is the correct change test"
 )]
-pub fn apply_name_tag_settings(
+pub(crate) fn apply_name_tag_settings(
     settings: Option<Res<crate::settings::ViewerSettings>>,
     mut registry: ResMut<NameTagMaterials>,
     mut materials: ResMut<Assets<NameTagMaterial>>,
@@ -1221,7 +1221,7 @@ const SMOOTHING_SNAP_METRES: f32 = 0.002;
 /// root-to-head offset): the dead-banded target and the eased position last
 /// written to the tag's [`Transform`].
 #[derive(Component, Debug, Default, Clone, Copy)]
-pub struct NameTagSmooth {
+pub(crate) struct NameTagSmooth {
     /// The dead-banded target the tag is easing toward.
     target: Option<Vec3>,
     /// The eased position last written (`None` until first placement, which
@@ -1234,7 +1234,7 @@ pub struct NameTagSmooth {
 /// Filled by [`follow_tag_anchors`]; the anti-overlap solver shifts it and the
 /// cursor hit test ([`NameTagHitTest`]) reads it.
 #[derive(Component, Debug, Default, Clone, Copy, PartialEq)]
-pub struct NameTagScreenRect {
+pub(crate) struct NameTagScreenRect {
     /// The bubble rect, or `None` while the tag projects off-screen.
     pub(crate) rect: Option<Rect>,
     /// Camera→tag distance, metres (front-most-wins ordering for the hit
@@ -1289,7 +1289,7 @@ pub(crate) fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
     reason = "the per-tag query row is the placement state in one fetch, and the \
               smoothing / projection math is finite metre- and pixel-space geometry"
 )]
-pub fn follow_tag_anchors(
+pub(crate) fn follow_tag_anchors(
     time: Res<Time>,
     cameras: Query<(&Camera, &GlobalTransform), With<crate::world_api::ViewerCamera>>,
     anchors: Query<&Transform, (With<AvatarAnchor>, Without<NameTag>)>,
@@ -1457,7 +1457,7 @@ const OVERLAP_SNAP_PX: f32 = 0.5;
 /// Per-tag anti-overlap state: the solved target offset and the smoothed
 /// offset actually applied (both logical px, viewport axes — +y down).
 #[derive(Component, Debug, Default, Clone, Copy, PartialEq)]
-pub struct NameTagOverlapOffset {
+pub(crate) struct NameTagOverlapOffset {
     /// This frame's solved separation offset.
     target: Vec2,
     /// The smoothed offset last applied (eases toward [`Self::target`]).
@@ -1572,7 +1572,7 @@ pub(crate) fn solve_overlap_offsets(tags: &[(Rect, f32)]) -> Vec<Vec2> {
     reason = "the per-tag query row is the solver state in one fetch, and the offset \
               smoothing / packing math is finite pixel-space geometry"
 )]
-pub fn solve_tag_overlap(
+pub(crate) fn solve_tag_overlap(
     time: Res<Time>,
     mut last_camera: Local<Option<Vec3>>,
     cameras: Query<(&Camera, &GlobalTransform), With<crate::world_api::ViewerCamera>>,
@@ -1699,7 +1699,7 @@ pub fn solve_tag_overlap(
     clippy::type_complexity,
     reason = "the filter pair (marker + change gate) is clearer inline than behind an alias"
 )]
-pub fn sync_tag_pages(
+pub(crate) fn sync_tag_pages(
     tags: Query<(&MeshTag, &Children), (With<NameTag>, Changed<MeshTag>)>,
     mut pages: Query<&mut MeshTag, (With<NameTagPage>, Without<NameTag>)>,
 ) {
@@ -1717,7 +1717,7 @@ pub fn sync_tag_pages(
 /// Resolve which avatar's name tag (if any) is under the cursor — the tag is
 /// a valid avatar pick target (right-click opens the avatar menu, matching
 /// the reference), and no picking backend covers our custom tag meshes, so
-/// this is a stored-rect test against [`NameTagScreenRect`]. The front-most
+/// this is a stored-rect test against `NameTagScreenRect`. The front-most
 /// (nearest-camera) tag wins where tags overlap.
 #[derive(Debug, bevy::ecs::system::SystemParam)]
 pub struct NameTagHitTest<'w, 's> {
@@ -1753,9 +1753,13 @@ impl NameTagHitTest<'_, '_> {
     }
 }
 
-/// The plugin wiring the world-space name-tag billboards: the embedded shader
-/// and the [`NameTagMaterial`] pipeline. The tag systems themselves are
-/// registered alongside the avatar systems in `lib.rs`.
+/// The plugin wiring the world-space name-tag billboards: the embedded shader,
+/// the `NameTagMaterial` pipeline, and the render chain that turns changed tag
+/// content into placed meshes.
+///
+/// The chain covers object floating text ([`crate::hover_text`]) too — the two
+/// share one renderer, and interleaving them is what keeps a settings change and
+/// a content change reaching the same frame's meshes.
 #[derive(Debug, Default)]
 pub struct NameTagBillboardPlugin;
 
@@ -1769,7 +1773,31 @@ impl Plugin for NameTagBillboardPlugin {
         );
         app.add_plugins(MaterialPlugin::<NameTagMaterial>::default())
             .init_resource::<NameTagMaterials>()
-            .init_resource::<TagLayoutBudget>();
+            .init_resource::<TagLayoutBudget>()
+            // Materialise changed tag content as text spans, lay the spans out
+            // through the shared text pipeline, rebuild changed tag meshes, then
+            // place each tag over its avatar anchor (smoothed follow + distance
+            // cutoff + preference gates). All before transform propagation so
+            // page children inherit this frame's matrix; the layout step runs
+            // after the global span-change detector and after camera updates
+            // (its scale-factor source).
+            .add_systems(
+                PostUpdate,
+                (
+                    apply_name_tag_settings,
+                    crate::hover_text::apply_hover_text_settings,
+                    sync_tag_spans,
+                    layout_tag_text
+                        .after(bevy::text::detect_text_needs_rerender)
+                        .after(bevy::camera::CameraUpdateSystems),
+                    build_tag_meshes,
+                    follow_tag_anchors,
+                    solve_tag_overlap,
+                    sync_tag_pages,
+                )
+                    .chain()
+                    .before(TransformSystems::Propagate),
+            );
     }
 }
 

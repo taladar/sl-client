@@ -437,7 +437,7 @@ pub fn apply_draw_distance(
 /// on its first appearance, and a clean exit on logout/disconnect.
 ///
 /// The camera is no longer placed here: third-person
-/// ([`crate::camera::position_camera`]) follows the avatar the moment it arrives,
+/// (`crate::camera::position_camera`) follows the avatar the moment it arrives,
 /// so there is nothing to snap. The `SL_VIEWER_CAMERA_*` framing knobs the old
 /// snap read now seed the third-person orbit
 /// ([`CameraRig::seed_orbit_from_env`](crate::world_api::CameraRig)).

@@ -36,7 +36,7 @@
 //! material's depth with no extra pipelines.
 //!
 //! The [`UnderwaterFog`] component on the camera carries the per-frame parameters
-//! ([`update_underwater_fog`] fills them from the region's EEP water settings, the
+//! (`update_underwater_fog` fills them from the region's EEP water settings, the
 //! sky sun direction, the camera pose, and the water level).
 //!
 //! The pass runs after the main pass and **before** the tone mapper
@@ -76,8 +76,8 @@ use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, Ren
 use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::sky::day_position;
-use crate::water::WaterLevel;
-use crate::world_api::ViewerCamera;
+use crate::water::{WaterLevel, drive_water};
+use crate::world_api::{ViewerCamera, WorldPhase};
 
 /// The internal handle the fog shader (`underwater_fog.wgsl`) is loaded under.
 const FOG_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f2a9c17-54e8-4b6d-a90c-2e718d43ff05");
@@ -137,7 +137,7 @@ impl ExtractComponent for UnderwaterFog {
 /// sky sun direction, the camera pose, and the current water level — the reference
 /// `LLSettingsVOWater` uniform prep (`waterFogKS = 1 / max(lightDir.z, 0.3)`,
 /// `getModifiedWaterFogDensity` — `pow(density, fogMod)` when the eye is submerged).
-pub fn update_underwater_fog(
+pub(crate) fn update_underwater_fog(
     environment: Res<EnvironmentState>,
     level: Res<WaterLevel>,
     mut cameras: Query<(&GlobalTransform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
@@ -246,7 +246,17 @@ impl Plugin for UnderwaterFogPlugin {
         app.add_plugins((
             ExtractComponentPlugin::<UnderwaterFog>::default(),
             UniformComponentPlugin::<UnderwaterFog>::default(),
-        ));
+        ))
+        // Refresh the camera's fog parameters (water level, EEP fog
+        // colour/density, reconstruction matrix) each frame, after the camera so
+        // the matrix matches the current viewpoint and after the ocean so the
+        // water level it reads is this frame's.
+        .add_systems(
+            Update,
+            update_underwater_fog
+                .after(WorldPhase::CameraPositioned)
+                .after(drive_water),
+        );
 
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;

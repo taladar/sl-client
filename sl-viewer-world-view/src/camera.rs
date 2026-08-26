@@ -240,7 +240,7 @@ pub enum FocusTarget {
 ///
 /// Off by default, throttled to 1 Hz, and a plain main-world read, so it does not perturb
 /// render-world timing.
-pub fn dump_camera_pose(
+pub(crate) fn dump_camera_pose(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
@@ -294,7 +294,7 @@ pub(crate) struct FlycamSmoothing {
 /// The avatar heading the camera aims at in mouselook, published for
 /// [`crate::movement`] so the body faces where the mouse looks.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct CameraAim {
+pub(crate) struct CameraAim {
     /// The Second Life heading (yaw about the SL up axis, radians) the mouselook
     /// camera is pointed along; the avatar body follows it while in mouselook.
     pub(crate) sl_yaw: f32,
@@ -397,7 +397,7 @@ pub struct CameraPlugin;
 
 impl Plugin for CameraPlugin {
     /// Wire the camera systems. `sync_input_mode` runs in `PreUpdate` so the action
-    /// map's profile matches this frame's mode; the drivers and [`position_camera`]
+    /// map's profile matches this frame's mode; the drivers and `position_camera`
     /// run in `Update`, in order, so every `.after(position_camera)` consumer (sky,
     /// water, particles, interest reporting) reads the finished pose.
     fn build(&self, app: &mut App) {
@@ -422,7 +422,7 @@ impl Plugin for CameraPlugin {
                     aim_look.run_if(resource_equals(CameraMode::Mouselook)),
                     focus_on_object,
                     drive_flycam.run_if(resource_equals(CameraMode::Flycam)),
-                    position_camera,
+                    position_camera.in_set(crate::world_api::WorldPhase::CameraPositioned),
                 )
                     .chain()
                     // Run after the avatar dead-reckoner so `position_camera` reads
@@ -433,6 +433,16 @@ impl Plugin for CameraPlugin {
                     .after(crate::physics::drive_avatar_motion),
             )
             .add_systems(Update, update_camera_cursor);
+        if std::env::var_os("SL_VIEWER_CAMERA_DUMP").is_some() {
+            // Log the camera pose as a ready-to-paste `--camera-position` /
+            // `--camera-look-at` for repeatable framing. Registered here rather
+            // than by the viewer: which system the dump must follow is this
+            // module's business.
+            app.add_systems(
+                Update,
+                dump_camera_pose.after(crate::world_api::WorldPhase::CameraPositioned),
+            );
+        }
     }
 }
 
@@ -1018,7 +1028,7 @@ type AvatarTransformQuery<'world, 'state> =
               avatar, the transform query, the ray caster for collision, time for the smoothing, \
               and the camera itself"
 )]
-pub fn position_camera(
+pub(crate) fn position_camera(
     // Bundled into one tuple param: a Bevy system tops out at 16 parameters and
     // this one is full — a tuple of `SystemParam`s is itself a `SystemParam`.
     camera_state: (Res<CameraMode>, Res<FocusTarget>, Res<CameraTuning>),

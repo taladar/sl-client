@@ -31,6 +31,27 @@ use crate::sound_cache::SoundCache;
 use crate::textures::TextureManager;
 use crate::ui_font::UiFont;
 
+/// The pipeline-status overlay's own scheduling (P19.3): the `F3` panel that
+/// reports the texture / mesh / animation stores' live fetch and decode state.
+#[derive(Debug, Default)]
+pub struct PipelineOverlayPlugin;
+
+impl Plugin for PipelineOverlayPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(PipelineOverlayVisible::from_env())
+            .add_systems(Startup, setup_pipeline_overlay)
+            .add_systems(
+                Update,
+                (
+                    toggle_pipeline_overlay,
+                    update_pipeline_overlay
+                        .run_if(pipeline_overlay_active)
+                        .after(toggle_pipeline_overlay),
+                ),
+            );
+    }
+}
+
 /// The overlay font size, in logical pixels.
 const DIAG_FONT_SIZE: f32 = 15.0;
 
@@ -50,7 +71,7 @@ const PIPELINE_TOGGLE_KEY: KeyCode = KeyCode::F3;
 /// `PIPELINE_TOGGLE_KEY`; hidden by default so it stays out of the way until
 /// the fetch/decode pipeline is being watched.
 #[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct PipelineOverlayVisible(pub(crate) bool);
+pub(crate) struct PipelineOverlayVisible(pub(crate) bool);
 
 impl PipelineOverlayVisible {
     /// The initial visibility, seeded from the `SL_VIEWER_PIPELINE_OVERLAY`
@@ -59,7 +80,7 @@ impl PipelineOverlayVisible {
     /// unset to start hidden (the interactive default). The `F3` key still
     /// toggles it either way.
     #[must_use]
-    pub fn from_env() -> Self {
+    pub(crate) fn from_env() -> Self {
         Self(std::env::var_os("SL_VIEWER_PIPELINE_OVERLAY").is_some())
     }
 }
@@ -67,14 +88,14 @@ impl PipelineOverlayVisible {
 /// A marker component tagging the single pipeline-status text node, so the
 /// update system can find and rewrite it.
 #[derive(Component, Debug, Clone, Copy)]
-pub struct PipelineStatusText;
+pub(crate) struct PipelineStatusText;
 
 /// Startup system: spawn the persistent pipeline-status text node, pinned to the
 /// top-left corner (clear of the top-right frame overlay and the bottom-left
 /// chat overlay). It starts [`Visibility::Hidden`] — the panel is opt-in via
 /// `PIPELINE_TOGGLE_KEY` — and is rewritten each frame it is visible from the
 /// live store snapshots.
-pub fn setup_pipeline_overlay(mut commands: Commands) {
+pub(crate) fn setup_pipeline_overlay(mut commands: Commands) {
     commands.spawn((
         Text::new(String::new()),
         // Monospace, as for the frame overlay above: the panel is tabular
@@ -93,7 +114,7 @@ pub fn setup_pipeline_overlay(mut commands: Commands) {
 }
 
 /// Toggle the pipeline-status overlay when `PIPELINE_TOGGLE_KEY` is pressed.
-pub fn toggle_pipeline_overlay(
+pub(crate) fn toggle_pipeline_overlay(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut visible: ResMut<PipelineOverlayVisible>,
 ) {
@@ -106,7 +127,7 @@ pub fn toggle_pipeline_overlay(
 /// visibility just flipped (the changed arm runs the hide write on toggle-off
 /// and the initial sync) — a hidden overlay costs no dispatch at all.
 #[must_use]
-pub fn pipeline_overlay_active(visible: Res<PipelineOverlayVisible>) -> bool {
+pub(crate) fn pipeline_overlay_active(visible: Res<PipelineOverlayVisible>) -> bool {
     visible.0 || visible.is_changed()
 }
 
@@ -118,7 +139,7 @@ pub fn pipeline_overlay_active(visible: Res<PipelineOverlayVisible>) -> bool {
     clippy::too_many_arguments,
     reason = "one asset-store resource per pipeline sampled into the overlay"
 )]
-pub fn update_pipeline_overlay(
+pub(crate) fn update_pipeline_overlay(
     visible: Res<PipelineOverlayVisible>,
     textures: Res<TextureManager>,
     meshes: Res<MeshManager>,

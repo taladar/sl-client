@@ -158,7 +158,7 @@ impl OwnBakeInputs {
 
     /// Live-edit preview: substitute the worn asset of `edited`'s wearable type
     /// with `edited` (append it if none is worn) so the shape morph
-    /// ([`apply_own_shape_from_wearables`](crate::avatars::apply_own_shape_from_wearables))
+    /// (`apply_own_shape_from_wearables`)
     /// and the bake composite re-derive from the edited wearable. The caller
     /// follows this with [`request_asset_textures`](Self::request_asset_textures)
     /// and [`reassemble`](Self::reassemble), then clears the local bake's built

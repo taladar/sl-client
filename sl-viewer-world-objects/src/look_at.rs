@@ -193,8 +193,8 @@ struct LookAtTarget {
 }
 
 /// The current world look-at target of each avatar that has one, keyed by agent.
-/// Populated by [`update_own_look_at_target`] (own avatar, from the fly-camera)
-/// and [`receive_look_at_effects`] (others, from `ViewerEffect`); consumed by the
+/// Populated by `update_own_look_at_target` (own avatar, from the fly-camera)
+/// and `receive_look_at_effects` (others, from `ViewerEffect`); consumed by the
 /// pose pass to aim the head and eyes.
 #[derive(Debug, Resource, Default)]
 pub struct LookAtTargets {
@@ -896,7 +896,7 @@ const LOOK_AHEAD_METRES: f32 = 10.0;
 /// enabling settings and animation-priority interactions, and the debug gizmos that
 /// draw every avatar's look-at) is a faithful `LLHUDEffectLookAt` reimplementation —
 /// its own task ([[viewer-lookat-faithful]]), deliberately not half-built here.
-pub fn update_own_look_at_target(
+pub(crate) fn update_own_look_at_target(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     mode: Res<CameraMode>,
@@ -932,7 +932,7 @@ pub fn update_own_look_at_target(
 /// (P11-era gaze hints), and prune expired targets. The own avatar's gaze is driven
 /// from the camera instead ([`update_own_look_at_target`]), so an echoed own-avatar
 /// effect is ignored. A cleared / ended look-at drops the target.
-pub fn receive_look_at_effects(
+pub(crate) fn receive_look_at_effects(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     mut events: MessageReader<SlEvent>,

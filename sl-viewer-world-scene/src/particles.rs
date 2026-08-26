@@ -28,7 +28,7 @@
 //! `LLViewerPartSourceScript::unpackPSS` (`indra/newview/llviewerpartsource.cpp`),
 //! `LLPartSysData` (`indra/llmessage/llpartdata.cpp`).
 //!
-//! **Simulate + render (P30.2).** [`drive_particles`] runs a CPU particle
+//! **Simulate + render (P30.2).** `drive_particles` runs a CPU particle
 //! simulation for every [`ObjectParticleSystem`] source each frame and renders
 //! its live particles as camera-facing textured billboards. It is a port of the
 //! reference viewer's split of the work:
@@ -107,8 +107,35 @@ use crate::settings::ViewerSettings;
 use crate::textures::TextureManager;
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, DecodedTextures, HUD_RENDER_LAYER, ObjectParticleSystem, ViewerCamera,
-    on_hud_layer,
+    WorldPhase, on_hud_layer,
 };
+
+/// The particle system's own scheduling (P30.2).
+///
+/// `drive_particles` rebuilds each source's camera-facing billboard mesh, so
+/// it orders against [`WorldPhase::CameraPositioned`] rather than naming the
+/// camera system. The `SL_VIEWER_PARTICLE_FOCUS` debug aim is registered here
+/// too — its ordering is this module's business, not the viewer's.
+#[derive(Debug, Default)]
+pub struct ParticlesPlugin;
+
+impl Plugin for ParticlesPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<ParticleSim>()
+            .add_systems(Startup, setup_particles)
+            .add_systems(Update, drive_particles.after(WorldPhase::CameraPositioned));
+        if std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some() {
+            // Aim the camera at the busiest particle cloud so an unattended
+            // screenshot frames a real emitter.
+            app.add_systems(
+                Update,
+                focus_camera_on_particles
+                    .after(drive_particles)
+                    .after(WorldPhase::CameraPositioned),
+            );
+        }
+    }
+}
 
 // ---------------------------------------------------------------------------
 // P30.2 — CPU particle simulation + camera-facing billboard render.
@@ -126,11 +153,11 @@ const RENDER_SECTION: &[&str] = &["render"];
 /// The particle-cap setting key: the maximum number of live particles across all
 /// sources. The reference viewer's `RenderMaxPartCount`; surfaced in the
 /// quick-preferences panel (`crate::quick_preferences`) and consumed live by
-/// [`drive_particles`].
+/// `drive_particles`.
 pub const SETTING_MAX_PARTICLES: &str = "RenderMaxPartCount";
 
 /// Declare the persisted particle-cap setting (the quick-preferences panel binds
-/// to it; [`drive_particles`] reads it each frame).
+/// to it; `drive_particles` reads it each frame).
 pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         RENDER_SECTION,
@@ -614,7 +641,7 @@ struct Cloud {
 /// The scene-wide particle simulation state (P30.2): one `Cloud` per live
 /// particle source. Rebuilt incrementally by [`drive_particles`] each frame.
 #[derive(Debug, Resource, Default)]
-pub struct ParticleSim {
+pub(crate) struct ParticleSim {
     /// Live clouds keyed by their source object entity.
     clouds: HashMap<Entity, Cloud>,
 }
@@ -647,7 +674,7 @@ impl ParticleSim {
 /// are in) and after `position_camera` (so it
 /// overrides the follow pose). Flycam is the only mode whose pose a system may
 /// write directly (the others recompute it), so it switches there.
-pub fn focus_camera_on_particles(
+pub(crate) fn focus_camera_on_particles(
     sim: Res<ParticleSim>,
     mut mode: ResMut<crate::world_api::CameraMode>,
     mut camera: Query<(&mut Transform, &mut crate::world_api::CameraRig), With<ViewerCamera>>,
@@ -677,10 +704,10 @@ pub fn focus_camera_on_particles(
 /// bundled `sDefaultParticleImagep` ("pixiesmall.j2c"), which is likewise a soft
 /// white blob.
 #[derive(Debug, Resource)]
-pub struct DefaultParticleImage(Handle<Image>);
+pub(crate) struct DefaultParticleImage(Handle<Image>);
 
 /// Startup: build and upload the procedural default particle sprite.
-pub fn setup_particles(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+pub(crate) fn setup_particles(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let handle = images.add(default_particle_image());
     commands.insert_resource(DefaultParticleImage(handle));
 }
@@ -880,7 +907,7 @@ fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
     clippy::too_many_arguments,
     reason = "a Bevy system's arguments are its resource/query dependencies"
 )]
-pub fn drive_particles(
+pub(crate) fn drive_particles(
     time: Res<Time>,
     mut commands: Commands,
     mut sim: ResMut<ParticleSim>,

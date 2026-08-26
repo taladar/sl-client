@@ -33,11 +33,7 @@
 //! Reference (Firestorm, read-only): `llpanelface`, `lltoolface`; message
 //! `ObjectImage`.
 
-use crate::world_api::{
-    MATMEDIA_MATERIAL, MATMEDIA_PBR, MATTYPE_DIFFUSE, MATTYPE_NORMAL, MATTYPE_SPECULAR,
-    MatModeState, PBRTYPE_BASE_COLOR, PBRTYPE_EMISSIVE, PBRTYPE_METALLIC, PBRTYPE_NORMAL,
-    PBRTYPE_RENDER_MATERIAL,
-};
+use crate::world_api::{MatChannel, MatMedia, MatModeState, PbrChannel};
 use bevy::input_focus::InputFocus;
 use bevy::prelude::*;
 use bevy::text::{EditableText, FontCx, LayoutCx};
@@ -122,16 +118,24 @@ impl ShowWhen {
     /// Whether a control tagged with this rule is shown in `state`.
     pub(crate) const fn matches(self, state: MatModeState) -> bool {
         match self {
-            Self::MaterialDiffuse => state.is_material() && state.mat_type == MATTYPE_DIFFUSE,
-            Self::MaterialNormal => state.is_material() && state.mat_type == MATTYPE_NORMAL,
-            Self::MaterialSpecular => state.is_material() && state.mat_type == MATTYPE_SPECULAR,
+            Self::MaterialDiffuse => {
+                state.is_material() && matches!(state.mat_type, MatChannel::Diffuse)
+            }
+            Self::MaterialNormal => {
+                state.is_material() && matches!(state.mat_type, MatChannel::Normal)
+            }
+            Self::MaterialSpecular => {
+                state.is_material() && matches!(state.mat_type, MatChannel::Specular)
+            }
             Self::MaterialAny => state.is_material(),
             Self::PbrAny => state.is_pbr(),
-            Self::PbrMaterialId => state.is_pbr() && state.pbr_type == PBRTYPE_RENDER_MATERIAL,
-            Self::PbrBaseColor => state.is_pbr() && state.pbr_type == PBRTYPE_BASE_COLOR,
-            Self::PbrMetallic => state.is_pbr() && state.pbr_type == PBRTYPE_METALLIC,
-            Self::PbrEmissive => state.is_pbr() && state.pbr_type == PBRTYPE_EMISSIVE,
-            Self::PbrNormal => state.is_pbr() && state.pbr_type == PBRTYPE_NORMAL,
+            Self::PbrMaterialId => state.is_pbr() && matches!(state.pbr_type, PbrChannel::Material),
+            Self::PbrBaseColor => state.is_pbr() && matches!(state.pbr_type, PbrChannel::BaseColor),
+            Self::PbrMetallic => {
+                state.is_pbr() && matches!(state.pbr_type, PbrChannel::MetallicRoughness)
+            }
+            Self::PbrEmissive => state.is_pbr() && matches!(state.pbr_type, PbrChannel::Emissive),
+            Self::PbrNormal => state.is_pbr() && matches!(state.pbr_type, PbrChannel::Normal),
         }
     }
 }
@@ -642,7 +646,7 @@ fn spawn_mode_selectors(
             element: "build-tex-matmedia",
             placement: TabPlacement::BlockStart,
             labels: &matmedia_labels,
-            active: MATMEDIA_MATERIAL,
+            active: MatMedia::Material.radio_index(),
             tab_index: *tab_index,
             font_size: TOOL_FONT_SIZE,
             strip_width: None,
@@ -666,7 +670,7 @@ fn spawn_mode_selectors(
         &RadioSpec {
             element: "build-tex-mattype",
             labels: &mat_type_labels,
-            active: MATTYPE_DIFFUSE,
+            active: MatChannel::Diffuse.radio_index(),
             tab_index: *tab_index,
             font_size: TOOL_FONT_SIZE,
             layout: RadioLayout::Row,
@@ -692,7 +696,7 @@ fn spawn_mode_selectors(
         &RadioSpec {
             element: "build-tex-pbrtype",
             labels: &pbr_type_labels,
-            active: PBRTYPE_RENDER_MATERIAL,
+            active: PbrChannel::Material.radio_index(),
             tab_index: *tab_index,
             font_size: TOOL_FONT_SIZE,
             layout: RadioLayout::Row,
@@ -781,15 +785,15 @@ fn auto_select_material_mode(
         &scene,
     );
     let want = if has_pbr {
-        MATMEDIA_PBR
+        MatMedia::Pbr
     } else {
-        MATMEDIA_MATERIAL
+        MatMedia::Material
     };
     // Write the strip's active index directly; the tab widget's
     // `apply_programmatic_tab_selection` reconciles its highlight (`crate::ui_tab`
     // owns the click / arrow path, this is the programmatic one).
     if let Ok(mut strip) = strips.get_mut(ui.matmedia_strip) {
-        strip.active = want;
+        strip.active = want.radio_index();
     }
 }
 
@@ -846,13 +850,19 @@ fn read_material_mode(
     };
     let matmedia = strips
         .get(ui.matmedia_strip)
-        .map_or(MATMEDIA_MATERIAL, |strip| strip.active);
+        .map_or(MatMedia::Material, |strip| {
+            MatMedia::from_radio_index(strip.active)
+        });
     let mat_type = radios
         .get(ui.mat_type_radio)
-        .map_or(MATTYPE_DIFFUSE, |radio| radio.active);
+        .map_or(MatChannel::Diffuse, |radio| {
+            MatChannel::from_radio_index(radio.active)
+        });
     let pbr_type = radios
         .get(ui.pbr_type_radio)
-        .map_or(PBRTYPE_RENDER_MATERIAL, |radio| radio.active);
+        .map_or(PbrChannel::Material, |radio| {
+            PbrChannel::from_radio_index(radio.active)
+        });
     mode.set_if_neq(MatModeState {
         matmedia,
         mat_type,

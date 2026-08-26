@@ -36,8 +36,8 @@
 //!
 //! The reference resolves a point-at whose target is an *object* against that object's
 //! current transform every frame, so the reach follows a moving target; so does this
-//! ([`drive_own_point_at`] re-reads the selected entity's global each frame, and
-//! [`receive_point_at_effects`] resolves the on-wire offset against the target object's
+//! (`drive_own_point_at` re-reads the selected entity's global each frame, and
+//! `receive_point_at_effects` resolves the on-wire offset against the target object's
 //! entity when it knows it — the wire field is a *local offset* when a target object is
 //! set and a global position only when it is not).
 //!
@@ -195,8 +195,8 @@ struct PointAtTarget {
 }
 
 /// The current world point-at target of each avatar that has one, keyed by agent — the
-/// editing motion's target. Populated by [`drive_own_point_at`] (own avatar, from its
-/// selection) and [`receive_point_at_effects`] (others, from `ViewerEffect`), and read by
+/// editing motion's target. Populated by `drive_own_point_at` (own avatar, from its
+/// selection) and `receive_point_at_effects` (others, from `ViewerEffect`), and read by
 /// the pose fold and the hand-pose driver (an avatar reaching for something also holds
 /// its hand in `EDITING_HAND_POSE`).
 #[derive(Debug, Resource, Default)]
@@ -768,7 +768,7 @@ pub(crate) fn log_enabled() -> bool {
               camera to cast from, the ray caster, the parent / object components the hit is \
               resolved through, and the selection it writes"
 )]
-pub fn select_object_under_crosshair(
+pub(crate) fn select_object_under_crosshair(
     keyboard: Res<ButtonInput<KeyCode>>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     mut ray_cast: MeshRayCast,
@@ -835,7 +835,7 @@ pub fn select_object_under_crosshair(
 ///
 /// The target is re-resolved from the selected object's *current* transform every frame, so
 /// the reach follows an object that moves. A selection whose object has despawned is dropped.
-pub fn drive_own_point_at(
+pub(crate) fn drive_own_point_at(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     globals: Query<&GlobalTransform>,
@@ -920,7 +920,7 @@ fn send_point_at(
 /// and a global position only when it does not; both are resolved into the scene here. An
 /// effect naming an object this viewer has not seen is skipped rather than placed at the
 /// region origin.
-pub fn receive_point_at_effects(
+pub(crate) fn receive_point_at_effects(
     time: Res<Time>,
     identity: Res<SlIdentity>,
     mut events: MessageReader<SlEvent>,
@@ -985,7 +985,7 @@ pub fn receive_point_at_effects(
 /// echoes it back as an ordinary signalled animation — so the targeting motion switches on
 /// through exactly the path a scripted weapon would drive, and other viewers see the avatar
 /// aim too.
-pub fn drive_aim_animation(
+pub(crate) fn drive_aim_animation(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut aiming: Local<bool>,
     mut writer: MessageWriter<SlCommand>,

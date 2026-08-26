@@ -9,7 +9,7 @@
 //! [`ObjectLight`] component, which `apply_object` attaches to (or clears from)
 //! each object entity as its updates arrive.
 //!
-//! **Render (P25.2).** [`drive_local_lights`] reads those [`ObjectLight`]
+//! **Render (P25.2).** `drive_local_lights` reads those [`ObjectLight`]
 //! components each frame and spawns a Bevy [`PointLight`] (or [`SpotLight`] for a
 //! projector) as a child of the light-flagged object entity, so the Bevy light
 //! rides the prim's transform. Only the nearest / brightest `MAX_LOCAL_LIGHTS`
@@ -34,7 +34,24 @@ use std::collections::HashMap;
 use bevy::prelude::*;
 
 use crate::sky::SCENE_LIGHT_ILLUMINANCE;
-use crate::world_api::{LightProjection, ObjectLight, ViewerCamera};
+use crate::world_api::{LightProjection, ObjectLight, ViewerCamera, WorldPhase};
+
+/// The local-light budget's own scheduling (P25.2).
+///
+/// `drive_local_lights` ranks the light-flagged prims by distance from the
+/// viewpoint, so it orders against [`WorldPhase::CameraPositioned`] rather than
+/// naming the camera system.
+#[derive(Debug, Default)]
+pub struct LocalLightsPlugin;
+
+impl Plugin for LocalLightsPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<LocalLights>().add_systems(
+            Update,
+            drive_local_lights.after(WorldPhase::CameraPositioned),
+        );
+    }
+}
 
 /// The maximum number of local prim lights rendered at once (P25.2). Second
 /// Life's legacy fixed-function path capped hardware lights at
@@ -131,7 +148,7 @@ pub(crate) struct LocalLightChild;
 /// churns the render world and makes the light flicker, so the selection is
 /// reconciled against this map rather than rebuilt from scratch.
 #[derive(Debug, Resource, Default)]
-pub struct LocalLights {
+pub(crate) struct LocalLights {
     /// Light-flagged object entity → its spawned Bevy light child entity and the
     /// last [`ObjectLight`] applied to it. The stored light lets the reconcile
     /// skip a prim whose light is unchanged, so a stable scene does no per-frame
@@ -239,7 +256,7 @@ fn update_local_light(commands: &mut Commands, child: Entity, light: &ObjectLigh
 /// Bevy light children are **kept alive and updated in place** across frames (see
 /// [`LocalLights`]); a prim only gains a child on entering the budget and loses it
 /// on dropping out — re-spawning every frame flickers the render world.
-pub fn drive_local_lights(
+pub(crate) fn drive_local_lights(
     mut commands: Commands,
     mut assigned: ResMut<LocalLights>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,

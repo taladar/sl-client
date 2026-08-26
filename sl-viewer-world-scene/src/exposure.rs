@@ -257,7 +257,7 @@ pub(crate) fn exposure_range(sky: SkyExposureInputs, settings: ExposureSettings)
 /// with the live settings through `exposure_range`. A legacy no-op sky until one is
 /// resolved.
 #[derive(Debug, Resource, Clone, Copy, PartialEq)]
-pub struct ExposureRange {
+pub(crate) struct ExposureRange {
     /// The frame's `reflection_probe_ambiance`.
     pub(crate) reflection_probe_ambiance: f32,
     /// The frame's `gamma`.
@@ -465,7 +465,7 @@ impl ExtractComponent for SlExposure {
 }
 
 /// The plugin: registers extraction / uniform upload, loads the shader, seeds the
-/// [`ExposureRange`] resource, and wires the exposure pass into the 3D render
+/// `ExposureRange` resource, and wires the exposure pass into the 3D render
 /// schedule — after the glow / fog, before the tone mapper.
 #[derive(Debug, Default)]
 pub struct SlExposurePlugin;

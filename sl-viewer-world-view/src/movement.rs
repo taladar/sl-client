@@ -47,8 +47,29 @@ use crate::spacenav::{AvatarAxisSettings, AvatarNavSmoothing, SpacenavInput, ava
 use crate::world_api::AvatarState;
 use crate::world_api::TerrainState;
 use crate::world_api::{
-    AvatarControls, AvatarMotion, CameraMode, DoubleTapRun, ROTATION_SEND_INTERVAL_SECS,
+    AvatarControls, AvatarMotion, CameraMode, DoubleTapRun, ROTATION_SEND_INTERVAL_SECS, WorldPhase,
 };
+
+/// Avatar movement's own scheduling: walk / turn / fly the own avatar from the
+/// movement actions (viewer-input-action-map).
+///
+/// The simulator moves the avatar and the P31.4 dead-reckoner smooths the
+/// returned motion; the camera itself is driven by [`crate::camera::CameraPlugin`].
+/// Actions are already gated on focus by the action map, so no `run_if` is
+/// needed. The advertised intent is published as
+/// [`WorldPhase::AvatarControlsDriven`] so the object layer's client-side
+/// locomotion animations can order against it without naming this system.
+#[derive(Debug, Default)]
+pub struct AvatarMovementPlugin;
+
+impl Plugin for AvatarMovementPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            drive_avatar_controls.in_set(WorldPhase::AvatarControlsDriven),
+        );
+    }
+}
 
 /// How fast the ← / → keys turn the avatar's heading, in radians per second
 /// (~183°/s — a brisk turn that feels responsive rather than sluggish).
@@ -182,7 +203,7 @@ fn rotation_from_yaw(yaw: f32) -> Rotation {
               input + settings + smoothing, and the avatar motions plus the controls state and \
               command writer"
 )]
-pub fn drive_avatar_controls(
+pub(crate) fn drive_avatar_controls(
     actions: Res<ButtonInput<Action>>,
     mode: Res<CameraMode>,
     camera_aim: Res<CameraAim>,

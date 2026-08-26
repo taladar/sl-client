@@ -1354,12 +1354,9 @@ fn sync_material_widgets(
     }
     // PBR transform fields: the active channel's effective transform (base +
     // override), or defaults for a textureless channel.
-    let transform = effective_channel_transform(
-        &shown.pbr_base,
-        shown.pbr_override.as_ref(),
-        mode.pbr_channel(),
-    )
-    .unwrap_or_default();
+    let transform =
+        effective_channel_transform(&shown.pbr_base, shown.pbr_override.as_ref(), mode.pbr_type)
+            .unwrap_or_default();
     for (entity, field, mut editor) in &mut widgets.pbr_fields {
         if focus.get() == Some(entity) {
             continue;
@@ -2264,7 +2261,7 @@ fn commit_pbr_fields(
     if !material_edit_allowed(&selection, &objects, &mut notices) {
         return;
     }
-    let slots = pbr_channel_slots(mode.pbr_channel());
+    let slots = pbr_channel_slots(mode.pbr_type);
     let mut updates: Vec<MaterialOverrideUpdate> = Vec::new();
     for node in selection.iter() {
         let object_id: ObjectKey = node.full;

@@ -450,35 +450,48 @@ impl EditToolState {
 /// selector widgets each frame so the visibility system and the channel editors
 /// read one place. Mirrors the reference's `mComboMatMedia` /
 /// `mRadioMaterialType` / `mRadioPbrType` current indices.
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct MatModeState {
-    /// The `matmedia` selection ([`MATMEDIA_MATERIAL`] / [`MATMEDIA_PBR`]).
-    pub matmedia: usize,
-    /// The Material-mode map channel ([`MATTYPE_DIFFUSE`] / [`MATTYPE_NORMAL`] /
-    /// [`MATTYPE_SPECULAR`]).
-    pub mat_type: usize,
-    /// The PBR-mode channel ([`PBRTYPE_RENDER_MATERIAL`] …).
-    pub pbr_type: usize,
+    /// Which material system the tab edits.
+    pub matmedia: MatMedia,
+    /// The Material-mode map channel.
+    pub mat_type: MatChannel,
+    /// The PBR-mode channel.
+    pub pbr_type: PbrChannel,
 }
 
-impl Default for MatModeState {
-    /// The tab opens in Material / Diffuse mode with the render-material PBR
-    /// channel pre-selected, exactly as the reference initialises its selectors.
-    fn default() -> Self {
-        Self {
-            matmedia: MATMEDIA_MATERIAL,
-            mat_type: MATTYPE_DIFFUSE,
-            pbr_type: PBRTYPE_RENDER_MATERIAL,
-        }
-    }
+/// Which material system the Texture tab edits — the reference's `mComboMatMedia`
+/// selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MatMedia {
+    /// The legacy **Material** (Blinn-Phong) mode — a diffuse texture plus
+    /// optional normal / specular maps.
+    #[default]
+    Material,
+    /// The **PBR** (GLTF) render-material mode.
+    Pbr,
+}
+
+/// The Material-mode map channel a Blinn-Phong edit applies to — the
+/// reference's `mRadioMaterialType` selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MatChannel {
+    /// The diffuse **Texture** channel.
+    #[default]
+    Diffuse,
+    /// The **Bumpiness** (normal-map) channel.
+    Normal,
+    /// The **Shininess** (specular-map) channel.
+    Specular,
 }
 
 /// The active PBR texture channel a transform edits, or the whole material when
-/// the render-material channel is selected — the resolved form of
-/// [`MatModeState::pbr_type`] the PBR display path keys by.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// the render-material channel is selected — the reference's `mRadioPbrType`
+/// selection, and what the PBR display path keys by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PbrChannel {
     /// The complete render material (its asset id), not a single texture.
+    #[default]
     Material,
     /// The base-colour texture.
     BaseColor,
@@ -490,29 +503,91 @@ pub enum PbrChannel {
     Normal,
 }
 
+/// The `matmedia` combo options, in the order they appear in the strip. The one
+/// place the index↔mode mapping lives, like [`BUILD_TOOLS`].
+pub(crate) const MAT_MEDIA_MODES: [MatMedia; 2] = [MatMedia::Material, MatMedia::Pbr];
+
+/// The `radio_material_type` options, in the order they appear in the radio row.
+pub(crate) const MATERIAL_CHANNELS: [MatChannel; 3] = [
+    MatChannel::Diffuse,
+    MatChannel::Normal,
+    MatChannel::Specular,
+];
+
+/// The `radio_pbr_type` options, in the order they appear in the radio row.
+pub(crate) const PBR_CHANNELS: [PbrChannel; 5] = [
+    PbrChannel::Material,
+    PbrChannel::BaseColor,
+    PbrChannel::MetallicRoughness,
+    PbrChannel::Emissive,
+    PbrChannel::Normal,
+];
+
+impl MatMedia {
+    /// This mode's index in the `matmedia` strip — the tab it selects.
+    #[must_use]
+    pub fn radio_index(self) -> usize {
+        MAT_MEDIA_MODES
+            .iter()
+            .position(|&mode| mode == self)
+            .unwrap_or(0)
+    }
+
+    /// The mode a strip tab index selects, defaulting to Material for an index
+    /// the strip does not carry.
+    #[must_use]
+    pub fn from_radio_index(index: usize) -> Self {
+        MAT_MEDIA_MODES.get(index).copied().unwrap_or_default()
+    }
+}
+
+impl MatChannel {
+    /// This channel's index in the material-type radio row.
+    #[must_use]
+    pub fn radio_index(self) -> usize {
+        MATERIAL_CHANNELS
+            .iter()
+            .position(|&channel| channel == self)
+            .unwrap_or(0)
+    }
+
+    /// The channel a radio index selects, defaulting to Diffuse for an index the
+    /// row does not carry.
+    #[must_use]
+    pub fn from_radio_index(index: usize) -> Self {
+        MATERIAL_CHANNELS.get(index).copied().unwrap_or_default()
+    }
+}
+
+impl PbrChannel {
+    /// This channel's index in the PBR-type radio row.
+    #[must_use]
+    pub fn radio_index(self) -> usize {
+        PBR_CHANNELS
+            .iter()
+            .position(|&channel| channel == self)
+            .unwrap_or(0)
+    }
+
+    /// The channel a radio index selects, defaulting to the whole render
+    /// material for an index the row does not carry.
+    #[must_use]
+    pub fn from_radio_index(index: usize) -> Self {
+        PBR_CHANNELS.get(index).copied().unwrap_or_default()
+    }
+}
+
 impl MatModeState {
     /// Whether the Material (Blinn-Phong) mode is active.
     #[must_use]
     pub const fn is_material(self) -> bool {
-        self.matmedia == MATMEDIA_MATERIAL
+        matches!(self.matmedia, MatMedia::Material)
     }
 
     /// Whether the PBR (GLTF) mode is active.
     #[must_use]
     pub const fn is_pbr(self) -> bool {
-        self.matmedia == MATMEDIA_PBR
-    }
-
-    /// The active PBR channel for the current `pbr_type` selection.
-    #[must_use]
-    pub const fn pbr_channel(self) -> PbrChannel {
-        match self.pbr_type {
-            PBRTYPE_BASE_COLOR => PbrChannel::BaseColor,
-            PBRTYPE_METALLIC => PbrChannel::MetallicRoughness,
-            PBRTYPE_EMISSIVE => PbrChannel::Emissive,
-            PBRTYPE_NORMAL => PbrChannel::Normal,
-            _material => PbrChannel::Material,
-        }
+        matches!(self.matmedia, MatMedia::Pbr)
     }
 }
 
@@ -544,39 +619,6 @@ pub enum GridFrame {
     /// command.
     Reference,
 }
-
-/// The `matmedia` combo index for the legacy **Material** (Blinn-Phong) mode —
-/// diffuse texture plus optional normal / specular maps.
-pub const MATMEDIA_MATERIAL: usize = 0;
-
-/// The `matmedia` combo index for the **PBR** (GLTF) render-material mode.
-pub const MATMEDIA_PBR: usize = 1;
-
-/// The `radio_material_type` index for the diffuse **Texture** channel.
-pub const MATTYPE_DIFFUSE: usize = 0;
-
-/// The `radio_material_type` index for the **Bumpiness** (normal-map) channel.
-pub const MATTYPE_NORMAL: usize = 1;
-
-/// The `radio_material_type` index for the **Shininess** (specular-map) channel.
-pub const MATTYPE_SPECULAR: usize = 2;
-
-/// The `radio_pbr_type` index for the whole render **material** (the material-id
-/// swatch — assign or clear a stored GLTF material asset).
-pub const PBRTYPE_RENDER_MATERIAL: usize = 0;
-
-/// The `radio_pbr_type` index for the PBR **base-colour** channel transform.
-pub const PBRTYPE_BASE_COLOR: usize = 1;
-
-/// The `radio_pbr_type` index for the PBR **metallic-roughness** channel
-/// transform.
-pub const PBRTYPE_METALLIC: usize = 2;
-
-/// The `radio_pbr_type` index for the PBR **emissive** channel transform.
-pub const PBRTYPE_EMISSIVE: usize = 3;
-
-/// The `radio_pbr_type` index for the PBR **normal** channel transform.
-pub const PBRTYPE_NORMAL: usize = 4;
 
 /// The most entries the mute list holds — the reference's `MuteListLimit`
 /// debug setting, whose default this matches. A mute past the limit is
@@ -4231,6 +4273,32 @@ pub enum WorldPhase {
     AvatarsUpdated,
     /// The third-person camera has consumed this frame's orbit input.
     CameraOrbited,
+    /// This frame's playing animations have been sampled onto every avatar's
+    /// skeleton, so the set each avatar is playing is settled.
+    AvatarSkeletonsDriven,
+    /// This frame's avatar appearance rebuild is done: every rigged body has
+    /// been re-shaped from its visual params and its baked region materials
+    /// settled.
+    AvatarAppearanceApplied,
+    /// This frame's per-avatar runtime morph params (eye blink, body physics,
+    /// hand pose) have been folded into the mesh morph weights.
+    AvatarMorphsFolded,
+    /// This frame's movement intent has been folded into the own avatar's
+    /// controls and advertised to the simulator.
+    ///
+    /// The client-side locomotion animations live in the object layer but must
+    /// read the intent the *view* layer just advertised; this set is how that
+    /// constraint is stated without the object layer naming a system above it.
+    AvatarControlsDriven,
+    /// The camera's final pose for this frame has been written.
+    ///
+    /// Everything that faces, follows or centres on the viewpoint — the sky
+    /// dome and its discs, clouds and stars, the ocean, the particle
+    /// billboards, the local-light budget, the underwater-fog matrix — orders
+    /// itself against this. It is what lets those live in the scene layer,
+    /// *below* the camera that drives them, without naming the system that
+    /// positions it.
+    CameraPositioned,
 }
 
 /// The number of ground ("detail") textures a region blends between.
@@ -6041,6 +6109,20 @@ impl InputContext {
     pub const fn is_world(self) -> bool {
         matches!(self, Self::World)
     }
+}
+
+/// A run condition: true while the world owns the keyboard.
+///
+/// Put this on every system that reads a key a focused UI could want — which is
+/// all of them bar the `F`-key overlay toggles. See
+/// `sl_viewer_world_view::input_context` for why the arrow keys are in that set.
+///
+/// It lives here, beside [`InputContext`] itself, rather than with the system
+/// that computes the context: a gate stated in terms of shared vocabulary can be
+/// applied by any layer, and every layer that reads a key needs it.
+#[must_use]
+pub fn world_has_keyboard(context: Res<InputContext>) -> bool {
+    context.is_world()
 }
 
 /// The spawned HUD point nodes, keyed by raw attachment-point id, so an

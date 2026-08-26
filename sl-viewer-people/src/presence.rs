@@ -371,7 +371,7 @@ fn track_presence_activity(
 ///
 /// The `ControlFlags::AWAY`(sl_client_bevy::ControlFlags) bit is not sent
 /// here — the movement driver owns the control-flag word and folds the away bit
-/// into it ([`crate::movement::drive_avatar_controls`]), because a separate
+/// into it (`movement::drive_avatar_controls`), because a separate
 /// writer would just fight it for the same field.
 fn advertise_presence(
     settings: Option<Res<ViewerSettings>>,

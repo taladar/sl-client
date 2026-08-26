@@ -68,8 +68,83 @@ use crate::world_api::DecodedTextures;
 use crate::world_api::ObjectState;
 use crate::world_api::{
     AppearanceDirtyStamps, AvatarAnchor, AvatarEntities, AvatarMotion, AvatarPickTarget,
-    AvatarState, NameRecord, Seated, SeatedTarget, despawn_avatar,
+    AvatarState, NameRecord, Seated, SeatedTarget, WorldPhase, despawn_avatar,
 };
+
+/// The avatar appearance pipeline's own scheduling.
+///
+/// Re-shape each rigged body from its avatar's visual params — morph targets
+/// (P13.3) and skeletal proportions (P13.4) — show/hide whole base regions from
+/// the worn skirt / mesh-body items (P13.5), then fetch each avatar's
+/// server-published baked textures (P14.1) and drape them over the matching body
+/// regions (P14.2), filling each region material once its bake decodes. When the
+/// grid publishes no server bake for our own avatar (OpenSim), drape the locally
+/// composited client-side bake (P15.3) over the regions it did not bake, after
+/// the server-bake assignment so a real bake still wins.
+///
+/// The rebuild is published as [`WorldPhase::AvatarAppearanceApplied`] and the
+/// morph fold as [`WorldPhase::AvatarMorphsFolded`], so the animation pipeline
+/// can order against them without naming a system here.
+#[derive(Debug, Default)]
+pub struct AvatarAppearancePlugin;
+
+impl Plugin for AvatarAppearancePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            Update,
+            (
+                // Give each freshly-spawned placeholder its shared mesh and
+                // material. The spawn path records only *that* an avatar is
+                // showing a placeholder (the `AvatarSphere` marker); what one
+                // looks like is render machinery, and keeping it here is what
+                // holds the avatar mirror clear of the asset stores.
+                dress_avatar_spheres.after(WorldPhase::AvatarsUpdated),
+                apply_avatar_appearance.in_set(WorldPhase::AvatarAppearanceApplied),
+                // Drive the per-frame runtime morph params (eye blink, body
+                // physics) into each part's `MeshMorphWeights` (P31.12a), after
+                // the appearance rebuild has (re)seeded those components.
+                apply_avatar_runtime_morphs
+                    .in_set(WorldPhase::AvatarMorphsFolded)
+                    .after(WorldPhase::AvatarAppearanceApplied),
+                // Render our own avatar from its worn shape, not the server's
+                // echo of our own last publish (R12); after the appearance
+                // rebuild so it overrides a just-stored server appearance.
+                apply_own_shape_from_wearables.after(WorldPhase::AvatarAppearanceApplied),
+                apply_avatar_part_visibility,
+                ingest_avatar_bakes,
+                // The avatar pies' manual Tex Refresh: re-issue an agent's bake
+                // fetches, before assignment so a refreshed bake is picked up
+                // the same frame it re-decodes.
+                handle_refetch_avatar_textures,
+                assign_avatar_bake_materials,
+                apply_avatar_bake_textures,
+                apply_own_local_bake.after(assign_avatar_bake_materials),
+                // Point each worn bake-on-mesh (BoM) rigged face at its wearer's
+                // baked region material (P17.3), after both bake-assignment
+                // paths have settled the region materials this frame.
+                apply_bom_face_materials
+                    .after(assign_avatar_bake_materials)
+                    .after(apply_own_local_bake),
+                // Publish our own client-side bake to the grid (P15.4): encode +
+                // upload each composited region over `UploadBakedTexture`, then
+                // advertise them in an `AgentSetAppearance` (OpenSim-only path).
+                crate::bake_publish::drive_bake_publish,
+            ),
+        );
+        if std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1") {
+            // R22b diagnostic census of unresolved coarse "blue sphere" avatars.
+            app.add_systems(Update, log_avatar_interest_census);
+        }
+        if std::env::var_os("SL_VIEWER_VOLUME_FOCUS").is_some() {
+            // Aim the camera at the avatar whose shape displaces its collision
+            // volumes the most (P34.3).
+            app.add_systems(
+                Update,
+                focus_camera_on_volume_shape.after(WorldPhase::CameraPositioned),
+            );
+        }
+    }
+}
 
 /// The radius, in metres, of an avatar placeholder sphere (a ~2 m-diameter
 /// UV-sphere, roughly avatar-sized).
@@ -118,11 +193,11 @@ const RGBA_CHANNELS: usize = 4;
 
 /// A marker component tagging an entity as an avatar placeholder sphere.
 #[derive(Component, Debug, Clone, Copy)]
-pub struct AvatarSphere;
+pub(crate) struct AvatarSphere;
 
 /// A marker on one rigged base-part render entity, tying it back to its avatar
 /// and its index in `AvatarBody::parts` / [`AvatarAssetLibrary::parts`] so the
-/// appearance system ([`apply_avatar_appearance`]) can rebuild just that part's mesh from
+/// appearance system (`apply_avatar_appearance`) can rebuild just that part's mesh from
 /// the avatar's resolved visual-param weights.
 #[derive(Component, Debug, Clone, Copy)]
 pub struct AvatarBodyPart {
@@ -159,7 +234,7 @@ impl AvatarBodyPart {
 /// [`apply_bom_face_materials`] keeps the face pointing at that region's material,
 /// falling back to the opaque skin placeholder until the bake resolves.
 #[derive(Component, Debug, Clone, Copy)]
-pub struct BomFace {
+pub(crate) struct BomFace {
     /// The wearer avatar whose bake textures this face samples.
     agent: AgentKey,
     /// The baked slot ([`avatar_texture`]) the sentinel named — the region whose
@@ -333,13 +408,13 @@ pub struct NameTag {
 
 /// The master name-tag toggle (the preferences General tab's headline switch;
 /// the reference `AvatarNameTagMode` off/on axis). Honoured by
-/// [`crate::name_tag_billboard::follow_tag_anchors`]; the full reference toggle set is the separate
-/// `viewer-name-tags-preferences` task.
+/// `name_tag_billboard::follow_tag_anchors`; the full reference toggle set is
+/// the separate `viewer-name-tags-preferences` task.
 pub const SETTING_SHOW_NAME_TAGS: &str = "ShowNameTags";
 
 /// Whether the logged-in avatar's own tag is shown (the reference
 /// `RenderNameShowSelf`). Honoured by
-/// [`crate::name_tag_billboard::follow_tag_anchors`].
+/// `name_tag_billboard::follow_tag_anchors`.
 pub const SETTING_SHOW_OWN_NAME_TAG: &str = "ShowOwnNameTag";
 
 /// The settings section the name-tag toggles live in.
@@ -894,7 +969,7 @@ const AVATAR_HOVER_PARAM: i32 = 11001;
     clippy::too_many_arguments,
     reason = "a Bevy system's parameters are its injected resources / queries"
 )]
-pub fn focus_camera_on_volume_shape(
+pub(crate) fn focus_camera_on_volume_shape(
     state: Res<AvatarState>,
     body: Option<Res<AvatarBody>>,
     library: Option<Res<AvatarAssetLibrary>>,
@@ -1287,6 +1362,36 @@ impl AvatarPlaceholderAssets {
     }
 }
 
+/// Give every undressed [`AvatarSphere`] the shared placeholder mesh and
+/// material.
+///
+/// The spawn path records *that* an avatar is showing a placeholder — the
+/// marker component — and this is the only place that knows what a placeholder
+/// looks like. Splitting it this way is what lets the avatar bookkeeping and
+/// the three systems that drive it stay clear of the render stores: a mesh
+/// handle and a material handle are built from [`Assets<Mesh>`] and
+/// [`Assets<FaceMaterial>`] and mean nothing to the layer that tracks agents.
+///
+/// Ordered after the spawning systems, so a sphere is dressed in the frame it
+/// appears (the `.after` edges make Bevy flush their commands first).
+pub(crate) fn dress_avatar_spheres(
+    undressed: Query<Entity, (With<AvatarSphere>, Without<Mesh3d>)>,
+    mut assets: ResMut<AvatarPlaceholderAssets>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<FaceMaterial>>,
+    mut commands: Commands,
+) {
+    if undressed.is_empty() {
+        return;
+    }
+    let (mesh, material) = assets.handles(&mut meshes, &mut materials);
+    for sphere in &undressed {
+        commands
+            .entity(sphere)
+            .insert((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())));
+    }
+}
+
 /// Spawn the floating world-space name-tag billboard for `agent`, anchored
 /// to `anchor`, floating `tag_height` metres above it, and pulled toward
 /// the camera by `pull_radius` metres so the avatar's own body cannot
@@ -1317,21 +1422,27 @@ fn spawn_label(
 
 /// Spawn a placeholder sphere and its floating name tag for `agent` at
 /// `translation`, returning both entities.
+///
+/// The sphere is spawned as a *marked position* — [`AvatarSphere`] and a
+/// transform — and carries no render handles. [`dress_avatar_spheres`] attaches
+/// the shared mesh and material afterwards, which is what keeps the whole
+/// spawn path (and the three systems that drive it) free of
+/// [`Assets<Mesh>`] / [`Assets<FaceMaterial>`] and of the placeholder-asset
+/// resource itself.
 fn spawn_sphere(
     state: &AvatarState,
-    assets: &mut AvatarPlaceholderAssets,
     agent: AgentKey,
     translation: Vec3,
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
 ) -> AvatarEntities {
-    let (mesh, material) = assets.handles(meshes, materials);
     let sphere = commands
         .spawn((
-            Mesh3d(mesh),
-            MeshMaterial3d(material),
             Transform::from_translation(translation),
+            // Spelled out rather than left to `Mesh3d`'s required components,
+            // which no longer arrive with the spawn: the visibility filters
+            // (`hide_suppressed_avatars` and the derender hand-off below) must
+            // see a sphere from the frame it appears, dressed or not.
+            Visibility::default(),
             AvatarSphere,
             AvatarAnchor,
             // Avatars are dynamic content for reflection probes: this whole
@@ -1468,21 +1579,12 @@ fn spawn_body(
 ///
 /// A full object supersedes any coarse placeholder for the same agent (the
 /// object position is precise), so an existing coarse sphere is despawned.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "spawning or moving one avatar needs the state it is recorded in, \
-              the placeholder assets, the object update, the loaded body assets, \
-              the own-agent id, and the Commands / mesh / material sinks"
-)]
 fn apply_object(
     state: &mut AvatarState,
-    assets: &mut AvatarPlaceholderAssets,
     object: &Object,
     body: Option<&AvatarBody>,
     own: Option<AgentKey>,
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
 ) {
     let agent = AgentKey::from(object.full_id.uuid());
     let scoped = object.scoped_id();
@@ -1591,12 +1693,9 @@ fn apply_object(
         }
         None => spawn_sphere(
             state,
-            assets,
             agent,
             sphere_translation(object, region_offset),
             commands,
-            meshes,
-            materials,
         ),
     };
     commands.entity(entities.anchor).insert(avatar_motion);
@@ -1639,12 +1738,9 @@ fn apply_object(
 /// no body (a coarse-only one already has the placeholder).
 pub(crate) fn derender_agent(
     state: &mut AvatarState,
-    assets: &mut AvatarPlaceholderAssets,
     agent: AgentKey,
     at: Option<Vec3>,
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
 ) {
     let scoped = state
         .by_scoped
@@ -1664,7 +1760,7 @@ pub(crate) fn derender_agent(
     if let Some(at) = at
         && !state.coarse.contains_key(&agent)
     {
-        let entities = spawn_sphere(state, assets, agent, at, commands, meshes, materials);
+        let entities = spawn_sphere(state, agent, at, commands);
         commands.entity(entities.anchor).insert(Visibility::Hidden);
         state.coarse.insert(agent, entities);
     }
@@ -1683,24 +1779,14 @@ pub(crate) fn derender_agent(
 /// neighbour terrain (R24). The reconcile is scoped to `region`, so a
 /// neighbour's update never despawns another region's dots — and an empty
 /// update for a region (emitted when it is disabled) drops exactly its dots.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "reconciling one region's coarse dots needs the state they are \
-              recorded in, the placeholder assets, the region + scene origin (to \
-              offset), the update's locations + you index, and the Commands / \
-              mesh / material sinks to spawn spheres"
-)]
 fn apply_coarse(
     state: &mut AvatarState,
-    assets: &mut AvatarPlaceholderAssets,
     region: RegionHandle,
     origin: Option<RegionHandle>,
     own: Option<AgentKey>,
     locations: &[CoarseLocation],
     you: Option<usize>,
     commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<FaceMaterial>,
 ) {
     // The neighbour region's south-west corner relative to the scene origin, in
     // Second Life east/north metres (0 for the root region itself).
@@ -1735,15 +1821,7 @@ fn apply_coarse(
                 .insert(Transform::from_translation(translation));
         } else {
             state.request_name(agent);
-            let entities = spawn_sphere(
-                state,
-                assets,
-                agent,
-                translation,
-                commands,
-                meshes,
-                materials,
-            );
+            let entities = spawn_sphere(state, agent, translation, commands);
             state.coarse.insert(agent, entities);
         }
         state.coarse_region.insert(agent, region);
@@ -1952,22 +2030,13 @@ pub fn recenter_avatars(
 /// Spawn / move / despawn the placeholder of every avatar the simulator streams
 /// as a full in-world object (`pcode` 47), requesting each avatar's legacy name
 /// once.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "a Bevy system's parameters are its injected resources: the event stream, the \
-              session identity, the avatar mirror, the derender list it is gated on, the \
-              loaded body, and the three ECS sinks a spawn writes to"
-)]
 pub fn update_avatar_objects(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
-    mut assets: ResMut<AvatarPlaceholderAssets>,
     derender: Res<crate::world_api::DerenderList>,
     body: Option<Res<AvatarBody>>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let body = body.as_deref();
     for event in events.read() {
@@ -1999,16 +2068,7 @@ pub fn update_avatar_objects(
                     } else {
                         state.ever_full_object.insert(agent);
                     }
-                    apply_object(
-                        &mut state,
-                        &mut assets,
-                        object,
-                        body,
-                        identity.agent_id,
-                        &mut commands,
-                        &mut meshes,
-                        &mut materials,
-                    );
+                    apply_object(&mut state, object, body, identity.agent_id, &mut commands);
                 }
             }
             SlSessionEvent::ObjectRemoved { local_id, .. } => {
@@ -2143,10 +2203,7 @@ pub fn update_coarse_avatars(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut state: ResMut<AvatarState>,
-    mut assets: ResMut<AvatarPlaceholderAssets>,
     mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<FaceMaterial>>,
 ) {
     let origin = identity.region_handle;
     let own = identity.agent_id;
@@ -2160,15 +2217,12 @@ pub fn update_coarse_avatars(
         {
             apply_coarse(
                 &mut state,
-                &mut assets,
                 *region_handle,
                 origin,
                 own,
                 locations,
                 *you,
                 &mut commands,
-                &mut meshes,
-                &mut materials,
             );
         }
     }
@@ -2182,7 +2236,7 @@ pub fn update_coarse_avatars(
 /// pinpoints whether an unresolved sphere is a "never streamed" (interest-list /
 /// cross-region) case or a "streamed but unrendered" (viewer) case. A no-op unless the
 /// env flag is set.
-pub fn log_avatar_interest_census(
+pub(crate) fn log_avatar_interest_census(
     time: Res<Time>,
     state: Res<AvatarState>,
     mut next_at: Local<f32>,
@@ -2263,7 +2317,7 @@ pub struct RefetchAvatarTextures {
 /// Handle a [`RefetchAvatarTextures`] request by re-issuing the agent's baked-
 /// texture fetches (`refetch_bakes`), using the same server-bake /
 /// by-UUID rule the initial ingest does.
-pub fn handle_refetch_avatar_textures(
+pub(crate) fn handle_refetch_avatar_textures(
     mut requests: MessageReader<RefetchAvatarTextures>,
     mut state: ResMut<AvatarState>,
     mut manager: ResMut<TextureManager>,
@@ -2295,7 +2349,7 @@ pub fn handle_refetch_avatar_textures(
 /// avatars' viewers' client-side bakes — either way they are published ids the
 /// viewer simply fetches. A slot with no real bake (empty / default / invisible)
 /// is skipped, so a region with no published texture keeps its flat skin tint.
-pub fn ingest_avatar_bakes(
+pub(crate) fn ingest_avatar_bakes(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<AvatarState>,
     mut manager: ResMut<TextureManager>,
@@ -2678,7 +2732,7 @@ const fn classify_bake_alpha(decoded: &DecodedTexture) -> BakeAlpha {
     clippy::too_many_arguments,
     reason = "a Bevy system reading the tracked bakes and the ECS resources the region materials need"
 )]
-pub fn assign_avatar_bake_materials(
+pub(crate) fn assign_avatar_bake_materials(
     mut state: ResMut<AvatarState>,
     body: Option<Res<AvatarBody>>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
@@ -2752,7 +2806,7 @@ pub fn assign_avatar_bake_materials(
 /// bakes in one frame would otherwise upload every bake at once, adding to the
 /// serial `extract_render_asset<GpuImage>` spike. A bake already uploaded (cached)
 /// is free to reuse, so it always applies even with the budget spent.
-pub fn apply_avatar_bake_textures(
+pub(crate) fn apply_avatar_bake_textures(
     store: Res<DecodedTextures>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     mut budget: ResMut<TextureApplyBudget>,
@@ -2802,11 +2856,11 @@ const LOCAL_BAKE_SIZE: u32 = 512;
 ///
 /// On a grid that publishes no server "Sunshine" bake for our own avatar
 /// (OpenSim, and any grid without central baking) our own avatar would otherwise
-/// stay an untextured cloud: the P14 [`ingest_avatar_bakes`] path finds no baked
-/// UUIDs in our own appearance, so [`assign_avatar_bake_materials`] leaves our
+/// stay an untextured cloud: the P14 `ingest_avatar_bakes` path finds no baked
+/// UUIDs in our own appearance, so `assign_avatar_bake_materials` leaves our
 /// body on the flat skin material. This resource instead holds the bake the
 /// *viewer* composited from the worn wearable layers (P15.1/P15.2), which
-/// [`apply_own_local_bake`] drapes over our own body regions — the client-bake
+/// `apply_own_local_bake` drapes over our own body regions — the client-bake
 /// counterpart of the server bake other avatars (and our own on Second Life)
 /// carry.
 #[derive(Debug, Resource, Default)]
@@ -2850,7 +2904,7 @@ impl OwnLocalBake {
     }
 
     /// Force the client-side bake to re-composite on the next
-    /// [`apply_own_local_bake`] — the appearance editor calls this after a live
+    /// `apply_own_local_bake` — the appearance editor calls this after a live
     /// texture / tint edit changes the worn bake inputs.
     pub const fn invalidate(&mut self) {
         self.built_generation = None;
@@ -2996,7 +3050,7 @@ struct LocalBakeJob {
     clippy::too_many_arguments,
     reason = "a Bevy system compositing our own bake and draping it over the body-region materials"
 )]
-pub fn apply_own_local_bake(
+pub(crate) fn apply_own_local_bake(
     identity: Res<SlIdentity>,
     inputs: Res<OwnBakeInputs>,
     state: Res<AvatarState>,
@@ -3107,7 +3161,7 @@ pub fn apply_own_local_bake(
 /// the avatar for re-shaping. Self-healing: it re-asserts the worn shape if a
 /// later server appearance overwrites it, and picks up a re-outfit; a param no
 /// worn wearable sets falls back to its table default (the neutral Ruth shape).
-pub fn apply_own_shape_from_wearables(
+pub(crate) fn apply_own_shape_from_wearables(
     identity: Res<SlIdentity>,
     inputs: Res<OwnBakeInputs>,
     library: Option<Res<AvatarAssetLibrary>>,
@@ -3146,7 +3200,7 @@ const APPEARANCE_MAX_WAIT_SECS: f64 = 1.0;
 const DEFAULT_APPEARANCE_APPLY_BUDGET: usize = 2;
 
 /// The per-frame cap on avatars whose appearance
-/// [`apply_avatar_appearance`] resolves and re-meshes (see
+/// `apply_avatar_appearance` resolves and re-meshes (see
 /// `DEFAULT_APPEARANCE_APPLY_BUDGET`).
 #[derive(Debug, Resource)]
 pub struct AppearanceApplyBudget {
@@ -3194,7 +3248,7 @@ impl Default for AppearanceApplyBudget {
     clippy::type_complexity,
     reason = "a Bevy query whose disjointness filters spell out the exact anchor archetype"
 )]
-pub fn apply_avatar_appearance(
+pub(crate) fn apply_avatar_appearance(
     mut events: MessageReader<SlEvent>,
     mut decoded: MessageReader<TextureDecoded>,
     library: Option<Res<AvatarAssetLibrary>>,
@@ -3558,7 +3612,7 @@ pub fn apply_avatar_appearance(
 
 /// Per-frame overrides for avatar runtime morph params (P31.12a): the eye-blink
 /// ([[viewer-p31-12b]]) and body-physics ([[viewer-p34-1]]) drivers write a named
-/// param's target weight here, keyed by avatar, and [`apply_avatar_runtime_morphs`]
+/// param's target weight here, keyed by avatar, and `apply_avatar_runtime_morphs`
 /// folds each into the affected parts' `MeshMorphWeights` every frame. A param
 /// with no entry stays at its appearance-resolved rest weight.
 #[derive(Resource, Debug, Default)]
@@ -3617,7 +3671,7 @@ impl AvatarRuntimeMorphs {
 /// runtime morph, so [`apply_avatar_runtime_morphs`] can map an avatar's named
 /// override weights onto the right weight index without touching the mesh asset.
 #[derive(Component, Debug, Clone)]
-pub struct RuntimeMorphParams {
+pub(crate) struct RuntimeMorphParams {
     /// Runtime morph-target names, in the mesh's morph-target (weight) order.
     names: Vec<String>,
     /// Each param's rest (appearance-resolved) weight — the value the per-frame
@@ -3670,7 +3724,7 @@ fn attach_runtime_morphs(
 /// `MeshMorphWeights` changed and re-uploads the part's morph weights, so an
 /// idle avatar (no blink mid-cycle, no body-physics displacement) must take the
 /// read-only path and upload nothing.
-pub fn apply_avatar_runtime_morphs(
+pub(crate) fn apply_avatar_runtime_morphs(
     morphs: Res<AvatarRuntimeMorphs>,
     mut parts: Query<(&AvatarBodyPart, &RuntimeMorphParams, &mut MeshMorphWeights)>,
 ) {
@@ -3841,7 +3895,7 @@ fn part_clothing_mask(
 /// The clothing-morph alpha masks (P14.5) — the per-vertex flared-cuff carving —
 /// are a *geometry* mask applied in [`apply_avatar_appearance`], not a visibility
 /// toggle, so they are not handled here.
-pub fn apply_avatar_part_visibility(
+pub(crate) fn apply_avatar_part_visibility(
     state: Res<AvatarState>,
     bake_mats: Res<AvatarBakeMaterials>,
     complexity: Res<crate::avatar_complexity::AvatarComplexityModel>,
@@ -3948,7 +4002,7 @@ pub fn apply_avatar_part_visibility(
     clippy::too_many_arguments,
     reason = "a Bevy system: the ECS resources / queries it needs plus a diagnostic Local"
 )]
-pub fn apply_bom_face_materials(
+pub(crate) fn apply_bom_face_materials(
     state: Res<AvatarState>,
     mut bake_mats: ResMut<AvatarBakeMaterials>,
     store: Res<DecodedTextures>,
@@ -4392,6 +4446,53 @@ mod tests {
                 propagated.rotation,
             );
         }
+        Ok(())
+    }
+
+    /// The placeholder's render handles are attached by the render pass, not the
+    /// spawn: a bare [`AvatarSphere`] marker is enough to be dressed, every sphere
+    /// shares the one mesh and the one material (so the stores hold exactly one of
+    /// each however many avatars appear), and an already-dressed sphere keeps the
+    /// handles it has rather than being re-inserted every frame.
+    #[test]
+    fn spheres_are_dressed_from_the_marker_and_share_one_mesh()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use super::{AvatarPlaceholderAssets, AvatarSphere, dress_avatar_spheres};
+        use crate::face_material::FaceMaterial;
+        use bevy::prelude::{App, Assets, Handle, Mesh, Mesh3d, MeshMaterial3d, Update};
+
+        let mut app = App::new();
+        app.init_resource::<AvatarPlaceholderAssets>()
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<Assets<FaceMaterial>>()
+            .add_systems(Update, dress_avatar_spheres);
+
+        let first = app.world_mut().spawn(AvatarSphere).id();
+        app.update();
+
+        let second = app.world_mut().spawn(AvatarSphere).id();
+        app.update();
+
+        let handles = |app: &App, entity| -> Option<(Handle<Mesh>, Handle<FaceMaterial>)> {
+            let mesh = app.world().get::<Mesh3d>(entity)?;
+            let material = app.world().get::<MeshMaterial3d<FaceMaterial>>(entity)?;
+            Some((mesh.0.clone(), material.0.clone()))
+        };
+        let (first_mesh, first_material) =
+            handles(&app, first).ok_or("the first sphere must be dressed")?;
+        let (second_mesh, second_material) =
+            handles(&app, second).ok_or("the second sphere must be dressed")?;
+        assert_eq!(first_mesh, second_mesh);
+        assert_eq!(first_material, second_material);
+        assert_eq!(app.world().resource::<Assets<Mesh>>().len(), 1);
+        assert_eq!(app.world().resource::<Assets<FaceMaterial>>().len(), 1);
+
+        // A third pass leaves the dressed spheres exactly as they are.
+        app.update();
+        assert_eq!(
+            handles(&app, first).ok_or("the first sphere stays dressed")?,
+            (first_mesh, first_material),
+        );
         Ok(())
     }
 

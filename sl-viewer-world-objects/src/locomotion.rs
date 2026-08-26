@@ -132,7 +132,7 @@ fn turn_intent(keyboard: &ButtonInput<KeyCode>) -> TurnIntent {
     clippy::too_many_arguments,
     reason = "a Bevy system reading time, keyboard, identity, controls, avatars, motions, and both animation resources"
 )]
-pub fn drive_own_locomotion(
+pub(crate) fn drive_own_locomotion(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
     identity: Res<SlIdentity>,

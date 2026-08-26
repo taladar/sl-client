@@ -225,7 +225,7 @@ pub(crate) struct MaterialInternContext {
     pbr_faces: Vec<u8>,
     /// Whether the object belongs to a HUD attachment — every HUD face's
     /// material is forced fullbright (`unlit`) in place by
-    /// [`apply_hud_fullbright`](sl_viewer_world_view::hud::apply_hud_fullbright).
+    /// `hud::apply_hud_fullbright`.
     hud: bool,
 }
 

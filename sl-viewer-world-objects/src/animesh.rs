@@ -19,10 +19,10 @@
 //!   the linkset's rigged submeshes to those joints (the animesh branch of the
 //!   worn-rigged-mesh bind), recording the rig's joint position overrides on the
 //!   control avatar rather than on any wearer;
-//! - [`ingest_object_animations`] fetches each signalled animation's motion and
-//!   [`drive_control_avatars`] reconciles each object's `ObjectAnimation` set
+//! - `ingest_object_animations` fetches each signalled animation's motion and
+//!   `drive_control_avatars` reconciles each object's `ObjectAnimation` set
 //!   into a merged per-root playing set, which — via
-//!   [`publish_control_avatars`] publishing the object's root matrix to the
+//!   `publish_control_avatars` publishing the object's root matrix to the
 //!   GPU-avatar feed — the shared passes-A–D pipeline samples, blends and
 //!   FK-poses in place (§5), exactly as it does an avatar's clips.
 //!
@@ -33,6 +33,24 @@
 //! position overrides its own rigged meshes impose.
 
 use std::collections::HashMap;
+
+/// The animesh control-avatar pose publish's own scheduling (P29.2).
+///
+/// Publish each animesh control avatar's pose slot to the GPU feed (its object
+/// world matrix + empty corrections) after transform propagation, so the GPU
+/// samples / blends / FK-poses it in place (Phase 4 §5) — no per-object joint
+/// entities remain.
+#[derive(Debug, Default)]
+pub struct AnimeshPosePlugin;
+
+impl Plugin for AnimeshPosePlugin {
+    fn build(&self, app: &mut App) {
+        app.add_systems(
+            PostUpdate,
+            publish_control_avatars.after(TransformSystems::Propagate),
+        );
+    }
+}
 
 use bevy::prelude::*;
 use sl_client_bevy::{
@@ -268,7 +286,7 @@ impl ControlAvatarState {
 /// animesh counterpart of
 /// [`ingest_avatar_animations`](crate::animations::ingest_avatar_animations),
 /// sharing the same [`AnimationManager`]. The request is idempotent.
-pub fn ingest_object_animations(
+pub(crate) fn ingest_object_animations(
     mut events: MessageReader<SlEvent>,
     mut manager: ResMut<AnimationManager>,
 ) {
@@ -296,7 +314,7 @@ pub fn ingest_object_animations(
 /// through the shared `AvatarBody::joint_index`). A root with no spawned
 /// control avatar or no drivable motion is omitted, so it keeps its bind-pose
 /// rest.
-pub fn drive_control_avatars(
+pub(crate) fn drive_control_avatars(
     time: Res<Time>,
     mut events: MessageReader<SlEvent>,
     manager: Res<AnimationManager>,
@@ -403,7 +421,7 @@ pub fn drive_control_avatars(
 /// root's `GlobalTransform` is current) and **before**
 /// [`stage_gpu_avatars`](crate::gpu_avatars) reads the feed. A no-op on a
 /// downlevel device, where the GPU pipeline is inactive.
-pub fn publish_control_avatars(
+pub(crate) fn publish_control_avatars(
     control: Res<ControlAvatarState>,
     mut feed: ResMut<crate::gpu_avatars::GpuAvatarPoseFeed>,
     mode: Option<Res<crate::gpu_avatars::GpuAvatarsMode>>,

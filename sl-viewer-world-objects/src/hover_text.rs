@@ -2,10 +2,10 @@
 //! sets over a prim (vendors, rental boxes, scripted signs, HUD readouts).
 //!
 //! This reuses the world-space text billboard the avatar name tags render
-//! through ([`crate::name_tag_billboard`]): the same [`TagText`] layout, glyph
+//! through ([`crate::name_tag_billboard`]): the same `TagText` layout, glyph
 //! atlas and camera-facing constant-on-screen-size mesh, styled with
 //! `WorldTextStyle::HOVER_TEXT` (no chat-bubble backdrop, no 25 px screen
-//! lift, and a shorter `LLHUDText` fade sampled from [`HoverTextMaterials`]).
+//! lift, and a shorter `LLHUDText` fade sampled from `HoverTextMaterials`).
 //!
 //! The reference-faithful bits (`LLViewerObject::updateText`,
 //! `LLHUDText::renderText`):
@@ -31,8 +31,8 @@
 //! Billboards are **top-level** entities (never children of the object), so the
 //! object subtree's `Propagate(probe layers)` cannot leak a reflection-probe
 //! layer onto them — the same rule the name tags follow. Their lifetime is
-//! tracked in [`HoverTextLabels`] and reaped when the object's
-//! [`ObjectFloatingText`] is removed (cleared text *or* the object despawning).
+//! tracked in `HoverTextLabels` and reaped when the object's
+//! `ObjectFloatingText` is removed (cleared text *or* the object despawning).
 
 use bevy::ecs::system::SystemParam;
 use bevy::platform::collections::HashMap;
@@ -121,7 +121,7 @@ pub fn register_settings(settings: &mut crate::settings::ViewerSettings) {
 /// (`crate::objects::apply_object`). Absent when the object has no text (an
 /// `llSetText("")` clears it); a terse motion update never touches it.
 #[derive(Component, Debug, Clone, PartialEq, Eq)]
-pub struct ObjectFloatingText {
+pub(crate) struct ObjectFloatingText {
     /// The text (already trimmed of the trailing NUL by the decode).
     pub(crate) text: String,
     /// The RGBA colour, **as transmitted** — the alpha byte is inverted on the
@@ -160,7 +160,7 @@ impl ObjectFloatingText {
 /// A world-space floating-text billboard, pointing back at the object entity it
 /// floats over so [`follow_hover_text`] can track its world pose and Z scale.
 #[derive(Component, Debug, Clone, Copy)]
-pub struct HoverText {
+pub(crate) struct HoverText {
     /// The object entity this text labels.
     pub(crate) object: Entity,
 }
@@ -168,7 +168,7 @@ pub struct HoverText {
 /// Maps an object entity to its floating-text billboard entity, so a cleared
 /// (or despawned) object can reap the top-level billboard it owns.
 #[derive(Resource, Debug, Default)]
-pub struct HoverTextLabels(HashMap<Entity, Entity>);
+pub(crate) struct HoverTextLabels(HashMap<Entity, Entity>);
 
 /// The renderer-side components of a floating-text billboard (mirrors
 /// [`crate::name_tag_billboard::name_tag_render_bundle`], minus the name-tag
@@ -216,7 +216,7 @@ fn object_pull_radius(scale: &sl_client_bevy::Vector) -> f32 {
 /// [`ObjectFloatingText`]: a changed text (re)composes the billboard's content
 /// in place (spawning it on first sight), the compare-then-assign on
 /// [`TagContent`] keeping the layout pipeline quiet when nothing shown changed.
-pub fn sync_object_hover_text(
+pub(crate) fn sync_object_hover_text(
     mut commands: Commands,
     mut labels: ResMut<HoverTextLabels>,
     changed: Query<(Entity, &ObjectFloatingText, &ObjectSlMotion), Changed<ObjectFloatingText>>,
@@ -250,7 +250,7 @@ pub fn sync_object_hover_text(
 /// Reap floating-text billboards whose object lost its [`ObjectFloatingText`] —
 /// fired both when a script clears the text (`llSetText("")`, the component is
 /// removed) and when the object despawns entirely (the component goes with it).
-pub fn despawn_removed_hover_text(
+pub(crate) fn despawn_removed_hover_text(
     mut commands: Commands,
     mut labels: ResMut<HoverTextLabels>,
     mut removed: RemovedComponents<ObjectFloatingText>,
@@ -323,7 +323,7 @@ pub(crate) fn hover_text_anchor(object_world: &GlobalTransform, sl_scale_z: f32)
 
 /// Everything [`follow_hover_text`] reads about the object a billboard labels.
 #[derive(Debug, SystemParam)]
-pub struct HoverTextObjects<'w, 's> {
+pub(crate) struct HoverTextObjects<'w, 's> {
     /// Object world pose (for a linkset child this is the only correct world
     /// position) and its Second Life Z scale (the lift term).
     objects: Query<'w, 's, (&'static GlobalTransform, &'static ObjectSlMotion), With<SceneObject>>,
@@ -334,7 +334,7 @@ pub struct HoverTextObjects<'w, 's> {
 /// `GlobalTransform` (correct for linkset children), so the billboard trails a
 /// moving object by one frame — imperceptible for the stationary vendors /
 /// signs floating text lives on.
-pub fn follow_hover_text(
+pub(crate) fn follow_hover_text(
     cameras: Query<&GlobalTransform, With<crate::world_api::ViewerCamera>>,
     objects: HoverTextObjects,
     settings: Option<Res<crate::settings::ViewerSettings>>,
@@ -394,7 +394,7 @@ pub fn follow_hover_text(
     reason = "the registry stores verbatim copies of the setting values, so exact \
               equality is the correct change test"
 )]
-pub fn apply_hover_text_settings(
+pub(crate) fn apply_hover_text_settings(
     settings: Option<Res<crate::settings::ViewerSettings>>,
     mut registry: ResMut<HoverTextMaterials>,
     mut materials: ResMut<Assets<NameTagMaterial>>,
@@ -425,16 +425,38 @@ pub fn apply_hover_text_settings(
     }
 }
 
-/// The floating object-text plugin: the [`HoverTextMaterials`] registry and the
-/// [`HoverTextLabels`] lifetime map. The systems are scheduled alongside the
-/// name-tag chain in `lib.rs`.
+/// The floating object-text plugin (`llSetText`, viewer-hover-text): the
+/// `HoverTextMaterials` registry, the `HoverTextLabels` lifetime map, and
+/// the compose / place systems.
+///
+/// The *render* half of the chain — laying the composed content out into meshes
+/// — is shared with the avatar name tags and lives in
+/// [`crate::name_tag_billboard::NameTagBillboardPlugin`], which schedules
+/// `apply_hover_text_settings` alongside its own settings step.
 #[derive(Debug, Default)]
 pub struct HoverTextPlugin;
 
 impl Plugin for HoverTextPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HoverTextMaterials>()
-            .init_resource::<HoverTextLabels>();
+            .init_resource::<HoverTextLabels>()
+            // Reap billboards whose object cleared its text or despawned, then
+            // (re)compose the rest from the mirrored `ObjectFloatingText`.
+            .add_systems(
+                Update,
+                (despawn_removed_hover_text, sync_object_hover_text)
+                    .chain()
+                    .after(crate::world_api::WorldPhase::ObjectsUpdated),
+            )
+            // Read the object's freshly-propagated world pose and lift the text
+            // by 0.6 × the prim's Z scale in world up (the billboard's own
+            // transform then propagates next frame — a 1-frame trail on a moving
+            // object, imperceptible for the stationary vendors / signs floating
+            // text lives on, and never an origin flash).
+            .add_systems(
+                PostUpdate,
+                follow_hover_text.after(TransformSystems::Propagate),
+            );
     }
 }
 

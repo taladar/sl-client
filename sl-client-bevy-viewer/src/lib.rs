@@ -190,7 +190,6 @@ pub(crate) use sl_viewer_world_objects::legacy_materials;
 pub(crate) use sl_viewer_world_scene::lights;
 mod load_url;
 pub(crate) use sl_viewer_chat::local_chat_input;
-pub(crate) use sl_viewer_world_objects::locomotion;
 pub(crate) use sl_viewer_world_objects::locomotion_ik;
 pub(crate) use sl_viewer_world_objects::look_at;
 pub(crate) use sl_viewer_world_objects::material_cache;
@@ -357,13 +356,8 @@ use crate::about_floater::AboutFloaterPlugin;
 use crate::about_land::AboutLandPlugin;
 use crate::about_landmark::AboutLandmarkPlugin;
 use crate::about_region::AboutRegionPlugin;
-use crate::animations::{
-    AnimationManager, AnimationPlayback, drive_avatar_skeletons, ingest_avatar_animations,
-    poll_animations, pose_avatar_skeletons, update_animation_caps,
-};
-use crate::animesh::{
-    ControlAvatarState, drive_control_avatars, ingest_object_animations, publish_control_avatars,
-};
+use crate::animations::{AnimationManager, AnimationPlayback};
+use crate::animesh::ControlAvatarState;
 use crate::appearance::{ServerBakeState, drive_server_bake};
 use crate::asset_blacklist::AssetBlacklistPlugin;
 use crate::asset_budget::{MeshUploadBudget, reset_mesh_upload_budget};
@@ -375,23 +369,17 @@ use crate::avatar_profile::AvatarProfilePlugin;
 use crate::avatars::RefetchAvatarTextures;
 use crate::avatars::{
     AppearanceApplyBudget, AvatarBakeMaterials, AvatarRuntimeMorphs, OwnLocalBake, VolumeMorphGain,
-    apply_avatar_appearance, apply_avatar_bake_textures, apply_avatar_names,
-    apply_avatar_part_visibility, apply_avatar_runtime_morphs, apply_bom_face_materials,
-    apply_own_local_bake, apply_own_shape_from_wearables, assign_avatar_bake_materials,
-    fit_avatar_tag_heights, focus_camera_on_volume_shape, handle_refetch_avatar_textures,
-    ingest_avatar_bakes, log_avatar_interest_census, recenter_avatars, setup_avatar_body,
+    apply_avatar_names, fit_avatar_tag_heights, recenter_avatars, setup_avatar_body,
     toggle_volume_morphs, update_avatar_objects, update_coarse_avatars,
 };
 use crate::bake_inputs::{
     OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
     drive_wearable_requests, poll_wearable_assets, update_asset_caps,
 };
-use crate::bake_publish::{OwnBakePublish, drive_bake_publish};
+use crate::bake_publish::OwnBakePublish;
 use crate::blocked::BlockedPlugin;
 use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
-use crate::camera::{
-    CameraPlugin, CameraSpin, CameraStart, SpinAxis, dump_camera_pose, position_camera,
-};
+use crate::camera::{CameraPlugin, CameraSpin, CameraStart, SpinAxis};
 use crate::chat::{
     ChatOverlay, position_chat_overlay, restyle_chat_overlay, setup_chat_overlay,
     tick_chat_overlay, update_chat_overlay,
@@ -399,10 +387,6 @@ use crate::chat::{
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
 use crate::derender::DerenderPlugin;
-use crate::diagnostics::{
-    PipelineOverlayVisible, pipeline_overlay_active, setup_pipeline_overlay,
-    toggle_pipeline_overlay, update_pipeline_overlay,
-};
 use crate::edit_selection::EditSelectionPlugin;
 use crate::edit_tool::EditToolPlugin;
 use crate::emoji_complete::ColonCompletePlugin;
@@ -419,7 +403,6 @@ use crate::glow::{SlGlow, SlGlowPlugin};
 use crate::group_notice::GroupNoticePlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
-use crate::hud::{apply_hud_fullbright, fit_hud_points, setup_hud_screen};
 use crate::hud_pick::pick_and_touch;
 use crate::i18n::ViewerI18nPlugin;
 use crate::input_action::InputActionPlugin;
@@ -436,17 +419,14 @@ use crate::legacy_materials::{
     apply_legacy_specular_maps, drive_legacy_material_requests, receive_legacy_materials,
     register_legacy_materials,
 };
-use crate::lights::{LocalLights, drive_local_lights};
 use crate::load_url::LoadUrlPlugin;
 use crate::local_chat_input::LocalChatInputPlugin;
-use crate::locomotion::drive_own_locomotion;
 use crate::materials::{
     MaterialManager, apply_blinn_phong_hide, apply_material_overrides, apply_pbr_textures,
     poll_materials, register_changed_render_materials, register_pbr_materials,
     revert_removed_render_materials, update_material_caps,
 };
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
-use crate::movement::drive_avatar_controls;
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::notification_host::{
     NotificationHostPlugin, ingest_alert_messages, spawn_notification_demo,
@@ -457,18 +437,15 @@ use crate::objects::{
     PendingBuilds, PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents,
     PrimLodTargets, RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments,
     apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_rigged_attachments,
-    apply_tree_lod, log_suspicious_objects, pick_object, prune_control_avatars, recenter_objects,
-    spawn_animesh_control_avatars, update_objects,
+    apply_tree_lod, recenter_objects, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
-use crate::particles::{ParticleSim, drive_particles, focus_camera_on_particles, setup_particles};
 use crate::people::PeoplePlugin;
 use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
-use crate::screenshot::{ScreenshotSchedule, capture_screenshots, poll_screenshot_saves};
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
@@ -479,11 +456,6 @@ use crate::session::{
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
 use crate::sit_camera::SitCameraPlugin;
-use crate::sky::{
-    apply_cloud_textures, apply_disc_textures, apply_sky_textures, apply_star_textures,
-    center_sky_on_camera, drive_clouds, drive_sky, drive_stars, drive_sun_moon_discs, setup_clouds,
-    setup_sky, setup_stars, setup_sun_moon_discs,
-};
 use crate::spacenav::SpacenavPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
 use crate::terrain::{
@@ -496,7 +468,7 @@ use crate::textures::{
     reset_texture_apply_budget, serve_texture_boosts, sync_texture_blacklist, update_texture_caps,
 };
 use crate::tonemap::{SlTonemap, SlTonemapPlugin};
-use crate::typing::{TypingState, drive_own_typing};
+use crate::typing::TypingState;
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_element::UiAction;
 use crate::ui_tab::TabWidgetPlugin;
@@ -508,13 +480,8 @@ use crate::ui_text_input::{
     TextInputDemoVisible, TextInputPlugin, apply_text_input_demo_visibility, setup_text_input_demo,
     toggle_text_input_demo, update_demo_value_readouts,
 };
-use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin, update_underwater_fog};
+use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin};
 use crate::virtual_list::VirtualListPlugin;
-use crate::water::{WaterLevel, apply_water_textures, drive_water, setup_water, update_water};
-use crate::water_exclusion::{
-    bind_water_exclusion_mask, convert_water_exclusion_faces, setup_water_exclusion,
-    sync_water_exclusion_camera,
-};
 use crate::world_api::AvatarControls;
 use crate::world_api::AvatarState;
 use crate::world_api::BoostTexture;
@@ -773,11 +740,11 @@ struct LoginOutcome {
 }
 
 /// Startup system: spawn the one [`ViewerCamera`]. The scene's directional light
-/// (the sun / moon) is spawned by [`crate::sky::setup_sky`], which also drives it
+/// (the sun / moon) is spawned by `sky::setup_sky`, which also drives it
 /// from the region's environment.
 ///
 /// The camera starts in third-person, which follows the avatar as soon as it
-/// arrives ([`position_camera`]), so no login camera-snap is needed. A fixed
+/// arrives (`camera::position_camera`), so no login camera-snap is needed. A fixed
 /// `--camera-position` instead starts it in **flycam** at that absolute pose (and
 /// aims it), which is what the unattended screenshot harness frames from; the
 /// `SL_VIEWER_CAMERA_*` envs seed the third-person orbit so the harness can also
@@ -1190,8 +1157,14 @@ fn run_session(
     .add_plugins(InputActionPlugin)
     // The camera system (viewer-camera-*): one `ViewerCamera` entity driven by a
     // `CameraMode` state machine (mouselook / third-person / flycam), replacing the
-    // debug fly-camera. Every `.after(position_camera)` consumer reads its pose.
+    // debug fly-camera. Every `WorldPhase::CameraPositioned` consumer reads its pose.
     .add_plugins(CameraPlugin)
+    // Walking / turning / flying the own avatar from the movement actions, and the
+    // screen-space HUD screen with its viewport-anchored attachment points.
+    .add_plugins((
+        crate::movement::AvatarMovementPlugin,
+        crate::hud::HudScreenPlugin,
+    ))
     // Scripted sit camera + forced mouselook a seat imposes on sit
     // (viewer-sit-target-and-stand-button): tracked here, applied by
     // `position_camera`.
@@ -1615,6 +1588,16 @@ fn run_session(
     // render): the embedded billboard shader + material pipeline; the tag
     // systems themselves register with the avatar systems below.
     .add_plugins(crate::name_tag_billboard::NameTagBillboardPlugin)
+    // The object layer's own stacks: the avatar appearance / bake pipeline, and
+    // the two `PostUpdate` pose passes that write animated joint globals after
+    // transform propagation.
+    .add_plugins((
+        crate::avatars::AvatarAppearancePlugin,
+        crate::animations::AvatarAnimationPlugin,
+        crate::animations::AvatarPosePlugin,
+        crate::animesh::AnimeshPosePlugin,
+        crate::objects::ObjectDiagnosticsPlugin,
+    ))
     // Object floating text (`llSetText`) reuses the name-tag billboard renderer
     // with its own fade registry + lifetime map (viewer-hover-text).
     .add_plugins(crate::hover_text::HoverTextPlugin)
@@ -1624,7 +1607,7 @@ fn run_session(
     // and the build floater.
     .add_plugins(crate::object_cost::ObjectCostPlugin)
     // The atmospheric sky dome material (P22.2), driven from the region's EEP
-    // environment by the `sky` module's systems below.
+    // environment by `SkyPlugin`.
     .add_plugins(SkyMaterialPlugin)
     // The sun / moon disc billboard material (P22.3), driven alongside the sky.
     .add_plugins(SunDiscMaterialPlugin)
@@ -1633,8 +1616,21 @@ fn run_session(
     // The night-time star-field material (P22.5), driven alongside the sky.
     .add_plugins(StarMaterialPlugin)
     // The water-surface material (P23.1), driven from the region's EEP water
-    // settings by the `water` module's systems below.
+    // settings by `WaterPlugin`.
     .add_plugins(WaterMaterialPlugin)
+    // The scene layer's own stacks, each scheduling itself against the world
+    // phases rather than being wired system-by-system here: the sky dome with
+    // its discs, clouds and stars; the endless ocean; the water-exclusion mask;
+    // the CPU particle simulation; the local-light budget; and the `F3`
+    // pipeline-status overlay.
+    .add_plugins((
+        crate::sky::SkyPlugin,
+        crate::water::WaterPlugin,
+        crate::water_exclusion::WaterExclusionPlugin,
+        crate::particles::ParticlesPlugin,
+        crate::lights::LocalLightsPlugin,
+        crate::diagnostics::PipelineOverlayPlugin,
+    ))
     // Water-relative transparency ordering (viewer-particle-water-ordering): a
     // render-world re-sort of the transparent phase so translucent content (a
     // fountain's spray, translucent prims) orders correctly against the
@@ -1806,7 +1802,6 @@ fn run_session(
         // The water-render bookkeeping (P23.1) is created by `setup_water` at
         // startup, so no `init_resource` is needed here; the surface level the
         // underwater-fog pass reads is a small resource published by `drive_water`.
-        .init_resource::<WaterLevel>()
         .init_resource::<PrimLodTargets>()
         .init_resource::<TreeLodTargets>()
         // The cross-instance geometry cache: shared mesh handles for identical
@@ -1816,8 +1811,6 @@ fn run_session(
         // identical face content, so matched copies batch into instanced draws
         // (`viewer-perf-material-intern`).
         .init_resource::<material_cache::MaterialCache>()
-        .init_resource::<LocalLights>()
-        .init_resource::<ParticleSim>()
         .init_resource::<AvatarState>()
         .init_resource::<avatars::AvatarPlaceholderAssets>()
         .init_resource::<AppearanceApplyBudget>()
@@ -1857,7 +1850,6 @@ fn run_session(
         .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
         .init_resource::<AnimationPlayback>()
         .init_resource::<environment_assets::EnvironmentAssetManager>()
-        .insert_resource(PipelineOverlayVisible::from_env())
         // The UI text & font foundation demo (viewer-ui-text-foundation): a
         // toggleable `EditableText` panel, seeded shown/hidden from
         // `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it.
@@ -1892,20 +1884,10 @@ fn run_session(
             Startup,
             (
                 setup_scene,
-                setup_sky,
-                setup_sun_moon_discs,
-                setup_clouds,
-                setup_stars,
-                setup_water,
-                // The water-exclusion mask camera + render target
-                // (`viewer-water-exclusion`); its mask is bound into the water
-                // material by `bind_water_exclusion_mask` once both exist.
-                setup_water_exclusion,
                 // The chat overlay now parents itself under the scaffold's
                 // `UiRoot` (so the snapshot include-UI-off hide covers it), and so
                 // must see the root.
                 setup_chat_overlay.after(UiScaffoldSystems::SpawnRoot),
-                setup_pipeline_overlay,
                 // The UI text & font foundation demo panel (viewer-ui-text-foundation),
                 // which parents itself to the scaffold's `UiRoot` and so must see it.
                 setup_text_demo.after(UiScaffoldSystems::SpawnRoot),
@@ -1913,11 +1895,6 @@ fn run_session(
                 // likewise parented to the scaffold's `UiRoot`.
                 setup_text_input_demo.after(UiScaffoldSystems::SpawnRoot),
                 setup_avatar_body,
-                // P35.1: the screen-space HUD screen + its attachment-point nodes, which
-                // a worn HUD is routed onto instead of a body joint.
-                setup_hud_screen,
-                // P30.2: upload the procedural default particle sprite.
-                setup_particles,
                 // GPU particles (viewer-perf-gpu-particles): upload the one shared
                 // unit-quad mesh every cloud instances.
                 setup_particle_quad,
@@ -2139,7 +2116,7 @@ fn run_session(
                             .after(update_avatar_objects)
                             .after(update_coarse_avatars)
                             .after(apply_avatar_names)
-                            .after(crate::animations::drive_avatar_skeletons)
+                            .after(world_api::WorldPhase::AvatarSkeletonsDriven)
                             .after(crate::groups::ingest_group_events),
                     )
                         .chain(),
@@ -2164,56 +2141,7 @@ fn run_session(
                         .after(apply_object_meshes)
                         .after(update_avatar_objects),
                 ),
-                // Object floating text (`llSetText`, viewer-hover-text): reap
-                // billboards whose object cleared its text or despawned, then
-                // (re)compose the rest from the mirrored `ObjectFloatingText`.
-                // The PostUpdate world-text chain lays out the changed content.
-                (
-                    hover_text::despawn_removed_hover_text.after(update_objects),
-                    hover_text::sync_object_hover_text.after(update_objects),
-                )
-                    .chain(),
                 apply_avatar_names,
-                // Re-shape each rigged body from its avatar's visual params — morph
-                // targets (P13.3) and skeletal proportions (P13.4) — show/hide whole
-                // base regions from the worn skirt / mesh-body items (P13.5), then
-                // fetch each avatar's server-published baked textures (P14.1) and
-                // drape them over the matching body regions (P14.2), filling each
-                // region material once its bake decodes. When the grid publishes no
-                // server bake for our own avatar (OpenSim), drape the locally
-                // composited client-side bake (P15.3) over the regions it did not bake,
-                // after the server-bake assignment so a real bake still wins. Nested
-                // into one tuple to stay within Bevy's per-tuple system limit.
-                (
-                    apply_avatar_appearance,
-                    // Drive the per-frame runtime morph params (eye blink, body
-                    // physics) into each part's `MeshMorphWeights` (P31.12a), after
-                    // the appearance rebuild has (re)seeded those components.
-                    apply_avatar_runtime_morphs.after(apply_avatar_appearance),
-                    // Render our own avatar from its worn shape, not the server's echo
-                    // of our own last publish (R12); after `apply_avatar_appearance`
-                    // so it overrides a just-stored server appearance.
-                    apply_own_shape_from_wearables.after(apply_avatar_appearance),
-                    apply_avatar_part_visibility,
-                    ingest_avatar_bakes,
-                    // The avatar pies' manual Tex Refresh: re-issue an agent's bake
-                    // fetches, before assignment so a refreshed bake is picked up
-                    // the same frame it re-decodes.
-                    handle_refetch_avatar_textures,
-                    assign_avatar_bake_materials,
-                    apply_avatar_bake_textures,
-                    apply_own_local_bake.after(assign_avatar_bake_materials),
-                    // Point each worn bake-on-mesh (BoM) rigged face at its wearer's
-                    // baked region material (P17.3), after both bake-assignment paths
-                    // have settled the region materials this frame.
-                    apply_bom_face_materials
-                        .after(assign_avatar_bake_materials)
-                        .after(apply_own_local_bake),
-                    // Publish our own client-side bake to the grid (P15.4): encode +
-                    // upload each composited region over `UploadBakedTexture`, then
-                    // advertise them in an `AgentSetAppearance` (OpenSim-only path).
-                    drive_bake_publish,
-                ),
                 // Append newly received local chat to the on-screen overlay, age each
                 // line so it fades and despawns once chat goes quiet
                 // (viewer-chat-overlay-fade), and keep the overlay pinned just above the
@@ -2244,12 +2172,6 @@ fn run_session(
                     // Persist the settings store when a logout is requested.
                     save_settings_on_logout,
                 ),
-                // Walk / turn / fly the own avatar from the movement actions
-                // (viewer-input-action-map): the simulator moves the avatar and the
-                // P31.4 dead-reckoner smooths the returned motion. The camera itself is
-                // driven by `CameraPlugin`. Actions are already gated on focus by the
-                // action map, so no `run_if` is needed here.
-                drive_avatar_controls,
             ),
         )
         // The crosshair pick tool (press `P`) to identify the object under the
@@ -2259,13 +2181,6 @@ fn run_session(
         .add_systems(
             Update,
             (
-                pick_object.run_if(world_has_keyboard),
-                // The screen-space HUD (P35.2): keep each HUD point anchored to its
-                // corner of the viewport as the window's aspect changes, and render every
-                // HUD face fullbright (the reference forces `LLFace::FULLBRIGHT` on a HUD
-                // attachment; here a lit one would also render black, since the world's
-                // sun is not on the HUD layer).
-                (fit_hud_points, apply_hud_fullbright),
                 // HUD picking & clicking (P35.3): a left click touches the HUD (or,
                 // failing that, world) object under the pointer through an orthographic
                 // HUD-camera pick, HUD before world. The cursor is free to click with
@@ -2308,13 +2223,6 @@ fn run_session(
                         bevy::time::common_conditions::on_timer(material_cache::PRUNE_INTERVAL),
                     ),
                 ),
-                // Key-toggled texture/mesh pipeline-status panel (P19.3): flip its
-                // resource on the toggle key, then drive the panel's visibility and
-                // (while shown) its text from the live store snapshots.
-                toggle_pipeline_overlay,
-                update_pipeline_overlay
-                    .run_if(pipeline_overlay_active)
-                    .after(toggle_pipeline_overlay),
                 // UI text & font foundation (viewer-ui-text-foundation): toggle /
                 // apply the demo panel's visibility (the F4 key). Nested into one
                 // tuple to stay within Bevy's per-tuple system limit.
@@ -2334,14 +2242,6 @@ fn run_session(
                         .after(toggle_text_input_demo),
                     update_demo_value_readouts.run_if(crate::ui_text_input::text_input_demo_active),
                 ),
-                // Local lights (P25.2): render the nearest / brightest light-flagged
-                // prims as Bevy point / spot lights, after the fly-camera so the
-                // distance-based budget selection uses the current viewpoint.
-                drive_local_lights.after(position_camera),
-                // Particles (P30.2): advance each source's CPU particle simulation and
-                // rebuild its camera-facing billboard mesh, after the fly-camera so the
-                // billboards face the current viewpoint.
-                drive_particles.after(position_camera),
                 // Flexi prims (P32.2): step each flexible prim's CPU chain simulation
                 // and rewrite its deformed geometry in place, after `update_objects` so
                 // this frame's spawns / rebuilds have seeded their chain state.
@@ -2356,191 +2256,33 @@ fn run_session(
                 restore_stopped_animations,
             ),
         )
-        // Atmospheric sky (P22.2): keep the sky dome centred on the camera, then fold
-        // the region environment + camera altitude into the sky material, the sun /
-        // moon directional light, and the ambient light, and swap each decoded sky
-        // overlay texture into the material. Run after the fly-camera so the dome
-        // tracks the current viewpoint.
+        // Terrain lighting (viewer-clouds-sun-occlusion): drive each region's ground
+        // with the sky frame's atmospheric sun / ambient colours, like the reference
+        // legacy terrain, after the camera so it reads the current altitude's sky
+        // frame. The sky, water, water-exclusion and underwater-fog stacks schedule
+        // themselves — see `SkyPlugin` and its siblings.
         .add_systems(
             Update,
-            (
-                center_sky_on_camera.after(position_camera),
-                drive_sky.after(position_camera),
-                apply_sky_textures,
-                // Terrain lighting (viewer-clouds-sun-occlusion): drive each region's
-                // ground with the sky frame's atmospheric sun / ambient colours, like
-                // the reference legacy terrain, after the camera so it reads the
-                // current altitude's sky frame.
-                crate::terrain::drive_terrain_lighting.after(position_camera),
-                // Sun / moon discs (P22.3): aim and colour the billboards from the same
-                // active sky frame (after the fly-camera, so they track the viewpoint),
-                // then swap each decoded disc texture into its material.
-                drive_sun_moon_discs.after(position_camera),
-                apply_disc_textures,
-                // Cloud layer (P22.4): fold the same active sky frame into the cloud
-                // material, accumulate the scroll, and swap in the decoded cloud noise.
-                drive_clouds.after(position_camera),
-                apply_cloud_textures,
-                // Star field (P22.5): centre / rotate the field on the camera, fade it
-                // in with the active sky frame's `star_brightness`, and swap in the
-                // decoded bloom texture.
-                drive_stars.after(position_camera),
-                apply_star_textures,
-                // Water surface (P23.1): learn each region's water height, then centre
-                // the endless ocean on the camera and place a per-region plane where a
-                // neighbour's sea level differs, fold the EEP water settings into the
-                // shared material (after the fly-camera, so the ocean tracks the
-                // viewpoint), and swap in the decoded wave normal map.
-                update_water,
-                drive_water.after(position_camera),
-                apply_water_textures,
-                // Water-exclusion surfaces (`viewer-water-exclusion`): route faces
-                // textured with the invisiprim-successor sentinel onto the mask
-                // layer, slave the mask camera to the main view (after the
-                // fly-camera so the mask lines up with what the water samples it
-                // against), and bind the finished mask into the water material.
-                convert_water_exclusion_faces,
-                sync_water_exclusion_camera.after(position_camera),
-                bind_water_exclusion_mask,
-                // Underwater fog (P23.1): refresh the camera's fog parameters (water
-                // level, EEP fog colour/density, reconstruction matrix) each frame,
-                // after the fly-camera so the matrix matches the current viewpoint.
-                update_underwater_fog
-                    .after(position_camera)
-                    .after(drive_water),
-            ),
+            crate::terrain::drive_terrain_lighting.after(world_api::WorldPhase::CameraPositioned),
         )
-        // Animations: keep the animation store's `ViewerAsset` cap current, request a
-        // motion for every animation each nearby avatar is playing, and fold finished
-        // resolves into the shared motion cache (P18.2); then drive each rigged
-        // avatar's skeleton from its playing motions, overlaying the sampled keyframe
-        // poses onto the appearance rest pose (P18.3, so after `apply_avatar_appearance`).
+        // The EEP settings-asset fetch cap for the World ▸ Environment Modern
+        // presets, and the session's camera-interest / viewport reports. The avatar
+        // animation pipeline that used to share this call schedules itself — see
+        // `AvatarAnimationPlugin`.
         .add_systems(
             Update,
             (
-                update_animation_caps,
-                // Refresh the EEP settings-asset fetch cap and drain finished
-                // fetch+decode tasks for the World ▸ Environment Modern presets.
                 environment_assets::update_environment_asset_caps,
                 environment_assets::poll_environment_assets,
-                ingest_avatar_animations,
-                poll_animations,
-                // Client-side locomotion / state animations for the own avatar (P31.6):
-                // derive its movement state from the P31.4 velocity + P31.5 controls and
-                // play the matching built-in animation when the simulator is silent about
-                // it. After the controls (so it reads the freshly advertised intent) and
-                // before the skeleton driver (so its client-driven set is reconciled into
-                // the same frame's pose).
-                drive_own_locomotion
-                    .after(drive_avatar_controls)
-                    .before(drive_avatar_skeletons)
-                    .run_if(world_has_keyboard),
-                // Typing state animation for the own avatar (P31.9): reconcile the typing
-                // state the nearby-chat bar drives, play `ANIM_AGENT_TYPE` locally, and
-                // broadcast a `StartTyping` / `StopTyping` `ChatFromViewer`. Not gated on
-                // `world_has_keyboard` — typing happens while the *chat field* holds the
-                // keyboard (the TextEntry context), so that gate would suppress it. Like
-                // locomotion it must reconcile its client-driven set before the skeleton
-                // driver folds it into the frame's pose.
-                drive_own_typing.before(drive_avatar_skeletons),
-                drive_avatar_skeletons.after(apply_avatar_appearance),
-                // Hand-pose morph (P31.13): cross-fade each avatar's hands into the pose
-                // its highest-priority playing animation asks for. After the skeleton
-                // driver (whose playing set it reads) and before the runtime-morph fold,
-                // so the cross-faded weights reach the GPU in the same frame.
-                hand_pose::drive_hand_poses
-                    .after(drive_avatar_skeletons)
-                    .before(apply_avatar_runtime_morphs),
                 report_camera_interest,
                 report_agent_viewport,
-                // Head & eye look-at tracking (P31.12): derive the own avatar's look-at
-                // target from the fly-camera, and ingest nearby avatars' `ViewerEffect`
-                // look-at gaze hints. The pose pass (PostUpdate) reads both.
-                look_at::update_own_look_at_target,
-                look_at::receive_look_at_effects,
-                // Activity-driven reach & aim (P31.15): the own avatar's object selection
-                // (the E key) and the point-at effect it publishes, other avatars' point-at
-                // effects, and the G key that plays an aim animation through the simulator
-                // so the targeting motion engages the way a scripted weapon would drive it.
-                // The pose pass (PostUpdate) reads the resulting targets.
-                (
-                    reach::select_object_under_crosshair.run_if(world_has_keyboard),
-                    reach::drive_own_point_at.after(reach::select_object_under_crosshair),
-                    reach::receive_point_at_effects,
-                    reach::drive_aim_animation.run_if(world_has_keyboard),
-                ),
-                // Avatar ground probe (P31.14): resolve what is under each avatar's root
-                // and ankles — the terrain land height combined with the simulator's
-                // collision (foot) plane, as the reference viewer's `getGround` does — for
-                // the foot IK and the landing recovery. It reads the ankle joint globals
-                // the pose pass wrote *last* frame.
-                ground::probe_avatar_ground,
-                // Animesh (P29): request each animated object's animation motions, drive
-                // its control-avatar skeleton from them (after its rigged meshes bind in
-                // `apply_rigged_attachments`), and drop control avatars whose object is
-                // gone (after `update_objects` has processed removals).
-                ingest_object_animations,
-                drive_control_avatars.after(apply_rigged_attachments),
-                // Spawn a control avatar as soon as an animesh has an animation playing
-                // (after `drive_control_avatars` folds the `ObjectAnimation` into the
-                // playback clock), so a late mesh bind does not lose an early animation.
-                spawn_animesh_control_avatars.after(drive_control_avatars),
-                prune_control_avatars.after(update_objects),
             ),
-        )
-        // Write the posed avatars' (and animesh control avatars') animated joint world
-        // matrices straight into their `GlobalTransform`s (P18.3 / P29.2), after
-        // transform propagation has produced the rest globals this frame — so the
-        // animated pose is what skinning / render extraction reads, without the
-        // limb-shear a rotation overlaid on the baked-scale local transform would cause.
-        .add_systems(
-            PostUpdate,
-            (
-                pose_avatar_skeletons.after(TransformSystems::Propagate),
-                // Publish each animesh control avatar's pose slot to the GPU
-                // feed (its object world matrix + empty corrections) after
-                // propagation, so the GPU samples/blends/FK-poses it in place
-                // (§5) — no per-object joint entities remain.
-                publish_control_avatars.after(TransformSystems::Propagate),
-                // (Worn rigid attachments no longer need a hand re-propagation:
-                // their attachment-point node is an avatar-root child whose local
-                // `Transform` the pose driver's socket writer sets each frame, so
-                // ordinary change-gated propagation seats the worn subtree — the
-                // former `pose_attachment_nodes` pass, Phase 4 §5.4.)
-                // Object floating text placement (viewer-hover-text): read the
-                // object's freshly-propagated world pose and lift the text by
-                // 0.6 × the prim's Z scale in world up (the billboard's own
-                // transform then propagates next frame — a 1-frame trail on a
-                // moving object, imperceptible for the stationary vendors /
-                // signs floating text lives on, and never an origin flash).
-                hover_text::follow_hover_text.after(TransformSystems::Propagate),
-            ),
-        )
-        // The world-space name-tag billboard chain
-        // (viewer-name-tags-billboard-render): materialise changed tag content
-        // as text spans, lay the spans out through the shared text pipeline,
-        // rebuild changed tag meshes, then place each tag over its avatar
-        // anchor (smoothed follow + distance cutoff + preference gates). All
-        // before transform propagation so page children inherit this frame's
-        // matrix; the layout step runs after the global span-change detector
-        // and after camera updates (its scale-factor source).
-        .add_systems(
-            PostUpdate,
-            (
-                name_tag_billboard::apply_name_tag_settings,
-                hover_text::apply_hover_text_settings,
-                name_tag_billboard::sync_tag_spans,
-                name_tag_billboard::layout_tag_text
-                    .after(bevy::text::detect_text_needs_rerender)
-                    .after(bevy::camera::CameraUpdateSystems),
-                name_tag_billboard::build_tag_meshes,
-                name_tag_billboard::follow_tag_anchors,
-                name_tag_billboard::solve_tag_overlap,
-                name_tag_billboard::sync_tag_pages,
-            )
-                .chain()
-                .before(TransformSystems::Propagate),
         );
+    // (Worn rigid attachments no longer need a hand re-propagation: their
+    // attachment-point node is an avatar-root child whose local `Transform` the
+    // pose driver's socket writer sets each frame, so ordinary change-gated
+    // propagation seats the worn subtree — the former `pose_attachment_nodes`
+    // pass, Phase 4 §5.4.)
     // Load the client-side avatar assets (if a directory was given) so rigged
     // bodies replace the placeholder spheres; absent them the viewer keeps spheres.
     if let Some(library) = load_avatar_library(viewer_assets) {
@@ -2550,33 +2292,6 @@ fn run_session(
     // (the `capture_screenshots` pattern) — a normal session pays no scheduler
     // dispatch for them at all. Each predicate mirrors the system's own
     // internal env check.
-    if std::env::var_os("SL_VIEWER_LOG_OBJECTS").is_some() {
-        app.add_systems(Update, log_suspicious_objects);
-    }
-    if std::env::var("SL_VIEWER_LOG_AVATAR_INTEREST").as_deref() == Ok("1") {
-        // R22b diagnostic census of unresolved coarse "blue sphere" avatars.
-        app.add_systems(Update, log_avatar_interest_census);
-    }
-    if std::env::var_os("SL_VIEWER_CAMERA_DUMP").is_some() {
-        // Log the camera pose as a ready-to-paste
-        // `--camera-position`/`--camera-look-at` for repeatable framing.
-        app.add_systems(Update, dump_camera_pose.after(position_camera));
-    }
-    if std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some() {
-        // Aim the camera at the busiest particle cloud so an unattended
-        // screenshot frames a real emitter.
-        app.add_systems(
-            Update,
-            focus_camera_on_particles
-                .after(drive_particles)
-                .after(position_camera),
-        );
-    }
-    if std::env::var_os("SL_VIEWER_VOLUME_FOCUS").is_some() {
-        // Aim the camera at the avatar whose shape displaces its collision
-        // volumes the most (P34.3).
-        app.add_systems(Update, focus_camera_on_volume_shape.after(position_camera));
-    }
     if std::env::var_os(crate::notification_host::DEMO_ENV).is_some() {
         // Raise a sample notification spread on startup so the live stacking /
         // fade / modal behaviour can be watched without a server alert.
@@ -2605,14 +2320,8 @@ fn run_session(
     // captured events once and drive the optional test rig (orbit light /
     // reflection probe). Only present in `--replay` mode.
     if let Some(config) = replay {
-        app.insert_resource(config).add_systems(
-            Update,
-            (
-                crate::avatar_replay::inject_replay_bundle,
-                crate::avatar_replay::drive_replay_orbit_light,
-                crate::avatar_replay::follow_replay_probe,
-            ),
-        );
+        app.insert_resource(config)
+            .add_plugins(crate::avatar_replay::AvatarReplayPlugin);
     }
     // In screenshot mode, capture a numbered PNG sequence of the window after a
     // startup delay, then quit (the R11 offline-inspection harness).
@@ -2620,8 +2329,9 @@ fn run_session(
         if let Err(error) = fs_err::create_dir_all(dir) {
             warn!("failed to create screenshot dir {}: {error}", dir.display());
         }
-        app.insert_resource(ScreenshotSchedule::new(dir.to_path_buf()))
-            .add_systems(Update, (capture_screenshots, poll_screenshot_saves));
+        app.add_plugins(crate::screenshot::ScreenshotPlugin {
+            dir: dir.to_path_buf(),
+        });
     }
     let _exit = app.run();
     app.world_mut()
