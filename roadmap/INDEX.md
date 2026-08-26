@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 99 |
-| ready | 257 |
+| ready | 256 |
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 33 |
-| done | 864 |
+| done | 865 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1373** |
@@ -229,7 +229,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (257)
+## ready (256)
 
 ### protocol
 
@@ -240,9 +240,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`build-structural-encapsulation-audit`](ready/build-structural-encapsulation-audit.md)
-  — Audit the workspace for structural and encapsulation improvements the crate
-  split exposed (blocked by `build-split-viewer-crate` (done))
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -1159,7 +1156,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (864)
+## done (865)
 
 ### protocol
 
@@ -1327,6 +1324,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`build-split-viewer-crate`](done/build-split-viewer-crate.md) — Split the
   viewer crate to regain cross-crate build parallelism
+- [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
+  — Audit the workspace for structural and encapsulation improvements the crate
+  split exposed (blocked by `build-split-viewer-crate` (done))
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))

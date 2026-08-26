@@ -241,7 +241,7 @@ Every one of these produced a wrong number here before being caught:
 
 - [build-split-world-avatar-crate](../ideas/build-split-world-avatar-crate.md) —
   what separating the avatar layer from the object layer would take.
-- [build-structural-encapsulation-audit](../blocked/build-structural-encapsulation-audit.md)
+- [build-structural-encapsulation-audit](build-structural-encapsulation-audit.md)
   — the 60 component types that are `pub` only to satisfy exported system
   signatures, and the render handles held where state lives.
 - [viewer-ecs-idiom-audit](../ideas/viewer-ecs-idiom-audit.md) — the
