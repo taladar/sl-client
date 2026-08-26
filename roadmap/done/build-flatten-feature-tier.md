@@ -27,7 +27,9 @@ set by the slowest one alone.
 
 `cargo build --release -p sl-client-bevy-viewer --timings`, then the
 infinite-core longest path through cargo's own unit-unblock graph
-(`unblocked_units` / `unblocked_rmeta_units` in the report's `UNIT_DATA`). The
+(`unblocked_units` / `unblocked_rmeta_units` in the report's `UNIT_DATA`) —
+`scripts/build-critical-path.py`, which was written for this task and does both
+the single-report solve and the noise-controlled before/after below. The
 "before" run: **a 279.1 s critical path against a 279.7 s wall clock** on 24
 cores. The build was entirely chain-bound — at no point would more cores have
 helped.

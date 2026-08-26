@@ -250,8 +250,43 @@ objdump -h target/release/sl-client-bevy-viewer |
   awk '$2 ~ /^\.debug/ {s+=strtonum("0x"$3)} END {print s/1048576, "MB"}'
 ```
 
-The `--timings` report is also the right starting point for the largest
-remaining lever, which is structural rather than configuration: the viewer is
-one crate of 283k lines with 228 private modules, so there is no cross-crate
-parallelism and any one-line edit recompiles all of it. Splitting it is tracked
-separately in the roadmap.
+### The critical path, not the wall clock
+
+Cargo's report shows what the cores happened to do on one run. For structural
+work — which crate depends on which — the number that matters is the **longest
+chain of crates that must compile one after another**, i.e. what the build
+would still cost on infinitely many cores. `scripts/build-critical-path.py`
+solves that from the same report:
+
+```console
+cargo build --release -p sl-client-bevy-viewer --timings
+python3 scripts/build-critical-path.py target/cargo-timings/cargo-timing.html
+```
+
+It prints the chain itself and then ranks each rebuilt workspace crate by the
+work still ahead of it once it starts — which is what an edit to that crate
+costs, and the right way to decide where structural work is worth spending.
+
+For a before/after, pass `--baseline`:
+
+```console
+python3 scripts/build-critical-path.py --baseline before.html after.html
+```
+
+Do not compare two raw critical paths. Per-unit compile times swing enough
+between runs (an untouched crate has come back 26.5 s and then 31.3 s) to swamp
+the effect being measured, and two runs rarely rebuild the same set of crates.
+`--baseline` handles both: it re-solves the *new* graph with the *baseline's*
+durations — same clock, different edges — and reports the delta over the
+segment the two runs share rather than over their absolute totals. Touch the
+lowest crate of the tier under study before each run so the same set rebuilds.
+
+One caveat that applies to every figure here: a warm dependency tree reports
+0.0 s for third-party units, so only the crates that actually rebuilt are real,
+and anything below them is understated.
+
+The structural lever this was built for is now spent — the monolithic viewer
+crate was split, the world tier split again, and the feature tier flattened
+from a chain into a fan. See the roadmap's `build-split-viewer-crate`,
+`build-split-world-avatar-crate` and `build-flatten-feature-tier` for what each
+measured and where it stopped.
