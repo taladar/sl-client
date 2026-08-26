@@ -2,7 +2,7 @@
 id: build-structural-encapsulation-audit
 title: Audit the workspace for structural and encapsulation improvements the crate split exposed
 topic: viewer
-status: blocked
+status: ready
 origin: crate-split work (2026-08) — patterns the visibility pass kept surfacing
 points: 8
 refs: [build-split-viewer-crate]

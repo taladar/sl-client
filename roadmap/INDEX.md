@@ -11,20 +11,22 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 98 |
-| ready | 256 |
-| blocked | 68 |
-| in-progress | 18 |
+| ideas | 99 |
+| ready | 257 |
+| blocked | 67 |
+| in-progress | 17 |
 | bugs | 33 |
-| done | 863 |
+| done | 864 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1372** |
+| **total** | **1373** |
 
-## ideas (98)
+## ideas (99)
 
 ### viewer
 
+- [`build-split-world-avatar-crate`](ideas/build-split-world-avatar-crate.md) —
+  Separate the avatar layer from the object layer in the world split
 - [`viewer-a11y-screen-reader`](ideas/viewer-a11y-screen-reader.md) —
   Screen-reader / assistive-technology support (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -227,7 +229,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (256)
+## ready (257)
 
 ### protocol
 
@@ -238,6 +240,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-structural-encapsulation-audit`](ready/build-structural-encapsulation-audit.md)
+  — Audit the workspace for structural and encapsulation improvements the crate
+  split exposed (blocked by `build-split-viewer-crate` (done))
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -829,13 +834,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
 
-## blocked (68)
+## blocked (67)
 
 ### viewer
 
-- [`build-structural-encapsulation-audit`](blocked/build-structural-encapsulation-audit.md)
-  — Audit the workspace for structural and encapsulation improvements the crate
-  split exposed (blocked by `build-split-viewer-crate`)
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
@@ -1029,12 +1031,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (18)
+## in-progress (17)
 
 ### viewer
 
-- [`build-split-viewer-crate`](in-progress/build-split-viewer-crate.md) — Split
-  the viewer crate to regain cross-crate build parallelism
 - [`viewer-agentupdate-cadence-effects`](in-progress/viewer-agentupdate-cadence-effects.md)
   — Explore what the raised AgentUpdate/camera-interest cadence buys (and how
   the sim reacts)
@@ -1159,7 +1159,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (863)
+## done (864)
 
 ### protocol
 
@@ -1325,6 +1325,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-split-viewer-crate`](done/build-split-viewer-crate.md) — Split the
+  viewer crate to regain cross-crate build parallelism
 - [`viewer-about-floater`](done/viewer-about-floater.md) — About floater —
   version, system info, credits, licenses (blocked by
   `viewer-ui-widget-scaffold` (done))
