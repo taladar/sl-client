@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 97 |
-| ready | 256 |
+| ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 33 |
+| bugs | 100 |
 | done | 870 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1376** |
+| **total** | **1484** |
 
 ## ideas (97)
 
@@ -225,10 +225,30 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (256)
+## ready (297)
 
 ### protocol
 
+- [`protocol-audit-asset-store-duplication`](ready/protocol-audit-asset-store-duplication.md)
+  — Three hand-rolled copies of the same asset store
+- [`protocol-audit-conversions-test-coverage`](ready/protocol-audit-conversions-test-coverage.md)
+  — conversions.rs has 233 pure functions and 32 tests
+- [`protocol-audit-decoder-fuzz-harness`](ready/protocol-audit-decoder-fuzz-harness.md)
+  — Fuzz the wire and asset decoders
+- [`protocol-audit-dispatch-child-drift`](ready/protocol-audit-dispatch-child-drift.md)
+  — dispatch_child is a hand-copied subset of dispatch
+- [`protocol-audit-extract-lludp-transport`](ready/protocol-audit-extract-lludp-transport.md)
+  — The LLUDP reliable-transport layer is implemented twice and has drifted
+- [`protocol-audit-j2c-encode-lint-config`](ready/protocol-audit-j2c-encode-lint-config.md)
+  — The one crate with unsafe FFI has the workspace's weakest lint configuration
+- [`protocol-audit-runtime-parity-gaps`](ready/protocol-audit-runtime-parity-gaps.md)
+  — Re-exports and derived login state reach only the bevy runtime
+- [`protocol-audit-runtime-shared-crate`](ready/protocol-audit-runtime-shared-crate.md)
+  — 1677 byte-identical lines are duplicated between the two runtime crates
+- [`protocol-audit-session-god-object`](ready/protocol-audit-session-god-object.md)
+  — Session and SimSession are god objects with 12k-line impl blocks
+- [`protocol-audit-wire-error-contract`](ready/protocol-audit-wire-error-contract.md)
+  — sl-wire's public parse surface has five different failure disciplines
 - [`protocol-sl-llsd-serde`](ready/protocol-sl-llsd-serde.md) — serde
   Serialize/Deserialize derives for sl-llsd (Llsd) types
 - [`protocol-sl-lsl-serde`](ready/protocol-sl-lsl-serde.md) — serde support for
@@ -236,6 +256,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-audit-ci-pipeline`](ready/build-audit-ci-pipeline.md) — There is no CI
+  — every quality gate is a local pre-commit hook
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -264,6 +286,58 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-attachment-align`](ready/viewer-attachment-align.md) — Attachment
   alignment tool (avatar align) (blocked by `viewer-object-edit-floater-shell`
   (done))
+- [`viewer-audit-binary-module-extraction`](ready/viewer-audit-binary-module-extraction.md)
+  — About 15k lines still in the viewer binary map onto existing feature crates
+- [`viewer-audit-decoded-texture-uploaders`](ready/viewer-audit-decoded-texture-uploaders.md)
+  — Eight independent DecodedTexture uploaders each re-decide colour space
+- [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
+  — Five developer demo panels ship in the release binary from inside library
+  crates
+- [`viewer-audit-extract-and-test-pure-logic`](ready/viewer-audit-extract-and-test-pure-logic.md)
+  — Extract the pure logic trapped inside viewer systems and test it
+- [`viewer-audit-kit-single-consumer-split`](ready/viewer-audit-kit-single-consumer-split.md)
+  — sl-viewer-kit is a grab-bag: 39% of it has exactly one consumer
+- [`viewer-audit-lsp-position-roundtrip`](ready/viewer-audit-lsp-position-roundtrip.md)
+  — The LSP position-to-byte direction has zero tests
+- [`viewer-audit-menu-label-i18n`](ready/viewer-audit-menu-label-i18n.md) — Menu
+  and pie-menu labels cannot be translated, by type
+- [`viewer-audit-notifications-crate-split`](ready/viewer-audit-notifications-crate-split.md)
+  — Split the 21637-line notification catalogue and make its lookup a map
+- [`viewer-audit-object-children-index`](ready/viewer-audit-object-children-index.md)
+  — ObjectState has no children index, so every linkset query full-scans the
+  region
+- [`viewer-audit-plugins-own-their-schedule`](ready/viewer-audit-plugins-own-their-schedule.md)
+  — Most viewer crates export loose systems instead of owning a plugin
+- [`viewer-audit-preferences-hub-decoupling`](ready/viewer-audit-preferences-hub-decoupling.md)
+  — sl-viewer-preferences is a 12-crate hub whose own decoupling mechanism is
+  under-applied
+- [`viewer-audit-preferences-restart-note`](ready/viewer-audit-preferences-restart-note.md)
+  — There is no restart-note idiom, so 'restart required' is baked into labels
+- [`viewer-audit-render-fixtures-crate`](ready/viewer-audit-render-fixtures-crate.md)
+  — 3297 lines of test fixtures ship in the production scene crate
+- [`viewer-audit-rlv-behaviour-table-test`](ready/viewer-audit-rlv-behaviour-table-test.md)
+  — Pin the whole RLV behaviour table with one table-driven test
+- [`viewer-audit-scene-live-daycycle-fixture`](ready/viewer-audit-scene-live-daycycle-fixture.md)
+  — A test fixture that advances the day cycle between samples
+- [`viewer-audit-search-map-edge`](ready/viewer-audit-search-map-edge.md) —
+  sl-viewer-search depends on sl-viewer-map for one two-field struct
+- [`viewer-audit-skin-token-coverage`](ready/viewer-audit-skin-token-coverage.md)
+  — The skin system covers two widgets
+- [`viewer-audit-table-sort-consolidation`](ready/viewer-audit-table-sort-consolidation.md)
+  — The multi-column sort comparator is hand-written six times, and People
+  reimplements TableSortState
+- [`viewer-audit-ui-core-sound-coupling`](ready/viewer-audit-ui-core-sound-coupling.md)
+  — Three lines in ui_sounds.rs put the protocol stack behind 22 crates
+- [`viewer-audit-ui-spawn-helper-consolidation`](ready/viewer-audit-ui-spawn-helper-consolidation.md)
+  — The same widget spawn helpers are reimplemented in five to seven crates
+- [`viewer-audit-web-auth-preference`](ready/viewer-audit-web-auth-preference.md)
+  — Whether the grid session cookie is injected into the browser is a CLI flag,
+  not a preference
+- [`viewer-audit-world-api-query-tests`](ready/viewer-audit-world-api-query-tests.md)
+  — sl-viewer-world-api has 214 functions and 5 tests
+- [`viewer-audit-world-api-split`](ready/viewer-audit-world-api-split.md) —
+  sl-viewer-world-api is a 6892-line god-module and the workspace's shared-types
+  dump
 - [`viewer-autopilot-click-to-walk`](ready/viewer-autopilot-click-to-walk.md) —
   Autopilot core + click-to-walk (blocked by `viewer-input-action-map` (done))
 - [`viewer-avatar-alignment-tools`](ready/viewer-avatar-alignment-tools.md) —
@@ -819,13 +893,34 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out
 
+### idiomatic
+
+- [`idiomatic-audit-bevy-system-param-bundles`](ready/idiomatic-audit-bevy-system-param-bundles.md)
+  — 128+ too_many_arguments suppressions are Bevy systems that want a
+  SystemParam bundle
+- [`idiomatic-audit-dead-forward-api`](ready/idiomatic-audit-dead-forward-api.md)
+  — Decoded-but-never-read fields and write-only state across the workspace
+- [`idiomatic-audit-lsl-scope-duplication`](ready/idiomatic-audit-lsl-scope-duplication.md)
+  — LSL scope resolution is implemented twice, with nothing pinning them equal
+- [`idiomatic-audit-session-facade`](ready/idiomatic-audit-session-facade.md) —
+  Every embedder hand-writes the MFA login loop and the three session pumps
+
 ### test
 
+- [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
+  — Factor the repeated session/id acquisition out of the conformance cases
+- [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
+  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
+
+### repl
+
+- [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
+  The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
 ## blocked (67)
 
@@ -1070,10 +1165,51 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (33)
+## bugs (100)
 
 ### protocol
 
+- [`protocol-audit-asset-decoder-allocation-caps`](bugs/protocol-audit-asset-decoder-allocation-caps.md)
+  — Notecard, animation and legacy-material decoders reserve from a
+  wire-supplied count
+- [`protocol-audit-asset-transfer-timeouts`](bugs/protocol-audit-asset-transfer-timeouts.md)
+  — No asset transfer has a timeout — six registries only ever grow
+- [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
+  — Four decoder divergences from the reference viewer
+- [`protocol-audit-flush-acks-loses-acks`](bugs/protocol-audit-flush-acks-loses-acks.md)
+  — flush_acks drops every remaining ack on a wire error, in both directions
+- [`protocol-audit-inventory-fetch-deadlock`](bugs/protocol-audit-inventory-fetch-deadlock.md)
+  — Lost folder replies permanently deadlock the background inventory crawl
+- [`protocol-audit-j2c-dimension-caps`](bugs/protocol-audit-j2c-dimension-caps.md)
+  — No MAX_IMAGE_SIZE / MAX_IMAGE_AREA cap on a JPEG-2000 header
+- [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
+  — The legacy-material binary LLSD codec writes Date one way and reads it
+  another
+- [`protocol-audit-llsd-recursion-depth-cap`](bugs/protocol-audit-llsd-recursion-depth-cap.md)
+  — LLSD parsers recurse with no depth limit
+- [`protocol-audit-lure-region-handle`](bugs/protocol-audit-lure-region-handle.md)
+  — parse_lure_region_handle reads 8 bytes of any UUID and calls it a region
+  handle
+- [`protocol-audit-mesh-decode-allocation-caps`](bugs/protocol-audit-mesh-decode-allocation-caps.md)
+  — Mesh decode: unbounded inflate, unbounded header offset, unchecked indices
+- [`protocol-audit-notecard-fidelity`](bugs/protocol-audit-notecard-fidelity.md)
+  — The notecard codec misreads metadata, corrupts on re-encode, and misplaces
+  embedded items
+- [`protocol-audit-oldest-unacked-wrap`](bugs/protocol-audit-oldest-unacked-wrap.md)
+  — OldestUnacked uses numeric min instead of wrapping-oldest
+- [`protocol-audit-region-handshake-mid-session`](bugs/protocol-audit-region-handshake-mid-session.md)
+  — A root RegionHandshake outside AwaitingHandshake is silently dropped
+- [`protocol-audit-reliable-exhaustion-kills-session`](bugs/protocol-audit-reliable-exhaustion-kills-session.md)
+  — One exhausted reliable packet of any kind closes the session as
+  HandshakeFailed
+- [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
+  — SimSession accepts identity rebinding, never validates a session id, and
+  frees nothing on close
+- [`protocol-audit-texture-download-completeness`](bugs/protocol-audit-texture-download-completeness.md)
+  — A texture download completes on a chunk count, not on the chunk indices
+- [`protocol-audit-tokio-caps-refetch`](bugs/protocol-audit-tokio-caps-refetch.md)
+  — The tokio region-change caps fetch stalls the UDP pump, then swallows its
+  failure
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
   SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
   fetch never retries)
@@ -1091,6 +1227,113 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (rotates the whole minimap)
 - [`viewer-audio-tests-open-real-devices`](bugs/viewer-audio-tests-open-real-devices.md)
   — Unit tests open real audio devices on the developer's machine
+- [`viewer-audit-about-land-row-rebuild`](bugs/viewer-audit-about-land-row-rebuild.md)
+  — About Land rebuilds every owner and access row whenever any avatar name
+  resolves
+- [`viewer-audit-account-dir-index-repoint`](bugs/viewer-audit-account-dir-index-repoint.md)
+  — A skipped rename still repoints the UUID index, handing one avatar another's
+  data
+- [`viewer-audit-app-exit-discarded`](bugs/viewer-audit-app-exit-discarded.md) —
+  The viewer exits 0 on a failing AppExit
+- [`viewer-audit-asset-editor-scaffold`](bugs/viewer-audit-asset-editor-scaffold.md)
+  — The wearable editor reports a save that has not happened, and claims other
+  editors' results
+- [`viewer-audit-audio-mute-and-device`](bugs/viewer-audit-audio-mute-and-device.md)
+  — Collision sounds ignore the object-sound mute exception, and a device
+  fallback lies to the UI
+- [`viewer-audit-camera-reset-resnap`](bugs/viewer-audit-camera-reset-resnap.md)
+  — Escape out of flycam interpolates between two unrelated poses
+- [`viewer-audit-collider-settle-treadmill`](bugs/viewer-audit-collider-settle-treadmill.md)
+  — A mesh with no physics block rebuilds its collider and the BVH every frame
+  forever
+- [`viewer-audit-command-result-diagnostics`](bugs/viewer-audit-command-result-diagnostics.md)
+  — The bevy command dispatcher discards 300 protocol send results with no log
+- [`viewer-audit-display-name-accessor-sweep`](bugs/viewer-audit-display-name-accessor-sweep.md)
+  — Ten display sites call the wire-name accessor, so display names are ignored
+- [`viewer-audit-ellipsis-reveal-latch`](bugs/viewer-audit-ellipsis-reveal-latch.md)
+  — A cell about one ellipsis wide latches a permanent spurious ellipsis
+- [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
+  — Environment variables silently override live graphics preferences
+- [`viewer-audit-environment-parcel-reply`](bugs/viewer-audit-environment-parcel-reply.md)
+  — A parcel environment reply is accepted as the shared one
+- [`viewer-audit-gpu-pick-slot-lifecycle`](bugs/viewer-audit-gpu-pick-slot-lifecycle.md)
+  — Pick slots are recycled with no generation, and a lost try_insert leaks one
+- [`viewer-audit-inventory-delete-guard-parity`](bugs/viewer-audit-inventory-delete-guard-parity.md)
+  — The keyboard delete path omits the in-trash check the menu path has
+- [`viewer-audit-inventory-merge-and-tree-walks`](bugs/viewer-audit-inventory-merge-and-tree-walks.md)
+  — The chunked inventory merge is quadratic, and the downward tree walks have
+  no cycle guard
+- [`viewer-audit-map-tile-transient-error`](bugs/viewer-audit-map-tile-transient-error.md)
+  — A transient map-tile fetch error is cached as permanently missing
+- [`viewer-audit-media-url-scheme-allowlist`](bugs/viewer-audit-media-url-scheme-allowlist.md)
+  — Parcel media URLs reach CEF and GStreamer with no scheme allowlist
+- [`viewer-audit-name-tag-viewport-gate`](bugs/viewer-audit-name-tag-viewport-gate.md)
+  — The name-tag viewport-changed gate is exactly inverted
+- [`viewer-audit-notification-store-overwrite`](bugs/viewer-audit-notification-store-overwrite.md)
+  — A malformed notification store is overwritten, destroying unanswered notices
+- [`viewer-audit-parcel-access-list-accumulate`](bugs/viewer-audit-parcel-access-list-accumulate.md)
+  — Editing a multi-packet parcel ban list unbans everyone not in the last
+  packet
+- [`viewer-audit-parcel-audio-autoplay`](bugs/viewer-audit-parcel-audio-autoplay.md)
+  — A transient empty parcel resets the user's stop decision and re-autoplays
+- [`viewer-audit-parcel-borders-retessellation`](bugs/viewer-audit-parcel-borders-retessellation.md)
+  — A region with parcels but no terrain re-tessellates its overlay every frame
+- [`viewer-audit-particles-dt-and-cloud-leak`](bugs/viewer-audit-particles-dt-and-cloud-leak.md)
+  — Particle integration uses an unclamped dt, and a switched-off emitter leaks
+  its cloud
+- [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
+  — Two plugins read resources they never register
+- [`viewer-audit-probe-ambient-multiply`](bugs/viewer-audit-probe-ambient-multiply.md)
+  — suppress_global_ambient multiplies an absolute producer and decays it
+  geometrically
+- [`viewer-audit-probe-nonuniform-scale-shear`](bugs/viewer-audit-probe-nonuniform-scale-shear.md)
+  — A reflection probe's non-uniform volume scale shears its sampling frame
+- [`viewer-audit-render-path-env-reads`](bugs/viewer-audit-render-path-env-reads.md)
+  — About a dozen getenv calls and allocations per frame in the sky and post
+  chain
+- [`viewer-audit-rlv-behaviour-lookup`](bugs/viewer-audit-rlv-behaviour-lookup.md)
+  — RLV behaviour lookup is param-type-blind and has no modifier fallback
+- [`viewer-audit-scene-change-guards-day-cycle`](bugs/viewer-audit-scene-change-guards-day-cycle.md)
+  — The scene crate's write-on-change guards were reasoned about under a pinned
+  sky
+- [`viewer-audit-search-sentinel-row`](bugs/viewer-audit-search-sentinel-row.md)
+  — The directory 'there is more' sentinel row is rendered as a result
+- [`viewer-audit-settings-write-race`](bugs/viewer-audit-settings-write-race.md)
+  — Settings are written non-atomically from unordered detached tasks
+- [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
+  The scripted sit camera arms on any SitResult and never clears forced
+  mouselook
+- [`viewer-audit-stale-globaltransform-readers`](bugs/viewer-audit-stale-globaltransform-readers.md)
+  — Depth-reconstructing passes and the interest camera read a frame-old camera
+  pose
+- [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
+  — Update tuples claim a pipeline order the scheduler does not enforce
+- [`viewer-audit-tab-panel-focus-order`](bugs/viewer-audit-tab-panel-focus-order.md)
+  — Inactive tab panels keep their keyboard tab stops
+- [`viewer-audit-table-interaction-disabled`](bugs/viewer-audit-table-interaction-disabled.md)
+  — The table widget ignores InteractionDisabled
+- [`viewer-audit-texture-align-material-channels`](bugs/viewer-audit-texture-align-material-channels.md)
+  — Align planar faces does not propagate to the normal and specular transforms
+- [`viewer-audit-toast-starvation-dnd-queue`](bugs/viewer-audit-toast-starvation-dnd-queue.md)
+  — A low-priority toast can be queued forever, and the DND hold list is
+  unbounded
+- [`viewer-audit-tonemap-legacy-sky`](bugs/viewer-audit-tonemap-legacy-sky.md) —
+  ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-ui-texture-poll-leak`](bugs/viewer-audit-ui-texture-poll-leak.md)
+  — Eight copied texture-poll systems each leak Image assets for the session
+- [`viewer-audit-ui-widget-per-frame-writes`](bugs/viewer-audit-ui-widget-per-frame-writes.md)
+  — The colour picker writes unguarded every frame and defeats the layout gate
+- [`viewer-audit-underwater-fog-nan`](bugs/viewer-audit-underwater-fog-nan.md) —
+  A negative underwater fog density NaNs the screen
+- [`viewer-audit-virtual-list-rebinding`](bugs/viewer-audit-virtual-list-rebinding.md)
+  — The recycling virtual list re-binds every pooled row on a one-row scroll
+- [`viewer-audit-water-state-purge`](bugs/viewer-audit-water-state-purge.md) —
+  WaterState is not purged on a teleport, and leaks spawned water planes
+- [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
+  — The world map keeps a second live arboard handle
+- [`viewer-audit-world-reset-purge-completeness`](bugs/viewer-audit-world-reset-purge-completeness.md)
+  — The world-reset purge is a hand-maintained list of five, and several stores
+  are missing
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1151,6 +1394,21 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Background flickers behind the underwater fog while walking underwater
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
+
+### test
+
+- [`test-audit-conformance-runner-isolation`](bugs/test-audit-conformance-runner-isolation.md)
+  — A panicking or hung conformance case aborts the run and strands the avatar
+- [`test-audit-conformance-trace-correctness`](bugs/test-audit-conformance-trace-correctness.md)
+  — sl-conformance-trace mislabels every datagram on loopback and correlates
+  across circuits
+- [`test-audit-fake-grid-session-teardown`](bugs/test-audit-fake-grid-session-teardown.md)
+  — sl-fake-grid never prunes sessions, and its tasks outlive shutdown
+
+### repl
+
+- [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
+  — 15 commands the REPL formatter can print cannot be parsed back
 
 ## done (870)
 
