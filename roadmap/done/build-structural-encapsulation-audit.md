@@ -167,7 +167,7 @@ the three recenter systems, and the terrain chain (scene) runs before
 `update_objects` and `apply_object_meshes` (objects) to win the shared
 `MeshUploadBudget`. That is three more `WorldPhase` variants for one component,
 so it was left alone; it is the natural first step of
-[build-split-world-avatar-crate](../ideas/build-split-world-avatar-crate.md),
+[build-split-world-avatar-crate](../done/build-split-world-avatar-crate.md),
 which will have to move that chain anyway.
 
 The other nine remaining items are the accessor-held group above. They are

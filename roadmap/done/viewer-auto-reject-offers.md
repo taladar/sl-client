@@ -59,7 +59,7 @@ conversations ingest and the presence replies consume it.
   flags and two facts about the offer — is the sender a friend, is the
   inviting group one we are already in — and answers with the `RejectKind`
   that swallowed it, or `None`. The offers host
-  ([`offers_invites.rs`](../../sl-client-bevy-viewer/src/offers_invites.rs))
+  ([`offers_invites.rs`](../../sl-viewer-people/src/offers_invites.rs))
   runs it in front of every card, ahead of the Do Not Disturb deferral:
   an offer being answered automatically has nothing to defer.
 - **A rejection answers, it does not just drop.** The mode's canned reply

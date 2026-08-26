@@ -45,7 +45,7 @@ Reference (Firestorm, read-only): `indra/llui/llfloater.cpp`
 
 New module **`src/floater_persist.rs`** (`FloaterPersistPlugin`):
 floater-manager infrastructure, not per-panel — every floater with a
-[`Floater::id`](../../sl-client-bevy-viewer/src/floater.rs) gets remembered
+[`Floater::id`](../../sl-viewer-ui-widgets/src/floater.rs) gets remembered
 geometry for free (the inventory window is the first beneficiary). Persisted
 through the typed settings store into the **`Account`** scope — the per-(grid,
 avatar-name) file from [[viewer-settings-account-scope-persist]] — so it is per

@@ -15,7 +15,8 @@
 //!   parented to it) follows the object as it moves (the reference viewer's
 //!   `matchVolumeTransform` pins the control avatar to the root prim's render
 //!   transform);
-//! - [`apply_rigged_attachments`](crate::objects::apply_rigged_attachments) binds
+//! - [`apply_rigged_attachments`](crate::rigged_attachments::apply_rigged_attachments)
+//!   binds
 //!   the linkset's rigged submeshes to those joints (the animesh branch of the
 //!   worn-rigged-mesh bind), recording the rig's joint position overrides on the
 //!   control avatar rather than on any wearer;
@@ -54,13 +55,55 @@ impl Plugin for AnimeshPosePlugin {
 
 use bevy::prelude::*;
 use sl_client_bevy::{
-    AnimationPose, AssetKey, JointOverrides, ObjectKey, SlEvent, SlSessionEvent, Uuid,
+    AnimationPose, AssetKey, JointOverrides, ObjectKey, ScopedObjectId, SlEvent, SlSessionEvent,
+    Uuid,
 };
 
 use crate::animations::{
     AnimationManager, PlayState, reconcile_playing, resolve_pose, retain_active,
 };
 use crate::avatars::AvatarBody;
+use crate::world_api::ObjectState;
+
+/// Whether worn rigged meshes' joint position overrides (R1) are applied to the
+/// avatar skeleton. On by default; `SL_VIEWER_JOINT_OVERRIDES=0` disables it, so the
+/// pre-override skeleton behaviour can be compared side by side in one session.
+#[must_use]
+pub fn joint_overrides_enabled() -> bool {
+    std::env::var("SL_VIEWER_JOINT_OVERRIDES").as_deref() != Ok("0")
+}
+
+/// A guard on the linkset-chain walk in [`animesh_root`], against a malformed
+/// parent cycle.
+const MAX_LINKSET_DEPTH: usize = 32;
+
+/// The animesh linkset root that `scoped` belongs to (P29): walk its parent chain
+/// up to the object carrying the animated-object flag and return that root's full
+/// [`ObjectKey`] (the key its control avatar is filed under) and scene entity
+/// (the control-avatar skeleton parents to it so it follows the object). `None`
+/// if the chain reaches no animated-object root (not an animesh).
+///
+/// This walk is also how a signalled animation finds its control avatar
+/// (P29.2): the sim keys `ObjectAnimation` by the linkset **part** holding the
+/// animations (the prim the script runs in) — often a *child*, not the flagged
+/// root — and the reference merges every part's signalled set into the root's
+/// control avatar (`LLControlAvatar::updateAnimations` over the whole linkset).
+#[must_use]
+pub fn animesh_root(state: &ObjectState, scoped: ScopedObjectId) -> Option<(ObjectKey, Entity)> {
+    let mut current = scoped;
+    for _ in 0..MAX_LINKSET_DEPTH {
+        let tracked = state.objects.get(&current)?;
+        if tracked.animated {
+            return Some((tracked.full_key, tracked.entity));
+        }
+        // A root's `parent` is its own scoped id; stop before looping forever.
+        if tracked.parent == current {
+            return None;
+        }
+        current = tracked.parent;
+    }
+    None
+}
 
 /// One animesh's control avatar (§5): the skeleton root the linkset's rigged
 /// submeshes parent to, plus the joint position overrides its own rigged meshes
@@ -97,7 +140,7 @@ struct ControlAvatar {
 /// sim named in `ObjectAnimation.Sender.ID` — the linkset prim holding the
 /// animations (the one the script runs in), which is *often a child, not the
 /// root*. The drivers resolve each signalled part up its linkset
-/// (`crate::objects::animesh_root`) and merge every part's set into the
+/// ([`animesh_root`]) and merge every part's set into the
 /// root's control avatar, exactly as the reference's
 /// `LLControlAvatar::updateAnimations` merges the signalled maps of every
 /// volume in the linkset. The playback half mirrors
@@ -207,7 +250,7 @@ impl ControlAvatarState {
     /// an animesh linkset has an animation — rather than waiting for its mesh
     /// to bind, so an animation that arrives before the (much later) mesh
     /// decode is not lost (P29); the caller resolves each part to its flagged
-    /// root (`crate::objects::animesh_root`).
+    /// root ([`animesh_root`]).
     pub(crate) fn signalled_parts(&self) -> std::collections::HashSet<ObjectKey> {
         self.playing.keys().copied().collect()
     }
@@ -307,7 +350,7 @@ pub(crate) fn ingest_object_animations(
 /// per-**part** playback clock (the sim keys the message by the linkset prim
 /// holding the animations, not the flagged root), drops fully-eased-out
 /// motions, resolves every signalled part up its linkset to the animesh root
-/// (`crate::objects::animesh_root`) — merging the sets of all parts of one
+/// ([`animesh_root`]) — merging the sets of all parts of one
 /// linkset, as the reference's `LLControlAvatar::updateAnimations` does — then
 /// blends each root's motions into an [`AnimationPose`] against the standard
 /// skeleton (a control avatar has no visual-param shape, so joint names resolve
@@ -362,7 +405,7 @@ pub(crate) fn drive_control_avatars(
         let Some(&scoped) = scoped_by_full.get(&part) else {
             continue;
         };
-        let Some((root, _entity)) = crate::objects::animesh_root(&state, scoped) else {
+        let Some((root, _entity)) = animesh_root(&state, scoped) else {
             continue;
         };
         let entry = merged.entry(root).or_default();

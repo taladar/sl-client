@@ -50,8 +50,8 @@
 //! prim–prim collision sounds see them.
 //!
 //! **P31.4 — avatar dead-reckoning.** The same `interpolateLinearMotion` port is
-//! extended to the own and other full-object avatars (the [`sl_viewer_world_objects::avatars`] path,
-//! not the object path): `apply_object`(sl_viewer_world_objects::avatars) stamps each avatar's
+//! extended to the own and other full-object avatars (the [`sl_viewer_world_avatar::avatars`] path,
+//! not the object path): `apply_object`(sl_viewer_world_avatar::avatars) stamps each avatar's
 //! anchor with an [`AvatarMotion`] marker, and `drive_avatar_motion` dead-reckons
 //! it between updates with the same phase-out taper and geometric clamps — but with
 //! the **stricter avatar ground floor** (`avatar_ground_floor`:
@@ -1130,7 +1130,7 @@ fn avatar_ground_floor(land_height: Option<f32>, height: f32) -> Option<f32> {
 
 /// A collision plane whose up-axis component is below this is treated as absent (a
 /// near-vertical plane cannot be a floor, and dividing by its tiny `nz` would
-/// explode). Mirrors [`sl_viewer_world_objects::ground`]'s guard.
+/// explode). Mirrors [`sl_viewer_world_avatar::ground`]'s guard.
 const PLANE_NORMAL_EPSILON: f32 = 1.0e-3;
 
 /// `SL_VIEWER_LOG_AVATAR_GROUND=1` traces the avatar ground floor
@@ -1159,7 +1159,7 @@ fn log_avatar_ground_enabled() -> bool {
 /// land patches are mid-rebuild), so flooring the rendered avatar to it is what
 /// keeps a bouncing / low authoritative position from dropping the avatar through
 /// the ground — the same plane the reference viewer plants feet on
-/// ([`sl_viewer_world_objects::ground`]).
+/// ([`sl_viewer_world_avatar::ground`]).
 fn avatar_collision_floor(
     plane: Option<[f32; 4]>,
     land_height: Option<f32>,
@@ -1181,7 +1181,7 @@ fn avatar_collision_floor(
 
 /// Dead-reckon every full-object avatar between server updates (P31.4), the avatar
 /// counterpart of `drive_physical_objects`: on the frame an [`AvatarMotion`]
-/// update lands, `apply_object`(sl_viewer_world_objects::avatars) has already snapped the anchor to
+/// update lands, `apply_object`(sl_viewer_world_avatar::avatars) has already snapped the anchor to
 /// the authoritative pose, so this only (re)seeds the interpolation; between
 /// updates it advances the predicted pose with the same phase-out taper and
 /// geometric clamps as the object path — but with the **stricter avatar ground

@@ -32,8 +32,8 @@ mod about_floater;
 pub(crate) use sl_viewer_places::about_land;
 pub(crate) use sl_viewer_places::about_landmark;
 pub(crate) use sl_viewer_places::about_region;
-pub(crate) use sl_viewer_world_objects::animations;
-pub(crate) use sl_viewer_world_objects::animesh;
+pub(crate) use sl_viewer_world_avatar::animations;
+pub(crate) use sl_viewer_world_avatar::animesh;
 /// Every module that declares settings, in registration order.
 ///
 /// This list lives here rather than in `settings` because a store that
@@ -82,6 +82,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
 // `crate::<module>::…` path in the viewer still resolves.
 pub(crate) use sl_viewer_kit::appearance;
 mod asset_blacklist;
+pub(crate) use sl_viewer_world_avatar::avatar_asset_stats;
 pub(crate) use sl_viewer_world_objects::asset_budget;
 pub(crate) use sl_viewer_world_objects::asset_stats;
 // The platform layer (directory layout, on-disk caches, clipboard, URL
@@ -91,19 +92,19 @@ mod attachment_menu;
 pub(crate) use sl_viewer_audio::audio;
 pub(crate) use sl_viewer_kit::avatar_assets;
 pub(crate) use sl_viewer_people::auto_reject;
-pub(crate) use sl_viewer_world_objects::avatar_complexity;
-pub(crate) use sl_viewer_world_objects::avatar_dump;
+pub(crate) use sl_viewer_world_avatar::avatar_complexity;
+pub(crate) use sl_viewer_world_avatar::avatar_dump;
 mod avatar_menu;
 pub(crate) use sl_viewer_people::avatar_profile;
 pub(crate) use sl_viewer_pickers::avatar_picker;
 mod avatar_render_floater;
 pub(crate) use sl_viewer_people::blocked;
-pub(crate) use sl_viewer_world_objects::avatar_render_settings;
-pub(crate) use sl_viewer_world_objects::avatar_replay;
-pub(crate) use sl_viewer_world_objects::avatars;
-pub(crate) use sl_viewer_world_objects::bake_inputs;
-pub(crate) use sl_viewer_world_objects::bake_publish;
-pub(crate) use sl_viewer_world_objects::body_physics;
+pub(crate) use sl_viewer_world_avatar::avatar_render_settings;
+pub(crate) use sl_viewer_world_avatar::avatar_replay;
+pub(crate) use sl_viewer_world_avatar::avatars;
+pub(crate) use sl_viewer_world_avatar::bake_inputs;
+pub(crate) use sl_viewer_world_avatar::bake_publish;
+pub(crate) use sl_viewer_world_avatar::body_physics;
 pub(crate) use sl_viewer_world_scene::beacons;
 mod bottom_toolbar;
 // Media (the CEF / GStreamer backends, the browser widget) is its own crate;
@@ -122,7 +123,7 @@ pub(crate) use sl_viewer_world_objects::bump;
 pub(crate) use sl_viewer_world_view::camera;
 mod crowd_debug_button;
 pub(crate) use sl_viewer_preferences::debug_settings;
-pub(crate) use sl_viewer_world_objects::derender;
+pub(crate) use sl_viewer_world_avatar::derender;
 pub(crate) use sl_viewer_world_scene::diagnostics;
 mod double_click_teleport;
 pub(crate) use sl_viewer_asset_editors::edit_notecard;
@@ -162,10 +163,10 @@ pub(crate) use sl_viewer_kit::geometry_cache;
 pub(crate) use sl_viewer_people::group_notice;
 pub(crate) use sl_viewer_people::group_profile;
 pub(crate) use sl_viewer_people::groups;
-pub(crate) use sl_viewer_world_objects::gpu_avatar_spike;
-pub(crate) use sl_viewer_world_objects::gpu_avatars;
-pub(crate) use sl_viewer_world_objects::ground;
-pub(crate) use sl_viewer_world_objects::hand_pose;
+pub(crate) use sl_viewer_world_avatar::gpu_avatar_spike;
+pub(crate) use sl_viewer_world_avatar::gpu_avatars;
+pub(crate) use sl_viewer_world_avatar::ground;
+pub(crate) use sl_viewer_world_avatar::hand_pose;
 pub(crate) use sl_viewer_world_objects::hover_text;
 pub(crate) use sl_viewer_world_scene::glow;
 pub(crate) use sl_viewer_world_view::gpu_pick;
@@ -191,8 +192,8 @@ pub(crate) use sl_viewer_world_objects::legacy_materials;
 pub(crate) use sl_viewer_world_scene::lights;
 mod load_url;
 pub(crate) use sl_viewer_chat::local_chat_input;
-pub(crate) use sl_viewer_world_objects::locomotion_ik;
-pub(crate) use sl_viewer_world_objects::look_at;
+pub(crate) use sl_viewer_world_avatar::locomotion_ik;
+pub(crate) use sl_viewer_world_avatar::look_at;
 pub(crate) use sl_viewer_world_objects::material_cache;
 pub(crate) use sl_viewer_world_objects::material_preview;
 pub(crate) use sl_viewer_world_objects::materials;
@@ -209,9 +210,9 @@ pub(crate) use sl_viewer_map::minimap;
 pub(crate) use sl_viewer_notices::notification_host;
 pub(crate) use sl_viewer_notices::notification_persist;
 pub(crate) use sl_viewer_people::mutes;
+pub(crate) use sl_viewer_world_avatar::name_tag_content;
 pub(crate) use sl_viewer_world_objects::meshes;
 pub(crate) use sl_viewer_world_objects::name_tag_billboard;
-pub(crate) use sl_viewer_world_objects::name_tag_content;
 pub(crate) use sl_viewer_world_view::movement;
 // The notification catalogue is its own crate (~22k lines of declarative data
 // with no dependency on anything else here), aliased under its old module name
@@ -239,8 +240,8 @@ pub(crate) use sl_viewer_preferences::preferences_graphics;
 pub(crate) use sl_viewer_preferences::preferences_network_cache;
 pub(crate) use sl_viewer_preferences::quick_preferences;
 pub(crate) use sl_viewer_ui_widgets::pie_menu;
+pub(crate) use sl_viewer_world_avatar::reach;
 pub(crate) use sl_viewer_world_objects::objects;
-pub(crate) use sl_viewer_world_objects::reach;
 pub(crate) use sl_viewer_world_scene::parcel_borders;
 pub(crate) use sl_viewer_world_scene::particles;
 pub(crate) use sl_viewer_world_scene::probes;
@@ -255,7 +256,8 @@ mod render_test;
 pub(crate) use sl_viewer_notices::script_dialog;
 pub(crate) use sl_viewer_notices::script_permission;
 pub(crate) use sl_viewer_search::search;
-pub(crate) use sl_viewer_world_objects::replay_bundle;
+pub(crate) use sl_viewer_world_avatar::replay_bundle;
+pub(crate) use sl_viewer_world_avatar::rigged_attachments;
 pub(crate) use sl_viewer_world_view::scene_reset;
 pub(crate) use sl_viewer_world_view::screenshot;
 pub(crate) use sl_viewer_world_view::session;
@@ -301,7 +303,7 @@ pub(crate) use sl_viewer_ui_core::ui;
 pub(crate) use sl_viewer_ui_core::ui_element;
 pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
-pub(crate) use sl_viewer_world_objects::typing;
+pub(crate) use sl_viewer_world_avatar::typing;
 pub(crate) use sl_viewer_world_scene::transparency;
 mod ui_elements;
 pub(crate) use sl_viewer_notices::ui_name_link;
@@ -436,8 +438,7 @@ use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
     PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents, PrimLodTargets,
-    RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
-    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
+    TreeLodTargets, apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_tree_lod,
     recenter_objects, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
@@ -447,6 +448,9 @@ use crate::physics::PhysicsPlugin;
 use crate::pie_menu::PieMenuPlugin;
 use crate::probes::ReflectionProbePlugin;
 use crate::render_priority::drive_render_priority;
+use crate::rigged_attachments::{
+    RiggedBindSkipLog, adopt_pending_attachments, apply_rigged_attachments,
+};
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
@@ -1632,6 +1636,7 @@ fn run_session(
         crate::lights::LocalLightsPlugin,
         crate::diagnostics::PipelineOverlayPlugin,
         crate::asset_stats::AssetStatsPlugin,
+        crate::avatar_asset_stats::AvatarAssetStatsPlugin,
     ))
     // Water-relative transparency ordering (viewer-particle-water-ordering): a
     // render-world re-sort of the transparent phase so translucent content (a

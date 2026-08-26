@@ -6609,6 +6609,23 @@ pub const WEARABLE_LABEL: &str = "wear";
 /// The glTF render-material store's published label (see [`TEXTURE_LABEL`]).
 pub const MATERIAL_LABEL: &str = "gmat";
 
+/// Every store label the overlay expects to find published.
+///
+/// The publishers are **split across two crates** — the object layer's
+/// `asset_stats` covers texture / mesh / material and the avatar layer's
+/// `avatar_asset_stats` covers animation / wearable — so neither one can check
+/// its own completeness, and a whole publisher going missing (a plugin dropped
+/// from the composition root, a store added to one half and not listed) would
+/// only show up as two quietly absent lines on the `F3` panel. This is the list
+/// the two halves are checked against together.
+pub const PIPELINE_LABELS: &[&str] = &[
+    TEXTURE_LABEL,
+    MESH_LABEL,
+    ANIMATION_LABEL,
+    WEARABLE_LABEL,
+    MATERIAL_LABEL,
+];
+
 /// One asset store's live pipeline figures, as its own layer publishes them.
 ///
 /// The formatting is the reader's business; this is just the numbers.

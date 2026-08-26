@@ -43,9 +43,8 @@ use bevy::text::TextBounds;
 use crate::name_tag_billboard::tag_render_layers;
 use crate::name_tag_billboard::{
     HoverTextMaterials, NEUTRAL_MESH_TAG, NameTagMaterial, NameTagPixelSize, NameTagPullRadius,
-    TagText, WorldTextStyle,
+    TagContent, TagLine, TagLineSize, TagText, WorldTextStyle,
 };
-use crate::name_tag_content::{TagContent, TagLine, TagLineSize};
 use crate::objects::{ObjectSlMotion, SceneObject};
 
 /// The world-up lift of the text anchor as a fraction of the prim's full local
@@ -484,7 +483,7 @@ impl Plugin for HoverTextPlugin {
 #[cfg(test)]
 mod tests {
     use super::{HOVER_ANCHOR_SCALE_FACTOR, ObjectFloatingText, hover_text_anchor};
-    use crate::name_tag_content::TagLineSize;
+    use crate::name_tag_billboard::TagLineSize;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 

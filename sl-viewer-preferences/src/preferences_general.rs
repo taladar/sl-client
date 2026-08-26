@@ -94,7 +94,8 @@ const MATURITY_MAX_ATTEMPTS: u8 = 3;
 const MATURITY_TIMEOUT_SECONDS: f64 = 10.0;
 
 /// Register the general tab's settings (the language key lives in
-/// [`crate::i18n`], the name-tag keys in [`crate::avatars`]).
+/// [`crate::i18n`], the name-tag keys in [`crate::name_tag_billboard`] and
+/// [`crate::name_tag_content`]).
 pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         GENERAL_SECTION,
@@ -200,13 +201,13 @@ pub(crate) fn build_general_tab(commands: &mut Commands, panel: Entity) {
         commands,
         panel,
         "preferences-row-name-tags",
-        SettingBinding::global(crate::avatars::SETTING_SHOW_NAME_TAGS),
+        SettingBinding::global(crate::name_tag_billboard::SETTING_SHOW_NAME_TAGS),
     );
     crate::preferences::spawn_pref_checkbox(
         commands,
         panel,
         "preferences-row-own-name-tag",
-        SettingBinding::global(crate::avatars::SETTING_SHOW_OWN_NAME_TAG),
+        SettingBinding::global(crate::name_tag_billboard::SETTING_SHOW_OWN_NAME_TAG),
     );
     // The full name-tag toggle set (viewer-name-tags-preferences): line choices,
     // status lines, colouring and the fade distances the billboard renderer and
@@ -654,7 +655,7 @@ pub fn resolve_start_location(cli: Option<StartLocation>, stored: Option<&str>) 
 /// The general tab's runtime systems: the UI-scale applier and the maturity
 /// server conversation. (The tab *content* is built by the shell through
 /// `PREF_TABS`; the language applier lives in [`crate::i18n`], the name-tag
-/// gates in [`crate::avatars`].)
+/// gates in [`crate::name_tag_billboard`].)
 ///
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PreferencesGeneralPlugin;

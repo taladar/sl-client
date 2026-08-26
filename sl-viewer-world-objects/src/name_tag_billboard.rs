@@ -25,6 +25,18 @@
 //! **top-level** (never children of the avatar anchor, whose
 //! `Propagate(dynamic_render_layers())` would leak the probe layer onto them)
 //! and carry [`RenderLayers`] layer 0 only, so probe cameras never see a tag.
+//!
+//! # Why this is in the object layer
+//!
+//! It is named for the avatar feature but it is **not** the avatar layer's: the
+//! same renderer draws an object's `llSetText` floating text
+//! ([`crate::hover_text`]), and the plugin's one chain deliberately interleaves
+//! the two so a settings change and a content change reach the same frame's
+//! meshes. It therefore has to sit below both of its users, and the object
+//! layer is the lower one — which is also why the vocabulary the two writers
+//! share ([`TagContent`], [`TagLine`], [`TagLineSize`]) and the marker the
+//! placement queries by ([`NameTag`]) live here rather than with the avatar
+//! composer that fills them in.
 
 use bevy::asset::{Asset, load_internal_asset, uuid_handle};
 use bevy::camera::visibility::RenderLayers;
@@ -45,8 +57,6 @@ use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{AgentKey, SlIdentity};
 
-use crate::avatars::NameTag;
-use crate::name_tag_content::TagContent;
 use crate::ui_font::UiFont;
 use crate::world_api::{AvatarAnchor, AvatarPickTarget};
 
@@ -85,11 +95,11 @@ pub(crate) const BASE_LIFT_PX: f32 = 25.0;
 
 /// Default distance at which a tag starts fading, metres (the reference's
 /// `CHAT_NORMAL_RADIUS` 20 — `setFadeDistance(CHAT_NORMAL_RADIUS, 5)`).
-pub(crate) const DEFAULT_FADE_START_METRES: f32 = 20.0;
+pub const DEFAULT_FADE_START_METRES: f32 = 20.0;
 
 /// Default fade range, metres: a tag is fully gone `FadeRange` past the fade
 /// start (reference: 5 m, so tags vanish at 25 m).
-pub(crate) const DEFAULT_FADE_RANGE_METRES: f32 = 5.0;
+pub const DEFAULT_FADE_RANGE_METRES: f32 = 5.0;
 
 /// The distance at which tags start fading, metres (a float setting;
 /// default `DEFAULT_FADE_START_METRES`).
@@ -102,6 +112,16 @@ pub const SETTING_FADE_RANGE: &str = "FadeRange";
 /// The bubble backdrop opacity (the reference `ChatBubbleOpacity`,
 /// default 0.5).
 pub const SETTING_BUBBLE_OPACITY: &str = "BubbleOpacity";
+
+/// The master name-tag toggle (the preferences General tab's headline switch;
+/// the reference `AvatarNameTagMode` off/on axis). Honoured by
+/// `follow_tag_anchors`; the full reference toggle set is the separate
+/// `viewer-name-tags-preferences` task.
+pub const SETTING_SHOW_NAME_TAGS: &str = "ShowNameTags";
+
+/// Whether the logged-in avatar's own tag is shown (the reference
+/// `RenderNameShowSelf`). Honoured by `follow_tag_anchors`.
+pub const SETTING_SHOW_OWN_NAME_TAG: &str = "ShowOwnNameTag";
 
 /// The neutral (no anti-overlap offset) [`MeshTag`] value: both packed
 /// components at the `+32768` bias.
@@ -273,6 +293,79 @@ impl TextSection for TagText {
 
     fn get_text_mut(&mut self) -> &mut String {
         &mut self.0
+    }
+}
+
+/// The font size, physical px at scale factor 1, of the main name line (the
+/// reference renders the name in `SansSerif`; the tag previously used 16 px).
+pub const NAME_FONT_SIZE_PX: f32 = 16.0;
+
+/// The font size of the auxiliary lines — status, group title, username,
+/// distance (the reference's `SansSerifSmall`; small/medium ratio 0.8 → 13 px
+/// against the 16 px name line).
+pub const SMALL_FONT_SIZE_PX: f32 = 13.0;
+
+/// The relative font tier of one tag line; the renderer maps tiers to sizes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TagLineSize {
+    /// The main name line (reference `SansSerif`).
+    Name,
+    /// An auxiliary line (reference `SansSerifSmall`).
+    Small,
+}
+
+impl TagLineSize {
+    /// The font size, in logical px, this tier renders at.
+    #[must_use]
+    pub const fn font_size_px(self) -> f32 {
+        match self {
+            Self::Name => NAME_FONT_SIZE_PX,
+            Self::Small => SMALL_FONT_SIZE_PX,
+        }
+    }
+}
+
+/// One composed line of world-anchored text, top-to-bottom order in
+/// [`TagContent::lines`].
+#[derive(Debug, Clone, PartialEq)]
+pub struct TagLine {
+    /// The line's text (no trailing newline; the renderer joins lines).
+    pub text: String,
+    /// The line's font tier.
+    pub size: TagLineSize,
+    /// The line's colour.
+    pub color: Color,
+}
+
+/// The composed content of one billboard; a component on the tag (label)
+/// entity. The renderer rebuilds spans/layout/mesh on `Changed<TagContent>`,
+/// so writers must compare before assigning.
+///
+/// Held here rather than with either writer because both of them write it:
+/// `sl_viewer_world_avatar::name_tag_content` composes an avatar's name-tag
+/// lines and [`crate::hover_text`] an object's `llSetText`.
+#[derive(Component, Debug, Clone, PartialEq, Default)]
+pub struct TagContent {
+    /// Ordered top-to-bottom: for a name tag, `[status?, group title?, name,
+    /// username?, distance?]`.
+    pub lines: Vec<TagLine>,
+    /// The resolved whole-tag colour (the name/status/title line tint; the
+    /// bubble itself stays the reference's black backdrop regardless).
+    pub base_color: Color,
+}
+
+impl TagContent {
+    /// A single plain white name line — the minimal tag shown until the
+    /// composer has resolved richer content.
+    pub fn plain_name(name: impl Into<String>) -> Self {
+        Self {
+            lines: vec![TagLine {
+                text: name.into(),
+                size: TagLineSize::Name,
+                color: Color::WHITE,
+            }],
+            base_color: Color::WHITE,
+        }
     }
 }
 
@@ -1217,6 +1310,22 @@ const SMOOTHING_TIME_CONSTANT_SECS: f32 = 0.2;
 /// settled tag stops writing its transform every frame.
 const SMOOTHING_SNAP_METRES: f32 = 0.002;
 
+/// A world-space name-tag billboard, pointing back at the avatar anchor it
+/// floats over so `follow_tag_anchors` can track the anchor's world position
+/// each frame.
+///
+/// The avatar layer spawns it (`sl_viewer_world_avatar::avatars`) and composes
+/// what it says (`…::name_tag_content`); the placement and rendering are this
+/// module's, so the marker the placement queries by lives here.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct NameTag {
+    /// The avatar anchor entity (sphere or body root) this tag labels.
+    pub anchor: Entity,
+    /// The height, in metres above the anchor's world position, at which to
+    /// float the tag (a sphere's top or a body's head).
+    pub tag_height: f32,
+}
+
 /// Per-tag anchor-follow smoothing state (the reference's smoothed
 /// root-to-head offset): the dead-banded target and the eased position last
 /// written to the tag's [`Transform`].
@@ -1245,7 +1354,8 @@ pub(crate) struct NameTagScreenRect {
 /// The renderer-side components of one tag entity, composed by
 /// `avatars::spawn_label` alongside the avatar-side identity components
 /// (`NameTag`, `AvatarPickTarget`, `TagContent`).
-pub(crate) fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
+#[must_use]
+pub fn name_tag_render_bundle(pull_radius: f32) -> impl Bundle {
     (
         TagText::default(),
         TextLayout {
@@ -1316,21 +1426,11 @@ pub(crate) fn follow_tag_anchors(
     // world runs ungated): a store without the keys means "shown".
     let show_tags = settings
         .as_ref()
-        .and_then(|settings| {
-            settings
-                .store()
-                .get_bool(crate::avatars::SETTING_SHOW_NAME_TAGS)
-                .ok()
-        })
+        .and_then(|settings| settings.store().get_bool(SETTING_SHOW_NAME_TAGS).ok())
         .unwrap_or(true);
     let show_own = settings
         .as_ref()
-        .and_then(|settings| {
-            settings
-                .store()
-                .get_bool(crate::avatars::SETTING_SHOW_OWN_NAME_TAG)
-                .ok()
-        })
+        .and_then(|settings| settings.store().get_bool(SETTING_SHOW_OWN_NAME_TAG).ok())
         .unwrap_or(true);
     let own_agent = identity.as_ref().and_then(|identity| identity.agent_id);
     let (fade_start, fade_range) = registry.as_ref().map_or(
@@ -1812,11 +1912,11 @@ pub const fn tag_render_layers() -> RenderLayers {
 #[cfg(test)]
 mod tests {
     use super::{
-        GlyphQuadInput, NEUTRAL_MESH_TAG, TagPageGeometry, TagText, build_tag_mesh_data,
-        empty_tag_mesh, pack_overlap_offset, sync_tag_spans, unpack_overlap_offset,
-        write_page_mesh,
+        GlyphQuadInput, NEUTRAL_MESH_TAG, NameTag, SETTING_SHOW_NAME_TAGS,
+        SETTING_SHOW_OWN_NAME_TAG, TagContent, TagLine, TagLineSize, TagPageGeometry, TagText,
+        build_tag_mesh_data, empty_tag_mesh, pack_overlap_offset, sync_tag_spans,
+        unpack_overlap_offset, write_page_mesh,
     };
-    use crate::name_tag_content::{TagContent, TagLine, TagLineSize};
     use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
 
@@ -2122,7 +2222,7 @@ mod tests {
     /// counts, which is exactly right: the first placement is a write).
     fn count_tag_writes(
         mut writes: ResMut<TagWrites>,
-        changed: Query<(), (Changed<Transform>, With<crate::avatars::NameTag>)>,
+        changed: Query<(), (Changed<Transform>, With<NameTag>)>,
     ) {
         writes.0 = changed.iter().count();
     }
@@ -2139,7 +2239,7 @@ mod tests {
         app.world_mut()
             .spawn((
                 super::name_tag_render_bundle(0.5),
-                crate::avatars::NameTag {
+                NameTag {
                     anchor,
                     tag_height: 0.3,
                 },
@@ -2197,7 +2297,6 @@ mod tests {
     /// own-tag toggle hides only the logged-in avatar's.
     #[test]
     fn preference_toggles_gate_tags() {
-        use crate::avatars::{SETTING_SHOW_NAME_TAGS, SETTING_SHOW_OWN_NAME_TAG};
         use crate::settings::ViewerSettings;
         use sl_client_bevy::{SlIdentity, Uuid};
         use sl_settings::{Scope, SettingValue, SettingsStore};

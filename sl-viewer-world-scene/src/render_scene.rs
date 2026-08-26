@@ -63,7 +63,7 @@
 //! | --- | --- | --- |
 //! | bytes → decoded asset | `sl-mesh`, `sl-sculpt`, `sl-avatar` | no — sans-I/O |
 //! | decoded → geometry | `sl-prim`, `sl-tree`, `sl_client_bevy::to_bevy_*` | no — pure |
-//! | geometry → entities | `sl_viewer_world_objects::objects`, `sl_viewer_world_objects::avatars` | **yes** |
+//! | geometry → entities | `sl_viewer_world_objects::objects`, `sl_viewer_world_avatar::avatars` | **yes** |
 //!
 //! The fixtures below enter at the **second** row: they synthesize a decoded
 //! asset (a [`PrimShapeFloat`], a [`Submesh`], a sculpt map) and run the real
@@ -1804,7 +1804,7 @@ fn avatar_morphed_body(
         return;
     };
 
-    // The resolve, exactly as `sl_viewer_world_objects::avatars`' `shape_avatars` does it: one
+    // The resolve, exactly as `sl_viewer_world_avatar::avatars`' `shape_avatars` does it: one
     // `ResolvedParams` feeding the morph weights, the skeletal deformations and the
     // collision-volume displacements, so the three cannot disagree by construction.
     let resolved = ResolvedParams::from_appearance(library.params(), &shaped_appearance());

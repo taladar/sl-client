@@ -36,6 +36,8 @@ use std::collections::HashSet;
 
 use sl_client_bevy::{AgentKey, SlEvent, SlSessionEvent};
 
+use crate::name_tag_billboard::{NameTag, TagContent, TagLine, TagLineSize};
+
 /// Show display names on tags (the reference `NameTagShowDisplayNames`,
 /// default on). Off = legacy names only.
 pub const SETTING_SHOW_DISPLAY_NAMES: &str = "ShowDisplayNames";
@@ -87,74 +89,6 @@ pub const SETTING_SHOW_OWN_COMPLEXITY: &str = "ShowOwnComplexity";
 /// (Firestorm `FSTagShowTooComplexOnlyARW`, default on). Off shows it on every
 /// avatar — informative, and a great deal of text over a crowd.
 pub const SETTING_SHOW_COMPLEXITY_WHEN_LIMITED_ONLY: &str = "ShowComplexityWhenLimitedOnly";
-
-/// The font size, physical px at scale factor 1, of the main name line (the
-/// reference renders the name in `SansSerif`; the tag previously used 16 px).
-pub(crate) const NAME_FONT_SIZE_PX: f32 = 16.0;
-
-/// The font size of the auxiliary lines — status, group title, username,
-/// distance (the reference's `SansSerifSmall`; small/medium ratio 0.8 → 13 px
-/// against the 16 px name line).
-pub(crate) const SMALL_FONT_SIZE_PX: f32 = 13.0;
-
-/// The relative font tier of one tag line; the renderer maps tiers to sizes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum TagLineSize {
-    /// The main name line (reference `SansSerif`).
-    Name,
-    /// An auxiliary line (reference `SansSerifSmall`).
-    Small,
-}
-
-impl TagLineSize {
-    /// The font size, in logical px, this tier renders at.
-    pub(crate) const fn font_size_px(self) -> f32 {
-        match self {
-            Self::Name => NAME_FONT_SIZE_PX,
-            Self::Small => SMALL_FONT_SIZE_PX,
-        }
-    }
-}
-
-/// One composed line of a name tag, top-to-bottom order in
-/// [`TagContent::lines`].
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct TagLine {
-    /// The line's text (no trailing newline; the renderer joins lines).
-    pub(crate) text: String,
-    /// The line's font tier.
-    pub(crate) size: TagLineSize,
-    /// The line's colour.
-    pub(crate) color: Color,
-}
-
-/// The composed content of one avatar's tag; a component on the tag (label)
-/// entity. The renderer rebuilds spans/layout/mesh on `Changed<TagContent>`,
-/// so writers must compare before assigning.
-#[derive(Component, Debug, Clone, PartialEq, Default)]
-pub struct TagContent {
-    /// Ordered top-to-bottom: `[status?, group title?, name, username?,
-    /// distance?]`.
-    pub(crate) lines: Vec<TagLine>,
-    /// The resolved whole-tag colour (the name/status/title line tint; the
-    /// bubble itself stays the reference's black backdrop regardless).
-    pub(crate) base_color: Color,
-}
-
-impl TagContent {
-    /// A single plain white name line — the minimal tag shown until the
-    /// composer has resolved richer content.
-    pub(crate) fn plain_name(name: impl Into<String>) -> Self {
-        Self {
-            lines: vec![TagLine {
-                text: name.into(),
-                size: TagLineSize::Name,
-                color: Color::WHITE,
-            }],
-            base_color: Color::WHITE,
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Colours (values from the reference's colors.xml).
@@ -777,7 +711,7 @@ pub fn compose_name_tags(
     identity: Option<Res<sl_client_bevy::SlIdentity>>,
     settings: Option<Res<crate::settings::ViewerSettings>>,
     anchors: Query<&Transform, With<crate::world_api::AvatarAnchor>>,
-    mut contents: Query<&mut TagContent, With<crate::avatars::NameTag>>,
+    mut contents: Query<&mut TagContent, With<NameTag>>,
 ) {
     let toggles = TagToggles::from_settings(settings.as_deref());
     let colors = TagColors::from_settings(settings.as_deref());

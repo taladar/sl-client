@@ -59,8 +59,9 @@ use crate::coords::{
     sl_rotation_to_quat, sl_to_bevy_object_rotation, sl_to_bevy_vec,
 };
 use crate::face_material::{FaceMaterial, inert_face_material};
-use crate::name_tag_billboard::name_tag_render_bundle;
-use crate::name_tag_content::TagContent;
+use crate::name_tag_billboard::{
+    NameTag, SETTING_SHOW_NAME_TAGS, SETTING_SHOW_OWN_NAME_TAG, TagContent, name_tag_render_bundle,
+};
 use crate::probe_layers::dynamic_render_layers;
 use crate::textures::{TextureApplyBudget, TextureDecoded, TextureManager, tint_color};
 use crate::world_api::AvatarInterp;
@@ -393,29 +394,6 @@ fn uv_grid_image() -> Image {
 /// (an earring, a piercing) tracks the head instead of freezing at the rest pose.
 #[derive(Component, Debug, Clone, Copy)]
 pub(crate) struct AttachmentPointNode;
-
-/// A world-space name-tag billboard ([`crate::name_tag_billboard`]), pointing
-/// back at the avatar anchor it floats over so the placement system can
-/// follow the anchor's world position each frame.
-#[derive(Component, Debug, Clone, Copy)]
-pub struct NameTag {
-    /// The avatar anchor entity (sphere or body root) this tag labels.
-    pub(crate) anchor: Entity,
-    /// The height, in metres above the anchor's world position, at which to
-    /// float the tag (a sphere's top or a body's head).
-    pub(crate) tag_height: f32,
-}
-
-/// The master name-tag toggle (the preferences General tab's headline switch;
-/// the reference `AvatarNameTagMode` off/on axis). Honoured by
-/// `name_tag_billboard::follow_tag_anchors`; the full reference toggle set is
-/// the separate `viewer-name-tags-preferences` task.
-pub const SETTING_SHOW_NAME_TAGS: &str = "ShowNameTags";
-
-/// Whether the logged-in avatar's own tag is shown (the reference
-/// `RenderNameShowSelf`). Honoured by
-/// `name_tag_billboard::follow_tag_anchors`.
-pub const SETTING_SHOW_OWN_NAME_TAG: &str = "ShowOwnNameTag";
 
 /// The settings section the name-tag toggles live in.
 const NAME_TAG_SECTION: &[&str] = &["nametags"];

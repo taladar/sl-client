@@ -64,11 +64,11 @@ pub(crate) use sl_viewer_ui_widgets::ui_tab;
 pub(crate) use sl_viewer_ui_widgets::ui_table;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_api as world_api;
-pub(crate) use sl_viewer_world_objects::animations;
-pub(crate) use sl_viewer_world_objects::avatar_complexity;
-pub(crate) use sl_viewer_world_objects::avatar_render_settings;
-pub(crate) use sl_viewer_world_objects::derender;
-pub(crate) use sl_viewer_world_objects::name_tag_content;
+pub(crate) use sl_viewer_world_avatar::animations;
+pub(crate) use sl_viewer_world_avatar::avatar_complexity;
+pub(crate) use sl_viewer_world_avatar::avatar_render_settings;
+pub(crate) use sl_viewer_world_avatar::derender;
+pub(crate) use sl_viewer_world_avatar::name_tag_content;
 pub(crate) use sl_viewer_world_view::session;
 
 pub mod auto_reject;

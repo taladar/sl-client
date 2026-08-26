@@ -1,6 +1,6 @@
 [package]
-name = "sl-viewer-preferences"
-description = "The Second Life / OpenSim viewer's preferences: the tabbed floater over every setting, the quick-preferences popover, and the debug-settings editor"
+name = "sl-viewer-world-avatar"
+description = "The Second Life / OpenSim viewer's avatar layer: the skeletons, animations, bakes, worn attachments and name tags an agent's state builds into entities"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -8,8 +8,8 @@ rust-version.workspace = true
 readme.workspace = true
 repository.workspace = true
 license.workspace = true
-keywords = ["secondlife", "opensim", "viewer", "settings"]
-categories = ["game-development"]
+keywords = ["secondlife", "opensim", "viewer", "avatar"]
+categories = ["game-development", "rendering"]
 exclude.workspace = true
 publish.workspace = true
 
@@ -17,34 +17,44 @@ publish.workspace = true
 # Not a workspace dependency: members disagree about `default-features`, so the
 # spec stays per-crate (see the root manifest).
 bevy = { version = "0.19.0" }
-bevy_flair = { version = "0.8.0" }
-bevy_fluent = { version = "0.15.0" }
+bytes = { workspace = true }
 fs-err = { workspace = true }
-serde = { workspace = true, features = ["derive"] }
+image = { version = "0.25.10", default-features = false, features = [
+  "bmp",
+  "jpeg",
+  "png",
+  "tga",
+] }
+jiff = { version = "0.2.35" }
+reqwest = { workspace = true, features = [
+  "blocking",
+  "rustls-tls",
+] }
+serde = { workspace = true, features = [
+  "derive",
+] }
 serde_json = { workspace = true }
-sl-audio = { path = "../sl-audio", version = "0.1.0" }
+sl-anim = { workspace = true }
+sl-avatar = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
-sl-viewer-audio = { workspace = true }
+sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
+  "encode",
+] }
 sl-viewer-kit = { workspace = true }
-sl-viewer-map = { workspace = true }
-sl-viewer-notifications = { workspace = true }
-sl-viewer-people = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
-sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
-sl-viewer-world-avatar = { workspace = true }
 sl-viewer-world-objects = { workspace = true }
-sl-viewer-world-scene = { workspace = true }
-sl-viewer-world-view = { workspace = true }
 tracing = { workspace = true }
+url = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+sl-viewer-testkit = { workspace = true }
 
 [lints]
 workspace = true

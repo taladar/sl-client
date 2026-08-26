@@ -24,8 +24,8 @@
 //! material with the override folded on, re-applied to the face's
 //! [`StandardMaterial`].
 //!
-//! Mirrors the structure of [`AnimationManager`](crate::animations) /
-//! [`WearableAssetManager`](crate::bake_inputs) for the fetch/decode/cache half.
+//! Mirrors the structure of the avatar layer's `AnimationManager` /
+//! `WearableAssetManager` for the fetch/decode/cache half.
 
 use core::ops::Mul as _;
 use std::collections::{HashMap, HashSet};

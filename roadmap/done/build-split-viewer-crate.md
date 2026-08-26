@@ -136,9 +136,10 @@ of those broke cleanly. The avatar layer would not separate from the object
 layer because in Second Life an avatar *is* an object and an attachment *is* an
 object parented to one: the asset managers, the world-space billboard renderer
 that serves both name tags and `llSetText`, derender, and rigged-attachment
-skinning all genuinely serve both. What that would take is written up in
-[build-split-world-avatar-crate](../ideas/build-split-world-avatar-crate.md),
-along with the reason it is not obviously worth doing.
+skinning all genuinely serve both. What that would take was written up in
+[build-split-world-avatar-crate](build-split-world-avatar-crate.md) — which then
+did it: the four-way split exists after all, once the two halves were laid out
+as **layers** (avatar above object) rather than as peers.
 
 `media_prim` sits in `world-view` rather than with the objects it names. That
 placement is what makes the graph acyclic; grouped with the objects it closes a
@@ -239,12 +240,13 @@ Every one of these produced a wrong number here before being caught:
 
 ## Follow-ups this opened
 
-- [build-split-world-avatar-crate](../ideas/build-split-world-avatar-crate.md) —
-  what separating the avatar layer from the object layer would take.
+- [build-split-world-avatar-crate](build-split-world-avatar-crate.md) —
+  separating the avatar layer from the object layer. Done: `world-objects` 44.8k
+  → 16.3k with a 28.8k `world-avatar` beside `world-scene`.
 - [build-structural-encapsulation-audit](build-structural-encapsulation-audit.md)
   — the 60 component types that are `pub` only to satisfy exported system
   signatures, and the render handles held where state lives.
-- [viewer-ecs-idiom-audit](../ideas/viewer-ecs-idiom-audit.md) — the
+- [viewer-ecs-idiom-audit](viewer-ecs-idiom-audit.md) — the
   call-into-manager pattern this refactor kept running into. The texture-store
   inversion in `f6592d13` is one instance of the fix; ten systems turned out to
   need no manager at all once the reads moved.

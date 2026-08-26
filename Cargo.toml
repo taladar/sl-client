@@ -61,6 +61,7 @@ members = [
   "sl-viewer-ui-core",
   "sl-viewer-ui-widgets",
   "sl-viewer-world-api",
+  "sl-viewer-world-avatar",
   "sl-viewer-world-objects",
   "sl-viewer-world-scene",
   "sl-viewer-world-view",
@@ -141,6 +142,7 @@ sl-viewer-testkit = { path = "sl-viewer-testkit", version = "0.1.0" }
 sl-viewer-ui-core = { path = "sl-viewer-ui-core", version = "0.1.0" }
 sl-viewer-ui-widgets = { path = "sl-viewer-ui-widgets", version = "0.1.0" }
 sl-viewer-world-api = { path = "sl-viewer-world-api", version = "0.1.0" }
+sl-viewer-world-avatar = { path = "sl-viewer-world-avatar", version = "0.1.0" }
 sl-viewer-world-objects = { path = "sl-viewer-world-objects", version = "0.1.0" }
 sl-viewer-world-scene = { path = "sl-viewer-world-scene", version = "0.1.0" }
 sl-viewer-world-view = { path = "sl-viewer-world-view", version = "0.1.0" }

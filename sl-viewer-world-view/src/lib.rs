@@ -31,7 +31,7 @@ pub(crate) use sl_viewer_media::media_keys;
 pub(crate) use sl_viewer_settings as settings;
 pub(crate) use sl_viewer_spacenav as spacenav;
 pub(crate) use sl_viewer_world_api as world_api;
-pub(crate) use sl_viewer_world_objects::avatars;
+pub(crate) use sl_viewer_world_avatar::avatars;
 pub(crate) use sl_viewer_world_objects::meshes;
 pub(crate) use sl_viewer_world_objects::objects;
 pub(crate) use sl_viewer_world_scene::terrain;

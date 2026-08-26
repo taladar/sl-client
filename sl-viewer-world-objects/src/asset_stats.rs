@@ -4,7 +4,7 @@
 //! a line per asset store: per-stage entry counts, in-memory footprint, and the
 //! admission gate's in-flight / capacity / waiting figures. It used to read them
 //! by taking one `Res<…Manager>` per store — which meant the scene layer named
-//! four of this crate's asset stores (`AnimationManager`, `MaterialManager`,
+//! four of the world's asset stores (`AnimationManager`, `MaterialManager`,
 //! `MeshManager`, `WearableAssetManager`) for no reason but to call three
 //! accessors on each, and named [`TextureManager`] there as well as in the places
 //! that genuinely fetch through it.
@@ -16,19 +16,19 @@
 //!
 //! It is demand-driven: the overlay states whether it is looking
 //! (`PipelineStats::set_wanted`), and this system's run condition reads that, so a
-//! hidden overlay costs one boolean check per frame rather than five stats
-//! snapshots.
+//! hidden overlay costs one boolean check per frame rather than a stats
+//! snapshot per store.
+//!
+//! The avatar layer's two stores publish the same way from
+//! `sl_viewer_world_avatar::avatar_asset_stats`, into the same resource.
 
 use bevy::prelude::*;
 
-use crate::animations::AnimationManager;
-use crate::bake_inputs::WearableAssetManager;
 use crate::materials::MaterialManager;
 use crate::meshes::MeshManager;
 use crate::textures::TextureManager;
 use crate::world_api::{
-    ANIMATION_LABEL, MATERIAL_LABEL, MESH_LABEL, PipelineStats, StorePipelineStats, TEXTURE_LABEL,
-    WEARABLE_LABEL,
+    MATERIAL_LABEL, MESH_LABEL, PipelineStats, StorePipelineStats, TEXTURE_LABEL,
 };
 
 /// Publishing the object layer's asset-store figures for whoever displays them.
@@ -44,15 +44,13 @@ impl Plugin for AssetStatsPlugin {
     }
 }
 
-/// Snapshot each of this crate's asset stores into
+/// Snapshot each of the object layer's asset stores into
 /// [`PipelineStats`](crate::world_api::PipelineStats).
 ///
 /// Only runs while something is displaying the figures.
 fn publish_asset_store_stats(
     textures: Res<TextureManager>,
     meshes: Res<MeshManager>,
-    animations: Res<AnimationManager>,
-    wearables: Res<WearableAssetManager>,
     materials: Res<MaterialManager>,
     mut published: ResMut<PipelineStats>,
 ) {
@@ -73,22 +71,6 @@ fn publish_asset_store_stats(
         },
     );
     published.publish(
-        ANIMATION_LABEL,
-        StorePipelineStats {
-            stats: animations.stats(),
-            gate: animations.gate_stats(),
-            deferred: animations.deferred_count(),
-        },
-    );
-    published.publish(
-        WEARABLE_LABEL,
-        StorePipelineStats {
-            stats: wearables.stats(),
-            gate: wearables.gate_stats(),
-            deferred: wearables.deferred_count(),
-        },
-    );
-    published.publish(
         MATERIAL_LABEL,
         StorePipelineStats {
             stats: materials.stats(),
@@ -101,14 +83,10 @@ fn publish_asset_store_stats(
 #[cfg(test)]
 mod tests {
     use super::{AssetStatsPlugin, publish_asset_store_stats};
-    use crate::animations::AnimationManager;
-    use crate::bake_inputs::WearableAssetManager;
     use crate::materials::MaterialManager;
     use crate::meshes::MeshManager;
     use crate::textures::TextureManager;
-    use crate::world_api::{
-        ANIMATION_LABEL, MATERIAL_LABEL, MESH_LABEL, PipelineStats, TEXTURE_LABEL, WEARABLE_LABEL,
-    };
+    use crate::world_api::{MATERIAL_LABEL, MESH_LABEL, PipelineStats, TEXTURE_LABEL};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
@@ -121,8 +99,6 @@ mod tests {
         app.add_plugins(AssetStatsPlugin)
             .init_resource::<TextureManager>()
             .init_resource::<MeshManager>()
-            .insert_resource(AnimationManager::new(None))
-            .init_resource::<WearableAssetManager>()
             .init_resource::<MaterialManager>();
 
         app.update();
@@ -137,13 +113,7 @@ mod tests {
             .set_wanted(true);
         app.update();
         let published = app.world().resource::<PipelineStats>();
-        for label in [
-            TEXTURE_LABEL,
-            MESH_LABEL,
-            ANIMATION_LABEL,
-            WEARABLE_LABEL,
-            MATERIAL_LABEL,
-        ] {
+        for label in [TEXTURE_LABEL, MESH_LABEL, MATERIAL_LABEL] {
             assert!(
                 published.get(label).is_some(),
                 "{label} publishes its figures once the reader asks"
@@ -151,23 +121,21 @@ mod tests {
         }
     }
 
-    /// The publisher is a plain system over the five stores, so it can be run
+    /// The publisher is a plain system over the three stores, so it can be run
     /// against a bare world without the plugin's run condition.
     #[test]
-    fn publisher_covers_every_store_in_this_crate() {
+    fn publisher_covers_every_object_store() {
         let mut app = App::new();
         app.init_resource::<PipelineStats>()
             .init_resource::<TextureManager>()
             .init_resource::<MeshManager>()
-            .insert_resource(AnimationManager::new(None))
-            .init_resource::<WearableAssetManager>()
             .init_resource::<MaterialManager>()
             .add_systems(Update, publish_asset_store_stats);
         app.update();
         assert_eq!(
             app.world().resource::<PipelineStats>().iter().count(),
-            5,
-            "every asset store this crate owns is published"
+            3,
+            "every asset store the object layer owns is published"
         );
     }
 }

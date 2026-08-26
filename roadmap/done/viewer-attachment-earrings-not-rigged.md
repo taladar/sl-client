@@ -25,7 +25,7 @@ points (ids 13 / 14), which hang off `mHead` at the `avatar_lad.xml` offset. So
 its placement depends entirely on the attachment-point node's world transform.
 
 Root cause: the pose driver
-[`pose_avatar_skeletons`](../../sl-client-bevy-viewer/src/animations.rs)
+[`pose_avatar_skeletons`](../../sl-viewer-world-avatar/src/animations.rs)
 overwrites each skeleton joint's `GlobalTransform` **directly** in `PostUpdate`,
 *after* Bevy's transform propagation (P18.3 — the SL matrix-palette recurrence
 produces world matrices, and GPU skinning reads them). It hand-re-places the

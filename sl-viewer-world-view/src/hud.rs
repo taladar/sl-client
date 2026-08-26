@@ -16,7 +16,7 @@
 //!
 //! - `setup_hud_screen` spawns the **HUD screen** — the `mScreen` equivalent —
 //!   plus one node per HUD point at the point's fixed `avatar_lad.xml` offset,
-//!   exactly as [`sl_viewer_world_objects::avatars`] spawns the body's attachment-point nodes off
+//!   exactly as [`sl_viewer_world_avatar::avatars`] spawns the body's attachment-point nodes off
 //!   their joints (P16.2). The screen carries the single Second Life → Bevy basis
 //!   change, so the subtree below it stays in Second Life space like every other
 //!   attachment subtree;
@@ -31,7 +31,7 @@
 //! skips every `hud="true"` point on another avatar), so another avatar's HUD
 //! attachment never attaches and never renders — the grid does not normally send
 //! them at all, but a HUD worn by someone else must not turn into world geometry
-//! if one arrives. [`sl_viewer_world_objects::objects::adopt_pending_attachments`] hides those.
+//! if one arrives. [`sl_viewer_world_avatar::rigged_attachments::adopt_pending_attachments`] hides those.
 
 use bevy::app::Propagate;
 use bevy::camera::visibility::RenderLayers;

@@ -2,7 +2,7 @@
 //!
 //! A region *crossing* and a teleport to an *already-connected* (neighbour)
 //! region keep the whole world and merely re-base it onto the new origin (see
-//! [`sl_viewer_world_objects::objects::recenter_objects`] / [`sl_viewer_world_objects::avatars::recenter_avatars`] /
+//! [`sl_viewer_world_objects::objects::recenter_objects`] / [`sl_viewer_world_avatar::avatars::recenter_avatars`] /
 //! [`sl_viewer_world_scene::terrain::recenter_terrain`]). A **distant** teleport instead mints a
 //! fresh circuit to an unconnected region: the session clears its object / terrain
 //! / region caches with *no* per-object `KillObject`, so nothing drives the

@@ -36,7 +36,7 @@ reasons); the tag surface ([[viewer-name-tags-billboard-render]]) is done.
 ## Built
 
 The two render-cost lines, in the tag composer
-([`name_tag_content.rs`](../../sl-client-bevy-viewer/src/name_tag_content.rs)),
+([`name_tag_content.rs`](../../sl-viewer-world-avatar/src/name_tag_content.rs)),
 over the scores [[viewer-avatar-complexity-limit]] measures:
 
 - **`Complexity: N`** on a green→amber→red ramp of the cost against the

@@ -44,7 +44,7 @@ geometry + texture build (nothing about the HUD path is asset-specific).
   (`sRenderingHUDs`) — a screen overlay has no business darkening at dusk. Here
   it is doubly necessary: a Bevy light only lights the layers it is on, and the
   sun is on the world layer, so a lit HUD material would render black.
-  [`face_material`](../../sl-client-bevy-viewer/src/textures.rs) builds an
+  [`face_material`](../../sl-viewer-world-objects/src/textures.rs) builds an
   unshared material per face, so flipping `unlit` cannot leak into world
   geometry. It runs on faces whose material *or layer* changed, which catches a
   face spawned under an already-routed attachment and one whose material a later

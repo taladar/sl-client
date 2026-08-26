@@ -74,7 +74,7 @@ struct ManagedMeshLod {
 /// decoded or failed. The object system reads this and either builds the now-
 /// cached submesh geometry or leaves the object geometry-less.
 #[derive(Message, Debug, Clone, Copy)]
-pub struct MeshDecoded(pub(crate) MeshKey);
+pub struct MeshDecoded(pub MeshKey);
 
 /// The shared mesh fetch/decode/cache pipeline: one [`MeshStore`] plus the
 /// in-flight background fetch tasks and the decoded meshes already in hand.
@@ -123,8 +123,8 @@ pub struct MeshManager {
     /// models: the per-level block byte sizes are what the streaming (land
     /// impact) and avatar render-complexity formulas estimate a mesh's triangle
     /// count from, at *every* level — including the levels this viewer never
-    /// decodes ([`crate::avatar_complexity`]). Sixty-odd bytes per mesh, and the
-    /// only place the header survives the fetch.
+    /// decodes (`sl_viewer_world_avatar::avatar_complexity`). Sixty-odd bytes
+    /// per mesh, and the only place the header survives the fetch.
     headers: HashMap<MeshKey, MeshHeader>,
     /// Requests made before the region's mesh capability was known, held here (at
     /// their base priority) instead of failed. A fetch issued before the seed caps
@@ -433,15 +433,17 @@ impl MeshManager {
 
     /// The decoded rig skin for `id`, once fetched, or `None` if the mesh carries
     /// no skin block, is still in flight, or the fetch failed (P17.2).
-    pub(crate) fn skin(&self, id: MeshKey) -> Option<&Arc<MeshSkin>> {
+    #[must_use]
+    pub fn skin(&self, id: MeshKey) -> Option<&Arc<MeshSkin>> {
         self.skins.get(&id)
     }
 
     /// The parsed asset header of `id` once its fetch resolved, or `None` while
     /// it is in flight (or if it failed). Its per-level block sizes are the
     /// input the cost models estimate a mesh's triangle count from — see
-    /// [`crate::avatar_complexity`].
-    pub(crate) fn header(&self, id: MeshKey) -> Option<&MeshHeader> {
+    /// `sl_viewer_world_avatar::avatar_complexity`.
+    #[must_use]
+    pub fn header(&self, id: MeshKey) -> Option<&MeshHeader> {
         self.headers.get(&id)
     }
 
@@ -488,13 +490,14 @@ impl MeshManager {
     }
 
     /// Whether a level-of-detail change for `id` is still in flight — chiefly the
-    /// [`upgrade_to_finest`](Self::upgrade_to_finest) a rigged mesh triggers when it
+    /// `upgrade_to_finest` a rigged mesh triggers when it
     /// is discovered to be worn / an animesh after starting on the managed coarse
     /// path. A rigged mesh must not be built from its coarse block while its finest
     /// block is still decoding (rigged meshes are not on the LOD-swap rebuild path,
     /// so a coarse build is frozen — an animesh renders as a few-vertex husk); the
     /// skinned bind waits on this (P29).
-    pub(crate) fn lod_change_inflight(&self, id: MeshKey) -> bool {
+    #[must_use]
+    pub fn lod_change_inflight(&self, id: MeshKey) -> bool {
         self.lod_inflight.contains_key(&id)
     }
 

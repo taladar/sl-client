@@ -1,6 +1,6 @@
 [package]
 name = "sl-viewer-world-objects"
-description = "The Second Life / OpenSim viewer's object layer: the prims, meshes, materials, textures and avatars a region's state builds into entities"
+description = "The Second Life / OpenSim viewer's object layer: the prims, meshes, materials and textures a region's state builds into entities"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
@@ -18,43 +18,20 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest).
 bevy = { version = "0.19.0" }
 bytes = { workspace = true }
-fs-err = { workspace = true }
-image = { version = "0.25.10", default-features = false, features = [
-  "bmp",
-  "jpeg",
-  "png",
-  "tga",
-] }
-jiff = { version = "0.2.35" }
-reqwest = { workspace = true, features = [
-  "blocking",
-  "rustls-tls",
-] }
-serde = { workspace = true, features = [
-  "derive",
-] }
-serde_json = { workspace = true }
-sl-anim = { workspace = true }
-sl-avatar = { workspace = true }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
 ] }
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
-sl-texture = { path = "../sl-texture", version = "0.1.0", features = [
-  "encode",
-] }
 sl-viewer-kit = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
 sl-viewer-world-api = { workspace = true }
-tracing = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 sl-proto = { workspace = true }
-sl-viewer-testkit = { workspace = true }
 
 [lints]
 workspace = true

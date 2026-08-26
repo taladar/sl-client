@@ -35,6 +35,7 @@ sl-viewer-media = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
 sl-viewer-world-api = { workspace = true }
+sl-viewer-world-avatar = { workspace = true }
 sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
 url = { workspace = true }

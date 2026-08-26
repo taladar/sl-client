@@ -150,14 +150,14 @@ impl Plugin for AvatarAnimationPlugin {
                 // has processed removals).
                 crate::animesh::ingest_object_animations,
                 crate::animesh::drive_control_avatars
-                    .after(crate::objects::apply_rigged_attachments),
+                    .after(crate::rigged_attachments::apply_rigged_attachments),
                 // Spawn a control avatar as soon as an animesh has an animation
                 // playing (after `drive_control_avatars` folds the
                 // `ObjectAnimation` into the playback clock), so a late mesh bind
                 // does not lose an early animation.
-                crate::objects::spawn_animesh_control_avatars
+                crate::rigged_attachments::spawn_animesh_control_avatars
                     .after(crate::animesh::drive_control_avatars),
-                crate::objects::prune_control_avatars.after(WorldPhase::ObjectsUpdated),
+                crate::rigged_attachments::prune_control_avatars.after(WorldPhase::ObjectsUpdated),
             ),
         );
     }

@@ -8523,6 +8523,7 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
+ "sl-viewer-world-avatar",
  "sl-viewer-world-objects",
  "sl-viewer-world-scene",
  "sl-viewer-world-view",
@@ -9005,6 +9006,7 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
+ "sl-viewer-world-avatar",
  "sl-viewer-world-objects",
 ]
 
@@ -9204,7 +9206,7 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-objects",
+ "sl-viewer-world-avatar",
  "sl-viewer-world-view",
  "tracing",
 ]
@@ -9284,6 +9286,7 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
+ "sl-viewer-world-avatar",
  "sl-viewer-world-objects",
  "sl-viewer-world-scene",
  "sl-viewer-world-view",
@@ -9393,7 +9396,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sl-viewer-world-objects"
+name = "sl-viewer-world-avatar"
 version = "0.1.0"
 dependencies = [
  "bevy",
@@ -9408,7 +9411,6 @@ dependencies = [
  "sl-anim",
  "sl-avatar",
  "sl-client-bevy",
- "sl-proto",
  "sl-settings",
  "sl-texture",
  "sl-viewer-kit",
@@ -9417,7 +9419,26 @@ dependencies = [
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
  "sl-viewer-world-api",
+ "sl-viewer-world-objects",
  "tracing",
+ "url",
+]
+
+[[package]]
+name = "sl-viewer-world-objects"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bytes",
+ "pretty_assertions",
+ "sl-client-bevy",
+ "sl-proto",
+ "sl-settings",
+ "sl-viewer-kit",
+ "sl-viewer-platform",
+ "sl-viewer-settings",
+ "sl-viewer-ui-core",
+ "sl-viewer-world-api",
  "url",
 ]
 
@@ -9463,6 +9484,7 @@ dependencies = [
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
  "sl-viewer-world-api",
+ "sl-viewer-world-avatar",
  "sl-viewer-world-objects",
  "sl-viewer-world-scene",
  "url",

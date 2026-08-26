@@ -78,6 +78,15 @@
 //! cache miss — `refetch_released_objects`) and the object comes back within
 //! the round trip.
 //!
+//! # Why the whole feature is in the avatar layer
+//!
+//! It suppresses objects as well as avatars, so it reads as shared — but the
+//! object half only ever touches [`ObjectState`], which lives a layer further
+//! down in `sl-viewer-world-api`, while the avatar half needs
+//! `avatars::derender_agent` to hand a suppressed body over to its coarse
+//! placeholder in the same frame. So the object half costs nothing to host here
+//! and the avatar half could not be hosted anywhere lower.
+//!
 //! Reference (Firestorm, read-only): `fsassetblacklist`,
 //! `llviewermenu.cpp`'s `derenderObject`, `LLAvatarActions::derender`,
 //! `llviewerobjectlist.cpp`'s `mDerendered` / `resetDerenderList`.

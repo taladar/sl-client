@@ -313,7 +313,7 @@ impl TextureManager {
     /// [`TextureStore`] keyed by `id`, so every consumer reads it exactly like any
     /// other texture (P17.3 / P14). Boosted like any avatar texture (P20.2) so the
     /// bake loads promptly rather than queued behind nearer prims.
-    pub(crate) fn request_server_bake(&mut self, id: TextureKey, url: String) {
+    pub fn request_server_bake(&mut self, id: TextureKey, url: String) {
         self.request_from(
             id,
             RemoteTextureSource::ServerBake { url },
@@ -331,7 +331,7 @@ impl TextureManager {
     /// bookkeeping. The material currently displaying the texture keeps its own
     /// Bevy `Handle`, so the avatar does not blank; the image is replaced when the
     /// fresh fetch re-decodes.
-    pub(crate) fn forget(&mut self, id: TextureKey, store: &mut DecodedTextures) {
+    pub fn forget(&mut self, id: TextureKey, store: &mut DecodedTextures) {
         self.decoded_ids.remove(&id);
         let _decoded = store.remove(id);
         let _request = self.requests.remove(&id);
@@ -588,18 +588,16 @@ impl TextureManager {
     /// decoded, or `None` while it has not. The cost models want the asset's real
     /// size, not the level this viewer happens to be showing: the reference's
     /// render-complexity charge per texture is `256 + 16·(h/128 + w/128)` over
-    /// `getFullHeight` / `getFullWidth` ([`crate::avatar_complexity`]).
+    /// `getFullHeight` / `getFullWidth`
+    /// (`sl_viewer_world_avatar::avatar_complexity`).
     ///
     /// Read from the store entry's parsed J2C header where available (the
     /// authoritative size), falling back to the decoded-size-scaled-by-discard
-    /// back-calculation — the same order [`record_decoded`](Self::record_decoded)
+    /// back-calculation — the same order `record_decoded`
     /// uses, and the only route for a boosted texture, which retains no request
     /// handle to reach the header through.
-    pub(crate) fn native_dimensions(
-        &self,
-        id: TextureKey,
-        store: &DecodedTextures,
-    ) -> Option<(u32, u32)> {
+    #[must_use]
+    pub fn native_dimensions(&self, id: TextureKey, store: &DecodedTextures) -> Option<(u32, u32)> {
         if let Some(native) = self
             .requests
             .get(&id)
@@ -980,7 +978,7 @@ impl TextureApplyBudget {
     /// modules — so the combined new-`Image` count per frame is bounded and the
     /// serial `extract_render_asset<GpuImage>` upload cannot spike from stacked
     /// per-system budgets.
-    pub(crate) const fn take_image(&mut self) -> bool {
+    pub const fn take_image(&mut self) -> bool {
         if self.image_remaining > 0 {
             self.image_remaining = self.image_remaining.saturating_sub(1);
             true
@@ -1090,7 +1088,7 @@ const FACE_ALPHA_MASK_CUTOFF: f32 = 0.5;
 /// for a rigged one (which cannot mask).
 ///
 /// A face with no texture (nil id) keeps just its flat tint.
-pub(crate) fn face_material(
+pub fn face_material(
     face: &TextureFace,
     materials: &mut Assets<FaceMaterial>,
     manager: &mut TextureManager,
@@ -1772,7 +1770,8 @@ const fn texture_has_transparency(decoded: &DecodedTexture) -> bool {
 
 /// Convert a face tint (RGBA bytes, `[255; 4]` = opaque white = no tint) into a
 /// Bevy sRGB [`Color`] to multiply the diffuse texture by.
-pub(crate) fn tint_color(color: [u8; 4]) -> Color {
+#[must_use]
+pub fn tint_color(color: [u8; 4]) -> Color {
     Color::srgba(
         f32::from(color[0]) / 255.0,
         f32::from(color[1]) / 255.0,

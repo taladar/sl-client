@@ -11,22 +11,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 98 |
-| ready | 256 |
+| ideas | 97 |
+| ready | 258 |
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 32 |
-| done | 867 |
+| done | 868 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1373** |
+| **total** | **1375** |
 
-## ideas (98)
+## ideas (97)
 
 ### viewer
 
-- [`build-split-world-avatar-crate`](ideas/build-split-world-avatar-crate.md) —
-  Separate the avatar layer from the object layer in the world split
 - [`viewer-a11y-screen-reader`](ideas/viewer-a11y-screen-reader.md) —
   Screen-reader / assistive-technology support (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -227,7 +225,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (256)
+## ready (258)
 
 ### protocol
 
@@ -238,6 +236,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-flatten-feature-tier`](ready/build-flatten-feature-tier.md) — Flatten
+  the feature tier — it is a chain where it should be a fan
+- [`build-split-ui-widgets-crate`](ready/build-split-ui-widgets-crate.md) — Lift
+  the single-consumer widgets out of sl-viewer-ui-widgets
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -1152,7 +1154,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (867)
+## done (868)
 
 ### protocol
 
@@ -1320,6 +1322,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`build-split-viewer-crate`](done/build-split-viewer-crate.md) — Split the
   viewer crate to regain cross-crate build parallelism
+- [`build-split-world-avatar-crate`](done/build-split-world-avatar-crate.md) —
+  Separate the avatar layer from the object layer in the world split
 - [`build-structural-encapsulation-audit`](done/build-structural-encapsulation-audit.md)
   — Audit the workspace for structural and encapsulation improvements the crate
   split exposed (blocked by `build-split-viewer-crate` (done))

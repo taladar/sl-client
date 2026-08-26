@@ -186,7 +186,7 @@ ordering constraints. Re-measured against the current tree — every `pub` /
 took the other forty-three, and the nine that are left are the ones it named as
 hard: the terrain-wins-the-shared-`MeshUploadBudget` chain and the avatar chain
 both order *both ways* across the layers. Dissolving them is
-[build-split-world-avatar-crate](../ideas/build-split-world-avatar-crate.md)'s
+[build-split-world-avatar-crate](../done/build-split-world-avatar-crate.md)'s
 work, which has to move that chain anyway. Recording the number so the next
 person does not re-derive it.
 

@@ -17,7 +17,7 @@ rigidly to the seat, the rider is now as smooth as the **seat** — but the seat
 
 This is the **object** side of the same dead-reckoning story as the avatar
 translation ease ([[viewer-avatar-dead-reckoning-translation-rubberband]]):
-[`drive_physical_objects`](../../sl-client-bevy-viewer/src/physics.rs) (P31.2)
+[`drive_physical_objects`](../../sl-viewer-world-view/src/physics.rs) (P31.2)
 extrapolates a physical prim between `ObjectUpdate`s, then on each authoritative
 update **hard-snaps** it back to truth (`reseed` + `place`). When prediction and
 truth diverge, that per-update snap is a visible jump — the object analogue of
