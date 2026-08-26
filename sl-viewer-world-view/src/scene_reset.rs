@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 use sl_client_bevy::{SlEvent, SlIdentity, SlSessionEvent};
 
-use crate::objects::{PendingBuilds, PendingObjectEvents};
+use crate::objects::PendingObjectEvents;
 use crate::terrain::TerrainTextures;
 use crate::world_api::AvatarState;
 use crate::world_api::ObjectState;
@@ -43,7 +43,6 @@ pub fn reset_scene_on_world_reset(
     mut events: MessageReader<SlEvent>,
     identity: Res<SlIdentity>,
     mut objects: ResMut<ObjectState>,
-    mut builds: ResMut<PendingBuilds>,
     mut pending: ResMut<PendingObjectEvents>,
     mut avatars: ResMut<AvatarState>,
     mut terrain: ResMut<TerrainState>,
@@ -69,9 +68,8 @@ pub fn reset_scene_on_world_reset(
     // by `AvatarState::purge` (agent-keyed, so it does not flash) and the
     // destination re-streams everything.
     objects.purge(&mut commands);
-    // The deferred geometry builds belonged to the objects purge just dropped;
-    // they no longer die with them, so the queue is cleared explicitly.
-    builds.clear();
+    // The purged objects' deferred geometry builds are components on the entities
+    // that purge just despawned, so they go with them.
     pending.clear();
     avatars.purge(identity.agent_id, &mut commands);
     terrain.purge(&mut commands);

@@ -30,12 +30,13 @@
 //!
 //! Billboards are **top-level** entities (never children of the object), so the
 //! object subtree's `Propagate(probe layers)` cannot leak a reflection-probe
-//! layer onto them — the same rule the name tags follow. Their lifetime is
-//! tracked in `HoverTextLabels` and reaped when the object's
-//! `ObjectFloatingText` is removed (cleared text *or* the object despawning).
+//! layer onto them — the same rule the name tags follow. Their lifetime is a
+//! Bevy **relationship**: `HoverText` on the billboard points at the object,
+//! `HoverTextLabel` on the object points back, and `linked_spawn` despawns the
+//! billboard with the object. `llSetText("")` — the object outliving its text —
+//! is the one case a system still has to handle.
 
 use bevy::ecs::system::SystemParam;
-use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::text::TextBounds;
 
@@ -159,16 +160,27 @@ impl ObjectFloatingText {
 
 /// A world-space floating-text billboard, pointing back at the object entity it
 /// floats over so [`follow_hover_text`] can track its world pose and Z scale.
+///
+/// The **source** half of the billboard↔object relationship: inserting it puts
+/// [`HoverTextLabel`] on the object, so "which billboard does this object own?"
+/// is a component on the object rather than an entry in a map the reap paths have
+/// to keep in step.
 #[derive(Component, Debug, Clone, Copy)]
+#[relationship(relationship_target = HoverTextLabel)]
 pub(crate) struct HoverText {
     /// The object entity this text labels.
     pub(crate) object: Entity,
 }
 
-/// Maps an object entity to its floating-text billboard entity, so a cleared
-/// (or despawned) object can reap the top-level billboard it owns.
-#[derive(Resource, Debug, Default)]
-pub(crate) struct HoverTextLabels(HashMap<Entity, Entity>);
+/// The floating-text billboard an object currently owns — the **target** half of
+/// [`HoverText`].
+///
+/// `linked_spawn` is what makes the object despawning enough: the billboard is a
+/// top-level entity (see the module docs) so the hierarchy would not take it, and
+/// the relationship does instead.
+#[derive(Component, Debug)]
+#[relationship_target(relationship = HoverText, linked_spawn)]
+pub(crate) struct HoverTextLabel(Entity);
 
 /// The renderer-side components of a floating-text billboard (mirrors
 /// [`crate::name_tag_billboard::name_tag_render_bundle`], minus the name-tag
@@ -218,15 +230,22 @@ fn object_pull_radius(scale: &sl_client_bevy::Vector) -> f32 {
 /// [`TagContent`] keeping the layout pipeline quiet when nothing shown changed.
 pub(crate) fn sync_object_hover_text(
     mut commands: Commands,
-    mut labels: ResMut<HoverTextLabels>,
-    changed: Query<(Entity, &ObjectFloatingText, &ObjectSlMotion), Changed<ObjectFloatingText>>,
+    changed: Query<
+        (
+            Entity,
+            &ObjectFloatingText,
+            &ObjectSlMotion,
+            Option<&HoverTextLabel>,
+        ),
+        Changed<ObjectFloatingText>,
+    >,
     mut contents: Query<(&mut TagContent, &mut NameTagPullRadius), With<HoverText>>,
 ) {
-    for (object, floating, motion) in &changed {
+    for (object, floating, motion, label) in &changed {
         let content = floating.to_content();
         let pull_radius = object_pull_radius(&motion.scale);
-        if let Some(&label) = labels.0.get(&object) {
-            if let Ok((mut existing, mut radius)) = contents.get_mut(label) {
+        if let Some(label) = label {
+            if let Ok((mut existing, mut radius)) = contents.get_mut(label.0) {
                 if *existing != content {
                     *existing = content;
                 }
@@ -235,29 +254,31 @@ pub(crate) fn sync_object_hover_text(
                 }
             }
         } else {
-            let label = commands
-                .spawn((
-                    hover_text_render_bundle(pull_radius),
-                    content,
-                    HoverText { object },
-                ))
-                .id();
-            labels.0.insert(object, label);
+            // Inserting `HoverText` puts the matching `HoverTextLabel` on the object,
+            // so the next frame's pass finds the billboard through the relationship.
+            commands.spawn((
+                hover_text_render_bundle(pull_radius),
+                content,
+                HoverText { object },
+            ));
         }
     }
 }
 
-/// Reap floating-text billboards whose object lost its [`ObjectFloatingText`] —
-/// fired both when a script clears the text (`llSetText("")`, the component is
-/// removed) and when the object despawns entirely (the component goes with it).
+/// Reap the floating-text billboard of an object that lost its
+/// [`ObjectFloatingText`] but is still there — a script clearing the text
+/// (`llSetText("")`).
+///
+/// An object that *despawned* needs nothing here: `HoverText`'s relationship is
+/// `linked_spawn`, so the billboard went with it.
 pub(crate) fn despawn_removed_hover_text(
     mut commands: Commands,
-    mut labels: ResMut<HoverTextLabels>,
+    labels: Query<&HoverTextLabel>,
     mut removed: RemovedComponents<ObjectFloatingText>,
 ) {
     for object in removed.read() {
-        if let Some(label) = labels.0.remove(&object) {
-            commands.entity(label).try_despawn();
+        if let Ok(label) = labels.get(object) {
+            commands.entity(label.0).try_despawn();
         }
     }
 }
@@ -426,8 +447,9 @@ pub(crate) fn apply_hover_text_settings(
 }
 
 /// The floating object-text plugin (`llSetText`, viewer-hover-text): the
-/// `HoverTextMaterials` registry, the `HoverTextLabels` lifetime map, and
-/// the compose / place systems.
+/// `HoverTextMaterials` registry and the compose / place systems. A billboard's
+/// lifetime is the crate-private `HoverText` relationship's business, not a
+/// resource's.
 ///
 /// The *render* half of the chain — laying the composed content out into meshes
 /// — is shared with the avatar name tags and lives in
@@ -439,8 +461,7 @@ pub struct HoverTextPlugin;
 impl Plugin for HoverTextPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<HoverTextMaterials>()
-            .init_resource::<HoverTextLabels>()
-            // Reap billboards whose object cleared its text or despawned, then
+            // Reap billboards whose object cleared its text, then
             // (re)compose the rest from the mirrored `ObjectFloatingText`.
             .add_systems(
                 Update,
@@ -505,6 +526,87 @@ mod tests {
                 .iter()
                 .all(|line| line.size == TagLineSize::Name)
         );
+    }
+
+    /// A billboard's lifetime is the relationship's: the object gains a
+    /// [`HoverTextLabel`] when the billboard is spawned, `llSetText("")` reaps it,
+    /// and the object despawning takes the billboard with it (`linked_spawn`) with
+    /// no reap system involved at all.
+    #[test]
+    fn billboard_lifetime_follows_the_relationship() -> Result<(), Box<dyn core::error::Error>> {
+        use super::{
+            HoverTextLabel, ObjectSlMotion, despawn_removed_hover_text, sync_object_hover_text,
+        };
+        use sl_client_bevy::{Rotation, Vector};
+
+        /// A unit-scale motion block, the only part of the object the compose pass
+        /// reads (for the billboard's camera pull radius).
+        fn unit_motion() -> ObjectSlMotion {
+            ObjectSlMotion {
+                position: Vector {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+                rotation: Rotation {
+                    x: 0.0,
+                    y: 0.0,
+                    z: 0.0,
+                    s: 1.0,
+                },
+                scale: Vector {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                },
+                is_root: true,
+                attachment: false,
+            }
+        }
+
+        let mut app = App::new();
+        app.add_systems(
+            Update,
+            (despawn_removed_hover_text, sync_object_hover_text).chain(),
+        );
+
+        let text = || ObjectFloatingText {
+            text: "Vendor".to_owned(),
+            raw_color: [255, 255, 255, 0],
+        };
+        let object = app.world_mut().spawn((text(), unit_motion())).id();
+        app.update();
+        let billboard = app
+            .world()
+            .get::<HoverTextLabel>(object)
+            .ok_or("the object owns its billboard through the relationship")?
+            .0;
+        app.world().get_entity(billboard)?;
+
+        // `llSetText("")` removes the mirrored component; the billboard is reaped
+        // and the relationship with it.
+        app.world_mut()
+            .entity_mut(object)
+            .remove::<ObjectFloatingText>();
+        app.update();
+        assert!(app.world().get_entity(billboard).is_err());
+        assert!(app.world().get::<HoverTextLabel>(object).is_none());
+
+        // A second object, this time despawned outright: nothing reaps its
+        // billboard except `linked_spawn`.
+        let doomed = app.world_mut().spawn((text(), unit_motion())).id();
+        app.update();
+        let doomed_billboard = app
+            .world()
+            .get::<HoverTextLabel>(doomed)
+            .ok_or("the second object owns a billboard too")?
+            .0;
+        app.world_mut().entity_mut(doomed).despawn();
+        assert!(
+            app.world().get_entity(doomed_billboard).is_err(),
+            "linked_spawn despawns the billboard with its object"
+        );
+        Ok(())
     }
 
     /// The anchor lifts the object centre by 0.6 × Z scale in world up only —

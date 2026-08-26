@@ -388,15 +388,22 @@ struct PendingTree {
     priority: Priority,
 }
 
-/// One object's outstanding deferred geometry work: the asset fetch its first
-/// build is waiting on, and the inputs each of its level-of-detail rebuilds needs
-/// to run again without the live [`Object`].
+/// One object's outstanding deferred geometry work, carried on the object entity:
+/// the asset fetch its first build is waiting on, and the inputs each of its
+/// level-of-detail rebuilds needs to run again without the live [`Object`].
 ///
-/// All four are the *same* object's build state and are re-established together
-/// on a re-tessellation, so they live in one record rather than four parallel
-/// maps — which also makes forgetting a removed object exactly one deletion.
-#[derive(Debug, Default)]
-struct ObjectBuilds {
+/// All four are the *same* object's build state and are re-established together on
+/// a re-tessellation, so they are one component rather than four — a
+/// re-tessellation states the object's whole outstanding work in a single insert,
+/// and cannot leave a stale rebuild input behind by forgetting one of four.
+///
+/// It is a **component** rather than an entry in a side map keyed by scoped id
+/// because the work is a fact about the object that is waiting: it dies when the
+/// object's entity does, so no removal path has to say so. That is the whole
+/// payoff — the scans below are archetype iteration where they were map iteration,
+/// which is a wash, and nothing crosses a crate boundary either way.
+#[derive(Debug, Default, Component)]
+pub(crate) struct ObjectBuilds {
     /// For an object still waiting on an asset fetch to decode (a mesh's `LLMesh`
     /// asset or a sculpt's map texture), the pending build request; `None` once
     /// the geometry is built or for an object whose geometry needs no fetch.
@@ -430,86 +437,107 @@ impl ObjectBuilds {
     }
 }
 
-/// The deferred geometry builds of every object that still has some, keyed by
-/// scoped id — the queue side of the object graph.
+/// Every object's outstanding deferred geometry work, reached through the object
+/// entities that carry it (`ObjectBuilds`, crate-private).
 ///
-/// This is machinery, not world state: each entry holds an in-flight asset fetch
+/// This is machinery, not world state: each record holds an in-flight asset fetch
 /// or the retained inputs of a level-of-detail rebuild, so it stays in the world
-/// crate while [`ObjectState`] describes the scene from below. The split has one
-/// hazard: an object's builds used to die implicitly with its
-/// [`TrackedObject`], and now every removal path has to say so — `forget` /
-/// `forget_all` on a removal, `clear` on a world reset. A missed one leaks a
-/// queue entry for an object that no longer exists, which nothing else would
-/// notice.
-#[derive(Debug, Resource, Default)]
-pub struct PendingBuilds {
-    /// Every object with outstanding build work. An object whose builds have all
-    /// resolved holds no entry at all.
-    builds: HashMap<ScopedObjectId, ObjectBuilds>,
+/// crate while [`ObjectState`] describes the scene from below. Making it a
+/// component rather than a map keyed by scoped id is what removed the hazard that
+/// split introduced — the builds used to die implicitly with the
+/// [`TrackedObject`], then had to be forgotten by name on every removal path, and
+/// a missed one leaked a record (and its retained texture entry) for an object
+/// that no longer existed. Now they die with the entity again.
+///
+/// The **writes** go through `Commands` rather than this parameter: a record is
+/// established for an entity the same `apply_object` call may only just have
+/// spawned, and mixing a second command queue into these systems would make the
+/// order of an insert against the outer queue's despawn undefined. So
+/// `set_object_builds` is a free function taking the caller's own `Commands`, and
+/// this parameter carries
+/// only the reads and the in-place field updates.
+#[derive(SystemParam, Debug)]
+pub struct PendingBuilds<'w, 's> {
+    /// Every object entity carrying outstanding build work, with the scoped id the
+    /// build paths speak.
+    builds: Query<'w, 's, (Entity, &'static SceneObject, &'static mut ObjectBuilds)>,
 }
 
-impl PendingBuilds {
-    /// The outstanding builds of `scoped`, or `None` when it has none.
-    fn get(&self, scoped: &ScopedObjectId) -> Option<&ObjectBuilds> {
-        self.builds.get(scoped)
+impl PendingBuilds<'_, '_> {
+    /// The outstanding builds of `entity`, or `None` when it has none.
+    fn get(&self, entity: Entity) -> Option<&ObjectBuilds> {
+        self.builds
+            .get(entity)
+            .ok()
+            .map(|(_entity, _scene, builds)| builds)
     }
 
-    /// Replace `scoped`'s whole build record — what a (re-)tessellation
-    /// establishes in one go. An all-resolved record is dropped rather than
-    /// stored, so an object that needs no deferred work holds no entry.
-    fn set(&mut self, scoped: ScopedObjectId, builds: ObjectBuilds) {
-        if builds.is_empty() {
-            let _resolved = self.builds.remove(&scoped);
-        } else {
-            let _previous = self.builds.insert(scoped, builds);
+    /// Take `entity`'s pending asset build, leaving its rebuild inputs in place.
+    ///
+    /// The emptied record is left on the entity rather than removed: the caller may
+    /// be about to park a *different* build on it in the same pass (a rigged mesh
+    /// re-parks its build for `apply_rigged_attachments`), and a removal queued
+    /// through `Commands` would land after that write and silently take it.
+    fn take_pending(&mut self, entity: Entity) -> Option<PendingGeometry> {
+        let (_entity, _scene, mut builds) = self.builds.get_mut(entity).ok()?;
+        builds.pending.take()
+    }
+
+    /// Drop `entity`'s record if the take above left nothing outstanding — for a
+    /// caller that knows it is *not* about to park another build on it (a sculpt
+    /// and a rigged mesh both carry no LOD-rebuild inputs, so their record is done
+    /// the moment their build is). An object that needs no deferred work carries no
+    /// record, exactly as it did while this was a map.
+    fn drop_if_resolved(&self, entity: Entity, commands: &mut Commands) {
+        if self.get(entity).is_some_and(ObjectBuilds::is_empty) {
+            commands.entity(entity).remove::<ObjectBuilds>();
         }
     }
 
-    /// Take `scoped`'s pending asset build, leaving its rebuild inputs in place
-    /// (and dropping the entry when nothing else is outstanding).
-    fn take_pending(&mut self, scoped: &ScopedObjectId) -> Option<PendingGeometry> {
-        let entry = self.builds.get_mut(scoped)?;
-        let taken = entry.pending.take();
-        if entry.is_empty() {
-            let _resolved = self.builds.remove(scoped);
+    /// Set `entity`'s pending asset build. A no-op for an object with no record —
+    /// every caller has just taken from one, so it is there.
+    fn set_pending(&mut self, entity: Entity, pending: PendingGeometry) {
+        if let Ok((_entity, _scene, mut builds)) = self.builds.get_mut(entity) {
+            builds.pending = Some(pending);
         }
-        taken
     }
 
-    /// Set `scoped`'s pending asset build, creating its record if needed.
-    fn set_pending(&mut self, scoped: ScopedObjectId, pending: PendingGeometry) {
-        self.builds.entry(scoped).or_default().pending = Some(pending);
+    /// Set `entity`'s static-mesh LOD rebuild inputs, on the same terms as
+    /// [`set_pending`](Self::set_pending).
+    fn set_mesh_rebuild(&mut self, entity: Entity, rebuild: PendingMesh) {
+        if let Ok((_entity, _scene, mut builds)) = self.builds.get_mut(entity) {
+            builds.mesh_rebuild = Some(rebuild);
+        }
     }
 
-    /// Set `scoped`'s static-mesh LOD rebuild inputs, creating its record if
-    /// needed.
-    fn set_mesh_rebuild(&mut self, scoped: ScopedObjectId, rebuild: PendingMesh) {
-        self.builds.entry(scoped).or_default().mesh_rebuild = Some(rebuild);
-    }
-
-    /// Every object whose pending asset build satisfies `wanted`.
-    fn scoped_pending_on(&self, wanted: impl Fn(&PendingGeometry) -> bool) -> Vec<ScopedObjectId> {
+    /// Every object whose pending asset build satisfies `wanted`, with the entity
+    /// carrying it — snapshotted, so the caller may build (and write back) as it
+    /// walks the result.
+    fn scoped_pending_on(
+        &self,
+        wanted: impl Fn(&PendingGeometry) -> bool,
+    ) -> Vec<(ScopedObjectId, Entity)> {
         self.builds
             .iter()
-            .filter(|(_scoped, builds)| builds.pending.as_ref().is_some_and(&wanted))
-            .map(|(&scoped, _builds)| scoped)
+            .filter(|(_entity, _scene, builds)| builds.pending.as_ref().is_some_and(&wanted))
+            .map(|(entity, scene, _builds)| (scene.scoped_id, entity))
             .collect()
     }
 
     /// Every object that has already built its static mesh from `key` and holds
     /// the inputs to rebuild it at another level of detail — nothing pending, and
     /// retained rebuild inputs naming that key.
-    fn scoped_mesh_rebuild_on(&self, key: MeshKey) -> Vec<ScopedObjectId> {
+    fn scoped_mesh_rebuild_on(&self, key: MeshKey) -> Vec<(ScopedObjectId, Entity)> {
         self.builds
             .iter()
-            .filter(|(_scoped, builds)| {
+            .filter(|(_entity, _scene, builds)| {
                 builds.pending.is_none()
                     && builds
                         .mesh_rebuild
                         .as_ref()
                         .is_some_and(|rebuild| rebuild.key == key)
             })
-            .map(|(&scoped, _builds)| scoped)
+            .map(|(entity, scene, _builds)| (scene.scoped_id, entity))
             .collect()
     }
 
@@ -517,29 +545,22 @@ impl PendingBuilds {
     /// `wanted` — the cheap gate in front of a decode-backlog scan.
     fn any_pending_on(&self, wanted: impl Fn(&PendingGeometry) -> bool) -> bool {
         self.builds
-            .values()
-            .any(|builds| builds.pending.as_ref().is_some_and(&wanted))
+            .iter()
+            .any(|(_entity, _scene, builds)| builds.pending.as_ref().is_some_and(&wanted))
     }
+}
 
-    /// Forget every deferred build of `scoped`. **Every** path that drops a
-    /// [`TrackedObject`] must call this (or [`forget_all`](Self::forget_all)):
-    /// the build state used to die with the tracked object and no longer does.
-    fn forget(&mut self, scoped: &ScopedObjectId) {
-        let _dropped = self.builds.remove(scoped);
-    }
-
-    /// Forget the deferred builds of every id in `scoped` — the removal paths
-    /// that take a whole linkset report what they dropped.
-    pub(crate) fn forget_all(&mut self, scoped: &[ScopedObjectId]) {
-        for id in scoped {
-            self.forget(id);
-        }
-    }
-
-    /// Forget every deferred build there is: the queue half of the scene-mirror
-    /// purge [`ObjectState::purge`] performs on a fresh-circuit teleport.
-    pub fn clear(&mut self) {
-        self.builds.clear();
+/// State `entity`'s whole outstanding build work — what a (re-)tessellation
+/// establishes in one go. An all-resolved record is removed rather than stored, so
+/// an object that needs no deferred work carries nothing.
+///
+/// Through `Commands` rather than [`PendingBuilds`] because the entity may have
+/// been spawned by this very call and so is not in any query yet.
+fn set_object_builds(entity: Entity, builds: ObjectBuilds, commands: &mut Commands) {
+    if builds.is_empty() {
+        commands.entity(entity).remove::<ObjectBuilds>();
+    } else {
+        commands.entity(entity).insert(builds);
     }
 }
 
@@ -951,7 +972,6 @@ fn drain_budgeted<T>(
 pub fn update_objects(
     mut events: MessageReader<SlEvent>,
     mut state: ResMut<ObjectState>,
-    mut builds: ResMut<PendingBuilds>,
     derender: Res<crate::world_api::DerenderList>,
     mut pending: ResMut<PendingObjectEvents>,
     mut mesh_budget: ResMut<MeshUploadBudget>,
@@ -991,7 +1011,6 @@ pub fn update_objects(
                 }
                 apply_object(
                     &mut state,
-                    &mut builds,
                     &object,
                     &mut commands,
                     &mut meshes,
@@ -1011,7 +1030,7 @@ pub fn update_objects(
                         let _empty = queued_removes.remove(&scoped);
                     }
                 }
-                builds.forget_all(&state.remove_object(scoped, &mut commands));
+                let _removed = state.remove_object(scoped, &mut commands);
                 false
             }
         })
@@ -1039,7 +1058,6 @@ pub fn update_objects(
                 SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => {
                     apply_object(
                         &mut state,
-                        &mut builds,
                         object,
                         &mut commands,
                         &mut meshes,
@@ -1053,7 +1071,7 @@ pub fn update_objects(
                     )
                 }
                 SlSessionEvent::ObjectRemoved { local_id, .. } => {
-                    builds.forget_all(&state.remove_object(*local_id, &mut commands));
+                    let _removed = state.remove_object(*local_id, &mut commands);
                     false
                 }
                 _other => false,
@@ -2890,7 +2908,6 @@ fn apply_light(entity: Entity, light: Option<ObjectLight>, commands: &mut Comman
 /// a component-only refresh, or anything that touched no geometry.
 fn apply_object(
     state: &mut ObjectState,
-    builds: &mut PendingBuilds,
     object: &Object,
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -2976,11 +2993,8 @@ fn apply_object(
     if let Some(stale) =
         state.drop_stale_tracked_entity(scoped, |entity| commands.get_entity(entity).is_ok())
     {
-        // The stale entry's deferred builds went with it while they lived inside
-        // the tracked object; now they have to be dropped by name, or the queue
-        // would keep an entry (and its retained texture entry) for an object the
-        // spawn path is about to re-create from scratch below.
-        builds.forget(&scoped);
+        // The stale entry's deferred builds went with the entity Bevy despawned —
+        // they are a component on it — so there is nothing to drop by name here.
         debug!(
             "object {scoped}: tracked entity {stale:?} was despawned externally (parent hierarchy gone); respawning"
         );
@@ -3132,14 +3146,15 @@ fn apply_object(
             // tree's (P26.2). An object that changed category drops the rebuild
             // inputs it no longer has (each is `None`), and one that now needs no
             // deferred work at all drops its entry entirely.
-            builds.set(
-                scoped,
+            set_object_builds(
+                existing.entity,
                 ObjectBuilds {
                     pending,
                     mesh_rebuild,
                     prim_rebuild,
                     tree_rebuild,
                 },
+                commands,
             );
             existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
             existing.tree_tier = INITIAL_TREE_TIER;
@@ -3275,14 +3290,15 @@ fn apply_object(
     // (`prim_rebuild`, first tessellated at the coarse placeholder level), and a
     // tree's regeneration inputs (`tree_rebuild`). An object that owes none —
     // an avatar, a grass clump — gets no entry at all.
-    builds.set(
-        scoped,
+    set_object_builds(
+        entity,
         ObjectBuilds {
             pending,
             mesh_rebuild,
             prim_rebuild,
             tree_rebuild,
         },
+        commands,
     );
     state.objects.insert(
         scoped,
@@ -3542,7 +3558,7 @@ pub fn apply_object_meshes(
     mut pending_keys: ResMut<PendingDecodedMeshes>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
-    mut builds: ResMut<PendingBuilds>,
+    mut builds: PendingBuilds,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -3593,7 +3609,7 @@ pub fn apply_object_meshes(
         let hud_rigged: HashSet<ScopedObjectId> = if is_rigged {
             waiting
                 .iter()
-                .copied()
+                .map(|&(scoped, _entity)| scoped)
                 .filter(|&scoped| in_hud_attachment(&state, scoped))
                 .collect()
         } else {
@@ -3607,8 +3623,8 @@ pub fn apply_object_meshes(
         }
         // First build: an object pending on this mesh key. A build pending on a
         // *different* asset (another mesh, or a sculpt) was never collected.
-        for scoped in waiting {
-            let Some(PendingGeometry::Mesh(pending)) = builds.take_pending(&scoped) else {
+        for (scoped, entity) in waiting {
+            let Some(PendingGeometry::Mesh(pending)) = builds.take_pending(entity) else {
                 continue;
             };
             if is_rigged && !hud_rigged.contains(&scoped) {
@@ -3626,7 +3642,7 @@ pub fn apply_object_meshes(
                 // fetch began and it started on the managed, coarse-block path.
                 mesh_manager.upgrade_to_finest(key);
                 builds.set_pending(
-                    scoped,
+                    entity,
                     PendingGeometry::RiggedMesh(PendingRiggedMesh {
                         key,
                         texture_entry: pending.texture_entry,
@@ -3661,7 +3677,7 @@ pub fn apply_object_meshes(
             }
             // Remember how to rebuild on a later LOD swap (P21.2); a rigged
             // mesh (handled above) is boosted and never LOD managed.
-            builds.set_mesh_rebuild(scoped, pending);
+            builds.set_mesh_rebuild(entity, pending);
         }
         // LOD swap (P21.2): these objects already built this static mesh, and the
         // store just swapped its geometry to a different level of detail. Despawn
@@ -3670,9 +3686,9 @@ pub fn apply_object_meshes(
         if is_rigged {
             continue;
         }
-        for scoped in swapped {
+        for (scoped, entity) in swapped {
             let Some(rebuild) = builds
-                .get(&scoped)
+                .get(entity)
                 .and_then(|entry| entry.mesh_rebuild.as_ref())
             else {
                 continue;
@@ -3733,7 +3749,7 @@ pub fn apply_prim_lod(
     mut targets: ResMut<PrimLodTargets>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
-    builds: Res<PendingBuilds>,
+    builds: PendingBuilds,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -3753,10 +3769,11 @@ pub fn apply_prim_lod(
             let Some(tracked) = state.objects.get_mut(&scoped) else {
                 return LodOutcome::Resolved;
             };
+            let entity = tracked.entity;
             // Only a plain prim carries re-tessellation inputs; a sculpt / mesh /
             // avatar has none and is left untouched.
             let Some(rebuild) = builds
-                .get(&scoped)
+                .get(entity)
                 .and_then(|entry| entry.prim_rebuild.as_ref())
             else {
                 return LodOutcome::Resolved;
@@ -3820,7 +3837,7 @@ pub fn apply_tree_lod(
     mut targets: ResMut<TreeLodTargets>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
-    builds: Res<PendingBuilds>,
+    builds: PendingBuilds,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -3836,9 +3853,10 @@ pub fn apply_tree_lod(
             let Some(tracked) = state.objects.get_mut(&scoped) else {
                 return LodOutcome::Resolved;
             };
+            let entity = tracked.entity;
             // Only a tree carries regeneration inputs; anything else is left untouched.
             let Some(rebuild) = builds
-                .get(&scoped)
+                .get(entity)
                 .and_then(|entry| entry.tree_rebuild.as_ref())
             else {
                 return LodOutcome::Resolved;
@@ -3996,7 +4014,7 @@ const fn pending_kind(pending: Option<&PendingGeometry>) -> &'static str {
 )]
 pub fn apply_rigged_attachments(
     mut state: ResMut<ObjectState>,
-    mut builds: ResMut<PendingBuilds>,
+    mut builds: PendingBuilds,
     mut avatars: ResMut<AvatarState>,
     mut control: ResMut<ControlAvatarState>,
     body: Option<Res<AvatarBody>>,
@@ -4023,7 +4041,7 @@ pub fn apply_rigged_attachments(
     // below can borrow `builds` immutably before the final update.
     let pending =
         builds.scoped_pending_on(|pending| matches!(pending, PendingGeometry::RiggedMesh(_)));
-    for scoped in pending {
+    for (scoped, entity) in pending {
         // A skinned build is among the heaviest per-object costs (submesh
         // meshes + inverse bindposes + skeleton binding); spend from the
         // shared decode-apply budget so a crowd's worth of rigged bodies
@@ -4036,7 +4054,7 @@ pub fn apply_rigged_attachments(
             continue;
         }
         let Some(PendingGeometry::RiggedMesh(build)) =
-            builds.get(&scoped).and_then(|entry| entry.pending.as_ref())
+            builds.get(entity).and_then(|entry| entry.pending.as_ref())
         else {
             continue;
         };
@@ -4095,7 +4113,7 @@ pub fn apply_rigged_attachments(
                                     tracked.attachment_point,
                                     pending_kind(
                                         builds
-                                            .get(&terminus)
+                                            .get(tracked.entity)
                                             .and_then(|entry| entry.pending.as_ref()),
                                     ),
                                 ),
@@ -4246,7 +4264,8 @@ pub fn apply_rigged_attachments(
         // The rigged build is done with (a re-tessellation would establish a fresh
         // one); dropping it also drops the object's whole queue entry, since a
         // rigged mesh carries no LOD-rebuild inputs.
-        let _built = builds.take_pending(&scoped);
+        let _built = builds.take_pending(entity);
+        builds.drop_if_resolved(entity, &mut commands);
         if let Some(tracked) = state.objects.get_mut(&scoped) {
             tracked.face_entities = face_entities;
             // The skinned mesh follows the skeleton joints directly, so the object
@@ -4657,7 +4676,7 @@ pub fn apply_object_sculpts(
     mut pending_keys: ResMut<PendingDecodedSculpts>,
     mut budget: ResMut<MeshUploadBudget>,
     mut state: ResMut<ObjectState>,
-    mut builds: ResMut<PendingBuilds>,
+    mut builds: PendingBuilds,
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<FaceMaterial>>,
@@ -4702,11 +4721,12 @@ pub fn apply_object_sculpts(
         let waiting = builds.scoped_pending_on(
             |pending| matches!(pending, PendingGeometry::Sculpt(sculpt) if sculpt.map == id),
         );
-        for scoped in waiting {
+        for (scoped, entity) in waiting {
             // Take the pending build so a built object is not rebuilt.
-            let Some(PendingGeometry::Sculpt(pending)) = builds.take_pending(&scoped) else {
+            let Some(PendingGeometry::Sculpt(pending)) = builds.take_pending(entity) else {
                 continue;
             };
+            builds.drop_if_resolved(entity, &mut commands);
             let Some(geometry) = state.objects.get(&scoped).map(|tracked| tracked.geometry) else {
                 continue;
             };
@@ -5579,7 +5599,6 @@ mod tests {
         world.init_resource::<MaterialCache>();
 
         let mut state = super::ObjectState::default();
-        let mut builds = super::PendingBuilds::default();
         let root_obj = bare_object(pcode::PRIMITIVE);
         let mut child_obj = bare_object(pcode::PRIMITIVE);
         child_obj.local_id = RegionLocalObjectId(2);
@@ -5593,7 +5612,6 @@ mod tests {
         // to inspect / despawn between invocations.
         let apply = |world: &mut World,
                      state: &mut super::ObjectState,
-                     builds: &mut super::PendingBuilds,
                      object: &Object|
          -> Result<(), Box<dyn core::error::Error>> {
             let mut params: SystemState<ApplyParams> = SystemState::new(world);
@@ -5612,7 +5630,6 @@ mod tests {
                 .map_err(|error| format!("system params: {error}"))?;
             super::apply_object(
                 state,
-                builds,
                 object,
                 &mut commands,
                 &mut meshes,
@@ -5629,8 +5646,8 @@ mod tests {
         };
 
         // Spawn the root then the child; the child parents to the root's entity.
-        apply(&mut world, &mut state, &mut builds, &root_obj)?;
-        apply(&mut world, &mut state, &mut builds, &child_obj)?;
+        apply(&mut world, &mut state, &root_obj)?;
+        apply(&mut world, &mut state, &child_obj)?;
         let root_entity = state
             .objects
             .get(&root_scoped)
@@ -5658,7 +5675,7 @@ mod tests {
 
         // A later ObjectUpdated for the child: the guard drops the stale entry and the
         // spawn path re-creates the object, re-parented to the still-live root.
-        apply(&mut world, &mut state, &mut builds, &child_obj)?;
+        apply(&mut world, &mut state, &child_obj)?;
         let new_child = state
             .objects
             .get(&child_scoped)
@@ -5677,18 +5694,20 @@ mod tests {
         Ok(())
     }
 
-    /// Every path that drops a tracked object must also drop its deferred builds.
+    /// Every path that drops a tracked object drops its deferred builds with it —
+    /// without any of them saying so.
     ///
     /// While the build queues lived *inside* `TrackedObject`, removing the object
-    /// from the map dropped them implicitly; with the queues in the side table
-    /// they only go if the removal says so, and nothing fails to compile when one
-    /// path forgets. This pins all three ways an entry leaves the map — a
+    /// from the map dropped them implicitly; a side table keyed by scoped id made
+    /// every removal path responsible for saying `forget`, and nothing failed to
+    /// compile when one did not. As a component on the object entity they are
+    /// implicit again. This pins all three ways an object leaves the scene — a
     /// `KillObject`-style removal (which takes the linkset's children too), the
     /// stale-entity guard, and the world-reset purge — against a leak that would
-    /// otherwise keep a plain prim's retained texture entry alive for every
-    /// object the session has ever seen.
+    /// otherwise keep a plain prim's retained texture entry alive for every object
+    /// the session has ever seen.
     #[test]
-    fn every_removal_path_forgets_the_deferred_builds() -> Result<(), Box<dyn core::error::Error>> {
+    fn every_removal_path_drops_the_deferred_builds() -> Result<(), Box<dyn core::error::Error>> {
         use crate::face_material::FaceMaterial;
         use crate::geometry_cache::GeometryCache;
         use crate::material_cache::MaterialCache;
@@ -5712,6 +5731,11 @@ mod tests {
             ResMut<'w, MaterialCache>,
         );
 
+        /// How many object entities still carry outstanding deferred build work.
+        fn queued(world: &mut World) -> usize {
+            world.query::<&super::ObjectBuilds>().iter(world).count()
+        }
+
         let mut world = World::new();
         world.init_resource::<Assets<Mesh>>();
         world.init_resource::<Assets<FaceMaterial>>();
@@ -5730,7 +5754,6 @@ mod tests {
 
         let apply = |world: &mut World,
                      state: &mut super::ObjectState,
-                     builds: &mut super::PendingBuilds,
                      object: &Object|
          -> Result<(), Box<dyn core::error::Error>> {
             let mut params: SystemState<ApplyParams> = SystemState::new(world);
@@ -5749,7 +5772,6 @@ mod tests {
                 .map_err(|error| format!("system params: {error}"))?;
             super::apply_object(
                 state,
-                builds,
                 object,
                 &mut commands,
                 &mut meshes,
@@ -5766,19 +5788,18 @@ mod tests {
         };
 
         // A two-prim linkset. Both are plain prims, so each keeps its
-        // re-tessellation inputs — the queue tracks exactly the two of them.
+        // re-tessellation inputs — exactly the two of them are queued.
         let mut state = super::ObjectState::default();
-        let mut builds = super::PendingBuilds::default();
-        apply(&mut world, &mut state, &mut builds, &root_obj)?;
-        apply(&mut world, &mut state, &mut builds, &child_obj)?;
+        apply(&mut world, &mut state, &root_obj)?;
+        apply(&mut world, &mut state, &child_obj)?;
         assert_eq!(
-            builds.builds.len(),
+            queued(&mut world),
             2,
             "both plain prims queued their re-tessellation inputs"
         );
 
         // 1. The `KillObject` / derender removal: the root takes its linkset
-        //    child's builds with it, because it reports both ids.
+        //    child's builds with it, because it despawns both entities.
         let mut removals: SystemState<Commands> = SystemState::new(&mut world);
         let mut commands = removals
             .get_mut(&mut world)
@@ -5786,17 +5807,16 @@ mod tests {
         let removed = state.remove_object(root_scoped, &mut commands);
         removals.apply(&mut world);
         assert_eq!(removed.len(), 2, "the removal reports the child as well");
-        builds.forget_all(&removed);
-        assert!(
-            builds.builds.is_empty(),
-            "removing the linkset forgets both prims' deferred builds"
+        assert_eq!(
+            queued(&mut world),
+            0,
+            "removing the linkset drops both prims' deferred builds"
         );
 
         // 2. The stale-entity guard: an object whose entity a parent's hierarchy
-        //    despawn already took leaves no queue entry behind either.
+        //    despawn already took leaves no build record behind either.
         let mut state = super::ObjectState::default();
-        let mut builds = super::PendingBuilds::default();
-        apply(&mut world, &mut state, &mut builds, &root_obj)?;
+        apply(&mut world, &mut state, &root_obj)?;
         let entity = state
             .objects
             .get(&root_scoped)
@@ -5805,27 +5825,26 @@ mod tests {
         world.entity_mut(entity).despawn();
         let dropped = state.drop_stale_tracked_entity(root_scoped, |e| world.get_entity(e).is_ok());
         assert_eq!(dropped, Some(entity), "the stale entry is dropped");
-        builds.forget(&root_scoped);
-        assert!(
-            builds.builds.is_empty(),
-            "the stale entry's deferred builds go with it"
+        assert_eq!(
+            queued(&mut world),
+            0,
+            "the stale entry's deferred builds went with its entity"
         );
 
-        // 3. The world-reset purge: the whole queue goes, like the whole map.
+        // 3. The world-reset purge: every record goes, like every entity.
         let mut state = super::ObjectState::default();
-        let mut builds = super::PendingBuilds::default();
-        apply(&mut world, &mut state, &mut builds, &root_obj)?;
-        apply(&mut world, &mut state, &mut builds, &child_obj)?;
+        apply(&mut world, &mut state, &root_obj)?;
+        apply(&mut world, &mut state, &child_obj)?;
         let mut purge: SystemState<Commands> = SystemState::new(&mut world);
         let mut commands = purge
             .get_mut(&mut world)
             .map_err(|error| format!("system params: {error}"))?;
         state.purge(&mut commands);
         purge.apply(&mut world);
-        builds.clear();
-        assert!(
-            builds.builds.is_empty(),
-            "a world reset clears the deferred builds with the object mirror"
+        assert_eq!(
+            queued(&mut world),
+            0,
+            "a world reset drops the deferred builds with the object mirror"
         );
         Ok(())
     }

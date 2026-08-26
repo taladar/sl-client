@@ -29,8 +29,6 @@
 //! `LLLightParams` / `LLLightImageParams`
 //! (`indra/llprimitive/llprimitive.{h,cpp}`).
 
-use std::collections::HashMap;
-
 use bevy::prelude::*;
 
 use crate::sky::SCENE_LIGHT_ILLUMINANCE;
@@ -46,7 +44,7 @@ pub struct LocalLightsPlugin;
 
 impl Plugin for LocalLightsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<LocalLights>().add_systems(
+        app.add_systems(
             Update,
             drive_local_lights.after(WorldPhase::CameraPositioned),
         );
@@ -139,21 +137,26 @@ const MAX_SPOT_ANGLE: f32 = core::f32::consts::FRAC_PI_2 - 0.01;
 #[derive(Component)]
 pub(crate) struct LocalLightChild;
 
-/// The persistent mapping from a light-flagged object entity to the Bevy light
-/// child [`drive_local_lights`] spawned for it (P25.2).
+/// The Bevy light child [`drive_local_lights`] spawned for a light-flagged prim
+/// that currently holds a slot in the render budget (P25.2), carried on the prim
+/// entity itself.
 ///
 /// The light entities are **kept alive across frames** and updated in place — a
 /// prim only gains a light child when it enters the render budget and loses it
 /// when it drops out. Despawning / re-spawning the Bevy light every frame instead
 /// churns the render world and makes the light flicker, so the selection is
-/// reconciled against this map rather than rebuilt from scratch.
-#[derive(Debug, Resource, Default)]
-pub(crate) struct LocalLights {
-    /// Light-flagged object entity → its spawned Bevy light child entity and the
-    /// last [`ObjectLight`] applied to it. The stored light lets the reconcile
+/// reconciled against the prims already carrying this rather than rebuilt from
+/// scratch. Living on the prim is what makes "which prims hold a slot" a query
+/// (and makes a despawned prim's assignment die with it) instead of a map whose
+/// stale entries have to be reaped by hand.
+#[derive(Debug, Component)]
+pub(crate) struct AssignedLight {
+    /// The spawned Bevy light child entity.
+    child: Entity,
+    /// The last [`ObjectLight`] applied to that child. Kept so the reconcile can
     /// skip a prim whose light is unchanged, so a stable scene does no per-frame
     /// component churn at all.
-    assigned: HashMap<Entity, (Entity, ObjectLight)>,
+    applied: ObjectLight,
 }
 
 /// The Rec. 709 relative luminance of a linear RGB colour — used to rank lights
@@ -254,13 +257,15 @@ fn update_local_light(commands: &mut Commands, child: Entity, light: &ObjectLigh
 /// mirroring `LLPipeline::setupHWLights`. A prim with a black or zero-radius light
 /// contributes nothing and is skipped so it does not waste a slot. The winners'
 /// Bevy light children are **kept alive and updated in place** across frames (see
-/// [`LocalLights`]); a prim only gains a child on entering the budget and loses it
+/// [`AssignedLight`]); a prim only gains a child on entering the budget and loses it
 /// on dropping out — re-spawning every frame flickers the render world.
 pub(crate) fn drive_local_lights(
     mut commands: Commands,
-    mut assigned: ResMut<LocalLights>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
     lights: Query<(Entity, &ObjectLight, &GlobalTransform)>,
+    // Every prim currently holding a budget slot — the reconcile's "what is
+    // assigned right now" side, which used to be a resource map.
+    mut assigned: Query<(Entity, &mut AssignedLight)>,
     // The count rendered last frame, so a change (a light coming into / out of
     // the budget) logs once instead of every frame.
     mut last_rendered: Local<usize>,
@@ -297,20 +302,17 @@ pub(crate) fn drive_local_lights(
         *last_rendered = ranked.len();
     }
 
-    // Retire the light children of prims that fell out of the budget (or whose
-    // object despawned — Bevy's hierarchy already took the child, so `try_despawn`
-    // is a safe no-op there). Retaining leaves only entries for the selected,
-    // still-alive objects, so the refresh loop below never inserts into a dead
-    // entity.
+    // Retire the light children of prims that fell out of the budget. A prim whose
+    // object despawned took its `AssignedLight` (and, through the hierarchy, its
+    // light child) with it, so it is not in the query at all — the case the map
+    // needed a `retain` to catch.
     let selected: std::collections::HashSet<Entity> = ranked.iter().map(|&(e, _)| e).collect();
-    assigned.assigned.retain(|object, (child, _)| {
-        if selected.contains(object) {
-            true
-        } else {
-            commands.entity(*child).try_despawn();
-            false
+    for (object, assignment) in &assigned {
+        if !selected.contains(&object) {
+            commands.entity(assignment.child).try_despawn();
+            commands.entity(object).remove::<AssignedLight>();
         }
-    });
+    }
 
     // Insert a child for each newly selected prim; refresh the rest only when the
     // light actually changed, so a stable scene does no per-frame ECS churn.
@@ -320,16 +322,19 @@ pub(crate) fn drive_local_lights(
         let Ok((_, light, _)) = lights.get(entity) else {
             continue;
         };
-        match assigned.assigned.get_mut(&entity) {
-            Some((child, applied)) => {
-                if *applied != *light {
-                    update_local_light(&mut commands, *child, light);
-                    *applied = *light;
+        match assigned.get_mut(entity) {
+            Ok((_, mut assignment)) => {
+                if assignment.applied != *light {
+                    update_local_light(&mut commands, assignment.child, light);
+                    assignment.applied = *light;
                 }
             }
-            None => {
+            Err(_) => {
                 let child = spawn_local_light(&mut commands, entity, light);
-                assigned.assigned.insert(entity, (child, *light));
+                commands.entity(entity).insert(AssignedLight {
+                    child,
+                    applied: *light,
+                });
             }
         }
     }
@@ -573,6 +578,66 @@ mod tests {
         let doubled = local_light_lumens(&base) * 2.0;
         let got = local_light_lumens(&brighter);
         assert!((got - doubled).abs() < doubled * 1.0e-5);
+    }
+
+    /// A light-flagged prim gains an [`AssignedLight`] when it enters the render
+    /// budget, keeps the same light child while its light is unchanged, and loses
+    /// both when its `ObjectLight` goes — the reconcile that used to be a
+    /// `retain` over a resource map keyed by prim entity.
+    #[test]
+    fn budget_assignment_rides_the_prim_entity() -> Result<(), Box<dyn core::error::Error>> {
+        use super::{AssignedLight, ViewerCamera, drive_local_lights};
+        use bevy::prelude::{App, GlobalTransform, Transform, Update, Vec3};
+
+        let mut app = App::new();
+        app.add_systems(Update, drive_local_lights);
+        app.world_mut().spawn((
+            ViewerCamera,
+            Transform::default(),
+            GlobalTransform::default(),
+        ));
+
+        let light = ObjectLight {
+            linear_color: [1.0, 1.0, 1.0],
+            intensity: 1.0,
+            radius: 5.0,
+            falloff: 1.0,
+            cutoff: 0.0,
+            projection: None,
+        };
+        let prim = app
+            .world_mut()
+            .spawn((
+                light,
+                Transform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
+                GlobalTransform::from_translation(Vec3::new(1.0, 0.0, 0.0)),
+            ))
+            .id();
+
+        app.update();
+        let child = app
+            .world()
+            .get::<AssignedLight>(prim)
+            .ok_or("a budgeted prim carries its assignment")?
+            .child;
+        app.world().get_entity(child)?;
+
+        // An unchanged light keeps the very same child (no per-frame churn).
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AssignedLight>(prim)
+                .ok_or("the assignment survives an idle frame")?
+                .child,
+            child,
+        );
+
+        // The prim stops being a light: the assignment and its child both go.
+        app.world_mut().entity_mut(prim).remove::<ObjectLight>();
+        app.update();
+        assert!(app.world().get::<AssignedLight>(prim).is_none());
+        assert!(app.world().get_entity(child).is_err());
+        Ok(())
     }
 
     /// White is brighter than any single primary, and green outweighs red /

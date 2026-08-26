@@ -91,7 +91,6 @@ use sl_settings::SettingValue;
 use tracing::{debug, info, warn};
 
 use crate::avatars::derender_agent;
-use crate::objects::PendingBuilds;
 use crate::settings::ViewerSettings;
 use crate::world_api::AvatarState;
 use crate::world_api::ObjectState;
@@ -443,7 +442,8 @@ pub(crate) fn index_derendered_objects(
 ///
 /// Removing an object also removes its tracked descendants
 /// ([`ObjectState::remove_object`]), so a linkset or an avatar's attachments
-/// go with their root.
+/// go with their root — and each one's outstanding deferred geometry work, which
+/// is a component on its entity, goes with it.
 ///
 /// Every removed region-scoped id is **recorded** in the suppression index, not
 /// just the ones the wire happened to teach it. The simulator streams a static
@@ -455,7 +455,6 @@ pub(crate) fn index_derendered_objects(
 pub(crate) fn enforce_derender(
     mut list: ResMut<DerenderList>,
     mut objects: ResMut<ObjectState>,
-    mut builds: ResMut<PendingBuilds>,
     mut avatars: ResMut<AvatarState>,
     poses: Query<&Transform>,
     mut commands: Commands,
@@ -466,7 +465,6 @@ pub(crate) fn enforce_derender(
     for source in core::mem::take(&mut list.pending_ids) {
         for scoped in objects.scoped_by_full_id(source.id()) {
             let removed = objects.remove_object(scoped, &mut commands);
-            builds.forget_all(&removed);
             list.note_hidden(removed, source);
         }
         // Where the body stands right now, so its placeholder can take over in
@@ -483,7 +481,6 @@ pub(crate) fn enforce_derender(
         // whole subtree is released (and re-fetched) together.
         let root = list.suppressing_root(scoped);
         let removed = objects.remove_object(scoped, &mut commands);
-        builds.forget_all(&removed);
         if let Some(root) = root {
             list.note_hidden(removed, root);
         }

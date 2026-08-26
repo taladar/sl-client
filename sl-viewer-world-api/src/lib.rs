@@ -4627,7 +4627,7 @@ pub struct TrackedObject {
     /// (and left at [`PrimLod::FINEST`]) for a non-prim.
     ///
     /// The re-tessellation *inputs* are not here: a deferred build is machinery,
-    /// and lives in the world's own `PendingBuilds` side table.
+    /// and lives in the world's own `ObjectBuilds` component on the object entity.
     pub prim_lod: PrimLod,
     /// A tree's currently generated `TreeTier` (P26.2), compared against the
     /// driver's desired tier to decide whether to regenerate. Meaningless (and left
@@ -4748,9 +4748,8 @@ impl ObjectState {
     /// Also drops the origin anchor so `recenter_objects` re-anchors on the
     /// destination without a spurious re-base shift.
     ///
-    /// The purged objects' deferred builds are **not** dropped here — they live
-    /// in the world's own `PendingBuilds`, whose `clear`
-    /// the reset system calls alongside this.
+    /// The purged objects' deferred builds go with the entities this despawns —
+    /// they are the world's own `ObjectBuilds` component on each of them.
     pub fn purge(&mut self, commands: &mut Commands) {
         for tracked in self.objects.values() {
             // Bevy's hierarchy despawn takes the geometry holder + parented
@@ -4773,9 +4772,9 @@ impl ObjectState {
     /// descendants) — the removal's full extent, which the caller both records as
     /// suppressed on the derender path (`crate::derender`: those ids are the only
     /// handle left on objects the simulator has already streamed and will not send
-    /// again, so they are what a later un-derender re-fetches) and hands to
-    /// `PendingBuilds::forget_all`, which no longer loses their deferred builds
-    /// implicitly. Empty when `scoped` was not tracked.
+    /// again, so they are what a later un-derender re-fetches). Each removed
+    /// object's deferred builds go with its entity — they are a component on it.
+    /// Empty when `scoped` was not tracked.
     pub fn remove_object(
         &mut self,
         scoped: ScopedObjectId,
@@ -6594,6 +6593,94 @@ pub fn env_budget(var: &str, default: usize) -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|value| *value > 0)
         .unwrap_or(default)
+}
+
+/// The label the texture store's pipeline figures are published under — the same
+/// short name the overlay prints them beside, so neither side keeps a mapping
+/// table of its own. The labels live here rather than beside the stores because
+/// they are what the two layers agree on.
+pub const TEXTURE_LABEL: &str = "tex";
+/// The mesh store's published label (see [`TEXTURE_LABEL`]).
+pub const MESH_LABEL: &str = "mesh";
+/// The animation store's published label (see [`TEXTURE_LABEL`]).
+pub const ANIMATION_LABEL: &str = "anim";
+/// The wearable-asset store's published label (see [`TEXTURE_LABEL`]).
+pub const WEARABLE_LABEL: &str = "wear";
+/// The glTF render-material store's published label (see [`TEXTURE_LABEL`]).
+pub const MATERIAL_LABEL: &str = "gmat";
+
+/// One asset store's live pipeline figures, as its own layer publishes them.
+///
+/// The formatting is the reader's business; this is just the numbers.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StorePipelineStats {
+    /// Per-stage entry counts, footprint and cumulative cache / GC counters.
+    pub stats: sl_client_bevy::StoreStats,
+    /// The admission gate's in-flight / capacity / waiting figures.
+    pub gate: sl_client_bevy::GateStats,
+    /// How many requests are parked or retrying.
+    pub deferred: usize,
+}
+
+/// Every asset store's live pipeline figures, **published by the layer that owns
+/// the store** and read by whoever wants to show them.
+///
+/// The pipeline-status overlay (`F3`) used to take one `Res<…Manager>` per store,
+/// which meant the scene layer named four of the object layer's asset stores for
+/// no reason but to read three numbers off each. Publishing here inverts that: the
+/// object layer states its own figures in vocabulary this crate defines, and the
+/// overlay reads one resource.
+///
+/// [`wanted`](Self::wanted) is the demand side of the same inversion: publishing
+/// costs nothing while nothing is looking, so the reader says when it is looking
+/// and the publishers order themselves against that rather than against a
+/// visibility flag that lives in the reader's crate.
+#[derive(Debug, Resource, Default)]
+pub struct PipelineStats {
+    /// Whether anything is currently displaying these figures. Publishers skip
+    /// their work entirely while this is `false`.
+    wanted: bool,
+    /// The published figures, by the short label the overlay prints them under.
+    /// A `BTreeMap` so the overlay's line order is stable frame to frame without
+    /// the reader having to sort.
+    by_label: BTreeMap<&'static str, StorePipelineStats>,
+}
+
+impl PipelineStats {
+    /// State whether anything is displaying these figures, so the publishers know
+    /// whether to bother. Idempotent — call it every frame from the reader.
+    pub const fn set_wanted(&mut self, wanted: bool) {
+        self.wanted = wanted;
+    }
+
+    /// Whether a publisher should do its work this frame.
+    #[must_use]
+    pub const fn wanted(&self) -> bool {
+        self.wanted
+    }
+
+    /// Run condition for a publisher system: is anything looking?
+    #[must_use]
+    pub fn pipeline_stats_wanted(stats: Res<Self>) -> bool {
+        stats.wanted
+    }
+
+    /// Publish one store's figures under `label`.
+    pub fn publish(&mut self, label: &'static str, stats: StorePipelineStats) {
+        let _previous = self.by_label.insert(label, stats);
+    }
+
+    /// One store's published figures, or `None` when its layer has not published
+    /// any yet (the frame the overlay is first shown).
+    #[must_use]
+    pub fn get(&self, label: &str) -> Option<StorePipelineStats> {
+        self.by_label.get(label).copied()
+    }
+
+    /// Every published store's label and figures, in label order.
+    pub fn iter(&self) -> impl Iterator<Item = (&'static str, StorePipelineStats)> {
+        self.by_label.iter().map(|(&label, &stats)| (label, stats))
+    }
 }
 
 #[cfg(test)]

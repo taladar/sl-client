@@ -122,7 +122,7 @@ use crate::face_material::{FaceMaterial, MAP_FLAG_NORMAL, MAP_FLAG_SPEC, inert_f
 use crate::flexi::{FLEXI_LOD, FlexiSimState, ObjectFlexi, flexi_attributes, simulate_flexi};
 use crate::legacy_materials::{apply_legacy_scalars, build_linear_image, build_srgb_image};
 use crate::objects::{FaceTextureDebug, PrimFaceEntity};
-use crate::particles::{ParticleSim, drive_particles, float_to_u8};
+use crate::particles::{drive_particles, float_to_u8, retire_orphaned_clouds};
 use crate::sky::{
     MOON_DISK_RADIUS, SCENE_LIGHT_ILLUMINANCE, SKY_DOME_RADIUS, STAR_DOME_RADIUS, SUN_DISK_RADIUS,
     build_cloud_dome_mesh, build_star_mesh, cloud_params, disc_transform,
@@ -380,8 +380,7 @@ impl Plugin for SceneRuntimePlugin {
         // `TextureManager` sits at its `Default`: no capability URL, so it never
         // fetches — the state the real viewer is in before its seed caps arrive
         // (`sl-client-viewer-fetch-defer-until-cap`).
-        app.init_resource::<ParticleSim>()
-            .init_resource::<TextureManager>()
+        app.init_resource::<TextureManager>()
             .init_resource::<DecodedTextures>()
             .add_systems(
                 Startup,
@@ -392,7 +391,12 @@ impl Plugin for SceneRuntimePlugin {
             )
             .add_systems(
                 Update,
-                (drive_particles, simulate_flexi, drive_texture_animations),
+                (
+                    drive_particles,
+                    retire_orphaned_clouds.after(drive_particles),
+                    simulate_flexi,
+                    drive_texture_animations,
+                ),
             );
     }
 }

@@ -126,7 +126,6 @@ impl Plugin for PhysicsPlugin {
         app.init_resource::<RegionTimeDilation>()
             .init_resource::<CircuitLiveness>()
             .init_resource::<ObjectPhysicsShapes>()
-            .init_resource::<StaticColliderBuilds>()
             .add_systems(
                 Update,
                 (
@@ -1909,9 +1908,16 @@ fn run_collider_build(job: ColliderBuildJob) -> SharedShape {
     }
 }
 
-/// The static-index collider record to attach once its off-thread build finishes,
-/// paired with the running [`Task`] in [`StaticColliderBuilds`].
-struct StaticBuildTask {
+/// The off-thread static-index collider build a prim currently has in flight,
+/// carried on the prim entity itself — the running [`Task`] plus the record to
+/// attach once it finishes.
+///
+/// Living on the prim is what makes "is a build already in flight for this prim?"
+/// a [`Without`] filter on the scanner's query rather than a hash lookup per
+/// candidate prim, and what drops the build when the prim despawns — the case
+/// [`apply_static_colliders`] used to have to check for by hand before installing.
+#[derive(Component)]
+pub(crate) struct StaticBuildTask {
     /// The running collider construction.
     task: Task<SharedShape>,
     /// The object scale the collider is being built for.
@@ -1924,15 +1930,6 @@ struct StaticBuildTask {
     /// Whether this is the intended final shape (vs a mesh's visual-geometry fallback
     /// awaiting its lighter physics shape, which is retried).
     settled: bool,
-}
-
-/// The in-flight off-thread static-collider builds, keyed by prim entity, so the
-/// scanner ([`build_static_colliders`]) does not re-queue a prim whose collider is
-/// already building and [`apply_static_colliders`] can install each finished one.
-#[derive(Resource, Default)]
-pub(crate) struct StaticColliderBuilds {
-    /// One running build per prim entity.
-    tasks: HashMap<Entity, StaticBuildTask>,
 }
 
 /// One prim needing a static-index collider built this frame, with the world
@@ -1993,6 +1990,12 @@ pub(crate) fn build_static_colliders(
     mut mesh_manager: ResMut<MeshManager>,
     meshes: Res<Assets<Mesh>>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    // A prim whose build is already in flight carries a `StaticBuildTask`, so
+    // "is one running for this prim?" comes out of the archetype with the rest of
+    // its components rather than out of a side map. It stays part of the fetched
+    // data rather than a `Without` filter because a *disqualified* prim with a
+    // build in flight still has to be seen — to strip its stale collider and
+    // cancel the build.
     prims: Query<
         (
             Entity,
@@ -2000,20 +2003,20 @@ pub(crate) fn build_static_colliders(
             &ObjectSlMotion,
             &GlobalTransform,
             Option<&StaticCollider>,
+            Option<&StaticBuildTask>,
         ),
         Without<PhysicalObject>,
     >,
     children_q: Query<&Children>,
     holders: Query<(), With<GeometryHolder>>,
     mesh_handles: Query<&Mesh3d>,
-    mut builds: ResMut<StaticColliderBuilds>,
     mut commands: Commands,
 ) {
     // Gather the prims whose static collider is missing / stale, each tagged with
     // the facts and the world position its proximity ranking needs. A prim whose
     // build is already in flight is skipped (it is not re-queued until it lands).
     let mut work: Vec<ColliderWork> = Vec::new();
-    for (entity, scene, sl_motion, global, existing) in &prims {
+    for (entity, scene, sl_motion, global, existing, building) in &prims {
         let facts = object_state.static_collider_facts(&scene.scoped_id);
         // Whether this prim should carry a static-index collider at all: a plain
         // prim / sculpt / mesh, not worn, not flexi, and tracked.
@@ -2031,10 +2034,12 @@ pub(crate) fn build_static_colliders(
             if existing.is_some() {
                 commands.entity(entity).remove::<StaticCollider>();
             }
-            let _cancelled = builds.tasks.remove(&entity);
+            if building.is_some() {
+                commands.entity(entity).remove::<StaticBuildTask>();
+            }
             continue;
         }
-        if builds.tasks.contains_key(&entity) {
+        if building.is_some() {
             // Build already in flight: not re-queued until it lands.
             continue;
         }
@@ -2172,16 +2177,13 @@ pub(crate) fn build_static_colliders(
             Some(job) => {
                 let task =
                     AsyncComputeTaskPool::get().spawn(async move { run_collider_build(job) });
-                builds.tasks.insert(
-                    item.entity,
-                    StaticBuildTask {
-                        task,
-                        scale: item.scale,
-                        non_solid: item.non_solid,
-                        shape: item.shape,
-                        settled,
-                    },
-                );
+                commands.entity(item.entity).insert(StaticBuildTask {
+                    task,
+                    scale: item.scale,
+                    non_solid: item.non_solid,
+                    shape: item.shape,
+                    settled,
+                });
             }
         }
     }
@@ -2191,38 +2193,33 @@ pub(crate) fn build_static_colliders(
 /// poll the in-flight tasks, and for each that completed attach its
 /// [`StaticCollider`] record (which carries the built [`SharedShape`];
 /// [`sync_raycast_index`] then mirrors it into the index) — unless the prim has
-/// since been despawned or become a physical root (the physical path owns its
-/// collider then), in which case the built shape is simply dropped.
+/// become a physical root (the physical path owns its collider then), in which
+/// case the built shape is simply dropped.
+///
+/// A prim that despawned while its build ran needs no check here at all: the task
+/// is a component, so it went with the entity and never reaches this query.
 pub(crate) fn apply_static_colliders(
-    mut builds: ResMut<StaticColliderBuilds>,
+    mut builds: Query<(Entity, &mut StaticBuildTask)>,
     physical: Query<(), With<PhysicalObject>>,
     mut commands: Commands,
 ) {
-    let mut finished: Vec<(Entity, SharedShape)> = Vec::new();
-    for (&entity, build) in &mut builds.tasks {
-        if let Some(collider) = block_on(poll_once(&mut build.task)) {
-            finished.push((entity, collider));
-        }
-    }
-    for (entity, collider) in finished {
-        let Some(build) = builds.tasks.remove(&entity) else {
+    for (entity, mut build) in &mut builds {
+        let Some(collider) = block_on(poll_once(&mut build.task)) else {
             continue;
         };
+        commands.entity(entity).remove::<StaticBuildTask>();
         // The prim became physical while its build ran: drop the collider (the
         // physical path owns it now).
         if physical.get(entity).is_ok() {
             continue;
         }
-        // The prim may have been despawned; only install onto a live entity.
-        if let Ok(mut entity_commands) = commands.get_entity(entity) {
-            entity_commands.insert(StaticCollider {
-                collider,
-                scale: build.scale,
-                non_solid: build.non_solid,
-                shape: build.shape,
-                settled: build.settled,
-            });
-        }
+        commands.entity(entity).insert(StaticCollider {
+            collider,
+            scale: build.scale,
+            non_solid: build.non_solid,
+            shape: build.shape,
+            settled: build.settled,
+        });
     }
 }
 
@@ -3311,5 +3308,59 @@ mod tests {
             ),
             "an unabsorbed rotation residual keeps driving"
         );
+    }
+
+    /// A finished off-thread collider build installs its [`super::StaticCollider`]
+    /// and drops the task component, and a prim that despawned while its build ran
+    /// takes the task with it — which is why the applier no longer needs the "is
+    /// this entity still alive?" check the resource map required before installing.
+    #[test]
+    fn finished_collider_builds_install_and_clear_the_task()
+    -> Result<(), Box<dyn core::error::Error>> {
+        use super::{StaticBuildTask, StaticCollider, apply_static_colliders};
+        use bevy::prelude::{App, Update};
+        use bevy::tasks::AsyncComputeTaskPool;
+        use parry3d::shape::SharedShape;
+
+        AsyncComputeTaskPool::get_or_init(bevy::tasks::TaskPool::new);
+        let mut app = App::new();
+        app.add_systems(Update, apply_static_colliders);
+
+        let build = |settled| StaticBuildTask {
+            task: AsyncComputeTaskPool::get()
+                .spawn(async move { SharedShape::cuboid(1.0, 1.0, 1.0) }),
+            scale: [1.0, 1.0, 1.0],
+            non_solid: false,
+            shape: None,
+            settled,
+        };
+
+        let prim = app.world_mut().spawn(build(true)).id();
+        let doomed = app.world_mut().spawn(build(true)).id();
+
+        // The prim whose build lands while it is gone simply is not in the query.
+        app.world_mut().entity_mut(doomed).despawn();
+        // Give the pool a chance to finish; the poll is retried each frame until it
+        // does, so a slow pool just means one more update.
+        for _ in 0..64 {
+            app.update();
+            if app.world().get::<StaticCollider>(prim).is_some() {
+                break;
+            }
+        }
+
+        assert!(
+            app.world().get::<StaticCollider>(prim).is_some(),
+            "the finished build installs its collider"
+        );
+        assert!(
+            app.world().get::<StaticBuildTask>(prim).is_none(),
+            "and the task component goes with it"
+        );
+        assert!(
+            app.world().get_entity(doomed).is_err(),
+            "the despawned prim's build died with it, unpolled"
+        );
+        Ok(())
     }
 }

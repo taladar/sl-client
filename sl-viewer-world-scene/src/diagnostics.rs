@@ -9,8 +9,11 @@
 //! This is the P19.3 slice. The frame rate and per-frame budget the module once
 //! also showed in a top-right overlay now live in the status area
 //! (`crate::status_bar`) as a user-facing read-out, so only the developer
-//! pipeline panel remains here. It renders the P19.2 [`StoreStats`] /
-//! [`GateStats`] snapshots — per-stage entry counts (queued / downloading /
+//! pipeline panel remains here. It renders the P19.2
+//! [`StoreStats`](sl_client_bevy::StoreStats) /
+//! [`GateStats`](sl_client_bevy::GateStats) snapshots, which each store's own
+//! layer publishes into [`PipelineStats`] — per-stage entry counts (queued /
+//! downloading /
 //! decoding / ready / failed), the in-memory footprint, the cumulative
 //! disk-cache-hit and GC counters, and the admission gate's in-flight / waiting
 //! figures. The rendering-fidelity phases drive these pipelines hard, so this
@@ -18,18 +21,16 @@
 //! `LLTextureFetch` / `LLMeshRepository` queue stats.
 
 use bevy::prelude::*;
-use sl_client_bevy::{GateStats, StoreStats};
 
-use crate::animations::AnimationManager;
-use crate::bake_inputs::WearableAssetManager;
 use crate::environment_assets::EnvironmentAssetManager;
 use crate::geometry_cache::{GeometryCache, GeometryCacheStats};
 use crate::material_cache::{MaterialCache, MaterialCacheStats};
-use crate::materials::MaterialManager;
-use crate::meshes::MeshManager;
 use crate::sound_cache::SoundCache;
-use crate::textures::TextureManager;
 use crate::ui_font::UiFont;
+use crate::world_api::{
+    ANIMATION_LABEL, MATERIAL_LABEL, MESH_LABEL, PipelineStats, StorePipelineStats, TEXTURE_LABEL,
+    WEARABLE_LABEL,
+};
 
 /// The pipeline-status overlay's own scheduling (P19.3): the `F3` panel that
 /// reports the texture / mesh / animation stores' live fetch and decode state.
@@ -39,11 +40,19 @@ pub struct PipelineOverlayPlugin;
 impl Plugin for PipelineOverlayPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(PipelineOverlayVisible::from_env())
+            // The stores' own layer initialises this too; doing it here as well
+            // keeps the overlay standalone (an app that shows it need not also
+            // register the object layer's publisher).
+            .init_resource::<PipelineStats>()
             .add_systems(Startup, setup_pipeline_overlay)
             .add_systems(
                 Update,
                 (
                     toggle_pipeline_overlay,
+                    // State the demand before the object layer's publisher runs,
+                    // so a store's figures are current in the frame the overlay
+                    // is first shown rather than one frame stale.
+                    state_pipeline_stats_demand.after(toggle_pipeline_overlay),
                     update_pipeline_overlay
                         .run_if(pipeline_overlay_active)
                         .after(toggle_pipeline_overlay),
@@ -135,19 +144,13 @@ pub(crate) fn pipeline_overlay_active(visible: Res<PipelineOverlayVisible>) -> b
 /// and — while it is shown — rewrite it from the live texture / mesh store and
 /// gate snapshots (P19.2). The stats are only sampled when the panel is visible,
 /// so the hidden default costs nothing beyond the toggle check.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "one asset-store resource per pipeline sampled into the overlay"
-)]
 pub(crate) fn update_pipeline_overlay(
     visible: Res<PipelineOverlayVisible>,
-    textures: Res<TextureManager>,
-    meshes: Res<MeshManager>,
-    animations: Res<AnimationManager>,
+    // The object layer's five stores, as that layer publishes them — the overlay
+    // does not name (or depend on) any of them.
+    published: Res<PipelineStats>,
     environment: Res<EnvironmentAssetManager>,
     sounds: Res<SoundCache>,
-    wearables: Res<WearableAssetManager>,
-    gltf_materials: Res<MaterialManager>,
     geometry: Res<GeometryCache>,
     material: Res<MaterialCache>,
     mut panels: Query<(&mut Text, &mut Visibility), With<PipelineStatusText>>,
@@ -164,53 +167,51 @@ pub(crate) fn update_pipeline_overlay(
     if *visibility != Visibility::Visible {
         *visibility = Visibility::Visible;
     }
-    // The asset managers added since the overlay was built get one condensed
-    // line each (a full two-line block per store would make the debug panel too
-    // tall). `gmat` is the glTF-material *asset* store, distinct from the interned
-    // `FaceMaterial` `mat` cache line below.
+    // The asset stores added since the overlay was built get one condensed line
+    // each (a full two-line block per store would make the debug panel too tall).
+    // `gmat` is the glTF-material *asset* store, distinct from the interned
+    // `FaceMaterial` `mat` cache line below. The platform layer's two stores sit
+    // below this crate, so they are read directly; the object layer's sit above
+    // the data's direction of travel, so they arrive published.
     let condensed = [
-        (
-            "anim",
-            animations.stats(),
-            animations.gate_stats(),
-            animations.deferred_count(),
-        ),
+        ("anim", published.get(ANIMATION_LABEL).unwrap_or_default()),
         (
             "env",
-            environment.stats(),
-            environment.gate_stats(),
-            environment.deferred_count(),
+            StorePipelineStats {
+                stats: environment.stats(),
+                gate: environment.gate_stats(),
+                deferred: environment.deferred_count(),
+            },
         ),
         (
             "sound",
-            sounds.stats(),
-            sounds.gate_stats(),
-            sounds.deferred_count(),
+            StorePipelineStats {
+                stats: sounds.stats(),
+                gate: sounds.gate_stats(),
+                deferred: sounds.deferred_count(),
+            },
         ),
-        (
-            "wear",
-            wearables.stats(),
-            wearables.gate_stats(),
-            wearables.deferred_count(),
-        ),
-        (
-            "gmat",
-            gltf_materials.stats(),
-            gltf_materials.gate_stats(),
-            gltf_materials.deferred_count(),
-        ),
+        ("wear", published.get(WEARABLE_LABEL).unwrap_or_default()),
+        ("gmat", published.get(MATERIAL_LABEL).unwrap_or_default()),
     ];
     *text = Text::new(format_pipeline(
-        textures.stats(),
-        textures.gate_stats(),
-        textures.deferred_count(),
-        meshes.stats(),
-        meshes.gate_stats(),
-        meshes.deferred_count(),
+        published.get(TEXTURE_LABEL).unwrap_or_default(),
+        published.get(MESH_LABEL).unwrap_or_default(),
         &condensed,
         geometry.stats(),
         material.stats(),
     ));
+}
+
+/// Tell the asset stores' own layers whether anything is displaying their
+/// pipeline figures, so they publish only while the `F3` overlay is up.
+pub(crate) fn state_pipeline_stats_demand(
+    visible: Res<PipelineOverlayVisible>,
+    mut published: ResMut<PipelineStats>,
+) {
+    if published.wanted() != visible.0 {
+        published.set_wanted(visible.0);
+    }
 }
 
 /// Render a byte count as mebibytes with one decimal place, using integer math
@@ -225,7 +226,12 @@ fn format_bytes(bytes: u64) -> String {
 /// Format one store's two-line block: the per-stage entry counts on the first
 /// line, then the in-memory footprint, cumulative cache-hit / GC counters, and
 /// the admission gate's in-flight / capacity / waiting figures on the second.
-fn format_store_block(label: &str, stats: StoreStats, gate: GateStats, deferred: usize) -> String {
+fn format_store_block(label: &str, published: StorePipelineStats) -> String {
+    let StorePipelineStats {
+        stats,
+        gate,
+        deferred,
+    } = published;
     format!(
         "{label:<5} queued {}  dl {}  dec {}  ready {}  fail {}  defer {}\n\
          {:<5} mem {} ({})  cached {}  gc {}  gate {}/{} wait {}",
@@ -252,7 +258,12 @@ fn format_store_block(label: &str, stats: StoreStats, gate: GateStats, deferred:
 /// screen. Carries the per-stage counts, the deferred (parked / retrying) count,
 /// the in-memory footprint, and the admission gate's in-flight / capacity /
 /// waiting figures on one line.
-fn format_store_line(label: &str, stats: StoreStats, gate: GateStats, deferred: usize) -> String {
+fn format_store_line(label: &str, published: StorePipelineStats) -> String {
+    let StorePipelineStats {
+        stats,
+        gate,
+        deferred,
+    } = published;
     format!(
         "{label:<5} q{} dl{} dec{} rdy{} f{} def{}  mem {} ({})  gate {}/{} w{}",
         stats.queued,
@@ -301,28 +312,20 @@ fn format_material_block(stats: MaterialCacheStats) -> String {
 /// texture and mesh blocks, then one condensed [`format_store_line`] per
 /// later-added asset store (`condensed`, in display order), then the
 /// geometry-cache and material-cache lines.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "the two detailed stores plus the condensed slice and two caches rendered in the overlay"
-)]
 fn format_pipeline(
-    tex: StoreStats,
-    tex_gate: GateStats,
-    tex_deferred: usize,
-    mesh: StoreStats,
-    mesh_gate: GateStats,
-    mesh_deferred: usize,
-    condensed: &[(&str, StoreStats, GateStats, usize)],
+    tex: StorePipelineStats,
+    mesh: StorePipelineStats,
+    condensed: &[(&str, StorePipelineStats)],
     geometry: GeometryCacheStats,
     material: MaterialCacheStats,
 ) -> String {
     let mut panel = format!(
         "PIPELINE  (F3)\n{}\n{}\n",
-        format_store_block("tex", tex, tex_gate, tex_deferred),
-        format_store_block("mesh", mesh, mesh_gate, mesh_deferred),
+        format_store_block("tex", tex),
+        format_store_block("mesh", mesh),
     );
-    for (label, stats, gate, deferred) in condensed {
-        panel.push_str(&format_store_line(label, *stats, *gate, *deferred));
+    for (label, stats) in condensed {
+        panel.push_str(&format_store_line(label, *stats));
         panel.push('\n');
     }
     panel.push_str(&format_geometry_block(geometry));
@@ -334,11 +337,12 @@ fn format_pipeline(
 #[cfg(test)]
 mod tests {
     use super::{
-        GateStats, GeometryCacheStats, MaterialCacheStats, StoreStats, format_bytes,
+        GeometryCacheStats, MaterialCacheStats, StorePipelineStats, format_bytes,
         format_geometry_block, format_material_block, format_pipeline, format_store_block,
         format_store_line,
     };
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{GateStats, StoreStats};
 
     /// Bytes render as MiB with one decimal via integer math, flooring the
     /// fraction and handling the zero case.
@@ -374,7 +378,14 @@ mod tests {
             waiting: 0,
         };
         assert_eq!(
-            format_store_block("tex", stats, gate, 7),
+            format_store_block(
+                "tex",
+                StorePipelineStats {
+                    stats,
+                    gate,
+                    deferred: 7,
+                },
+            ),
             "tex   queued 3  dl 2  dec 1  ready 840  fail 0  defer 7\n      \
              mem 840 (128.0 MiB)  cached 512  gc 4  gate 6/8 wait 0"
         );
@@ -400,7 +411,14 @@ mod tests {
             in_flight: 5,
             waiting: 1,
         };
-        let line = format_store_line("anim", stats, gate, 4);
+        let line = format_store_line(
+            "anim",
+            StorePipelineStats {
+                stats,
+                gate,
+                deferred: 4,
+            },
+        );
         assert_eq!(
             line,
             "anim  q3 dl2 dec1 rdy40 f0 def4  mem 40 (2.0 MiB)  gate 5/16 w1"
@@ -450,19 +468,15 @@ mod tests {
     #[test]
     fn pipeline_panel_has_header_and_both_blocks() {
         let condensed = [
-            ("anim", StoreStats::default(), GateStats::default(), 0),
-            ("env", StoreStats::default(), GateStats::default(), 0),
-            ("sound", StoreStats::default(), GateStats::default(), 0),
-            ("wear", StoreStats::default(), GateStats::default(), 0),
-            ("gmat", StoreStats::default(), GateStats::default(), 0),
+            ("anim", StorePipelineStats::default()),
+            ("env", StorePipelineStats::default()),
+            ("sound", StorePipelineStats::default()),
+            ("wear", StorePipelineStats::default()),
+            ("gmat", StorePipelineStats::default()),
         ];
         let panel = format_pipeline(
-            StoreStats::default(),
-            GateStats::default(),
-            0,
-            StoreStats::default(),
-            GateStats::default(),
-            0,
+            StorePipelineStats::default(),
+            StorePipelineStats::default(),
             &condensed,
             GeometryCacheStats::default(),
             MaterialCacheStats::default(),

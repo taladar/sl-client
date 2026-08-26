@@ -88,8 +88,6 @@
 //! `SL_VIEWER_DISABLE_HUD_PARTICLES` suppresses HUD emitters entirely (defaulted
 //! **on** for us — we have no settings UI and the point is to see it work).
 
-use std::collections::{HashMap, HashSet};
-
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
@@ -121,9 +119,16 @@ pub struct ParticlesPlugin;
 
 impl Plugin for ParticlesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ParticleSim>()
-            .add_systems(Startup, setup_particles)
-            .add_systems(Update, drive_particles.after(WorldPhase::CameraPositioned));
+        app.add_systems(Startup, setup_particles).add_systems(
+            Update,
+            (
+                drive_particles.after(WorldPhase::CameraPositioned),
+                // After the driver, so a source that stopped simulating this frame
+                // has its render entity reaped in the same frame (Bevy's
+                // auto-inserted sync point flushes the driver's commands first).
+                retire_orphaned_clouds.after(drive_particles),
+            ),
+        );
         if std::env::var_os("SL_VIEWER_PARTICLE_FOCUS").is_some() {
             // Aim the camera at the busiest particle cloud so an unattended
             // screenshot frames a real emitter.
@@ -605,10 +610,19 @@ impl Emitter {
     }
 }
 
-/// The render + simulation state for one particle source, keyed by its object
-/// entity in [`ParticleSim`].
-#[derive(Debug)]
-struct Cloud {
+/// The render + simulation state for one particle source, carried on the source
+/// object entity itself.
+///
+/// It lives here rather than in a scene-wide map keyed by source entity because a
+/// source's simulation state *is* a fact about that source: the sim is then a
+/// mutable query over the sources, a source whose object despawns takes its cloud
+/// state with it, and the driver needs no snapshot of the query to release its
+/// borrow before mutating a resource. The one thing the ECS does not do for us is
+/// despawn the separate *render* entity ([`Cloud::entity`], deliberately not a
+/// child — its particles are in absolute world coordinates), so
+/// [`retire_orphaned_clouds`] reaps those.
+#[derive(Debug, Component)]
+pub(crate) struct Cloud {
     /// The source emitter state.
     emitter: Emitter,
     /// The source's live particles.
@@ -638,22 +652,23 @@ struct Cloud {
     is_hud: bool,
 }
 
-/// The scene-wide particle simulation state (P30.2): one `Cloud` per live
-/// particle source. Rebuilt incrementally by [`drive_particles`] each frame.
-#[derive(Debug, Resource, Default)]
-pub(crate) struct ParticleSim {
-    /// Live clouds keyed by their source object entity.
-    clouds: HashMap<Entity, Cloud>,
-}
+/// Points a particle **render** entity back at the source object whose [`Cloud`]
+/// drives it (P30.2).
+///
+/// The render entity is deliberately not a child of its source — its particles are
+/// in absolute world coordinates, so it must not inherit the source's transform —
+/// which means the ECS does not reap it when the source despawns. This back-pointer
+/// is what lets [`retire_orphaned_clouds`] recognise a render entity whose source is
+/// gone (or has stopped being a particle source) and despawn it.
+#[derive(Debug, Component)]
+pub(crate) struct CloudOf(Entity);
 
-impl ParticleSim {
-    /// The world-space centroid of the cloud holding the most live particles, with
-    /// that count — the debug focus target for [`focus_camera_on_particles`]. `None`
-    /// when no cloud has any live particles yet.
-    fn busiest_centroid(&self) -> Option<(Vec3, usize)> {
-        let cloud = self
-            .clouds
-            .values()
+/// The world-space centroid of the cloud holding the most live particles, with
+/// that count — the debug focus target for [`focus_camera_on_particles`]. `None`
+/// when no cloud has any live particles yet.
+fn busiest_centroid<'cloud>(clouds: impl Iterator<Item = &'cloud Cloud>) -> Option<(Vec3, usize)> {
+    {
+        let cloud = clouds
             .filter(|cloud| !cloud.particles.is_empty())
             .max_by_key(|cloud| cloud.particles.len())?;
         let count = cloud.particles.len();
@@ -675,7 +690,7 @@ impl ParticleSim {
 /// overrides the follow pose). Flycam is the only mode whose pose a system may
 /// write directly (the others recompute it), so it switches there.
 pub(crate) fn focus_camera_on_particles(
-    sim: Res<ParticleSim>,
+    clouds: Query<&Cloud>,
     mut mode: ResMut<crate::world_api::CameraMode>,
     mut camera: Query<(&mut Transform, &mut crate::world_api::CameraRig), With<ViewerCamera>>,
     mut enabled: Local<Option<bool>>,
@@ -684,7 +699,7 @@ pub(crate) fn focus_camera_on_particles(
     if !on {
         return;
     }
-    let Some((centroid, _count)) = sim.busiest_centroid() else {
+    let Some((centroid, _count)) = busiest_centroid(clouds.iter()) else {
         return;
     };
     let Ok((mut transform, mut rig)) = camera.single_mut() else {
@@ -899,23 +914,27 @@ fn cloud_centroid(particles: &[Particle], default: Vec3) -> Vec3 {
 /// source, advance its emitter and particles this frame and rebuild its
 /// camera-facing billboard mesh.
 ///
-/// Sources gain a `Cloud` the first frame they appear and lose it (its cloud
-/// entity despawned) when the [`ObjectParticleSystem`] component is removed — a
-/// source toggled off in-world, or its object gone. The whole simulation is
-/// bounded by `MAX_PARTICLES`; particles beyond the cap are simply not emitted.
+/// Sources gain a [`Cloud`] the first frame they appear and lose it when the
+/// [`ObjectParticleSystem`] component is removed — a source toggled off in-world,
+/// or its object gone (which takes the `Cloud` with it). Either way
+/// [`retire_orphaned_clouds`] despawns the render entity that is left behind. The
+/// whole simulation is bounded by `MAX_PARTICLES`; particles beyond the cap are
+/// simply not emitted.
 #[expect(
     clippy::too_many_arguments,
-    reason = "a Bevy system's arguments are its resource/query dependencies"
+    clippy::type_complexity,
+    reason = "a Bevy system's arguments are its resource/query dependencies; a query's \
+              fetched components are inherently a tuple"
 )]
 pub(crate) fn drive_particles(
     time: Res<Time>,
     mut commands: Commands,
-    mut sim: ResMut<ParticleSim>,
-    sources: Query<(
+    mut sources: Query<(
         Entity,
         &ObjectParticleSystem,
         &GlobalTransform,
         Option<&RenderLayers>,
+        Option<&mut Cloud>,
     )>,
     quad: Res<ParticleQuad>,
     store: Res<DecodedTextures>,
@@ -936,97 +955,54 @@ pub(crate) fn drive_particles(
     let dt = time.delta_secs();
     let max_particles = particle_cap(settings.as_deref());
 
-    // Snapshot each source's world pose, HUD classification, and system, releasing
-    // the query borrow before the resource is mutated. The Second Life-space source
-    // rotation is recovered from the Bevy world rotation by undoing the basis change.
-    // A HUD source is suppressed entirely when HUD particles are disabled — it is
-    // then dropped from the snapshot, so its cloud (if any) is retired below.
+    // The Second Life-space source rotation is recovered from the Bevy world
+    // rotation by undoing the basis change.
     let basis_inv = sl_to_bevy_rotation().inverse();
-    let sources_data: Vec<(Entity, Vec3, Quat, ParticleSystem, bool)> = sources
-        .iter()
-        .filter_map(|(entity, ops, global, layers)| {
-            let is_hud = on_hud_layer(layers);
-            if is_hud && hud_disabled {
-                return None;
-            }
-            Some((
-                entity,
-                global.translation(),
-                basis_inv.mul_quat(global.rotation()),
-                ops.system.clone(),
-                is_hud,
-            ))
-        })
-        .collect();
-    let current: HashSet<Entity> = sources_data.iter().map(|(entity, ..)| *entity).collect();
-
-    // Retire clouds whose source is gone (component removed or object despawned).
-    sim.clouds.retain(|entity, cloud| {
-        if current.contains(entity) {
-            true
-        } else {
-            commands.entity(cloud.entity).try_despawn();
-            false
-        }
-    });
 
     // A running live-particle count across all clouds, so the global cap is
     // respected as each source emits.
     let mut total: usize = 0;
+    // How many sources are simulating, for the periodic diagnostic below.
+    let mut simulating: usize = 0;
 
-    for (entity, src, q_sl, system, is_hud) in &sources_data {
-        let is_hud = *is_hud;
+    for (entity, ops, global, layers, cloud) in &mut sources {
+        let system = &ops.system;
+        let src = global.translation();
+        let q_sl = basis_inv.mul_quat(global.rotation());
+        let is_hud = on_hud_layer(layers);
+        // A HUD source is suppressed entirely when HUD particles are disabled: it
+        // drops its `Cloud`, and `retire_orphaned_clouds` reaps the render entity.
+        if is_hud && hud_disabled {
+            if cloud.is_some() {
+                commands.entity(entity).remove::<Cloud>();
+            }
+            continue;
+        }
+        simulating = simulating.saturating_add(1);
         // Ensure a cloud exists for this source, spawning its render entity on first
         // sight. Every cloud instances the one shared quad mesh; a HUD source's entity
         // goes on the HUD render layer, so the HUD camera draws it (and the fly camera
         // does not) — `queue_particles` scopes the draw to the matching view. The
         // per-frame instance / draw-parameter components are inserted below (not in the
         // spawn bundle), so a cloud spawned this frame carries them the same frame.
-        let cloud = sim.clouds.entry(*entity).or_insert_with(|| {
-            let mut cloud_commands = commands.spawn((
-                Mesh3d(quad.mesh.clone()),
-                Transform::IDENTITY,
-                // Starts hidden: no particles yet. Flipped to visible once it has any,
-                // which is also what keeps an idle cloud out of the render queue.
-                Visibility::Hidden,
-                NotShadowCaster,
-                // The billboards live in the per-particle instance buffer, not the
-                // shared quad's `Aabb` (which sits at the origin), so without this the
-                // quad would frustum-cull the whole cloud from every viewpoint (the
-                // way `objects.rs` opts its dynamic meshes out).
-                NoFrustumCulling,
-                // Every cloud instances the *same* shared quad mesh through the same
-                // pipeline, so Bevy's GPU-preprocessing batcher would merge sort-adjacent
-                // clouds into one draw — and our custom draw reads one cloud's instance
-                // buffer per item, so a merged draw would render only the first cloud and
-                // drop the rest. Because the sort order is camera-dependent, that showed
-                // as whole streams flickering in and out as the camera moved. Opting each
-                // cloud out of automatic batching gives every cloud its own draw (its own
-                // instance buffer) while leaving the rest of the scene's indirect drawing
-                // untouched.
-                NoAutomaticBatching,
-                // Named so a diagnostic — or `crate::render_test`'s checks —
-                // can say "the particle cloud" rather than an entity id the
-                // reader has no way to resolve. The cloud is spawned here rather
-                // than by whatever created the source, so this is the only place
-                // that knows what it is.
-                Name::new("particle-cloud"),
-            ));
-            if is_hud {
-                cloud_commands.insert(RenderLayers::layer(HUD_RENDER_LAYER));
-            }
-            let cloud_entity = cloud_commands.id();
-            Cloud {
+        //
+        // A source seen for the first time gets its `Cloud` through `Commands`, so it
+        // is not in the query until the next frame — the seed value is simulated (and
+        // rendered) locally this frame and handed over at the end of the iteration.
+        let mut seeded: Option<Cloud> = None;
+        let cloud: &mut Cloud = match cloud {
+            Some(cloud) => cloud.into_inner(),
+            None => seeded.insert(Cloud {
                 emitter: Emitter::new(entity.to_bits()),
                 particles: Vec::new(),
-                entity: cloud_entity,
+                entity: spawn_cloud_entity(&mut commands, &quad, entity, is_hud),
                 system: system.clone(),
                 texture: default_image.0.clone(),
                 texture_applied: false,
                 visible: false,
                 is_hud,
-            }
-        });
+            }),
+        };
 
         // The HUD classification can arrive a frame after the cloud is spawned (the
         // source's HUD layer propagates down in `PostUpdate`): move the cloud entity
@@ -1058,13 +1034,13 @@ pub(crate) fn drive_particles(
         // so it falls back to its own position (the reference's own fallback).
         cloud
             .particles
-            .retain_mut(|part| part.integrate(dt, *src, *src));
+            .retain_mut(|part| part.integrate(dt, src, src));
         total = total.saturating_add(cloud.particles.len());
         cloud.emitter.emit(
             system,
             dt,
-            *src,
-            *q_sl,
+            src,
+            q_sl,
             &mut cloud.particles,
             &mut total,
             max_particles,
@@ -1087,7 +1063,7 @@ pub(crate) fn drive_particles(
         // is how the render-world extract picks up the change, mirroring the visibility
         // write below.
         let instances = build_cloud_instances(&cloud.particles);
-        let sort_center = cloud_centroid(&cloud.particles, *src);
+        let sort_center = cloud_centroid(&cloud.particles, src);
         commands.entity(cloud.entity).insert((
             ParticleInstances { instances },
             ParticleDrawParams {
@@ -1111,16 +1087,89 @@ pub(crate) fn drive_particles(
             };
             commands.entity(cloud.entity).insert(visibility);
         }
+
+        // Hand a freshly seeded cloud to its source entity; from the next frame it
+        // arrives through the query like every other.
+        if let Some(cloud) = seeded {
+            commands.entity(entity).insert(cloud);
+        }
     }
 
     // Periodic live-count diagnostic: how many sources and particles the sim holds.
     *log_timer += dt;
     if *log_timer >= 2.0 {
         *log_timer = 0.0;
-        debug!(
-            "particle sim: {} source cloud(s), {total} live particle(s)",
-            sim.clouds.len(),
-        );
+        debug!("particle sim: {simulating} source cloud(s), {total} live particle(s)");
+    }
+}
+
+/// Spawn the world-space render entity for a particle source's cloud, returning
+/// its entity.
+///
+/// It is deliberately **not** a child of the source: a cloud's particles are in
+/// absolute world coordinates, so inheriting the source's transform would move the
+/// whole stream with the emitter. [`CloudOf`] carries the link the hierarchy would
+/// otherwise have given us, so [`retire_orphaned_clouds`] can reap it.
+fn spawn_cloud_entity(
+    commands: &mut Commands,
+    quad: &ParticleQuad,
+    source: Entity,
+    is_hud: bool,
+) -> Entity {
+    let mut cloud_commands = commands.spawn((
+        Mesh3d(quad.mesh.clone()),
+        Transform::IDENTITY,
+        // Starts hidden: no particles yet. Flipped to visible once it has any,
+        // which is also what keeps an idle cloud out of the render queue.
+        Visibility::Hidden,
+        NotShadowCaster,
+        // The billboards live in the per-particle instance buffer, not the
+        // shared quad's `Aabb` (which sits at the origin), so without this the
+        // quad would frustum-cull the whole cloud from every viewpoint (the
+        // way `objects.rs` opts its dynamic meshes out).
+        NoFrustumCulling,
+        // Every cloud instances the *same* shared quad mesh through the same
+        // pipeline, so Bevy's GPU-preprocessing batcher would merge sort-adjacent
+        // clouds into one draw — and our custom draw reads one cloud's instance
+        // buffer per item, so a merged draw would render only the first cloud and
+        // drop the rest. Because the sort order is camera-dependent, that showed
+        // as whole streams flickering in and out as the camera moved. Opting each
+        // cloud out of automatic batching gives every cloud its own draw (its own
+        // instance buffer) while leaving the rest of the scene's indirect drawing
+        // untouched.
+        NoAutomaticBatching,
+        // Named so a diagnostic — or `crate::render_test`'s checks —
+        // can say "the particle cloud" rather than an entity id the
+        // reader has no way to resolve. The cloud is spawned here rather
+        // than by whatever created the source, so this is the only place
+        // that knows what it is.
+        Name::new("particle-cloud"),
+        CloudOf(source),
+    ));
+    if is_hud {
+        cloud_commands.insert(RenderLayers::layer(HUD_RENDER_LAYER));
+    }
+    cloud_commands.id()
+}
+
+/// Despawn every particle render entity whose source is no longer simulating — its
+/// object despawned (taking the [`Cloud`] with it), it stopped being a particle
+/// source ([`ObjectParticleSystem`] removed), or HUD particles are disabled and it
+/// is a HUD source.
+///
+/// This is the one piece of a cloud's lifetime the ECS cannot keep for us: the
+/// render entity is not a child of its source (see [`spawn_cloud_entity`]), so
+/// nothing despawns it when the source goes. Everything else — the emitter, the
+/// particles, the resolved texture — now dies with the source entity.
+pub(crate) fn retire_orphaned_clouds(
+    mut commands: Commands,
+    renders: Query<(Entity, &CloudOf)>,
+    simulating: Query<(), (With<Cloud>, With<ObjectParticleSystem>)>,
+) {
+    for (render, source) in &renders {
+        if simulating.get(source.0).is_err() {
+            commands.entity(render).try_despawn();
+        }
     }
 }
 
@@ -1711,5 +1760,73 @@ mod tests {
         let alpha = live_system(); // an ordinary alpha system: lit in the world…
         assert!(!is_unlit(&alpha, false));
         assert!(is_unlit(&alpha, true), "…but unlit on the HUD");
+    }
+
+    /// A cloud's render entity is reaped when its source stops simulating —
+    /// whether the source despawned (which takes the `Cloud` component with it,
+    /// the case the old side map had to notice by hand) or merely stopped being a
+    /// particle source.
+    #[test]
+    fn orphaned_cloud_renders_are_retired() -> Result<(), Box<dyn core::error::Error>> {
+        use super::{Cloud, CloudOf, Emitter, retire_orphaned_clouds};
+        use bevy::prelude::{App, Update};
+
+        let mut app = App::new();
+        app.add_systems(Update, retire_orphaned_clouds);
+
+        // Two sources, each with a cloud and its separate render entity.
+        let cloud_of = |source| Cloud {
+            emitter: Emitter::new(0),
+            particles: Vec::new(),
+            entity: source,
+            system: live_system(),
+            texture: bevy::prelude::Handle::default(),
+            texture_applied: false,
+            visible: false,
+            is_hud: false,
+        };
+        let despawned = app
+            .world_mut()
+            .spawn((ObjectParticleSystem {
+                system: live_system(),
+            },))
+            .id();
+        app.world_mut()
+            .entity_mut(despawned)
+            .insert(cloud_of(despawned));
+        let kept = app
+            .world_mut()
+            .spawn((ObjectParticleSystem {
+                system: live_system(),
+            },))
+            .id();
+        app.world_mut().entity_mut(kept).insert(cloud_of(kept));
+        let orphan_render = app.world_mut().spawn(CloudOf(despawned)).id();
+        let kept_render = app.world_mut().spawn(CloudOf(kept)).id();
+
+        // Both sources are simulating: nothing is retired.
+        app.update();
+        app.world().get_entity(orphan_render)?;
+        app.world().get_entity(kept_render)?;
+
+        // The first source's object goes away entirely; its render entity follows.
+        app.world_mut().entity_mut(despawned).despawn();
+        app.update();
+        assert!(
+            app.world().get_entity(orphan_render).is_err(),
+            "a despawned source's render entity is reaped"
+        );
+        app.world().get_entity(kept_render)?;
+
+        // The second merely stops being a particle source (`llParticleSystem([])`).
+        app.world_mut()
+            .entity_mut(kept)
+            .remove::<ObjectParticleSystem>();
+        app.update();
+        assert!(
+            app.world().get_entity(kept_render).is_err(),
+            "a source that stopped emitting has its render entity reaped"
+        );
+        Ok(())
     }
 }

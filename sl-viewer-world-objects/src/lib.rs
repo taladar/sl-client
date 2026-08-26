@@ -40,6 +40,7 @@ pub(crate) use sl_viewer_world_api as world_api;
 pub mod animations;
 pub mod animesh;
 pub mod asset_budget;
+pub mod asset_stats;
 pub mod avatar_complexity;
 pub mod avatar_dump;
 pub mod avatar_render_settings;

@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 99 |
+| ideas | 98 |
 | ready | 256 |
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 33 |
-| done | 865 |
+| done | 866 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1373** |
 
-## ideas (99)
+## ideas (98)
 
 ### viewer
 
@@ -50,8 +50,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   opt-in reporting
 - [`viewer-derender-all-animesh`](ideas/viewer-derender-all-animesh.md) —
   One-click derender of all animated objects
-- [`viewer-ecs-idiom-audit`](ideas/viewer-ecs-idiom-audit.md) — Audit the viewer
-  for state modelled beside the ECS rather than in it
 - [`viewer-flycam-key-bindings-rethink`](ideas/viewer-flycam-key-bindings-rethink.md)
   — Rethink the flycam mode's key bindings
 - [`viewer-gltf-scene-editor`](ideas/viewer-gltf-scene-editor.md) — GLTF scene /
@@ -1156,7 +1154,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (865)
+## done (866)
 
 ### protocol
 
@@ -1483,6 +1481,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-chat-input-bar` (done))
 - [`viewer-double-click-teleport`](done/viewer-double-click-teleport.md) —
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
+- [`viewer-ecs-idiom-audit`](done/viewer-ecs-idiom-audit.md) — Audit the viewer
+  for state modelled beside the ECS rather than in it
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))

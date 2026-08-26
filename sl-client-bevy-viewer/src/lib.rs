@@ -83,6 +83,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
 pub(crate) use sl_viewer_kit::appearance;
 mod asset_blacklist;
 pub(crate) use sl_viewer_world_objects::asset_budget;
+pub(crate) use sl_viewer_world_objects::asset_stats;
 // The platform layer (directory layout, on-disk caches, clipboard, URL
 // linkification) is its own crate; each module is aliased under its old
 // name so every `crate::<module>::…` path in the viewer still resolves.
@@ -434,10 +435,10 @@ use crate::notification_host::{
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
 use crate::objects::{
-    PendingBuilds, PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents,
-    PrimLodTargets, RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments,
-    apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_rigged_attachments,
-    apply_tree_lod, recenter_objects, update_objects,
+    PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents, PrimLodTargets,
+    RiggedBindSkipLog, TreeLodTargets, adopt_pending_attachments, apply_object_meshes,
+    apply_object_sculpts, apply_prim_lod, apply_rigged_attachments, apply_tree_lod,
+    recenter_objects, update_objects,
 };
 use crate::offers_invites::OffersInvitesPlugin;
 use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
@@ -1630,6 +1631,7 @@ fn run_session(
         crate::particles::ParticlesPlugin,
         crate::lights::LocalLightsPlugin,
         crate::diagnostics::PipelineOverlayPlugin,
+        crate::asset_stats::AssetStatsPlugin,
     ))
     // Water-relative transparency ordering (viewer-particle-water-ordering): a
     // render-world re-sort of the transparent phase so translucent content (a
@@ -1792,7 +1794,6 @@ fn run_session(
         // The deferred geometry builds of the objects `ObjectState` tracks, kept
         // beside it rather than inside a tracked object: an in-flight asset fetch
         // or a retained LOD rebuild is machinery, not world state.
-        .init_resource::<PendingBuilds>()
         .init_resource::<PendingObjectEvents>()
         .init_resource::<RiggedBindSkipLog>()
         .init_resource::<PendingDecodedMeshes>()
