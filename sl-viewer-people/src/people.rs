@@ -265,20 +265,9 @@ const PEOPLE_SETTINGS_SECTION: &[&str] = &["people"];
 /// draggable columns).
 const FRIENDS_WIDTHS_SETTING: &str = "friends_widths";
 
-/// The account setting gating the friend online / offline toasts (the
-/// reference `ChatOnlineNotification`, surfaced on the Preferences alerts
-/// tab): while on, `notify_friend_presence` raises a `FriendOnlineOffline`
-/// tip as a friend's presence changes. Lives in the `[notifications]` section
-/// with the other notification preferences.
-pub const SETTING_FRIEND_NOTIFY: &str = "ChatOnlineNotification";
-
-/// The account setting that lets a **contact set** ask for its members' online /
-/// offline toasts even while [`SETTING_FRIEND_NOTIFY`] is off (the reference
-/// `FSContactSetsNotificationToast`, default off — one opts in to the per-set
-/// path deliberately). The per-set flag itself lives on the set
-/// (`crate::contact_sets::ContactSets::notifies`); this is the master switch
-/// over all of them, so the feature can be turned off without editing every set.
-pub const SETTING_CONTACT_SET_NOTIFY: &str = "ContactSetsNotificationToast";
+// Bound by the preferences alerts tab, so the keys live in
+// `sl-viewer-settings`; `notify_friend_presence` below is what reads them.
+pub use sl_viewer_settings::keys::people::{SETTING_CONTACT_SET_NOTIFY, SETTING_FRIEND_NOTIFY};
 
 /// The friends list, expressed for the reusable table widget. The Name and Status
 /// columns are widget-owned **text** cells (Name gains the locale ellipsis); the

@@ -56,12 +56,16 @@ use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
 use bevy::render::render_resource::TextureUsages;
 use bevy::render::texture::GpuImage;
+use bevy::window::PrimaryWindow;
 
 use sl_client_bevy::{AgentKey, PrimFaceId, ScopedObjectId};
 
 use crate::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
 use crate::water::{WaterOcean, WaterRegionPlane};
-use crate::world_api::{AvatarPickTarget, TerrainSurface, ViewerCamera, on_hud_layer};
+use crate::world_api::{
+    AvatarPickTarget, DragPickActive, DragPickHit, DragWorldPick, TerrainSurface, ViewerCamera,
+    WorldPhase, on_hud_layer,
+};
 
 /// The internal handle `pick.wgsl` is loaded under.
 const PICK_SHADER_HANDLE: Handle<Shader> = uuid_handle!("3f5d1a82-6c47-49b3-8e90-b21f7c04a6de");
@@ -1018,6 +1022,66 @@ fn on_pick_readback(
     }
 }
 
+/// While an inventory drag is in flight ([`DragPickActive`]), keep a
+/// ~[`PICK_HZ`] Hz pick alive at the cursor so [`DragWorldPick`] stays fresh
+/// for the drag's hover outline and its eventual drop; clear the stashed hit
+/// when no drag is running.
+///
+/// The drag itself lives in the inventory panel, three tiers below this one.
+/// It cannot ask for a pick directly and this crate must not know it exists, so
+/// the two talk through the flag and the answer, both declared in
+/// `sl-viewer-world-api`.
+fn drive_drag_world_picks(
+    active: Res<DragPickActive>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    time: Res<Time>,
+    mut since_pick: Local<f32>,
+    mut picker: ResMut<GpuPicker>,
+    mut world_pick: ResMut<DragWorldPick>,
+) {
+    if !active.active {
+        if world_pick.hit.is_some() {
+            world_pick.hit = None;
+        }
+        *since_pick = f32::MAX;
+        return;
+    }
+    let Some(cursor) = windows
+        .single()
+        .ok()
+        .and_then(|window| window.cursor_position())
+    else {
+        return;
+    };
+    *since_pick += time.delta_secs();
+    if *since_pick >= 1.0 / PICK_HZ {
+        picker.request(cursor, PickPurpose::Drag);
+        *since_pick = 0.0;
+    }
+}
+
+/// Fold every resolved drag pick into [`DragWorldPick`].
+fn ingest_drag_world_picks(
+    mut picks: MessageReader<GpuPickResolved>,
+    mut world_pick: ResMut<DragWorldPick>,
+) {
+    for pick in picks.read() {
+        if pick.purpose != PickPurpose::Drag {
+            continue;
+        }
+        world_pick.hit = pick.hit.as_ref().map(|hit| match hit.resolution {
+            PickResolution::Avatar { agent, worn: _ } => DragPickHit::Avatar(agent),
+            PickResolution::ObjectFace { entity, .. } => DragPickHit::Object {
+                entity,
+                world_point: hit.world_point,
+            },
+            PickResolution::Terrain | PickResolution::Water => DragPickHit::Ground {
+                world_point: hit.world_point,
+            },
+        });
+    }
+}
+
 /// The GPU-picking plugin: the registry + tag assignment, the queue and
 /// submission, the readback resolve, and the render-world pass.
 #[derive(Debug, Default)]
@@ -1035,6 +1099,8 @@ impl Plugin for GpuPickPlugin {
             .init_resource::<GpuPicker>()
             .init_resource::<GpuPickSubmission>()
             .init_resource::<GpuPickWarmSet>()
+            .init_resource::<DragPickActive>()
+            .init_resource::<DragWorldPick>()
             .add_message::<GpuPickResolved>()
             .add_plugins((
                 ExtractResourcePlugin::<GpuPickSubmission>::default(),
@@ -1052,6 +1118,12 @@ impl Plugin for GpuPickPlugin {
                     free_pick_tags,
                     collect_pick_warm_set,
                 ),
+            )
+            .add_systems(
+                Update,
+                (drive_drag_world_picks, ingest_drag_world_picks)
+                    .chain()
+                    .in_set(WorldPhase::DragPickResolved),
             )
             .add_systems(
                 PostUpdate,

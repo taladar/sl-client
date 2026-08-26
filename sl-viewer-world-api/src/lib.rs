@@ -2017,6 +2017,55 @@ pub struct DragHover {
     pub foreign: bool,
 }
 
+/// Whether an inventory drag is in flight, so the world half should keep a GPU
+/// pick alive under the cursor — set by `crate::inventory_drag` as a drag
+/// starts and ends, read by `crate::gpu_pick`'s drag driver.
+///
+/// The flag exists because the two halves of a drag-to-world drop sit on
+/// opposite sides of the dependency graph: the panel that starts the drag is a
+/// feature crate, the picker that resolves what is under the cursor is the
+/// world tier, and neither may depend on the other. So the request and the
+/// answer ([`DragWorldPick`]) both live here, in the vocabulary layer beneath
+/// both — the same seam [`DragHoverHighlight`] already uses.
+#[derive(Resource, Debug, Default)]
+pub struct DragPickActive {
+    /// Whether a drag is running right now.
+    pub active: bool,
+}
+
+/// What the latest GPU pick found under the cursor during an active drag —
+/// the world half of an inventory drop's resolution. Filled by
+/// `crate::gpu_pick`'s drag driver while [`DragPickActive`] is set, read by
+/// `crate::inventory_drag` at `DragEnd` and by the hover outline every frame.
+#[derive(Resource, Debug, Default)]
+pub struct DragWorldPick {
+    /// The latest resolved world hit, `None` when the pick missed (sky) or no
+    /// drag is active.
+    pub hit: Option<DragPickHit>,
+}
+
+/// One resolved drag-time world hit.
+#[derive(Debug, Clone, Copy)]
+pub enum DragPickHit {
+    /// An avatar's drawn pixels (a worn rigged submesh drops onto its wearer
+    /// too, matching the old body pick).
+    Avatar(AgentKey),
+    /// An object face: the face's mesh entity (for the linkset walk) and the
+    /// struck world point (the rez ray's end).
+    Object {
+        /// The face's mesh entity.
+        entity: Entity,
+        /// The struck world point.
+        world_point: Vec3,
+    },
+    /// Bare terrain — or water, which the old first-hit ray also treated as a
+    /// rez surface.
+    Ground {
+        /// The struck world point.
+        world_point: Vec3,
+    },
+}
+
 /// A request to start an **ad-hoc conference** with several residents, or to
 /// invite more people into one that is already open — the reference's
 /// `LLAvatarActions::startConference` (`llavataractions.cpp:423`), and the one
@@ -4290,6 +4339,14 @@ pub enum WorldPhase {
     /// read the intent the *view* layer just advertised; this set is how that
     /// constraint is stated without the object layer naming a system above it.
     AvatarControlsDriven,
+    /// This frame's drag-time world pick has been folded into
+    /// [`DragWorldPick`], so what the cursor is over in the world is settled
+    /// for whoever started the drag.
+    ///
+    /// The panel that starts an inventory drag lives well below the picker that
+    /// resolves it; this set is how it orders its own drop / hover work after
+    /// the answer without naming the system that produces it.
+    DragPickResolved,
     /// The camera's final pose for this frame has been written.
     ///
     /// Everything that faces, follows or centres on the viewpoint — the sky

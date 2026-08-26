@@ -81,22 +81,14 @@ pub const MINIMAP_FLOATER_ID: &str = "minimap";
 /// The settings section every minimap setting registers under.
 const MINIMAP_SECTION: &[&str] = &["minimap"];
 
-/// The map scale setting (pixels per 256 m region), shared by all instances.
-/// `pub(crate)` for the preferences floater's bound controls, like every
-/// promoted setting name below.
-pub const SETTING_SCALE: &str = "MiniMapScale";
-
-/// Whether the map rotates so the camera heading points up.
-pub const SETTING_ROTATE: &str = "MiniMapRotate";
-
-/// Whether the pan offset eases back to centre each frame.
-pub const SETTING_AUTO_CENTER: &str = "MiniMapAutoCenter";
-
-/// The minimap surface opacity.
-pub const SETTING_OPACITY: &str = "MiniMapOpacity";
-
-/// Whether the object layer draws at all.
-pub const SETTING_OBJECTS: &str = "MiniMapObjects";
+// The names the preferences floater binds controls to live in
+// `sl-viewer-settings`, the layer beneath both this crate and the panel; the
+// defaults, sections and descriptions stay here with the behaviour. The
+// unshared knobs below keep their names here, private to this module.
+pub use sl_viewer_settings::keys::minimap::{
+    SETTING_AUTO_CENTER, SETTING_CHAT_RING, SETTING_FOR_SALE, SETTING_OBJECTS, SETTING_OPACITY,
+    SETTING_PROPERTY_LINES, SETTING_ROTATE, SETTING_SCALE,
+};
 
 /// Accent toggle: highlight physical objects.
 const SETTING_PHYSICAL: &str = "NetMapPhysical";
@@ -109,15 +101,6 @@ const SETTING_TEMP_ON_REZ: &str = "NetMapTempOnRez";
 
 /// Phantom-object dot opacity, in percent.
 const SETTING_PHANTOM_OPACITY: &str = "NetMapPhantomOpacity";
-
-/// Whether the parcel layer (property lines) draws at all.
-pub const SETTING_PROPERTY_LINES: &str = "MiniMapShowPropertyLines";
-
-/// Whether for-sale / auction parcels are filled.
-pub const SETTING_FOR_SALE: &str = "MiniMapForSaleParcels";
-
-/// Master toggle for the chat-range rings.
-pub const SETTING_CHAT_RING: &str = "MiniMapChatRing";
 
 /// Per-ring toggle: the whisper-range ring.
 const SETTING_WHISPER_RING: &str = "MiniMapWhisperRing";

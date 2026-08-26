@@ -49,7 +49,6 @@ use sl_client_bevy::{
 };
 
 use crate::coords::bevy_to_sl_vec;
-use crate::gpu_pick::{GpuPickResolved, GpuPicker, PICK_HZ, PickPurpose, PickResolution};
 use crate::inventory::{
     InventoryModel, InventorySelection, InventoryUi, InventoryUiAction, InventoryView, RowKey,
     query_folder_page,
@@ -61,6 +60,7 @@ use crate::virtual_list::{VirtualList, VirtualRow};
 use crate::world_api::AvatarPickTarget;
 use crate::world_api::ViewerCamera;
 use crate::world_api::pointer_over_blocking_ui;
+use crate::world_api::{DragPickActive, DragPickHit, DragWorldPick, WorldPhase};
 
 /// The ghost's offset from the pointer, in logical pixels — clear of the hot
 /// pixel so the pointer, not the ghost, decides the drop target.
@@ -742,7 +742,7 @@ pub(crate) fn on_row_drag_end(
 
     // 4. The world: an avatar body first, then a rez point for an object item.
     // The world resolution is the latest GPU ID-buffer pick kept fresh during
-    // the drag by `drive_drag_world_picks` (a drop happens with the cursor at
+    // the drag by the world tier's drag pick driver (a drop happens with the cursor at
     // rest, so the ≤ ~70 ms staleness is invisible).
     let Ok((_camera, camera_transform)) = camera.single() else {
         return;
@@ -1049,105 +1049,40 @@ pub struct InventoryDragPlugin;
 
 impl Plugin for InventoryDragPlugin {
     /// Register the drag state and the per-frame drive systems.
+    ///
+    /// The world half of a drop — keeping a GPU pick alive under the cursor and
+    /// folding the answer into [`DragWorldPick`] — runs in the world tier, in
+    /// `sl-viewer-world-view`'s `gpu_pick`, because the picker is up there and
+    /// this crate must stay below it. `publish_drag_pick_active` is what asks
+    /// for it, and [`WorldPhase::DragPickResolved`] is what the readers here
+    /// order themselves against.
     fn build(&self, app: &mut App) {
         app.init_resource::<InventoryDragState>()
+            // Idempotent with the world tier's own init: whichever half of the
+            // conversation is present alone still finds its side of it.
+            .init_resource::<DragPickActive>()
             .init_resource::<DragWorldPick>()
             .add_systems(
                 Update,
-                (
-                    drive_inventory_drag,
-                    drive_drag_world_picks,
-                    ingest_drag_world_picks,
-                    drive_drag_object_hover,
-                )
-                    .chain(),
+                (drive_inventory_drag, publish_drag_pick_active)
+                    .chain()
+                    .before(WorldPhase::DragPickResolved),
+            )
+            .add_systems(
+                Update,
+                drive_drag_object_hover.after(WorldPhase::DragPickResolved),
             );
     }
 }
 
-/// What the latest GPU pick found under the cursor during an active drag —
-/// the world half of the drop resolution ([`on_row_drag_end`] reads it at
-/// `DragEnd`, the hover outline reads it every frame).
-#[derive(Resource, Debug, Default)]
-pub(crate) struct DragWorldPick {
-    /// The latest resolved world hit, `None` when the pick missed (sky) or no
-    /// drag is active.
-    hit: Option<DragPickHit>,
-}
-
-/// One resolved drag-time world hit.
-#[derive(Debug, Clone, Copy)]
-enum DragPickHit {
-    /// An avatar's drawn pixels (a worn rigged submesh drops onto its wearer
-    /// too, matching the old body pick).
-    Avatar(AgentKey),
-    /// An object face: the face's mesh entity (for the linkset walk) and the
-    /// struck world point (the rez ray's end).
-    Object {
-        /// The face's mesh entity.
-        entity: Entity,
-        /// The struck world point.
-        world_point: Vec3,
-    },
-    /// Bare terrain — or water, which the old first-hit ray also treated as a
-    /// rez surface.
-    Ground {
-        /// The struck world point.
-        world_point: Vec3,
-    },
-}
-
-/// While a drag is active, keep a ~[`PICK_HZ`] Hz GPU pick alive at the
-/// cursor so [`DragWorldPick`] stays fresh for the hover outline and the
-/// eventual drop; clear the stashed hit when no drag is running.
-fn drive_drag_world_picks(
-    state: Res<InventoryDragState>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    time: Res<Time>,
-    mut since_pick: Local<f32>,
-    mut picker: ResMut<GpuPicker>,
-    mut world_pick: ResMut<DragWorldPick>,
-) {
-    if state.active.is_none() {
-        if world_pick.hit.is_some() {
-            world_pick.hit = None;
-        }
-        *since_pick = f32::MAX;
-        return;
-    }
-    let Some(cursor) = windows
-        .single()
-        .ok()
-        .and_then(|window| window.cursor_position())
-    else {
-        return;
-    };
-    *since_pick += time.delta_secs();
-    if *since_pick >= 1.0 / PICK_HZ {
-        picker.request(cursor, PickPurpose::Drag);
-        *since_pick = 0.0;
-    }
-}
-
-/// Fold every resolved drag pick into [`DragWorldPick`].
-fn ingest_drag_world_picks(
-    mut picks: MessageReader<GpuPickResolved>,
-    mut world_pick: ResMut<DragWorldPick>,
-) {
-    for pick in picks.read() {
-        if pick.purpose != PickPurpose::Drag {
-            continue;
-        }
-        world_pick.hit = pick.hit.as_ref().map(|hit| match hit.resolution {
-            PickResolution::Avatar { agent, worn: _ } => DragPickHit::Avatar(agent),
-            PickResolution::ObjectFace { entity, .. } => DragPickHit::Object {
-                entity,
-                world_point: hit.world_point,
-            },
-            PickResolution::Terrain | PickResolution::Water => DragPickHit::Ground {
-                world_point: hit.world_point,
-            },
-        });
+/// Mirror "a drag is in flight" into [`DragPickActive`], which the world tier's
+/// drag pick driver watches. Unconditional (not folded into
+/// [`drive_inventory_drag`], which returns early with no panel or no drag) so
+/// the flag also *clears* when a drag ends.
+fn publish_drag_pick_active(state: Res<InventoryDragState>, mut active: ResMut<DragPickActive>) {
+    let running = state.active.is_some();
+    if active.active != running {
+        active.active = running;
     }
 }
 
@@ -1201,8 +1136,8 @@ fn drive_drag_object_hover(
         clear(&mut hover_out);
         return;
     }
-    // The latest resolved GPU pick under the cursor (kept fresh at ~PICK_HZ
-    // by `drive_drag_world_picks`); only an object face can be an outline
+    // The latest resolved GPU pick under the cursor (kept fresh by the world
+    // tier's drag pick driver); only an object face can be an outline
     // target.
     let target = match world_pick.hit {
         Some(DragPickHit::Object { entity, .. }) => {

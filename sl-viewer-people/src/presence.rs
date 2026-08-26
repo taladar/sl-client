@@ -94,36 +94,13 @@ use crate::world_api::{
 /// The settings section the presence modes and their replies live in.
 pub(crate) const PRESENCE_SECTION: &[&str] = &["presence"];
 
-/// Whether an IM received while merely **away** is answered at all (the
-/// reference `FSSendAwayAvatarResponse`; default off — being away is not being
-/// busy).
-pub const SETTING_SEND_AWAY_RESPONSE: &str = "SendAwayAvatarResponse";
-
-/// The reply sent to an IM while away, when [`SETTING_SEND_AWAY_RESPONSE`] is
-/// on (the reference `FSAwayAvatarResponse`).
-pub const SETTING_AWAY_RESPONSE: &str = "AwayAvatarResponse";
-
-/// Whether a **blocked** resident's IM is answered with
-/// [`SETTING_MUTED_RESPONSE`] (the reference `FSSendMutedAvatarResponse`;
-/// default off — telling someone they are blocked is a deliberate choice).
-pub const SETTING_SEND_MUTED_RESPONSE: &str = "SendMutedAvatarResponse";
-
-/// The reply sent to a blocked resident's IM, when
-/// [`SETTING_SEND_MUTED_RESPONSE`] is on (the reference
-/// `FSMutedAvatarResponse`).
-pub const SETTING_MUTED_RESPONSE: &str = "MutedAvatarResponse";
-
-/// Whether going away sits the avatar down on the ground, standing it back up
-/// on return (the reference `AvatarSitOnAway`, an anti-grief habit). Default
-/// off.
-pub const SETTING_SIT_ON_AWAY: &str = "AvatarSitOnAway";
-
-/// Seconds of *being away* after which the viewer logs out by itself; `0` =
-/// never (the reference `QuitAfterSecondsOfAFK`). Distinct from
-/// `SETTING_AFK_TIMEOUT`, which is the idle time before going away.
-///
-/// `SETTING_AFK_TIMEOUT`: crate::world_api::SETTING_AFK_TIMEOUT
-pub const SETTING_QUIT_AFTER_AFK: &str = "QuitAfterSecondsOfAFK";
+// The keys the preferences floater binds its controls to live in
+// `sl-viewer-settings`, the layer beneath both this crate and the panel; the
+// defaults and descriptions below stay here, with the behaviour.
+pub use sl_viewer_settings::keys::presence::{
+    SETTING_AWAY_RESPONSE, SETTING_MUTED_RESPONSE, SETTING_QUIT_AFTER_AFK,
+    SETTING_SEND_AWAY_RESPONSE, SETTING_SEND_MUTED_RESPONSE, SETTING_SIT_ON_AWAY,
+};
 
 /// The default away reply (the reference `AwayAvatarResponseDefault`).
 const AWAY_RESPONSE_DEFAULT: &str = "The Resident you messaged is currently away from keyboard. \

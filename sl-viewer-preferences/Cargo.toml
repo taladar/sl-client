@@ -29,9 +29,7 @@ sl-client-bevy = { workspace = true, features = [
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-viewer-audio = { workspace = true }
 sl-viewer-kit = { workspace = true }
-sl-viewer-map = { workspace = true }
 sl-viewer-notifications = { workspace = true }
-sl-viewer-people = { workspace = true }
 sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-ui-core = { workspace = true }

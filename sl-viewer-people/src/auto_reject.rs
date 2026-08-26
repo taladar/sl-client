@@ -63,45 +63,16 @@ use crate::presence::PRESENCE_SECTION;
 use crate::settings::ViewerSettings;
 use crate::world_api::SETTING_AUTORESPONSE_ITEM;
 
-/// Whether incoming teleport offers and requests are rejected unanswered (the
-/// reference `FSRejectTeleportOffersMode`). Account-scoped and persisted.
-pub const SETTING_REJECT_TELEPORT_OFFERS: &str = "RejectTeleportOffersMode";
-
-/// Whether a **friend's** teleport offer is exempt from
-/// [`SETTING_REJECT_TELEPORT_OFFERS`] (the reference
-/// `FSDontRejectTeleportOffersFromFriends`).
-pub const SETTING_DONT_REJECT_TELEPORT_FROM_FRIENDS: &str = "DontRejectTeleportOffersFromFriends";
-
-/// The canned reply sent to a rejected teleport offer (the reference
-/// `FSRejectTeleportOffersResponse`).
-pub const SETTING_REJECT_TELEPORT_RESPONSE: &str = "RejectTeleportOffersResponse";
-
-/// Whether incoming friendship requests are rejected (the reference
-/// `FSRejectFriendshipRequestsMode`). Account-scoped and persisted.
-pub const SETTING_REJECT_FRIENDSHIP_REQUESTS: &str = "RejectFriendshipRequestsMode";
-
-/// The canned reply sent to a rejected friendship request (the reference
-/// `FSRejectFriendshipRequestsResponse`).
-pub const SETTING_REJECT_FRIENDSHIP_RESPONSE: &str = "RejectFriendshipRequestsResponse";
-
-/// Whether incoming group invitations are rejected (the reference
-/// `FSRejectAllGroupInvitesMode`). Account-scoped and persisted.
-pub const SETTING_REJECT_ALL_GROUP_INVITES: &str = "RejectAllGroupInvitesMode";
-
-/// Whether an invitation to a group the agent is **already a member of** is
-/// still shown (the reference `FSShowJoinedGroupInvitations`; default off, so
-/// the redundant re-invite is dropped).
-pub const SETTING_SHOW_JOINED_GROUP_INVITATIONS: &str = "ShowJoinedGroupInvitations";
-
-/// Whether an ad-hoc conference invitation is silently declined (the reference
-/// `FSIgnoreAdHocSessions`). Group IMs are never touched by it — only the
-/// multi-resident conferences a griefer can pull anyone into.
-pub const SETTING_IGNORE_AD_HOC_SESSIONS: &str = "IgnoreAdHocSessions";
-
-/// Whether a **friend's** conference invitation is exempt from
-/// [`SETTING_IGNORE_AD_HOC_SESSIONS`] (the reference
-/// `FSDontIgnoreAdHocFromFriends`).
-pub const SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS: &str = "DontIgnoreAdHocFromFriends";
+// Bound by the preferences chat tab and the menu bar's Online Status submenu,
+// so the keys live in `sl-viewer-settings`; the defaults, the canned reply
+// texts and the code that acts on them stay here.
+pub use sl_viewer_settings::keys::auto_reject::{
+    SETTING_DONT_IGNORE_AD_HOC_FROM_FRIENDS, SETTING_DONT_REJECT_TELEPORT_FROM_FRIENDS,
+    SETTING_IGNORE_AD_HOC_SESSIONS, SETTING_REJECT_ALL_GROUP_INVITES,
+    SETTING_REJECT_FRIENDSHIP_REQUESTS, SETTING_REJECT_FRIENDSHIP_RESPONSE,
+    SETTING_REJECT_TELEPORT_OFFERS, SETTING_REJECT_TELEPORT_RESPONSE,
+    SETTING_SHOW_JOINED_GROUP_INVITATIONS,
+};
 
 /// The default rejected-teleport reply (the reference
 /// `RejectTeleportOffersResponseDefault`, without its `[APP_NAME]`

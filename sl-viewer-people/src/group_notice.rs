@@ -76,13 +76,9 @@ use crate::world_api::{ConversationKey, OpenConversation};
 /// for its history / response bookkeeping).
 const GROUP_NOTICE_TEMPLATE: &str = "GroupNotice";
 
-/// The account setting gating group-notice toasts (the Preferences alerts
-/// tab's headline row; our own name — the reference has no single global
-/// gate). While off, a received notice raises no card and is not persisted
-/// for relogin re-raise (it stays readable in the group's Notices tab, which
-/// pulls from the server). Lives in the `[notifications]` section with the
-/// other notification preferences.
-pub const SETTING_GROUP_NOTICE_TOASTS: &str = "ShowGroupNoticeToasts";
+// Bound by the preferences alerts tab's headline row, so the key lives in
+// `sl-viewer-settings`; the default is declared just below.
+pub use sl_viewer_settings::keys::group_notice::SETTING_GROUP_NOTICE_TOASTS;
 
 /// Startup: declare [`SETTING_GROUP_NOTICE_TOASTS`] (default on).
 fn register_group_notice_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {

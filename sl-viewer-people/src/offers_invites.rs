@@ -91,14 +91,9 @@ use crate::world_api::RequestBlock;
 /// `UserGiveItem` notification.
 const INVENTORY_OFFER_TEMPLATE: &str = "UserGiveItem";
 
-/// The account setting for silently accepting inventory offers (the reference
-/// `AutoAcceptNewInventory`, surfaced on the Preferences alerts tab; default
-/// **off**). While on, an inventory offer is filed into its type folder with
-/// no offer card; an offer whose destination cannot be resolved yet (the
-/// inventory skeleton still loading) falls back to the card — an offer is
-/// never dropped. Lives in the `[notifications]` section with the other
-/// notification preferences.
-pub const SETTING_AUTO_ACCEPT_INVENTORY: &str = "AutoAcceptNewInventory";
+// Bound by the preferences alerts tab, so the key lives in
+// `sl-viewer-settings`; the default is declared just below.
+pub use sl_viewer_settings::keys::offers_invites::SETTING_AUTO_ACCEPT_INVENTORY;
 
 /// Startup: declare [`SETTING_AUTO_ACCEPT_INVENTORY`] (default off).
 fn register_offers_settings(settings: Option<ResMut<crate::settings::ViewerSettings>>) {

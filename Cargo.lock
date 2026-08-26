@@ -9044,7 +9044,6 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-view",
 ]
 
 [[package]]
@@ -9079,7 +9078,6 @@ dependencies = [
  "sl-viewer-ui-core",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
- "sl-viewer-world-view",
 ]
 
 [[package]]
@@ -9278,9 +9276,7 @@ dependencies = [
  "sl-settings",
  "sl-viewer-audio",
  "sl-viewer-kit",
- "sl-viewer-map",
  "sl-viewer-notifications",
- "sl-viewer-people",
  "sl-viewer-platform",
  "sl-viewer-settings",
  "sl-viewer-ui-core",

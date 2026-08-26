@@ -18,6 +18,12 @@
 //!
 //! Both scopes save on a clean logout, so a tuned value (e.g. a SpaceNavigator
 //! sensitivity) survives a restart.
+//!
+//! [`keys`] holds the setting **names** that both the feature owning a setting
+//! and the preferences panel drawing a control for it have to agree on — the
+//! layer beneath both, so neither has to depend on the other for a string.
+
+pub mod keys;
 
 use std::path::{Path, PathBuf};
 

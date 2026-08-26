@@ -121,24 +121,13 @@ const DOUBLE_CLICK_SECS: f32 = 0.4;
 /// The persisted-settings section the radar's knobs live under (`[radar]`).
 const RADAR_SECTION: &[&str] = &["radar"];
 
-/// Report entering chat (say) range.
-pub const SETTING_CHAT_ENTER: &str = "RadarReportChatRangeEnter";
-/// Report leaving chat (say) range.
-pub const SETTING_CHAT_LEAVE: &str = "RadarReportChatRangeLeave";
-/// Report entering draw distance.
-pub const SETTING_DRAW_ENTER: &str = "RadarReportDrawRangeEnter";
-/// Report leaving draw distance.
-pub const SETTING_DRAW_LEAVE: &str = "RadarReportDrawRangeLeave";
-/// Report entering the own region.
-pub const SETTING_SIM_ENTER: &str = "RadarReportSimRangeEnter";
-/// Report leaving the own region.
-pub const SETTING_SIM_LEAVE: &str = "RadarReportSimRangeLeave";
-/// Where alerts go: `"chat"` (Nearby Chat line) or `"toast"`.
-pub const SETTING_ALERT_OUTPUT: &str = "RadarAlertOutput";
-/// Arm the young-account alert.
-pub const SETTING_AGE_ALERT: &str = "RadarAgeAlert";
-/// The young-account threshold, days.
-pub const SETTING_AGE_DAYS: &str = "RadarAgeAlertDays";
+// Every alert knob is bound by the preferences alerts tab, so the keys live in
+// `sl-viewer-settings`; the defaults and the reporting itself stay here.
+pub use sl_viewer_settings::keys::radar::{
+    SETTING_AGE_ALERT, SETTING_AGE_DAYS, SETTING_ALERT_OUTPUT, SETTING_CHAT_ENTER,
+    SETTING_CHAT_LEAVE, SETTING_DRAW_ENTER, SETTING_DRAW_LEAVE, SETTING_SIM_ENTER,
+    SETTING_SIM_LEAVE,
+};
 /// Limit the radar list to [`SETTING_RANGE`] metres.
 const SETTING_LIMIT: &str = "RadarLimitByRange";
 /// The near-me range limit, metres (the reference's `NearMeRange`).

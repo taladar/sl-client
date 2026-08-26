@@ -23,10 +23,12 @@
 //!   few-frame window). The log *path* stays with the network & cache tab; the
 //!   12/24-hour clock style has no reference setting and stays 24-hour.
 //! - The **automatic replies** are account-scoped texts *consumed* by the
-//!   do-not-disturb / away mode machinery ([`crate::presence`]); the keys keep
-//!   their original names, so nothing persisted changed by the move here.
+//!   do-not-disturb / away mode machinery in `sl-viewer-people`'s `presence`
+//!   (whose keys are [`crate::presence`]); the keys keep their original names,
+//!   so nothing persisted changed by the move here.
 //! - The **automatic rejection** section is the settings half of the standing
-//!   auto-reject modes ([`crate::auto_reject`]): the three mode toggles (also on
+//!   auto-reject modes in `sl-viewer-people`'s `auto_reject` (whose keys are
+//!   [`crate::auto_reject`]): the three mode toggles (also on
 //!   Comm ▸ Online Status, where the reference keeps them), their canned
 //!   replies, the two friends exemptions, and the two narrower suppressions
 //!   (already-joined group invitations, ad-hoc conferences). The autoresponse

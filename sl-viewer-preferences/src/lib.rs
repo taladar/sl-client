@@ -5,11 +5,17 @@
 //! ([`quick_preferences`]), and the raw debug-settings editor
 //! ([`debug_settings`]) for the ones no tab shows.
 //!
-//! This crate sits at the top of the feature tier and depends on nearly all of
-//! it, which is the point: a tab draws a control for a setting whose behaviour
-//! lives elsewhere, so the dependency runs from the tab to the behaviour and
-//! never the other way. The setting *keys* live with the behaviour -- many of
-//! them in `sl-viewer-world-api` -- precisely so that stays true.
+//! This crate sits at the top of the feature tier, which is the point: a tab
+//! draws a control for a setting whose behaviour lives elsewhere, so the
+//! dependency runs from the tab to the behaviour and never the other way.
+//!
+//! It does *not* follow that a tab needs a dependency on every crate it draws a
+//! control for. A binding needs only the setting's **name**, and a name two
+//! layers agree on belongs beneath both -- in `sl-viewer-world-api` for the
+//! world settings, and in [`sl_viewer_settings::keys`] for the ones whose
+//! behaviour lives in the feature tier alongside this crate. Where a tab needs
+//! actual behaviour (the audio buses, the sky presets) the dependency is real
+//! and it is here.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -28,18 +34,17 @@ pub(crate) use sl_viewer_audio::volume_panel;
 pub(crate) use sl_viewer_audio::world_sounds;
 pub(crate) use sl_viewer_kit::minimap_math;
 pub(crate) use sl_viewer_kit::sky_presets;
-pub(crate) use sl_viewer_map::minimap;
-pub(crate) use sl_viewer_map::world_map;
 pub(crate) use sl_viewer_notifications as notifications;
-pub(crate) use sl_viewer_people::auto_reject;
-pub(crate) use sl_viewer_people::group_notice;
-pub(crate) use sl_viewer_people::offers_invites;
-pub(crate) use sl_viewer_people::people;
-pub(crate) use sl_viewer_people::presence;
-pub(crate) use sl_viewer_people::radar;
 pub(crate) use sl_viewer_platform::clipboard;
 pub(crate) use sl_viewer_platform::paths;
 pub(crate) use sl_viewer_settings as settings;
+// The keys of the settings whose behaviour lives in `sl-viewer-people` and
+// `sl-viewer-map`. Those are the only two things this crate ever named from
+// either, so the keys live below both (`sl_viewer_settings::keys`) and neither
+// crate is a dependency here — see that module's doc.
+pub(crate) use sl_viewer_settings::keys::{
+    auto_reject, group_notice, minimap, offers_invites, people, presence, radar, world_map,
+};
 pub(crate) use sl_viewer_ui_core::i18n;
 pub(crate) use sl_viewer_ui_core::skin;
 pub(crate) use sl_viewer_ui_core::skin_colors;

@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 97 |
-| ready | 258 |
+| ready | 257 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 32 |
-| done | 868 |
+| bugs | 33 |
+| done | 869 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1375** |
+| **total** | **1376** |
 
 ## ideas (97)
 
@@ -225,7 +225,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (258)
+## ready (257)
 
 ### protocol
 
@@ -236,8 +236,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`build-flatten-feature-tier`](ready/build-flatten-feature-tier.md) — Flatten
-  the feature tier — it is a chain where it should be a fan
 - [`build-split-ui-widgets-crate`](ready/build-split-ui-widgets-crate.md) — Lift
   the single-consumer widgets out of sl-viewer-ui-widgets
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
@@ -1074,7 +1072,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (32)
+## bugs (33)
 
 ### protocol
 
@@ -1134,6 +1132,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Own avatar forward direction drifts every few seconds while idle
 - [`viewer-perf-steady-state-46fps-ceiling`](bugs/viewer-perf-steady-state-46fps-ceiling.md)
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
+- [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
+  — A plain prim attachment reads "(worn)" in inventory but never appears on
 - [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
   — A second resident profile replaces the first instead of opening its own
 - [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
@@ -1154,7 +1154,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (868)
+## done (869)
 
 ### protocol
 
@@ -1320,6 +1320,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
+- [`build-flatten-feature-tier`](done/build-flatten-feature-tier.md) — Flatten
+  the feature tier — it is a chain where it should be a fan
 - [`build-split-viewer-crate`](done/build-split-viewer-crate.md) — Split the
   viewer crate to regain cross-crate build parallelism
 - [`build-split-world-avatar-crate`](done/build-split-world-avatar-crate.md) —

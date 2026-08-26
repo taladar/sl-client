@@ -82,27 +82,19 @@ const WORLD_MAP_SECTION: &[&str] = &["worldmap"];
 /// The map scale setting (pixels per 256 m region).
 const SETTING_SCALE: &str = "WorldMapScale";
 
-/// Layer toggle: avatar ("people") markers. `pub(crate)` for the preferences
-/// floater's bound controls, like the other promoted names below.
-pub const SETTING_PEOPLE: &str = "WorldMapShowPeople";
-
-/// Layer toggle: telehub / infohub markers.
-pub const SETTING_INFOHUBS: &str = "WorldMapShowInfohubs";
-
-/// Layer toggle: land-for-sale markers.
-pub const SETTING_LAND_SALE: &str = "WorldMapShowLandForSale";
-
-/// Layer toggle: PG event markers.
-pub const SETTING_EVENTS: &str = "WorldMapShowEvents";
+// The layer toggles the preferences floater binds controls to live in
+// `sl-viewer-settings`, the layer beneath both this crate and the panel; the
+// defaults and descriptions stay here. The unshared toggles below keep their
+// names here, private to this module.
+pub use sl_viewer_settings::keys::world_map::{
+    SETTING_EVENTS, SETTING_INFOHUBS, SETTING_LAND_SALE, SETTING_PEOPLE, SETTING_REGION_NAMES,
+};
 
 /// Layer toggle: Moderate event markers.
 const SETTING_MATURE_EVENTS: &str = "WorldMapShowMatureEvents";
 
 /// Layer toggle: Adult event markers.
 const SETTING_ADULT_EVENTS: &str = "WorldMapShowAdultEvents";
-
-/// Whether region-name labels draw in the detail regime.
-pub const SETTING_REGION_NAMES: &str = "WorldMapShowRegionNames";
 
 /// Register every world-map setting (called from
 /// [`crate::settings::ViewerSettings`]'s `FromWorld`).

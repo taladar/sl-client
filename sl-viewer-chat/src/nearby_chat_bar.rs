@@ -15,10 +15,10 @@
 //! 2. **Send** — the widget's session-free [`LocalChatSubmit`] mapped to
 //!    `Command::Chat` (message / channel / chat type straight through).
 //! 3. **Focus & typing** — `Enter` while the **World** owns the keyboard focuses
-//!    the bar (`Esc` blurs back, via [`crate::input_context`]); while the bar is
-//!    focused and holds a draft, [`crate::world_api::TypingState`] is driven so the
-//!    own avatar plays the typing animation and neighbours see the "is typing"
-//!    indicator.
+//!    the bar (`Esc` blurs back, via `sl-viewer-world-view`'s
+//!    `input_context`); while the bar is focused and holds a draft,
+//!    [`crate::world_api::TypingState`] is driven so the own avatar plays the
+//!    typing animation and neighbours see the "is typing" indicator.
 //!
 //! A **toggle button** on the leading end of the bottom button bar shows / hides
 //! the bar (the reference's chat button); `crate::bottom_toolbar` owns that
@@ -40,11 +40,11 @@ use bevy::text::EditableText;
 use sl_client_bevy::{Command, SlCommand};
 
 use crate::chat_input::ChatInputSpec;
-use crate::input_context::world_has_keyboard;
 use crate::local_chat_input::{LocalChatSubmit, spawn_local_chat_input};
 use crate::ui::BottomArea;
 use crate::ui::row;
 use crate::world_api::TypingState;
+use crate::world_api::world_has_keyboard;
 
 /// The bar's least width, in logical pixels — a floor so it stays usable on a very
 /// narrow window where half the screen would be too little. The leading/trailing
@@ -190,7 +190,7 @@ fn send_nearby_chat(
 /// Focus the bar on `Enter` while the World owns the keyboard, so a user starts
 /// local chat by pressing `Enter` (the reference's chat-focus key). The field is
 /// empty at that point, so the chat input's own `Enter`-to-send does not fire;
-/// `Esc` blurs back to the World ([`crate::input_context`]).
+/// `Esc` blurs back to the World (`sl-viewer-world-view`'s `input_context`).
 fn focus_nearby_chat_on_enter(
     keyboard: Res<ButtonInput<KeyCode>>,
     bar: Option<ResMut<NearbyChatBar>>,
