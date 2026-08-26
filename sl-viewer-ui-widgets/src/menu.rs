@@ -6,12 +6,12 @@
 //!
 //! # The other half of the pie
 //!
-//! [`crate::pie_menu`] is the *radial* presentation of a menu; this is the
-//! *line* presentation. The reference viewer makes pie-vs-line a **preference**
-//! (`UsePieMenu`), not two feature sets, and the two widgets are two drawings of
-//! the same thing: a **tree of entries**, each a label, an action, and the
-//! conditions under which it is available and checked. So the entry vocabulary
-//! here mirrors the pie's ([`crate::pie_menu::PieAction`] — a `label`, an
+//! `sl_viewer_ui_pie_menu::pie_menu` is the *radial* presentation of a menu; this
+//! is the *line* presentation. The reference viewer makes pie-vs-line a
+//! **preference** (`UsePieMenu`), not two feature sets, and the two widgets are
+//! two drawings of the same thing: a **tree of entries**, each a label, an
+//! action, and the conditions under which it is available and checked. So the
+//! entry vocabulary here mirrors the pie's (`pie_menu::PieAction` — a `label`, an
 //! `action` string, and a named `when` condition), and both widgets dispatch the
 //! same way, by writing a `UiAction` that someone else routes (the registry
 //! rule, `ui_element`). What a given domain menu *contains* is
@@ -91,7 +91,7 @@ use sl_viewer_ui_core::ui_font::UiFont;
 
 /// One command a menu can run, at one line.
 ///
-/// The shape mirrors [`crate::pie_menu::PieAction`] on purpose — a `label`, an
+/// The shape mirrors `pie_menu::PieAction` on purpose — a `label`, an
 /// `action` string emitted when picked, and named condition keys — so the two
 /// presentations of a menu can share a domain's entries rather than drifting.
 /// The extra fields are the ones a *line* has room for that a pie slice does
@@ -1840,7 +1840,7 @@ pub struct OpenContextMenu {
     /// The `element` its actions are attributed to.
     pub element: &'static str,
     /// The condition names that hold for this open, snapshotted by the opener —
-    /// the same open-time model as [`crate::pie_menu::OpenPieMenu`]. Every
+    /// the same open-time model as `pie_menu::OpenPieMenu`. Every
     /// `enabled_when` / `checked_when` / `visible_when` key of the menu resolves
     /// against this set; empty means every conditional entry reads unavailable.
     pub conditions: Vec<&'static str>,

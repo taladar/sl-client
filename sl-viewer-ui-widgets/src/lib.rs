@@ -7,14 +7,24 @@
 //!
 //! - [`floater`], [`floater_persist`] — the window abstraction and the geometry
 //!   it remembers between sessions.
-//! - [`menu`], [`pie_menu`] — the menu bar's dropdowns and the radial menu,
-//!   whose labels are placed by polar coordinate rather than by flexbox.
+//! - [`menu`] — the menu bar's dropdowns and the line-based context menu.
 //! - [`ui_text_input`], [`ui_search`], [`ui_combo`], [`ui_radio`],
 //!   [`ui_color_picker`] — the input controls.
 //! - [`ui_tab`], [`ui_table`] — tab strips and the sortable, virtualized table.
-//! - [`emoji_complete`] — the `:shortcode:` completion popup.
 //! - [`settings_binding`] — the two-way binding that makes a control read and
 //!   write a settings-store value directly.
+//!
+//! # Two widgets that used to be here, and why they are not
+//!
+//! Everything above is named by five to thirteen crates, which is what makes it
+//! a shared vocabulary worth one crate. Two modules were not, and every consumer
+//! above was paying to recompile them for edits none of them could see:
+//!
+//! - the **radial menu** is now `sl-viewer-ui-pie-menu`, a *sibling* crate over
+//!   `sl-viewer-ui-core` — 3.4k lines that only the composition root ever spawns,
+//!   and that named nothing here;
+//! - the **`:shortcode:` completion popup** is now `sl_viewer_chat::emoji_complete`,
+//!   beside the one text field that attaches it.
 
 #![expect(
     clippy::module_name_repetitions,
@@ -31,11 +41,9 @@
 #[cfg(test)]
 pub use sl_viewer_testkit as ui_test;
 
-pub mod emoji_complete;
 pub mod floater;
 pub mod floater_persist;
 pub mod menu;
-pub mod pie_menu;
 pub mod settings_binding;
 pub mod ui_color_picker;
 pub mod ui_combo;

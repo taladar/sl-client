@@ -59,6 +59,7 @@ members = [
   "sl-viewer-spacenav",
   "sl-viewer-testkit",
   "sl-viewer-ui-core",
+  "sl-viewer-ui-pie-menu",
   "sl-viewer-ui-widgets",
   "sl-viewer-world-api",
   "sl-viewer-world-avatar",
@@ -140,6 +141,7 @@ sl-viewer-settings = { path = "sl-viewer-settings", version = "0.1.0" }
 sl-viewer-spacenav = { path = "sl-viewer-spacenav", version = "0.1.0" }
 sl-viewer-testkit = { path = "sl-viewer-testkit", version = "0.1.0" }
 sl-viewer-ui-core = { path = "sl-viewer-ui-core", version = "0.1.0" }
+sl-viewer-ui-pie-menu = { path = "sl-viewer-ui-pie-menu", version = "0.1.0" }
 sl-viewer-ui-widgets = { path = "sl-viewer-ui-widgets", version = "0.1.0" }
 sl-viewer-world-api = { path = "sl-viewer-world-api", version = "0.1.0" }
 sl-viewer-world-avatar = { path = "sl-viewer-world-avatar", version = "0.1.0" }

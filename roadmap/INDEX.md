@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 97 |
-| ready | 257 |
+| ready | 256 |
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 33 |
-| done | 869 |
+| done | 870 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1376** |
@@ -225,7 +225,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (257)
+## ready (256)
 
 ### protocol
 
@@ -236,8 +236,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### viewer
 
-- [`build-split-ui-widgets-crate`](ready/build-split-ui-widgets-crate.md) — Lift
-  the single-consumer widgets out of sl-viewer-ui-widgets
 - [`viewer-360-snapshot`](ready/viewer-360-snapshot.md) — 360-degree
   (equirectangular) snapshot
 - [`viewer-about-land-objects-return`](ready/viewer-about-land-objects-return.md)
@@ -1154,7 +1152,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (869)
+## done (870)
 
 ### protocol
 
@@ -1322,6 +1320,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`build-flatten-feature-tier`](done/build-flatten-feature-tier.md) — Flatten
   the feature tier — it is a chain where it should be a fan
+- [`build-split-ui-widgets-crate`](done/build-split-ui-widgets-crate.md) — Lift
+  the single-consumer widgets out of sl-viewer-ui-widgets
 - [`build-split-viewer-crate`](done/build-split-viewer-crate.md) — Split the
   viewer crate to regain cross-crate build parallelism
 - [`build-split-world-avatar-crate`](done/build-split-world-avatar-crate.md) —

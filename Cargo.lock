@@ -8521,6 +8521,7 @@ dependencies = [
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
  "sl-viewer-ui-core",
+ "sl-viewer-ui-pie-menu",
  "sl-viewer-ui-widgets",
  "sl-viewer-world-api",
  "sl-viewer-world-avatar",
@@ -9363,6 +9364,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-viewer-ui-pie-menu"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "pretty_assertions",
+ "sl-viewer-testkit",
+ "sl-viewer-ui-core",
+]
+
+[[package]]
 name = "sl-viewer-ui-widgets"
 version = "0.1.0"
 dependencies = [
@@ -9370,7 +9381,6 @@ dependencies = [
  "bevy_flair",
  "parley",
  "pretty_assertions",
- "sl-emoji",
  "sl-settings",
  "sl-viewer-settings",
  "sl-viewer-testkit",

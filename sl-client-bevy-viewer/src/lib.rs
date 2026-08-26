@@ -146,13 +146,13 @@ pub(crate) use sl_viewer_world_api as world_api;
 // The widgets (floaters, menus, inputs, tabs, tables) are their own crate;
 // each module is aliased under its old name so every `crate::<module>::…`
 // path in the viewer still resolves.
+pub(crate) use sl_viewer_chat::emoji_complete;
 pub(crate) use sl_viewer_chat::emoji_picker;
 pub(crate) use sl_viewer_kit::face_material;
 pub(crate) use sl_viewer_kit::flexi;
 pub(crate) use sl_viewer_notices::experience_permission;
 pub(crate) use sl_viewer_notices::experiences_floater;
 pub(crate) use sl_viewer_platform::environment_assets;
-pub(crate) use sl_viewer_ui_widgets::emoji_complete;
 pub(crate) use sl_viewer_ui_widgets::floater;
 pub(crate) use sl_viewer_ui_widgets::floater_persist;
 pub(crate) use sl_viewer_world_scene::environment;
@@ -239,7 +239,7 @@ pub(crate) use sl_viewer_preferences::preferences_general;
 pub(crate) use sl_viewer_preferences::preferences_graphics;
 pub(crate) use sl_viewer_preferences::preferences_network_cache;
 pub(crate) use sl_viewer_preferences::quick_preferences;
-pub(crate) use sl_viewer_ui_widgets::pie_menu;
+pub(crate) use sl_viewer_ui_pie_menu::pie_menu;
 pub(crate) use sl_viewer_world_avatar::reach;
 pub(crate) use sl_viewer_world_objects::objects;
 pub(crate) use sl_viewer_world_scene::parcel_borders;

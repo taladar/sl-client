@@ -519,7 +519,7 @@ fn resize_size(size: Vec2, delta: Vec2, direction: UiDirection, floor: Vec2) -> 
 /// Per component rather than `size * inverse_scale_factor`, because the whole-
 /// `Vec2` `*` is a `glam` operator and the workspace's `arithmetic_side_effects`
 /// lint fires on those (but not on plain `f32` arithmetic) — the same reason
-/// `crate::pie_menu` and `ik` spell their vector maths out.
+/// `pie_menu` and `ik` spell their vector maths out.
 fn logical_size(computed: &ComputedNode) -> Vec2 {
     let size = computed.size();
     let inverse = computed.inverse_scale_factor();

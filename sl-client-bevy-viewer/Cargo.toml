@@ -203,6 +203,7 @@ sl-viewer-search = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
 sl-viewer-ui-core = { workspace = true }
+sl-viewer-ui-pie-menu = { workspace = true }
 sl-viewer-ui-widgets = { workspace = true }
 sl-viewer-world-api = { workspace = true }
 sl-viewer-world-avatar = { workspace = true }
