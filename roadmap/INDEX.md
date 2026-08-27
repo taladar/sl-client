@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 91 |
-| done | 882 |
+| bugs | 90 |
+| done | 883 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,14 +1165,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (91)
+## bugs (90)
 
 ### protocol
 
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
-- [`protocol-audit-j2c-dimension-caps`](bugs/protocol-audit-j2c-dimension-caps.md)
-  — No MAX_IMAGE_SIZE / MAX_IMAGE_AREA cap on a JPEG-2000 header
 - [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
   — The legacy-material binary LLSD codec writes Date one way and reads it
   another
@@ -1389,7 +1387,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (882)
+## done (883)
 
 ### protocol
 
@@ -1521,6 +1519,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — flush_acks drops every remaining ack on a wire error, in both directions
 - [`protocol-audit-inventory-fetch-deadlock`](done/protocol-audit-inventory-fetch-deadlock.md)
   — Lost folder replies permanently deadlock the background inventory crawl
+- [`protocol-audit-j2c-dimension-caps`](done/protocol-audit-j2c-dimension-caps.md)
+  — No MAX_IMAGE_SIZE / MAX_IMAGE_AREA cap on a JPEG-2000 header
 - [`protocol-audit-llsd-recursion-depth-cap`](done/protocol-audit-llsd-recursion-depth-cap.md)
   — LLSD parsers recurse with no depth limit
 - [`protocol-audit-mesh-decode-allocation-caps`](done/protocol-audit-mesh-decode-allocation-caps.md)

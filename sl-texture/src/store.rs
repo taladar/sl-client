@@ -369,6 +369,13 @@ impl TextureStore {
             drop(guard);
             return;
         }
+        // A single-pixel-wide or -tall image has no halving left in it, so
+        // `downsample` would copy the buffer and hand back the same level. Skip
+        // the CPU task rather than repeat it on every coarser request.
+        if image.width <= 1 || image.height <= 1 {
+            drop(guard);
+            return;
+        }
         let Some(coarser) = self.run_cpu(move || downsample(&image, target)).await else {
             drop(guard);
             return;

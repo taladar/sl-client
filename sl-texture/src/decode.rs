@@ -126,6 +126,20 @@ pub enum DecodeError {
     /// The decoder returned an empty or malformed image.
     #[error("decoded image was empty or had zero dimensions")]
     Empty,
+    /// The codestream's `SIZ` segment declares an image outside the protocol's
+    /// caps ([`sl_proto::j2c::Header::within_limits`]), so it is refused
+    /// before OpenJPEG is asked to allocate for it.
+    #[error(
+        "JPEG-2000 header declares an out-of-range image: {width}x{height}, {components} components"
+    )]
+    OutOfRange {
+        /// The width the header claimed.
+        width: u32,
+        /// The height the header claimed.
+        height: u32,
+        /// The component count the header claimed.
+        components: u16,
+    },
 }
 
 /// Decodes a `.j2c` codestream to RGBA8 at `discard_level`, using OpenJPEG's
@@ -137,8 +151,10 @@ pub enum DecodeError {
 /// # Errors
 ///
 /// Returns [`DecodeError::Disabled`] when built without the `decode` feature,
-/// [`DecodeError::Codec`] when OpenJPEG rejects the data, and
-/// [`DecodeError::Empty`] when the decoded image has no pixels.
+/// [`DecodeError::OutOfRange`] when the codestream header declares an image
+/// beyond the protocol's size caps, [`DecodeError::Codec`] when OpenJPEG
+/// rejects the data, and [`DecodeError::Empty`] when the decoded image has no
+/// pixels.
 #[cfg(feature = "decode")]
 #[expect(
     clippy::module_name_repetitions,
@@ -149,6 +165,21 @@ pub fn decode_j2c(
     discard_level: DiscardLevel,
 ) -> Result<DecodedImage, DecodeError> {
     use jpeg2k::{DecodeParameters, Image};
+
+    // OpenJPEG sizes its own buffers from the `SIZ` segment, and `to_rgba8`
+    // then allocates `width * height * 4` on top — both driven by numbers that
+    // came off the wire. Refuse an image the protocol cannot produce before
+    // either allocation happens. A codestream whose header is unparsable is
+    // left to OpenJPEG, which rejects it with a codec error.
+    if let Some(header) = sl_proto::j2c::parse_header_unvalidated(codestream)
+        && !header.within_limits()
+    {
+        return Err(DecodeError::OutOfRange {
+            width: header.width,
+            height: header.height,
+            components: header.components,
+        });
+    }
 
     let params = DecodeParameters::default().reduce(discard_level.reduce_factor());
     let image = Image::from_bytes_with(codestream, params)
@@ -344,6 +375,12 @@ fn to_rgba8(data: &jpeg2k::ImagePixelData) -> Vec<u8> {
 /// This is how an in-memory texture's level of detail is *lowered* to reclaim
 /// memory: a `1024²` RGBA image (4 MiB) downsampled to discard level 2 is a
 /// `256²` image (256 KiB), computed from pixels already in hand.
+///
+/// A small image runs out of halvings before it reaches `target` — a `2²` image
+/// cannot be quartered twice. The result is then labelled with the level it
+/// actually reached, not the one that was asked for: the
+/// [`discard_level`](DecodedImage::discard_level) is what every LOD decision
+/// downstream reads, so it has to describe the pixels in hand.
 #[must_use]
 pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
     if target.get() <= image.discard_level.get() {
@@ -352,6 +389,7 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
     let steps = target.get().saturating_sub(image.discard_level.get());
     let mut width = image.width;
     let mut height = image.height;
+    let mut level = image.discard_level;
     let mut pixels = image.pixels.to_vec();
     // Downsample the aux mask channel (R16) in lockstep so a lowered LOD keeps it.
     let mut aux = image.aux.as_ref().map(|mask| mask.to_vec());
@@ -367,13 +405,14 @@ pub fn downsample(image: &DecodedImage, target: DiscardLevel) -> DecodedImage {
         pixels = halved;
         width = next_width;
         height = next_height;
+        level = level.coarser();
     }
     let (min_alpha, max_alpha) = alpha_range(&pixels);
     DecodedImage {
         width,
         height,
         components: image.components,
-        discard_level: target,
+        discard_level: level,
         pixels: Bytes::from(pixels),
         aux: aux.map(Bytes::from),
         min_alpha,
@@ -491,5 +530,98 @@ mod tests {
         assert_eq!(same.width, 4);
         assert_eq!(same.height, 4);
         assert_eq!(same.discard_level, DiscardLevel::FULL);
+    }
+
+    #[test]
+    fn downsample_reports_the_level_it_could_reach() -> Result<(), TestError> {
+        // A 4x4 image has two halvings in it (4 -> 2 -> 1), so a request for
+        // discard 4 stops at 2 — and must say so, rather than claiming a level
+        // its pixels never reached.
+        let image = solid(4, 4, [10, 20, 30, 255]);
+        let four = DiscardLevel::new(4).ok_or("level 4")?;
+        let out = downsample(&image, four);
+        assert_eq!((out.width, out.height), (1, 1));
+        assert_eq!(out.discard_level, DiscardLevel::new(2).ok_or("level 2")?);
+
+        // A 1x1 image cannot halve at all: the level is unchanged.
+        let pixel = solid(1, 1, [1, 2, 3, 4]);
+        let stuck = downsample(&pixel, four);
+        assert_eq!((stuck.width, stuck.height), (1, 1));
+        assert_eq!(stuck.discard_level, DiscardLevel::FULL);
+
+        // A non-square image is limited by its shorter axis: 8x2 halves once
+        // (to 4x1) and then stops.
+        let wide = solid(8, 2, [5, 6, 7, 8]);
+        let out = downsample(&wide, four);
+        assert_eq!((out.width, out.height), (4, 1));
+        assert_eq!(out.discard_level, DiscardLevel::new(1).ok_or("level 1")?);
+        Ok(())
+    }
+
+    /// Builds a minimal J2C main header (`SOC` + `SIZ`) declaring the given
+    /// geometry — enough for the decoder's pre-check to read it.
+    #[cfg(feature = "decode")]
+    fn synth_j2c_header(width: u32, height: u32, components: u16) -> Vec<u8> {
+        /// Appends `value` as `width` big-endian bytes (avoiding the
+        /// endian-byte-method lint).
+        fn push_be(data: &mut Vec<u8>, value: u32, width: u32) {
+            let mut shift = width.saturating_mul(8);
+            while shift >= 8 {
+                shift = shift.saturating_sub(8);
+                data.push(u8::try_from((value >> shift) & 0xFF).unwrap_or(0));
+            }
+        }
+        let mut data = vec![0xFF, 0x4F, 0xFF, 0x51]; // SOC, SIZ
+        push_be(&mut data, 38, 2); // Lsiz
+        push_be(&mut data, 0, 2); // Rsiz
+        for value in [width, height, 0, 0, width, height, 0, 0] {
+            push_be(&mut data, value, 4); // Xsiz..YTOsiz
+        }
+        push_be(&mut data, u32::from(components), 2); // Csiz
+        data.extend_from_slice(&[7, 1, 1]); // one component descriptor
+        data
+    }
+
+    #[test]
+    #[cfg(feature = "decode")]
+    fn decode_refuses_an_out_of_range_header_before_allocating() -> Result<(), TestError> {
+        use super::{DecodeError, decode_j2c};
+
+        // Sixteen times the 4096 cap in each axis: a header claiming this would
+        // have OpenJPEG (and then `to_rgba8`) allocate from a number that came
+        // off the wire.
+        const HUGE: u32 = 0x0001_0000;
+
+        let data = synth_j2c_header(HUGE, HUGE, 8);
+        let Err(DecodeError::OutOfRange {
+            width,
+            height,
+            components,
+        }) = decode_j2c(&data, DiscardLevel::FULL)
+        else {
+            return Err("an out-of-range header should be refused".into());
+        };
+        assert_eq!((width, height, components), (HUGE, HUGE, 8));
+        Ok(())
+    }
+
+    #[test]
+    #[cfg(feature = "decode")]
+    fn decode_leaves_an_in_range_header_to_the_codec() {
+        use super::{DecodeError, decode_j2c};
+
+        // A header within the caps but with no codestream body behind it is a
+        // codec error, not a range refusal — the pre-check must not swallow the
+        // ordinary "malformed data" path.
+        let data = synth_j2c_header(512, 512, 3);
+        assert!(matches!(
+            decode_j2c(&data, DiscardLevel::FULL),
+            Err(DecodeError::Codec(_))
+        ));
+        // Neither does it refuse a blob with no recognisable header at all.
+        assert!(matches!(
+            decode_j2c(&[0_u8; 32], DiscardLevel::FULL),
+            Err(DecodeError::Codec(_))
+        ));
     }
 }

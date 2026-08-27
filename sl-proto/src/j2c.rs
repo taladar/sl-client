@@ -24,6 +24,27 @@
 /// texture's [`Header`] before requesting the full LOD prefix.
 pub const FIRST_PACKET_SIZE: usize = 600;
 
+/// The largest pixel dimension, in either axis, a Second Life texture may have:
+/// the reference viewer's `MAX_IMAGE_SIZE` (`1 << MAX_IMAGE_MIP`, i.e. `2^12`;
+/// `indra/llimage/llimage.h`).
+pub const MAX_IMAGE_SIZE: u32 = 0x1000;
+
+/// The largest texel count a Second Life texture may have: the reference
+/// viewer's `MAX_IMAGE_AREA`, [`MAX_IMAGE_SIZE`] squared.
+pub const MAX_IMAGE_AREA: u64 = 0x0100_0000;
+
+/// The largest component (channel) count a Second Life texture may have: the
+/// reference viewer's `MAX_IMAGE_COMPONENTS`. Four is the usual maximum (RGBA);
+/// a server-baked avatar texture has five (`R G B alpha mask`).
+pub const MAX_IMAGE_COMPONENTS: u16 = 8;
+
+/// The largest uncompressed pixel-byte count a Second Life texture may have:
+/// the reference viewer's `MAX_IMAGE_DATA_SIZE`, [`MAX_IMAGE_AREA`] times
+/// [`MAX_IMAGE_COMPONENTS`] (128 MiB). Every byte-size estimate in this module
+/// is capped at it, so a header field off the wire cannot size an unbounded
+/// fetch or allocation.
+pub const MAX_IMAGE_DATA_SIZE: u64 = 0x0800_0000;
+
 /// The J2C marker prefix byte: every two-byte marker starts with `0xFF`.
 const MARKER_PREFIX: u8 = 0xFF;
 
@@ -42,6 +63,9 @@ const SCAN_WINDOW: usize = 64;
 
 /// The parsed header of a J2C codestream: enough to estimate per-LOD byte
 /// sizes without decoding the image.
+///
+/// A [`parse_header`] result is always [within the image caps](Header::within_limits);
+/// a [`parse_header_unvalidated`] one may not be.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Header {
     /// Image width in pixels (`Xsiz - XOsiz`).
@@ -57,6 +81,26 @@ pub struct Header {
 }
 
 impl Header {
+    /// Whether the header's geometry is one a Second Life texture may actually
+    /// have: non-degenerate, and within the reference viewer's [`MAX_IMAGE_SIZE`]
+    /// / [`MAX_IMAGE_COMPONENTS`] caps (`LLImageBase::sanityCheck`). Since both
+    /// dimensions are capped, so are the derived [`MAX_IMAGE_AREA`] and
+    /// [`MAX_IMAGE_DATA_SIZE`].
+    ///
+    /// The dimensions come straight off the wire and drive both the fetch length
+    /// ([`Self::full_data_size_bound`]) and the decoder's pixel allocation, so a
+    /// header that fails this is treated as "not a recognisable codestream"
+    /// rather than as an image to go and fetch.
+    #[must_use]
+    pub const fn within_limits(&self) -> bool {
+        self.width > 0
+            && self.height > 0
+            && self.components > 0
+            && self.width <= MAX_IMAGE_SIZE
+            && self.height <= MAX_IMAGE_SIZE
+            && self.components <= MAX_IMAGE_COMPONENTS
+    }
+
     /// The estimated number of leading codestream bytes that make up the image
     /// at `discard_level` (0 = full resolution; each level halves both
     /// dimensions). Mirrors the viewer's `calcDataSizeJ2C` with its default
@@ -83,12 +127,15 @@ impl Header {
     /// prefix boundary only for coarser LODs — this is what a full-resolution
     /// (discard 0) fetch must use: the estimate can fall short of a
     /// poorly-compressing texture's true length and truncate it mid-tile-part,
-    /// which OpenJPEG then rejects. Never below [`FIRST_PACKET_SIZE`].
+    /// which OpenJPEG then rejects. Never below [`FIRST_PACKET_SIZE`], and never
+    /// above [`MAX_IMAGE_DATA_SIZE`] — a header claiming a larger image cannot
+    /// drive an unbounded fetch.
     #[must_use]
     pub fn full_data_size_bound(&self) -> usize {
         let raw = u64::from(self.width)
             .saturating_mul(u64::from(self.height))
-            .saturating_mul(u64::from(self.components));
+            .saturating_mul(u64::from(self.components))
+            .min(MAX_IMAGE_DATA_SIZE);
         usize::try_from(raw)
             .unwrap_or(usize::MAX)
             .max(FIRST_PACKET_SIZE)
@@ -272,10 +319,30 @@ fn find_marker(data: &[u8], second: u8) -> Option<usize> {
 }
 
 /// Parses the `SIZ` (and, if present, `COD`) marker segments of a J2C
-/// codestream into a [`Header`], or `None` if no `SIZ` segment is found in
-/// the scanned window (i.e. the data is not a recognisable J2C codestream).
+/// codestream into a [`Header`], or `None` if no `SIZ` segment is found in the
+/// scanned window (i.e. the data is not a recognisable J2C codestream) **or**
+/// the segment declares an image outside the protocol's caps
+/// ([`Header::within_limits`]).
+///
+/// The caps are applied here, at the single point where the numbers enter the
+/// client, because everything downstream sizes work from them: the HTTP fetch
+/// grows its buffer to [`Header::full_data_size_bound`] and the decoder
+/// allocates `width * height * 4` pixel bytes. A caller that needs to see the
+/// declared geometry of an out-of-range header — to report *why* it was
+/// rejected — uses [`parse_header_unvalidated`].
 #[must_use]
 pub fn parse_header(data: &[u8]) -> Option<Header> {
+    parse_header_unvalidated(data).filter(Header::within_limits)
+}
+
+/// [`parse_header`] without the image-cap check: parses whatever geometry the
+/// `SIZ` segment declares, however large.
+///
+/// Prefer [`parse_header`]. This exists for the decoder's pre-check, which must
+/// distinguish "not a J2C codestream at all" from "a J2C codestream declaring an
+/// image too large to decode" so it can report the latter as its own error.
+#[must_use]
+pub fn parse_header_unvalidated(data: &[u8]) -> Option<Header> {
     // After the `SIZ` marker: Lsiz(2) Rsiz(2) Xsiz(4) Ysiz(4) XOsiz(4) YOsiz(4)
     // then tile fields, then Csiz(2). Offsets are measured from the first byte
     // after the marker.
@@ -308,7 +375,9 @@ pub fn parse_header(data: &[u8]) -> Option<Header> {
 /// image of the given pixel dimensions and component count. Each discard level
 /// halves both dimensions (floored at 1); the default `1/8` compression rate is
 /// applied as exact integer division. The result is never below the viewer's
-/// `FIRST_PACKET_SIZE` (600 bytes).
+/// `FIRST_PACKET_SIZE` (600 bytes), and the uncompressed size it is an eighth of
+/// is capped at [`MAX_IMAGE_DATA_SIZE`], so an over-large `width`/`height` off
+/// the wire cannot size an unbounded fetch.
 #[must_use]
 pub fn discard_data_size(width: u32, height: u32, components: u16, discard_level: u8) -> usize {
     let mut w = u64::from(width);
@@ -319,7 +388,11 @@ pub fn discard_data_size(width: u32, height: u32, components: u16, discard_level
         h >>= 1_u64;
         level = level.saturating_sub(1);
     }
-    let raw = w.saturating_mul(h).saturating_mul(u64::from(components)) / 8;
+    let raw = w
+        .saturating_mul(h)
+        .saturating_mul(u64::from(components))
+        .min(MAX_IMAGE_DATA_SIZE)
+        / 8;
     usize::try_from(raw)
         .unwrap_or(usize::MAX)
         .max(FIRST_PACKET_SIZE)
@@ -346,8 +419,9 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::{
-        DiscardLevel, FIRST_PACKET_SIZE, MAX_DISCARD_LEVEL, discard_data_size, parse_header,
-        truncate_to_discard,
+        DiscardLevel, FIRST_PACKET_SIZE, MAX_DISCARD_LEVEL, MAX_IMAGE_AREA, MAX_IMAGE_COMPONENTS,
+        MAX_IMAGE_DATA_SIZE, MAX_IMAGE_SIZE, discard_data_size, parse_header,
+        parse_header_unvalidated, truncate_to_discard,
     };
 
     /// Appends `value` to `data` as big-endian bytes of `width` bytes (avoiding
@@ -532,5 +606,65 @@ mod tests {
         // A non-J2C blob is returned unchanged.
         let junk = [0_u8; 16];
         assert_eq!(truncate_to_discard(&junk, 2).len(), junk.len());
+    }
+
+    #[test]
+    fn image_caps_hold_the_reference_relationships() {
+        // The literals are the reference viewer's derived constants; keep them
+        // honest against the identities they are derived from.
+        assert_eq!(
+            MAX_IMAGE_AREA,
+            u64::from(MAX_IMAGE_SIZE).saturating_mul(u64::from(MAX_IMAGE_SIZE))
+        );
+        assert_eq!(
+            MAX_IMAGE_DATA_SIZE,
+            MAX_IMAGE_AREA.saturating_mul(u64::from(MAX_IMAGE_COMPONENTS))
+        );
+        // `MAX_IMAGE_SIZE` is the reference's `1 << MAX_IMAGE_MIP` (mip 12).
+        assert_eq!(MAX_IMAGE_SIZE, 2_u32.pow(12));
+    }
+
+    #[test]
+    fn parse_header_rejects_an_over_large_or_degenerate_image() -> Result<(), TestError> {
+        // At the cap: still a texture we will fetch.
+        let at_cap = synth_header(MAX_IMAGE_SIZE, MAX_IMAGE_SIZE, 4, 5);
+        assert!(parse_header(&at_cap).is_some());
+
+        // One pixel over it in either axis, an absurd component count, or a
+        // degenerate zero dimension: not a texture, so not a fetch to size.
+        for data in [
+            synth_header(MAX_IMAGE_SIZE + 1, 512, 3, 5),
+            synth_header(512, MAX_IMAGE_SIZE + 1, 3, 5),
+            synth_header(512, 512, MAX_IMAGE_COMPONENTS + 1, 5),
+            synth_header(0, 512, 3, 5),
+            synth_header(512, 0, 3, 5),
+            synth_header(512, 512, 0, 5),
+        ] {
+            assert_eq!(parse_header(&data), None, "over-cap header was accepted");
+            // The unvalidated parse still reports what the wire claimed, so the
+            // decoder can say *why* it refused.
+            assert!(parse_header_unvalidated(&data).is_some());
+        }
+
+        // A hostile header claiming the whole u32 range in both axes.
+        let huge = synth_header(u32::MAX, u32::MAX, 4, 5);
+        assert_eq!(parse_header(&huge), None);
+        let unvalidated = parse_header_unvalidated(&huge).ok_or("unvalidated header")?;
+        assert!(!unvalidated.within_limits());
+        Ok(())
+    }
+
+    #[test]
+    fn size_estimates_are_capped_at_max_image_data_size() -> Result<(), TestError> {
+        // Even reached through an unvalidated header, the byte-size estimates
+        // that drive fetch growth stay bounded: full is the pixel-byte cap, and
+        // the per-LOD estimate an eighth of it.
+        let huge = parse_header_unvalidated(&synth_header(u32::MAX, u32::MAX, 8, 5))
+            .ok_or("unvalidated header")?;
+        let cap = usize::try_from(MAX_IMAGE_DATA_SIZE)?;
+        assert_eq!(huge.full_data_size_bound(), cap);
+        assert_eq!(huge.discard_data_size(0), cap / 8);
+        assert_eq!(discard_data_size(u32::MAX, u32::MAX, 8, 3), cap / 8);
+        Ok(())
     }
 }
