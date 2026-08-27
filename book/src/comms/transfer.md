@@ -61,6 +61,26 @@ non-`Ok` status in the `TransferInfo` (size 0), most commonly
 `UnknownSource` (−2, the transfer 404) or `InsufficientPermissions`
 (−3).
 
+## What counts as complete
+
+Packets may arrive out of order, so a client buffers them by index and
+decides completeness afterwards — and the decision has to be about the
+*indices*, not how many arrived. The reference viewer gets this for free
+by delivering packets strictly in order: it holds anything out of order
+in a delayed map and acts on the terminating `Done` status only when
+that packet's turn comes, so a `Done` at index 5 finishes nothing while
+packet 3 is still missing. Counting instead — a buffer as large as the
+last index — hands the caller an asset silently spliced across the hole,
+which for a notecard or script is a body that parses and is wrong.
+
+Two more things fall out of the same rule. The declared size is the
+asset's, so a stream that says `Done` short of it (or overruns it)
+delivered something else, and the fetch fails rather than truncating.
+And a packet index has to be a real one: the wire field is signed, and
+the delayed buffer is bounded (the reference's `LL_MAX_DELAYED_PACKETS`,
+100), so a simulator streaming nothing but far-future indices is
+abandoned instead of buffered forever.
+
 ## When the stream stops
 
 `TransferInfo` promises a size, not a delivery. A simulator that starts a

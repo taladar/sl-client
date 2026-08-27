@@ -48,8 +48,9 @@ use super::{
     ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
     SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
     TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
-    TransferDownload, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_STALL_TIMEOUT,
-    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
+    merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -3758,42 +3759,61 @@ impl Session {
                 // `Done`-status packet marks the last index, and the assembled
                 // bytes are routed once the stream is contiguous.
                 let transfer_id = TransferId::new(packet.transfer_data.transfer_id);
-                if self.transfer_downloads.contains_key(&transfer_id) {
-                    let index = u32::try_from(packet.transfer_data.packet).unwrap_or(0);
-                    let status = TransferStatus::from_code(packet.transfer_data.status);
-                    let completed =
-                        if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
-                            download
-                                .chunks
-                                .insert(index, packet.transfer_data.data.clone());
-                            download.last_progress = now;
-                            if matches!(status, TransferStatus::Done) {
-                                download.last_packet = Some(index);
-                            }
-                            download.is_complete()
-                        } else {
-                            false
-                        };
-                    if completed && let Some(download) = self.transfer_downloads.remove(&transfer_id)
-                    {
-                        let data = download.assemble();
-                        match download.purpose {
-                            TransferPurpose::TaskInventoryItem { task, item } => {
-                                self.events.push_back(Event::TaskItemAssetReceived {
-                                    transfer_id,
-                                    task,
-                                    item,
-                                    asset_type: download.asset_type,
-                                    data,
-                                });
-                            }
-                            TransferPurpose::EstateCovenant => {
-                                self.events.push_back(Event::EstateCovenantAssetReceived {
-                                    transfer_id,
-                                    data,
-                                });
+                // A negative index is not a packet of ours: the wire field is
+                // signed, and taking it for zero would overwrite the real first
+                // packet with a stranger's bytes.
+                let index = u32::try_from(packet.transfer_data.packet).ok();
+                let status = TransferStatus::from_code(packet.transfer_data.status);
+                let progress = if let Some(index) = index
+                    && let Some(download) = self.transfer_downloads.get_mut(&transfer_id)
+                {
+                    download.insert_chunk(index, packet.transfer_data.data.clone());
+                    download.last_progress = now;
+                    if matches!(status, TransferStatus::Done) {
+                        download.note_last_packet(index);
+                    }
+                    download.progress()
+                } else {
+                    TransferProgress::Incomplete
+                };
+                match progress {
+                    TransferProgress::Incomplete => {}
+                    TransferProgress::Complete => {
+                        if let Some(download) = self.transfer_downloads.remove(&transfer_id) {
+                            let data = download.assemble();
+                            match download.purpose {
+                                TransferPurpose::TaskInventoryItem { task, item } => {
+                                    self.events.push_back(Event::TaskItemAssetReceived {
+                                        transfer_id,
+                                        task,
+                                        item,
+                                        asset_type: download.asset_type,
+                                        data,
+                                    });
+                                }
+                                TransferPurpose::EstateCovenant => {
+                                    self.events.push_back(Event::EstateCovenantAssetReceived {
+                                        transfer_id,
+                                        data,
+                                    });
+                                }
                             }
                         }
+                    }
+                    TransferProgress::Failed(reason) => {
+                        // The bytes on hand are not the asset, so fail the
+                        // fetch rather than hand a caller a corrupt one — and
+                        // tell the simulator to stop serving it, as the
+                        // reference does when it gives up on a transfer.
+                        let _download = self.transfer_downloads.remove(&transfer_id);
+                        tracing::warn!(%transfer_id, "abandoning a UDP asset transfer: {reason}");
+                        if let Some(circuit) = self.circuit.as_mut() {
+                            let _ignored = circuit.send_transfer_abort(transfer_id, now);
+                        }
+                        self.events.push_back(Event::TransferFailed {
+                            transfer_id,
+                            status: TransferStatus::Error,
+                        });
                     }
                 }
             }
@@ -3802,9 +3822,11 @@ impl Session {
                 // packet-count header plus packet 0's data.
                 let id = image.image_id.id;
                 let completed = if let Some(download) = self.texture_downloads.get_mut(&id) {
-                    download.codec = ImageCodec::from_code(image.image_id.codec);
-                    download.packets = image.image_id.packets;
-                    download.chunks.insert(0, image.image_data.data.clone());
+                    download.note_header(
+                        ImageCodec::from_code(image.image_id.codec),
+                        image.image_id.packets,
+                        image.image_data.data.clone(),
+                    );
                     download.note_progress(now);
                     download.is_complete()
                 } else {
@@ -3825,9 +3847,7 @@ impl Session {
                 let id = image.image_id.id;
                 let packet_index = image.image_id.packet;
                 let completed = if let Some(download) = self.texture_downloads.get_mut(&id) {
-                    download
-                        .chunks
-                        .insert(packet_index, image.image_data.data.clone());
+                    download.insert_chunk(packet_index, image.image_data.data.clone());
                     download.note_progress(now);
                     download.is_complete()
                 } else {
@@ -8390,6 +8410,7 @@ impl Session {
                 asset_type,
                 expected_size: None,
                 chunks: BTreeMap::new(),
+                buffered_bytes: 0,
                 last_packet: None,
                 last_progress: now,
             },

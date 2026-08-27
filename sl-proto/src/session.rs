@@ -771,6 +771,17 @@ pub const TEXTURE_DOWNLOAD_MAX_ATTEMPTS: u32 = 10;
 /// completed.
 pub const ASSET_TRANSFER_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// How many packets of a legacy UDP asset Transfer may be buffered *ahead* of
+/// the contiguous prefix — packets that arrived out of order and cannot be
+/// delivered yet — before the session abandons the transfer.
+///
+/// Matches the reference's `LL_MAX_DELAYED_PACKETS`
+/// (`LLTransferTarget::addDelayedPacket`), which aborts a transfer whose
+/// delayed-packet map grows past this ("Too many delayed packets processing
+/// transfer"). Without it a simulator that streams nothing but far-future
+/// indices grows the buffer without bound, and none of it is ever deliverable.
+const MAX_DELAYED_TRANSFER_PACKETS: usize = 100;
+
 /// How long an in-flight `Xfer` (an inbound file download or an outbound file
 /// upload) may go without a packet or a confirmation before the session
 /// abandons it, sending an `AbortXfer` and surfacing
@@ -972,9 +983,44 @@ struct TextureDownload {
 }
 
 impl TextureDownload {
-    /// Whether every packet `0..packets` has been received.
+    /// Whether every packet `0..packets` has been received — the *indices*,
+    /// not merely a matching count.
+    ///
+    /// Mirrors the reference's `mLastPacket >= mTotalPackets - 1`
+    /// (`LLTextureFetchWorker::processSimulatorPackets`), where `mLastPacket`
+    /// is the contiguous high-water mark: a stream missing packet 3 but
+    /// carrying a spurious packet 9 is short, however its packets count up.
+    /// A download whose header has not arrived yet (`packets == 0`) is never
+    /// complete, however many follow-on packets are already buffered.
     fn is_complete(&self) -> bool {
-        usize::from(self.packets) == self.chunks.len()
+        self.packets > 0 && self.next_missing_packet() == self.packets
+    }
+
+    /// Records the `ImageData` header — the codec, the packet count and packet
+    /// zero's data — dropping any follow-on packet that arrived ahead of the
+    /// header with an index the header now says does not exist.
+    fn note_header(&mut self, codec: ImageCodec, packets: u16, data: Vec<u8>) {
+        self.codec = codec;
+        self.packets = packets;
+        if packets > 0 {
+            self.chunks.retain(|index, _payload| *index < packets);
+        }
+        self.insert_chunk(0, data);
+    }
+
+    /// Buffers `data` as packet `index`, on the reference's terms
+    /// (`LLTextureFetchWorker::insertPacket`): an index at or past the header's
+    /// packet count is not part of this image and is dropped, and a repeat of
+    /// an index already held keeps the copy already buffered (a re-issued
+    /// `RequestImage` re-sends packets that did arrive).
+    ///
+    /// A packet count of zero means the header has not arrived yet, so no range
+    /// is known to check against.
+    fn insert_chunk(&mut self, index: u16, data: Vec<u8>) {
+        if self.packets > 0 && index >= self.packets {
+            return;
+        }
+        let _buffered = self.chunks.entry(index).or_insert(data);
     }
 
     /// Records that a packet arrived: the stall clock restarts and the retry
@@ -1046,25 +1092,118 @@ struct TransferDownload {
     /// `TransferInfo`/`TransferPacket` arriving. [`ASSET_TRANSFER_TIMEOUT`] past
     /// this the session abandons it.
     last_progress: Instant,
-    /// The declared total size from the `TransferInfo` header, once received
-    /// (currently informational; completion is driven by the `Done` packet).
+    /// The declared total size from the `TransferInfo` header, once received.
+    /// The assembled asset is held to it: a stream that overruns it, or that
+    /// says `Done` short of it, delivered something other than the asset.
     expected_size: Option<usize>,
     /// The received packet payloads, keyed by packet index (from 0).
     chunks: BTreeMap<u32, Vec<u8>>,
+    /// The total length of the buffered payloads — the length
+    /// [`assemble`](Self::assemble) will produce, kept running so each packet
+    /// can be weighed against [`expected_size`](Self::expected_size) without
+    /// re-walking the buffer.
+    buffered_bytes: usize,
     /// The index of the final packet (the one carrying the `Done` status),
     /// once seen.
     last_packet: Option<u32>,
 }
 
+/// Where a legacy UDP asset Transfer stands after a `TransferPacket` was
+/// buffered — the verdict [`TransferDownload::progress`] returns.
+#[derive(Debug)]
+enum TransferProgress {
+    /// Packets are still outstanding: keep buffering.
+    Incomplete,
+    /// Every packet `0..=last` is buffered and the assembled bytes match what
+    /// the `TransferInfo` declared: deliver the asset.
+    Complete,
+    /// The stream cannot become the asset that was asked for. The reason is a
+    /// log line, not something a caller distinguishes — the fetch fails either
+    /// way.
+    Failed(&'static str),
+}
+
 impl TransferDownload {
-    /// Whether every packet `0..=last` has been received.
+    /// Buffers `data` as packet `index`, keeping the copy already held if the
+    /// index repeats: the reference delivers each packet exactly once
+    /// (`LLTransferManager::processTransferPacket` plays a delayed packet back
+    /// and erases it), so a re-sent index must not be counted twice.
+    fn insert_chunk(&mut self, index: u32, data: Vec<u8>) {
+        if self.chunks.contains_key(&index) {
+            return;
+        }
+        self.buffered_bytes = self.buffered_bytes.saturating_add(data.len());
+        let _buffered = self.chunks.insert(index, data);
+    }
+
+    /// Records `index` as the final packet — the one that carried the `Done`
+    /// status — and drops anything buffered past it.
+    ///
+    /// The reference stops delivering at that packet and discards the rest of
+    /// its delayed map (`processTransferPacket` returns after the completion
+    /// callback), so a higher index is not part of the asset and must not be
+    /// concatenated onto the end of it.
+    fn note_last_packet(&mut self, index: u32) {
+        self.last_packet = Some(index);
+        self.chunks.retain(|packet, _payload| *packet <= index);
+        self.buffered_bytes = self.chunks.values().map(Vec::len).sum();
+    }
+
+    /// The index of the first packet not yet buffered, counting up from zero —
+    /// the boundary between what the reference would already have delivered in
+    /// order and what it would still be holding back as delayed.
+    fn next_missing_packet(&self) -> u32 {
+        let mut next = 0;
+        for index in self.chunks.keys() {
+            if *index != next {
+                break;
+            }
+            next = next.saturating_add(1);
+        }
+        next
+    }
+
+    /// How many buffered packets sit *past* the contiguous prefix: the
+    /// reference's delayed-packet map, which is what
+    /// [`MAX_DELAYED_TRANSFER_PACKETS`] bounds.
+    fn delayed_packets(&self) -> usize {
+        let delivered = usize::try_from(self.next_missing_packet()).unwrap_or(usize::MAX);
+        self.chunks.len().saturating_sub(delivered)
+    }
+
+    /// Whether every packet `0..=last` has been received — the *indices*, not
+    /// merely a matching count.
+    ///
+    /// The reference reaches the same place from the other side: it delivers
+    /// packets strictly in order and acts on the terminating status only when
+    /// that packet's turn comes, so a `Done` at index 5 finishes nothing while
+    /// packet 3 is still missing, however many packets arrived in total.
     fn is_complete(&self) -> bool {
-        self.last_packet.is_some_and(|last| {
-            usize::try_from(last)
-                .ok()
-                .and_then(|count| count.checked_add(1))
-                .is_some_and(|expected| self.chunks.len() == expected)
-        })
+        self.last_packet
+            .is_some_and(|last| self.next_missing_packet() > last)
+    }
+
+    /// Where the transfer stands now that a packet was buffered.
+    fn progress(&self) -> TransferProgress {
+        if let Some(expected) = self.expected_size
+            && self.buffered_bytes > expected
+        {
+            return TransferProgress::Failed("the packet stream overran the declared asset size");
+        }
+        if self.delayed_packets() > MAX_DELAYED_TRANSFER_PACKETS {
+            return TransferProgress::Failed(
+                "too many out-of-order packets are waiting on a missing one",
+            );
+        }
+        if !self.is_complete() {
+            return TransferProgress::Incomplete;
+        }
+        if let Some(expected) = self.expected_size
+            && self.buffered_bytes != expected
+        {
+            return TransferProgress::Failed("the assembled asset is shorter than declared");
+        }
+        TransferProgress::Complete
     }
 
     /// Concatenates the buffered packets in index order into the full asset

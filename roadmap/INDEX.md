@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 92 |
-| done | 881 |
+| bugs | 91 |
+| done | 882 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (92)
+## bugs (91)
 
 ### protocol
 
@@ -1191,8 +1191,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close
-- [`protocol-audit-texture-download-completeness`](bugs/protocol-audit-texture-download-completeness.md)
-  — A texture download completes on a chunk count, not on the chunk indices
 - [`protocol-audit-tokio-caps-refetch`](bugs/protocol-audit-tokio-caps-refetch.md)
   — The tokio region-change caps fetch stalls the UDP pump, then swallows its
   failure
@@ -1391,7 +1389,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (881)
+## done (882)
 
 ### protocol
 
@@ -1532,6 +1530,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-reliable-exhaustion-kills-session`](done/protocol-audit-reliable-exhaustion-kills-session.md)
   — One exhausted reliable packet of any kind closes the session as
   HandshakeFailed
+- [`protocol-audit-texture-download-completeness`](done/protocol-audit-texture-download-completeness.md)
+  — A texture download completes on a chunk count, not on the chunk indices
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

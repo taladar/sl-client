@@ -158,12 +158,13 @@ mod test {
         TelehubInfoSpawnPointBlockBlock, TelehubInfoTelehubBlockBlock, TeleportFailed,
         TeleportFailedAlertInfoBlock, TeleportFailedInfoBlock, TeleportFinish,
         TeleportFinishInfoBlock, TerminateFriendship, TerminateFriendshipAgentDataBlock,
-        TerminateFriendshipExBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
-        UpdateCreateInventoryItem, UpdateCreateInventoryItemAgentDataBlock,
-        UpdateCreateInventoryItemInventoryDataBlock, UseCachedMuteList,
-        UseCachedMuteListAgentDataBlock, UserInfoReply, UserInfoReplyAgentDataBlock,
-        UserInfoReplyUserDataBlock, ViewerEffect as ViewerEffectMessage,
-        ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
+        TerminateFriendshipExBlockBlock, TransferInfo, TransferInfoTransferInfoBlock,
+        TransferPacket, TransferPacketTransferDataBlock, UUIDNameReply,
+        UUIDNameReplyUUIDNameBlockBlock, UpdateCreateInventoryItem,
+        UpdateCreateInventoryItemAgentDataBlock, UpdateCreateInventoryItemInventoryDataBlock,
+        UseCachedMuteList, UseCachedMuteListAgentDataBlock, UserInfoReply,
+        UserInfoReplyAgentDataBlock, UserInfoReplyUserDataBlock,
+        ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
@@ -6259,6 +6260,358 @@ mod test {
         assert_eq!(received.id, TextureKey::from(texture));
         assert_eq!(received.codec, ImageCodec::J2c);
         assert_eq!(received.data, vec![1, 2, 3, 4, 5, 6]);
+        Ok(())
+    }
+
+    /// A texture is complete when the packets its header promised have
+    /// *arrived*, not when as many packets as it promised have: an index past
+    /// the header's count is not part of the image, and a repeated index is not
+    /// a second packet. Either one, counted, finishes the download early over a
+    /// hole and hands the decoder a codestream spliced across the gap.
+    #[test]
+    fn a_texture_completes_on_its_packet_indices_not_a_count() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let texture = uuid::Uuid::from_u128(0x00C0_FFEE);
+        session.request_texture(TextureKey::from(texture), 0, 1.0e6, now)?;
+        drain(&mut session)?;
+
+        let header = AnyMessage::ImageData(ImageData {
+            image_id: ImageDataImageIDBlock {
+                id: texture,
+                codec: 2, // IMG_CODEC_J2C
+                size: 9,
+                packets: 3,
+            },
+            image_data: ImageDataImageDataBlock {
+                data: vec![1, 2, 3],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&header, 9, true)?, now)?;
+
+        // Packet 1, then a packet the header does not cover, then packet 1
+        // again: three insertions for a three-packet image, but packet 2 is
+        // still missing.
+        for (sequence, packet, data) in [
+            (10, 1, vec![4, 5, 6]),
+            (11, 7, vec![0xEE, 0xEE, 0xEE]),
+            (12, 1, vec![0xDD, 0xDD, 0xDD]),
+        ] {
+            let follow = AnyMessage::ImagePacket(ImagePacket {
+                image_id: ImagePacketImageIDBlock {
+                    id: texture,
+                    packet,
+                },
+                image_data: ImagePacketImageDataBlock { data },
+            });
+            session.handle_datagram(sim_addr(), &server_message(&follow, sequence, true)?, now)?;
+        }
+        let events = drain_events(&mut session);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::TextureReceived(_))),
+            "an image missing packet 2 is not complete: {events:?}"
+        );
+
+        // The packet actually owed completes it, and neither the stray index
+        // nor the repeat left a mark on the bytes.
+        let last = AnyMessage::ImagePacket(ImagePacket {
+            image_id: ImagePacketImageIDBlock {
+                id: texture,
+                packet: 2,
+            },
+            image_data: ImagePacketImageDataBlock {
+                data: vec![7, 8, 9],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&last, 13, true)?, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TextureReceived(texture) => Some(texture),
+                _ => None,
+            })
+            .ok_or("expected a TextureReceived event")?;
+        assert_eq!(received.data, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        Ok(())
+    }
+
+    /// A follow-on packet can outrun its `ImageData` header, so an index cannot
+    /// be checked when it arrives — but once the header says how many packets
+    /// the image has, one buffered past that count is disowned rather than
+    /// concatenated into the middle of the codestream.
+    #[test]
+    fn a_texture_packet_the_header_disowns_is_dropped() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        let texture = uuid::Uuid::from_u128(0xBEEF);
+        session.request_texture(TextureKey::from(texture), 0, 1.0e6, now)?;
+        drain(&mut session)?;
+
+        let early = AnyMessage::ImagePacket(ImagePacket {
+            image_id: ImagePacketImageIDBlock {
+                id: texture,
+                packet: 5,
+            },
+            image_data: ImagePacketImageDataBlock {
+                data: vec![0xEE, 0xEE, 0xEE],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&early, 9, true)?, now)?;
+
+        let header = AnyMessage::ImageData(ImageData {
+            image_id: ImageDataImageIDBlock {
+                id: texture,
+                codec: 2,
+                size: 6,
+                packets: 2,
+            },
+            image_data: ImageDataImageDataBlock {
+                data: vec![1, 2, 3],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&header, 10, true)?, now)?;
+        let events = drain_events(&mut session);
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::TextureReceived(_))),
+            "packet 5 is not packet 1 of a two-packet image: {events:?}"
+        );
+
+        let follow = AnyMessage::ImagePacket(ImagePacket {
+            image_id: ImagePacketImageIDBlock {
+                id: texture,
+                packet: 1,
+            },
+            image_data: ImagePacketImageDataBlock {
+                data: vec![4, 5, 6],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&follow, 11, true)?, now)?;
+
+        let received = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TextureReceived(texture) => Some(texture),
+                _ => None,
+            })
+            .ok_or("expected a TextureReceived event")?;
+        assert_eq!(received.data, vec![1, 2, 3, 4, 5, 6]);
+        Ok(())
+    }
+
+    /// The `TransferInfo` header of a legacy UDP asset transfer.
+    fn transfer_info(transfer_id: uuid::Uuid, status: TransferStatus, size: i32) -> AnyMessage {
+        AnyMessage::TransferInfo(TransferInfo {
+            transfer_info: TransferInfoTransferInfoBlock {
+                transfer_id,
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                target_type: 0,
+                status: status.to_code(),
+                size,
+                params: Vec::new(),
+            },
+        })
+    }
+
+    /// One packet of a legacy UDP asset transfer.
+    fn transfer_packet(
+        transfer_id: uuid::Uuid,
+        packet: i32,
+        status: TransferStatus,
+        data: Vec<u8>,
+    ) -> AnyMessage {
+        AnyMessage::TransferPacket(TransferPacket {
+            transfer_data: TransferPacketTransferDataBlock {
+                transfer_id,
+                channel_type: sl_wire::TRANSFER_CHANNEL_ASSET,
+                packet,
+                status: status.to_code(),
+                data,
+            },
+        })
+    }
+
+    /// The task-inventory item asset fetch used by the transfer tests, and the
+    /// transfer id the simulator's packets have to carry.
+    fn fetch_a_task_item_asset(
+        session: &mut Session,
+        now: Instant,
+    ) -> Result<uuid::Uuid, TestError> {
+        let transfer_id = session.fetch_task_item_asset(
+            ObjectKey::from(uuid::Uuid::from_u128(0x7A5C_0B1E)),
+            InventoryKey::from(uuid::Uuid::from_u128(0x17E3_0B1E)),
+            AssetKey::from(uuid::Uuid::from_u128(0xA55E_0B1E)),
+            AssetType::Notecard,
+            now,
+        )?;
+        drain(session)?;
+        Ok(transfer_id.get())
+    }
+
+    /// An asset transfer is done when the packets up to the `Done` one have
+    /// *arrived*, not when as many packets as its index have: the reference
+    /// delivers packets strictly in order and acts on the terminating status
+    /// only when that packet's turn comes. Counting instead delivers an asset
+    /// spliced across a hole — and one buffered past the `Done` index is no
+    /// part of it either.
+    #[test]
+    fn a_transfer_completes_on_its_packet_indices_not_a_count() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let transfer_id = fetch_a_task_item_asset(&mut session, now)?;
+
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&transfer_info(transfer_id, TransferStatus::Ok, 9), 9, true)?,
+            now,
+        )?;
+
+        // Packet 0, a packet past the end, then the `Done` packet at index 2:
+        // three packets for a three-packet asset, with packet 1 still missing.
+        for (sequence, packet, status, data) in [
+            (10, 0, TransferStatus::Ok, vec![1, 2, 3]),
+            (11, 3, TransferStatus::Ok, vec![0xEE, 0xEE, 0xEE]),
+            (12, 2, TransferStatus::Done, vec![7, 8, 9]),
+        ] {
+            let message = transfer_packet(transfer_id, packet, status, data);
+            session.handle_datagram(sim_addr(), &server_message(&message, sequence, true)?, now)?;
+        }
+        let events = drain_events(&mut session);
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                Event::TaskItemAssetReceived { .. } | Event::TransferFailed { .. }
+            )),
+            "an asset missing packet 1 is neither complete nor failed: {events:?}"
+        );
+
+        let message = transfer_packet(transfer_id, 1, TransferStatus::Ok, vec![4, 5, 6]);
+        session.handle_datagram(sim_addr(), &server_message(&message, 13, true)?, now)?;
+        let data = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TaskItemAssetReceived { data, .. } => Some(data),
+                _ => None,
+            })
+            .ok_or("expected a TaskItemAssetReceived event")?;
+        assert_eq!(data, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        Ok(())
+    }
+
+    /// The size a `TransferInfo` declares is the asset's, so a stream that says
+    /// `Done` short of it delivered something other than the asset. Fail the
+    /// fetch rather than hand a caller a truncated one it cannot tell apart.
+    #[test]
+    fn a_transfer_that_ends_short_of_its_declared_size_fails() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let transfer_id = fetch_a_task_item_asset(&mut session, now)?;
+
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&transfer_info(transfer_id, TransferStatus::Ok, 9), 9, true)?,
+            now,
+        )?;
+        for (sequence, packet, status, data) in [
+            (10, 0, TransferStatus::Ok, vec![1, 2, 3]),
+            (11, 1, TransferStatus::Done, vec![4, 5, 6]),
+        ] {
+            let message = transfer_packet(transfer_id, packet, status, data);
+            session.handle_datagram(sim_addr(), &server_message(&message, sequence, true)?, now)?;
+        }
+
+        let events = drain_events(&mut session);
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, Event::TransferFailed { .. })),
+            "a short asset fails its fetch: {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::TaskItemAssetReceived { .. })),
+            "a short asset is not delivered: {events:?}"
+        );
+        // And the simulator is told to stop serving it.
+        let sent = drain(&mut session)?;
+        assert!(
+            sent.iter()
+                .any(|message| matches!(message, AnyMessage::TransferAbort(_))),
+            "expected a TransferAbort for the abandoned transfer"
+        );
+        Ok(())
+    }
+
+    /// Out-of-order packets are buffered until the one they wait on arrives —
+    /// but only so many. A simulator that streams nothing but far-future
+    /// indices would otherwise grow a buffer none of which is ever deliverable
+    /// (the reference's `LL_MAX_DELAYED_PACKETS`, which aborts the transfer).
+    #[test]
+    fn a_transfer_drowning_in_out_of_order_packets_is_abandoned() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let transfer_id = fetch_a_task_item_asset(&mut session, now)?;
+
+        // Every packet but the first, so nothing can ever be delivered.
+        for packet in 1..=102 {
+            let message = transfer_packet(transfer_id, packet, TransferStatus::Ok, vec![0xEE]);
+            let sequence = 100_u32.saturating_add(u32::try_from(packet).unwrap_or(0));
+            session.handle_datagram(sim_addr(), &server_message(&message, sequence, true)?, now)?;
+        }
+
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|event| matches!(event, Event::TransferFailed { .. })),
+            "a transfer that can never be delivered is abandoned, not held"
+        );
+        Ok(())
+    }
+
+    /// The `Packet` field of a `TransferPacket` is signed on the wire. A
+    /// negative index is no packet of ours — and must not be taken for zero,
+    /// which would overwrite the real first packet with a stranger's bytes.
+    #[test]
+    fn a_negative_transfer_packet_index_is_not_packet_zero() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let transfer_id = fetch_a_task_item_asset(&mut session, now)?;
+
+        session.handle_datagram(
+            sim_addr(),
+            &server_message(&transfer_info(transfer_id, TransferStatus::Ok, 6), 9, true)?,
+            now,
+        )?;
+        for (sequence, packet, status, data) in [
+            (10, 0, TransferStatus::Ok, vec![1, 2, 3]),
+            (11, -1, TransferStatus::Ok, vec![0xEE, 0xEE, 0xEE]),
+            (12, 1, TransferStatus::Done, vec![4, 5, 6]),
+        ] {
+            let message = transfer_packet(transfer_id, packet, status, data);
+            session.handle_datagram(sim_addr(), &server_message(&message, sequence, true)?, now)?;
+        }
+
+        let data = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::TaskItemAssetReceived { data, .. } => Some(data),
+                _ => None,
+            })
+            .ok_or("expected a TaskItemAssetReceived event")?;
+        assert_eq!(data, vec![1, 2, 3, 4, 5, 6]);
         Ok(())
     }
 
