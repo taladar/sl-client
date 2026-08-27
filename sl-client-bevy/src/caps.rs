@@ -14,6 +14,7 @@
 //! retires it on timeout) rather than trying to close it, because a `done: true`
 //! close blocks like a long-poll on OpenSim and would stall the switch.
 
+use crate::retry::{MAX_TRANSIENT_RETRIES, transient_backoff};
 use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError, unbounded};
@@ -33,6 +34,21 @@ use std::time::Duration;
 /// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event). The NUL
 /// prefix cannot collide with a real capability / event-queue name.
 pub(crate) const CAPS_FAILURE_PREFIX: &str = "\0caps-failure\0";
+
+/// How many times a failed seed-capabilities fetch is retried before the worker
+/// stops trying and waits for the next region change. Shares the asset fetchers'
+/// transient-error budget: the seed POST fails for the same reasons (a sim still
+/// spinning up the new region's cap handlers answers a transient error before it
+/// answers the map). Without the retry a single transient failure leaves the
+/// region with **no event queue at all** until the agent crosses again — and
+/// `CrossedRegion` is itself an event-queue event, so the agent cannot.
+const MAX_SEED_FETCH_RETRIES: u32 = MAX_TRANSIENT_RETRIES;
+
+/// The pause before re-polling `EventQueueGet` after a round that produced no
+/// usable reply — a transport error, an unreadable body, or a body that did not
+/// parse. Without it an endpoint that answers `200` with a broken body turns the
+/// long poll into an unthrottled request loop.
+const POLL_ERROR_BACKOFF: Duration = Duration::from_secs(1);
 
 /// Reports that a CAPS request for `cap` failed before producing a reply,
 /// sending the failure sentinel over `caps_tx`. Helpers call this in place of
@@ -122,15 +138,26 @@ pub(crate) fn post_neighbour_seed(seed_url: url::Url) {
     });
 }
 
+/// The outcome of one seed-capabilities fetch, distinguishing the two ways it
+/// can leave the worker without a queue to poll: a *failed* fetch is worth
+/// retrying, a region that simply advertises no `EventQueueGet` is not.
+enum SeedOutcome {
+    /// The region served its capability map. Carries its `EventQueueGet` URL, or
+    /// `None` when the region advertises no event queue at all — retrying that
+    /// fetch would return the same answer.
+    Fetched(Option<String>),
+    /// The seed request, its body, or its parse failed. Retryable.
+    Failed,
+}
+
 /// POSTs `seed_url` to fetch a region's capability map (reporting it over
-/// `map_tx`, `Ok` or a readable `Err`) and returns its `EventQueueGet` URL, or
-/// `None` if the seed request / parse failed or the region advertises no event
-/// queue.
+/// `map_tx`, `Ok` or a readable `Err`) and returns its `EventQueueGet` URL —
+/// see [`SeedOutcome`] for the two failure shapes.
 fn fetch_caps(
     http: &ReqwestBlockingClient,
     seed_url: &url::Url,
     map_tx: &Sender<Result<HashMap<String, String>, String>>,
-) -> Option<String> {
+) -> SeedOutcome {
     let response = match http
         .post(seed_url.clone())
         .header("Content-Type", "application/llsd+xml")
@@ -144,7 +171,7 @@ fn fetch_caps(
                 map_tx,
                 Err(format!("the seed-capabilities request failed: {error}")),
             );
-            return None;
+            return SeedOutcome::Failed;
         }
     };
     let text = match response.text() {
@@ -156,7 +183,7 @@ fn fetch_caps(
                     "the seed-capabilities response body could not be read: {error}"
                 )),
             );
-            return None;
+            return SeedOutcome::Failed;
         }
     };
     let capabilities = match parse_seed_response(&text) {
@@ -168,7 +195,7 @@ fn fetch_caps(
                     "the seed-capabilities response did not parse: {error}"
                 )),
             );
-            return None;
+            return SeedOutcome::Failed;
         }
     };
     deliver(map_tx, Ok(capabilities.clone()));
@@ -180,7 +207,7 @@ fn fetch_caps(
             "event queue: region advertises NO EventQueueGet — no CrossedRegion / EnableSimulator will arrive"
         );
     }
-    url
+    SeedOutcome::Fetched(url)
 }
 
 /// The outcome of one `EventQueueGet` long-poll round.
@@ -214,6 +241,10 @@ struct EventQueueWorker {
     /// The id of the last delivered batch, acked on the next poll; `None` starts
     /// a fresh poll (all queued events).
     ack: Option<i32>,
+    /// How many seed fetches for the current region have failed in a row; `0`
+    /// once one succeeds. Drives the retry backoff in [`run_event_queue`], so a
+    /// transient failure does not cost the region its event queue outright.
+    seed_failures: u32,
 }
 
 impl EventQueueWorker {
@@ -236,16 +267,60 @@ impl EventQueueWorker {
                 return None;
             }
         };
-        let event_queue_url = fetch_caps(&http, &seed, map_tx);
-        if let Some(url) = &event_queue_url {
-            tracing::info!(%url, "event queue: polling started");
-        }
-        Some(Self {
+        let outcome = fetch_caps(&http, &seed, map_tx);
+        let mut worker = Self {
             http,
             seed,
-            event_queue_url,
+            event_queue_url: None,
             ack: None,
-        })
+            seed_failures: 0,
+        };
+        worker.apply_seed(outcome);
+        if let Some(url) = &worker.event_queue_url {
+            tracing::info!(%url, "event queue: polling started");
+        }
+        Some(worker)
+    }
+
+    /// Records a seed fetch's outcome: a served map ends the retry budget
+    /// (whatever it advertises), a failed fetch spends one more of it.
+    fn apply_seed(&mut self, outcome: SeedOutcome) {
+        match outcome {
+            SeedOutcome::Fetched(url) => {
+                self.event_queue_url = url;
+                self.seed_failures = 0;
+            }
+            SeedOutcome::Failed => {
+                self.event_queue_url = None;
+                self.seed_failures = self.seed_failures.saturating_add(1);
+            }
+        }
+    }
+
+    /// The pause before the next seed-fetch retry, or `None` when there is
+    /// nothing to retry — the last fetch succeeded (so the region either has a
+    /// queue or genuinely advertises none), or the budget is spent.
+    fn seed_retry_backoff(&self) -> Option<Duration> {
+        if self.seed_failures == 0 || self.seed_failures > MAX_SEED_FETCH_RETRIES {
+            return None;
+        }
+        Some(transient_backoff(self.seed_failures.saturating_sub(1)))
+    }
+
+    /// Re-runs the seed fetch for the region already being polled, after a
+    /// failure. Unlike [`EventQueueWorker::switch`] it keeps the failure count,
+    /// so the retry budget runs out instead of retrying for ever.
+    fn retry_seed(&mut self, map_tx: &Sender<Result<HashMap<String, String>, String>>) {
+        tracing::info!(
+            seed = %self.seed,
+            failures = self.seed_failures,
+            "event queue: retrying the seed-capabilities fetch"
+        );
+        let outcome = fetch_caps(&self.http, &self.seed, map_tx);
+        self.apply_seed(outcome);
+        if let Some(url) = &self.event_queue_url {
+            tracing::info!(%url, "event queue: polling started after a seed retry");
+        }
     }
 
     /// Re-targets the worker at `seed` (a region change): **abandons** the old
@@ -270,7 +345,11 @@ impl EventQueueWorker {
         }
         self.seed = seed;
         self.ack = None;
-        self.event_queue_url = fetch_caps(&self.http, &self.seed, map_tx);
+        // A new region starts with a fresh retry budget: the old region's
+        // failures say nothing about this one's.
+        self.seed_failures = 0;
+        let outcome = fetch_caps(&self.http, &self.seed, map_tx);
+        self.apply_seed(outcome);
         if let Some(url) = &self.event_queue_url {
             tracing::info!(%url, "event queue: re-targeted to the new region");
         }
@@ -293,7 +372,7 @@ impl EventQueueWorker {
             Ok(response) => response,
             Err(error) => {
                 tracing::trace!(%error, "event queue: poll request errored; retrying");
-                std::thread::sleep(Duration::from_secs(1));
+                std::thread::sleep(POLL_ERROR_BACKOFF);
                 return PollOutcome::Idle;
             }
         };
@@ -303,11 +382,24 @@ impl EventQueueWorker {
             std::thread::sleep(Duration::from_millis(200));
             return PollOutcome::Idle;
         }
-        let Ok(text) = response.text() else {
-            return PollOutcome::Idle;
+        // A body that cannot be read, or that does not parse, is as transient as
+        // a failed request — and backs off the same way, or a grid answering a
+        // broken `200` spins this thread as fast as the network allows.
+        let text = match response.text() {
+            Ok(text) => text,
+            Err(error) => {
+                tracing::trace!(%error, "event queue: poll body could not be read; retrying");
+                std::thread::sleep(POLL_ERROR_BACKOFF);
+                return PollOutcome::Idle;
+            }
         };
-        let Ok(parsed) = parse_event_queue_response(&text) else {
-            return PollOutcome::Idle;
+        let parsed = match parse_event_queue_response(&text) {
+            Ok(parsed) => parsed,
+            Err(error) => {
+                tracing::trace!(%error, "event queue: poll body did not parse; retrying");
+                std::thread::sleep(POLL_ERROR_BACKOFF);
+                return PollOutcome::Idle;
+            }
         };
         self.ack = Some(parsed.id);
         if parsed.events.is_empty() {
@@ -359,15 +451,24 @@ fn run_event_queue(
             }
         }
         if worker.event_queue_url.is_none() {
-            // Nothing to poll (no seed / no EventQueueGet): block for a command so
-            // the thread does not spin.
-            match command_rx.recv() {
-                Ok(EqCommand::Switch(seed)) => {
-                    worker.switch(seed, map_tx);
-                    continue;
-                }
-                Err(_) => return,
+            // Nothing to poll. A *failed* seed fetch is retried on a backoff — a
+            // region that advertises no event queue answers the same way every
+            // time, so only a failure is worth repeating, and leaving a region
+            // queueless over one transient error strands the agent (its own
+            // `CrossedRegion` is an event-queue event). Once the budget is spent,
+            // block for a command so the thread does not spin.
+            match worker.seed_retry_backoff() {
+                Some(backoff) => match command_rx.recv_timeout(backoff) {
+                    Ok(EqCommand::Switch(seed)) => worker.switch(seed, map_tx),
+                    Err(RecvTimeoutError::Timeout) => worker.retry_seed(map_tx),
+                    Err(RecvTimeoutError::Disconnected) => return,
+                },
+                None => match command_rx.recv() {
+                    Ok(EqCommand::Switch(seed)) => worker.switch(seed, map_tx),
+                    Err(_) => return,
+                },
             }
+            continue;
         }
         match worker.poll_round(caps_tx) {
             PollOutcome::ReceiverGone => return,
@@ -391,5 +492,93 @@ fn run_event_queue(
             }
             | PollOutcome::Idle => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+
+    use super::{EventQueueWorker, MAX_SEED_FETCH_RETRIES, SeedOutcome};
+    use pretty_assertions::assert_eq;
+    use std::time::Duration;
+
+    /// A worker parked on a placeholder seed, with no fetch performed: the retry
+    /// budget is driven directly through [`EventQueueWorker::apply_seed`], so the
+    /// state machine is exercised without a grid.
+    fn worker() -> EventQueueWorker {
+        EventQueueWorker {
+            http: crate::http_proxy::blocking_client_builder()
+                .build()
+                .expect("a direct blocking client builds"),
+            seed: "http://sim.example/cap/seed"
+                .parse()
+                .expect("the placeholder seed URL parses"),
+            event_queue_url: None,
+            ack: None,
+            seed_failures: 0,
+        }
+    }
+
+    /// A region that served its map has nothing to retry — whether or not it
+    /// advertised an event queue. Retrying a region that answered "no
+    /// `EventQueueGet`" would only re-read the same answer.
+    #[test]
+    fn a_served_map_ends_the_retry_budget() {
+        let mut worker = worker();
+        worker.apply_seed(SeedOutcome::Fetched(Some(
+            "http://sim.example/eq".to_owned(),
+        )));
+        assert_eq!(worker.seed_failures, 0);
+        assert_eq!(worker.seed_retry_backoff(), None);
+
+        worker.apply_seed(SeedOutcome::Fetched(None));
+        assert_eq!(worker.event_queue_url, None);
+        assert_eq!(worker.seed_retry_backoff(), None);
+    }
+
+    /// Each consecutive failure spends one retry and lengthens the pause, until
+    /// the budget runs out and the worker falls back to waiting for the next
+    /// region change.
+    #[test]
+    fn consecutive_failures_back_off_then_exhaust_the_budget() {
+        let mut worker = worker();
+        worker.apply_seed(SeedOutcome::Failed);
+        assert_eq!(
+            worker.seed_retry_backoff(),
+            Some(Duration::from_millis(200))
+        );
+        worker.apply_seed(SeedOutcome::Failed);
+        assert_eq!(
+            worker.seed_retry_backoff(),
+            Some(Duration::from_millis(400))
+        );
+
+        for _spent in 0..MAX_SEED_FETCH_RETRIES {
+            worker.apply_seed(SeedOutcome::Failed);
+        }
+        assert!(worker.seed_failures > MAX_SEED_FETCH_RETRIES);
+        assert_eq!(worker.seed_retry_backoff(), None);
+    }
+
+    /// A success in the middle of a failing run re-opens the full budget, so a
+    /// region that flaps is not starved by an earlier region's failures.
+    #[test]
+    fn a_success_restores_the_full_budget() {
+        let mut worker = worker();
+        for _spent in 0..MAX_SEED_FETCH_RETRIES {
+            worker.apply_seed(SeedOutcome::Failed);
+        }
+        worker.apply_seed(SeedOutcome::Fetched(Some(
+            "http://sim.example/eq".to_owned(),
+        )));
+        worker.apply_seed(SeedOutcome::Failed);
+        assert_eq!(
+            worker.seed_retry_backoff(),
+            Some(Duration::from_millis(200))
+        );
     }
 }

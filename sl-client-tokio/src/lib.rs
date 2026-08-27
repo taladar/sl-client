@@ -181,8 +181,8 @@ mod upload;
 mod voice;
 use crate::appearance::request_server_appearance_update;
 use crate::caps::{
-    CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, spawn_event_queue,
-    spawn_simulator_features,
+    CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, refetch_capabilities,
+    spawn_event_queue, spawn_simulator_features,
 };
 use crate::chat_log::ChatLog;
 use crate::experiences::{
@@ -367,7 +367,13 @@ impl Client {
     /// socket bind, or the circuit bootstrap fails.
     pub async fn connect(params: LoginParams) -> Result<Self, Error> {
         let mut session = Session::new(params);
-        let http = crate::http_proxy::client_builder().build()?;
+        // Async reqwest has no default request timeout (unlike `reqwest::blocking`,
+        // which the bevy login path relies on), so a login server that accepts the
+        // connection and never answers would hang `connect()` for ever. Use the same
+        // 60 s the runtime's other HTTP clients set.
+        let http = crate::http_proxy::client_builder()
+            .timeout(Duration::from_secs(60))
+            .build()?;
         let mut redirects: u32 = 0;
         // A redirect response (`login = "indeterminate"`) re-arms the
         // session's pending login request at its `next_url`, so the loop
@@ -577,14 +583,22 @@ impl Client {
         diagnostics: mpsc::Sender<Diagnostic>,
         mut commands: mpsc::Receiver<Command>,
     ) -> Result<(), Error> {
-        // The region's capability map is fetched once from the seed and cached
-        // here: the event-queue long-poll runs off `EventQueueGet`, and inventory
+        // The region's capability map is fetched from the seed and cached here:
+        // the event-queue long-poll runs off `EventQueueGet`, and inventory
         // fetches POST to `FetchInventoryDescendents2`. Both deliver their decoded
         // payloads back over `caps_rx` to `handle_caps_event`.
         let http = crate::http_proxy::client_builder()
             .timeout(Duration::from_secs(60))
             .build()?;
         let (caps_tx, mut caps_rx) = mpsc::channel::<(String, Llsd)>(64);
+        // A region change re-fetches the map in a detached task
+        // ([`refetch_capabilities`]) rather than inline, so the round-trip never
+        // stalls the UDP pump; the new map arrives over this channel. Each map is
+        // stamped with the generation of the region change that asked for it, so a
+        // slow fetch overtaken by a second crossing cannot install a stale map.
+        let (caps_map_tx, mut caps_map_rx) = mpsc::channel::<(u64, HashMap<String, String>)>(4);
+        let mut caps_generation: u64 = 0;
+        let mut caps_refetch_task: Option<tokio::task::JoinHandle<()>> = None;
         // The region must serve capabilities: fail login (propagating the readable
         // error) rather than proceed into a capless session. Releasing the deferred
         // `CompleteAgentMovement` only now, on success, also guarantees the simulator
@@ -709,30 +723,41 @@ impl Client {
                 }
                 deliver(&events, event).await;
                 if region_changed {
+                    // Stop polling the region we have left before anything else:
+                    // its queue is stale, and a poller still blocked in a long
+                    // poll there would corrupt the ack stream if the agent
+                    // crossed straight back.
                     abort_task(&mut caps_task);
-                    // A region change's cap fetch is best-effort: the session is
-                    // already established, so a failure degrades the new region
-                    // rather than failing the session (unlike the initial login).
-                    caps = fetch_capabilities(self.session.seed_capability(), &http)
-                        .await
-                        .unwrap_or_default();
-                    if let Some(reporter) = &self.caps_reporter {
-                        deliver(reporter, caps.clone()).await;
-                    }
-                    spawn_simulator_features(&caps, &http, &caps_tx);
-                    caps_task = spawn_event_queue(&caps, &http, &caps_tx);
+                    // A region change's cap fetch is best-effort and **detached**:
+                    // the session is already established, so a failure degrades
+                    // the new region rather than failing the session (unlike the
+                    // initial login) — and it must not run inline, because this
+                    // loop is the only thing pumping UDP. A second crossing while
+                    // a fetch is still in flight supersedes it, by both aborting
+                    // the task and bumping the generation the reply is matched on.
+                    abort_task(&mut caps_refetch_task);
+                    caps_generation = caps_generation.wrapping_add(1);
+                    caps_refetch_task = Some(tokio::spawn(refetch_capabilities(
+                        caps_generation,
+                        self.session.seed_capability().cloned(),
+                        http.clone(),
+                        caps_map_tx.clone(),
+                        caps_tx.clone(),
+                    )));
                 }
                 if terminal {
                     // Persist the inventory cache before exit (Firestorm's
                     // save-at-cleanup); a no-op when the cache is disabled.
                     inventory_cache.save(&mut self.session);
                     abort_task(&mut caps_task);
+                    abort_task(&mut caps_refetch_task);
                     return Ok(());
                 }
             }
             if self.session.is_closed() {
                 inventory_cache.save(&mut self.session);
                 abort_task(&mut caps_task);
+                abort_task(&mut caps_refetch_task);
                 return Ok(());
             }
             // The optional dirty/idle inventory-cache save (crash-safety beyond
@@ -832,6 +857,37 @@ impl Client {
                     let (len, from) = result?;
                     if let Some(datagram) = self.recv_buf.get(..len) {
                         self.session.handle_datagram(from, datagram, Instant::now())?;
+                    }
+                }
+                caps_map = caps_map_rx.recv() => {
+                    // A detached region-change refetch finished. A map stamped
+                    // with a superseded generation is dropped: a second crossing
+                    // while the first fetch was in flight already re-aimed the
+                    // session, and installing the older map would point every
+                    // capability at a region we have left. Until a fetch lands,
+                    // the previous region's map stays in place — its cap URLs are
+                    // stale but mostly still answer, which degrades a command
+                    // issued mid-crossing rather than dropping it silently.
+                    if let Some((generation, map)) = caps_map
+                        && generation == caps_generation
+                    {
+                        caps = map;
+                        if let Some(reporter) = &self.caps_reporter {
+                            deliver(reporter, caps.clone()).await;
+                        }
+                        spawn_simulator_features(&caps, &http, &caps_tx);
+                        // The region change already aborted the old poller; abort
+                        // again so that even a map arriving without one (a retry
+                        // that outlived its region change) cannot leave two
+                        // pollers on the same queue.
+                        abort_task(&mut caps_task);
+                        caps_task = spawn_event_queue(&caps, &http, &caps_tx);
+                        if caps_task.is_none() {
+                            tracing::warn!(
+                                capabilities = caps.len(),
+                                "the region advertises no EventQueueGet — no CrossedRegion / TeleportFinish will arrive"
+                            );
+                        }
                     }
                 }
                 caps_event = caps_rx.recv() => {

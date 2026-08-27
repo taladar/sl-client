@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 90 |
-| done | 883 |
+| bugs | 89 |
+| done | 884 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (90)
+## bugs (89)
 
 ### protocol
 
@@ -1189,9 +1189,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close
-- [`protocol-audit-tokio-caps-refetch`](bugs/protocol-audit-tokio-caps-refetch.md)
-  — The tokio region-change caps fetch stalls the UDP pump, then swallows its
-  failure
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
   SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
   fetch never retries)
@@ -1387,7 +1384,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (883)
+## done (884)
 
 ### protocol
 
@@ -1532,6 +1529,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   HandshakeFailed
 - [`protocol-audit-texture-download-completeness`](done/protocol-audit-texture-download-completeness.md)
   — A texture download completes on a chunk count, not on the chunk indices
+- [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)
+  — The tokio region-change caps fetch stalls the UDP pump, then swallows its
+  failure
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —
