@@ -61,6 +61,19 @@ non-`Ok` status in the `TransferInfo` (size 0), most commonly
 `UnknownSource` (−2, the transfer 404) or `InsufficientPermissions`
 (−3).
 
+## When the stream stops
+
+`TransferInfo` promises a size, not a delivery. A simulator that starts a
+transfer and then goes quiet leaves the client holding a half-assembled
+asset that will never complete, so the client puts a deadline on it: a
+transfer that goes five minutes without a packet (the reference viewer's
+`LL_ASSET_STORAGE_TIMEOUT`, which is what
+`LLAssetStorage::checkForTimeouts` fails a download on) is abandoned. The
+client sends a `TransferAbort` so the simulator stops serving it, drops
+the buffered chunks, and surfaces the give-up as a typed failure — the
+same shape a refusal takes, so a caller waiting for the asset has exactly
+one thing to wait on.
+
 ## Client and server views
 
 The client mints monotonic transfer ids (a sans-I/O session has no

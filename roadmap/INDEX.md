@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 93 |
-| done | 880 |
+| bugs | 92 |
+| done | 881 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,12 +1165,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (93)
+## bugs (92)
 
 ### protocol
 
-- [`protocol-audit-asset-transfer-timeouts`](bugs/protocol-audit-asset-transfer-timeouts.md)
-  — No asset transfer has a timeout — six registries only ever grow
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
 - [`protocol-audit-j2c-dimension-caps`](bugs/protocol-audit-j2c-dimension-caps.md)
@@ -1393,7 +1391,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (880)
+## done (881)
 
 ### protocol
 
@@ -1519,6 +1517,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-asset-decoder-allocation-caps`](done/protocol-audit-asset-decoder-allocation-caps.md)
   — Notecard, animation and legacy-material decoders reserve from a
   wire-supplied count
+- [`protocol-audit-asset-transfer-timeouts`](done/protocol-audit-asset-transfer-timeouts.md)
+  — No asset transfer has a timeout — six registries only ever grow
 - [`protocol-audit-flush-acks-loses-acks`](done/protocol-audit-flush-acks-loses-acks.md)
   — flush_acks drops every remaining ack on a wire error, in both directions
 - [`protocol-audit-inventory-fetch-deadlock`](done/protocol-audit-inventory-fetch-deadlock.md)

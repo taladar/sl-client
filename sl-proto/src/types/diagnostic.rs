@@ -165,6 +165,40 @@ impl Diagnostic {
     /// branch of the tree stay empty, with nothing else surfaced.
     pub const INVENTORY_DESCENDENTS_REQUEST: &'static str = "FetchInventoryDescendents";
 
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a legacy UDP
+    /// texture download whose `ImageData`/`ImagePacket` stream stalled often
+    /// enough for the session to give up on it.
+    ///
+    /// Like [`Diagnostic::INVENTORY_DESCENDENTS_REQUEST`] this names the wire
+    /// request rather than an operation: the agent sees one texture stay grey,
+    /// with the accompanying
+    /// [`Event::TextureNotFound`](crate::Event::TextureNotFound) saying only
+    /// that the image will not arrive, not why.
+    pub const TEXTURE_REQUEST: &'static str = "RequestImage";
+
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for an `Xfer`
+    /// that stopped making progress, or an upload offer the simulator never
+    /// picked up.
+    ///
+    /// Covers both directions: an inbound download whose `SendXferPacket`s dried
+    /// up, an outbound upload whose `ConfirmXferPacket` never came, and a file
+    /// offered for upload that no `RequestXfer` ever claimed.
+    pub const XFER_REQUEST: &'static str = "RequestXfer";
+
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a legacy UDP
+    /// asset Transfer whose `TransferInfo`/`TransferPacket` stream stopped
+    /// before the asset was complete.
+    pub const TRANSFER_REQUEST: &'static str = "TransferRequest";
+
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a legacy
+    /// transaction asset upload whose oversized payload the simulator never
+    /// pulled (no `RequestXfer` naming its predicted asset id arrived).
+    pub const ASSET_UPLOAD_REQUEST: &'static str = "AssetUploadRequest";
+
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for a task
+    /// (object) inventory fetch whose `ReplyTaskInventory` never arrived.
+    pub const TASK_INVENTORY_REQUEST: &'static str = "RequestTaskInventory";
+
     /// The marked [`hexdump`] of the bytes this diagnostic captured, or [`None`]
     /// for a variant that captures none.
     ///

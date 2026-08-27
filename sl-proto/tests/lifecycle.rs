@@ -41,12 +41,12 @@ mod test {
         ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
         SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
         SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
-        TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
-        UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
-        WaterSettings, WearableType, avatar_texture, chat_session_agent_params_from_llsd,
-        chat_session_agents_body, chat_session_request_body, decode_texture_entry, group_powers,
-        pcode,
+        TEXTURE_DOWNLOAD_MAX_ATTEMPTS, TaskInventoryKey, TaskInventoryReply, TeleportFlags,
+        TerraformArea, TerrainLayerType, TextureEntry, TextureFace, TextureKey, Throttle,
+        TransactionId, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+        ViewerEffectData, ViewerEffectType, WaterSettings, WearableType, avatar_texture,
+        chat_session_agent_params_from_llsd, chat_session_agents_body, chat_session_request_body,
+        decode_texture_entry, group_powers, pcode,
     };
     use sl_types::lsl::{Rotation, Vector};
     use sl_wire::messages::{
@@ -6281,6 +6281,365 @@ mod test {
             drain_events(&mut session).iter().any(
                 |e| matches!(e, Event::TextureNotFound(id) if *id == TextureKey::from(texture))
             )
+        );
+        Ok(())
+    }
+
+    /// Acknowledges the bootstrap packets and drains what establishing the
+    /// session queued, so a stall test can push the clock minutes forward
+    /// without `UseCircuitCode`/`CompleteAgentMovement` exhausting their
+    /// retransmissions and failing the session out from under it.
+    fn settle_for_a_long_wait(session: &mut Session, now: Instant) -> Result<(), TestError> {
+        drain(session)?;
+        ack_sequences_through(session, now, 1, 32)?;
+        drain(session)?;
+        drain_events(session);
+        Ok(())
+    }
+
+    /// An inbound message the session ignores outright, used by the stall tests
+    /// to keep the circuit's inactivity timer fed while wall-clock time is
+    /// pushed past a transfer timeout: a texture packet for an id no download is
+    /// registered under is dropped without an event or a reply.
+    fn inert_keepalive() -> AnyMessage {
+        AnyMessage::ImagePacket(ImagePacket {
+            image_id: ImagePacketImageIDBlock {
+                id: uuid::Uuid::nil(),
+                packet: 1,
+            },
+            image_data: ImagePacketImageDataBlock { data: Vec::new() },
+        })
+    }
+
+    /// Advances `session` to `until`, feeding an inert datagram every 30 seconds
+    /// so the 45-second inactivity timeout does not close the circuit out from
+    /// under a test that has to wait minutes for a transfer to time out.
+    fn advance_alive(
+        session: &mut Session,
+        from: Instant,
+        until: Instant,
+        first_sequence: u32,
+    ) -> Result<(), TestError> {
+        let mut at = from;
+        let mut sequence = first_sequence;
+        while at < until {
+            at = after(at, 30_000)?.min(until);
+            session.handle_datagram(
+                sim_addr(),
+                &server_message(&inert_keepalive(), sequence, false)?,
+                at,
+            )?;
+            session.handle_timeout(at);
+            sequence = sequence.wrapping_add(1);
+        }
+        Ok(())
+    }
+
+    /// A UDP texture stream that stops part-way is re-requested from the first
+    /// packet still missing — the reference viewer's `SIM_LAZY_FLUSH_TIMEOUT`
+    /// behaviour — and abandoned once the retries run out, so a stalled download
+    /// neither holds its partial packet buffer for the session's life nor leaves
+    /// its caller waiting on an image that is not coming.
+    #[test]
+    fn a_stalled_texture_download_is_re_requested_then_abandoned() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        settle_for_a_long_wait(&mut session, now)?;
+
+        let texture = uuid::Uuid::from_u128(0x0B_0B);
+        session.request_texture(TextureKey::from(texture), 0, 1.0e6, now)?;
+        drain(&mut session)?;
+
+        // Packet 0 of three arrives, then the simulator goes quiet.
+        let header = AnyMessage::ImageData(ImageData {
+            image_id: ImageDataImageIDBlock {
+                id: texture,
+                codec: 2,
+                size: 9,
+                packets: 3,
+            },
+            image_data: ImageDataImageDataBlock {
+                data: vec![1, 2, 3],
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&header, 9, true)?, now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Every stall re-issues the request. The first one is the telling case:
+        // no packet-1 request has ever been sent, so a `RequestImage` resuming
+        // there can only be the re-issue, and it resumes rather than restarting
+        // the image from the top.
+        let mut at = now;
+        let mut sequence = 100;
+        for attempt in 0..TEXTURE_DOWNLOAD_MAX_ATTEMPTS {
+            at = after(at, 10_001)?;
+            session.handle_timeout(at);
+            let sent = drain(&mut session)?;
+            assert!(
+                sent.iter().any(|message| match message {
+                    AnyMessage::RequestImage(request) => request
+                        .request_image
+                        .iter()
+                        .any(|block| block.image == texture && block.packet == 1),
+                    _ => false,
+                }),
+                "stall {attempt} did not re-issue the RequestImage from packet 1"
+            );
+            let events = drain_events(&mut session);
+            assert!(
+                events.is_empty(),
+                "a re-request is not a failure: {events:?}"
+            );
+            // The retry budget outlives the inactivity timeout; keep the link fed.
+            session.handle_datagram(
+                sim_addr(),
+                &server_message(&inert_keepalive(), sequence, false)?,
+                at,
+            )?;
+            sequence = sequence.wrapping_add(1);
+        }
+
+        // The budget is spent: the download is dropped and its caller told.
+        at = after(at, 10_001)?;
+        session.handle_timeout(at);
+        assert!(!session.is_closed(), "a stalled texture is not a dead link");
+        assert!(
+            drain_events(&mut session).iter().any(
+                |e| matches!(e, Event::TextureNotFound(id) if *id == TextureKey::from(texture))
+            )
+        );
+        drain(&mut session)?;
+
+        // The partial buffer went with it: the packets the simulator owed,
+        // arriving late, no longer assemble into an image.
+        for packet in 1..=2 {
+            let late = AnyMessage::ImagePacket(ImagePacket {
+                image_id: ImagePacketImageIDBlock {
+                    id: texture,
+                    packet,
+                },
+                image_data: ImagePacketImageDataBlock {
+                    data: vec![4, 5, 6],
+                },
+            });
+            session.handle_datagram(
+                sim_addr(),
+                &server_message(&late, 900 + u32::from(packet), true)?,
+                at,
+            )?;
+        }
+        assert!(
+            !drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::TextureReceived(_))),
+            "an abandoned download does not reassemble from late packets"
+        );
+        Ok(())
+    }
+
+    /// An `Xfer` download whose packets stop arriving is abandoned rather than
+    /// held for the session's life: the session sends the same `AbortXfer` the
+    /// reference viewer's `LLXfer::abort` sends on `LL_ERR_TCP_TIMEOUT`, and
+    /// surfaces the give-up so a caller waiting on the bytes is not stranded.
+    #[test]
+    fn a_stalled_xfer_download_is_aborted_and_surfaced() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        settle_for_a_long_wait(&mut session, now)?;
+
+        let xfer_id = session.request_xfer("inventory.tmp", now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // Just short of the stall timeout the transfer is still live…
+        session.handle_timeout(after(now, 29_000)?);
+        assert!(
+            !drain(&mut session)?
+                .iter()
+                .any(|m| matches!(m, AnyMessage::AbortXfer(_)))
+        );
+
+        // …and past it it is aborted on the wire and surfaced.
+        session.handle_timeout(after(now, 30_001)?);
+        assert!(!session.is_closed(), "a stalled Xfer is not a dead link");
+        let aborted = drain(&mut session)?
+            .into_iter()
+            .find_map(|message| match message {
+                AnyMessage::AbortXfer(abort) => Some(abort.xfer_id),
+                _ => None,
+            })
+            .ok_or("expected an AbortXfer for the stalled download")?;
+        assert_eq!(aborted.id, xfer_id.get());
+        assert_eq!(aborted.result, -23016, "the reference's LL_ERR_TCP_TIMEOUT");
+        assert!(drain_events(&mut session).iter().any(|e| matches!(
+            e,
+            Event::XferAborted { xfer_id: got, result: -23016 } if *got == xfer_id
+        )));
+        Ok(())
+    }
+
+    /// A legacy UDP asset Transfer whose packets stop arriving is abandoned too:
+    /// the simulator is told to stop serving it and the fetch fails, rather than
+    /// leaving a half-assembled asset in the registry forever.
+    #[test]
+    fn a_stalled_asset_transfer_fails_the_fetch() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        settle_for_a_long_wait(&mut session, now)?;
+
+        let transfer_id = session.fetch_estate_covenant_asset(now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The five-minute transfer timeout outlives the inactivity timeout, so
+        // the link is kept fed while the clock runs out.
+        let expired = after(now, 300_001)?;
+        advance_alive(&mut session, now, expired, 200)?;
+        assert!(!session.is_closed());
+        let aborted = drain(&mut session)?
+            .into_iter()
+            .find_map(|message| match message {
+                AnyMessage::TransferAbort(abort) => Some(abort.transfer_info.transfer_id),
+                _ => None,
+            })
+            .ok_or("expected a TransferAbort for the stalled transfer")?;
+        assert_eq!(aborted, transfer_id.get());
+        assert!(drain_events(&mut session).iter().any(|e| matches!(
+            e,
+            Event::TransferFailed { transfer_id: got, status: TransferStatus::Abort }
+                if *got == transfer_id
+        )));
+        Ok(())
+    }
+
+    /// A file offered for upload that the simulator never asks for is withdrawn
+    /// (the reference's `LL_XFER_REGISTRATION_TIMEOUT`) instead of holding its
+    /// whole payload for the session's life — and a `RequestXfer` that turns up
+    /// after the offer lapsed is no longer honoured.
+    #[test]
+    fn an_upload_offer_the_simulator_never_pulls_is_withdrawn() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+
+        settle_for_a_long_wait(&mut session, now)?;
+
+        session.request_region_terrain_upload("terrain.raw", vec![7_u8; 26], now)?;
+        drain(&mut session)?;
+
+        let expired = after(now, 60_001)?;
+        advance_alive(&mut session, now, expired, 300)?;
+        drain(&mut session)?;
+
+        let request = AnyMessage::RequestXfer(RequestXfer {
+            xfer_id: RequestXferXferIDBlock {
+                id: 0x4242,
+                filename: b"terrain.raw\0".to_vec(),
+                file_path: 0,
+                delete_on_completion: false,
+                use_big_packets: false,
+                v_file_id: uuid::Uuid::nil(),
+                v_file_type: 0,
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&request, 400, true)?, expired)?;
+        assert!(
+            !drain(&mut session)?
+                .iter()
+                .any(|m| matches!(m, AnyMessage::SendXferPacket(_))),
+            "a withdrawn offer is not streamed"
+        );
+        Ok(())
+    }
+
+    /// An oversized legacy asset save waits for the simulator to pull its bytes
+    /// over `Xfer`. When that pull never comes the offer is withdrawn — and the
+    /// save is failed, because `AssetUploadComplete` is its only other
+    /// completion path and it is never going to arrive.
+    #[test]
+    fn an_asset_upload_the_simulator_never_pulls_fails_the_save() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        settle_for_a_long_wait(&mut session, now)?;
+
+        let item = sample_item(
+            uuid::Uuid::from_u128(0x17E3),
+            uuid::Uuid::from_u128(0xF01D),
+            "Edited notecard",
+        );
+        let transaction = TransactionId::new(uuid::Uuid::from_u128(0x7A2));
+        // Too large to inline, so the bytes are held for the simulator's pull.
+        session.save_inventory_asset(
+            &item,
+            AssetType::Notecard,
+            vec![9_u8; 4096],
+            transaction,
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let expired = after(now, 60_001)?;
+        advance_alive(&mut session, now, expired, 700)?;
+        assert!(!session.is_closed());
+        assert!(
+            drain_events(&mut session)
+                .iter()
+                .any(|e| matches!(e, Event::InventoryAssetSaved { success: false, .. })),
+            "a save whose bytes were never pulled is reported failed"
+        );
+        Ok(())
+    }
+
+    /// A task-inventory fetch for an object that was not yet cached takes a
+    /// positional claim on the next unmatched `ReplyTaskInventory`. A claim whose
+    /// own reply never arrives is dropped rather than left to hijack an unrelated
+    /// later reply — which would download and parse the contents of an object
+    /// nobody asked to read.
+    #[test]
+    fn a_lost_task_inventory_reply_does_not_hijack_a_later_one() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let circuit = session.root_circuit_id().ok_or("no circuit")?;
+
+        settle_for_a_long_wait(&mut session, now)?;
+
+        // The object is not in the cache, so the fetch claims positionally.
+        session.fetch_task_inventory(
+            ScopedObjectId::new(circuit, sl_proto::RegionLocalObjectId(77)),
+            now,
+        )?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        let expired = after(now, 60_001)?;
+        advance_alive(&mut session, now, expired, 500)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // An unrelated object's reply now arrives; the stale claim must not take
+        // it, so no `Xfer` for that object's listing goes out.
+        let reply = AnyMessage::ReplyTaskInventory(ReplyTaskInventory {
+            inventory_data: ReplyTaskInventoryInventoryDataBlock {
+                task_id: uuid::Uuid::from_u128(0x5EA7),
+                serial: 3,
+                filename: b"inventory.tmp\0".to_vec(),
+            },
+        });
+        session.handle_datagram(sim_addr(), &server_message(&reply, 600, true)?, expired)?;
+        assert!(
+            !drain(&mut session)?
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RequestXfer(_))),
+            "a dropped claim does not follow someone else's reply"
         );
         Ok(())
     }
@@ -14445,6 +14804,58 @@ mod test {
         assert!(
             !re_requested,
             "a now-tracked parent must not be re-requested"
+        );
+        Ok(())
+    }
+
+    /// The unknown-parent request is speculative: nothing tracks whether the
+    /// simulator answered it. Deduping it *forever* would strand every child of
+    /// that root for the session if the one request went unanswered, so the
+    /// dedupe is a cooldown — a later update naming the same missing parent
+    /// re-asks once the cooldown has passed.
+    #[test]
+    fn an_unanswered_unknown_parent_request_is_re_asked_later() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        settle_for_a_long_wait(&mut session, now)?;
+
+        let AnyMessage::ObjectUpdate(mut child) = object_update(9002, 0xC3, zero_vec()) else {
+            return Err("object_update should build an ObjectUpdate".into());
+        };
+        let block = child
+            .object_data
+            .first_mut()
+            .ok_or("the child update must have a block")?;
+        block.parent_id = 4300;
+        let child = AnyMessage::ObjectUpdate(child);
+
+        // Asks for the missing parent once, and does not ask again for a repeat
+        // of the same update moments later.
+        let asks_for_the_parent = |session: &mut Session| -> Result<bool, TestError> {
+            Ok(drain(session)?.iter().any(|message| match message {
+                AnyMessage::RequestMultipleObjects(request) => {
+                    request.object_data.iter().any(|block| block.id == 4300)
+                }
+                _ => false,
+            }))
+        };
+        session.handle_datagram(sim_addr(), &server_message(&child, 20, true)?, now)?;
+        assert!(asks_for_the_parent(&mut session)?);
+        session.handle_datagram(sim_addr(), &server_message(&child, 21, true)?, now)?;
+        assert!(
+            !asks_for_the_parent(&mut session)?,
+            "the request is deduped while the cooldown stands"
+        );
+
+        // Once the cooldown has passed the parent is asked for again, rather
+        // than the child being stranded on one unanswered request.
+        let later = after(now, 60_001)?;
+        advance_alive(&mut session, now, later, 800)?;
+        drain(&mut session)?;
+        session.handle_datagram(sim_addr(), &server_message(&child, 22, true)?, later)?;
+        assert!(
+            asks_for_the_parent(&mut session)?,
+            "an unanswered parent request is re-asked after the cooldown"
         );
         Ok(())
     }

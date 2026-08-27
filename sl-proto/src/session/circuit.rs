@@ -42,16 +42,17 @@ use sl_types::money::LindenAmount;
 use sl_wire::AbuseReport;
 use sl_wire::Permissions;
 use sl_wire::messages::{
-    AcceptCallingCard, AcceptCallingCardAgentDataBlock, AcceptCallingCardFolderDataBlock,
-    AcceptCallingCardTransactionBlockBlock, AcceptFriendship, AcceptFriendshipAgentDataBlock,
-    AcceptFriendshipFolderDataBlock, AcceptFriendshipTransactionBlockBlock, ActivateGestures,
-    ActivateGesturesAgentDataBlock, ActivateGesturesDataBlock, ActivateGroup,
-    ActivateGroupAgentDataBlock, AgentAnimation, AgentAnimationAgentDataBlock,
-    AgentAnimationAnimationListBlock, AgentAnimationPhysicalAvatarEventListBlock,
-    AgentCachedTexture, AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock,
-    AgentIsNowWearing, AgentIsNowWearingAgentDataBlock, AgentIsNowWearingWearableDataBlock,
-    AgentRequestSit, AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock,
-    AgentSetAppearance, AgentSetAppearanceAgentDataBlock, AgentSetAppearanceObjectDataBlock,
+    AbortXfer, AbortXferXferIDBlock, AcceptCallingCard, AcceptCallingCardAgentDataBlock,
+    AcceptCallingCardFolderDataBlock, AcceptCallingCardTransactionBlockBlock, AcceptFriendship,
+    AcceptFriendshipAgentDataBlock, AcceptFriendshipFolderDataBlock,
+    AcceptFriendshipTransactionBlockBlock, ActivateGestures, ActivateGesturesAgentDataBlock,
+    ActivateGesturesDataBlock, ActivateGroup, ActivateGroupAgentDataBlock, AgentAnimation,
+    AgentAnimationAgentDataBlock, AgentAnimationAnimationListBlock,
+    AgentAnimationPhysicalAvatarEventListBlock, AgentCachedTexture,
+    AgentCachedTextureAgentDataBlock, AgentCachedTextureWearableDataBlock, AgentIsNowWearing,
+    AgentIsNowWearingAgentDataBlock, AgentIsNowWearingWearableDataBlock, AgentRequestSit,
+    AgentRequestSitAgentDataBlock, AgentRequestSitTargetObjectBlock, AgentSetAppearance,
+    AgentSetAppearanceAgentDataBlock, AgentSetAppearanceObjectDataBlock,
     AgentSetAppearanceVisualParamBlock, AgentSetAppearanceWearableDataBlock, AgentSit,
     AgentSitAgentDataBlock, AgentThrottle, AgentThrottleAgentDataBlock, AgentThrottleThrottleBlock,
     AgentUpdate, AgentUpdateAgentDataBlock, AgentWearablesRequest,
@@ -2246,6 +2247,24 @@ impl Circuit {
             xfer_id: ConfirmXferPacketXferIDBlock {
                 id: xfer_id.get(),
                 packet,
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)
+    }
+
+    /// Queues an `AbortXfer` reliably, telling the simulator to stop serving (or
+    /// stop waiting on) the transfer `xfer_id`. `result` is the `LLTErrorCode`
+    /// the reference viewer's `LLXfer::abort` passes — negative on error.
+    pub(crate) fn send_abort_xfer(
+        &mut self,
+        xfer_id: XferId,
+        result: i32,
+        now: Instant,
+    ) -> Result<(), WireError> {
+        let message = AnyMessage::AbortXfer(AbortXfer {
+            xfer_id: AbortXferXferIDBlock {
+                id: xfer_id.get(),
+                result,
             },
         });
         self.send(&message, Reliability::Reliable, now)

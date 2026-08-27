@@ -730,16 +730,21 @@ pub enum Event {
         /// The number of file bytes uploaded.
         byte_count: usize,
     },
-    /// An in-flight `Xfer` transfer (upload or download) was aborted by the
-    /// simulator (`AbortXfer`), so it will not complete. Surfaced so a caller
-    /// waiting on [`Event::XferUploaded`](Event::XferUploaded) /
+    /// An in-flight `Xfer` transfer (upload or download) was aborted, so it will
+    /// not complete — either by the simulator (`AbortXfer`) or by this session
+    /// giving up on a transfer that stopped making progress for
+    /// [`XFER_STALL_TIMEOUT`](crate::XFER_STALL_TIMEOUT), which sends the same
+    /// `AbortXfer` the other way. Surfaced so a caller waiting on
+    /// [`Event::XferUploaded`](Event::XferUploaded) /
     /// [`Event::ServerFileDownloaded`](Event::ServerFileDownloaded) is not left
     /// hanging.
     XferAborted {
         /// The transfer id that was aborted.
         xfer_id: XferId,
-        /// The simulator's abort reason code (an `LLTErrorCode`; negative on
-        /// error, per the reference viewer).
+        /// The abort reason code (an `LLTErrorCode`; negative on error, per the
+        /// reference viewer). A local give-up reports the reference's
+        /// `LL_ERR_TCP_TIMEOUT` (`-23016`), which is what `LLXfer::abort` sends
+        /// in the same situation.
         result: i32,
     },
     /// A task-inventory item's asset arrived over the legacy UDP Transfer path
@@ -773,7 +778,10 @@ pub enum Event {
     /// non-`Ok` status (e.g. [`UnknownSource`](TransferStatus::UnknownSource)
     /// for a missing asset, or
     /// [`InsufficientPermissions`](TransferStatus::InsufficientPermissions)),
-    /// so no asset bytes will arrive. Distinct from
+    /// or the stream went quiet for
+    /// [`ASSET_TRANSFER_TIMEOUT`](crate::ASSET_TRANSFER_TIMEOUT) and this
+    /// session gave up on it ([`Abort`](TransferStatus::Abort)) — either way no
+    /// asset bytes will arrive. Distinct from
     /// [`Event::AssetTransferFailed`](Event::AssetTransferFailed), which
     /// reports the modern HTTP fetch path.
     TransferFailed {
@@ -1482,9 +1490,11 @@ pub enum Event {
     /// HTTP `GetTexture` capability (the runtime `FetchTexture` command). The
     /// image bytes are the raw (usually JPEG-2000) codestream, not pixels.
     TextureReceived(Box<Texture>),
-    /// A requested texture does not exist in the asset store
-    /// (`ImageNotInDatabase`), or its HTTP fetch returned 404. Carries the
-    /// texture's UUID.
+    /// A requested texture will not arrive: it does not exist in the asset store
+    /// (`ImageNotInDatabase`), its HTTP fetch returned 404 or errored, or its
+    /// legacy UDP stream stalled through
+    /// [`TEXTURE_DOWNLOAD_MAX_ATTEMPTS`](crate::TEXTURE_DOWNLOAD_MAX_ATTEMPTS)
+    /// re-requests and the session gave up on it. Carries the texture's UUID.
     TextureNotFound(TextureKey),
     /// A requested generic asset finished downloading: the [`Asset`] fetched
     /// over the HTTP `ViewerAsset` / `GetMesh` capability (a runtime `FetchAsset`
@@ -1520,6 +1530,11 @@ pub enum Event {
     /// uploader: this reports the UDP path that saves an edited asset back onto
     /// its existing inventory item. The item's asset id is bound separately by
     /// the accompanying `UpdateInventoryItem`, so no inventory-item id is carried.
+    ///
+    /// An oversized save whose bytes the simulator never pulled also lands here
+    /// with `success == false`, once its upload offer expires
+    /// ([`XFER_OFFER_TIMEOUT`](crate::XFER_OFFER_TIMEOUT)) — the save has no
+    /// other completion path, so without it the caller would wait forever.
     InventoryAssetSaved {
         /// The stored asset's UUID (`combine(transaction_id, secure_session_id)`).
         asset_id: Uuid,

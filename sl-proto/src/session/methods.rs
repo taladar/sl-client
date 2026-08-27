@@ -28,26 +28,28 @@ use super::conversions::{
     windlight_refresh_from_llsd,
 };
 use super::{
-    AGENT_UPDATE_INTERVAL, AVATAR_PICKER_SEARCH_TAG, CAP_AGENT_EXPERIENCES, CAP_AGENT_PREFERENCES,
-    CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST, CAP_CREATE_INVENTORY_CATEGORY,
-    CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT, CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM,
-    CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM, CAP_FIND_EXPERIENCE_BY_NAME,
-    CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES, CAP_GET_DISPLAY_NAMES,
-    CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST, CAP_GET_OBJECT_PHYSICS_DATA,
-    CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES, CAP_LIBRARY_API_V3,
-    CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA, CAP_PARCEL_VOICE_INFO,
-    CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS, CAP_REGION_EXPERIENCES,
-    CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED, CAP_SIMULATOR_FEATURES,
-    CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
+    AGENT_UPDATE_INTERVAL, ASSET_TRANSFER_TIMEOUT, AVATAR_PICKER_SEARCH_TAG, CAP_AGENT_EXPERIENCES,
+    CAP_AGENT_PREFERENCES, CAP_ATTACHMENT_RESOURCES, CAP_CHAT_SESSION_REQUEST,
+    CAP_CREATE_INVENTORY_CATEGORY, CAP_EXPERIENCE_PREFERENCES, CAP_EXT_ENVIRONMENT,
+    CAP_FETCH_INVENTORY, CAP_FETCH_INVENTORY_ITEM, CAP_FETCH_LIBRARY, CAP_FETCH_LIBRARY_ITEM,
+    CAP_FIND_EXPERIENCE_BY_NAME, CAP_GET_ADMIN_EXPERIENCES, CAP_GET_CREATOR_EXPERIENCES,
+    CAP_GET_DISPLAY_NAMES, CAP_GET_EXPERIENCE_INFO, CAP_GET_EXPERIENCES, CAP_GET_OBJECT_COST,
+    CAP_GET_OBJECT_PHYSICS_DATA, CAP_GROUP_MEMBER_DATA, CAP_INVENTORY_API_V3, CAP_LAND_RESOURCES,
+    CAP_LIBRARY_API_V3, CAP_LSL_SYNTAX, CAP_MODIFY_MATERIAL_PARAMS, CAP_OBJECT_MEDIA,
+    CAP_PARCEL_VOICE_INFO, CAP_PROVISION_VOICE_ACCOUNT, CAP_READ_OFFLINE_MSGS,
+    CAP_REGION_EXPERIENCES, CAP_REMOTE_PARCEL_REQUEST, CAP_RESOURCE_COST_SELECTED,
+    CAP_SIMULATOR_FEATURES, CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
     Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MessageCursor, PING_INTERVAL, PendingHandover, PendingInvite, ReliableSeverity, SIT_TIMEOUT,
-    ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState,
-    Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT,
-    TakenControls, TeleportPhase, TextureDownload, TransferDownload, TransferPurpose,
-    VoiceChannelInfo, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover, PendingInvite,
+    RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
+    SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
+    TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
+    TransferDownload, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT, XFER_STALL_TIMEOUT,
+    XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -224,13 +226,13 @@ impl Session {
             secure_session_id: Uuid::nil(),
             pending_asset_uploads: BTreeMap::new(),
             next_xfer_id: XferId(1),
-            pending_task_inventory: BTreeSet::new(),
+            pending_task_inventory: BTreeMap::new(),
             pending_task_inventory_unresolved: VecDeque::new(),
             texture_downloads: BTreeMap::new(),
             transfer_downloads: BTreeMap::new(),
             next_transfer_id: 1,
             objects: BTreeMap::new(),
-            requested_parents: BTreeSet::new(),
+            requested_parents: BTreeMap::new(),
             terrain: BTreeMap::new(),
             regions: BTreeMap::new(),
             region_flags: BTreeMap::new(),
@@ -2411,15 +2413,23 @@ impl Session {
             }
         }
         // Ask the simulator to (re)send the unknown parent so the child's linkset /
-        // attachment chain can resolve; deduped so it is asked once until it
-        // arrives (the reference viewer requests unknown parents in
-        // `LLViewerObjectList::processUpdateCore`).
-        if parent_missing
-            && self
+        // attachment chain can resolve (the reference viewer requests unknown
+        // parents in `LLViewerObjectList::processUpdateCore`). The request is a
+        // speculative one whose result is not tracked, so the dedupe is a
+        // cooldown rather than a latch: asking once *ever* would strand every
+        // child of that root for the session if the simulator ignored that one
+        // request, and asking on every referencing update would flood a region
+        // streaming many children of a missing root.
+        if parent_missing {
+            let parent = ScopedObjectId::new(circuit_id, parent_local);
+            let due = self
                 .requested_parents
-                .insert(ScopedObjectId::new(circuit_id, parent_local))
-        {
-            self.request_object_ids(from, &[parent_local], now);
+                .get(&parent)
+                .is_none_or(|asked| now.saturating_duration_since(*asked) >= RELIABLE_REPLY_GRACE);
+            if due {
+                let _previous = self.requested_parents.insert(parent, now);
+                self.request_object_ids(from, &[parent_local], now);
+            }
         }
     }
 
@@ -2766,6 +2776,11 @@ impl Session {
         self.parcels.remove(&circuit_id);
         self.time_dilation.remove(&circuit_id);
         self.own_avatar.remove(&circuit_id);
+        // Outstanding parent re-send requests are scoped to this circuit's
+        // region-local ids, so they go stale with it; without this they are the
+        // one per-circuit store that survives the circuit.
+        self.requested_parents
+            .retain(|parent, _asked| parent.circuit != circuit_id);
         // Drop any permission grants scoped to this retiring (child/neighbour)
         // circuit; the root is never retired this way, so attachment grants
         // (root-scoped) are never dropped here.
@@ -3628,6 +3643,7 @@ impl Session {
                     let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
                     if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
                         download.buffer.extend_from_slice(chunk.payload);
+                        download.last_progress = now;
                     }
                     if let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_confirm_xfer_packet(xfer_id, packet_id.raw(), now)?;
@@ -3653,16 +3669,17 @@ impl Session {
                 let offered = self.pending_xfer_uploads.remove(&filename).or_else(|| {
                     self.pending_asset_uploads.remove(&request.xfer_id.v_file_id)
                 });
-                if let Some(data) = offered {
+                if let Some(offer) = offered {
                     let xfer_id = XferId(request.xfer_id.id);
                     self.xfer_uploads.insert(
                         xfer_id,
                         XferUpload {
                             viewer_filename: filename,
-                            data,
+                            data: offer.data,
                             sent: 0,
                             next_sequence: 0,
                             last_sent: false,
+                            last_progress: now,
                         },
                     );
                     self.send_next_xfer_upload_packet(xfer_id, now)?;
@@ -3682,8 +3699,10 @@ impl Session {
                 // upload; release the next one, or finish if that was the final
                 // packet. `Xfer` upload is strictly one-packet-at-a-time.
                 let xfer_id = XferId(confirm.xfer_id.id);
-                if let Some(upload) = self.xfer_uploads.get(&xfer_id) {
-                    if upload.last_sent {
+                if let Some(upload) = self.xfer_uploads.get_mut(&xfer_id) {
+                    upload.last_progress = now;
+                    let finished = upload.last_sent;
+                    if finished {
                         if let Some(upload) = self.xfer_uploads.remove(&xfer_id) {
                             self.events.push_back(Event::XferUploaded {
                                 xfer_id,
@@ -3722,6 +3741,7 @@ impl Session {
                     if matches!(status, TransferStatus::Ok) {
                         if let Some(download) = self.transfer_downloads.get_mut(&transfer_id) {
                             download.expected_size = usize::try_from(info.transfer_info.size).ok();
+                            download.last_progress = now;
                         }
                     } else {
                         let _download = self.transfer_downloads.remove(&transfer_id);
@@ -3746,6 +3766,7 @@ impl Session {
                             download
                                 .chunks
                                 .insert(index, packet.transfer_data.data.clone());
+                            download.last_progress = now;
                             if matches!(status, TransferStatus::Done) {
                                 download.last_packet = Some(index);
                             }
@@ -3784,6 +3805,7 @@ impl Session {
                     download.codec = ImageCodec::from_code(image.image_id.codec);
                     download.packets = image.image_id.packets;
                     download.chunks.insert(0, image.image_data.data.clone());
+                    download.note_progress(now);
                     download.is_complete()
                 } else {
                     false
@@ -3806,6 +3828,7 @@ impl Session {
                     download
                         .chunks
                         .insert(packet_index, image.image_data.data.clone());
+                    download.note_progress(now);
                     download.is_complete()
                 } else {
                     false
@@ -4019,7 +4042,7 @@ impl Session {
                 // If `fetch_task_inventory` asked for this object's parsed
                 // contents, follow the reply to its `Xfer` file (or emit an empty
                 // listing directly when the task inventory is empty).
-                let claimed = self.pending_task_inventory.remove(&task)
+                let claimed = self.pending_task_inventory.remove(&task).is_some()
                     || self.pending_task_inventory_unresolved.pop_front().is_some();
                 if claimed {
                     if filename.is_empty() {
@@ -4989,6 +5012,12 @@ impl Session {
             }
         }
 
+        // Re-issue, and eventually abandon, asset streams that stopped making
+        // progress. Every one of these registries is insert-on-request,
+        // remove-on-success, so without this a stalled stream strands its
+        // partial buffer — and its caller — for the session's life.
+        self.expire_asset_transfers(now);
+
         if self
             .circuit
             .as_ref()
@@ -5187,6 +5216,276 @@ impl Session {
         }
 
         Ok(())
+    }
+
+    /// Advances every asset-transfer registry to `now`: re-issues what the
+    /// reference viewer re-issues, and drops what has gone quiet for too long.
+    ///
+    /// Each of these registries is filled when a request goes out and emptied
+    /// when the answer completes, with no third path — so a lost reply, a
+    /// simulator that stops streaming, or an upload offer that is silently
+    /// declined would otherwise hold its buffers (whole asset payloads, for an
+    /// upload) until the session ends, and leave whoever asked waiting on an
+    /// event that can never arrive.
+    fn expire_asset_transfers(&mut self, now: Instant) {
+        self.expire_texture_downloads(now);
+        self.expire_transfer_downloads(now);
+        self.expire_xfers(now);
+        self.expire_upload_offers(now);
+        self.expire_task_inventory_claims(now);
+    }
+
+    /// Re-issues the `RequestImage` of every legacy UDP texture download whose
+    /// packet stream has stalled, resuming at the first index still missing, and
+    /// gives up on one that has been re-issued
+    /// [`TEXTURE_DOWNLOAD_MAX_ATTEMPTS`] times without a packet.
+    fn expire_texture_downloads(&mut self, now: Instant) {
+        let mut retry = Vec::new();
+        let mut abandoned = Vec::new();
+        for (id, download) in &mut self.texture_downloads {
+            if now.saturating_duration_since(download.last_progress)
+                < TEXTURE_DOWNLOAD_STALL_TIMEOUT
+            {
+                continue;
+            }
+            download.last_progress = now;
+            if download.attempts >= TEXTURE_DOWNLOAD_MAX_ATTEMPTS {
+                abandoned.push(*id);
+            } else {
+                download.attempts = download.attempts.saturating_add(1);
+                retry.push((
+                    *id,
+                    download.discard_level,
+                    download.priority,
+                    download.next_missing_packet(),
+                ));
+            }
+        }
+        for (id, discard_level, priority, packet) in retry {
+            tracing::debug!(%id, packet, "UDP texture download stalled; re-requesting");
+            // Best-effort: an encode failure must not abort the timer loop, and
+            // the next stall re-tries it anyway.
+            if let Some(circuit) = self.circuit.as_mut() {
+                let _ignored = circuit.send_request_image(
+                    TextureKey::from(id),
+                    discard_level,
+                    priority,
+                    u32::from(packet),
+                    0,
+                    now,
+                );
+            }
+        }
+        for id in abandoned {
+            let _download = self.texture_downloads.remove(&id);
+            tracing::warn!(
+                %id,
+                "giving up on a UDP texture download after \
+                 {TEXTURE_DOWNLOAD_MAX_ATTEMPTS} stalled requests"
+            );
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::TEXTURE_REQUEST.to_owned(),
+                sequence: None,
+            });
+            self.events
+                .push_back(Event::TextureNotFound(TextureKey::from(id)));
+        }
+    }
+
+    /// Abandons every legacy UDP asset Transfer whose packet stream has been
+    /// quiet for [`ASSET_TRANSFER_TIMEOUT`], telling the simulator to stop
+    /// serving it and failing the fetch so its caller is not left waiting.
+    fn expire_transfer_downloads(&mut self, now: Instant) {
+        let expired: Vec<TransferId> = self
+            .transfer_downloads
+            .iter()
+            .filter(|(_, download)| {
+                now.saturating_duration_since(download.last_progress) >= ASSET_TRANSFER_TIMEOUT
+            })
+            .map(|(transfer_id, _)| *transfer_id)
+            .collect();
+        for transfer_id in expired {
+            let _download = self.transfer_downloads.remove(&transfer_id);
+            // Best-effort, like every other send on the timer loop.
+            if let Some(circuit) = self.circuit.as_mut() {
+                let _ignored = circuit.send_transfer_abort(transfer_id, now);
+            }
+            tracing::warn!(%transfer_id, "giving up on a stalled UDP asset transfer");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::TRANSFER_REQUEST.to_owned(),
+                sequence: None,
+            });
+            self.events.push_back(Event::TransferFailed {
+                transfer_id,
+                status: TransferStatus::Abort,
+            });
+        }
+    }
+
+    /// Abandons every in-flight `Xfer` — inbound download or outbound upload —
+    /// that has gone [`XFER_STALL_TIMEOUT`] without a packet or a confirmation,
+    /// sending the `AbortXfer` the reference viewer sends in the same situation.
+    fn expire_xfers(&mut self, now: Instant) {
+        let stalled = |last_progress: Instant| {
+            now.saturating_duration_since(last_progress) >= XFER_STALL_TIMEOUT
+        };
+        // The two registries are keyed independently — download ids are minted
+        // here, upload ids by the simulator — so they are swept separately: one
+        // sweep over the union could drop an unrelated live transfer that
+        // happens to share an id.
+        let downloads: Vec<XferId> = self
+            .xfer_downloads
+            .iter()
+            .filter(|(_, download)| stalled(download.last_progress))
+            .map(|(xfer_id, _)| *xfer_id)
+            .collect();
+        for xfer_id in downloads {
+            let _download = self.xfer_downloads.remove(&xfer_id);
+            self.abandon_xfer(xfer_id, "download", now);
+        }
+        let uploads: Vec<XferId> = self
+            .xfer_uploads
+            .iter()
+            .filter(|(_, upload)| stalled(upload.last_progress))
+            .map(|(xfer_id, _)| *xfer_id)
+            .collect();
+        for xfer_id in uploads {
+            let _upload = self.xfer_uploads.remove(&xfer_id);
+            self.abandon_xfer(xfer_id, "upload", now);
+        }
+    }
+
+    /// Tells the simulator this side has given up on `xfer_id` and surfaces the
+    /// give-up, so a caller waiting on the transfer's completion is not left
+    /// hanging. `direction` only labels the log line.
+    fn abandon_xfer(&mut self, xfer_id: XferId, direction: &str, now: Instant) {
+        // Best-effort, like every other send on the timer loop.
+        if let Some(circuit) = self.circuit.as_mut() {
+            let _ignored = circuit.send_abort_xfer(xfer_id, XFER_TIMEOUT_RESULT, now);
+        }
+        tracing::warn!(
+            xfer_id = xfer_id.get(),
+            direction,
+            "giving up on a stalled Xfer"
+        );
+        self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+            request: Diagnostic::XFER_REQUEST.to_owned(),
+            sequence: None,
+        });
+        self.events.push_back(Event::XferAborted {
+            xfer_id,
+            result: XFER_TIMEOUT_RESULT,
+        });
+    }
+
+    /// Withdraws every upload offer the simulator never picked up, dropping the
+    /// held payload. An asset offer additionally fails its
+    /// [`Session::save_inventory_asset`], whose completion event would otherwise
+    /// never come.
+    fn expire_upload_offers(&mut self, now: Instant) {
+        let expired_files: Vec<String> = self
+            .pending_xfer_uploads
+            .iter()
+            .filter(|(_, offer)| now >= offer.expires)
+            .map(|(filename, _)| filename.clone())
+            .collect();
+        for filename in expired_files {
+            let _offer = self.pending_xfer_uploads.remove(&filename);
+            tracing::warn!(%filename, "offered Xfer upload was never requested; withdrawn");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::XFER_REQUEST.to_owned(),
+                sequence: None,
+            });
+        }
+        let expired_assets: Vec<Uuid> = self
+            .pending_asset_uploads
+            .iter()
+            .filter(|(_, offer)| now >= offer.expires)
+            .map(|(asset_id, _)| *asset_id)
+            .collect();
+        for asset_id in expired_assets {
+            let _offer = self.pending_asset_uploads.remove(&asset_id);
+            tracing::warn!(%asset_id, "offered asset upload was never pulled; withdrawn");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::ASSET_UPLOAD_REQUEST.to_owned(),
+                sequence: None,
+            });
+            self.events.push_back(Event::InventoryAssetSaved {
+                asset_id,
+                success: false,
+            });
+        }
+    }
+
+    /// Drops task-inventory claims whose `ReplyTaskInventory` never arrived.
+    ///
+    /// The unresolved queue is the one that matters: its entries are positional,
+    /// so a claim left standing is filled by the next *unrelated* reply — an
+    /// object whose contents nobody asked to read would be downloaded and parsed
+    /// on a stale claim's behalf.
+    fn expire_task_inventory_claims(&mut self, now: Instant) {
+        let fresh = |asked: &Instant| now.saturating_duration_since(*asked) < RELIABLE_REPLY_GRACE;
+        let unresolved_before = self.pending_task_inventory_unresolved.len();
+        self.pending_task_inventory_unresolved.retain(fresh);
+        let resolved_before = self.pending_task_inventory.len();
+        self.pending_task_inventory.retain(|_, asked| fresh(asked));
+        let lost = unresolved_before
+            .saturating_sub(self.pending_task_inventory_unresolved.len())
+            .saturating_add(resolved_before.saturating_sub(self.pending_task_inventory.len()));
+        for _ in 0..lost {
+            tracing::warn!("task inventory reply never arrived; claim dropped");
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::TASK_INVENTORY_REQUEST.to_owned(),
+                sequence: None,
+            });
+        }
+    }
+
+    /// The earliest instant at which [`Self::expire_asset_transfers`] has work
+    /// to do, merged into [`Self::poll_timeout`] so an otherwise idle shell
+    /// still wakes for a stalled stream.
+    fn next_asset_transfer_deadline(&self) -> Option<Instant> {
+        let mut earliest = None;
+        for download in self.texture_downloads.values() {
+            merge_deadline(
+                &mut earliest,
+                Some(deadline(
+                    download.last_progress,
+                    TEXTURE_DOWNLOAD_STALL_TIMEOUT,
+                )),
+            );
+        }
+        for download in self.transfer_downloads.values() {
+            merge_deadline(
+                &mut earliest,
+                Some(deadline(download.last_progress, ASSET_TRANSFER_TIMEOUT)),
+            );
+        }
+        for download in self.xfer_downloads.values() {
+            merge_deadline(
+                &mut earliest,
+                Some(deadline(download.last_progress, XFER_STALL_TIMEOUT)),
+            );
+        }
+        for upload in self.xfer_uploads.values() {
+            merge_deadline(
+                &mut earliest,
+                Some(deadline(upload.last_progress, XFER_STALL_TIMEOUT)),
+            );
+        }
+        for offer in self.pending_xfer_uploads.values() {
+            merge_deadline(&mut earliest, Some(offer.expires));
+        }
+        for offer in self.pending_asset_uploads.values() {
+            merge_deadline(&mut earliest, Some(offer.expires));
+        }
+        for asked in &self.pending_task_inventory_unresolved {
+            merge_deadline(&mut earliest, Some(deadline(*asked, RELIABLE_REPLY_GRACE)));
+        }
+        for asked in self.pending_task_inventory.values() {
+            merge_deadline(&mut earliest, Some(deadline(*asked, RELIABLE_REPLY_GRACE)));
+        }
+        earliest
     }
 
     /// Enqueues an application message for delivery.
@@ -7948,6 +8247,15 @@ impl Session {
     /// Registers a new inbound `Xfer` download for `filename` with the given
     /// routing `purpose` and queues the `RequestXfer` that starts it. Returns the
     /// allocated [`XferId`] correlating the transfer.
+    ///
+    /// The registry entry is made **after** the request is on the wire:
+    /// registering first would leave a caller waiting on a download whose
+    /// request never went out, and strand its entry for the session's life.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
     fn start_xfer_download(
         &mut self,
         purpose: XferPurpose,
@@ -7955,16 +8263,16 @@ impl Session {
         now: Instant,
     ) -> Result<XferId, Error> {
         let xfer_id = self.alloc_xfer_id();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_request_xfer(xfer_id, filename, now)?;
         self.xfer_downloads.insert(
             xfer_id,
             XferDownload {
                 purpose,
                 buffer: Vec::new(),
+                last_progress: now,
             },
         );
-        if let Some(circuit) = self.circuit.as_mut() {
-            circuit.send_request_xfer(xfer_id, filename, now)?;
-        }
         Ok(xfer_id)
     }
 
@@ -8019,6 +8327,7 @@ impl Session {
         upload.sent = packet.sent;
         upload.last_sent = packet.id.is_last();
         upload.next_sequence = sequence.wrapping_add(1);
+        upload.last_progress = now;
         if let Some(circuit) = self.circuit.as_mut() {
             circuit.send_xfer_packet(xfer_id, packet.id.raw(), &packet.payload, now)?;
         }
@@ -8055,6 +8364,14 @@ impl Session {
     /// Starts a legacy UDP asset Transfer (`TransferRequest`) with the given
     /// routing `purpose`, `source_type` and packed `params`, registering the
     /// reassembly state under a fresh [`TransferId`].
+    ///
+    /// As in [`start_xfer_download`](Self::start_xfer_download) the registry
+    /// entry is made only once the request is on the wire.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if no circuit is established yet, or
+    /// [`Error::Wire`] if the request fails to encode.
     fn start_transfer_download(
         &mut self,
         purpose: TransferPurpose,
@@ -8064,6 +8381,8 @@ impl Session {
         now: Instant,
     ) -> Result<TransferId, Error> {
         let transfer_id = self.alloc_transfer_id();
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        circuit.send_transfer_request(transfer_id, source_type, params, now)?;
         self.transfer_downloads.insert(
             transfer_id,
             TransferDownload {
@@ -8072,11 +8391,9 @@ impl Session {
                 expected_size: None,
                 chunks: BTreeMap::new(),
                 last_packet: None,
+                last_progress: now,
             },
         );
-        if let Some(circuit) = self.circuit.as_mut() {
-            circuit.send_transfer_request(transfer_id, source_type, params, now)?;
-        }
         Ok(transfer_id)
     }
 
@@ -8250,18 +8567,24 @@ impl Session {
         priority: f32,
         now: Instant,
     ) -> Result<(), Error> {
-        // A fresh download buffer; a repeat request just restarts it.
+        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
+        // `type` 0 is the normal image channel; start at packet 0.
+        circuit.send_request_image(texture_id, discard_level, priority, 0, 0, now)?;
+        // A fresh download buffer; a repeat request just restarts it. Registered
+        // only once the request is on the wire, so a failed send leaves no entry
+        // behind for a caller to wait on.
         self.texture_downloads.insert(
             texture_id.uuid(),
             TextureDownload {
                 codec: ImageCodec::J2c,
                 packets: 0,
                 chunks: BTreeMap::new(),
+                discard_level,
+                priority,
+                last_progress: now,
+                attempts: 0,
             },
         );
-        let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
-        // `type` 0 is the normal image channel; start at packet 0.
-        circuit.send_request_image(texture_id, discard_level, priority, 0, 0, now)?;
         Ok(())
     }
 
@@ -9024,9 +9347,9 @@ impl Session {
     ) -> Result<(), Error> {
         match self.resolve_object_key(target) {
             Some(task) => {
-                self.pending_task_inventory.insert(task);
+                let _previous = self.pending_task_inventory.insert(task, now);
             }
-            None => self.pending_task_inventory_unresolved.push_back(()),
+            None => self.pending_task_inventory_unresolved.push_back(now),
         }
         let circuit = self.circuit_for_scope(target.circuit)?;
         circuit.send_request_task_inventory(target.id, now)?;
@@ -10191,7 +10514,13 @@ impl Session {
         )?;
         circuit.send_update_inventory_item(item, transaction_id.get(), callback_id, now)?;
         if !inline {
-            let _prev = self.pending_asset_uploads.insert(asset_id, data);
+            let _prev = self.pending_asset_uploads.insert(
+                asset_id,
+                OfferedUpload {
+                    data,
+                    expires: deadline(now, XFER_OFFER_TIMEOUT),
+                },
+            );
         }
         self.cache_inventory_item(item.clone());
         Ok(())
@@ -11042,8 +11371,13 @@ impl Session {
         let circuit = self.circuit.as_mut().ok_or(Error::NoCircuit)?;
         let params = ["upload filename".to_owned(), viewer_filename.to_owned()];
         circuit.send_estate_owner_message("terrain", &params, now)?;
-        self.pending_xfer_uploads
-            .insert(viewer_filename.to_owned(), data);
+        let _previous = self.pending_xfer_uploads.insert(
+            viewer_filename.to_owned(),
+            OfferedUpload {
+                data,
+                expires: deadline(now, XFER_OFFER_TIMEOUT),
+            },
+        );
         Ok(())
     }
 
@@ -12925,6 +13259,9 @@ impl Session {
         // per-circuit, but an idle shell still has to wake for them or a stalled
         // folder sits `Fetching` until some other timer happens to fire.
         merge_deadline(&mut earliest, self.inventory.next_fetch_deadline());
+        // Likewise the asset-transfer stall deadlines: without them a download
+        // that goes quiet is only noticed the next time some other timer fires.
+        merge_deadline(&mut earliest, self.next_asset_transfer_deadline());
         for child in self.children.values() {
             merge_deadline(&mut earliest, Some(child.timers.inactivity));
             merge_deadline(&mut earliest, child.timers.ack_flush);

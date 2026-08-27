@@ -737,6 +737,77 @@ pub const INVENTORY_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 /// the fetch queue rather than re-queued.
 pub const INVENTORY_FETCH_MAX_ATTEMPTS: u32 = 10;
 
+/// How long an in-flight legacy UDP texture download (`RequestImage` →
+/// `ImageData`/`ImagePacket`) may go without a packet before the session
+/// re-issues its `RequestImage`, resuming at the first packet index still
+/// missing.
+///
+/// Matches Firestorm's `SIM_LAZY_FLUSH_TIMEOUT`
+/// (`LLTextureFetch::sendRequestListToSimulators`), which re-sends a request
+/// that has gone this long without progress for exactly this reason.
+pub const TEXTURE_DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// How many times a stalled texture download is re-requested
+/// ([`TEXTURE_DOWNLOAD_STALL_TIMEOUT`] apart) before the session gives up on it,
+/// drops its partial packet buffer and surfaces
+/// [`Event::TextureNotFound`](crate::Event::TextureNotFound). A packet that
+/// actually arrives restores the full budget.
+///
+/// Matches Firestorm's `LL_PACKET_RETRY_LIMIT` (`LLXferManager`), the
+/// reference's retry ceiling for a UDP stream that stops answering. The
+/// reference's *texture* path has no ceiling of its own because a worker there
+/// is dropped when the viewer stops wanting the image; a sans-I/O session has
+/// no such signal, so an unbounded retry would be an unbounded registry.
+pub const TEXTURE_DOWNLOAD_MAX_ATTEMPTS: u32 = 10;
+
+/// How long an in-flight legacy UDP asset Transfer (`TransferRequest` →
+/// `TransferInfo`/`TransferPacket`) may go without a packet before the session
+/// abandons it, sending a `TransferAbort` and surfacing
+/// [`Event::TransferFailed`](crate::Event::TransferFailed) with
+/// [`TransferStatus::Abort`](crate::TransferStatus::Abort).
+///
+/// Matches Firestorm's `LL_ASSET_STORAGE_TIMEOUT`, the five minutes after which
+/// `LLAssetStorage::checkForTimeouts` fails a download request that has not
+/// completed.
+pub const ASSET_TRANSFER_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// How long an in-flight `Xfer` (an inbound file download or an outbound file
+/// upload) may go without a packet or a confirmation before the session
+/// abandons it, sending an `AbortXfer` and surfacing
+/// [`Event::XferAborted`](crate::Event::XferAborted).
+///
+/// Matches the reference's own ceiling for an `Xfer` that stops answering:
+/// `LL_PACKET_TIMEOUT` (3 s) times `LL_PACKET_RETRY_LIMIT` (10) in
+/// `LLXferManager::retransmitUnackedPackets`, past which the transfer is
+/// `abort`ed with `LL_ERR_TCP_TIMEOUT`.
+pub const XFER_STALL_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How long a file or asset offered for an outbound `Xfer` upload waits for the
+/// simulator's `RequestXfer` before the offer is withdrawn and its bytes
+/// dropped.
+///
+/// An offer the simulator never picks up — a terrain upload from a non-owner,
+/// say, which is silently refused — would otherwise hold a whole asset payload
+/// for the session's life. Matches Firestorm's `LL_XFER_REGISTRATION_TIMEOUT`
+/// ("registered xfer never requested, xfer dropped").
+pub const XFER_OFFER_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// The `Result` code an `AbortXfer` carries when *this* side gives up on a
+/// stalled transfer: the reference's `LL_ERR_TCP_TIMEOUT` (`llcircuit.h`), which
+/// is what `LLXfer::abort` sends in the same situation.
+const XFER_TIMEOUT_RESULT: i32 = -23016;
+
+/// How long a speculative, reliably-sent request may go unanswered before the
+/// session stops expecting its reply — used where the reply carries no
+/// correlation id of its own, so a claim left standing would be filled by an
+/// unrelated later reply.
+///
+/// Deliberately longer than the reliable layer's own worst-case retransmission
+/// window ([`RELIABLE_TIMEOUT_FACTOR`] × [`PING_AVERAGE_MAX`] ×
+/// [`MAX_RESEND_ATTEMPTS`] = 40 s), so giving up never races the original
+/// request still being retransmitted.
+const RELIABLE_REPLY_GRACE: Duration = Duration::from_secs(60);
+
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)
@@ -876,7 +947,7 @@ struct Timers {
 /// total size and packet count plus packet 0's data; subsequent `ImagePacket`s
 /// carry packets `1..`. Packets are buffered by index so an out-of-order arrival
 /// still reassembles correctly.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 struct TextureDownload {
     /// The codec reported by the `ImageData` header.
     codec: ImageCodec,
@@ -884,12 +955,48 @@ struct TextureDownload {
     packets: u16,
     /// The received packet payloads, keyed by packet index (0 = `ImageData`).
     chunks: BTreeMap<u16, Vec<u8>>,
+    /// The level of detail the request named, kept so a stalled download can be
+    /// re-requested on the same terms.
+    discard_level: i8,
+    /// The fetch priority the request named, kept for the same reason as
+    /// [`discard_level`](Self::discard_level).
+    priority: f32,
+    /// When this download last made progress — the request going out, or a
+    /// packet arriving. [`TEXTURE_DOWNLOAD_STALL_TIMEOUT`] past this the
+    /// `RequestImage` is re-issued.
+    last_progress: Instant,
+    /// How many times the `RequestImage` has been re-issued since the last
+    /// packet arrived. At [`TEXTURE_DOWNLOAD_MAX_ATTEMPTS`] the session gives
+    /// up on the download; an arriving packet resets it.
+    attempts: u32,
 }
 
 impl TextureDownload {
     /// Whether every packet `0..packets` has been received.
     fn is_complete(&self) -> bool {
         usize::from(self.packets) == self.chunks.len()
+    }
+
+    /// Records that a packet arrived: the stall clock restarts and the retry
+    /// budget is restored, so a slow but advancing stream is never abandoned
+    /// (the reference viewer resets `mRequestedDeltaTimer` the same way).
+    const fn note_progress(&mut self, now: Instant) {
+        self.last_progress = now;
+        self.attempts = 0;
+    }
+
+    /// The index of the first packet not yet received, counting up from zero —
+    /// where a re-issued `RequestImage` resumes (the reference viewer's
+    /// `mLastPacket + 1`).
+    fn next_missing_packet(&self) -> u16 {
+        let mut next = 0;
+        for index in self.chunks.keys() {
+            if *index != next {
+                break;
+            }
+            next = next.saturating_add(1);
+        }
+        next
     }
 
     /// Concatenates the buffered packets in index order into the full encoded
@@ -929,12 +1036,16 @@ enum TransferPurpose {
 /// stream is contiguous. Packets are buffered by index so an out-of-order
 /// arrival still reassembles correctly (mirroring the reference viewer's
 /// `LLTransferTarget` delayed-packet buffer).
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 struct TransferDownload {
     /// What the assembled asset bytes should be routed to on completion.
     purpose: TransferPurpose,
     /// The asset type the request named, echoed on the completion event.
     asset_type: AssetType,
+    /// When this transfer last made progress — the request going out, or a
+    /// `TransferInfo`/`TransferPacket` arriving. [`ASSET_TRANSFER_TIMEOUT`] past
+    /// this the session abandons it.
+    last_progress: Instant,
     /// The declared total size from the `TransferInfo` header, once received
     /// (currently informational; completion is driven by the `Done` packet).
     expected_size: Option<usize>,
@@ -1008,13 +1119,29 @@ enum XferPurpose {
 /// do with them once the final packet arrives. Started by a `MuteListUpdate`, an
 /// auto-fetched `ReplyTaskInventory`, or [`Session::request_xfer`], and keyed by
 /// [`XferId`] in [`Session::xfer_downloads`](Session::xfer_downloads).
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 struct XferDownload {
     /// What the assembled file should be routed to on completion.
     purpose: XferPurpose,
     /// The file bytes accumulated so far (the seq-0 length prefix already
     /// stripped).
     buffer: Vec<u8>,
+    /// When this download last made progress — the `RequestXfer` going out, or
+    /// a `SendXferPacket` arriving. [`XFER_STALL_TIMEOUT`] past this the session
+    /// abandons it.
+    last_progress: Instant,
+}
+
+/// A file or asset offered for an outbound `Xfer` upload that the simulator has
+/// not yet asked for. Held only until [`XFER_OFFER_TIMEOUT`] passes, so an offer
+/// the simulator silently declines does not hold its payload for the session's
+/// life (the reference's `LL_XFER_REGISTRATION_TIMEOUT`).
+#[derive(Debug)]
+struct OfferedUpload {
+    /// The complete bytes held for the simulator's pull.
+    data: Vec<u8>,
+    /// When the offer is withdrawn and [`data`](Self::data) dropped.
+    expires: Instant,
 }
 
 /// An in-flight outbound `Xfer` file upload: the file bytes and how far we have
@@ -1026,7 +1153,7 @@ struct XferDownload {
 /// [`Session::xfer_uploads`](Session::xfer_uploads). Unlike downloads, the
 /// simulator drives the pacing: each `SendXferPacket` we queue is released only
 /// once the previous one's `ConfirmXferPacket` arrives.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug)]
 struct XferUpload {
     /// The viewer-side filename this upload was named with, echoed back on
     /// [`Event::XferUploaded`](crate::Event::XferUploaded) once the final packet
@@ -1042,6 +1169,11 @@ struct XferUpload {
     /// Whether the final packet (with the high-bit end-of-file marker) has been
     /// sent and is only awaiting its confirmation.
     last_sent: bool,
+    /// When this upload last made progress — a packet going out, or its
+    /// `ConfirmXferPacket` arriving. [`XFER_STALL_TIMEOUT`] past this the
+    /// session abandons it. The simulator drives the pacing, so a simulator that
+    /// stops confirming would otherwise hold the whole payload forever.
+    last_progress: Instant,
 }
 
 /// The UDP circuit to a single simulator.
@@ -1459,8 +1591,9 @@ pub struct Session {
     /// bytes move into [`xfer_uploads`](Self::xfer_uploads) under the
     /// simulator-assigned [`XferId`] and start streaming. Mirrors the reference
     /// viewer's `expectFileForTransfer` registry: we only upload a file the
-    /// caller explicitly offered.
-    pending_xfer_uploads: BTreeMap<String, Vec<u8>>,
+    /// caller explicitly offered. An offer the simulator never picks up is
+    /// withdrawn after [`XFER_OFFER_TIMEOUT`].
+    pending_xfer_uploads: BTreeMap<String, OfferedUpload>,
     /// In-flight outbound `Xfer` file uploads, keyed by the **simulator-assigned**
     /// [`XferId`] from the `RequestXfer`. Each `ConfirmXferPacket` releases the
     /// next `SendXferPacket`; the final confirmation surfaces
@@ -1474,8 +1607,12 @@ pub struct Session {
     /// large to inline, keyed by the **predicted asset id** (`VFileID`). When the
     /// simulator answers with a `RequestXfer` whose `VFileID` matches, the bytes
     /// move into [`xfer_uploads`](Self::xfer_uploads) and stream. Mirrors the
-    /// reference viewer's `LLAssetStorage::storeAssetData` Xfer fallback.
-    pending_asset_uploads: BTreeMap<Uuid, Vec<u8>>,
+    /// reference viewer's `LLAssetStorage::storeAssetData` Xfer fallback. An
+    /// offer the simulator never picks up is withdrawn after
+    /// [`XFER_OFFER_TIMEOUT`], surfacing a failed
+    /// [`Event::InventoryAssetSaved`](crate::Event::InventoryAssetSaved) so the
+    /// save's caller is not left waiting.
+    pending_asset_uploads: BTreeMap<Uuid, OfferedUpload>,
     /// A monotonic counter for generating `Xfer` ids (never zero).
     next_xfer_id: XferId,
     /// Objects whose task inventory a [`Session::fetch_task_inventory`] asked
@@ -1483,14 +1620,19 @@ pub struct Session {
     /// request time). When the matching `ReplyTaskInventory` arrives its `Xfer`
     /// listing is auto-downloaded and parsed into
     /// [`Event::TaskInventoryContents`](crate::Event::TaskInventoryContents)
-    /// rather than surfaced only as a serial/filename.
-    pending_task_inventory: BTreeSet<ObjectKey>,
+    /// rather than surfaced only as a serial/filename. The value is when the
+    /// request went out: a claim whose reply never arrives is dropped after
+    /// [`RELIABLE_REPLY_GRACE`] rather than silently upgrading some later,
+    /// unrelated `RequestTaskInventory` for the same object.
+    pending_task_inventory: BTreeMap<ObjectKey, Instant>,
     /// A FIFO fallback for `fetch_task_inventory` calls whose target object was
     /// not yet in the cache (so its full id could not be resolved to key
     /// [`pending_task_inventory`](Self::pending_task_inventory)). Each entry
     /// auto-fetches the next otherwise-unmatched `ReplyTaskInventory`; it cannot
-    /// disambiguate concurrent uncached fetches.
-    pending_task_inventory_unresolved: VecDeque<()>,
+    /// disambiguate concurrent uncached fetches. Each entry is the instant its
+    /// request went out, and is dropped after [`RELIABLE_REPLY_GRACE`] — a claim
+    /// left standing would otherwise hijack an unrelated later reply.
+    pending_task_inventory_unresolved: VecDeque<Instant>,
     /// In-flight legacy UDP texture downloads, keyed by the texture's asset id
     /// (echoed in every `ImageData`/`ImagePacket`). Started by
     /// [`Session::request_texture`].
@@ -1517,9 +1659,12 @@ pub struct Session {
     /// object referenced a `parent_id` we had not tracked — an out-of-order or
     /// dropped root update. Without this a worn attachment (or any linkset child)
     /// whose root never arrives can never resolve its wearer / chain and so never
-    /// renders. Deduped so one unknown parent is requested once; an entry is
-    /// cleared when that object finally arrives, so a later re-orphan re-requests.
-    requested_parents: BTreeSet<ScopedObjectId>,
+    /// renders. The value is when that parent was last asked for: the request is
+    /// deduped for [`RELIABLE_REPLY_GRACE`] and then re-issued, so a speculative
+    /// fetch the simulator ignores does not strand the child forever. An entry
+    /// is cleared when the object finally arrives (so a later re-orphan
+    /// re-requests at once) and with the rest of a retiring circuit's state.
+    requested_parents: BTreeMap<ScopedObjectId, Instant>,
     /// The decoded terrain cache, keyed by the circuit instance the patches
     /// belong to (the root region *and* every neighbour streamed over a child
     /// circuit), then by `(layer code, patch x, patch y)` so each layer's

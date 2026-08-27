@@ -108,6 +108,33 @@ starts a download and returns the `XferId` that tags its completion event, so a
 caller handed a raw Xfer `filename` by some other message can fetch the bytes
 directly.
 
+## When a transfer stops answering
+
+An Xfer has no completion deadline of its own: the exchange ends when the EOF
+packet arrives, and nothing on the wire says a transfer has *failed*. The
+reference viewer's `LLXferManager` puts three timers on that, and this client
+carries the same three:
+
+- **A download whose packets dry up**, or an **upload whose
+  `ConfirmXferPacket` never comes**, is abandoned after 30 seconds of no
+  progress — the reference's `LL_PACKET_TIMEOUT` (3 s) times its
+  `LL_PACKET_RETRY_LIMIT` (10). The client sends the same `AbortXfer` the
+  reference's `LLXfer::abort` sends, carrying `LL_ERR_TCP_TIMEOUT` (`-23016`),
+  and surfaces `Event::XferAborted` — the same event a simulator-side abort
+  produces, so a caller waiting on completion has one failure to handle.
+- **A file offered for upload that no `RequestXfer` ever claims** is withdrawn
+  after 60 seconds (`LL_XFER_REGISTRATION_TIMEOUT`, *"registered xfer never
+  requested, xfer dropped"*). This is the common case for a terrain upload from
+  a non-owner: the command is silently refused, so without the timeout the
+  whole RAW heightmap would sit in the offer registry for the rest of the
+  session. An asset offer additionally fails its save
+  (`Event::InventoryAssetSaved { success: false }`), because
+  `AssetUploadComplete` is that save's only other completion path.
+
+The same reasoning applies to the registration order: a download registers its
+reassembly state only **after** its `RequestXfer` is on the wire, so a request
+that could not be sent leaves nothing behind for a caller to wait on.
+
 ## The server-initiated (terrain RAW) consumer
 
 Some downloads are pushed the *other* way round: instead of the viewer naming a
