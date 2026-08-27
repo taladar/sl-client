@@ -41,7 +41,7 @@
 //! overlay (`crate::chat`) so a headless / manual-clock run is deterministic.
 
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use bevy::input_focus::tab_navigation::TabIndex;
@@ -49,7 +49,9 @@ use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_client_bevy::{SlCommandFailed, SlEvent, SlSessionEvent};
+use sl_client_bevy::{
+    Command, Diagnostic, SlCommand, SlCommandFailed, SlDiagnostic, SlEvent, SlSessionEvent,
+};
 use sl_settings::SettingValue;
 use tracing::{debug, warn};
 
@@ -1623,6 +1625,29 @@ pub fn ingest_alert_messages(
     }
 }
 
+/// Whether `key`'s last raise is at least [`COMMAND_FAILURE_COOLDOWN`] old,
+/// recording `now` as its latest raise when it is.
+///
+/// The one coalescing rule the two protocol-report systems share: both watch a
+/// stream that can repeat every frame while the session is unhealthy, and both
+/// want at most one toast per distinct subject per window. Returning `false`
+/// suppresses only the *toast* — the failure itself is already logged where it
+/// happened.
+fn off_cooldown<K: Eq + std::hash::Hash>(
+    last_raised: &mut HashMap<K, Duration>,
+    key: K,
+    now: Duration,
+) -> bool {
+    if last_raised
+        .get(&key)
+        .is_some_and(|raised| now.saturating_sub(*raised) < COMMAND_FAILURE_COOLDOWN)
+    {
+        return false;
+    }
+    let _previous = last_raised.insert(key, now);
+    true
+}
+
 /// How long the same command's send-failure notification is suppressed after
 /// being raised. The driver queues per-frame commands (camera, controls), so a
 /// circuit that is down would otherwise raise the same failure every frame; the
@@ -1649,13 +1674,9 @@ pub fn announce_command_failures(
 ) {
     let now = time.elapsed();
     for failure in failures.read() {
-        let due = last_raised
-            .get(failure.command)
-            .is_none_or(|raised| now.saturating_sub(*raised) >= COMMAND_FAILURE_COOLDOWN);
-        if !due {
+        if !off_cooldown(&mut last_raised, failure.command, now) {
             continue;
         }
-        let _previous = last_raised.insert(failure.command, now);
         show.write(
             ShowNotification::new("ViewerCommandSendFailed")
                 .arg("COMMAND", failure.command.to_owned())
@@ -1664,6 +1685,157 @@ pub fn announce_command_failures(
                 .with_context(failure.command.to_owned()),
         );
     }
+}
+
+/// The name of the developer setting that turns protocol-diagnostic collection
+/// on and off (section `diagnostics`).
+pub const SETTING_COLLECT_DIAGNOSTICS: &str = "CollectProtocolDiagnostics";
+
+/// The settings section the diagnostics knobs live under.
+const DIAGNOSTICS_SECTION: &[&str] = &["diagnostics"];
+
+/// The `ExpectedReplyMissing` request labels that reach the **user** rather
+/// than only the log.
+///
+/// An allowlist, not a filter, because the label is an open vocabulary and most
+/// of what lands in it is not the user's business:
+///
+/// - a **capability** name, when a driver reports a failed CAPS request this
+///   way. Most are background fetches, and a capability the grid does not
+///   implement at all fails on every login (stock OpenSim and
+///   `SimulatorFeatures`) — a permanent toast about a grid's feature set.
+/// - a **message** name, when a reliable packet exhausted its retransmissions.
+///   The session tears the circuit down straight after, so the disconnect is
+///   the news; a toast naming the packet would arrive alongside it.
+/// - [`Diagnostic::LOGOUT_REQUEST`], which the logout itself already surfaces.
+///
+/// What is left is [`Diagnostic::SIT_REQUEST`]: the session keeps running,
+/// nothing else is surfaced, and the agent is simply left standing. New entries
+/// belong here only when the same three things are true — the user asked for
+/// it, it silently did not happen, and nothing else says so.
+pub const USER_VISIBLE_REQUESTS: &[&str] = &[Diagnostic::SIT_REQUEST];
+
+/// How many distinct "expected, unmodelled" diagnostics are remembered for the
+/// log-once rule before it degrades to logging every occurrence.
+///
+/// The keys are grid-controlled strings (a capability event name), so the set is
+/// bounded rather than trusted; a real grid produces a few dozen.
+const DIAGNOSTIC_LOG_ONCE_CAP: usize = 256;
+
+/// Register the diagnostics developer settings.
+pub fn register_settings(settings: &mut ViewerSettings) {
+    settings.register_in(
+        DIAGNOSTICS_SECTION,
+        SETTING_COLLECT_DIAGNOSTICS,
+        SettingValue::Bool(true),
+        "Collect protocol diagnostics (decode failures, unhandled messages, \
+         unknown capability events, missing replies) and report them to the log. \
+         Costs a little per inbound message; turn it off to run the session lean",
+    );
+}
+
+/// **The live source** (viewer-only): drain the protocol
+/// [`Diagnostic`] stream — the anomalies the session
+/// would otherwise silently drop — into the log, and raise a
+/// [`ViewerRequestNoReply`] toast for the one class a *user* can feel.
+///
+/// Level per variant, because the five are not equally interesting:
+///
+/// - `DecodeFailed` and `CapsDecodeFailed` are genuine protocol gaps in this
+///   client and are rare, so they are `warn`; the failed decode's captured bytes
+///   follow at `debug`, since a hexdump does not belong in a warning line.
+/// - `ExpectedReplyMissing` means something the session asked for was never
+///   answered — `warn`, plus the toast below.
+/// - `UnhandledMessage` and `UnknownCapsEvent` are *expected*: they name traffic
+///   this client does not model, they repeat for every arrival, and on some
+///   grids they never stop. They are `debug`, and each distinct one is logged
+///   **once** — building the dedup key only when that level is actually on, so
+///   the ordinary run pays nothing for them.
+///
+/// Only `ExpectedReplyMissing` reaches the screen, and only for the labels in
+/// [`USER_VISIBLE_REQUESTS`] — coalesced per label like
+/// [`announce_command_failures`]. See that list for why it is an allowlist.
+///
+/// [`ViewerRequestNoReply`]: crate::notifications::NOTIFICATIONS
+pub fn ingest_protocol_diagnostics(
+    mut diagnostics: MessageReader<SlDiagnostic>,
+    mut show: MessageWriter<ShowNotification>,
+    time: Res<Time>,
+    mut logged_once: Local<HashSet<String>>,
+    mut last_raised: Local<HashMap<String, Duration>>,
+) {
+    let now = time.elapsed();
+    for SlDiagnostic(diagnostic) in diagnostics.read() {
+        match diagnostic {
+            Diagnostic::UnhandledMessage { .. } | Diagnostic::UnknownCapsEvent { .. } => {
+                if !tracing::enabled!(tracing::Level::DEBUG) {
+                    continue;
+                }
+                let line = diagnostic.to_string();
+                // Past the cap the set stops growing and the rule degrades to
+                // logging every occurrence — noisy, but only at a level the
+                // developer asked for, and never unbounded memory.
+                if logged_once.len() < DIAGNOSTIC_LOG_ONCE_CAP && !logged_once.insert(line.clone())
+                {
+                    continue;
+                }
+                debug!("protocol diagnostic: {line}");
+            }
+            Diagnostic::DecodeFailed { .. } => {
+                warn!("protocol diagnostic: {diagnostic}");
+                if let Some(dump) = diagnostic.hexdump() {
+                    debug!("the bytes that failed to decode:\n{dump}");
+                }
+            }
+            Diagnostic::CapsDecodeFailed { .. } => {
+                warn!("protocol diagnostic: {diagnostic}");
+            }
+            Diagnostic::ExpectedReplyMissing { request, .. } => {
+                warn!("protocol diagnostic: {diagnostic}");
+                if !USER_VISIBLE_REQUESTS.contains(&request.as_str()) {
+                    continue;
+                }
+                if !off_cooldown(&mut last_raised, request.clone(), now) {
+                    continue;
+                }
+                show.write(
+                    ShowNotification::new("ViewerRequestNoReply")
+                        .arg("REQUEST", request.clone())
+                        // The `unique` context: one live toast per request.
+                        .with_context(request.clone()),
+                );
+            }
+            // `Diagnostic` is `#[non_exhaustive]`: a kind added upstream still
+            // reaches the log rather than vanishing.
+            other => warn!("protocol diagnostic: {other}"),
+        }
+    }
+}
+
+/// Push the collection switch to the session whenever it changes.
+///
+/// The plugin is added before the settings store exists, so the driver starts
+/// with collection on and this corrects it on the first tick — and on every
+/// later edit, from the debug-settings editor or the Advanced menu. Polling
+/// [`ViewerSettings`] change detection (rather than the preferences floater's
+/// apply hook) is what makes the raw editor work as a writer.
+pub fn apply_diagnostics_setting(
+    settings: Res<ViewerSettings>,
+    mut sl: MessageWriter<SlCommand>,
+    mut pushed: Local<Option<bool>>,
+) {
+    if !settings.is_changed() && pushed.is_some() {
+        return;
+    }
+    let enabled = settings
+        .store()
+        .get_bool(SETTING_COLLECT_DIAGNOSTICS)
+        .unwrap_or(true);
+    if *pushed == Some(enabled) {
+        return;
+    }
+    *pushed = Some(enabled);
+    sl.write(SlCommand(Command::SetDiagnostics(enabled)));
 }
 
 /// **The demo source** (viewer-only, gated on [`DEMO_ENV`]): raise a staggered
@@ -1803,11 +1975,15 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use bevy::time::Time;
-    use sl_client_bevy::{SessionError, SlCommandFailed};
+    use sl_client_bevy::{
+        Command, Diagnostic, MessageId, SessionError, SlCommand, SlCommandFailed, SlDiagnostic,
+        WireError,
+    };
 
     use super::{
-        IgnoreCheckbox, ResolveNotification, Toast, announce_command_failures,
-        auto_response_button, resolve_notifications,
+        IgnoreCheckbox, ResolveNotification, SETTING_COLLECT_DIAGNOSTICS, Toast,
+        announce_command_failures, apply_diagnostics_setting, auto_response_button,
+        ingest_protocol_diagnostics, resolve_notifications,
     };
     use crate::notifications::{
         NOTIFICATIONS, NotificationButton, NotificationIgnore, NotificationKind,
@@ -2156,5 +2332,203 @@ mod tests {
             1,
             "another command has its own cooldown"
         );
+    }
+
+    /// An app wired for [`ingest_protocol_diagnostics`] alone.
+    fn diagnostic_app() -> App {
+        let mut app = App::new();
+        app.add_message::<SlDiagnostic>();
+        app.add_message::<ShowNotification>();
+        app.init_resource::<Time>();
+        app.add_systems(Update, ingest_protocol_diagnostics);
+        app
+    }
+
+    /// Feed one diagnostic and return what reached the screen that frame.
+    fn raises_for(app: &mut App, diagnostic: Diagnostic) -> Vec<ShowNotification> {
+        app.world_mut().write_message(SlDiagnostic(diagnostic));
+        app.update();
+        drain_raises(app)
+    }
+
+    /// A missing reply for something the user asked for reaches the screen
+    /// naming the request — the one diagnostic class a user can feel.
+    #[test]
+    fn a_missing_reply_raises_a_named_notification() -> Result<(), TestError> {
+        let mut app = diagnostic_app();
+        let raises = raises_for(
+            &mut app,
+            Diagnostic::ExpectedReplyMissing {
+                request: Diagnostic::SIT_REQUEST.to_owned(),
+                sequence: None,
+            },
+        );
+        assert_eq!(raises.len(), 1, "one raise for one missing reply");
+        let raise = raises.first().ok_or("no raise was written")?;
+        assert_eq!(raise.template, "ViewerRequestNoReply");
+        assert_eq!(raise.context.as_deref(), Some("Sit"));
+        let args: Vec<(&str, &str)> = raise
+            .args
+            .pairs()
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        assert!(
+            args.contains(&("REQUEST", "Sit")),
+            "the toast names the request: {args:?}"
+        );
+        Ok(())
+    }
+
+    /// The missing replies that are *not* the user's business stay off the
+    /// screen: a logout (already surfaced as the logout), a capability the grid
+    /// does not implement at all (stock OpenSim never serves
+    /// `SimulatorFeatures`, so this fires on every login there), and a reliable
+    /// packet that died with the circuit (the disconnect is the news).
+    #[test]
+    fn background_missing_replies_are_not_raised() {
+        let mut app = diagnostic_app();
+        for (request, sequence) in [
+            (Diagnostic::LOGOUT_REQUEST.to_owned(), None),
+            ("SimulatorFeatures".to_owned(), None),
+            (
+                "AgentThrottle".to_owned(),
+                Some(sl_client_bevy::SequenceNumber(7)),
+            ),
+        ] {
+            let raises = raises_for(
+                &mut app,
+                Diagnostic::ExpectedReplyMissing { request, sequence },
+            );
+            assert!(raises.is_empty(), "only agent operations reach the screen");
+        }
+    }
+
+    /// The developer-facing variants are logged, never raised: an unmodelled
+    /// message or a decode failure is not something to interrupt a user with.
+    #[test]
+    fn developer_diagnostics_stay_out_of_the_ui() {
+        let mut app = diagnostic_app();
+        for diagnostic in [
+            Diagnostic::UnhandledMessage {
+                id: MessageId::High(1),
+                name: "SomeMessage",
+                child: false,
+            },
+            Diagnostic::UnknownCapsEvent {
+                message: "WeirdEvent".to_owned(),
+            },
+            Diagnostic::CapsDecodeFailed {
+                message: "ParcelProperties".to_owned(),
+                reason: Some("missing field".to_owned()),
+            },
+            Diagnostic::DecodeFailed {
+                id: MessageId::High(1),
+                name: None,
+                error: WireError::UnexpectedEof {
+                    needed: 4,
+                    available: 1,
+                },
+                raw: vec![0x01, 0x02],
+                failed_offset: 1,
+            },
+        ] {
+            let raises = raises_for(&mut app, diagnostic);
+            assert!(raises.is_empty(), "developer diagnostics are log-only");
+        }
+    }
+
+    /// A user retrying the same action against an unresponsive simulator gets
+    /// one toast, not one per attempt.
+    #[test]
+    fn repeat_missing_replies_are_coalesced_per_request() {
+        let mut app = diagnostic_app();
+        let mut raised = 0;
+        for _attempt in 0..3 {
+            raised += raises_for(
+                &mut app,
+                Diagnostic::ExpectedReplyMissing {
+                    request: Diagnostic::SIT_REQUEST.to_owned(),
+                    sequence: None,
+                },
+            )
+            .len();
+        }
+        assert_eq!(raised, 1, "the repeats are coalesced");
+    }
+
+    /// Every allowlisted label is one the catalogue template can actually
+    /// render, and the allowlist never quietly grows to include the background
+    /// traffic the live grid produces on every login.
+    #[test]
+    fn only_agent_operations_are_user_visible() {
+        assert_eq!(
+            super::USER_VISIBLE_REQUESTS,
+            [Diagnostic::SIT_REQUEST],
+            "widening this list needs the three tests in its doc comment to hold"
+        );
+    }
+
+    /// The switch is pushed once at startup and again on every change, and
+    /// never re-sent for a write that left it alone — the session must not be
+    /// told to reconfigure on every settings edit.
+    #[test]
+    fn the_collection_switch_is_pushed_on_change_only() -> Result<(), TestError> {
+        let mut store = SettingsStore::new();
+        store.register(
+            SETTING_COLLECT_DIAGNOSTICS,
+            SettingValue::Bool(true),
+            "collect",
+        )?;
+        let mut app = App::new();
+        app.add_message::<SlCommand>();
+        app.insert_resource(ViewerSettings::from_store_for_test(store));
+        app.add_systems(Update, apply_diagnostics_setting);
+
+        app.update();
+        assert_eq!(
+            pushed_diagnostics(&mut app),
+            vec![true],
+            "the startup value is pushed once"
+        );
+        app.update();
+        assert!(
+            pushed_diagnostics(&mut app).is_empty(),
+            "an unchanged tick pushes nothing"
+        );
+
+        app.world_mut()
+            .resource_mut::<ViewerSettings>()
+            .set_account(SETTING_COLLECT_DIAGNOSTICS, SettingValue::Bool(false));
+        app.update();
+        assert_eq!(
+            pushed_diagnostics(&mut app),
+            vec![false],
+            "turning it off is pushed"
+        );
+
+        // A settings write that does not touch this value marks the resource
+        // changed but must not re-push.
+        app.world_mut()
+            .resource_mut::<ViewerSettings>()
+            .set_account(SETTING_COLLECT_DIAGNOSTICS, SettingValue::Bool(false));
+        app.update();
+        assert!(
+            pushed_diagnostics(&mut app).is_empty(),
+            "re-writing the same value pushes nothing"
+        );
+        Ok(())
+    }
+
+    /// Drain the frame's `SetDiagnostics` pushes.
+    fn pushed_diagnostics(app: &mut App) -> Vec<bool> {
+        app.world_mut()
+            .resource_mut::<Messages<SlCommand>>()
+            .drain()
+            .filter_map(|command| match command.0 {
+                Command::SetDiagnostics(enabled) => Some(enabled),
+                _other => None,
+            })
+            .collect()
     }
 }

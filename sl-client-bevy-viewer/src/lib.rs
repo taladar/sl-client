@@ -75,6 +75,7 @@ pub(crate) const REGISTRARS: &[fn(&mut crate::settings::ViewerSettings)] = &[
     crate::ui_sounds::register_settings,
     crate::audio::register_settings,
     crate::debug_settings::register_settings,
+    crate::notification_host::register_settings,
 ];
 
 // The leaf toolkit (geometry math, render leaves, small models) is its own
@@ -432,8 +433,8 @@ use crate::materials::{
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::notification_host::{
-    NotificationHostPlugin, announce_command_failures, ingest_alert_messages,
-    spawn_notification_demo,
+    NotificationHostPlugin, announce_command_failures, apply_diagnostics_setting,
+    ingest_alert_messages, ingest_protocol_diagnostics, spawn_notification_demo,
 };
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
@@ -1409,6 +1410,13 @@ fn run_session(
     // an encode error), so an action that never reached the simulator says so
     // instead of looking as if it worked.
     .add_systems(Update, announce_command_failures)
+    // Drain the protocol diagnostics the session collects — decode failures,
+    // unhandled messages, unknown capability events, missing replies — into the
+    // log, and push the developer switch that turns their collection on or off.
+    .add_systems(
+        Update,
+        (ingest_protocol_diagnostics, apply_diagnostics_setting),
+    )
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout

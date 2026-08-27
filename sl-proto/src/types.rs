@@ -404,7 +404,7 @@ pub use chat::{
     GroupInvitationReceived, GroupNoticeItem, GroupNoticeReceived, ImDialog, InstantMessage,
     InventoryOffer,
 };
-pub use diagnostic::Diagnostic;
+pub use diagnostic::{Diagnostic, hexdump};
 pub use directory::{
     AvatarPickerResult, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult,
     DirLandResult, DirPeopleResult, DirPlaceResult, EventInfo, LandSearchType, PlacesResult,

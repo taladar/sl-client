@@ -4979,7 +4979,7 @@ impl Session {
         {
             tracing::warn!("logout timed out waiting for LogoutReply");
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
-                request: "Logout".to_owned(),
+                request: Diagnostic::LOGOUT_REQUEST.to_owned(),
                 sequence: None,
             });
             self.state = SessionState::Closed;
@@ -5045,7 +5045,7 @@ impl Session {
             }
             tracing::warn!("sit timed out waiting for AvatarSitResponse");
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
-                request: "Sit".to_owned(),
+                request: Diagnostic::SIT_REQUEST.to_owned(),
                 sequence: None,
             });
         }

@@ -85,7 +85,7 @@ pub use sl_proto::{
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
-    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MfaChallenge, MoneyBalance,
+    MediaEntry, MerchantStatus, MeshKey, MessageCursor, MessageId, MfaChallenge, MoneyBalance,
     MoneyTransaction, MoneyTransactionType, MovementMode, MuteEntry, MuteFlags, MuteType,
     NearbyHistoryLine, NegativeBalanceError, NeighborInfo, NewInventoryItem, NewInventoryLink,
     Object, ObjectExtraParams, ObjectFlagSettings, ObjectKey, ObjectMediaResponse, ObjectMotion,
@@ -113,7 +113,7 @@ pub use sl_proto::{
     ThrottleBuilder, ThrottleError, TimestampFormat, TransactionId, TransferId, Transmit,
     UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, UserInfo, Uuid, Vector, ViewerEffect,
     ViewerEffectData, ViewerEffectType, VoiceAccountInfo, VoiceProvisionRequest, WaterSettings,
-    Wearable, WearableType, XferId, avatar_texture, azimuth_altitude_to_rotation,
+    Wearable, WearableType, WireError, XferId, avatar_texture, azimuth_altitude_to_rotation,
     decode_particle_system, decode_texture_anim, decode_texture_entry, encode_texture_entry,
     environment_asset_from_bytes, grid_to_handle, group_powers, handle_to_global, handle_to_grid,
     particle_pattern, pcode, sim_access, texture_anim_mode,
@@ -4249,6 +4249,9 @@ fn apply_command(
         }
         Command::SetChatLogConfig(config) => {
             chat_log.set_config((**config).clone());
+        }
+        Command::SetDiagnostics(enabled) => {
+            session.set_diagnostics(*enabled);
         }
         Command::TriggerSound {
             sound,

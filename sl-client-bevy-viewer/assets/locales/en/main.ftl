@@ -1367,6 +1367,9 @@ notification-confirm-quit = Are you sure you want to quit?
 # Viewer-original (no reference counterpart): a queued protocol command
 # whose request never reached the simulator, so the action did nothing.
 notification-viewer-command-send-failed = [COMMAND] could not be sent: [REASON]
+# Viewer-original (no reference counterpart): a request the session made was
+# never answered, so whatever it was for quietly did not happen.
+notification-viewer-request-no-reply = The simulator never answered the [REQUEST] request; it did not take effect.
 
 ## Keyed server alerts (viewer-notification-catalogue): the AlertInfo-keyed
 ## messages the simulator sends. Ported from the reference notifications.xml,

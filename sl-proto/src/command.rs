@@ -2687,6 +2687,15 @@ pub enum Command {
     /// stored configuration a later re-login builds its logger from is
     /// replaced.
     SetChatLogConfig(Box<crate::chat_log::ChatLogConfig>),
+    /// Turn protocol [`Diagnostic`](crate::Diagnostic) collection on or off at
+    /// runtime ([`Session::set_diagnostics`](crate::Session::set_diagnostics)).
+    /// Consumed by the runtime shell (nothing goes on the wire).
+    ///
+    /// Collection is not free — the session captures the raw bytes of a failed
+    /// decode and records one diagnostic per unhandled inbound message — so a
+    /// client that surfaces diagnostics behind a developer switch flips it here
+    /// instead of paying for them unconditionally.
+    SetDiagnostics(bool),
     /// Update the agent's account contact preferences (`UpdateUserInfo`).
     UpdateUserInfo {
         /// Whether offline instant messages are forwarded to the agent's email.
@@ -3172,6 +3181,7 @@ impl Command {
             Self::SetVelocityInterpolation { .. } => "SetVelocityInterpolation",
             Self::RequestUserInfo => "RequestUserInfo",
             Self::SetChatLogConfig(..) => "SetChatLogConfig",
+            Self::SetDiagnostics(..) => "SetDiagnostics",
             Self::UpdateUserInfo { .. } => "UpdateUserInfo",
             Self::TriggerSound { .. } => "TriggerSound",
             Self::RequestGodlikePowers { .. } => "RequestGodlikePowers",

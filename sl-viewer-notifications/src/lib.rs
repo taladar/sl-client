@@ -1940,6 +1940,23 @@ pub const NOTIFICATIONS: &[NotificationTemplate] = &[
         form: NO_FORM,
         input: None,
     },
+    // Viewer-original (no reference counterpart): a request the session made was
+    // never answered, so whatever it was for quietly did not happen. `unique`
+    // with the request label as context, mirroring ViewerCommandSendFailed.
+    NotificationTemplate {
+        name: "ViewerRequestNoReply",
+        kind: NotificationKind::Notify,
+        message_key: "notification-viewer-request-no-reply",
+        title_key: None,
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: true,
+        unique: true,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: NO_FORM,
+        input: None,
+    },
     // A concrete keyed alert exercising `[KEY]` substitution and `unique` dedup —
     // the region-restart countdown the simulator sends as an `AlertInfo` key.
     NotificationTemplate {

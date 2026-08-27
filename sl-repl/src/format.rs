@@ -15,9 +15,9 @@
 //! [`Command`] or [`Event`] variant fails to compile here until it is named,
 //! so the formatter can never silently fall back to an anonymous rendering.
 
-use std::fmt::Write as _;
-
 use sl_proto::{Command, Diagnostic, Event};
+
+pub use sl_proto::hexdump;
 
 use crate::context::ReplContext;
 
@@ -64,28 +64,21 @@ pub fn format_command(command: &Command, ctx: &dyn ReplContext) -> String {
 /// Render a [`Diagnostic`] **literally** (no symbolization): a one-line header
 /// for every variant, plus a marked [`hexdump`] of the captured bytes for a
 /// [`Diagnostic::DecodeFailed`].
+///
+/// The pieces live in `sl-proto` beside the type ([`Diagnostic`]'s `Display`
+/// and [`Diagnostic::hexdump`]) so the viewer's diagnostic drain renders
+/// identically without depending on the REPL; this composes them into the
+/// transcript's one-string form.
 #[must_use]
 #[expect(
     clippy::module_name_repetitions,
     reason = "`format_diagnostic` is the natural public name for this renderer"
 )]
 pub fn format_diagnostic(diagnostic: &Diagnostic) -> String {
-    let mut out = String::new();
-    let _rendered = write_diagnostic(&mut out, diagnostic);
-    out
-}
-
-/// Render `bytes` as a classic offset / hex / ASCII dump, 16 bytes per row.
-///
-/// When `mark` is `Some(offset)` the byte at that offset is wrapped in square
-/// brackets (`[ab]` rather than ` ab `, keeping every cell four columns wide so
-/// the rows stay aligned). A `mark` at or past the end of `bytes` — the reader
-/// position a decode stopped at — is noted on a trailing line instead.
-#[must_use]
-pub fn hexdump(bytes: &[u8], mark: Option<usize>) -> String {
-    let mut out = String::new();
-    let _rendered = write_hexdump(&mut out, bytes, mark);
-    out
+    match diagnostic.hexdump() {
+        Some(dump) => format!("{diagnostic}\n{dump}"),
+        None => diagnostic.to_string(),
+    }
 }
 
 /// Drop the leading identifier of a `Debug` rendering (the Rust variant name),
@@ -227,90 +220,6 @@ fn unescape(text: &str) -> String {
         out.push('\\');
     }
     out
-}
-
-/// Write a [`Diagnostic`]'s literal rendering into `out`.
-fn write_diagnostic(out: &mut String, diagnostic: &Diagnostic) -> std::fmt::Result {
-    match diagnostic {
-        Diagnostic::DecodeFailed {
-            id,
-            name,
-            error,
-            raw,
-            failed_offset,
-        } => {
-            let displayed_name = name.unwrap_or("?");
-            write!(
-                out,
-                "DecodeFailed id={id:?} name={displayed_name} error={error} failed_offset={failed_offset}"
-            )?;
-            out.push('\n');
-            write_hexdump(out, raw, Some(*failed_offset))?;
-        }
-        Diagnostic::UnhandledMessage { id, name, child } => {
-            write!(out, "UnhandledMessage id={id:?} name={name} child={child}")?;
-        }
-        Diagnostic::UnknownCapsEvent { message } => {
-            write!(out, "UnknownCapsEvent message={message}")?;
-        }
-        Diagnostic::CapsDecodeFailed { message, reason } => {
-            write!(out, "CapsDecodeFailed message={message}")?;
-            if let Some(reason) = reason {
-                write!(out, " reason={reason}")?;
-            }
-        }
-        Diagnostic::ExpectedReplyMissing { request, sequence } => match sequence {
-            Some(seq) => write!(out, "ExpectedReplyMissing request={request} sequence={seq}")?,
-            None => write!(out, "ExpectedReplyMissing request={request} sequence=-")?,
-        },
-        // `Diagnostic` is `#[non_exhaustive]`: render any future kind generically.
-        other => write!(out, "{other:?}")?,
-    }
-    Ok(())
-}
-
-/// Write a marked offset / hex / ASCII dump of `bytes` into `out`.
-fn write_hexdump(out: &mut String, bytes: &[u8], mark: Option<usize>) -> std::fmt::Result {
-    if bytes.is_empty() {
-        out.push_str("(no bytes)");
-        if let Some(at) = mark {
-            write!(out, " — mark at offset {at}")?;
-        }
-        return Ok(());
-    }
-    for (row, chunk) in bytes.chunks(16).enumerate() {
-        let base = row.saturating_mul(16);
-        write!(out, "{base:08x} ")?;
-        for (col, byte) in chunk.iter().enumerate() {
-            let offset = base.saturating_add(col);
-            if Some(offset) == mark {
-                write!(out, "[{byte:02x}]")?;
-            } else {
-                write!(out, " {byte:02x} ")?;
-            }
-        }
-        out.push_str(" |");
-        for byte in chunk {
-            out.push(printable(*byte));
-        }
-        out.push('|');
-        out.push('\n');
-    }
-    if let Some(at) = mark
-        && at >= bytes.len()
-    {
-        write!(out, "(mark at offset {at} = end of {} bytes)", bytes.len())?;
-    }
-    Ok(())
-}
-
-/// The printable ASCII glyph for `byte`, or `.` for a non-printable byte.
-fn printable(byte: u8) -> char {
-    if (0x20..=0x7e).contains(&byte) {
-        char::from(byte)
-    } else {
-        '.'
-    }
 }
 
 /// The snake-case event name for an [`Event`] variant.
@@ -878,6 +787,7 @@ const fn command_name(command: &Command) -> &'static str {
         Command::RequestUserInfo => "request_user_info",
         Command::UpdateUserInfo { .. } => "update_user_info",
         Command::SetChatLogConfig(_) => "set_chat_log_config",
+        Command::SetDiagnostics(_) => "set_diagnostics",
         Command::TriggerSound { .. } => "trigger_sound",
         Command::RequestGodlikePowers { .. } => "request_godlike_powers",
         Command::EjectUser { .. } => "eject_user",

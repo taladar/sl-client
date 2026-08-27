@@ -123,6 +123,10 @@ const AVATAR_RENDER_SETTINGS_OPEN: &str = "avatar-render-settings-open";
 /// drives the check mark on the World ▸ Property Lines entry.
 const PROPERTY_LINES_ON: &str = "property-lines-on";
 
+/// Condition key: protocol-diagnostic collection is on — drives the check mark
+/// on the Advanced ▸ Collect Protocol Diagnostics entry.
+const COLLECT_DIAGNOSTICS_ON: &str = "collect-diagnostics-on";
+
 /// Condition key: the Build Tools floater (`crate::edit_tool`) is open.
 const BUILD_TOOLS_OPEN: &str = "build-tools-open";
 
@@ -471,11 +475,21 @@ static HELP_MENU: MenuDef = MenuDef {
 /// only; the live shortcut is `crate::debug_settings`'s own keyboard system.
 static ADVANCED_MENU: MenuDef = MenuDef {
     label: "Advanced",
-    items: &[MenuItemDef::Command(
-        MenuCommand::new("Debug settings\u{2026}", "toggle-debug-settings")
-            .accel("Ctrl+Alt+Shift+S")
-            .checked_when(DEBUG_SETTINGS_OPEN),
-    )],
+    items: &[
+        MenuItemDef::Command(
+            MenuCommand::new("Debug settings\u{2026}", "toggle-debug-settings")
+                .accel("Ctrl+Alt+Shift+S")
+                .checked_when(DEBUG_SETTINGS_OPEN),
+        ),
+        // Protocol-diagnostic collection (`notification_host`): the session
+        // records the anomalies it would otherwise silently drop, and the
+        // viewer reports them to the log. Reachable from the debug-settings
+        // editor too; here because it costs something to leave on.
+        MenuItemDef::Command(
+            MenuCommand::new("Collect Protocol Diagnostics", "toggle-collect-diagnostics")
+                .checked_when(COLLECT_DIAGNOSTICS_ON),
+        ),
+    ],
 };
 
 /// The top menu bar, in the reference viewer's order. Exposed so menu search
@@ -700,6 +714,14 @@ fn update_top_menu_conditions(
     {
         wanted.push(PROPERTY_LINES_ON);
     }
+    // The Advanced ▸ Collect Protocol Diagnostics check mark (default on).
+    if settings
+        .store()
+        .get_bool(crate::notification_host::SETTING_COLLECT_DIAGNOSTICS)
+        .unwrap_or(true)
+    {
+        wanted.push(COLLECT_DIAGNOSTICS_ON);
+    }
     // The Build ▸ Link / Unlink enable gates, from the current selection.
     if crate::edit_link::can_link(&selection, &edit_tool) {
         wanted.push(CAN_LINK);
@@ -884,6 +906,15 @@ fn handle_top_menu_actions(
             }
             "toggle-property-lines" => {
                 let name = crate::parcel_borders::SETTING_SHOW_PROPERTY_LINES;
+                let current = settings.store().get_bool(name).unwrap_or(true);
+                settings.set(
+                    sl_settings::Scope::Global,
+                    name,
+                    sl_settings::SettingValue::Bool(!current),
+                );
+            }
+            "toggle-collect-diagnostics" => {
+                let name = crate::notification_host::SETTING_COLLECT_DIAGNOSTICS;
                 let current = settings.store().get_bool(name).unwrap_or(true);
                 settings.set(
                     sl_settings::Scope::Global,

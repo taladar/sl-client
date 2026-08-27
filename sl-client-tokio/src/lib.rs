@@ -2466,6 +2466,9 @@ impl Client {
                         Some(Command::SetChatLogConfig(config)) => {
                             chat_log.set_config(*config);
                         }
+                        Some(Command::SetDiagnostics(enabled)) => {
+                            self.session.set_diagnostics(enabled);
+                        }
                         Some(Command::TriggerSound { sound, gain, region_handle, position }) => {
                             self.session.trigger_sound(sound, gain, region_handle, position, Instant::now())?;
                         }
