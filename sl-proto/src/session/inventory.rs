@@ -24,6 +24,7 @@
 //! `Uuid`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::time::Instant;
 
 use sl_types::key::{InventoryFolderKey, InventoryKey, OwnerKey};
 
@@ -60,6 +61,16 @@ pub enum FolderState {
         /// The folder version the contents were fetched at.
         version: i32,
     },
+    /// Every descendents request for this folder timed out and its retry budget
+    /// is spent — the crawl has given up on it. Terminal for the background
+    /// scheduler (which only picks [`Unknown`](Self::Unknown) folders) but not
+    /// for the model: an explicit on-demand request
+    /// ([`Session::mark_folder_fetching`](crate::Session::mark_folder_fetching))
+    /// starts a fresh budget, and a
+    /// skeleton reconcile or a successful load clears it. Mirrors Firestorm's
+    /// `MAX_FETCH_RETRIES` exhaustion, which drops the folder from the
+    /// background queue for good.
+    Failed,
 }
 
 /// A folder and everything the model tracks about it: the [`InventoryFolder`]
@@ -82,10 +93,47 @@ struct FolderEntry {
     owner: InventoryOwner,
     /// The fetch state of this folder's contents.
     state: FolderState,
+    /// When the in-flight descendents request for this folder is declared
+    /// stalled. `Some` only while `state` is [`Fetching`](FolderState::Fetching);
+    /// [`Inventory::expire_stalled_fetches`] returns the folder to
+    /// [`Unknown`](FolderState::Unknown) (or [`Failed`](FolderState::Failed))
+    /// once it passes, so a lost reply cannot hold an in-flight slot for the
+    /// session's life.
+    fetch_deadline: Option<Instant>,
+    /// How many descendents requests for this folder have timed out since it was
+    /// last loaded (or explicitly re-requested). Reaching
+    /// [`INVENTORY_FETCH_MAX_ATTEMPTS`](crate::INVENTORY_FETCH_MAX_ATTEMPTS)
+    /// gives up on the folder ([`Failed`](FolderState::Failed)).
+    fetch_failures: u32,
     /// The keys of this folder's immediate sub-folders.
     child_folders: BTreeSet<InventoryFolderKey>,
     /// The keys of the items filed directly in this folder.
     child_items: BTreeSet<InventoryKey>,
+}
+
+impl FolderEntry {
+    /// Flips this entry to [`Fetching`](FolderState::Fetching) and arms its
+    /// stall deadline at `now + `[`INVENTORY_FETCH_TIMEOUT`](crate::INVENTORY_FETCH_TIMEOUT).
+    /// Re-arming an entry that is already `Fetching` (the UDP path's bookkeeping
+    /// after the scheduler already picked it) only pushes the deadline forward;
+    /// the failure count is left alone so a retry series still converges on
+    /// [`Failed`](FolderState::Failed).
+    fn start_fetch(&mut self, now: Instant) {
+        self.state = FolderState::Fetching;
+        self.fetch_deadline = Some(
+            now.checked_add(crate::INVENTORY_FETCH_TIMEOUT)
+                .unwrap_or(now),
+        );
+    }
+
+    /// Clears the fetch bookkeeping — no deadline armed, a fresh retry budget.
+    /// Called wherever the folder reaches a state that ends the current fetch
+    /// series: loaded, invalidated, reconciled against the skeleton, or
+    /// explicitly re-requested after the crawl gave up.
+    const fn clear_fetch(&mut self) {
+        self.fetch_deadline = None;
+        self.fetch_failures = 0;
+    }
 }
 
 /// The held inventory model — both the agent tree and the Library tree.
@@ -318,6 +366,8 @@ impl Inventory {
             folder: None,
             owner,
             state: FolderState::Unknown,
+            fetch_deadline: None,
+            fetch_failures: 0,
             child_folders: BTreeSet::new(),
             child_items: BTreeSet::new(),
         })
@@ -395,6 +445,7 @@ impl Inventory {
         self.dirty = true;
         let entry = self.entry(folder, owner);
         entry.state = FolderState::Loaded { version };
+        entry.clear_fetch();
         if let Some(payload) = entry.folder.as_mut() {
             payload.version = version;
         }
@@ -416,6 +467,7 @@ impl Inventory {
             && version > current
         {
             entry.state = FolderState::Unknown;
+            entry.clear_fetch();
             // Advance the recorded version so readers (chiefly the server-bake
             // Current-Outfit-Folder version check) see the mutation immediately —
             // before the re-fetch lands, and even for a DELETE reply that carries no
@@ -573,11 +625,21 @@ impl Inventory {
     /// folders already [`Fetching`](FolderState::Fetching)) and flipping each
     /// returned folder to `Fetching`. Returns an empty batch when the budget is
     /// exhausted or nothing is `Unknown`. The walk descends *through*
-    /// already-`Fetching`/`Loaded` folders to reach deeper `Unknown` ones, so a
-    /// later call — after the issued replies fold in and seed their children
-    /// `Unknown` — continues the crawl one level deeper. Mirrors Firestorm's
-    /// bounded-in-flight `LLInventoryModelBackgroundFetch::bulkFetch`.
-    pub(crate) fn next_fetch_batch(&mut self, max_in_flight: usize) -> Vec<InventoryFolderKey> {
+    /// already-`Fetching`/`Loaded`/`Failed` folders to reach deeper `Unknown`
+    /// ones, so a later call — after the issued replies fold in and seed their
+    /// children `Unknown` — continues the crawl one level deeper. Mirrors
+    /// Firestorm's bounded-in-flight
+    /// `LLInventoryModelBackgroundFetch::bulkFetch`.
+    ///
+    /// Each returned folder's stall deadline is armed at `now`, so a reply that
+    /// never arrives releases its in-flight slot again
+    /// ([`expire_stalled_fetches`](Self::expire_stalled_fetches)) instead of
+    /// pinning the budget at zero for the rest of the session.
+    pub(crate) fn next_fetch_batch(
+        &mut self,
+        max_in_flight: usize,
+        now: Instant,
+    ) -> Vec<InventoryFolderKey> {
         let slots = max_in_flight.saturating_sub(self.fetching_count());
         if slots == 0 {
             return Vec::new();
@@ -608,7 +670,7 @@ impl Inventory {
         }
         for key in &batch {
             if let Some(entry) = self.folders.get_mut(key) {
-                entry.state = FolderState::Fetching;
+                entry.start_fetch(now);
             }
         }
         batch
@@ -616,17 +678,75 @@ impl Inventory {
 
     /// Flips a known folder to [`Fetching`](FolderState::Fetching) — an on-demand
     /// contents request issued for it outside the background crawl (so the
-    /// scheduler will not re-pick it and the completion query reflects it). A
-    /// no-op for a folder not in the model (the request still goes out, but there
-    /// is no entry to track yet).
-    pub(crate) fn mark_folder_fetching(&mut self, folder: InventoryFolderKey) {
+    /// scheduler will not re-pick it and the completion query reflects it) — and
+    /// arms its stall deadline at `now`. A no-op for a folder not in the model
+    /// (the request still goes out, but there is no entry to track yet).
+    ///
+    /// A folder the crawl has given up on ([`Failed`](FolderState::Failed)) gets
+    /// a **fresh** retry budget here: this path is caller-driven (a user opening
+    /// the folder, an explicit
+    /// [`Command::FetchInventoryFolders`](crate::Command::FetchInventoryFolders)),
+    /// so it is a new decision to fetch rather than a continuation of the series
+    /// that failed. Every other state keeps its running failure count.
+    pub(crate) fn mark_folder_fetching(&mut self, folder: InventoryFolderKey, now: Instant) {
         if let Some(entry) = self.folders.get_mut(&folder) {
-            entry.state = FolderState::Fetching;
+            if matches!(entry.state, FolderState::Failed) {
+                entry.clear_fetch();
+            }
+            entry.start_fetch(now);
         }
     }
 
+    /// Returns every folder whose in-flight descendents request has passed its
+    /// stall deadline to a fetchable state, with the state each was moved to:
+    /// [`Unknown`](FolderState::Unknown) while its retry budget holds (the crawl
+    /// picks it up again on the next sweep), or [`Failed`](FolderState::Failed)
+    /// once it has timed out
+    /// [`INVENTORY_FETCH_MAX_ATTEMPTS`](crate::INVENTORY_FETCH_MAX_ATTEMPTS)
+    /// times.
+    ///
+    /// Without this a lost or failed reply — a dropped UDP request, a CAPS POST
+    /// that errored out, a folder the simulator never answers — would strand its
+    /// folder `Fetching` for the rest of the session, and
+    /// `max_in_flight` such folders would pin
+    /// [`next_fetch_batch`](Self::next_fetch_batch)'s budget at zero, deadlocking
+    /// the whole background crawl. Mirrors Firestorm's per-category
+    /// `mDescendentsRequested` expiry plus its `MAX_FETCH_RETRIES` give-up.
+    pub(crate) fn expire_stalled_fetches(
+        &mut self,
+        now: Instant,
+    ) -> Vec<(InventoryFolderKey, FolderState)> {
+        let mut expired = Vec::new();
+        for (key, entry) in &mut self.folders {
+            if !matches!(entry.state, FolderState::Fetching)
+                || !entry.fetch_deadline.is_some_and(|deadline| now >= deadline)
+            {
+                continue;
+            }
+            entry.fetch_deadline = None;
+            entry.fetch_failures = entry.fetch_failures.saturating_add(1);
+            entry.state = if entry.fetch_failures >= crate::INVENTORY_FETCH_MAX_ATTEMPTS {
+                FolderState::Failed
+            } else {
+                FolderState::Unknown
+            };
+            expired.push((*key, entry.state));
+        }
+        expired
+    }
+
+    /// The earliest armed stall deadline across all in-flight folder fetches, so
+    /// a runtime shell's idle sleep wakes in time to expire it.
+    pub(crate) fn next_fetch_deadline(&self) -> Option<Instant> {
+        self.folders
+            .values()
+            .filter_map(|entry| entry.fetch_deadline)
+            .min()
+    }
+
     /// Whether every folder of `owner` has its contents loaded — none is
-    /// [`Unknown`](FolderState::Unknown) or [`Fetching`](FolderState::Fetching).
+    /// [`Unknown`](FolderState::Unknown), [`Fetching`](FolderState::Fetching) or
+    /// [`Failed`](FolderState::Failed).
     /// The background-crawl completion signal (mirrors Firestorm
     /// `isEverythingFetched`). Vacuously true before any folder of that owner is
     /// known.
@@ -722,6 +842,7 @@ impl Inventory {
                 self.purge_descendents(key);
                 if let Some(entry) = self.folders.get_mut(&key) {
                     entry.state = FolderState::Unknown;
+                    entry.clear_fetch();
                 }
                 needing_fetch.push(key);
             }
@@ -737,12 +858,22 @@ mod tests {
     use sl_wire::Permissions5;
     use uuid::Uuid;
 
-    use super::{FolderState, Inventory, InventoryOwner};
+    use super::{FolderState, Instant, Inventory, InventoryOwner};
     use crate::types::{InventoryFolder, InventoryItem};
 
     /// A folder key from a small constant.
     fn fk(id: u128) -> InventoryFolderKey {
         InventoryFolderKey::from(Uuid::from_u128(id))
+    }
+
+    /// `base` advanced by `stalls` whole stall timeouts plus `extra_millis` — the
+    /// clock the fetch-expiry tests drive, saturating at `base` on an (impossible)
+    /// overflow.
+    fn at(base: Instant, stalls: u32, extra_millis: u64) -> Instant {
+        let offset = crate::INVENTORY_FETCH_TIMEOUT
+            .saturating_mul(stalls)
+            .saturating_add(std::time::Duration::from_millis(extra_millis));
+        base.checked_add(offset).unwrap_or(base)
     }
 
     /// An item key from a small constant.
@@ -941,7 +1072,8 @@ mod tests {
         assert!(!inv.fully_loaded(InventoryOwner::Agent));
 
         // First sweep takes the bounded top of the tree (root + first child).
-        let batch = inv.next_fetch_batch(2);
+        let now = Instant::now();
+        let batch = inv.next_fetch_batch(2, now);
         assert_eq!(
             batch,
             vec![fk(0xF0), fk(0xF1)],
@@ -950,7 +1082,7 @@ mod tests {
         assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Fetching));
         assert_eq!(inv.folder_state(fk(0xF1)), Some(FolderState::Fetching));
         // The budget is full, so a second call returns nothing until replies land.
-        assert!(inv.next_fetch_batch(2).is_empty());
+        assert!(inv.next_fetch_batch(2, now).is_empty());
 
         // The two replies fold in: the fetched folders become `Loaded`.
         inv.mark_folder_loaded(fk(0xF0), 1, InventoryOwner::Agent);
@@ -958,13 +1090,118 @@ mod tests {
 
         // The next sweep descends past the now-`Loaded` folders to the deeper
         // `Unknown` ones.
-        let batch = inv.next_fetch_batch(2);
+        let batch = inv.next_fetch_batch(2, now);
         assert_eq!(batch, vec![fk(0xF2), fk(0xF3)]);
         inv.mark_folder_loaded(fk(0xF2), 1, InventoryOwner::Agent);
         inv.mark_folder_loaded(fk(0xF3), 1, InventoryOwner::Agent);
 
-        assert!(inv.next_fetch_batch(2).is_empty());
+        assert!(inv.next_fetch_batch(2, now).is_empty());
         assert!(inv.fully_loaded(InventoryOwner::Agent));
+    }
+
+    /// Replies that never arrive do **not** deadlock the crawl: once the whole
+    /// in-flight budget is handed out and every reply is lost, the stall deadline
+    /// returns those folders to `Unknown` and the very next sweep re-issues them.
+    /// Before the per-entry deadline existed, `slots` stayed pinned at zero for
+    /// the rest of the session and the tree never finished loading.
+    #[test]
+    fn a_lost_reply_frees_its_in_flight_slot() {
+        let mut inv = Inventory::new();
+        inv.set_agent_root(Some(fk(0xF0)));
+        inv.cache_folder(folder(0xF0, None, 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF1, Some(0xF0), 1), InventoryOwner::Agent);
+        inv.cache_folder(folder(0xF2, Some(0xF0), 1), InventoryOwner::Agent);
+
+        // The whole budget goes out at once, and nothing ever replies.
+        let start = Instant::now();
+        assert_eq!(inv.next_fetch_batch(2, start), vec![fk(0xF0), fk(0xF1)]);
+        assert_eq!(
+            inv.next_fetch_deadline(),
+            Some(at(start, 1, 0)),
+            "the shell is told when to wake and reclaim the slots"
+        );
+        assert!(
+            inv.next_fetch_batch(2, start).is_empty(),
+            "the budget is full while both requests are in flight"
+        );
+
+        // A moment before the deadline nothing is reclaimed…
+        assert!(inv.expire_stalled_fetches(at(start, 0, 1)).is_empty());
+        assert!(inv.next_fetch_batch(2, at(start, 0, 1)).is_empty());
+
+        // …and at the deadline both stalled folders come back as `Unknown`, with
+        // their retry budget merely dented.
+        assert_eq!(
+            inv.expire_stalled_fetches(at(start, 1, 0)),
+            vec![
+                (fk(0xF0), FolderState::Unknown),
+                (fk(0xF1), FolderState::Unknown),
+            ]
+        );
+        assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Unknown));
+
+        // The next sweep re-issues them — the crawl is running again.
+        assert_eq!(
+            inv.next_fetch_batch(2, at(start, 1, 0)),
+            vec![fk(0xF0), fk(0xF1)]
+        );
+
+        // A reply that does land clears the folder's stall bookkeeping outright:
+        // it is `Loaded`, and a later expiry pass leaves it alone.
+        inv.mark_folder_loaded(fk(0xF0), 1, InventoryOwner::Agent);
+        assert_eq!(
+            inv.expire_stalled_fetches(at(start, 2, 0)),
+            vec![(fk(0xF1), FolderState::Unknown)],
+            "only the still-in-flight folder expires"
+        );
+        assert_eq!(inv.next_fetch_deadline(), None, "nothing is in flight now");
+    }
+
+    /// A folder the simulator never answers is retried a bounded number of times
+    /// and then given up on (`Failed`) rather than re-issued forever — Firestorm's
+    /// `MAX_FETCH_RETRIES`. The give-up is terminal for the *scheduler* only: an
+    /// explicit on-demand request starts a fresh budget.
+    #[test]
+    fn a_folder_that_never_answers_is_given_up_on() {
+        let mut inv = Inventory::new();
+        inv.set_agent_root(Some(fk(0xF0)));
+        inv.cache_folder(folder(0xF0, None, 1), InventoryOwner::Agent);
+
+        let start = Instant::now();
+        for stall in 0..crate::INVENTORY_FETCH_MAX_ATTEMPTS {
+            let issued = at(start, stall, 0);
+            assert_eq!(
+                inv.next_fetch_batch(4, issued),
+                vec![fk(0xF0)],
+                "attempt {stall} is issued"
+            );
+            let expired = at(start, stall.saturating_add(1), 0);
+            assert_eq!(inv.expire_stalled_fetches(expired).len(), 1);
+        }
+        assert_eq!(
+            inv.folder_state(fk(0xF0)),
+            Some(FolderState::Failed),
+            "the retry budget is spent"
+        );
+
+        // The scheduler leaves it alone from here — but it is not `Loaded`, so the
+        // tree is honestly reported as incomplete.
+        let after = at(start, crate::INVENTORY_FETCH_MAX_ATTEMPTS, 0);
+        assert!(inv.next_fetch_batch(4, after).is_empty());
+        assert!(!inv.fully_loaded(InventoryOwner::Agent));
+
+        // An explicit request (a user opening the folder) tries again with a full
+        // budget: one stall puts it back to `Unknown`, not straight to `Failed`.
+        inv.mark_folder_fetching(fk(0xF0), after);
+        assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Fetching));
+        assert_eq!(
+            inv.expire_stalled_fetches(at(
+                start,
+                crate::INVENTORY_FETCH_MAX_ATTEMPTS.saturating_add(1),
+                0
+            )),
+            vec![(fk(0xF0), FolderState::Unknown)]
+        );
     }
 
     /// An on-demand fetch flips exactly its one folder to `Fetching`, leaving the
@@ -978,13 +1215,14 @@ mod tests {
         inv.cache_folder(folder(0xF1, Some(0xF0), 1), InventoryOwner::Agent);
         inv.cache_folder(folder(0xF2, Some(0xF0), 1), InventoryOwner::Agent);
 
-        inv.mark_folder_fetching(fk(0xF1));
+        let now = Instant::now();
+        inv.mark_folder_fetching(fk(0xF1), now);
         assert_eq!(inv.folder_state(fk(0xF1)), Some(FolderState::Fetching));
         assert_eq!(inv.folder_state(fk(0xF0)), Some(FolderState::Unknown));
         assert_eq!(inv.folder_state(fk(0xF2)), Some(FolderState::Unknown));
 
         // The scheduler skips the in-flight folder but sweeps up the rest.
-        let batch = inv.next_fetch_batch(10);
+        let batch = inv.next_fetch_batch(10, now);
         assert_eq!(batch, vec![fk(0xF0), fk(0xF2)]);
         assert!(!batch.contains(&fk(0xF1)));
     }

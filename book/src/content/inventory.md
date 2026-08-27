@@ -60,6 +60,8 @@ version, as a `FolderState`:
   been fetched.
 - **`Fetching`** — a descendents request for it is in flight.
 - **`Loaded { version }`** — its contents are present, fetched at that version.
+- **`Failed`** — every request for it stalled and its retry budget is spent (see
+  below); the crawl has given up on the folder.
 
 This is deliberately distinct from `InventoryFolder::version`: a skeleton folder
 carries a known, authoritative version yet `Unknown` contents until it is
@@ -109,14 +111,30 @@ Populating the whole tree is opt-in. `Session::set_background_inventory_fetch(
 true)` enables an automatic breadth-first crawl over `Unknown` folders; it is
 **disabled by default**, so a consumer that never reads inventory issues no
 folder fetches and pays nothing. While enabled, the runtime drives the crawl by
-calling `Session::next_inventory_fetch_batch(max_in_flight)` each tick — it
+calling `Session::next_inventory_fetch_batch(max_in_flight, now)` each tick — it
 returns the next batch of folders to fetch (bounded by `max_in_flight` minus
 those already in flight, `INVENTORY_FETCH_MAX_IN_FLIGHT` being the conventional
 bound) and flips each to `Fetching`. The shell POSTs a
 `FetchInventoryDescendents2` per folder; each reply folds in, flips the folder
 `Loaded`, and seeds its children `Unknown` for the next sweep.
 `Session::inventory_fully_loaded(owner)` is the completion signal — true once no
-folder of that tree is `Unknown` or `Fetching`.
+folder of that tree is `Unknown`, `Fetching` or `Failed`.
+
+### Stalled fetches
+
+A request whose reply never arrives — a dropped UDP datagram, a CAPS POST that
+errored out, a folder the simulator simply never answers — would otherwise hold
+its folder `Fetching` for the rest of the session, and `max_in_flight` such
+folders would pin the budget at zero and deadlock the crawl outright. So every
+in-flight folder carries a deadline: `Session::handle_timeout` returns any
+folder still unanswered after `INVENTORY_FETCH_TIMEOUT` (30 s, Firestorm's
+`FETCH_TIMER_EXPIRY`) to `Unknown`, and the next sweep re-issues it. After
+`INVENTORY_FETCH_MAX_ATTEMPTS` such stalls (10, Firestorm's
+`MAX_FETCH_RETRIES`) the crawl gives up on the folder and leaves it `Failed`,
+reported once as a `Diagnostic::ExpectedReplyMissing`. The give-up binds the
+*scheduler* only: an explicit on-demand request for the folder — which the
+runtime shells issue for a `Failed` folder the consumer queries, exactly as they
+do for an `Unknown` one — starts a fresh retry budget.
 
 The explicit pulls work regardless of the flag:
 `Session::request_folder_contents(id)` (UDP) and
@@ -256,7 +274,7 @@ mirroring inventory stays in sync. None has a reply; a mirror simply applies it:
 >   `library_root` / `library_owner`) and its own version-gated disk cache; a
 >   Library descendents reply folds back under `InventoryOwner::Library`, and no
 >   mutation command targets the Library. The per-folder contents state is
->   `FolderState` (`Unknown` / `Fetching` / `Loaded { version }`);
+>   `FolderState` (`Unknown` / `Fetching` / `Loaded { version }` / `Failed`);
 >   `merge_skeleton` reconciles a loaded cache against the login skeleton.
 > - The held read API lives on `Session` in `sl-proto/src/session/methods.rs`:
 >   `inventory_folder` / `inventory_item` (borrowed), `inventory_children`

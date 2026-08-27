@@ -154,6 +154,17 @@ impl Diagnostic {
     /// action did nothing reports this one.
     pub const SIT_REQUEST: &'static str = "Sit";
 
+    /// The [`Diagnostic::ExpectedReplyMissing`] `request` label for an inventory
+    /// folder-contents fetch that stalled often enough for the background crawl
+    /// to give up on the folder.
+    ///
+    /// Named for the wire request rather than an operation (it covers the UDP
+    /// `FetchInventoryDescendents` and its CAPS successors
+    /// `FetchInventoryDescendents2` / `FetchLibDescendents2` alike), because the
+    /// give-up is per folder rather than per user action: the agent sees one
+    /// branch of the tree stay empty, with nothing else surfaced.
+    pub const INVENTORY_DESCENDENTS_REQUEST: &'static str = "FetchInventoryDescendents";
+
     /// The marked [`hexdump`] of the bytes this diagnostic captured, or [`None`]
     /// for a variant that captures none.
     ///

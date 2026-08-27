@@ -21,25 +21,26 @@ mod test {
         FollowCamProperty, FreezeAction, FriendKey, FriendPresence, FriendRights,
         GestureActivation, GlobalCoordinates, Glow, GodRegionUpdate, GridCoordinates, GroupKey,
         GroupNoticeAttachment, GroupRequestId, GroupRoleChange, GroupRoleEdit, GroupRoleKey,
-        GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT, ImDialog,
-        ImSessionId, ImageCodec, InterestsUpdate, InventoryCallbackId, InventoryFolder,
-        InventoryFolderKey, InventoryItem, InventoryItemMove, InventoryItemOrFolderKey,
-        InventoryKey, InventoryOwner, InventoryType, InviteChannel, ItemInfo, LandArea,
-        LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandingType, LightData, LindenAmount,
-        LindenBalance, LoginAccount, LoginParams, LoginRedirect, LookAtType, LureId, MapItemType,
-        Material, Maturity, MeanCollisionType, MeshKey, MoneyTransactionType, MovementMode,
-        MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus, NewInventoryItem, NewInventoryLink,
-        NotecardRez, ObjectBuyItem, ObjectExtraParams, ObjectFlagSettings, ObjectKey,
-        ObjectTransform, OwnerKey, ParcelAccessEntry, ParcelAccessFlags, ParcelAccessScope,
-        ParcelCategory, ParcelFlags, ParcelKey, ParcelMediaCommand, ParcelRequestResult,
-        ParcelReturnType, ParcelStatus, ParcelUpdate, PendingInvite, PermissionField, Permissions,
-        Permissions5, PickUpdate, PointAtType, Postcard, PrimShape, PrimShapeParams, ProductType,
-        ProfileUpdate, QueryId, ReflectionProbeFlags, RegionCoordinates, RegionHandle,
-        RegionInfoUpdate, RegionLocalParcelId, RegionName, Reliability, RequiredVoiceVersion,
-        RestoreItem, RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale,
-        ScopedObjectId, ScopedParcelId, ScriptControlAction, ScriptPermissionStatus,
-        ScriptPermissions, SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply,
-        SimStatId, SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
+        GroupRoleMemberChange, GroupRoleUpdateType, INVENTORY_FETCH_MAX_IN_FLIGHT,
+        INVENTORY_FETCH_TIMEOUT, ImDialog, ImSessionId, ImageCodec, InterestsUpdate,
+        InventoryCallbackId, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemMove,
+        InventoryItemOrFolderKey, InventoryKey, InventoryOwner, InventoryType, InviteChannel,
+        ItemInfo, LandArea, LandBrushAction, LandBrushSize, LandEdit, LandImpact, LandingType,
+        LightData, LindenAmount, LindenBalance, LoginAccount, LoginParams, LoginRedirect,
+        LookAtType, LureId, MapItemType, Material, Maturity, MeanCollisionType, MeshKey,
+        MoneyTransactionType, MovementMode, MuteFlags, MuteType, NavMeshBuildStatus, NavMeshStatus,
+        NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
+        ObjectFlagSettings, ObjectKey, ObjectTransform, OwnerKey, ParcelAccessEntry,
+        ParcelAccessFlags, ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelKey,
+        ParcelMediaCommand, ParcelRequestResult, ParcelReturnType, ParcelStatus, ParcelUpdate,
+        PendingInvite, PermissionField, Permissions, Permissions5, PickUpdate, PointAtType,
+        Postcard, PrimShape, PrimShapeParams, ProductType, ProfileUpdate, QueryId,
+        ReflectionProbeFlags, RegionCoordinates, RegionHandle, RegionInfoUpdate,
+        RegionLocalParcelId, RegionName, Reliability, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, Scale, ScopedObjectId,
+        ScopedParcelId, ScriptControlAction, ScriptPermissionStatus, ScriptPermissions,
+        SculptOrMeshKey, Session, SessionMessage, SetDisplayNameReply, SimStatId,
+        SimWideDeleteFlags, SimulatorTime, SkySettings, SoundFlags, StartLocationSlot,
         TaskInventoryKey, TaskInventoryReply, TeleportFlags, TerraformArea, TerrainLayerType,
         TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, Transmit,
         UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
@@ -9684,7 +9685,7 @@ mod test {
         assert!(!session.background_inventory_fetch());
         assert!(
             session
-                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT)
+                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, now)
                 .is_empty()
         );
         assert_eq!(session.folder_fetch_state(root), Some(FolderState::Unknown));
@@ -9705,7 +9706,7 @@ mod test {
         // (the in-flight `sub` is skipped) and flips it `Fetching`.
         session.set_background_inventory_fetch(true);
         assert!(session.background_inventory_fetch());
-        let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
+        let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, now);
         assert_eq!(batch, vec![root]);
         assert_eq!(
             session.folder_fetch_state(root),
@@ -9743,8 +9744,86 @@ mod test {
         // Nothing left to sweep.
         assert!(
             session
-                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT)
+                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, now)
                 .is_empty()
+        );
+        Ok(())
+    }
+
+    /// B6: a folder-contents request whose reply never arrives does not hold its
+    /// in-flight slot for the session's life. The session's timed loop returns the
+    /// stalled folder to `Unknown` once its stall deadline passes, and the next
+    /// sweep re-issues it — so a run of lost replies cannot pin the crawl's budget
+    /// at zero and deadlock the whole background fetch.
+    #[test]
+    fn a_stalled_folder_fetch_is_requeued_by_the_timed_loop() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = new_session()?;
+        let root = InventoryFolderKey::from(uuid::Uuid::from_u128(0xF0));
+        let mut success = LoginSuccess::minimal(
+            AgentKey::from(uuid::Uuid::from_u128(1)),
+            uuid::Uuid::from_u128(2),
+            uuid::Uuid::from_u128(3),
+            CircuitCode(0x0011_2233),
+            Ipv4Addr::new(127, 0, 0, 1),
+            9000,
+            "http://127.0.0.1:9000/seed".parse()?,
+        );
+        success.inventory_root = Some(root);
+        success.inventory_skeleton = vec![SkeletonFolder {
+            folder_id: root,
+            parent_id: InventoryFolderKey::from(uuid::Uuid::nil()),
+            name: "My Inventory".to_owned(),
+            type_default: 8,
+            version: 5,
+        }];
+        session.handle_login_response(LoginResponse::Success(Box::new(success)), now)?;
+        drain(&mut session)?;
+        drain_events(&mut session);
+
+        // The crawl issues the folder, and the simulator never answers.
+        session.set_background_inventory_fetch(true);
+        let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, now);
+        assert_eq!(batch, vec![root]);
+        assert_eq!(
+            session.folder_fetch_state(root),
+            Some(FolderState::Fetching)
+        );
+
+        // The idle shell never sleeps past the stall deadline (the circuit's own
+        // keep-alive timers are sooner here, but the fetch deadline is merged in
+        // so an otherwise-quiet session still wakes for it).
+        let stall_deadline = now
+            .checked_add(INVENTORY_FETCH_TIMEOUT)
+            .ok_or("instant out of range")?;
+        assert!(
+            session
+                .poll_timeout()
+                .is_some_and(|wake| wake <= stall_deadline)
+        );
+
+        // A timed loop before the deadline changes nothing…
+        session.handle_timeout(after(now, 1_000)?);
+        assert_eq!(
+            session.folder_fetch_state(root),
+            Some(FolderState::Fetching)
+        );
+        assert!(
+            session
+                .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, after(now, 1_000)?)
+                .is_empty()
+        );
+
+        // …and one at the deadline requeues the folder (the session stays up: a
+        // stalled fetch is not a dead link).
+        let expired = after(now, 30_001)?;
+        session.handle_timeout(expired);
+        assert!(!session.is_closed());
+        assert_eq!(session.folder_fetch_state(root), Some(FolderState::Unknown));
+        assert_eq!(
+            session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, expired),
+            vec![root],
+            "the crawl re-issues the folder instead of deadlocking"
         );
         Ok(())
     }

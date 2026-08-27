@@ -754,7 +754,7 @@ impl Client {
             ) {
                 let batch = self
                     .session
-                    .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
+                    .next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, Instant::now());
                 // The batch can span both trees (the scheduler walks from both
                 // roots): the agent folders go to `FetchInventoryDescendents2` with
                 // the agent owner, the Library folders to `FetchLibDescendents2`
@@ -2380,10 +2380,14 @@ impl Client {
                                 self.session.inventory_folder_page(folder, before, limit);
                             // On-demand: a query for an unfetched folder schedules
                             // its fetch so a later query sees the contents (works
-                            // regardless of the background-crawl flag).
-                            if self.session.folder_fetch_state(folder)
-                                == Some(FolderState::Unknown)
-                            {
+                            // regardless of the background-crawl flag). A folder the
+                            // crawl gave up on (`Failed`) is retried here too — this
+                            // is a fresh, caller-driven decision to fetch it, and the
+                            // stall deadline keeps a repeated query from hammering.
+                            if matches!(
+                                self.session.folder_fetch_state(folder),
+                                Some(FolderState::Unknown | FolderState::Failed)
+                            ) {
                                 fetch_folder_contents(
                                     &mut self.session,
                                     folder,

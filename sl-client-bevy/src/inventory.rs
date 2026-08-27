@@ -57,8 +57,10 @@ pub(crate) fn fetch_folder_contents(
                 run_inventory_fetch(&url, owner, &[folder_id], response_cap, &events_tx);
             });
             // Mirror the UDP path's in-flight bookkeeping so the background crawl
-            // does not re-pick this folder before its reply lands.
-            session.mark_folder_fetching(folder_id);
+            // does not re-pick this folder before its reply lands — and so a POST
+            // that errors out (every failure above returns silently) releases the
+            // in-flight slot again once its stall deadline passes.
+            session.mark_folder_fetching(folder_id, now);
         }
         None => {
             session.request_folder_contents(folder_id, now)?;

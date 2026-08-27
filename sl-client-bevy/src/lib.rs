@@ -1367,7 +1367,7 @@ fn advance_running(
             caps.map.get(CAP_FETCH_INVENTORY).cloned(),
             session.agent_id(),
         ) {
-            let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT);
+            let batch = session.next_inventory_fetch_batch(INVENTORY_FETCH_MAX_IN_FLIGHT, now);
             // The batch can span both trees: the agent folders go to
             // `FetchInventoryDescendents2` with the agent owner, the Library folders
             // to `FetchLibDescendents2` with the Library owner (or, where the grid
@@ -4129,8 +4129,14 @@ fn apply_command(
             // `inventory_folder_page` directly, skipping the round-trip.
             let (folders, items, prev) = session.inventory_folder_page(*folder, *before, *limit);
             // On-demand: a query for an unfetched folder schedules its fetch
-            // (works regardless of the background-crawl flag).
-            if session.folder_fetch_state(*folder) == Some(FolderState::Unknown) {
+            // (works regardless of the background-crawl flag). A folder the crawl
+            // gave up on (`Failed`) is retried here too — this is a fresh,
+            // caller-driven decision to fetch it, and the stall deadline keeps a
+            // repeated query from hammering.
+            if matches!(
+                session.folder_fetch_state(*folder),
+                Some(FolderState::Unknown | FolderState::Failed)
+            ) {
                 fetch_folder_contents(session, *folder, caps, now)?;
             }
             report(

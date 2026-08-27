@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 96 |
-| done | 877 |
+| bugs | 95 |
+| done | 878 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (96)
+## bugs (95)
 
 ### protocol
 
@@ -1176,8 +1176,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — No asset transfer has a timeout — six registries only ever grow
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
-- [`protocol-audit-inventory-fetch-deadlock`](bugs/protocol-audit-inventory-fetch-deadlock.md)
-  — Lost folder replies permanently deadlock the background inventory crawl
 - [`protocol-audit-j2c-dimension-caps`](bugs/protocol-audit-j2c-dimension-caps.md)
   — No MAX_IMAGE_SIZE / MAX_IMAGE_AREA cap on a JPEG-2000 header
 - [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
@@ -1400,7 +1398,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (877)
+## done (878)
 
 ### protocol
 
@@ -1525,6 +1523,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
 - [`protocol-audit-flush-acks-loses-acks`](done/protocol-audit-flush-acks-loses-acks.md)
   — flush_acks drops every remaining ack on a wire error, in both directions
+- [`protocol-audit-inventory-fetch-deadlock`](done/protocol-audit-inventory-fetch-deadlock.md)
+  — Lost folder replies permanently deadlock the background inventory crawl
 - [`protocol-audit-llsd-recursion-depth-cap`](done/protocol-audit-llsd-recursion-depth-cap.md)
   — LLSD parsers recurse with no depth limit
 - [`protocol-audit-mesh-decode-allocation-caps`](done/protocol-audit-mesh-decode-allocation-caps.md)

@@ -718,6 +718,25 @@ pub const RECV_BUFFER_SIZE: usize = 0x1_0000;
 /// `max_concurrent_fetches = 12` (`LLInventoryModelBackgroundFetch`).
 pub const INVENTORY_FETCH_MAX_IN_FLIGHT: usize = 12;
 
+/// How long an in-flight inventory folder-contents fetch may go unanswered
+/// before the session declares it stalled, releases its in-flight slot and lets
+/// the background crawl re-issue it.
+///
+/// A lost UDP request, a CAPS POST that errored out, or a folder the simulator
+/// simply never answers would otherwise strand that folder `Fetching` for the
+/// session's life — and [`INVENTORY_FETCH_MAX_IN_FLIGHT`] such folders would
+/// deadlock the crawl outright. Matches Firestorm's non-AIS `FETCH_TIMER_EXPIRY`
+/// (`LLViewerInventoryCategory::setFetching`).
+pub const INVENTORY_FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// How many times one folder's contents fetch may stall
+/// ([`INVENTORY_FETCH_TIMEOUT`]) before the background crawl gives up on it and
+/// leaves it [`FolderState::Failed`]. An explicit on-demand request for the
+/// folder starts a fresh budget. Matches Firestorm's `MAX_FETCH_RETRIES`
+/// (`LLInventoryModelBackgroundFetch`), past which a category is dropped from
+/// the fetch queue rather than re-queued.
+pub const INVENTORY_FETCH_MAX_ATTEMPTS: u32 = 10;
+
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
     now.checked_add(duration).unwrap_or(now)

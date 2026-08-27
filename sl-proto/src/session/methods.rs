@@ -41,13 +41,13 @@ use super::{
     CAP_UPDATE_AVATAR_APPEARANCE, CAP_UPDATE_EXPERIENCE, CAP_USER_INFO,
     CHAT_SESSION_FETCH_HISTORY_TAG, ChatLifecycleView, ChatSession, ChatSessionInfo,
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
-    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory, InventoryOwner,
-    LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MessageCursor,
-    PING_INTERVAL, PendingHandover, PendingInvite, ReliableSeverity, SIT_TIMEOUT, ScriptGrant,
-    ScriptHolder, ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session,
-    SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
-    TeleportPhase, TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo,
-    XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
+    FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
+    Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
+    MessageCursor, PING_INTERVAL, PendingHandover, PendingInvite, ReliableSeverity, SIT_TIMEOUT,
+    ScriptGrant, ScriptHolder, ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState,
+    Session, SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT,
+    TakenControls, TeleportPhase, TextureDownload, TransferDownload, TransferPurpose,
+    VoiceChannelInfo, XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -4962,6 +4962,28 @@ impl Session {
                 .retain(|_, last_seen| now.saturating_duration_since(*last_seen) < TYPING_TIMEOUT);
         }
 
+        // Release inventory folder fetches whose reply never came: a lost UDP
+        // request or a CAPS POST that errored out would otherwise hold its folder
+        // `Fetching` for the session's life, and a full budget of such folders
+        // would pin the background crawl's slots at zero. Each stalled folder
+        // returns to `Unknown` for the next sweep to re-issue, until its retry
+        // budget is spent and the crawl gives up on it.
+        for (folder, state) in self.inventory.expire_stalled_fetches(now) {
+            if matches!(state, FolderState::Failed) {
+                tracing::warn!(
+                    %folder,
+                    "giving up on inventory folder contents after \
+                     {INVENTORY_FETCH_MAX_ATTEMPTS} stalled fetches"
+                );
+                self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                    request: Diagnostic::INVENTORY_DESCENDENTS_REQUEST.to_owned(),
+                    sequence: None,
+                });
+            } else {
+                tracing::debug!(%folder, "inventory folder contents fetch stalled; requeued");
+            }
+        }
+
         if self
             .circuit
             .as_ref()
@@ -9345,8 +9367,9 @@ impl Session {
             circuit.send_fetch_inventory_descendents(folder_id.uuid(), owner_id, now)?;
         }
         // Track the in-flight request in the model so the background scheduler
-        // does not re-pick this folder and the completion query reflects it.
-        self.inventory.mark_folder_fetching(folder_id);
+        // does not re-pick this folder and the completion query reflects it, and
+        // arm its stall deadline so a lost reply frees the slot again.
+        self.inventory.mark_folder_fetching(folder_id, now);
         Ok(())
     }
 
@@ -9365,11 +9388,21 @@ impl Session {
     /// sweep. The explicit pulls ([`Session::request_folder_contents`],
     /// [`Command::FetchInventoryFolders`](crate::Command::FetchInventoryFolders))
     /// work regardless of the flag.
-    pub fn next_inventory_fetch_batch(&mut self, max_in_flight: usize) -> Vec<InventoryFolderKey> {
+    ///
+    /// `now` arms each issued folder's stall deadline
+    /// ([`INVENTORY_FETCH_TIMEOUT`](crate::INVENTORY_FETCH_TIMEOUT)): a reply
+    /// that never lands releases its in-flight slot on the session's timed loop
+    /// ([`Session::handle_timeout`]) instead of pinning the budget at zero and
+    /// deadlocking the crawl.
+    pub fn next_inventory_fetch_batch(
+        &mut self,
+        max_in_flight: usize,
+        now: Instant,
+    ) -> Vec<InventoryFolderKey> {
         if !self.background_inventory_fetch {
             return Vec::new();
         }
-        self.inventory.next_fetch_batch(max_in_flight)
+        self.inventory.next_fetch_batch(max_in_flight, now)
     }
 
     /// Enables or disables the automatic background inventory crawl (default
@@ -9584,9 +9617,10 @@ impl Session {
     }
 
     /// The contents [`FolderState`] of `folder_id` (`Unknown` / `Fetching` /
-    /// `Loaded { version }`), or `None` if the folder is not in the model. A
-    /// skeleton folder is `Unknown` until its contents are fetched in their own
-    /// right; a descendents reply for the folder flips it to `Loaded`.
+    /// `Loaded { version }` / `Failed`), or `None` if the folder is not in the
+    /// model. A skeleton folder is `Unknown` until its contents are fetched in
+    /// their own right; a descendents reply for the folder flips it to `Loaded`,
+    /// and a fetch that stalls past its retry budget leaves it `Failed`.
     #[must_use]
     pub fn folder_fetch_state(&self, folder_id: InventoryFolderKey) -> Option<FolderState> {
         self.inventory.folder_state(folder_id)
@@ -9599,8 +9633,15 @@ impl Session {
     /// internally; a runtime that instead issues the fetch over the modern CAPS
     /// path (`FetchInventoryDescendents2` / `FetchLibDescendents2`, which Second
     /// Life requires) calls this so the in-flight bookkeeping matches either way.
-    pub fn mark_folder_fetching(&mut self, folder_id: InventoryFolderKey) {
-        self.inventory.mark_folder_fetching(folder_id);
+    ///
+    /// `now` arms the request's stall deadline
+    /// ([`INVENTORY_FETCH_TIMEOUT`](crate::INVENTORY_FETCH_TIMEOUT)), so a reply
+    /// that never arrives returns the folder to `Unknown` rather than holding an
+    /// in-flight slot for the session's life. A folder the crawl had given up on
+    /// ([`Failed`](FolderState::Failed)) gets a fresh retry budget — this path is
+    /// caller-driven, so it is a new decision to fetch.
+    pub fn mark_folder_fetching(&mut self, folder_id: InventoryFolderKey, now: Instant) {
+        self.inventory.mark_folder_fetching(folder_id, now);
     }
 
     /// Which tree — the agent's own inventory ([`InventoryOwner::Agent`]) or the
@@ -12875,6 +12916,10 @@ impl Session {
         merge_deadline(&mut earliest, circuit.timers.teleport);
         merge_deadline(&mut earliest, circuit.timers.sit);
         merge_deadline(&mut earliest, circuit.next_resend_deadline());
+        // The inventory fetch deadlines are session-scoped rather than
+        // per-circuit, but an idle shell still has to wake for them or a stalled
+        // folder sits `Fetching` until some other timer happens to fire.
+        merge_deadline(&mut earliest, self.inventory.next_fetch_deadline());
         for child in self.children.values() {
             merge_deadline(&mut earliest, Some(child.timers.inactivity));
             merge_deadline(&mut earliest, child.timers.ack_flush);
