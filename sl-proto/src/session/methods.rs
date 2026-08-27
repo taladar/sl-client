@@ -430,10 +430,17 @@ impl Session {
                     // The wire handle is authoritative (a lure or landmark
                     // teleport never knew its target); a server that omits it
                     // leaves us the handle we asked for, or none.
-                    let region_handle = finish.region_handle.unwrap_or(match self.teleport {
-                        TeleportPhase::Requested { target } => target,
-                        TeleportPhase::Idle | TeleportPhase::Handover { .. } => RegionHandle(0),
-                    });
+                    let region_handle = finish
+                        .region_handle
+                        .or(match self.teleport {
+                            TeleportPhase::Requested { target } => target,
+                            TeleportPhase::Idle | TeleportPhase::Handover { .. } => None,
+                        })
+                        // Neither side named a destination: report the
+                        // "unknown region" handle rather than a guess. The
+                        // destination's own `AgentMovementComplete` supplies the
+                        // real one when the handover commits.
+                        .unwrap_or(RegionHandle(0));
                     if matches!(self.state, SessionState::Teleporting) {
                         self.events.push_back(Event::TeleportFinished {
                             region_handle,
@@ -7689,8 +7696,9 @@ impl Session {
             now,
         )?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
-        // Best-effort destination hint; a cross-region lure's TeleportFinish
-        // carries the authoritative handle, so a non-fake-parcel id is harmless.
+        // Best-effort destination hint: OpenSim encodes the offerer's region in
+        // the lure id, Second Life's is opaque and yields `None`. Either way the
+        // TeleportFinish carries the authoritative handle.
         self.teleport = TeleportPhase::Requested {
             target: parse_lure_region_handle(lure_id.get()),
         };
@@ -12752,9 +12760,7 @@ impl Session {
             return false;
         };
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
-        self.teleport = TeleportPhase::Requested {
-            target: RegionHandle(0),
-        };
+        self.teleport = TeleportPhase::Requested { target: None };
         self.state = SessionState::Teleporting;
         true
     }
@@ -12810,7 +12816,7 @@ impl Session {
         circuit.send_teleport_location_request(region_handle.0, position, look_at, now)?;
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         self.teleport = TeleportPhase::Requested {
-            target: region_handle,
+            target: Some(region_handle),
         };
         self.state = SessionState::Teleporting;
         Ok(())
@@ -12842,9 +12848,7 @@ impl Session {
         circuit.timers.teleport = Some(deadline(now, TELEPORT_TIMEOUT));
         // A landmark teleport's destination is resolved sim-side; the
         // authoritative handle arrives with the TeleportFinish.
-        self.teleport = TeleportPhase::Requested {
-            target: RegionHandle(0),
-        };
+        self.teleport = TeleportPhase::Requested { target: None };
         self.state = SessionState::Teleporting;
         Ok(())
     }

@@ -15,7 +15,12 @@ and the position/orientation within it. There are a few flavours:
 - **Teleport on request** to another agent (`Command::RequestTeleport`).
 - **Lure** handling: you can offer another avatar a teleport
   (`Command::OfferTeleport`) and accept or decline an offered lure
-  (`Command::AcceptTeleportLure` / `Command::DeclineTeleportLure`).
+  (`Command::AcceptTeleportLure` / `Command::DeclineTeleportLure`). Like a
+  landmark teleport the destination is resolved simulator-side. OpenSim packs
+  the offerer's region handle and position into the lure id (a *fake parcel
+  id*, `sl_wire::FakeParcelId`), which gives an early destination hint; Second
+  Life's lure id is opaque, so there is none and the handle only becomes known
+  when the teleport finishes.
 - **Landmark teleport** (`Command::TeleportViaLandmark { landmark }`) teleports
   to a landmark inventory item's *asset* id; a `landmark` of `None` teleports to
   the agent's **home** location. Unlike a direct teleport the destination is

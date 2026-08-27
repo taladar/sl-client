@@ -1394,8 +1394,13 @@ enum TeleportPhase {
     /// `TeleportFinish`. `target` is the best-effort destination region handle
     /// (a cross-region lure's authoritative handle arrives with the finish).
     Requested {
-        /// The destination region handle the teleport was aimed at.
-        target: RegionHandle,
+        /// The destination region handle the teleport was aimed at, or `None`
+        /// when the request never named one — a landmark or home teleport, a
+        /// teleport the simulator decided on, or a lure whose id is opaque
+        /// rather than one of OpenSim's fake parcel ids. `None` is *unknown*,
+        /// which is not the same as the region at grid origin, so it must not
+        /// be flattened to `RegionHandle(0)` while the phase is in flight.
+        target: Option<RegionHandle>,
     },
     /// A teleport finished or a region border was crossed: the new root circuit
     /// is up and the next `RegionHandshake` should surface a

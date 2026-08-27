@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 88 |
-| done | 885 |
+| bugs | 87 |
+| done | 886 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (88)
+## bugs (87)
 
 ### protocol
 
@@ -1174,9 +1174,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
   — The legacy-material binary LLSD codec writes Date one way and reads it
   another
-- [`protocol-audit-lure-region-handle`](bugs/protocol-audit-lure-region-handle.md)
-  — parse_lure_region_handle reads 8 bytes of any UUID and calls it a region
-  handle
 - [`protocol-audit-mesh-joint-index-bounds`](bugs/protocol-audit-mesh-joint-index-bounds.md)
   — A rig's joint indices are never checked against the skin's joint count
 - [`protocol-audit-notecard-fidelity`](bugs/protocol-audit-notecard-fidelity.md)
@@ -1382,7 +1379,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (885)
+## done (886)
 
 ### protocol
 
@@ -1518,6 +1515,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — No MAX_IMAGE_SIZE / MAX_IMAGE_AREA cap on a JPEG-2000 header
 - [`protocol-audit-llsd-recursion-depth-cap`](done/protocol-audit-llsd-recursion-depth-cap.md)
   — LLSD parsers recurse with no depth limit
+- [`protocol-audit-lure-region-handle`](done/protocol-audit-lure-region-handle.md)
+  — parse_lure_region_handle reads 8 bytes of any UUID and calls it a region
+  handle
 - [`protocol-audit-mesh-decode-allocation-caps`](done/protocol-audit-mesh-decode-allocation-caps.md)
   — Mesh decode: unbounded inflate, unbounded header offset, unchecked indices
 - [`protocol-audit-region-handshake-mid-session`](done/protocol-audit-region-handshake-mid-session.md)

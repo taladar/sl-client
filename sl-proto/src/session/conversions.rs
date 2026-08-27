@@ -42,6 +42,7 @@ use sl_types::map::GridRectangle;
 use sl_types::map::GridRectangleLike as _;
 use sl_types::map::RegionCoordinates;
 use sl_wire::DisplayName;
+use sl_wire::FakeParcelId;
 use sl_wire::RegionHandle;
 use sl_wire::messages::{
     AgentDataUpdateAgentDataBlock, AgentGroupDataUpdateGroupDataBlock,
@@ -158,12 +159,45 @@ pub(crate) fn unpack_uuids(bucket: &[u8]) -> Vec<Uuid> {
         .collect()
 }
 
-/// Extracts the region handle encoded in a teleport lure id (OpenSim's
-/// `BuildFakeParcelID`: the handle is the first eight little-endian bytes).
-/// Returns `0` for an id that is not a fake parcel id (e.g. a Second Life lure
-/// id), in which case the destination is learned from `TeleportFinish` instead.
-pub(crate) fn parse_lure_region_handle(lure_id: Uuid) -> RegionHandle {
-    RegionHandle(sl_wire::Reader::new(lure_id.as_bytes()).u64().unwrap_or(0))
+/// Extracts the region handle encoded in a teleport lure id, when the id is one
+/// of OpenSim's *fake parcel ids* ([`FakeParcelId`], `BuildFakeParcelID`).
+///
+/// Returns `None` for an id that does not have that layout — a Second Life lure
+/// id is an opaque UUID, and its first eight bytes are **not** a region handle —
+/// in which case the destination is learned from `TeleportFinish` instead.
+pub(crate) fn parse_lure_region_handle(lure_id: Uuid) -> Option<RegionHandle> {
+    FakeParcelId::parse(lure_id).map(|place| place.region_handle)
+}
+
+#[cfg(test)]
+mod lure_region_handle_tests {
+    use pretty_assertions::assert_eq;
+    use sl_wire::{FakeParcelId, RegionHandle};
+    use uuid::Uuid;
+
+    use super::parse_lure_region_handle;
+
+    #[test]
+    fn an_opensim_fake_parcel_lure_id_yields_its_region() {
+        let handle = RegionHandle::from_grid(1000, 1001);
+        let lure_id = FakeParcelId {
+            region_handle: handle,
+            x: 128,
+            y: 64,
+            z: 23,
+        }
+        .to_uuid();
+        assert_eq!(parse_lure_region_handle(lure_id), Some(handle));
+    }
+
+    #[test]
+    fn an_opaque_second_life_lure_id_yields_no_handle() {
+        // A real (random) UUID: its first eight bytes are not a region handle,
+        // and reading them as one is what used to fabricate a destination.
+        let lure_id = Uuid::from_u128(0x3b6b_7c62_8f8f_4e34_9c1a_79c2_e2ba_0fd1);
+        assert_eq!(parse_lure_region_handle(lure_id), None);
+        assert_eq!(parse_lure_region_handle(Uuid::nil()), None);
+    }
 }
 
 /// A fully-specified outgoing `ImprovedInstantMessage`, the argument of
