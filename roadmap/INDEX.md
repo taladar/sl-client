@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 97 |
-| ready | 297 |
+| ready | 298 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 99 |
-| done | 873 |
+| bugs | 98 |
+| done | 874 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1486** |
+| **total** | **1487** |
 
 ## ideas (97)
 
@@ -225,7 +225,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (297)
+## ready (298)
 
 ### protocol
 
@@ -293,6 +293,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-demo-panels-in-release`](ready/viewer-audit-demo-panels-in-release.md)
   — Five developer demo panels ship in the release binary from inside library
   crates
+- [`viewer-audit-diagnostic-stream-unread`](ready/viewer-audit-diagnostic-stream-unread.md)
+  — The viewer collects protocol diagnostics and drains none of them
 - [`viewer-audit-extract-and-test-pure-logic`](ready/viewer-audit-extract-and-test-pure-logic.md)
   — Extract the pure logic trapped inside viewer systems and test it
 - [`viewer-audit-kit-single-consumer-split`](ready/viewer-audit-kit-single-consumer-split.md)
@@ -1165,7 +1167,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (99)
+## bugs (98)
 
 ### protocol
 
@@ -1246,8 +1248,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-collider-settle-treadmill`](bugs/viewer-audit-collider-settle-treadmill.md)
   — A mesh with no physics block rebuilds its collider and the BVH every frame
   forever
-- [`viewer-audit-command-result-diagnostics`](bugs/viewer-audit-command-result-diagnostics.md)
-  — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-display-name-accessor-sweep`](bugs/viewer-audit-display-name-accessor-sweep.md)
   — Ten display sites call the wire-name accessor, so display names are ignored
 - [`viewer-audit-ellipsis-reveal-latch`](bugs/viewer-audit-ellipsis-reveal-latch.md)
@@ -1407,7 +1407,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (873)
+## done (874)
 
 ### protocol
 
@@ -1616,6 +1616,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Worn rigid attachments freeze at the T-pose instead of following the
 - [`viewer-audio-backend`](done/viewer-audio-backend.md) — Audio backend —
   device, decode, listener & mixer
+- [`viewer-audit-command-result-diagnostics`](done/viewer-audit-command-result-diagnostics.md)
+  — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet

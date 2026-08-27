@@ -1,11 +1,11 @@
 //! Inventory / group-member / appearance capability fetches.
 
-use crate::{Caps, EVENT_QUEUE_TIMEOUT};
+use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_GROUP_MEMBER_DATA, CAP_UPDATE_AVATAR_APPEARANCE,
-    GroupKey, InventoryFolderKey, InventoryOwner, Llsd, Session, Uuid,
+    Error, GroupKey, InventoryFolderKey, InventoryOwner, Llsd, Session, Uuid,
     build_fetch_inventory_request, build_group_member_data_request,
     build_update_avatar_appearance_request, parse_llsd_xml,
 };
@@ -28,12 +28,18 @@ use std::time::Instant;
 /// The AIS3 (`InventoryAPIv3`) capability backs the inventory *mutation*
 /// commands; the read path keeps the descendents semantics (folder versioning /
 /// `Loaded` marking) that those caps provide.
+///
+/// # Errors
+///
+/// Returns the [`Error`] of the UDP fallback's send when no inventory
+/// capability is known and the request could not be put on the wire (the CAPS
+/// route cannot fail here — it hands the fetch to a worker thread).
 pub(crate) fn fetch_folder_contents(
     session: &mut Session,
     folder_id: InventoryFolderKey,
     caps: Option<&Caps>,
     now: Instant,
-) {
+) -> Result<(), Error> {
     let route = caps.and_then(|caps| {
         let (url, owner, response_cap) =
             if session.inventory_owner(folder_id) == Some(InventoryOwner::Library) {
@@ -55,9 +61,10 @@ pub(crate) fn fetch_folder_contents(
             session.mark_folder_fetching(folder_id);
         }
         None => {
-            session.request_folder_contents(folder_id, now).ok();
+            session.request_folder_contents(folder_id, now)?;
         }
     }
+    Ok(())
 }
 
 /// POSTs a `FetchInventoryDescendents2` / `FetchLibDescendents2` request for
@@ -92,7 +99,7 @@ pub(crate) fn run_inventory_fetch(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((response_cap.to_owned(), llsd)).ok();
+        deliver(caps_tx, (response_cap.to_owned(), llsd));
     }
 }
 
@@ -123,7 +130,7 @@ pub(crate) fn run_group_members_fetch(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd)).ok();
+        deliver(caps_tx, (CAP_GROUP_MEMBER_DATA.to_owned(), llsd));
     }
 }
 
@@ -156,8 +163,6 @@ pub(crate) fn run_server_appearance_update(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx
-            .send((CAP_UPDATE_AVATAR_APPEARANCE.to_owned(), llsd))
-            .ok();
+        deliver(caps_tx, (CAP_UPDATE_AVATAR_APPEARANCE.to_owned(), llsd));
     }
 }

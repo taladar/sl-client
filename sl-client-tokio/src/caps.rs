@@ -24,10 +24,23 @@ pub(crate) const CAPS_FAILURE_PREFIX: &str = "\0caps-failure\0";
 /// silently swallowing a transport / parse error; the run loop turns it into a
 /// diagnostic.
 pub(crate) async fn report_caps_failure(caps_tx: &mpsc::Sender<(String, Llsd)>, cap: &str) {
-    caps_tx
-        .send((format!("{CAPS_FAILURE_PREFIX}{cap}"), Llsd::Undef))
-        .await
-        .ok();
+    deliver(
+        caps_tx,
+        (format!("{CAPS_FAILURE_PREFIX}{cap}"), Llsd::Undef),
+    )
+    .await;
+}
+
+/// Hand a worker task's result back to the run loop over one of the session's
+/// channels (events, diagnostics, CAPS payloads, the caps reporter).
+///
+/// The **only** way this fails is a closed channel, which means the receiver was
+/// dropped: the `Client` went away, the consumer stopped reading, or the run
+/// loop already ended. The result belongs to a session nobody is driving any
+/// more, so there is nothing to report it to — routing every such send through
+/// this one helper keeps it the only place a send result is discarded.
+pub(crate) async fn deliver<T>(tx: &mpsc::Sender<T>, value: T) {
+    tx.send(value).await.ok();
 }
 
 /// Aborts a running task handle, if present.

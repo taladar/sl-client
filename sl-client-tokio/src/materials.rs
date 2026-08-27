@@ -1,5 +1,6 @@
 //! Render-materials capability fetch and ModifyMaterialParams post.
 
+use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     CAP_MODIFY_MATERIAL_PARAMS, Event, FaceMaterialPut, Llsd, Uuid,
@@ -32,7 +33,7 @@ pub(crate) async fn fetch_render_materials(
         },
         Err(_error) => Vec::new(),
     };
-    events.send(Event::RenderMaterials(materials)).await.ok();
+    deliver(&events, Event::RenderMaterials(materials)).await;
 }
 
 /// PUTs a `RenderMaterials` request that sets (or clears) legacy materials on
@@ -97,9 +98,6 @@ pub(crate) async fn post_modify_material_params(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx
-            .send((CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd))
-            .await
-            .ok();
+        deliver(&caps_tx, (CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd)).await;
     }
 }

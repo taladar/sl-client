@@ -1,5 +1,6 @@
 //! Two-step NewFileAgentInventory / UploadBakedTexture asset upload.
 
+use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{Event, ScriptCompileError, parse_asset_upload_response};
 use tokio::sync::mpsc;
@@ -19,7 +20,7 @@ pub(crate) async fn run_caps_upload(
     events: mpsc::Sender<Event>,
 ) {
     let event = caps_upload_event(&cap_url, metadata, data, &http).await;
-    events.send(event).await.ok();
+    deliver(&events, event).await;
 }
 
 /// Performs both steps of a CAPS asset upload and returns the resulting event.
@@ -82,7 +83,7 @@ pub(crate) async fn run_script_upload(
     events: mpsc::Sender<Event>,
 ) {
     let event = script_upload_event(&cap_url, metadata, source, running, &http).await;
-    events.send(event).await.ok();
+    deliver(&events, event).await;
 }
 
 /// Performs both steps of a script upload and maps the completion to an event.
@@ -168,9 +169,14 @@ pub(crate) async fn run_report_screenshot_upload(
         return;
     };
     if let Some(uploader) = response.uploader {
-        caps_upload_step(&http, &uploader, "application/octet-stream", screenshot)
-            .await
-            .ok();
+        // Fire-and-forget by design (no event is surfaced), but a failed
+        // snapshot upload still gets a line so a report that silently lost its
+        // screenshot is not invisible.
+        if let Err(reason) =
+            caps_upload_step(&http, &uploader, "application/octet-stream", screenshot).await
+        {
+            tracing::warn!("abuse-report screenshot upload failed: {reason}");
+        }
     }
 }
 

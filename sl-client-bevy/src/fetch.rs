@@ -1,5 +1,6 @@
 //! Binary asset fetch over HTTP (textures, mesh, generic assets).
 
+use crate::deliver;
 use crate::http::{blocking_get_bytes, blocking_get_range};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
@@ -27,7 +28,7 @@ pub(crate) fn run_texture_fetch(
         })),
         None => SessionEvent::TextureNotFound(texture_id),
     };
-    asset_tx.send(event).ok();
+    deliver(asset_tx, event);
 }
 
 /// Fetches the codestream bytes for a texture at `discard_level` using HTTP
@@ -81,7 +82,7 @@ pub(crate) fn run_asset_fetch(
             status: TransferStatus::UnknownSource,
         },
     };
-    asset_tx.send(event).ok();
+    deliver(asset_tx, event);
 }
 
 /// GETs a generic asset from the `GetAsset` capability using the asset class's
@@ -107,13 +108,14 @@ pub(crate) fn run_generic_asset_fetch(
             );
         }
         None => {
-            asset_tx
-                .send(SessionEvent::AssetTransferFailed {
+            deliver(
+                asset_tx,
+                SessionEvent::AssetTransferFailed {
                     asset_id,
                     asset_type,
                     status: TransferStatus::Error,
-                })
-                .ok();
+                },
+            );
         }
     }
 }

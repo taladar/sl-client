@@ -1,5 +1,6 @@
 //! Experience capability fetches (admin/contributor/group).
 
+use crate::caps::deliver;
 use crate::http::get_llsd;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{Event, ExperienceKey, GroupKey, parse_experience_ids, parse_experience_status};
@@ -17,13 +18,14 @@ pub(crate) async fn fetch_group_experiences(
         let Ok(experience_ids) = parse_experience_ids(&llsd) else {
             return;
         };
-        events
-            .send(Event::GroupExperiences {
+        deliver(
+            &events,
+            Event::GroupExperiences {
                 group_id,
                 experience_ids,
-            })
-            .await
-            .ok();
+            },
+        )
+        .await;
     }
 }
 
@@ -39,13 +41,14 @@ pub(crate) async fn fetch_experience_admin(
         let Ok(is_admin) = parse_experience_status(&llsd) else {
             return;
         };
-        events
-            .send(Event::ExperienceAdminStatus {
+        deliver(
+            &events,
+            Event::ExperienceAdminStatus {
                 experience_id,
                 is_admin,
-            })
-            .await
-            .ok();
+            },
+        )
+        .await;
     }
 }
 
@@ -62,12 +65,13 @@ pub(crate) async fn fetch_experience_contributor(
         let Ok(is_contributor) = parse_experience_status(&llsd) else {
             return;
         };
-        events
-            .send(Event::ExperienceContributorStatus {
+        deliver(
+            &events,
+            Event::ExperienceContributorStatus {
                 experience_id,
                 is_contributor,
-            })
-            .await
-            .ok();
+            },
+        )
+        .await;
     }
 }

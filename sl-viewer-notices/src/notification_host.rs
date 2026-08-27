@@ -41,13 +41,15 @@
 //! overlay (`crate::chat`) so a headless / manual-clock run is deterministic.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
+use std::time::Duration;
 
 use bevy::input_focus::tab_navigation::TabIndex;
 use bevy::prelude::*;
 use bevy::text::EditableText;
 use bevy::ui_widgets::{Activate, Button};
 use bevy_flair::style::components::ClassList;
-use sl_client_bevy::{SlEvent, SlSessionEvent};
+use sl_client_bevy::{SlCommandFailed, SlEvent, SlSessionEvent};
 use sl_settings::SettingValue;
 use tracing::{debug, warn};
 
@@ -1621,6 +1623,49 @@ pub fn ingest_alert_messages(
     }
 }
 
+/// How long the same command's send-failure notification is suppressed after
+/// being raised. The driver queues per-frame commands (camera, controls), so a
+/// circuit that is down would otherwise raise the same failure every frame; the
+/// network thread still logs each occurrence.
+pub const COMMAND_FAILURE_COOLDOWN: Duration = Duration::from_secs(10);
+
+/// **The live source** (viewer-only): surface a queued protocol command whose
+/// send **failed** — the request never reached the simulator, so the user's
+/// delete, rez, terraform or parcel edit did nothing — as a
+/// [`ViewerCommandSendFailed`] toast naming the action and the reason.
+///
+/// Raises are coalesced per command name on a [`COMMAND_FAILURE_COOLDOWN`], and
+/// the catalogue entry is `unique` with the command name as its context, so a
+/// command that fails every frame replaces its own toast rather than stacking.
+/// Suppressing a *raise* is not suppressing the *error*: the driver's network
+/// thread logs every failure as it happens.
+///
+/// [`ViewerCommandSendFailed`]: crate::notifications::NOTIFICATIONS
+pub fn announce_command_failures(
+    mut failures: MessageReader<SlCommandFailed>,
+    mut show: MessageWriter<ShowNotification>,
+    time: Res<Time>,
+    mut last_raised: Local<HashMap<&'static str, Duration>>,
+) {
+    let now = time.elapsed();
+    for failure in failures.read() {
+        let due = last_raised
+            .get(failure.command)
+            .is_none_or(|raised| now.saturating_sub(*raised) >= COMMAND_FAILURE_COOLDOWN);
+        if !due {
+            continue;
+        }
+        let _previous = last_raised.insert(failure.command, now);
+        show.write(
+            ShowNotification::new("ViewerCommandSendFailed")
+                .arg("COMMAND", failure.command.to_owned())
+                .arg("REASON", failure.error.to_string())
+                // The `unique` context: one live toast per failing command.
+                .with_context(failure.command.to_owned()),
+        );
+    }
+}
+
 /// **The demo source** (viewer-only, gated on [`DEMO_ENV`]): raise a staggered
 /// spread of sample notifications so the live stacking / timeout / fade / modal
 /// behaviour can be watched without a server alert. A no-op unless the env var
@@ -1757,13 +1802,17 @@ mod tests {
     use pretty_assertions::assert_eq;
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
+    use bevy::time::Time;
+    use sl_client_bevy::{SessionError, SlCommandFailed};
+
     use super::{
-        IgnoreCheckbox, ResolveNotification, Toast, auto_response_button, resolve_notifications,
+        IgnoreCheckbox, ResolveNotification, Toast, announce_command_failures,
+        auto_response_button, resolve_notifications,
     };
     use crate::notifications::{
         NOTIFICATIONS, NotificationButton, NotificationIgnore, NotificationKind,
         NotificationManager, NotificationPriority, NotificationResponse, NotificationTemplate,
-        last_response_setting_name,
+        ShowNotification, last_response_setting_name,
     };
     use crate::settings::ViewerSettings;
 
@@ -2025,5 +2074,87 @@ mod tests {
         let response = resolve_with_field(None);
         assert!(response.is_some(), "a dismissal still writes a response");
         assert_eq!(response.and_then(|r| r.input), None);
+    }
+
+    /// An app wired for [`announce_command_failures`] alone.
+    fn command_failure_app() -> App {
+        let mut app = App::new();
+        app.add_message::<SlCommandFailed>();
+        app.add_message::<ShowNotification>();
+        app.init_resource::<Time>();
+        app.add_systems(Update, announce_command_failures);
+        app
+    }
+
+    /// Drain and return the frame's [`ShowNotification`]s. Draining keeps the
+    /// count exact across several `update()`s, which a fresh cursor would not
+    /// (the double buffer drops the oldest frame).
+    fn drain_raises(app: &mut App) -> Vec<ShowNotification> {
+        app.world_mut()
+            .resource_mut::<Messages<ShowNotification>>()
+            .drain()
+            .collect()
+    }
+
+    /// A failed command becomes a toast naming the action and the reason, with
+    /// the command name as the `unique` context — the whole point of
+    /// [`SlCommandFailed`]: an action that did nothing says so.
+    #[test]
+    fn a_failed_command_raises_a_named_notification() -> Result<(), TestError> {
+        let mut app = command_failure_app();
+        app.world_mut().write_message(SlCommandFailed {
+            command: "DeleteObjects",
+            error: SessionError::NoCircuit,
+        });
+        app.update();
+        let raises = drain_raises(&mut app);
+        assert_eq!(raises.len(), 1, "one raise for one failure");
+        let raise = raises.first().ok_or("no raise was written")?;
+        assert_eq!(raise.template, "ViewerCommandSendFailed");
+        assert_eq!(raise.context.as_deref(), Some("DeleteObjects"));
+        let args: Vec<(&str, &str)> = raise
+            .args
+            .pairs()
+            .iter()
+            .map(|(key, value)| (key.as_str(), value.as_str()))
+            .collect();
+        assert!(
+            args.contains(&("COMMAND", "DeleteObjects")),
+            "the toast names the action: {args:?}"
+        );
+        assert!(
+            args.iter()
+                .any(|(key, value)| *key == "REASON" && !value.is_empty()),
+            "the reason is rendered from the error: {args:?}"
+        );
+        Ok(())
+    }
+
+    /// A per-frame command (camera, controls) fails every frame while the
+    /// circuit is down; only the first raise inside the cooldown reaches the
+    /// screen, and a *different* command is never suppressed by it.
+    #[test]
+    fn repeat_failures_are_coalesced_per_command() {
+        let mut app = command_failure_app();
+        let mut raised = 0;
+        for _tick in 0..3 {
+            app.world_mut().write_message(SlCommandFailed {
+                command: "SetCamera",
+                error: SessionError::NoCircuit,
+            });
+            app.update();
+            raised += drain_raises(&mut app).len();
+        }
+        assert_eq!(raised, 1, "the repeats are coalesced");
+        app.world_mut().write_message(SlCommandFailed {
+            command: "DeleteObjects",
+            error: SessionError::NoCircuit,
+        });
+        app.update();
+        assert_eq!(
+            drain_raises(&mut app).len(),
+            1,
+            "another command has its own cooldown"
+        );
     }
 }

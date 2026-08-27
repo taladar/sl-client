@@ -181,7 +181,7 @@ mod upload;
 mod voice;
 use crate::appearance::request_server_appearance_update;
 use crate::caps::{
-    CAPS_FAILURE_PREFIX, abort_task, fetch_capabilities, make_sleep, spawn_event_queue,
+    CAPS_FAILURE_PREFIX, abort_task, deliver, fetch_capabilities, make_sleep, spawn_event_queue,
     spawn_simulator_features,
 };
 use crate::chat_log::ChatLog;
@@ -593,7 +593,7 @@ impl Client {
         let mut caps = fetch_capabilities(self.session.seed_capability(), &http).await?;
         self.session.notify_capabilities_ready(Instant::now())?;
         if let Some(reporter) = &self.caps_reporter {
-            reporter.send(caps.clone()).await.ok();
+            deliver(reporter, caps.clone()).await;
         }
         spawn_simulator_features(&caps, &http, &caps_tx);
         let mut caps_task = spawn_event_queue(&caps, &http, &caps_tx);
@@ -633,7 +633,7 @@ impl Client {
             }
 
             while let Some(diagnostic) = self.session.poll_diagnostic() {
-                diagnostics.send(diagnostic).await.ok();
+                deliver(&diagnostics, diagnostic).await;
             }
 
             while let Some(event) = self.session.poll_event() {
@@ -682,7 +682,7 @@ impl Client {
                         {
                             last_lsl_syntax_id = Some(id);
                             if let Some(cached) = lsl_syntax_cache.load(id) {
-                                caps_tx.send((CAP_LSL_SYNTAX.to_owned(), cached)).await.ok();
+                                deliver(&caps_tx, (CAP_LSL_SYNTAX.to_owned(), cached)).await;
                             } else if let Some(url) = caps.get(CAP_LSL_SYNTAX).cloned() {
                                 tokio::spawn(fetch_lsl_syntax(
                                     url,
@@ -707,7 +707,7 @@ impl Client {
                     }
                     _other => {}
                 }
-                events.send(event).await.ok();
+                deliver(&events, event).await;
                 if region_changed {
                     abort_task(&mut caps_task);
                     // A region change's cap fetch is best-effort: the session is
@@ -717,7 +717,7 @@ impl Client {
                         .await
                         .unwrap_or_default();
                     if let Some(reporter) = &self.caps_reporter {
-                        reporter.send(caps.clone()).await.ok();
+                        deliver(reporter, caps.clone()).await;
                     }
                     spawn_simulator_features(&caps, &http, &caps_tx);
                     caps_task = spawn_event_queue(&caps, &http, &caps_tx);
@@ -845,13 +845,7 @@ impl Client {
                                 "CAPS request failed; no reply surfaced"
                             );
                             if self.session.diagnostics_enabled() {
-                                diagnostics
-                                    .send(Diagnostic::ExpectedReplyMissing {
-                                        request: cap.to_owned(),
-                                        sequence: None,
-                                    })
-                                    .await
-                                    .ok();
+                                deliver(&diagnostics, Diagnostic::ExpectedReplyMissing { request: cap.to_owned(), sequence: None, }).await;
                             }
                         } else {
                             self.session.handle_caps_event(&message, &body, Instant::now())?;
@@ -1836,9 +1830,7 @@ impl Client {
                         Some(Command::QueryScriptPermissions) => {
                             // Local query: synthesize the snapshot from the session
                             // and surface it on the event stream (no wire send).
-                            events.send(Event::ScriptPermissionState(
-                                self.session.script_permission_state(),
-                            )).await.ok();
+                            deliver(&events, Event::ScriptPermissionState( self.session.script_permission_state(), )).await;
                         }
                         Some(Command::DetachAttachmentIntoInventory { item_id }) => {
                             self.session.detach_attachment_into_inventory(item_id, Instant::now())?;
@@ -1891,10 +1883,11 @@ impl Client {
                             // Scripts must go through `UploadScript` so the
                             // simulator's compile result is surfaced; the generic
                             // create-with-body path would discard it.
-                            events.send(Event::AssetUploadFailed {
-                                reason: "scripts must be uploaded with UploadScript (create the item \
-                                    with create_inventory_item first)".to_owned(),
-                            }).await.ok();
+                            deliver(&events, Event::AssetUploadFailed {
+                                reason: "scripts must be uploaded with UploadScript (create the \
+                                         item with create_inventory_item first)"
+                                    .to_owned(),
+                            }).await;
                         }
                         Some(Command::UploadAsset {
                             folder_id, asset_type, inventory_type, name, description,
@@ -1918,9 +1911,7 @@ impl Client {
                                 );
                                 tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
                             } else {
-                                events.send(Event::AssetUploadFailed {
-                                    reason: "NewFileAgentInventory capability not available".to_owned(),
-                                }).await.ok();
+                                deliver(&events, Event::AssetUploadFailed { reason: "NewFileAgentInventory capability not available".to_owned(), }).await;
                             }
                         }
                         Some(Command::UploadBakedTexture { data }) => {
@@ -1928,9 +1919,7 @@ impl Client {
                                 let body = build_upload_baked_texture_request();
                                 tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
                             } else {
-                                events.send(Event::AssetUploadFailed {
-                                    reason: "UploadBakedTexture capability not available".to_owned(),
-                                }).await.ok();
+                                deliver(&events, Event::AssetUploadFailed { reason: "UploadBakedTexture capability not available".to_owned(), }).await;
                             }
                         }
                         Some(Command::UpdateInventoryAsset { location, asset_type, data }) => {
@@ -1950,9 +1939,7 @@ impl Client {
                             if let Some(url) = caps.get(cap).cloned() {
                                 tokio::spawn(run_caps_upload(url, body, data, http.clone(), events.clone()));
                             } else {
-                                events.send(Event::AssetUploadFailed {
-                                    reason: format!("{cap} capability not available"),
-                                }).await.ok();
+                                deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
                             }
                         }
                         Some(Command::UploadScript { location, target, source }) => {
@@ -1980,9 +1967,7 @@ impl Client {
                                     url, body, source, running, http.clone(), events.clone(),
                                 ));
                             } else {
-                                events.send(Event::AssetUploadFailed {
-                                    reason: format!("{cap} capability not available"),
-                                }).await.ok();
+                                deliver(&events, Event::AssetUploadFailed { reason: format!("{cap} capability not available"), }).await;
                             }
                         }
                         Some(Command::RequestObjectMedia { object_id }) => {
@@ -2341,9 +2326,7 @@ impl Client {
                         Some(Command::QueryChatSessions) => {
                             // Local query: build the light session list and surface
                             // it on the event stream (no wire send).
-                            events.send(Event::ChatSessions(
-                                self.session.chat_sessions_info().collect(),
-                            )).await.ok();
+                            deliver(&events, Event::ChatSessions( self.session.chat_sessions_info().collect(), )).await;
                         }
                         Some(Command::QueryChatHistoryPage { session, before, limit }) => {
                             // Newest-first paging across the unified memory→archive
@@ -2372,7 +2355,7 @@ impl Client {
                                         None => (Vec::new().into(), None),
                                     }
                                 };
-                            events.send(Event::ChatHistoryPage { session, messages, prev }).await.ok();
+                            deliver(&events, Event::ChatHistoryPage { session, messages, prev }).await;
                         }
                         Some(Command::QueryNearbyChatHistoryPage { already_shown, before, limit }) => {
                             // Nearby chat has no in-memory ring: the whole page
@@ -2385,7 +2368,7 @@ impl Client {
                                     Some((page, cursor)) => (page.into(), cursor),
                                     None => (Vec::new().into(), None),
                                 };
-                            events.send(Event::NearbyChatHistoryPage { lines, prev }).await.ok();
+                            deliver(&events, Event::NearbyChatHistoryPage { lines, prev }).await;
                         }
                         Some(Command::QueryInventoryFolder { folder, before, limit }) => {
                             // Local query: page the held model into owning view
@@ -2408,23 +2391,14 @@ impl Client {
                                     &http,
                                     &caps_tx,
                                     Instant::now(),
-                                )
-                                .ok();
+                                )?;
                             }
-                            events.send(Event::InventoryFolderPage {
-                                folder,
-                                folders: folders.into(),
-                                items: items.into(),
-                                prev,
-                            }).await.ok();
+                            deliver(&events, Event::InventoryFolderPage { folder, folders: folders.into(), items: items.into(), prev, }).await;
                         }
                         Some(Command::QueryInventoryRoots) => {
                             // Local query: surface the agent + library roots (both
                             // `Copy` keys, no `Arc` needed).
-                            events.send(Event::InventoryRoots {
-                                agent_root: self.session.inventory_root(),
-                                library_root: self.session.library_root(),
-                            }).await.ok();
+                            deliver(&events, Event::InventoryRoots { agent_root: self.session.inventory_root(), library_root: self.session.library_root(), }).await;
                         }
                         Some(Command::QueryInventoryFolders) => {
                             // Local query: snapshot the agent tree's known folders
@@ -2433,13 +2407,11 @@ impl Client {
                             // is cheap regardless of tree size.
                             let folders: std::sync::Arc<[FolderInfo]> =
                                 self.session.inventory_folder_infos().into();
-                            events.send(Event::InventoryFolders(folders)).await.ok();
+                            deliver(&events, Event::InventoryFolders(folders)).await;
                         }
                         Some(Command::QueryFriends) => {
                             // Local query: build the buddy snapshot with online flags.
-                            events.send(Event::FriendsSnapshot(
-                                self.session.friends_presence().collect(),
-                            )).await.ok();
+                            deliver(&events, Event::FriendsSnapshot( self.session.friends_presence().collect(), )).await;
                         }
                         Some(Command::RetrieveInstantMessages) => {
                             self.session.retrieve_instant_messages(Instant::now())?;

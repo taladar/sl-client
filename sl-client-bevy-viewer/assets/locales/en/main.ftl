@@ -1364,6 +1364,9 @@ notification-system-message = [MESSAGE]
 notification-generic-alert = [MESSAGE]
 notification-region-restart-minutes = The region you are in now will restart in [MINUTES] minutes. If you stay in this region you will be logged out.
 notification-confirm-quit = Are you sure you want to quit?
+# Viewer-original (no reference counterpart): a queued protocol command
+# whose request never reached the simulator, so the action did nothing.
+notification-viewer-command-send-failed = [COMMAND] could not be sent: [REASON]
 
 ## Keyed server alerts (viewer-notification-catalogue): the AlertInfo-keyed
 ## messages the simulator sends. Ported from the reference notifications.xml,

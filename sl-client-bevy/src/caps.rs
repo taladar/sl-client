@@ -14,7 +14,7 @@
 //! retires it on timeout) rather than trying to close it, because a `done: true`
 //! close blocks like a long-poll on OpenSim and would stall the switch.
 
-use crate::{Caps, EVENT_QUEUE_TIMEOUT};
+use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::{Receiver, RecvTimeoutError, Sender, TryRecvError, unbounded};
 use reqwest::blocking::Client as ReqwestBlockingClient;
@@ -39,9 +39,10 @@ pub(crate) const CAPS_FAILURE_PREFIX: &str = "\0caps-failure\0";
 /// silently swallowing a transport / parse error; the driver turns it into a
 /// diagnostic.
 pub(crate) fn report_caps_failure(caps_tx: &Sender<(String, Llsd)>, cap: &str) {
-    caps_tx
-        .send((format!("{CAPS_FAILURE_PREFIX}{cap}"), Llsd::Undef))
-        .ok();
+    deliver(
+        caps_tx,
+        (format!("{CAPS_FAILURE_PREFIX}{cap}"), Llsd::Undef),
+    );
 }
 
 /// A command to the single event-queue worker thread.
@@ -139,37 +140,38 @@ fn fetch_caps(
         Ok(response) => response,
         Err(error) => {
             tracing::warn!(%seed_url, %error, "event queue: seed-capabilities POST failed — no queue for this region");
-            map_tx
-                .send(Err(format!(
-                    "the seed-capabilities request failed: {error}"
-                )))
-                .ok();
+            deliver(
+                map_tx,
+                Err(format!("the seed-capabilities request failed: {error}")),
+            );
             return None;
         }
     };
     let text = match response.text() {
         Ok(text) => text,
         Err(error) => {
-            map_tx
-                .send(Err(format!(
+            deliver(
+                map_tx,
+                Err(format!(
                     "the seed-capabilities response body could not be read: {error}"
-                )))
-                .ok();
+                )),
+            );
             return None;
         }
     };
     let capabilities = match parse_seed_response(&text) {
         Ok(capabilities) => capabilities,
         Err(error) => {
-            map_tx
-                .send(Err(format!(
+            deliver(
+                map_tx,
+                Err(format!(
                     "the seed-capabilities response did not parse: {error}"
-                )))
-                .ok();
+                )),
+            );
             return None;
         }
     };
-    map_tx.send(Ok(capabilities.clone())).ok();
+    deliver(map_tx, Ok(capabilities.clone()));
     let url = capabilities.get("EventQueueGet").cloned();
     if url.is_none() {
         tracing::warn!(
@@ -227,11 +229,10 @@ impl EventQueueWorker {
         {
             Ok(http) => http,
             Err(error) => {
-                map_tx
-                    .send(Err(format!(
-                        "could not build the caps HTTP client: {error}"
-                    )))
-                    .ok();
+                deliver(
+                    map_tx,
+                    Err(format!("could not build the caps HTTP client: {error}")),
+                );
                 return None;
             }
         };

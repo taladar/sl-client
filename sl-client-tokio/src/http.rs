@@ -10,19 +10,44 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::caps::report_caps_failure;
+use crate::caps::{deliver, report_caps_failure};
 use crate::lsl_syntax_cache::LslSyntaxCache;
 
-/// POSTs `body` to a capability URL and ignores the reply — a fire-and-forget
-/// capability call where the simulator returns only an HTTP status (e.g. the
-/// `SendUserReport` abuse-report cap). Errors are swallowed; there is no event.
-pub(crate) async fn post_caps_oneway(cap_url: String, body: String, http: ReqwestClient) {
-    http.post(&cap_url)
+/// POSTs `body` to a capability URL and ignores the *reply*: the shared body of
+/// every fire-and-forget capability call, where the simulator answers with an
+/// HTTP status and nothing else.
+///
+/// `what` names the request family for the log. Because there is no event to
+/// carry an outcome, a transport failure or a rejecting status is logged here
+/// rather than discarded — that line is the only trace such a call leaves. The
+/// capability URL is deliberately **not** logged: it carries the region's
+/// per-session cap token.
+pub(crate) async fn post_llsd_oneway(
+    cap_url: &str,
+    body: String,
+    http: &ReqwestClient,
+    what: &str,
+) {
+    match http
+        .post(cap_url)
         .header("Content-Type", "application/llsd+xml")
         .body(body)
         .send()
         .await
-        .ok();
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "{what} was rejected");
+        }
+        Err(error) => tracing::warn!("{what} could not be sent: {error}"),
+    }
+}
+
+/// POSTs `body` to a capability URL and ignores the reply — a fire-and-forget
+/// capability call where the simulator returns only an HTTP status (e.g. the
+/// `SendUserReport` abuse-report cap). There is no event.
+pub(crate) async fn post_caps_oneway(cap_url: String, body: String, http: ReqwestClient) {
+    post_llsd_oneway(&cap_url, body, &http, "a fire-and-forget capability POST").await;
 }
 
 /// POSTs a `ChatSessionRequest` accept / decline `body` to the cap URL and
@@ -67,10 +92,11 @@ pub(crate) async fn post_chat_session_request(
     };
     let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
     let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
-    caps_tx
-        .send((CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)))
-        .await
-        .ok();
+    deliver(
+        &caps_tx,
+        (CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)),
+    )
+    .await;
 }
 
 /// POSTs a `ChatSessionRequest` `fetch history` `body` to the cap URL and
@@ -113,10 +139,11 @@ pub(crate) async fn post_chat_session_fetch_history(
     let _previous = map.insert("history".to_owned(), reply);
     let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
     let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
-    caps_tx
-        .send((CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)))
-        .await
-        .ok();
+    deliver(
+        &caps_tx,
+        (CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)),
+    )
+    .await;
 }
 
 /// GETs `url` and parses the LLSD-XML reply, returning `None` on any
@@ -144,7 +171,7 @@ pub(crate) async fn get_caps_llsd(
 ) {
     match get_llsd(&url, &http).await {
         Some(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+            deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         None => report_caps_failure(&caps_tx, cap).await,
     }
@@ -170,10 +197,11 @@ pub(crate) async fn get_avatar_picker_search(
         _other => HashMap::new(),
     };
     let _previous = map.insert("query-id".to_owned(), Llsd::Uuid(query_id));
-    caps_tx
-        .send((AVATAR_PICKER_SEARCH_TAG.to_owned(), Llsd::Map(map)))
-        .await
-        .ok();
+    deliver(
+        &caps_tx,
+        (AVATAR_PICKER_SEARCH_TAG.to_owned(), Llsd::Map(map)),
+    )
+    .await;
 }
 
 /// GETs the `LSLSyntax` capability, caches the raw document under syntax `id`,
@@ -222,7 +250,7 @@ pub(crate) async fn fetch_lsl_syntax(
     {
         cache.store(id, &text);
     }
-    caps_tx.send((CAP_LSL_SYNTAX.to_owned(), llsd)).await.ok();
+    deliver(&caps_tx, (CAP_LSL_SYNTAX.to_owned(), llsd)).await;
 }
 
 /// Drives the two-step `LandResources` flow: POSTs `{ parcel_id }` to the
@@ -262,10 +290,7 @@ pub(crate) async fn fetch_land_resources(
         report_caps_failure(&caps_tx, CAP_LAND_RESOURCES).await;
         return;
     };
-    caps_tx
-        .send((CAP_LAND_RESOURCES.to_owned(), reply))
-        .await
-        .ok();
+    deliver(&caps_tx, (CAP_LAND_RESOURCES.to_owned(), reply)).await;
 
     if let Some(summary) = urls.script_resource_summary {
         get_caps_llsd(
@@ -312,7 +337,7 @@ pub(crate) async fn put_caps_llsd(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+            deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
@@ -343,7 +368,7 @@ pub(crate) async fn patch_caps_llsd(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+            deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
@@ -372,7 +397,7 @@ pub(crate) async fn delete_caps_llsd(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+            deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }

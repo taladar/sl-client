@@ -10,7 +10,7 @@
 //! direct-event side channel the binary asset fetches and experience
 //! fetches use.
 
-use crate::EVENT_QUEUE_TIMEOUT;
+use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use crossbeam_channel::Sender;
 use reqwest::blocking::Client as ReqwestBlockingClient;
 use sl_proto::Event as SessionEvent;
@@ -43,9 +43,10 @@ pub(crate) fn dispatch_marketplace_request(
         (None, _) => "no DirectDelivery capability (not granted by this region/grid)".to_owned(),
         (_, Err(e)) => e.to_string(),
     };
-    asset_tx
-        .send(marketplace_failure_event(operation, failure_reason))
-        .ok();
+    deliver(
+        asset_tx,
+        marketplace_failure_event(operation, failure_reason),
+    );
 }
 
 /// Run one SLM request against the `DirectDelivery` capability base
@@ -66,7 +67,7 @@ pub(crate) fn run_marketplace_request(
     asset_tx: &Sender<SessionEvent>,
 ) {
     let event = perform_marketplace_request(cap_url, operation, request);
-    asset_tx.send(event).ok();
+    deliver(asset_tx, event);
 }
 
 /// Perform the HTTP round-trip and map the outcome to a session

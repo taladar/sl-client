@@ -1,5 +1,6 @@
 //! Experience capability fetches.
 
+use crate::deliver;
 use crate::http::blocking_get_llsd;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
@@ -17,12 +18,13 @@ pub(crate) fn run_group_experiences(
         let Ok(experience_ids) = parse_experience_ids(&llsd) else {
             return;
         };
-        asset_tx
-            .send(SessionEvent::GroupExperiences {
+        deliver(
+            asset_tx,
+            SessionEvent::GroupExperiences {
                 group_id,
                 experience_ids,
-            })
-            .ok();
+            },
+        );
     }
 }
 
@@ -52,5 +54,5 @@ pub(crate) fn run_experience_status(
             is_contributor: status,
         }
     };
-    asset_tx.send(event).ok();
+    deliver(asset_tx, event);
 }

@@ -1922,6 +1922,24 @@ pub const NOTIFICATIONS: &[NotificationTemplate] = &[
         form: OK_FORM,
         input: None,
     },
+    // Viewer-original (no reference counterpart): a queued protocol command whose
+    // request never reached the simulator, so the user's action did nothing.
+    // `unique` with the command name as context, so a command failing every frame
+    // (camera, controls) replaces its own toast instead of stacking.
+    NotificationTemplate {
+        name: "ViewerCommandSendFailed",
+        kind: NotificationKind::Notify,
+        message_key: "notification-viewer-command-send-failed",
+        title_key: None,
+        priority: NotificationPriority::Normal,
+        persist: false,
+        log_to_chat: true,
+        unique: true,
+        ignore: NotificationIgnore::None,
+        ignore_key: None,
+        form: NO_FORM,
+        input: None,
+    },
     // A concrete keyed alert exercising `[KEY]` substitution and `unique` dedup —
     // the region-restart countdown the simulator sends as an `AlertInfo` key.
     NotificationTemplate {

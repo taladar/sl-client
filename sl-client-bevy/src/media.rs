@@ -1,6 +1,6 @@
 //! Object-media capability fetch and update.
 
-use crate::EVENT_QUEUE_TIMEOUT;
+use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{CAP_OBJECT_MEDIA, Llsd, ObjectKey, build_object_media_get_request, parse_llsd_xml};
@@ -32,7 +32,7 @@ pub(crate) fn run_object_media_fetch(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((CAP_OBJECT_MEDIA.to_owned(), llsd)).ok();
+        deliver(caps_tx, (CAP_OBJECT_MEDIA.to_owned(), llsd));
     }
 }
 
@@ -44,15 +44,5 @@ pub(crate) fn run_object_media_fetch(
 /// `CopyInventoryFromNotecard` copy arrives over the normal inventory-update
 /// stream.
 pub(crate) fn post_caps_llsd_oneway(cap_url: &str, body: String) {
-    let Ok(http) = crate::http_proxy::blocking_client_builder()
-        .timeout(EVENT_QUEUE_TIMEOUT)
-        .build()
-    else {
-        return;
-    };
-    http.post(cap_url)
-        .header("Content-Type", "application/llsd+xml")
-        .body(body)
-        .send()
-        .ok();
+    crate::http::post_llsd_oneway(cap_url, body, "an out-of-band capability POST");
 }

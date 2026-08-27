@@ -8,6 +8,7 @@
 //! (`marketplace_reply_event` / `marketplace_failure_event`) — the
 //! same direct-event pattern the experience fetchers use.
 
+use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use sl_proto::{
@@ -46,10 +47,11 @@ pub(crate) fn dispatch_marketplace_request(
     };
     let events = events.clone();
     tokio::spawn(async move {
-        events
-            .send(marketplace_failure_event(operation, failure_reason))
-            .await
-            .ok();
+        deliver(
+            &events,
+            marketplace_failure_event(operation, failure_reason),
+        )
+        .await;
     });
 }
 
@@ -98,5 +100,5 @@ pub(crate) async fn run_marketplace_request(
         }
         Err(e) => marketplace_failure_event(operation, format!("SLM request failed: {e}")),
     };
-    events.send(event).await.ok();
+    deliver(&events, event).await;
 }

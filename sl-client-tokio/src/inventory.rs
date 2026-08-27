@@ -1,5 +1,6 @@
 //! Inventory capability fetches (AIS / FetchInventory, GroupMemberData).
 
+use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     CAP_FETCH_INVENTORY, CAP_FETCH_LIBRARY, CAP_GROUP_MEMBER_DATA, Error as ProtoError, GroupKey,
@@ -99,7 +100,7 @@ pub(crate) async fn fetch_inventory(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((response_cap.to_owned(), llsd)).await.ok();
+        deliver(&caps_tx, (response_cap.to_owned(), llsd)).await;
     }
 }
 
@@ -125,9 +126,6 @@ pub(crate) async fn fetch_group_members(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx
-            .send((CAP_GROUP_MEMBER_DATA.to_owned(), llsd))
-            .await
-            .ok();
+        deliver(&caps_tx, (CAP_GROUP_MEMBER_DATA.to_owned(), llsd)).await;
     }
 }

@@ -1,5 +1,6 @@
 //! Binary asset fetch over HTTP (textures, mesh, generic assets).
 
+use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{
     Asset, AssetType, DiscardLevel, Event, ImageCodec, Texture, TextureKey, TransferStatus, Uuid,
@@ -34,7 +35,7 @@ pub(crate) async fn fetch_texture_http(
         })),
         None => Event::TextureNotFound(texture_id),
     };
-    events.send(event).await.ok();
+    deliver(&events, event).await;
 }
 
 /// Fetches the codestream bytes for a texture at `discard_level`, using HTTP
@@ -98,7 +99,7 @@ pub(crate) async fn fetch_mesh_http(
 ) {
     let url = format!("{cap_url}/?mesh_id={mesh_id}");
     let event = http_asset_event(&http, &url, mesh_id, AssetType::Mesh, byte_range).await;
-    events.send(event).await.ok();
+    deliver(&events, event).await;
 }
 
 /// GETs a generic asset from the `GetAsset` capability (using the asset class's
@@ -124,7 +125,7 @@ pub(crate) async fn fetch_asset_http(
             status: TransferStatus::Error,
         },
     };
-    events.send(event).await.ok();
+    deliver(&events, event).await;
 }
 
 /// Performs an HTTP `GET` for an asset and builds the resulting event: an

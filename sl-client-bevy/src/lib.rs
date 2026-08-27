@@ -1,6 +1,6 @@
 #![doc = include_str!("../README.md")]
 
-use std::net::UdpSocket;
+use std::net::{SocketAddr, UdpSocket};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -66,21 +66,22 @@ pub use sl_proto::{
     DayCycle, DayCycleFrame, DeRezDestination, DetachOrder, Diagnostic, DirClassifiedResult,
     DirEventResult, DirFindFlags, DirGroupResult, DirLandResult, DirPeopleResult, DirPlaceResult,
     Direction, DirectoryVisibility, DisconnectReason, DisplayName, DisplayNameUpdate, Distance,
-    EconomyData, EnvironmentAsset, EnvironmentSettings, EstateAccessDelta, EstateAccessKind,
-    EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId, EventInfo, ExperienceInfo,
-    ExperienceKey, ExperiencePermission, ExperienceProperties, ExperienceUpdate, ExtendedMesh,
-    FaceMaterialPut, FlexibleData, FolderInfo, FolderState, FolderType, Friend, FriendKey,
-    FriendPresence, FriendRights, GestureActivation, GlobalCoordinates, Glow, GltfMaterialOverride,
-    GridCoordinates, GroupInvitationReceived, GroupKey, GroupMember, GroupMembership, GroupNotice,
-    GroupNoticeAttachment, GroupNoticeItem, GroupNoticeKey, GroupNoticeReceived, GroupProfile,
-    GroupRequestId, GroupRole, GroupRoleChange, GroupRoleEdit, GroupRoleKey, GroupRoleMember,
-    GroupRoleMemberChange, GroupRoleUpdateType, GroupTitle, HomeLocation, IceCandidate, ImDialog,
-    ImSessionId, InstantMessage, InterestsUpdate, InventoryCacheConfig, InventoryCallbackId,
-    InventoryCursor, InventoryFolder, InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey,
-    InventoryKey, InventoryOffer, InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea,
-    LandImpact, LandSearchType, LandingType, LegacyMaterial, LightData, LightImage, LindenAmount,
-    LindenBalance, Listing, ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure,
-    LoginParams, LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
+    EconomyData, EnvironmentAsset, EnvironmentSettings, Error as SessionError, EstateAccessDelta,
+    EstateAccessKind, EstateCovenant, EstateFlags, EstateInfo, EstateInfoUpdate, EventId,
+    EventInfo, ExperienceInfo, ExperienceKey, ExperiencePermission, ExperienceProperties,
+    ExperienceUpdate, ExtendedMesh, FaceMaterialPut, FlexibleData, FolderInfo, FolderState,
+    FolderType, Friend, FriendKey, FriendPresence, FriendRights, GestureActivation,
+    GlobalCoordinates, Glow, GltfMaterialOverride, GridCoordinates, GroupInvitationReceived,
+    GroupKey, GroupMember, GroupMembership, GroupNotice, GroupNoticeAttachment, GroupNoticeItem,
+    GroupNoticeKey, GroupNoticeReceived, GroupProfile, GroupRequestId, GroupRole, GroupRoleChange,
+    GroupRoleEdit, GroupRoleKey, GroupRoleMember, GroupRoleMemberChange, GroupRoleUpdateType,
+    GroupTitle, HomeLocation, IceCandidate, ImDialog, ImSessionId, InstantMessage, InterestsUpdate,
+    InventoryCacheConfig, InventoryCallbackId, InventoryCursor, InventoryFolder,
+    InventoryFolderKey, InventoryItem, InventoryItemOrFolderKey, InventoryKey, InventoryOffer,
+    InventoryOwner, InventoryType, ItemInfo, Key, Kilobits, LandArea, LandImpact, LandSearchType,
+    LandingType, LegacyMaterial, LightData, LightImage, LindenAmount, LindenBalance, Listing,
+    ListingId, LoadUrlRequest, LoggedChatType, LoginAccount, LoginFailure, LoginParams,
+    LoginRejectKind, LoginRequest, LookAtType, LureId, MAX_FACES, MEDIA_PERM_ALL,
     MEDIA_PERM_ANYONE, MEDIA_PERM_GROUP, MEDIA_PERM_NONE, MEDIA_PERM_OWNER, MapItem, MapItemType,
     MapRegionInfo, MarketplaceApiError, MarketplaceApiErrorKind, MarketplaceAssociateInventoryInfo,
     MarketplaceInventoryInfo, MarketplaceOperation, Material, MaterialOverrideUpdate, Maturity,
@@ -494,6 +495,7 @@ impl Plugin for SlClientPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<SlEvent>()
             .add_message::<SlDiagnostic>()
+            .add_message::<SlCommandFailed>()
             .add_message::<SlCapabilities>()
             .add_message::<SlMfaChallenge>()
             .add_message::<SlLoginRejected>()
@@ -530,6 +532,27 @@ pub struct SlEvent(pub SessionEvent);
 /// separate from [`SlEvent`].
 #[derive(Message, Debug, Clone)]
 pub struct SlDiagnostic(pub Diagnostic);
+
+/// A queued [`SlCommand`] whose send **failed**, emitted as a Bevy event.
+///
+/// The driver applies each frame's commands on the network thread; a command
+/// whose request never reached the wire (no circuit yet, a stale scoped id, an
+/// encode failure) would otherwise be indistinguishable from one that
+/// succeeded, so a user's delete, rez, terraform or parcel edit could silently
+/// do nothing. This surfaces that failure, naming the action that did not
+/// happen, so a consumer can tell the user (the viewer raises a notification).
+///
+/// Unlike [`SlDiagnostic`] — inbound anomalies, collected only while
+/// [`SlClientPlugin::diagnostics`] is on — this is about **outbound** work the
+/// app explicitly asked for, and is always emitted.
+#[derive(Message, Debug)]
+pub struct SlCommandFailed {
+    /// The failing command's variant name, from [`Command::name`]
+    /// (`"DeleteObjects"` for [`Command::DeleteObjects`]).
+    pub command: &'static str,
+    /// Why the send failed.
+    pub error: SessionError,
+}
 
 /// The region's capability map (cap name → URL), emitted as a Bevy event each
 /// time the driver discovers it: once after the seed capability is fetched at
@@ -617,6 +640,13 @@ enum NetOutbound {
     Event(SessionEvent),
     /// A protocol diagnostic, surfaced as [`SlDiagnostic`].
     Diagnostic(Diagnostic),
+    /// A queued [`Command`] whose send failed, surfaced as [`SlCommandFailed`].
+    CommandFailed {
+        /// The failing command's variant name, from [`Command::name`].
+        command: &'static str,
+        /// Why the send failed.
+        error: SessionError,
+    },
     /// A freshly discovered capability map, surfaced as [`SlCapabilities`].
     Capabilities(HashMap<String, String>),
     /// The login-derived identity, mirrored into the [`SlIdentity`] resource.
@@ -773,7 +803,12 @@ fn run_network_thread(
     };
     // Sleep *inside* `recv_from`: a datagram wakes the tick immediately, and
     // an idle tick still services timers / CAPS / commands every NET_TICK.
-    running.socket.set_read_timeout(Some(NET_TICK)).ok();
+    if let Err(error) = running.socket.set_read_timeout(Some(NET_TICK)) {
+        // Without the timeout the thread would block in `recv_from` until a
+        // datagram arrives, starving timers and commands — so say so loudly
+        // rather than looking merely sluggish.
+        tracing::warn!("could not set the socket read timeout: {error}");
+    }
     loop {
         // Drain this tick's commands; a disconnected channel means the app is
         // shutting down (the `SlState` resource dropped), so stop pumping.
@@ -821,6 +856,7 @@ fn drive(
     state: Res<SlState>,
     mut events: MessageWriter<SlEvent>,
     mut diagnostics: MessageWriter<SlDiagnostic>,
+    mut command_failed: MessageWriter<SlCommandFailed>,
     mut capabilities: MessageWriter<SlCapabilities>,
     mut identity: ResMut<SlIdentity>,
     mut agent_parcel: ResMut<SlAgentParcel>,
@@ -852,6 +888,9 @@ fn drive(
             Ok(NetOutbound::Diagnostic(diagnostic)) => {
                 diagnostics.write(SlDiagnostic(diagnostic));
             }
+            Ok(NetOutbound::CommandFailed { command, error }) => {
+                command_failed.write(SlCommandFailed { command, error });
+            }
             Ok(NetOutbound::Capabilities(map)) => {
                 capabilities.write(SlCapabilities(map));
             }
@@ -880,11 +919,65 @@ fn drive(
     }
 }
 
+/// Hand one report to the Bevy side.
+///
+/// The **only** way this fails is a closed channel, which means the app already
+/// dropped its [`SlState`] (teardown, or the whole `App` going away). The tick
+/// loop's own disconnected-channel check ends the thread immediately after, so
+/// there is nobody left to tell — this is the one place a discarded send result
+/// is correct, and routing every report through it keeps it the only one.
+fn report(outbound: &Sender<NetOutbound>, message: NetOutbound) {
+    outbound.send(message).ok();
+}
+
+/// Hand a worker thread's result back to the session's network thread over one
+/// of the [`Caps`] channels.
+///
+/// A closed channel means the [`Caps`] the worker was launched from has been
+/// dropped — a region change or session teardown raced the request — so the
+/// result belongs to a region the agent has already left. There is nothing to
+/// report it to and nothing to do about it.
+pub(crate) fn deliver<T>(tx: &Sender<T>, value: T) {
+    tx.send(value).ok();
+}
+
+/// Put the socket into (or out of) non-blocking mode, warning rather than
+/// silently leaving the tick cadence wrong if the mode change fails.
+fn set_nonblocking(socket: &UdpSocket, nonblocking: bool) {
+    if let Err(error) = socket.set_nonblocking(nonblocking) {
+        tracing::warn!("could not set the socket non-blocking to {nonblocking}: {error}");
+    }
+}
+
+/// Feed one inbound datagram to the session, warning on an undecodable one.
+///
+/// A framing-level parse failure is *not* covered by the session's own
+/// [`Diagnostic`]s (those start once a message body is reached) and must never
+/// end the tick loop over a single bad packet, so the log is its record.
+fn handle_datagram(session: &mut Session, from: SocketAddr, datagram: &[u8], now: Instant) {
+    if let Err(error) = session.handle_datagram(from, datagram, now) {
+        tracing::warn!(%from, "dropping an undecodable datagram: {error}");
+    }
+}
+
+/// Report a queued command whose send failed: log it on the network thread and
+/// hand it to the app side as a [`SlCommandFailed`], so the action that did not
+/// happen is named rather than silently dropped.
+fn report_command_failed(
+    outbound: &Sender<NetOutbound>,
+    command: &'static str,
+    error: SessionError,
+) {
+    tracing::warn!("command {command} failed to send: {error}");
+    report(outbound, NetOutbound::CommandFailed { command, error });
+}
+
 /// Send a synthetic [`SessionEvent::Disconnected`] to the app side.
 fn send_disconnect(outbound: &Sender<NetOutbound>, reason: DisconnectReason) {
-    outbound
-        .send(NetOutbound::Event(SessionEvent::Disconnected(reason)))
-        .ok();
+    report(
+        outbound,
+        NetOutbound::Event(SessionEvent::Disconnected(reason)),
+    );
 }
 
 /// The maximum number of login redirects (`login = "indeterminate"`) the
@@ -956,8 +1049,9 @@ fn login_phase(
             }
             match bind_socket() {
                 Ok(socket) => {
-                    outbound
-                        .send(NetOutbound::Identity(Box::new(SlIdentity {
+                    report(
+                        outbound,
+                        NetOutbound::Identity(Box::new(SlIdentity {
                             agent_id: session.agent_id(),
                             session_id: session.session_id(),
                             circuit_code: session.circuit_code(),
@@ -968,8 +1062,8 @@ fn login_phase(
                             openid_token: session.openid_token().map(str::to_owned),
                             region_handle: session.region_handle(),
                             circuit_id: session.root_circuit_id(),
-                        })))
-                        .ok();
+                        })),
+                    );
                     let caps = start_caps(&session);
                     // Resolve the per-avatar directory now that the login
                     // response has yielded the agent UUID — inline, before
@@ -1013,7 +1107,7 @@ fn login_phase(
             }
         }
         Ok(LoginResponse::MfaChallenge(challenge)) => {
-            outbound.send(NetOutbound::Mfa(challenge)).ok();
+            report(outbound, NetOutbound::Mfa(challenge));
             None
         }
         Ok(LoginResponse::Failure(failure)) => {
@@ -1021,7 +1115,7 @@ fn login_phase(
             // MFA challenge — its own event the driver can act on (consult
             // the user, re-add the plugin) — rather than a fatal disconnect.
             if failure.kind() == LoginRejectKind::AlreadyLoggedIn {
-                outbound.send(NetOutbound::Rejected(failure)).ok();
+                report(outbound, NetOutbound::Rejected(failure));
             } else {
                 send_disconnect(
                     outbound,
@@ -1182,16 +1276,18 @@ fn advance_running(
     match socket.recv_from(&mut recv_buf) {
         Ok((len, from)) => {
             if let Some(datagram) = recv_buf.get(..len) {
-                session.handle_datagram(from, datagram, now).ok();
+                handle_datagram(&mut session, from, datagram, now);
             }
-            socket.set_nonblocking(true).ok();
+            set_nonblocking(&socket, true);
             while let Ok((more_len, more_from)) = socket.recv_from(&mut recv_buf) {
                 if let Some(datagram) = recv_buf.get(..more_len) {
-                    session.handle_datagram(more_from, datagram, now).ok();
+                    handle_datagram(&mut session, more_from, datagram, now);
                 }
             }
-            socket.set_nonblocking(false).ok();
-            socket.set_read_timeout(Some(NET_TICK)).ok();
+            set_nonblocking(&socket, false);
+            if let Err(error) = socket.set_read_timeout(Some(NET_TICK)) {
+                tracing::warn!("could not restore the socket read timeout: {error}");
+            }
         }
         Err(_timeout_or_other) => {}
     }
@@ -1219,7 +1315,11 @@ fn advance_running(
             // `CompleteAgentMovement` now that the simulator has processed our
             // seed-caps request (which advertised animesh support) — so it knows we
             // render animesh before it streams the scene. A no-op on a region change.
-            session.notify_capabilities_ready(now).ok();
+            if let Err(error) = session.notify_capabilities_ready(now) {
+                // The deferred `CompleteAgentMovement` never went out, so the
+                // simulator will not start streaming the scene.
+                tracing::warn!("could not release the deferred agent movement: {error}");
+            }
             // The viewer fetches `SimulatorFeatures` on arriving in a region, so
             // GET it once the capability map is known (at login and on each region
             // change), surfacing the flags as `Event::SimulatorFeatures`.
@@ -1229,7 +1329,7 @@ fn advance_running(
                     run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
                 });
             }
-            outbound.send(NetOutbound::Capabilities(map.clone())).ok();
+            report(outbound, NetOutbound::Capabilities(map.clone()));
             caps.map = map;
         }
         while let Ok((message, body)) = caps.events_rx.try_recv() {
@@ -1239,20 +1339,21 @@ fn advance_running(
             if let Some(cap) = message.strip_prefix(CAPS_FAILURE_PREFIX) {
                 tracing::warn!(capability = cap, "CAPS request failed; no reply surfaced");
                 if session.diagnostics_enabled() {
-                    outbound
-                        .send(NetOutbound::Diagnostic(Diagnostic::ExpectedReplyMissing {
+                    report(
+                        outbound,
+                        NetOutbound::Diagnostic(Diagnostic::ExpectedReplyMissing {
                             request: cap.to_owned(),
                             sequence: None,
-                        }))
-                        .ok();
+                        }),
+                    );
                 }
-            } else {
-                session.handle_caps_event(&message, &body, now).ok();
+            } else if let Err(error) = session.handle_caps_event(&message, &body, now) {
+                tracing::warn!(capability = %message, "CAPS payload rejected: {error}");
             }
         }
         // Binary asset fetches return fully-formed session events; surface them.
         while let Ok(event) = caps.asset_rx.try_recv() {
-            outbound.send(NetOutbound::Event(event)).ok();
+            report(outbound, NetOutbound::Event(event));
         }
 
         // Background inventory crawl: when enabled, sweep the next bounded batch
@@ -1307,7 +1408,11 @@ fn advance_running(
                     }
                     _ => {
                         for folder in library_folders {
-                            session.request_folder_contents(folder, now).ok();
+                            if let Err(error) = session.request_folder_contents(folder, now) {
+                                tracing::warn!(
+                                    "could not request library folder {folder:?}: {error}"
+                                );
+                            }
                         }
                     }
                 }
@@ -1341,2935 +1446,19 @@ fn advance_running(
         }
     }
 
-    // Apply queued commands.
+    // Apply queued commands. Each arm propagates its send failure with `?`
+    // (matching the tokio runtime), so an action that never reached the wire is
+    // reported to the app side instead of being silently dropped.
     for command in &commands {
-        match command {
-            Command::Send {
-                message,
-                reliability,
-            } => {
-                session.enqueue((**message).clone(), *reliability, now).ok();
-            }
-            Command::Chat {
-                message,
-                chat_type,
-                channel,
-            } => {
-                session.say(message, *chat_type, *channel, now).ok();
-            }
-            Command::Typing(typing) => {
-                session.set_typing(*typing, now).ok();
-            }
-            Command::InstantMessage {
-                to_agent_id,
-                message,
-            } => {
-                session
-                    .send_instant_message(*to_agent_id, message, now)
-                    .ok();
-                chat_log.log_outbound_im(*to_agent_id, message);
-            }
-            Command::AutoResponse {
-                to_agent_id,
-                message,
-            } => {
-                session.send_auto_response(*to_agent_id, message, now).ok();
-            }
-            Command::ImTyping {
-                to_agent_id,
-                typing,
-            } => {
-                session.send_im_typing(*to_agent_id, *typing, now).ok();
-            }
-            Command::SetControls(controls) => {
-                session.set_controls(*controls, now).ok();
-            }
-            Command::SetThrottle(throttle) => {
-                session.set_throttle(*throttle, now).ok();
-            }
-            Command::SetRotation { body, head } => {
-                session.set_rotation(body.clone(), head.clone(), now).ok();
-            }
-            Command::SetCamera(camera) => {
-                session.set_camera(camera.clone(), now).ok();
-            }
-            Command::Stand => {
-                session.stand(now).ok();
-            }
-            Command::SitOnGround => {
-                session.sit_on_ground(now).ok();
-            }
-            Command::Sit { target, offset } => {
-                session.sit_on(*target, offset.clone(), now).ok();
-            }
-            Command::Autopilot {
-                global_x,
-                global_y,
-                z,
-            } => {
-                session.autopilot_to(*global_x, *global_y, *z, now).ok();
-            }
-            Command::RequestAvatarProperties(target) => {
-                session.request_avatar_properties(*target, now).ok();
-            }
-            Command::RequestAvatarPicks(target) => {
-                session.request_avatar_picks(*target, now).ok();
-            }
-            Command::RequestAvatarNotes(target) => {
-                session.request_avatar_notes(*target, now).ok();
-            }
-            Command::RequestAvatarClassifieds(target) => {
-                session.request_avatar_classifieds(*target, now).ok();
-            }
-            Command::RequestPickInfo {
-                creator_id,
-                pick_id,
-            } => {
-                session.request_pick_info(*creator_id, *pick_id, now).ok();
-            }
-            Command::RequestClassifiedInfo(classified_id) => {
-                session.request_classified_info(*classified_id, now).ok();
-            }
-            Command::UpdateProfile(update) => {
-                session.update_profile(update, now).ok();
-            }
-            Command::UpdateInterests(update) => {
-                session.update_interests(update, now).ok();
-            }
-            Command::UpdateAvatarNotes { target_id, notes } => {
-                session.update_avatar_notes(*target_id, notes, now).ok();
-            }
-            Command::UpdatePick(update) => {
-                session.update_pick(update, now).ok();
-            }
-            Command::DeletePick(pick_id) => {
-                session.delete_pick(*pick_id, now).ok();
-            }
-            Command::GodDeletePick { pick_id, query_id } => {
-                session.god_delete_pick(*pick_id, *query_id, now).ok();
-            }
-            Command::UpdateClassified(update) => {
-                session.update_classified(update, now).ok();
-            }
-            Command::DeleteClassified(classified_id) => {
-                session.delete_classified(*classified_id, now).ok();
-            }
-            Command::GodDeleteClassified {
-                classified_id,
-                query_id,
-            } => {
-                session
-                    .god_delete_classified(*classified_id, *query_id, now)
-                    .ok();
-            }
-            Command::RequestFolderContents(folder_id) => {
-                fetch_folder_contents(&mut session, *folder_id, caps.as_ref(), now);
-            }
-            Command::FetchInventoryFolders(folder_ids) => {
-                if let Some(caps) = caps.as_ref()
-                    && let (Some(url), Some(owner)) = (
-                        caps.map.get(CAP_FETCH_INVENTORY).cloned(),
-                        session.agent_id(),
-                    )
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let folders = folder_ids.clone();
-                    std::thread::spawn(move || {
-                        run_inventory_fetch(
-                            &url,
-                            owner.uuid(),
-                            &folders,
-                            CAP_FETCH_INVENTORY,
-                            &events_tx,
-                        );
-                    });
-                }
-            }
-            Command::CreateInventoryFolder {
-                folder_id,
-                parent_id,
-                folder_type,
-                name,
-            } => {
-                session
-                    .create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
-                    .ok();
-            }
-            Command::UpdateInventoryFolder {
-                folder_id,
-                parent_id,
-                folder_type,
-                name,
-            } => {
-                session
-                    .update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)
-                    .ok();
-            }
-            Command::MoveInventoryFolder {
-                folder_id,
-                parent_id,
-            } => {
-                // Second Life: re-parent via AIS3 (`PATCH /category/<id>`); OpenSim
-                // (no cap) keeps the UDP `MoveInventoryFolder`.
-                let suffix = ais_category_url(*folder_id);
-                let body = build_ais_move_body(*parent_id);
-                if !route_ais3(caps.as_ref(), &suffix, Ais3Verb::Patch, Some(body)) {
-                    session
-                        .move_inventory_folder(*folder_id, *parent_id, now)
-                        .ok();
-                }
-            }
-            Command::RemoveInventoryFolders(folder_ids) => {
-                // Second Life: delete each folder via AIS3 (`DELETE /category/<id>`);
-                // OpenSim (no cap) keeps the UDP batch `RemoveInventoryFolder`.
-                if has_ais3(caps.as_ref()) {
-                    for folder_id in folder_ids {
-                        route_ais3(
-                            caps.as_ref(),
-                            &ais_category_url(*folder_id),
-                            Ais3Verb::Delete,
-                            None,
-                        );
-                    }
-                } else {
-                    session.remove_inventory_folders(folder_ids, now).ok();
-                }
-            }
-            Command::CreateInventoryItem(new) => {
-                session.create_inventory_item(new, now).ok();
-            }
-            Command::CreateScript {
-                folder_id,
-                name,
-                description,
-                next_owner_mask,
-                language,
-            } => {
-                session
-                    .create_script(
-                        *folder_id,
-                        name,
-                        description,
-                        *next_owner_mask,
-                        *language,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::LinkInventoryItem(new) => {
-                // Second Life: create the link via AIS3 (`POST /category/<folder>`
-                // with a `links` array). The legacy UDP `LinkInventoryItem` is
-                // rejected against the AIS-managed Current Outfit Folder — the
-                // "Cannot create requested inventory" alert — so a worn layer's COF
-                // link never lands. OpenSim (no cap) keeps the UDP path.
-                let suffix = ais_create_category_url(new.folder_id, Uuid::new_v4());
-                let body = build_ais_create_link_body(
-                    new.linked_id.uuid(),
-                    new.link_type.to_code(),
-                    new.inv_type.to_code(),
-                    &new.name,
-                    &new.description,
-                );
-                if !route_ais3(caps.as_ref(), &suffix, Ais3Verb::Post, Some(body)) {
-                    session.link_inventory_item(new, now).ok();
-                }
-            }
-            Command::UpdateInventoryItem {
-                item,
-                transaction_id,
-            } => {
-                session
-                    .update_inventory_item(item, *transaction_id, now)
-                    .ok();
-            }
-            Command::SaveInventoryAsset {
-                item,
-                asset_type,
-                transaction_id,
-                data,
-            } => {
-                session
-                    .save_inventory_asset(item, *asset_type, data.clone(), *transaction_id, now)
-                    .ok();
-            }
-            Command::MoveInventoryItem {
-                item_id,
-                folder_id,
-                new_name,
-            } => {
-                // Second Life: re-parent via AIS3 (`PATCH /item/<id>` with
-                // `{ parent_id }`) — but only a *pure* move: the AIS3 move body
-                // carries no name, so a move that also renames stays on UDP rather
-                // than silently dropping the rename. OpenSim (no cap) keeps UDP.
-                let routed = new_name.is_empty()
-                    && route_ais3(
-                        caps.as_ref(),
-                        &ais_item_url(*item_id),
-                        Ais3Verb::Patch,
-                        Some(build_ais_move_body(*folder_id)),
-                    );
-                if !routed {
-                    session
-                        .move_inventory_item(*item_id, *folder_id, new_name, now)
-                        .ok();
-                }
-            }
-            Command::CopyInventoryItem {
-                old_agent_id,
-                old_item_id,
-                new_folder_id,
-                new_name,
-            } => {
-                session
-                    .copy_inventory_item(*old_agent_id, *old_item_id, *new_folder_id, new_name, now)
-                    .ok();
-            }
-            Command::RemoveInventoryItems(item_ids) => {
-                // Second Life: delete each item via AIS3 (`DELETE /item/<id>`);
-                // OpenSim (no cap) keeps the UDP batch `RemoveInventoryItem`.
-                if has_ais3(caps.as_ref()) {
-                    // Drop the items from the cache optimistically (the AIS3 DELETE
-                    // does not), so a taken-off / detached item's Current Outfit link
-                    // leaves the model at once; the reply reconverges the folder.
-                    session.remove_inventory_items_local(item_ids);
-                    for item_id in item_ids {
-                        route_ais3(
-                            caps.as_ref(),
-                            &ais_item_url(*item_id),
-                            Ais3Verb::Delete,
-                            None,
-                        );
-                    }
-                } else {
-                    session.remove_inventory_items(item_ids, now).ok();
-                }
-            }
-            Command::ChangeInventoryItemFlags { item_id, flags } => {
-                session
-                    .change_inventory_item_flags(*item_id, *flags, now)
-                    .ok();
-            }
-            Command::PurgeInventoryDescendents(folder_id) => {
-                // Second Life: empty via AIS3 (`DELETE /category/<id>/children`);
-                // OpenSim (no cap) keeps the UDP `PurgeInventoryDescendents`.
-                let suffix = ais_category_children_url(*folder_id);
-                if !route_ais3(caps.as_ref(), &suffix, Ais3Verb::Delete, None) {
-                    session.purge_inventory_descendents(*folder_id, now).ok();
-                }
-            }
-            Command::RemoveInventoryObjects {
-                folder_ids,
-                item_ids,
-            } => {
-                session
-                    .remove_inventory_objects(folder_ids, item_ids, now)
-                    .ok();
-            }
-            Command::CreateInventoryCategory {
-                parent_id,
-                folder_type,
-                name,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_CREATE_INVENTORY_CATEGORY).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let body = build_create_inventory_category_request(
-                        InventoryFolderKey::from(Uuid::new_v4()),
-                        *parent_id,
-                        *folder_type,
-                        name,
-                    );
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_CREATE_INVENTORY_CATEGORY, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3CreateFolder {
-                parent_id,
-                folder_type,
-                name,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!(
-                        "{base}{}",
-                        ais_create_category_url(*parent_id, Uuid::new_v4())
-                    );
-                    let body = build_ais_create_category_body(*folder_type, name);
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3RenameFolder { folder_id, name } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_category_url(*folder_id));
-                    let body = build_ais_rename_category_body(name);
-                    std::thread::spawn(move || {
-                        run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3MoveFolder {
-                folder_id,
-                parent_id,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_category_url(*folder_id));
-                    let body = build_ais_move_body(*parent_id);
-                    std::thread::spawn(move || {
-                        run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3RemoveFolder(folder_id) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_category_url(*folder_id));
-                    std::thread::spawn(move || {
-                        run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3PurgeFolder(folder_id) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_category_children_url(*folder_id));
-                    std::thread::spawn(move || {
-                        run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3FetchFolderChildren { folder_id, depth } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!(
-                        "{base}{}",
-                        ais_category_children_fetch_url(*folder_id, *depth)
-                    );
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3UpdateItem {
-                item_id,
-                name,
-                description,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_item_url(*item_id));
-                    let body = build_ais_update_item_body(name, description);
-                    std::thread::spawn(move || {
-                        run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3MoveItem { item_id, parent_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_item_url(*item_id));
-                    let body = build_ais_move_body(*parent_id);
-                    std::thread::spawn(move || {
-                        run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3RemoveItem(item_id) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_item_url(*item_id));
-                    std::thread::spawn(move || {
-                        run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::Ais3FetchItem(item_id) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let url = format!("{base}{}", ais_item_url(*item_id));
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
-                    });
-                }
-            }
-            Command::FetchGroupMembers(group_id) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GROUP_MEMBER_DATA).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let group = *group_id;
-                    std::thread::spawn(move || {
-                        run_group_members_fetch(&url, group, &events_tx);
-                    });
-                }
-            }
-            Command::OfferFriendship {
-                to_agent_id,
-                message,
-            } => {
-                session
-                    .send_friendship_offer(*to_agent_id, message, now)
-                    .ok();
-            }
-            Command::GrantUserRights { target, rights } => {
-                session.grant_user_rights(*target, *rights, now).ok();
-            }
-            Command::TerminateFriendship(other) => {
-                session.terminate_friendship(*other, now).ok();
-            }
-            Command::AcceptFriendship {
-                transaction_id,
-                friend_id,
-                calling_card_folder,
-            } => {
-                session
-                    .accept_friendship(*transaction_id, *friend_id, *calling_card_folder, now)
-                    .ok();
-            }
-            Command::DeclineFriendship(transaction_id) => {
-                session.decline_friendship(*transaction_id, now).ok();
-            }
-            Command::OfferCallingCard {
-                to_agent_id,
-                transaction_id,
-            } => {
-                session
-                    .offer_calling_card(*to_agent_id, *transaction_id, now)
-                    .ok();
-            }
-            Command::AcceptCallingCard {
-                transaction_id,
-                calling_card_folder,
-            } => {
-                session
-                    .accept_calling_card(*transaction_id, *calling_card_folder, now)
-                    .ok();
-            }
-            Command::DeclineCallingCard(transaction_id) => {
-                session.decline_calling_card(*transaction_id, now).ok();
-            }
-            Command::ActivateGroup(group_id) => {
-                session.activate_group(*group_id, now).ok();
-            }
-            Command::RequestGroupMembers(group_id) => {
-                session.request_group_members(*group_id, now).ok();
-            }
-            Command::RequestGroupRoles(group_id) => {
-                session.request_group_roles(*group_id, now).ok();
-            }
-            Command::RequestGroupRoleMembers(group_id) => {
-                session.request_group_role_members(*group_id, now).ok();
-            }
-            Command::RequestGroupTitles(group_id) => {
-                session.request_group_titles(*group_id, now).ok();
-            }
-            Command::RequestGroupProfile(group_id) => {
-                session.request_group_profile(*group_id, now).ok();
-            }
-            Command::RequestGroupNotices(group_id) => {
-                session.request_group_notices(*group_id, now).ok();
-            }
-            Command::RequestGroupNotice(notice_id) => {
-                session.request_group_notice(*notice_id, now).ok();
-            }
-            Command::CreateGroup(params) => {
-                session.create_group(params, now).ok();
-            }
-            Command::UpdateGroupInfo(params) => {
-                session.update_group_info(params, now).ok();
-            }
-            Command::UpdateGroupTitle {
-                group_id,
-                title_role_id,
-            } => {
-                session
-                    .update_group_title(*group_id, *title_role_id, now)
-                    .ok();
-            }
-            Command::JoinGroup(group_id) => {
-                session.join_group(*group_id, now).ok();
-            }
-            Command::LeaveGroup(group_id) => {
-                session.leave_group(*group_id, now).ok();
-            }
-            Command::InviteToGroup { group_id, invitees } => {
-                session.invite_to_group(*group_id, invitees, now).ok();
-            }
-            Command::AcceptGroupInvitation {
-                group_id,
-                transaction_id,
-                use_offline_cap,
-            } => {
-                // An online invitation is answered over UDP; an offline one (null
-                // session id) POSTs to the AcceptGroupInvite cap when present.
-                if *use_offline_cap {
-                    if let Some(caps) = caps.as_ref()
-                        && let Some(url) = caps.map.get(CAP_ACCEPT_GROUP_INVITE).cloned()
-                    {
-                        let body = group_invite_response_body(*group_id);
-                        std::thread::spawn(move || run_caps_oneway(&url, body));
-                    }
-                } else {
-                    session
-                        .accept_group_invitation(*group_id, *transaction_id, now)
-                        .ok();
-                }
-            }
-            Command::DeclineGroupInvitation {
-                group_id,
-                transaction_id,
-                use_offline_cap,
-            } => {
-                if *use_offline_cap {
-                    if let Some(caps) = caps.as_ref()
-                        && let Some(url) = caps.map.get(CAP_DECLINE_GROUP_INVITE).cloned()
-                    {
-                        let body = group_invite_response_body(*group_id);
-                        std::thread::spawn(move || run_caps_oneway(&url, body));
-                    }
-                } else {
-                    session
-                        .decline_group_invitation(*group_id, *transaction_id, now)
-                        .ok();
-                }
-            }
-            Command::SetGroupAcceptNotices {
-                group_id,
-                accept_notices,
-                list_in_profile,
-            } => {
-                session
-                    .set_group_accept_notices(*group_id, *accept_notices, *list_in_profile, now)
-                    .ok();
-            }
-            Command::SetGroupContribution {
-                group_id,
-                contribution,
-            } => {
-                session
-                    .set_group_contribution(*group_id, *contribution, now)
-                    .ok();
-            }
-            Command::StartGroupSession(group_id) => {
-                session.start_group_session(*group_id, now).ok();
-            }
-            Command::SendGroupMessage { group_id, message } => {
-                session.send_group_message(*group_id, message, now).ok();
-                if let Some(own) = session.agent_id() {
-                    let name = session.agent_legacy_name();
-                    chat_log.log_group(*group_id, own, &name, message);
-                }
-            }
-            Command::LeaveGroupSession(group_id) => {
-                session.leave_group_session(*group_id, now).ok();
-            }
-            Command::UpdateGroupRoles { group_id, roles } => {
-                session.update_group_roles(*group_id, roles, now).ok();
-            }
-            Command::ChangeGroupRoleMembers { group_id, changes } => {
-                session
-                    .change_group_role_members(*group_id, changes, now)
-                    .ok();
-            }
-            Command::EjectGroupMembers {
-                group_id,
-                member_ids,
-            } => {
-                session.eject_group_members(*group_id, member_ids, now).ok();
-            }
-            Command::ActivateGestures { gestures } => {
-                session.activate_gestures(gestures, now).ok();
-            }
-            Command::DeactivateGestures { item_ids } => {
-                session.deactivate_gestures(item_ids, now).ok();
-            }
-            Command::SetAlwaysRun { mode } => {
-                session.set_always_run(*mode, now).ok();
-            }
-            Command::PauseAgent => {
-                session.pause_agent(now).ok();
-            }
-            Command::ResumeAgent => {
-                session.resume_agent(now).ok();
-            }
-            Command::SetAgentFov { vertical_angle } => {
-                session.set_agent_fov(*vertical_angle, now).ok();
-            }
-            Command::SetAgentSize { height, width } => {
-                session.set_agent_size(*height, *width, now).ok();
-            }
-            Command::ReleaseScriptControls => {
-                session.release_script_controls(now).ok();
-            }
-            Command::SendGroupNotice {
-                group_id,
-                subject,
-                message,
-                attachment,
-            } => {
-                session
-                    .send_group_notice(*group_id, subject, message, *attachment, now)
-                    .ok();
-            }
-            Command::RequestGroupAccountSummary {
-                group_id,
-                request_id,
-                interval_days,
-                current_interval,
-            } => {
-                session
-                    .request_group_account_summary(
-                        *group_id,
-                        *request_id,
-                        *interval_days,
-                        *current_interval,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::RequestGroupAccountDetails {
-                group_id,
-                request_id,
-                interval_days,
-                current_interval,
-            } => {
-                session
-                    .request_group_account_details(
-                        *group_id,
-                        *request_id,
-                        *interval_days,
-                        *current_interval,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::RequestGroupAccountTransactions {
-                group_id,
-                request_id,
-                interval_days,
-                current_interval,
-            } => {
-                session
-                    .request_group_account_transactions(
-                        *group_id,
-                        *request_id,
-                        *interval_days,
-                        *current_interval,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::RequestGroupActiveProposals {
-                group_id,
-                transaction_id,
-            } => {
-                session
-                    .request_group_active_proposals(*group_id, *transaction_id, now)
-                    .ok();
-            }
-            Command::RequestGroupVoteHistory {
-                group_id,
-                transaction_id,
-            } => {
-                session
-                    .request_group_vote_history(*group_id, *transaction_id, now)
-                    .ok();
-            }
-            Command::StartGroupProposal {
-                group_id,
-                quorum,
-                majority,
-                duration,
-                proposal_text,
-            } => {
-                session
-                    .start_group_proposal(
-                        *group_id,
-                        *quorum,
-                        *majority,
-                        *duration,
-                        proposal_text,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::GroupProposalBallot {
-                proposal_id,
-                group_id,
-                vote_cast,
-            } => {
-                session
-                    .cast_group_proposal_ballot(*proposal_id, *group_id, vote_cast, now)
-                    .ok();
-            }
-            Command::ReplyScriptDialog {
-                object_id,
-                chat_channel,
-                button_index,
-                button_label,
-            } => {
-                session
-                    .reply_script_dialog(
-                        *object_id,
-                        *chat_channel,
-                        *button_index,
-                        button_label,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::AnswerScriptPermissions {
-                task_id,
-                item_id,
-                permissions,
-                experience_id,
-            } => {
-                session
-                    .answer_script_permissions(
-                        *task_id,
-                        *item_id,
-                        *permissions,
-                        *experience_id,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::RequestMuteList => {
-                session.request_mute_list(now).ok();
-            }
-            Command::Mute {
-                id,
-                name,
-                mute_type,
-                flags,
-            } => {
-                session.mute(*id, name, *mute_type, *flags, now).ok();
-            }
-            Command::Unmute { id, name } => {
-                session.unmute(*id, name, now).ok();
-            }
-            Command::Teleport {
-                region_handle,
-                position,
-                look_at,
-            } => {
-                session
-                    .teleport_to(*region_handle, *position, look_at.clone(), now)
-                    .ok();
-            }
-            Command::RequestRegionInfo => {
-                session.request_region_info(now).ok();
-            }
-            Command::RequestAvatarNames(ids) => {
-                session.request_avatar_names(ids, now).ok();
-            }
-            Command::RequestGroupNames(ids) => {
-                session.request_group_names(ids, now).ok();
-            }
-            Command::RequestEnvironment { parcel_id } => {
-                if let Some(caps) = caps.as_ref() {
-                    if let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned() {
-                        let events_tx = caps.events_tx.clone();
-                        let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
-                        tracing::info!(
-                            target: "sl_client_bevy::environment",
-                            "requesting EEP environment from {CAP_EXT_ENVIRONMENT} cap"
-                        );
-                        std::thread::spawn(move || {
-                            run_get_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
-                        });
-                    } else {
-                        tracing::warn!(
-                            target: "sl_client_bevy::environment",
-                            "RequestEnvironment: the {CAP_EXT_ENVIRONMENT} capability is not \
-                             advertised by this region; the sky / cloud / water stack will run \
-                             on the legacy WindLight defaults ({} caps available)",
-                            caps.map.len()
-                        );
-                    }
-                } else {
-                    tracing::warn!(
-                        target: "sl_client_bevy::environment",
-                        "RequestEnvironment: no CAPS available yet; environment not requested"
-                    );
-                }
-            }
-            Command::SetEnvironment {
-                parcel_id,
-                track_no,
-                update,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let parcel_id = parcel_id.unwrap_or(-1);
-                    let url = match track_no {
-                        Some(track_no) => {
-                            format!("{base}?parcelid={parcel_id}&trackno={track_no}")
-                        }
-                        None => format!("{base}?parcelid={parcel_id}"),
-                    };
-                    let body = build_environment_update_request(update);
-                    std::thread::spawn(move || {
-                        run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, &events_tx);
-                    });
-                }
-            }
-            Command::RequestMoneyBalance => {
-                session.request_money_balance(now).ok();
-            }
-            Command::RequestEconomyData => {
-                session.request_economy_data(now).ok();
-            }
-            Command::SendMoneyTransfer {
-                dest,
-                amount,
-                kind,
-                description,
-            } => {
-                session
-                    .send_money_transfer(*dest, amount.clone(), *kind, description, now)
-                    .ok();
-            }
-            Command::RequestParcelProperties {
-                west,
-                south,
-                east,
-                north,
-                sequence_id,
-            } => {
-                session
-                    .request_parcel_properties(*west, *south, *east, *north, *sequence_id, now)
-                    .ok();
-            }
-            Command::RequestParcelPropertiesById {
-                local_id,
-                sequence_id,
-            } => {
-                session
-                    .request_parcel_properties_by_id(*local_id, *sequence_id, now)
-                    .ok();
-            }
-            Command::SetParcelOtherCleanTime {
-                local_id,
-                clean_time,
-            } => {
-                session
-                    .set_parcel_other_clean_time(*local_id, *clean_time, now)
-                    .ok();
-            }
-            Command::ModifyLand(edit) => {
-                session.modify_land(edit, now).ok();
-            }
-            Command::UndoLand => {
-                session.undo_land(now).ok();
-            }
-            Command::SetDrawDistance(far) => session.set_draw_distance(far.clone()),
-            Command::RequestMapBlocks {
-                min_x,
-                max_x,
-                min_y,
-                max_y,
-            } => {
-                session
-                    .request_map_blocks(*min_x, *max_x, *min_y, *max_y, now)
-                    .ok();
-            }
-            Command::RequestMapByName { name } => {
-                session.request_map_by_name(name, now).ok();
-            }
-            Command::RequestMapItems {
-                item_type,
-                region_handle,
-            } => {
-                session
-                    .request_map_items(*item_type, *region_handle, now)
-                    .ok();
-            }
-            Command::RequestMapLayer => {
-                session.request_map_layer(now).ok();
-            }
-            Command::SendAbuseReport(report) => {
-                session.send_abuse_report(report, now).ok();
-            }
-            Command::SendAbuseReportViaCaps { report, screenshot } => {
-                if let Some(caps) = caps.as_ref() {
-                    // With a snapshot and the screenshot cap available, upload the
-                    // snapshot over the two-step uploader (filling `screenshot_id`
-                    // with a fresh texture asset id) and POST the report referencing
-                    // it; otherwise the plain no-screenshot path.
-                    let snapshot = screenshot
-                        .as_ref()
-                        .filter(|bytes| !bytes.is_empty())
-                        .and_then(|bytes| {
-                            caps.map
-                                .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
-                                .cloned()
-                                .map(|url| (url, bytes.clone()))
-                        });
-                    match snapshot {
-                        Some((url, bytes)) => {
-                            let mut report = report.clone();
-                            if report.screenshot_id.is_nil() {
-                                report.screenshot_id = Uuid::new_v4();
-                            }
-                            let body = build_send_user_report(&report);
-                            std::thread::spawn(move || {
-                                run_report_screenshot_upload(&url, body, bytes);
-                            });
-                        }
-                        None => {
-                            if let Some(url) = caps.map.get(CAP_SEND_USER_REPORT).cloned() {
-                                let body = build_send_user_report(report);
-                                std::thread::spawn(move || {
-                                    run_caps_oneway(&url, body);
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            Command::SendPostcard(postcard) => {
-                session.send_postcard(postcard, now).ok();
-            }
-            Command::RequestObjects { local_ids } => {
-                session.request_objects(local_ids, now).ok();
-            }
-            Command::ResendCachedObjects { local_ids } => {
-                session.resend_cached_objects(local_ids);
-            }
-            Command::RequestObjectProperties { local_ids } => {
-                session.request_object_properties(local_ids, now).ok();
-            }
-            Command::DeselectObjects { local_ids } => {
-                session.deselect_objects(local_ids, now).ok();
-            }
-            Command::TouchObject { local_id, surface } => {
-                session.touch_object(*local_id, surface.as_ref(), now).ok();
-            }
-            Command::GrabObject {
-                local_id,
-                grab_offset,
-                surface,
-            } => {
-                session
-                    .grab_object(*local_id, grab_offset.clone(), surface.as_ref(), now)
-                    .ok();
-            }
-            Command::GrabObjectUpdate {
-                object_id,
-                grab_offset_initial,
-                grab_position,
-                time_since_last,
-                surface,
-            } => {
-                session
-                    .grab_object_update(
-                        *object_id,
-                        grab_offset_initial.clone(),
-                        grab_position.clone(),
-                        *time_since_last,
-                        surface.as_ref(),
-                        now,
-                    )
-                    .ok();
-            }
-            Command::DegrabObject { local_id, surface } => {
-                session.degrab_object(*local_id, surface.as_ref(), now).ok();
-            }
-            Command::RezObject { shape, group_id } => {
-                session.rez_object(shape, *group_id, now).ok();
-            }
-            Command::DuplicateObjects {
-                local_ids,
-                offset,
-                group_id,
-            } => {
-                session
-                    .duplicate_objects(local_ids, offset.clone(), *group_id, now)
-                    .ok();
-            }
-            Command::DeleteObjects { local_ids } => {
-                session.delete_objects(local_ids, now).ok();
-            }
-            Command::DerezObjects {
-                local_ids,
-                destination,
-                transaction_id,
-                group_id,
-            } => {
-                session
-                    .derez_objects(local_ids, *destination, *transaction_id, *group_id, now)
-                    .ok();
-            }
-            Command::UpdateObject {
-                local_id,
-                transform,
-            } => {
-                session.update_object(*local_id, transform, now).ok();
-            }
-            Command::SetObjectName { local_id, name } => {
-                session.set_object_name(*local_id, name, now).ok();
-            }
-            Command::SetObjectDescription {
-                local_id,
-                description,
-            } => {
-                session
-                    .set_object_description(*local_id, description, now)
-                    .ok();
-            }
-            Command::SetObjectClickAction { local_id, action } => {
-                session
-                    .set_object_click_action(*local_id, *action, now)
-                    .ok();
-            }
-            Command::SetObjectMaterial { local_id, material } => {
-                session.set_object_material(*local_id, *material, now).ok();
-            }
-            Command::SetObjectFlags { local_id, flags } => {
-                session.set_object_flags(*local_id, flags, now).ok();
-            }
-            Command::SetObjectShape { local_id, shape } => {
-                session.set_object_shape(*local_id, shape, now).ok();
-            }
-            Command::SetObjectImage {
-                local_id,
-                media_url,
-                texture_entry,
-            } => {
-                session
-                    .set_object_image(*local_id, media_url.as_deref(), texture_entry, now)
-                    .ok();
-            }
-            Command::SetObjectExtraParams { local_id, params } => {
-                session.set_object_extra_params(*local_id, params, now).ok();
-            }
-            Command::SetObjectGroup {
-                local_ids,
-                group_id,
-            } => {
-                session.set_object_group(local_ids, *group_id, now).ok();
-            }
-            Command::DeedObjectsToGroup {
-                local_ids,
-                group_id,
-            } => {
-                session
-                    .deed_objects_to_group(local_ids, *group_id, now)
-                    .ok();
-            }
-            Command::SetObjectPermissions {
-                local_ids,
-                field,
-                set,
-                mask,
-            } => {
-                session
-                    .set_object_permissions(local_ids, *field, *set, *mask, now)
-                    .ok();
-            }
-            Command::SetObjectForSale {
-                local_id,
-                sale_type,
-                sale_price,
-            } => {
-                session
-                    .set_object_for_sale(*local_id, *sale_type, sale_price.clone(), now)
-                    .ok();
-            }
-            Command::SetObjectCategory { local_id, category } => {
-                session.set_object_category(*local_id, *category, now).ok();
-            }
-            Command::SetObjectIncludeInSearch { local_id, include } => {
-                session
-                    .set_object_include_in_search(*local_id, *include, now)
-                    .ok();
-            }
-            Command::LinkObjects { local_ids } => {
-                session.link_objects(local_ids, now).ok();
-            }
-            Command::DelinkObjects { local_ids } => {
-                session.delink_objects(local_ids, now).ok();
-            }
-            Command::UndoObjects { local_ids } => {
-                session.undo_objects(local_ids, now).ok();
-            }
-            Command::RedoObjects { local_ids } => {
-                session.redo_objects(local_ids, now).ok();
-            }
-            Command::UpdateParcel(update) => {
-                session.update_parcel(update, now).ok();
-            }
-            Command::RequestParcelAccessList { local_id, scope } => {
-                session
-                    .request_parcel_access_list(*local_id, *scope, now)
-                    .ok();
-            }
-            Command::UpdateParcelAccessList {
-                local_id,
-                scope,
-                entries,
-            } => {
-                session
-                    // A fresh transaction id per update, so the simulator clears
-                    // the old entries before applying ours rather than appending
-                    // (see `update_parcel_access_list`).
-                    .update_parcel_access_list(*local_id, *scope, entries, Uuid::new_v4(), now)
-                    .ok();
-            }
-            Command::RequestParcelDwell { local_id } => {
-                session.request_parcel_dwell(*local_id, now).ok();
-            }
-            Command::BuyParcel {
-                local_id,
-                price,
-                area,
-                group_id,
-                is_group_owned,
-            } => {
-                session
-                    .buy_parcel(*local_id, *price, *area, *group_id, *is_group_owned, now)
-                    .ok();
-            }
-            Command::ReturnParcelObjects {
-                local_id,
-                return_type,
-                owner_ids,
-                task_ids,
-            } => {
-                session
-                    .return_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)
-                    .ok();
-            }
-            Command::SelectParcelObjects {
-                local_id,
-                return_type,
-                object_ids,
-            } => {
-                session
-                    .select_parcel_objects(*local_id, *return_type, object_ids, now)
-                    .ok();
-            }
-            Command::DeedParcelToGroup { local_id, group_id } => {
-                session.deed_parcel_to_group(*local_id, *group_id, now).ok();
-            }
-            Command::ReclaimParcel { local_id } => {
-                session.reclaim_parcel(*local_id, now).ok();
-            }
-            Command::ReleaseParcel { local_id } => {
-                session.release_parcel(*local_id, now).ok();
-            }
-            Command::JoinParcels {
-                west,
-                south,
-                east,
-                north,
-            } => {
-                session.join_parcels(*west, *south, *east, *north, now).ok();
-            }
-            Command::DivideParcel {
-                west,
-                south,
-                east,
-                north,
-            } => {
-                session
-                    .divide_parcel(*west, *south, *east, *north, now)
-                    .ok();
-            }
-            Command::RequestParcelObjectOwners { local_id } => {
-                session.request_parcel_object_owners(*local_id, now).ok();
-            }
-            Command::BuyParcelPass { local_id } => {
-                session.buy_parcel_pass(*local_id, now).ok();
-            }
-            Command::DisableParcelObjects {
-                local_id,
-                return_type,
-                owner_ids,
-                task_ids,
-            } => {
-                session
-                    .disable_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)
-                    .ok();
-            }
-            Command::RequestParcelInfo { parcel_id } => {
-                session.request_parcel_info(*parcel_id, now).ok();
-            }
-            Command::RequestEstateInfo => {
-                session.request_estate_info(now).ok();
-            }
-            Command::RequestRegionTerrainDownload { viewer_filename } => {
-                session
-                    .request_region_terrain_download(viewer_filename, now)
-                    .ok();
-            }
-            Command::RequestRegionTerrainUpload {
-                viewer_filename,
-                data,
-            } => {
-                session
-                    .request_region_terrain_upload(viewer_filename, data.clone(), now)
-                    .ok();
-            }
-            Command::UpdateEstateAccess { delta, target } => {
-                session.update_estate_access(*delta, *target, now).ok();
-            }
-            Command::KickEstateUser { target } => {
-                session.kick_estate_user(*target, now).ok();
-            }
-            Command::TeleportHomeUser { target } => {
-                session.teleport_home_user(*target, now).ok();
-            }
-            Command::TeleportHomeAllUsers => {
-                session.teleport_home_all_users(now).ok();
-            }
-            Command::RestartRegion { seconds } => {
-                session.restart_region(*seconds, now).ok();
-            }
-            Command::SendEstateMessage { message } => {
-                session.send_estate_message(message, now).ok();
-            }
-            Command::SetRegionInfo(update) => {
-                session.set_region_info(update, now).ok();
-            }
-            Command::SetRegionDebug(update) => {
-                session.set_region_debug(update, now).ok();
-            }
-            Command::SetRegionTerrain(update) => {
-                session.set_region_terrain(update, now).ok();
-            }
-            Command::SetEstateInfo(update) => {
-                session.set_estate_info(update, now).ok();
-            }
-            Command::RequestEstateCovenant => {
-                session.request_estate_covenant(now).ok();
-            }
-            Command::RequestTelehubInfo => {
-                session.request_telehub_info(now).ok();
-            }
-            Command::ConnectTelehub { object_local_id } => {
-                session.connect_telehub(*object_local_id, now).ok();
-            }
-            Command::DisconnectTelehub => {
-                session.disconnect_telehub(now).ok();
-            }
-            Command::AddTelehubSpawnPoint { object_local_id } => {
-                session.add_telehub_spawn_point(*object_local_id, now).ok();
-            }
-            Command::RemoveTelehubSpawnPoint { spawn_index } => {
-                session.remove_telehub_spawn_point(*spawn_index, now).ok();
-            }
-            Command::GodKickUser { target, reason } => {
-                session.god_kick_user(*target, reason, now).ok();
-            }
-            Command::SendGodlikeMessage { method, params } => {
-                let refs: Vec<&str> = params.iter().map(String::as_str).collect();
-                session.send_godlike_message(method, &refs, now).ok();
-            }
-            Command::RequestTexture {
-                texture_id,
-                discard_level,
-                priority,
-            } => {
-                session
-                    .request_texture(*texture_id, *discard_level, *priority, now)
-                    .ok();
-            }
-            Command::FetchTexture {
-                texture_id,
-                discard_level,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GET_TEXTURE).cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let (id, discard) = (*texture_id, *discard_level);
-                    std::thread::spawn(move || {
-                        run_texture_fetch(&url, id, discard, &asset_tx);
-                    });
-                }
-            }
-            Command::FetchMesh {
-                mesh_id,
-                byte_range,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps
-                        .map
-                        .get(CAP_GET_MESH2)
-                        .or_else(|| caps.map.get(CAP_GET_MESH))
-                        .cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let (id, range) = (mesh_id.uuid(), *byte_range);
-                    std::thread::spawn(move || {
-                        run_asset_fetch(
-                            &url,
-                            &format!("?mesh_id={id}"),
-                            id,
-                            AssetType::Mesh,
-                            range,
-                            &asset_tx,
-                        );
-                    });
-                }
-            }
-            Command::FetchAsset {
-                asset_id,
-                asset_type,
-                byte_range,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_VIEWER_ASSET).cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let (id, asset_type, range) = (asset_id.uuid(), *asset_type, *byte_range);
-                    std::thread::spawn(move || {
-                        run_generic_asset_fetch(&url, id, asset_type, range, &asset_tx);
-                    });
-                }
-            }
-            Command::RequestWearables => {
-                session.request_wearables(now).ok();
-            }
-            Command::SetWearing(wearables) => {
-                session.set_wearing(wearables, now).ok();
-            }
-            Command::SetAppearance {
-                serial,
-                size,
-                texture_entry,
-                visual_params,
-                wearable_cache,
-            } => {
-                session
-                    .set_appearance(
-                        *serial,
-                        size.clone(),
-                        texture_entry,
-                        visual_params,
-                        wearable_cache,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::RequestCachedTextures { serial, slots } => {
-                session.request_cached_textures(*serial, slots, now).ok();
-            }
-            Command::RequestServerAppearanceUpdate { cof_version } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_UPDATE_AVATAR_APPEARANCE).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let version = *cof_version;
-                    std::thread::spawn(move || {
-                        run_server_appearance_update(&url, version, &events_tx);
-                    });
-                }
-            }
-            Command::SetAnimations(animations) => {
-                session.set_animations(animations, now).ok();
-            }
-            Command::PlayAnimation(anim_id) => {
-                session.play_animation(*anim_id, now).ok();
-            }
-            Command::StopAnimation(anim_id) => {
-                session.stop_animation(*anim_id, now).ok();
-            }
-            Command::AttachObject {
-                local_id,
-                attachment_point,
-                mode,
-                rotation,
-            } => {
-                session
-                    .attach_object(*local_id, *attachment_point, *mode, rotation, now)
-                    .ok();
-            }
-            Command::DetachObjects { local_ids } => {
-                session.detach_objects(local_ids, now).ok();
-            }
-            Command::DropAttachments { local_ids } => {
-                session.drop_attachments(local_ids, now).ok();
-            }
-            Command::RemoveAttachment {
-                attachment_point,
-                item_id,
-            } => {
-                session
-                    .remove_attachment(*attachment_point, *item_id, now)
-                    .ok();
-            }
-            Command::RezAttachment(rez) => {
-                session.rez_attachment(rez, now).ok();
-            }
-            Command::RezAttachments {
-                compound_id,
-                detach,
-                attachments,
-            } => {
-                session
-                    .rez_attachments(*compound_id, *detach, attachments, now)
-                    .ok();
-            }
-            Command::ViewerEffect(effects) => {
-                session.send_viewer_effect(effects, now).ok();
-            }
-            Command::TrackAgent { prey_id } => {
-                session.track_agent(*prey_id, now).ok();
-            }
-            Command::FindAgent { hunter, prey } => {
-                session.find_agent(*hunter, *prey, now).ok();
-            }
-            Command::DirFindQuery {
-                query_id,
-                query_text,
-                flags,
-                query_start,
-            } => {
-                session
-                    .dir_find_query(*query_id, query_text, *flags, *query_start, now)
-                    .ok();
-            }
-            Command::DirPlacesQuery {
-                query_id,
-                query_text,
-                flags,
-                category,
-                sim_name,
-                query_start,
-            } => {
-                session
-                    .dir_places_query(
-                        *query_id,
-                        query_text,
-                        *flags,
-                        *category,
-                        sim_name,
-                        *query_start,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::DirLandQuery {
-                query_id,
-                flags,
-                search_type,
-                price,
-                area,
-                query_start,
-            } => {
-                session
-                    .dir_land_query(
-                        *query_id,
-                        *flags,
-                        *search_type,
-                        *price,
-                        *area,
-                        *query_start,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::DirClassifiedQuery {
-                query_id,
-                query_text,
-                flags,
-                category,
-                query_start,
-            } => {
-                session
-                    .dir_classified_query(
-                        *query_id,
-                        query_text,
-                        *flags,
-                        *category,
-                        *query_start,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::AvatarPickerRequest { query_id, name } => {
-                // The modern search is the `AvatarPickerSearch` GET, which
-                // matches username *and* display name; the legacy UDP message
-                // is the fallback for a grid without the cap (on Second Life it
-                // answers "no matches" to everything).
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_AVATAR_PICKER_SEARCH).cloned()
-                {
-                    let url = format!(
-                        "{base}{}",
-                        avatar_picker_search_query(name, AVATAR_PICKER_PAGE_SIZE)
-                    );
-                    let events_tx = caps.events_tx.clone();
-                    let query_uuid = query_id.get();
-                    std::thread::spawn(move || {
-                        run_avatar_picker_search(&url, query_uuid, &events_tx);
-                    });
-                } else {
-                    session.avatar_picker_request(*query_id, name, now).ok();
-                }
-            }
-            Command::PlacesQuery {
-                query_id,
-                transaction_id,
-                query_text,
-                flags,
-                category,
-                sim_name,
-            } => {
-                session
-                    .places_query(
-                        *query_id,
-                        *transaction_id,
-                        query_text,
-                        *flags,
-                        *category,
-                        sim_name,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::EventInfoRequest { event_id } => {
-                session.event_info_request(*event_id, now).ok();
-            }
-            Command::EventNotificationAddRequest { event_id } => {
-                session.event_notification_add_request(*event_id, now).ok();
-            }
-            Command::EventNotificationRemoveRequest { event_id } => {
-                session
-                    .event_notification_remove_request(*event_id, now)
-                    .ok();
-            }
-            Command::BuyObject {
-                group_id,
-                category_id,
-                objects,
-            } => {
-                session
-                    .buy_object(*group_id, *category_id, objects, now)
-                    .ok();
-            }
-            Command::BuyObjectInventory {
-                object_id,
-                item_id,
-                folder_id,
-            } => {
-                session
-                    .buy_object_inventory(*object_id, *item_id, *folder_id, now)
-                    .ok();
-            }
-            Command::RequestPayPrice { object_id } => {
-                session.request_pay_price(*object_id, now).ok();
-            }
-            Command::RequestObjectPropertiesFamily {
-                request_flags,
-                object_id,
-            } => {
-                session
-                    .request_object_properties_family(*request_flags, *object_id, now)
-                    .ok();
-            }
-            Command::SpinObjectStart { object_id } => {
-                session.spin_object_start(*object_id, now).ok();
-            }
-            Command::SpinObjectUpdate {
-                object_id,
-                rotation,
-            } => {
-                session
-                    .spin_object_update(*object_id, rotation.clone(), now)
-                    .ok();
-            }
-            Command::SpinObjectStop { object_id } => {
-                session.spin_object_stop(*object_id, now).ok();
-            }
-            Command::DuplicateObjectsOnRay {
-                local_ids,
-                group_id,
-                ray_start,
-                ray_end,
-                bypass_raycast,
-                ray_end_is_intersection,
-                copy_centers,
-                copy_rotates,
-                ray_target_id,
-                duplicate_flags,
-            } => {
-                session
-                    .duplicate_objects_on_ray(
-                        local_ids,
-                        *group_id,
-                        ray_start.clone(),
-                        ray_end.clone(),
-                        *bypass_raycast,
-                        *ray_end_is_intersection,
-                        *copy_centers,
-                        *copy_rotates,
-                        *ray_target_id,
-                        *duplicate_flags,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::RezRestoreToWorld { item } => {
-                session.rez_restore_to_world(item, now).ok();
-            }
-            Command::RezObjectFromNotecard { rez } => {
-                session.rez_object_from_notecard(rez, now).ok();
-            }
-            Command::CopyInventoryFromNotecard {
-                notecard_id,
-                object_id,
-                item_id,
-                folder_id,
-            } => {
-                // Copy an item embedded in a notecard into inventory: a one-way
-                // LLSD POST to the cap. The copied item arrives over the normal
-                // inventory-update stream, so nothing is awaited here.
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_COPY_INVENTORY_FROM_NOTECARD).cloned()
-                {
-                    let body = copy_inventory_from_notecard_body(
-                        *notecard_id,
-                        *object_id,
-                        *item_id,
-                        *folder_id,
-                    );
-                    std::thread::spawn(move || {
-                        post_caps_llsd_oneway(&url, body);
-                    });
-                }
-            }
-            Command::RezObjectFromInventory { params } => {
-                session.rez_object_from_inventory(params, now).ok();
-            }
-            Command::RezScript { target, params } => {
-                session.rez_script(*target, params, now).ok();
-            }
-            Command::RevokeScriptPermissions {
-                object_id,
-                permissions,
-            } => {
-                session
-                    .revoke_script_permissions(*object_id, *permissions, now)
-                    .ok();
-            }
-            Command::QueryScriptPermissions => {
-                // Local query: synthesize the snapshot from the session and surface
-                // it on the event stream (no wire send).
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::ScriptPermissionState(
-                        session.script_permission_state(),
-                    )))
-                    .ok();
-            }
-            Command::DetachAttachmentIntoInventory { item_id } => {
-                session.detach_attachment_into_inventory(*item_id, now).ok();
-            }
-            Command::RequestTaskInventory { target } => {
-                session.request_task_inventory(*target, now).ok();
-            }
-            Command::FetchTaskInventory { target } => {
-                session.fetch_task_inventory(*target, now).ok();
-            }
-            Command::FetchTaskItemAsset {
-                task,
-                item_id,
-                asset_id,
-                asset_type,
-            } => {
-                session
-                    .fetch_task_item_asset(*task, *item_id, *asset_id, *asset_type, now)
-                    .ok();
-            }
-            Command::FetchEstateCovenantAsset => {
-                session.fetch_estate_covenant_asset(now).ok();
-            }
-            Command::RequestXfer { filename } => {
-                session.request_xfer(filename, now).ok();
-            }
-            Command::UpdateTaskInventory { target, key, item } => {
-                session.update_task_inventory(*target, *key, item, now).ok();
-            }
-            Command::MoveTaskInventory {
-                target,
-                folder_id,
-                item_id,
-            } => {
-                session
-                    .move_task_inventory(*target, *folder_id, *item_id, now)
-                    .ok();
-            }
-            Command::RemoveTaskInventory { target, item_id } => {
-                session.remove_task_inventory(*target, *item_id, now).ok();
-            }
-            Command::RequestScriptRunning { object_id, item_id } => {
-                session
-                    .request_script_running(*object_id, *item_id, now)
-                    .ok();
-            }
-            Command::SetScriptRunning {
-                object_id,
-                item_id,
-                running,
-            } => {
-                session
-                    .set_script_running(*object_id, *item_id, *running, now)
-                    .ok();
-            }
-            Command::ResetScript { object_id, item_id } => {
-                session.reset_script(*object_id, *item_id, now).ok();
-            }
-            Command::UploadAsset { asset_type, .. } if asset_type.is_script() => {
-                // Scripts must go through `UploadScript` so the simulator's
-                // compile result is surfaced; the generic create-with-body path
-                // would discard it.
-                emit_upload_failure(
-                    caps.as_ref(),
-                    "scripts must be uploaded with UploadScript (create the item with \
-                        create_inventory_item first)"
-                        .to_owned(),
-                );
-            }
-            Command::UploadAsset {
-                folder_id,
-                asset_type,
-                inventory_type,
-                name,
-                description,
-                next_owner_mask,
-                group_mask,
-                everyone_mask,
-                expected_upload_cost,
-                data,
-            } => {
-                // The modern CAPS uploader (the only upload path — the legacy UDP
-                // asset-upload fallback was dropped): needs both the region
-                // capability and a CAPS name for the asset and inventory classes.
-                let caps_available = matches!(
-                    (asset_type.caps_asset_name(), inventory_type.caps_name()),
-                    (Some(_), Some(_))
-                ) && caps
-                    .as_ref()
-                    .is_some_and(|caps| caps.map.contains_key(CAP_NEW_FILE_AGENT_INVENTORY));
-                if caps_available {
-                    spawn_new_file_upload(
-                        caps.as_ref(),
-                        *folder_id,
-                        *asset_type,
-                        *inventory_type,
-                        name,
-                        description,
-                        *next_owner_mask,
-                        *group_mask,
-                        *everyone_mask,
-                        *expected_upload_cost,
-                        data.clone(),
-                    );
-                } else {
-                    emit_upload_failure(
-                        caps.as_ref(),
-                        "NewFileAgentInventory capability not available".to_owned(),
-                    );
-                }
-            }
-            Command::UploadBakedTexture { data } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_UPLOAD_BAKED_TEXTURE).cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let body = build_upload_baked_texture_request();
-                    let data = data.clone();
-                    std::thread::spawn(move || {
-                        let event = run_caps_upload(&url, body, data);
-                        asset_tx.send(event).ok();
-                    });
-                } else {
-                    emit_upload_unavailable(caps.as_ref(), "UploadBakedTexture");
-                }
-            }
-            Command::UpdateInventoryAsset {
-                location,
-                asset_type,
-                data,
-            } => {
-                // `UpdatableAssetType::cap` / `task_cap` are total — scripts
-                // (which need the compile-aware `UploadScript`) are excluded from
-                // this type by construction. The location picks the agent vs task
-                // capability and the metadata body shape.
-                let (cap, body) = match location {
-                    AssetUpdateLocation::AgentInventory { item_id } => {
-                        (asset_type.cap(), build_update_item_asset_request(*item_id))
-                    }
-                    AssetUpdateLocation::TaskInventory { task_id, item_id } => (
-                        asset_type.task_cap(),
-                        build_update_task_item_asset_request(*task_id, *item_id),
-                    ),
-                };
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(cap).cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let data = data.clone();
-                    std::thread::spawn(move || {
-                        let event = run_caps_upload(&url, body, data);
-                        asset_tx.send(event).ok();
-                    });
-                } else {
-                    emit_upload_unavailable(caps.as_ref(), cap);
-                }
-            }
-            Command::UploadScript {
-                location,
-                target,
-                source,
-            } => {
-                // Choose the capability + request body by location; the completion
-                // carries the simulator's compile result.
-                let target_wire = target.to_wire();
-                let (cap, body, running) = match location {
-                    ScriptUploadLocation::AgentInventory { item_id } => (
-                        CAP_UPDATE_SCRIPT_AGENT,
-                        build_update_script_agent_request(*item_id, target_wire),
-                        None,
-                    ),
-                    ScriptUploadLocation::TaskInventory {
-                        task_id,
-                        item_id,
-                        running,
-                        experience,
-                    } => (
-                        CAP_UPDATE_SCRIPT_TASK,
-                        build_update_script_task_request(
-                            *task_id,
-                            *item_id,
-                            *running,
-                            target_wire,
-                            *experience,
-                        ),
-                        Some(*running),
-                    ),
-                };
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(cap).cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let source = source.clone();
-                    std::thread::spawn(move || {
-                        asset_tx
-                            .send(run_script_upload(&url, body, source, running))
-                            .ok();
-                    });
-                } else {
-                    emit_upload_unavailable(caps.as_ref(), cap);
-                }
-            }
-            Command::RequestObjectMedia { object_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    let object = *object_id;
-                    std::thread::spawn(move || {
-                        run_object_media_fetch(&url, object, &events_tx);
-                    });
-                }
-            }
-            Command::SetObjectMedia { object_id, faces } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
-                {
-                    let body = build_object_media_update_request(*object_id, faces);
-                    std::thread::spawn(move || {
-                        post_caps_llsd_oneway(&url, body);
-                    });
-                }
-            }
-            Command::NavigateObjectMedia {
-                object_id,
-                face,
-                url: media_url,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned()
-                {
-                    let body = build_object_media_navigate_request(*object_id, *face, media_url);
-                    std::thread::spawn(move || {
-                        post_caps_llsd_oneway(&url, body);
-                    });
-                }
-            }
-            Command::RequestRenderMaterials { material_ids } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
-                {
-                    let asset_tx = caps.asset_tx.clone();
-                    let ids = material_ids.clone();
-                    std::thread::spawn(move || {
-                        run_render_materials_fetch(&url, ids, &asset_tx);
-                    });
-                }
-            }
-            Command::SetRenderMaterials { updates } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
-                {
-                    let body = build_render_materials_put_request(updates);
-                    std::thread::spawn(move || {
-                        run_set_render_materials(&url, body);
-                    });
-                }
-            }
-            Command::ModifyMaterialParams { updates } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned()
-                {
-                    let body = build_modify_material_params_request(updates);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_modify_material_params(&url, body, &events_tx);
-                    });
-                }
-            }
-            Command::RequestVoiceAccount { request } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
-                {
-                    let body = build_provision_voice_account_request(request);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
-                    });
-                }
-            }
-            Command::RequestParcelVoiceInfo => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_PARCEL_VOICE_INFO).cloned()
-                {
-                    let body = build_parcel_voice_info_request();
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_PARCEL_VOICE_INFO, &events_tx);
-                    });
-                }
-            }
-            Command::SendVoiceSignaling {
-                viewer_session,
-                candidates,
-                completed,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_VOICE_SIGNALING).cloned()
-                {
-                    let body =
-                        build_voice_signaling_request(viewer_session, candidates, *completed);
-                    std::thread::spawn(move || {
-                        run_voice_signaling(&url, body);
-                    });
-                }
-            }
-            Command::RequestDisplayNames(agent_ids) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_GET_DISPLAY_NAMES).cloned()
-                {
-                    let agent_uuids: Vec<Uuid> = agent_ids.iter().map(AgentKey::uuid).collect();
-                    let url = format!("{base}{}", display_names_query(&agent_uuids));
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_GET_DISPLAY_NAMES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestRemoteParcelId {
-                location,
-                region_id,
-                region_handle,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_REMOTE_PARCEL_REQUEST).cloned()
-                {
-                    let body = build_remote_parcel_request(*location, *region_id, *region_handle);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_REMOTE_PARCEL_REQUEST, &events_tx);
-                    });
-                }
-            }
-            Command::RequestSimulatorFeatures => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_SIMULATOR_FEATURES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestAgentPreferences => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
-                {
-                    let body = build_agent_preferences_request(&AgentPreferences::default());
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
-                    });
-                }
-            }
-            Command::SetAgentPreferences(prefs) => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
-                {
-                    let body = build_agent_preferences_request(prefs);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestObjectCost { object_ids } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GET_OBJECT_COST).cloned()
-                {
-                    let body = build_get_object_cost_request(object_ids);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_GET_OBJECT_COST, &events_tx);
-                    });
-                }
-            }
-            Command::RequestSelectedCost { object_ids, roots } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_RESOURCE_COST_SELECTED).cloned()
-                {
-                    let kind = if *roots {
-                        SelectedCostKind::Roots
-                    } else {
-                        SelectedCostKind::Prims
-                    };
-                    let body = build_resource_cost_selected_request(kind, object_ids);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_RESOURCE_COST_SELECTED, &events_tx);
-                    });
-                }
-            }
-            Command::RequestObjectPhysicsData { object_ids } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GET_OBJECT_PHYSICS_DATA).cloned()
-                {
-                    let body = build_get_object_physics_data_request(object_ids);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_GET_OBJECT_PHYSICS_DATA, &events_tx);
-                    });
-                }
-            }
-            Command::RequestAttachmentResources => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_ATTACHMENT_RESOURCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_ATTACHMENT_RESOURCES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestLandResources { parcel_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_LAND_RESOURCES).cloned()
-                {
-                    let parcel_id = *parcel_id;
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_land_resources(&url, parcel_id, &events_tx);
-                    });
-                }
-            }
-            Command::RequestLandStat {
-                report_type,
-                request_flags,
-                filter,
-                parcel_local_id,
-            } => {
-                session
-                    .request_land_stat(*report_type, *request_flags, filter, *parcel_local_id, now)
-                    .ok();
-            }
-            Command::RequestExperienceInfo { experience_ids } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_GET_EXPERIENCE_INFO).cloned()
-                {
-                    let url = format!("{base}{}", experience_info_query(experience_ids));
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_GET_EXPERIENCE_INFO, &events_tx);
-                    });
-                }
-            }
-            Command::FindExperiences { query, page } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned()
-                {
-                    let url = format!("{base}{}", find_experience_query(query, *page));
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_FIND_EXPERIENCE_BY_NAME, &events_tx);
-                    });
-                }
-            }
-            Command::RequestExperiencePermissions => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GET_EXPERIENCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_GET_EXPERIENCES, &events_tx);
-                    });
-                }
-            }
-            Command::SetExperiencePermission {
-                experience_id,
-                permission,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_EXPERIENCE_PREFERENCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    if permission.is_forget() {
-                        let url = format!("{base}{}", forget_experience_query(*experience_id));
-                        std::thread::spawn(move || {
-                            run_delete_caps_llsd(&url, CAP_EXPERIENCE_PREFERENCES, &events_tx);
-                        });
-                    } else {
-                        let body =
-                            build_set_experience_permission_request(*experience_id, *permission);
-                        std::thread::spawn(move || {
-                            run_put_caps_llsd(&base, body, CAP_EXPERIENCE_PREFERENCES, &events_tx);
-                        });
-                    }
-                }
-            }
-            Command::RequestOwnedExperiences => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_AGENT_EXPERIENCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_AGENT_EXPERIENCES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestAdminExperiences => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GET_ADMIN_EXPERIENCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_GET_ADMIN_EXPERIENCES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestCreatorExperiences => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_GET_CREATOR_EXPERIENCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_GET_CREATOR_EXPERIENCES, &events_tx);
-                    });
-                }
-            }
-            Command::RequestGroupExperiences { group_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_GROUP_EXPERIENCES).cloned()
-                {
-                    let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
-                    let group_id = *group_id;
-                    let asset_tx = caps.asset_tx.clone();
-                    std::thread::spawn(move || {
-                        run_group_experiences(&url, group_id, &asset_tx);
-                    });
-                }
-            }
-            Command::RequestExperienceAdmin { experience_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_ADMIN).cloned()
-                {
-                    let url = format!("{base}{}", experience_id_query(*experience_id));
-                    let experience_id = *experience_id;
-                    let asset_tx = caps.asset_tx.clone();
-                    std::thread::spawn(move || {
-                        run_experience_status(&url, experience_id, true, &asset_tx);
-                    });
-                }
-            }
-            Command::RequestExperienceContributor { experience_id } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned()
-                {
-                    let url = format!("{base}{}", experience_id_query(*experience_id));
-                    let experience_id = *experience_id;
-                    let asset_tx = caps.asset_tx.clone();
-                    std::thread::spawn(move || {
-                        run_experience_status(&url, experience_id, false, &asset_tx);
-                    });
-                }
-            }
-            Command::UpdateExperience { update } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_UPDATE_EXPERIENCE).cloned()
-                {
-                    let body = build_update_experience_request(update);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_UPDATE_EXPERIENCE, &events_tx);
-                    });
-                }
-            }
-            Command::RequestRegionExperiences => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_REGION_EXPERIENCES, &events_tx);
-                    });
-                }
-            }
-            Command::SetRegionExperiences {
-                allowed,
-                blocked,
-                trusted,
-            } => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
-                {
-                    let body = build_region_experiences_request(allowed, blocked, trusted);
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_REGION_EXPERIENCES, &events_tx);
-                    });
-                }
-            }
-            Command::OfferTeleport { targets, message } => {
-                session.offer_teleport(targets, message, now).ok();
-            }
-            Command::AcceptTeleportLure { lure_id } => {
-                session.accept_teleport_lure(*lure_id, now).ok();
-            }
-            Command::DeclineTeleportLure {
-                from_agent_id,
-                lure_id,
-            } => {
-                session
-                    .decline_teleport_lure(*from_agent_id, *lure_id, now)
-                    .ok();
-            }
-            Command::RequestTeleport {
-                to_agent_id,
-                message,
-            } => {
-                session.request_teleport(*to_agent_id, message, now).ok();
-            }
-            Command::GiveInventory {
-                to_agent_id,
-                item_id,
-                asset_type,
-                item_name,
-                transaction_id,
-            } => {
-                session
-                    .give_inventory(
-                        *to_agent_id,
-                        *item_id,
-                        *asset_type,
-                        item_name,
-                        *transaction_id,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::GiveInventoryFolder {
-                to_agent_id,
-                folder_id,
-                folder_name,
-                transaction_id,
-            } => {
-                session
-                    .give_inventory_folder(
-                        *to_agent_id,
-                        *folder_id,
-                        folder_name,
-                        *transaction_id,
-                        now,
-                    )
-                    .ok();
-            }
-            Command::AcceptInventoryOffer { offer, folder_id } => {
-                session.accept_inventory_offer(offer, *folder_id, now).ok();
-            }
-            Command::DeclineInventoryOffer {
-                offer,
-                trash_folder_id,
-            } => {
-                session
-                    .decline_inventory_offer(offer, *trash_folder_id, now)
-                    .ok();
-            }
-            Command::StartConference {
-                session_id,
-                invitees,
-                message,
-            } => {
-                // The modern start is a `ChatSessionRequest` POST; the
-                // deprecated `IM_SESSION_CONFERENCE_START` instant message is
-                // the fallback for a grid without the cap (OpenSim). Either
-                // way the session opens locally under the id we minted, and
-                // the grid's `ChatterBoxSessionStartReply` moves it onto the
-                // id the session really has.
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
-                {
-                    let body = chat_session_agents_body(
-                        CHAT_SESSION_START_CONFERENCE,
-                        session_id.get(),
-                        invitees,
-                    );
-                    session.open_conference(*session_id, invitees, now);
-                    std::thread::spawn(move || {
-                        run_caps_oneway(&url, body);
-                    });
-                } else {
-                    session
-                        .start_conference(*session_id, invitees, message, now)
-                        .ok();
-                }
-            }
-            Command::InviteToChatSession {
-                session_id,
-                invitees,
-            } => {
-                // Adding to a session that already exists is the cap's own
-                // `invite`; the legacy path has only the conference-start IM,
-                // which a simulator without the cap treats as an add.
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
-                {
-                    let body =
-                        chat_session_agents_body(CHAT_SESSION_INVITE, session_id.get(), invitees);
-                    session.open_conference(*session_id, invitees, now);
-                    std::thread::spawn(move || {
-                        run_caps_oneway(&url, body);
-                    });
-                } else {
-                    session
-                        .start_conference(*session_id, invitees, "", now)
-                        .ok();
-                }
-            }
-            Command::SendConferenceMessage {
-                session_id,
-                message,
-            } => {
-                session
-                    .send_conference_message(*session_id, message, now)
-                    .ok();
-                if let Some(own) = session.agent_id() {
-                    let name = session.agent_legacy_name();
-                    let roster: BTreeSet<_> = session
-                        .participants(ChatSessionKind::Conference { id: *session_id })
-                        .collect();
-                    chat_log.log_conference(*session_id, &roster, own, &name, message);
-                }
-            }
-            Command::LeaveConference { session_id } => {
-                session.leave_conference(*session_id, now).ok();
-            }
-            Command::MarkSessionRead {
-                session: chat_session,
-            } => {
-                session.mark_session_read(*chat_session);
-            }
-            Command::AcceptChatInvite {
-                session_id,
-                from_group,
-            } => {
-                // Promote the entry to joined locally, then drive the modern
-                // accept over the cap when present (its reply roster seeds the
-                // participants); without the cap the optimistic join suffices.
-                session.accept_chat_invite(*session_id, *from_group, now);
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
-                {
-                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
-                    let events_tx = caps.events_tx.clone();
-                    let (session_uuid, from_group) = (session_id.get(), *from_group);
-                    std::thread::spawn(move || {
-                        run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
-                    });
-                }
-            }
-            Command::DeclineChatInvite {
-                session_id,
-                from_group,
-            } => {
-                // Remove the entry, then refuse on the wire: the cap `decline
-                // invitation` POST when present, else a UDP `SessionLeave`.
-                session.decline_chat_invite(*session_id, *from_group, now);
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
-                {
-                    let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
-                    let events_tx = caps.events_tx.clone();
-                    let (session_uuid, from_group) = (session_id.get(), *from_group);
-                    std::thread::spawn(move || {
-                        run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
-                    });
-                } else if *from_group {
-                    session
-                        .leave_group_session(GroupKey::from(session_id.get()), now)
-                        .ok();
-                } else {
-                    session.leave_conference(*session_id, now).ok();
-                }
-            }
-            Command::JoinSessionVoice {
-                session: chat_session,
-            } => {
-                // Optimistic local join, then drive the signalling: ensure a voice
-                // account, then signal into the channel over `ChatSessionRequest`
-                // (accept invitation). Signalling only — no audio.
-                session.join_session_voice(*chat_session, now);
-                if let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref()) {
-                    let session_uuid = chat_session.canonical_session_id(own);
-                    let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
-                    if let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
-                        let body =
-                            build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
-                        let events_tx = caps.events_tx.clone();
-                        std::thread::spawn(move || {
-                            run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
-                        });
-                    }
-                    if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                        let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
-                        let events_tx = caps.events_tx.clone();
-                        std::thread::spawn(move || {
-                            run_chat_session_request(
-                                &url,
-                                body,
-                                session_uuid,
-                                from_group,
-                                &events_tx,
-                            );
-                        });
-                    }
-                }
-            }
-            Command::LeaveSessionVoice {
-                session: chat_session,
-            } => {
-                // Optimistic local leave (keeps the text conversation), then signal
-                // the voice decline on the wire: a 1:1 P2P call uses `decline p2p
-                // voice`, a group / conference the multi-agent `decline invitation`.
-                session.leave_session_voice(*chat_session);
-                if let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref()) {
-                    let session_uuid = chat_session.canonical_session_id(own);
-                    let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
-                    let method = if matches!(chat_session, ChatSessionKind::Direct { .. }) {
-                        CHAT_SESSION_DECLINE_P2P_VOICE
-                    } else {
-                        CHAT_SESSION_DECLINE
-                    };
-                    if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
-                        let body = chat_session_request_body(method, session_uuid);
-                        let events_tx = caps.events_tx.clone();
-                        std::thread::spawn(move || {
-                            run_chat_session_request(
-                                &url,
-                                body,
-                                session_uuid,
-                                from_group,
-                                &events_tx,
-                            );
-                        });
-                    }
-                }
-            }
-            Command::FetchSessionHistory { kind } => {
-                // Explicit server-backlog fetch, bypassing the auto-fetch gate.
-                // Only group / conference sessions have a server backlog; on a
-                // grid without the cap (stock OpenSim) there is nothing to POST
-                // to, so the command silently degrades. Mirrors the tokio arm.
-                if !matches!(kind, ChatSessionKind::Direct { .. })
-                    && let (Some(own), Some(caps)) = (session.agent_id(), caps.as_ref())
-                    && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
-                {
-                    // Suppress a later duplicate auto-fetch of the same session.
-                    session.note_server_history_requested(*kind);
-                    let session_uuid = kind.canonical_session_id(own);
-                    let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
-                    let from_group = matches!(kind, ChatSessionKind::Group { .. });
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_chat_session_fetch_history(
-                            &url,
-                            body,
-                            session_uuid,
-                            from_group,
-                            &events_tx,
-                        );
-                    });
-                }
-            }
-            Command::QueryChatSessions => {
-                // Local query: build the light session list and surface it on the
-                // event stream. (A bevy system may instead borrow the Session and
-                // call `chat_sessions_info()` directly, skipping the round-trip.)
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::ChatSessions(
-                        session.chat_sessions_info().collect(),
-                    )))
-                    .ok();
-            }
-            Command::QueryChatHistoryPage {
-                session: chat_session,
-                before,
-                limit,
-            } => {
-                // Newest-first paging across the unified memory→archive view: the
-                // in-memory ring first, then older pages from the transcript (B9).
-                let consumed = before.map_or(0, MessageCursor::consumed_count);
-                let mem_len = session.history_len(*chat_session);
-                let (messages, prev): (std::sync::Arc<[SessionMessage]>, _) = if consumed < mem_len
-                {
-                    let (page, mem_prev) = session.history_page(*chat_session, *before, *limit);
-                    let collected: std::sync::Arc<[_]> = page.cloned().collect();
-                    let next = consumed.saturating_add(collected.len());
-                    let prev = mem_prev.or_else(|| {
-                        chat_log
-                            .read_older_page(*chat_session, mem_len, next, 1)
-                            .filter(|(probe, _)| !probe.is_empty())
-                            .map(|_more| MessageCursor::from_consumed(next))
-                    });
-                    (collected, prev)
-                } else {
-                    match chat_log.read_older_page(*chat_session, mem_len, consumed, *limit) {
-                        Some((msgs, prev)) => (msgs.into(), prev),
-                        None => (Vec::new().into(), None),
-                    }
-                };
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::ChatHistoryPage {
-                        session: *chat_session,
-                        messages,
-                        prev,
-                    }))
-                    .ok();
-            }
-            Command::QueryNearbyChatHistoryPage {
-                already_shown,
-                before,
-                limit,
-            } => {
-                // Nearby chat has no in-memory ring: the whole page comes from the
-                // on-disk transcript, skipping the newest `already_shown` lines the
-                // caller already shows live (B9 paging discipline).
-                let consumed = before.map_or(0, MessageCursor::consumed_count);
-                let (lines, prev): (std::sync::Arc<[NearbyHistoryLine]>, _) =
-                    match chat_log.read_nearby_older_page(*already_shown, consumed, *limit) {
-                        Some((page, cursor)) => (page.into(), cursor),
-                        None => (Vec::new().into(), None),
-                    };
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::NearbyChatHistoryPage {
-                        lines,
-                        prev,
-                    }))
-                    .ok();
-            }
-            Command::QueryInventoryFolder {
-                folder,
-                before,
-                limit,
-            } => {
-                // Local query: page the held model into owning view types (one
-                // bounded borrow→owned transform, `Arc<[…]>` payload). A bevy
-                // system may instead borrow the Session and call
-                // `inventory_folder_page` directly, skipping the round-trip.
-                let (folders, items, prev) =
-                    session.inventory_folder_page(*folder, *before, *limit);
-                // On-demand: a query for an unfetched folder schedules its fetch
-                // (works regardless of the background-crawl flag).
-                if session.folder_fetch_state(*folder) == Some(FolderState::Unknown) {
-                    fetch_folder_contents(&mut session, *folder, caps.as_ref(), now);
-                }
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::InventoryFolderPage {
-                        folder: *folder,
-                        folders: folders.into(),
-                        items: items.into(),
-                        prev,
-                    }))
-                    .ok();
-            }
-            Command::QueryInventoryRoots => {
-                // Local query: surface the agent + library roots (both `Copy`).
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::InventoryRoots {
-                        agent_root: session.inventory_root(),
-                        library_root: session.library_root(),
-                    }))
-                    .ok();
-            }
-            Command::QueryInventoryFolders => {
-                // Local query: snapshot the agent tree's known folders (seeded
-                // from the login skeleton, so present before any contents fetch).
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::InventoryFolders(
-                        session.inventory_folder_infos().into(),
-                    )))
-                    .ok();
-            }
-            Command::QueryFriends => {
-                // Local query: build the buddy snapshot with online flags.
-                outbound
-                    .send(NetOutbound::Event(SessionEvent::FriendsSnapshot(
-                        session.friends_presence().collect(),
-                    )))
-                    .ok();
-            }
-            Command::RetrieveInstantMessages => {
-                session.retrieve_instant_messages(now).ok();
-            }
-            Command::RequestOfflineMessages => {
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_READ_OFFLINE_MSGS).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_READ_OFFLINE_MSGS, &events_tx);
-                    });
-                }
-            }
-            Command::TeleportViaLandmark { landmark } => {
-                session.teleport_via_landmark(*landmark, now).ok();
-            }
-            Command::CancelTeleport => {
-                session.cancel_teleport(now).ok();
-            }
-            Command::SetStartLocation {
-                slot,
-                position,
-                look_at,
-            } => {
-                session
-                    .set_start_location(*slot, *position, look_at.clone(), now)
-                    .ok();
-            }
-            Command::RequestAgentDataUpdate => {
-                session.request_agent_data_update(now).ok();
-            }
-            Command::QuitCopy => {
-                session.quit_copy(now).ok();
-            }
-            Command::SetVelocityInterpolation { enabled } => {
-                session.set_velocity_interpolation(*enabled, now).ok();
-            }
-            Command::RequestUserInfo => {
-                // Cap-preferred (the modern `UserInfo` GET), falling back to
-                // the legacy `UserInfoRequest` UDP message where the region
-                // does not serve the capability (OpenSim).
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
-                {
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_get_caps_llsd(&url, CAP_USER_INFO, &events_tx);
-                    });
-                } else {
-                    session.request_user_info(now).ok();
-                }
-            }
-            Command::UpdateUserInfo {
-                im_via_email,
-                directory_visibility,
-            } => {
-                // Cap-preferred (the modern `UserInfo` POST), falling back to
-                // the legacy `UpdateUserInfo` UDP message where the region
-                // does not serve the capability (OpenSim). `im_via_email` is
-                // always included: OpenSim needs it and Second Life ignores
-                // unknown keys (it manages the forwarding preference on the
-                // account website).
-                if let Some(caps) = caps.as_ref()
-                    && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
-                {
-                    let body = build_user_info_update(&UserInfoUpdate {
-                        im_via_email: Some(*im_via_email),
-                        dir_visibility: directory_visibility.to_wire().to_owned(),
-                    });
-                    let events_tx = caps.events_tx.clone();
-                    std::thread::spawn(move || {
-                        run_voice_cap(&url, body, CAP_USER_INFO, &events_tx);
-                    });
-                } else {
-                    session
-                        .update_user_info(*im_via_email, *directory_visibility, now)
-                        .ok();
-                }
-            }
-            Command::SetChatLogConfig(config) => {
-                chat_log.set_config((**config).clone());
-            }
-            Command::TriggerSound {
-                sound,
-                gain,
-                region_handle,
-                position,
-            } => {
-                session
-                    .trigger_sound(*sound, *gain, *region_handle, *position, now)
-                    .ok();
-            }
-            Command::RequestGodlikePowers { godlike } => {
-                session.request_godlike_powers(*godlike, now).ok();
-            }
-            Command::EjectUser { target, action } => {
-                session.eject_user(*target, *action, now).ok();
-            }
-            Command::FreezeUser { target, action } => {
-                session.freeze_user(*target, *action, now).ok();
-            }
-            Command::SimWideDeletes { owner, flags } => {
-                session.sim_wide_deletes(*owner, *flags, now).ok();
-            }
-            Command::GodUpdateRegionInfo { update } => {
-                session.god_update_region_info(update, now).ok();
-            }
-            Command::ParcelGodForceOwner { parcel, owner } => {
-                session.parcel_god_force_owner(*parcel, *owner, now).ok();
-            }
-            Command::ParcelGodMarkAsContent { parcel } => {
-                session.parcel_god_mark_as_content(*parcel, now).ok();
-            }
-            Command::EventGodDelete {
-                event,
-                query_id,
-                query_text,
-                flags,
-                query_start,
-            } => {
-                session
-                    .event_god_delete(*event, *query_id, query_text, *flags, *query_start, now)
-                    .ok();
-            }
-            Command::StateSave { filename } => {
-                session.state_save(filename, now).ok();
-            }
-            Command::ViewerStartAuction { parcel, snapshot } => {
-                session.viewer_start_auction(*parcel, *snapshot, now).ok();
-            }
-            Command::MarketplaceMerchantStatus => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::MerchantStatus,
-                        Ok(merchant_status_request()),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::MarketplaceListings => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::GetListings,
-                        Ok(listings_request()),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::MarketplaceListing(id) => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::GetListing(*id),
-                        Ok(listing_request(*id)),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::MarketplaceCreateListing(payload) => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::CreateListing,
-                        create_listing_request(payload),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::MarketplaceUpdateListing(payload) => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::UpdateListing(payload.id),
-                        update_listing_request(payload),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::MarketplaceAssociateListing(payload) => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::AssociateInventory(payload.id),
-                        associate_inventory_request(payload),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::MarketplaceDeleteListing(id) => {
-                if let Some(caps) = caps.as_ref() {
-                    dispatch_marketplace_request(
-                        caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
-                        MarketplaceOperation::DeleteListing(*id),
-                        Ok(delete_listing_request(*id)),
-                        &caps.asset_tx,
-                    );
-                }
-            }
-            Command::Logout => session.initiate_logout(now),
+        if let Err(error) = apply_command(
+            command,
+            &mut session,
+            caps.as_ref(),
+            &mut chat_log,
+            now,
+            outbound,
+        ) {
+            report_command_failed(outbound, command.name(), error);
         }
     }
 
@@ -4283,14 +1472,22 @@ fn advance_running(
 
     // Flush outgoing datagrams.
     while let Some(transmit) = session.poll_transmit() {
-        socket.send_to(&transmit.payload, transmit.destination).ok();
+        if let Err(error) = socket.send_to(&transmit.payload, transmit.destination) {
+            // The datagram never left the host. A reliable one is retransmitted
+            // by the session's own timer; an unreliable one is simply lost, so
+            // the log is the only record either way.
+            tracing::warn!(
+                destination = %transmit.destination,
+                "could not transmit a datagram: {error}"
+            );
+        }
     }
 
     // Surface protocol diagnostics the session collected this frame (decode
     // failures, unhandled messages, unknown CAPS events, missing replies). Only
     // populated while diagnostics are enabled.
     while let Some(diagnostic) = session.poll_diagnostic() {
-        outbound.send(NetOutbound::Diagnostic(diagnostic)).ok();
+        report(outbound, NetOutbound::Diagnostic(diagnostic));
     }
 
     // Surface events. A region change brings a new seed capability, so restart
@@ -4329,9 +1526,7 @@ fn advance_running(
                 {
                     lsl_syntax.last_id = Some(id);
                     if let Some(cached) = lsl_syntax.cache.load(id) {
-                        caps.events_tx
-                            .send((CAP_LSL_SYNTAX.to_owned(), cached))
-                            .ok();
+                        deliver(&caps.events_tx, (CAP_LSL_SYNTAX.to_owned(), cached));
                     } else if let Some(url) = caps.map.get(CAP_LSL_SYNTAX).cloned() {
                         let events_tx = caps.events_tx.clone();
                         let cache = lsl_syntax.cache.clone();
@@ -4359,7 +1554,7 @@ fn advance_running(
         if chat_log.any_enabled() {
             chat_log.observe_event(&session, &event);
         }
-        outbound.send(NetOutbound::Event(event)).ok();
+        report(outbound, NetOutbound::Event(event));
     }
     if region_changed {
         // Re-target the single event-queue worker at the new root region rather
@@ -4390,9 +1585,10 @@ fn advance_running(
     refreshed.refresh_from(&session);
     if refreshed != agent_parcel {
         agent_parcel = refreshed;
-        outbound
-            .send(NetOutbound::AgentParcel(Box::new(agent_parcel.clone())))
-            .ok();
+        report(
+            outbound,
+            NetOutbound::AgentParcel(Box::new(agent_parcel.clone())),
+        );
     }
     Some(RunningSession {
         session,
@@ -4404,4 +1600,2852 @@ fn advance_running(
         lsl_syntax,
         agent_parcel,
     })
+}
+
+/// Applies one queued [`Command`] to the running `session` (on the network
+/// thread), sending whatever wire traffic — or spawning whatever CAPS request —
+/// the command calls for.
+///
+/// Every send propagates with `?`, exactly as the tokio runtime's command loop
+/// does: a failure here means the request never reached the wire, and
+/// [`advance_running`] reports it as a [`NetOutbound::CommandFailed`] so the app
+/// can tell the user their delete / rez / terraform did nothing. Nothing is
+/// discarded.
+///
+/// # Errors
+///
+/// Returns the [`Error`] of the first failing send in the arm — typically
+/// [`Error::NoCircuit`] (no circuit established yet), [`Error::UnknownCircuit`]
+/// (a stale scoped id), or [`Error::Wire`] (the request failed to encode).
+#[expect(
+    clippy::too_many_lines,
+    reason = "one arm per command in the shared vocabulary; splitting the match by topic would \
+              only scatter the single dispatch table the tokio runtime's loop mirrors"
+)]
+fn apply_command(
+    command: &Command,
+    session: &mut Session,
+    caps: Option<&Caps>,
+    chat_log: &mut ChatLog,
+    now: Instant,
+    outbound: &Sender<NetOutbound>,
+) -> Result<(), SessionError> {
+    match command {
+        Command::Send {
+            message,
+            reliability,
+        } => {
+            session.enqueue((**message).clone(), *reliability, now)?;
+        }
+        Command::Chat {
+            message,
+            chat_type,
+            channel,
+        } => {
+            session.say(message, *chat_type, *channel, now)?;
+        }
+        Command::Typing(typing) => {
+            session.set_typing(*typing, now)?;
+        }
+        Command::InstantMessage {
+            to_agent_id,
+            message,
+        } => {
+            // The transcript records only what actually went out, so the `?`
+            // above skips the log line when the send failed.
+            session.send_instant_message(*to_agent_id, message, now)?;
+            chat_log.log_outbound_im(*to_agent_id, message);
+        }
+        Command::AutoResponse {
+            to_agent_id,
+            message,
+        } => {
+            session.send_auto_response(*to_agent_id, message, now)?;
+        }
+        Command::ImTyping {
+            to_agent_id,
+            typing,
+        } => {
+            session.send_im_typing(*to_agent_id, *typing, now)?;
+        }
+        Command::SetControls(controls) => {
+            session.set_controls(*controls, now)?;
+        }
+        Command::SetThrottle(throttle) => {
+            session.set_throttle(*throttle, now)?;
+        }
+        Command::SetRotation { body, head } => {
+            session.set_rotation(body.clone(), head.clone(), now)?;
+        }
+        Command::SetCamera(camera) => {
+            session.set_camera(camera.clone(), now)?;
+        }
+        Command::Stand => {
+            session.stand(now)?;
+        }
+        Command::SitOnGround => {
+            session.sit_on_ground(now)?;
+        }
+        Command::Sit { target, offset } => {
+            session.sit_on(*target, offset.clone(), now)?;
+        }
+        Command::Autopilot {
+            global_x,
+            global_y,
+            z,
+        } => {
+            session.autopilot_to(*global_x, *global_y, *z, now)?;
+        }
+        Command::RequestAvatarProperties(target) => {
+            session.request_avatar_properties(*target, now)?;
+        }
+        Command::RequestAvatarPicks(target) => {
+            session.request_avatar_picks(*target, now)?;
+        }
+        Command::RequestAvatarNotes(target) => {
+            session.request_avatar_notes(*target, now)?;
+        }
+        Command::RequestAvatarClassifieds(target) => {
+            session.request_avatar_classifieds(*target, now)?;
+        }
+        Command::RequestPickInfo {
+            creator_id,
+            pick_id,
+        } => {
+            session.request_pick_info(*creator_id, *pick_id, now)?;
+        }
+        Command::RequestClassifiedInfo(classified_id) => {
+            session.request_classified_info(*classified_id, now)?;
+        }
+        Command::UpdateProfile(update) => {
+            session.update_profile(update, now)?;
+        }
+        Command::UpdateInterests(update) => {
+            session.update_interests(update, now)?;
+        }
+        Command::UpdateAvatarNotes { target_id, notes } => {
+            session.update_avatar_notes(*target_id, notes, now)?;
+        }
+        Command::UpdatePick(update) => {
+            session.update_pick(update, now)?;
+        }
+        Command::DeletePick(pick_id) => {
+            session.delete_pick(*pick_id, now)?;
+        }
+        Command::GodDeletePick { pick_id, query_id } => {
+            session.god_delete_pick(*pick_id, *query_id, now)?;
+        }
+        Command::UpdateClassified(update) => {
+            session.update_classified(update, now)?;
+        }
+        Command::DeleteClassified(classified_id) => {
+            session.delete_classified(*classified_id, now)?;
+        }
+        Command::GodDeleteClassified {
+            classified_id,
+            query_id,
+        } => {
+            session.god_delete_classified(*classified_id, *query_id, now)?;
+        }
+        Command::RequestFolderContents(folder_id) => {
+            fetch_folder_contents(session, *folder_id, caps, now)?;
+        }
+        Command::FetchInventoryFolders(folder_ids) => {
+            if let Some(caps) = caps
+                && let (Some(url), Some(owner)) = (
+                    caps.map.get(CAP_FETCH_INVENTORY).cloned(),
+                    session.agent_id(),
+                )
+            {
+                let events_tx = caps.events_tx.clone();
+                let folders = folder_ids.clone();
+                std::thread::spawn(move || {
+                    run_inventory_fetch(
+                        &url,
+                        owner.uuid(),
+                        &folders,
+                        CAP_FETCH_INVENTORY,
+                        &events_tx,
+                    );
+                });
+            }
+        }
+        Command::CreateInventoryFolder {
+            folder_id,
+            parent_id,
+            folder_type,
+            name,
+        } => {
+            session.create_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)?;
+        }
+        Command::UpdateInventoryFolder {
+            folder_id,
+            parent_id,
+            folder_type,
+            name,
+        } => {
+            session.update_inventory_folder(*folder_id, *parent_id, *folder_type, name, now)?;
+        }
+        Command::MoveInventoryFolder {
+            folder_id,
+            parent_id,
+        } => {
+            // Second Life: re-parent via AIS3 (`PATCH /category/<id>`); OpenSim
+            // (no cap) keeps the UDP `MoveInventoryFolder`.
+            let suffix = ais_category_url(*folder_id);
+            let body = build_ais_move_body(*parent_id);
+            if !route_ais3(caps, &suffix, Ais3Verb::Patch, Some(body)) {
+                session.move_inventory_folder(*folder_id, *parent_id, now)?;
+            }
+        }
+        Command::RemoveInventoryFolders(folder_ids) => {
+            // Second Life: delete each folder via AIS3 (`DELETE /category/<id>`);
+            // OpenSim (no cap) keeps the UDP batch `RemoveInventoryFolder`.
+            if has_ais3(caps) {
+                for folder_id in folder_ids {
+                    route_ais3(caps, &ais_category_url(*folder_id), Ais3Verb::Delete, None);
+                }
+            } else {
+                session.remove_inventory_folders(folder_ids, now)?;
+            }
+        }
+        Command::CreateInventoryItem(new) => {
+            session.create_inventory_item(new, now)?;
+        }
+        Command::CreateScript {
+            folder_id,
+            name,
+            description,
+            next_owner_mask,
+            language,
+        } => {
+            session.create_script(
+                *folder_id,
+                name,
+                description,
+                *next_owner_mask,
+                *language,
+                now,
+            )?;
+        }
+        Command::LinkInventoryItem(new) => {
+            // Second Life: create the link via AIS3 (`POST /category/<folder>`
+            // with a `links` array). The legacy UDP `LinkInventoryItem` is
+            // rejected against the AIS-managed Current Outfit Folder — the
+            // "Cannot create requested inventory" alert — so a worn layer's COF
+            // link never lands. OpenSim (no cap) keeps the UDP path.
+            let suffix = ais_create_category_url(new.folder_id, Uuid::new_v4());
+            let body = build_ais_create_link_body(
+                new.linked_id.uuid(),
+                new.link_type.to_code(),
+                new.inv_type.to_code(),
+                &new.name,
+                &new.description,
+            );
+            if !route_ais3(caps, &suffix, Ais3Verb::Post, Some(body)) {
+                session.link_inventory_item(new, now)?;
+            }
+        }
+        Command::UpdateInventoryItem {
+            item,
+            transaction_id,
+        } => {
+            session.update_inventory_item(item, *transaction_id, now)?;
+        }
+        Command::SaveInventoryAsset {
+            item,
+            asset_type,
+            transaction_id,
+            data,
+        } => {
+            session.save_inventory_asset(item, *asset_type, data.clone(), *transaction_id, now)?;
+        }
+        Command::MoveInventoryItem {
+            item_id,
+            folder_id,
+            new_name,
+        } => {
+            // Second Life: re-parent via AIS3 (`PATCH /item/<id>` with
+            // `{ parent_id }`) — but only a *pure* move: the AIS3 move body
+            // carries no name, so a move that also renames stays on UDP rather
+            // than silently dropping the rename. OpenSim (no cap) keeps UDP.
+            let routed = new_name.is_empty()
+                && route_ais3(
+                    caps,
+                    &ais_item_url(*item_id),
+                    Ais3Verb::Patch,
+                    Some(build_ais_move_body(*folder_id)),
+                );
+            if !routed {
+                session.move_inventory_item(*item_id, *folder_id, new_name, now)?;
+            }
+        }
+        Command::CopyInventoryItem {
+            old_agent_id,
+            old_item_id,
+            new_folder_id,
+            new_name,
+        } => {
+            session.copy_inventory_item(
+                *old_agent_id,
+                *old_item_id,
+                *new_folder_id,
+                new_name,
+                now,
+            )?;
+        }
+        Command::RemoveInventoryItems(item_ids) => {
+            // Second Life: delete each item via AIS3 (`DELETE /item/<id>`);
+            // OpenSim (no cap) keeps the UDP batch `RemoveInventoryItem`.
+            if has_ais3(caps) {
+                // Drop the items from the cache optimistically (the AIS3 DELETE
+                // does not), so a taken-off / detached item's Current Outfit link
+                // leaves the model at once; the reply reconverges the folder.
+                session.remove_inventory_items_local(item_ids);
+                for item_id in item_ids {
+                    route_ais3(caps, &ais_item_url(*item_id), Ais3Verb::Delete, None);
+                }
+            } else {
+                session.remove_inventory_items(item_ids, now)?;
+            }
+        }
+        Command::ChangeInventoryItemFlags { item_id, flags } => {
+            session.change_inventory_item_flags(*item_id, *flags, now)?;
+        }
+        Command::PurgeInventoryDescendents(folder_id) => {
+            // Second Life: empty via AIS3 (`DELETE /category/<id>/children`);
+            // OpenSim (no cap) keeps the UDP `PurgeInventoryDescendents`.
+            let suffix = ais_category_children_url(*folder_id);
+            if !route_ais3(caps, &suffix, Ais3Verb::Delete, None) {
+                session.purge_inventory_descendents(*folder_id, now)?;
+            }
+        }
+        Command::RemoveInventoryObjects {
+            folder_ids,
+            item_ids,
+        } => {
+            session.remove_inventory_objects(folder_ids, item_ids, now)?;
+        }
+        Command::CreateInventoryCategory {
+            parent_id,
+            folder_type,
+            name,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_CREATE_INVENTORY_CATEGORY).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let body = build_create_inventory_category_request(
+                    InventoryFolderKey::from(Uuid::new_v4()),
+                    *parent_id,
+                    *folder_type,
+                    name,
+                );
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_CREATE_INVENTORY_CATEGORY, &events_tx);
+                });
+            }
+        }
+        Command::Ais3CreateFolder {
+            parent_id,
+            folder_type,
+            name,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!(
+                    "{base}{}",
+                    ais_create_category_url(*parent_id, Uuid::new_v4())
+                );
+                let body = build_ais_create_category_body(*folder_type, name);
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3RenameFolder { folder_id, name } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_category_url(*folder_id));
+                let body = build_ais_rename_category_body(name);
+                std::thread::spawn(move || {
+                    run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3MoveFolder {
+            folder_id,
+            parent_id,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_category_url(*folder_id));
+                let body = build_ais_move_body(*parent_id);
+                std::thread::spawn(move || {
+                    run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3RemoveFolder(folder_id) => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_category_url(*folder_id));
+                std::thread::spawn(move || {
+                    run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3PurgeFolder(folder_id) => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_category_children_url(*folder_id));
+                std::thread::spawn(move || {
+                    run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3FetchFolderChildren { folder_id, depth } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!(
+                    "{base}{}",
+                    ais_category_children_fetch_url(*folder_id, *depth)
+                );
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3UpdateItem {
+            item_id,
+            name,
+            description,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_item_url(*item_id));
+                let body = build_ais_update_item_body(name, description);
+                std::thread::spawn(move || {
+                    run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3MoveItem { item_id, parent_id } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_item_url(*item_id));
+                let body = build_ais_move_body(*parent_id);
+                std::thread::spawn(move || {
+                    run_patch_caps_llsd(&url, body, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3RemoveItem(item_id) => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_item_url(*item_id));
+                std::thread::spawn(move || {
+                    run_delete_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::Ais3FetchItem(item_id) => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_INVENTORY_API_V3).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let url = format!("{base}{}", ais_item_url(*item_id));
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_INVENTORY_API_V3, &events_tx);
+                });
+            }
+        }
+        Command::FetchGroupMembers(group_id) => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GROUP_MEMBER_DATA).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let group = *group_id;
+                std::thread::spawn(move || {
+                    run_group_members_fetch(&url, group, &events_tx);
+                });
+            }
+        }
+        Command::OfferFriendship {
+            to_agent_id,
+            message,
+        } => {
+            session.send_friendship_offer(*to_agent_id, message, now)?;
+        }
+        Command::GrantUserRights { target, rights } => {
+            session.grant_user_rights(*target, *rights, now)?;
+        }
+        Command::TerminateFriendship(other) => {
+            session.terminate_friendship(*other, now)?;
+        }
+        Command::AcceptFriendship {
+            transaction_id,
+            friend_id,
+            calling_card_folder,
+        } => {
+            session.accept_friendship(*transaction_id, *friend_id, *calling_card_folder, now)?;
+        }
+        Command::DeclineFriendship(transaction_id) => {
+            session.decline_friendship(*transaction_id, now)?;
+        }
+        Command::OfferCallingCard {
+            to_agent_id,
+            transaction_id,
+        } => {
+            session.offer_calling_card(*to_agent_id, *transaction_id, now)?;
+        }
+        Command::AcceptCallingCard {
+            transaction_id,
+            calling_card_folder,
+        } => {
+            session.accept_calling_card(*transaction_id, *calling_card_folder, now)?;
+        }
+        Command::DeclineCallingCard(transaction_id) => {
+            session.decline_calling_card(*transaction_id, now)?;
+        }
+        Command::ActivateGroup(group_id) => {
+            session.activate_group(*group_id, now)?;
+        }
+        Command::RequestGroupMembers(group_id) => {
+            session.request_group_members(*group_id, now)?;
+        }
+        Command::RequestGroupRoles(group_id) => {
+            session.request_group_roles(*group_id, now)?;
+        }
+        Command::RequestGroupRoleMembers(group_id) => {
+            session.request_group_role_members(*group_id, now)?;
+        }
+        Command::RequestGroupTitles(group_id) => {
+            session.request_group_titles(*group_id, now)?;
+        }
+        Command::RequestGroupProfile(group_id) => {
+            session.request_group_profile(*group_id, now)?;
+        }
+        Command::RequestGroupNotices(group_id) => {
+            session.request_group_notices(*group_id, now)?;
+        }
+        Command::RequestGroupNotice(notice_id) => {
+            session.request_group_notice(*notice_id, now)?;
+        }
+        Command::CreateGroup(params) => {
+            session.create_group(params, now)?;
+        }
+        Command::UpdateGroupInfo(params) => {
+            session.update_group_info(params, now)?;
+        }
+        Command::UpdateGroupTitle {
+            group_id,
+            title_role_id,
+        } => {
+            session.update_group_title(*group_id, *title_role_id, now)?;
+        }
+        Command::JoinGroup(group_id) => {
+            session.join_group(*group_id, now)?;
+        }
+        Command::LeaveGroup(group_id) => {
+            session.leave_group(*group_id, now)?;
+        }
+        Command::InviteToGroup { group_id, invitees } => {
+            session.invite_to_group(*group_id, invitees, now)?;
+        }
+        Command::AcceptGroupInvitation {
+            group_id,
+            transaction_id,
+            use_offline_cap,
+        } => {
+            // An online invitation is answered over UDP; an offline one (null
+            // session id) POSTs to the AcceptGroupInvite cap when present.
+            if *use_offline_cap {
+                if let Some(caps) = caps
+                    && let Some(url) = caps.map.get(CAP_ACCEPT_GROUP_INVITE).cloned()
+                {
+                    let body = group_invite_response_body(*group_id);
+                    std::thread::spawn(move || run_caps_oneway(&url, body));
+                }
+            } else {
+                session.accept_group_invitation(*group_id, *transaction_id, now)?;
+            }
+        }
+        Command::DeclineGroupInvitation {
+            group_id,
+            transaction_id,
+            use_offline_cap,
+        } => {
+            if *use_offline_cap {
+                if let Some(caps) = caps
+                    && let Some(url) = caps.map.get(CAP_DECLINE_GROUP_INVITE).cloned()
+                {
+                    let body = group_invite_response_body(*group_id);
+                    std::thread::spawn(move || run_caps_oneway(&url, body));
+                }
+            } else {
+                session.decline_group_invitation(*group_id, *transaction_id, now)?;
+            }
+        }
+        Command::SetGroupAcceptNotices {
+            group_id,
+            accept_notices,
+            list_in_profile,
+        } => {
+            session.set_group_accept_notices(*group_id, *accept_notices, *list_in_profile, now)?;
+        }
+        Command::SetGroupContribution {
+            group_id,
+            contribution,
+        } => {
+            session.set_group_contribution(*group_id, *contribution, now)?;
+        }
+        Command::StartGroupSession(group_id) => {
+            session.start_group_session(*group_id, now)?;
+        }
+        Command::SendGroupMessage { group_id, message } => {
+            // As for an IM: a failed send is not transcribed.
+            session.send_group_message(*group_id, message, now)?;
+            if let Some(own) = session.agent_id() {
+                let name = session.agent_legacy_name();
+                chat_log.log_group(*group_id, own, &name, message);
+            }
+        }
+        Command::LeaveGroupSession(group_id) => {
+            session.leave_group_session(*group_id, now)?;
+        }
+        Command::UpdateGroupRoles { group_id, roles } => {
+            session.update_group_roles(*group_id, roles, now)?;
+        }
+        Command::ChangeGroupRoleMembers { group_id, changes } => {
+            session.change_group_role_members(*group_id, changes, now)?;
+        }
+        Command::EjectGroupMembers {
+            group_id,
+            member_ids,
+        } => {
+            session.eject_group_members(*group_id, member_ids, now)?;
+        }
+        Command::ActivateGestures { gestures } => {
+            session.activate_gestures(gestures, now)?;
+        }
+        Command::DeactivateGestures { item_ids } => {
+            session.deactivate_gestures(item_ids, now)?;
+        }
+        Command::SetAlwaysRun { mode } => {
+            session.set_always_run(*mode, now)?;
+        }
+        Command::PauseAgent => {
+            session.pause_agent(now)?;
+        }
+        Command::ResumeAgent => {
+            session.resume_agent(now)?;
+        }
+        Command::SetAgentFov { vertical_angle } => {
+            session.set_agent_fov(*vertical_angle, now)?;
+        }
+        Command::SetAgentSize { height, width } => {
+            session.set_agent_size(*height, *width, now)?;
+        }
+        Command::ReleaseScriptControls => {
+            session.release_script_controls(now)?;
+        }
+        Command::SendGroupNotice {
+            group_id,
+            subject,
+            message,
+            attachment,
+        } => {
+            session.send_group_notice(*group_id, subject, message, *attachment, now)?;
+        }
+        Command::RequestGroupAccountSummary {
+            group_id,
+            request_id,
+            interval_days,
+            current_interval,
+        } => {
+            session.request_group_account_summary(
+                *group_id,
+                *request_id,
+                *interval_days,
+                *current_interval,
+                now,
+            )?;
+        }
+        Command::RequestGroupAccountDetails {
+            group_id,
+            request_id,
+            interval_days,
+            current_interval,
+        } => {
+            session.request_group_account_details(
+                *group_id,
+                *request_id,
+                *interval_days,
+                *current_interval,
+                now,
+            )?;
+        }
+        Command::RequestGroupAccountTransactions {
+            group_id,
+            request_id,
+            interval_days,
+            current_interval,
+        } => {
+            session.request_group_account_transactions(
+                *group_id,
+                *request_id,
+                *interval_days,
+                *current_interval,
+                now,
+            )?;
+        }
+        Command::RequestGroupActiveProposals {
+            group_id,
+            transaction_id,
+        } => {
+            session.request_group_active_proposals(*group_id, *transaction_id, now)?;
+        }
+        Command::RequestGroupVoteHistory {
+            group_id,
+            transaction_id,
+        } => {
+            session.request_group_vote_history(*group_id, *transaction_id, now)?;
+        }
+        Command::StartGroupProposal {
+            group_id,
+            quorum,
+            majority,
+            duration,
+            proposal_text,
+        } => {
+            session.start_group_proposal(
+                *group_id,
+                *quorum,
+                *majority,
+                *duration,
+                proposal_text,
+                now,
+            )?;
+        }
+        Command::GroupProposalBallot {
+            proposal_id,
+            group_id,
+            vote_cast,
+        } => {
+            session.cast_group_proposal_ballot(*proposal_id, *group_id, vote_cast, now)?;
+        }
+        Command::ReplyScriptDialog {
+            object_id,
+            chat_channel,
+            button_index,
+            button_label,
+        } => {
+            session.reply_script_dialog(
+                *object_id,
+                *chat_channel,
+                *button_index,
+                button_label,
+                now,
+            )?;
+        }
+        Command::AnswerScriptPermissions {
+            task_id,
+            item_id,
+            permissions,
+            experience_id,
+        } => {
+            session.answer_script_permissions(
+                *task_id,
+                *item_id,
+                *permissions,
+                *experience_id,
+                now,
+            )?;
+        }
+        Command::RequestMuteList => {
+            session.request_mute_list(now)?;
+        }
+        Command::Mute {
+            id,
+            name,
+            mute_type,
+            flags,
+        } => {
+            session.mute(*id, name, *mute_type, *flags, now)?;
+        }
+        Command::Unmute { id, name } => {
+            session.unmute(*id, name, now)?;
+        }
+        Command::Teleport {
+            region_handle,
+            position,
+            look_at,
+        } => {
+            session.teleport_to(*region_handle, *position, look_at.clone(), now)?;
+        }
+        Command::RequestRegionInfo => {
+            session.request_region_info(now)?;
+        }
+        Command::RequestAvatarNames(ids) => {
+            session.request_avatar_names(ids, now)?;
+        }
+        Command::RequestGroupNames(ids) => {
+            session.request_group_names(ids, now)?;
+        }
+        Command::RequestEnvironment { parcel_id } => {
+            if let Some(caps) = caps {
+                if let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned() {
+                    let events_tx = caps.events_tx.clone();
+                    let url = format!("{base}?parcelid={}", parcel_id.unwrap_or(-1));
+                    tracing::info!(
+                        target: "sl_client_bevy::environment",
+                        "requesting EEP environment from {CAP_EXT_ENVIRONMENT} cap"
+                    );
+                    std::thread::spawn(move || {
+                        run_get_caps_llsd(&url, CAP_EXT_ENVIRONMENT, &events_tx);
+                    });
+                } else {
+                    tracing::warn!(
+                        target: "sl_client_bevy::environment",
+                        "RequestEnvironment: the {CAP_EXT_ENVIRONMENT} capability is not \
+                         advertised by this region; the sky / cloud / water stack will run \
+                         on the legacy WindLight defaults ({} caps available)",
+                        caps.map.len()
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    target: "sl_client_bevy::environment",
+                    "RequestEnvironment: no CAPS available yet; environment not requested"
+                );
+            }
+        }
+        Command::SetEnvironment {
+            parcel_id,
+            track_no,
+            update,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_EXT_ENVIRONMENT).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let parcel_id = parcel_id.unwrap_or(-1);
+                let url = match track_no {
+                    Some(track_no) => {
+                        format!("{base}?parcelid={parcel_id}&trackno={track_no}")
+                    }
+                    None => format!("{base}?parcelid={parcel_id}"),
+                };
+                let body = build_environment_update_request(update);
+                std::thread::spawn(move || {
+                    run_put_caps_llsd(&url, body, CAP_EXT_ENVIRONMENT, &events_tx);
+                });
+            }
+        }
+        Command::RequestMoneyBalance => {
+            session.request_money_balance(now)?;
+        }
+        Command::RequestEconomyData => {
+            session.request_economy_data(now)?;
+        }
+        Command::SendMoneyTransfer {
+            dest,
+            amount,
+            kind,
+            description,
+        } => {
+            session.send_money_transfer(*dest, amount.clone(), *kind, description, now)?;
+        }
+        Command::RequestParcelProperties {
+            west,
+            south,
+            east,
+            north,
+            sequence_id,
+        } => {
+            session.request_parcel_properties(*west, *south, *east, *north, *sequence_id, now)?;
+        }
+        Command::RequestParcelPropertiesById {
+            local_id,
+            sequence_id,
+        } => {
+            session.request_parcel_properties_by_id(*local_id, *sequence_id, now)?;
+        }
+        Command::SetParcelOtherCleanTime {
+            local_id,
+            clean_time,
+        } => {
+            session.set_parcel_other_clean_time(*local_id, *clean_time, now)?;
+        }
+        Command::ModifyLand(edit) => {
+            session.modify_land(edit, now)?;
+        }
+        Command::UndoLand => {
+            session.undo_land(now)?;
+        }
+        Command::SetDrawDistance(far) => session.set_draw_distance(far.clone()),
+        Command::RequestMapBlocks {
+            min_x,
+            max_x,
+            min_y,
+            max_y,
+        } => {
+            session.request_map_blocks(*min_x, *max_x, *min_y, *max_y, now)?;
+        }
+        Command::RequestMapByName { name } => {
+            session.request_map_by_name(name, now)?;
+        }
+        Command::RequestMapItems {
+            item_type,
+            region_handle,
+        } => {
+            session.request_map_items(*item_type, *region_handle, now)?;
+        }
+        Command::RequestMapLayer => {
+            session.request_map_layer(now)?;
+        }
+        Command::SendAbuseReport(report) => {
+            session.send_abuse_report(report, now)?;
+        }
+        Command::SendAbuseReportViaCaps { report, screenshot } => {
+            if let Some(caps) = caps {
+                // With a snapshot and the screenshot cap available, upload the
+                // snapshot over the two-step uploader (filling `screenshot_id`
+                // with a fresh texture asset id) and POST the report referencing
+                // it; otherwise the plain no-screenshot path.
+                let snapshot = screenshot
+                    .as_ref()
+                    .filter(|bytes| !bytes.is_empty())
+                    .and_then(|bytes| {
+                        caps.map
+                            .get(CAP_SEND_USER_REPORT_WITH_SCREENSHOT)
+                            .cloned()
+                            .map(|url| (url, bytes.clone()))
+                    });
+                match snapshot {
+                    Some((url, bytes)) => {
+                        let mut report = report.clone();
+                        if report.screenshot_id.is_nil() {
+                            report.screenshot_id = Uuid::new_v4();
+                        }
+                        let body = build_send_user_report(&report);
+                        std::thread::spawn(move || {
+                            run_report_screenshot_upload(&url, body, bytes);
+                        });
+                    }
+                    None => {
+                        if let Some(url) = caps.map.get(CAP_SEND_USER_REPORT).cloned() {
+                            let body = build_send_user_report(report);
+                            std::thread::spawn(move || {
+                                run_caps_oneway(&url, body);
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        Command::SendPostcard(postcard) => {
+            session.send_postcard(postcard, now)?;
+        }
+        Command::RequestObjects { local_ids } => {
+            session.request_objects(local_ids, now)?;
+        }
+        Command::ResendCachedObjects { local_ids } => {
+            session.resend_cached_objects(local_ids);
+        }
+        Command::RequestObjectProperties { local_ids } => {
+            session.request_object_properties(local_ids, now)?;
+        }
+        Command::DeselectObjects { local_ids } => {
+            session.deselect_objects(local_ids, now)?;
+        }
+        Command::TouchObject { local_id, surface } => {
+            session.touch_object(*local_id, surface.as_ref(), now)?;
+        }
+        Command::GrabObject {
+            local_id,
+            grab_offset,
+            surface,
+        } => {
+            session.grab_object(*local_id, grab_offset.clone(), surface.as_ref(), now)?;
+        }
+        Command::GrabObjectUpdate {
+            object_id,
+            grab_offset_initial,
+            grab_position,
+            time_since_last,
+            surface,
+        } => {
+            session.grab_object_update(
+                *object_id,
+                grab_offset_initial.clone(),
+                grab_position.clone(),
+                *time_since_last,
+                surface.as_ref(),
+                now,
+            )?;
+        }
+        Command::DegrabObject { local_id, surface } => {
+            session.degrab_object(*local_id, surface.as_ref(), now)?;
+        }
+        Command::RezObject { shape, group_id } => {
+            session.rez_object(shape, *group_id, now)?;
+        }
+        Command::DuplicateObjects {
+            local_ids,
+            offset,
+            group_id,
+        } => {
+            session.duplicate_objects(local_ids, offset.clone(), *group_id, now)?;
+        }
+        Command::DeleteObjects { local_ids } => {
+            session.delete_objects(local_ids, now)?;
+        }
+        Command::DerezObjects {
+            local_ids,
+            destination,
+            transaction_id,
+            group_id,
+        } => {
+            session.derez_objects(local_ids, *destination, *transaction_id, *group_id, now)?;
+        }
+        Command::UpdateObject {
+            local_id,
+            transform,
+        } => {
+            session.update_object(*local_id, transform, now)?;
+        }
+        Command::SetObjectName { local_id, name } => {
+            session.set_object_name(*local_id, name, now)?;
+        }
+        Command::SetObjectDescription {
+            local_id,
+            description,
+        } => {
+            session.set_object_description(*local_id, description, now)?;
+        }
+        Command::SetObjectClickAction { local_id, action } => {
+            session.set_object_click_action(*local_id, *action, now)?;
+        }
+        Command::SetObjectMaterial { local_id, material } => {
+            session.set_object_material(*local_id, *material, now)?;
+        }
+        Command::SetObjectFlags { local_id, flags } => {
+            session.set_object_flags(*local_id, flags, now)?;
+        }
+        Command::SetObjectShape { local_id, shape } => {
+            session.set_object_shape(*local_id, shape, now)?;
+        }
+        Command::SetObjectImage {
+            local_id,
+            media_url,
+            texture_entry,
+        } => {
+            session.set_object_image(*local_id, media_url.as_deref(), texture_entry, now)?;
+        }
+        Command::SetObjectExtraParams { local_id, params } => {
+            session.set_object_extra_params(*local_id, params, now)?;
+        }
+        Command::SetObjectGroup {
+            local_ids,
+            group_id,
+        } => {
+            session.set_object_group(local_ids, *group_id, now)?;
+        }
+        Command::DeedObjectsToGroup {
+            local_ids,
+            group_id,
+        } => {
+            session.deed_objects_to_group(local_ids, *group_id, now)?;
+        }
+        Command::SetObjectPermissions {
+            local_ids,
+            field,
+            set,
+            mask,
+        } => {
+            session.set_object_permissions(local_ids, *field, *set, *mask, now)?;
+        }
+        Command::SetObjectForSale {
+            local_id,
+            sale_type,
+            sale_price,
+        } => {
+            session.set_object_for_sale(*local_id, *sale_type, sale_price.clone(), now)?;
+        }
+        Command::SetObjectCategory { local_id, category } => {
+            session.set_object_category(*local_id, *category, now)?;
+        }
+        Command::SetObjectIncludeInSearch { local_id, include } => {
+            session.set_object_include_in_search(*local_id, *include, now)?;
+        }
+        Command::LinkObjects { local_ids } => {
+            session.link_objects(local_ids, now)?;
+        }
+        Command::DelinkObjects { local_ids } => {
+            session.delink_objects(local_ids, now)?;
+        }
+        Command::UndoObjects { local_ids } => {
+            session.undo_objects(local_ids, now)?;
+        }
+        Command::RedoObjects { local_ids } => {
+            session.redo_objects(local_ids, now)?;
+        }
+        Command::UpdateParcel(update) => {
+            session.update_parcel(update, now)?;
+        }
+        Command::RequestParcelAccessList { local_id, scope } => {
+            session.request_parcel_access_list(*local_id, *scope, now)?;
+        }
+        Command::UpdateParcelAccessList {
+            local_id,
+            scope,
+            entries,
+        } => {
+            session
+                // A fresh transaction id per update, so the simulator clears
+                // the old entries before applying ours rather than appending
+                // (see `update_parcel_access_list`).
+                .update_parcel_access_list(*local_id, *scope, entries, Uuid::new_v4(), now)?;
+        }
+        Command::RequestParcelDwell { local_id } => {
+            session.request_parcel_dwell(*local_id, now)?;
+        }
+        Command::BuyParcel {
+            local_id,
+            price,
+            area,
+            group_id,
+            is_group_owned,
+        } => {
+            session.buy_parcel(*local_id, *price, *area, *group_id, *is_group_owned, now)?;
+        }
+        Command::ReturnParcelObjects {
+            local_id,
+            return_type,
+            owner_ids,
+            task_ids,
+        } => {
+            session.return_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)?;
+        }
+        Command::SelectParcelObjects {
+            local_id,
+            return_type,
+            object_ids,
+        } => {
+            session.select_parcel_objects(*local_id, *return_type, object_ids, now)?;
+        }
+        Command::DeedParcelToGroup { local_id, group_id } => {
+            session.deed_parcel_to_group(*local_id, *group_id, now)?;
+        }
+        Command::ReclaimParcel { local_id } => {
+            session.reclaim_parcel(*local_id, now)?;
+        }
+        Command::ReleaseParcel { local_id } => {
+            session.release_parcel(*local_id, now)?;
+        }
+        Command::JoinParcels {
+            west,
+            south,
+            east,
+            north,
+        } => {
+            session.join_parcels(*west, *south, *east, *north, now)?;
+        }
+        Command::DivideParcel {
+            west,
+            south,
+            east,
+            north,
+        } => {
+            session.divide_parcel(*west, *south, *east, *north, now)?;
+        }
+        Command::RequestParcelObjectOwners { local_id } => {
+            session.request_parcel_object_owners(*local_id, now)?;
+        }
+        Command::BuyParcelPass { local_id } => {
+            session.buy_parcel_pass(*local_id, now)?;
+        }
+        Command::DisableParcelObjects {
+            local_id,
+            return_type,
+            owner_ids,
+            task_ids,
+        } => {
+            session.disable_parcel_objects(*local_id, *return_type, owner_ids, task_ids, now)?;
+        }
+        Command::RequestParcelInfo { parcel_id } => {
+            session.request_parcel_info(*parcel_id, now)?;
+        }
+        Command::RequestEstateInfo => {
+            session.request_estate_info(now)?;
+        }
+        Command::RequestRegionTerrainDownload { viewer_filename } => {
+            session.request_region_terrain_download(viewer_filename, now)?;
+        }
+        Command::RequestRegionTerrainUpload {
+            viewer_filename,
+            data,
+        } => {
+            session.request_region_terrain_upload(viewer_filename, data.clone(), now)?;
+        }
+        Command::UpdateEstateAccess { delta, target } => {
+            session.update_estate_access(*delta, *target, now)?;
+        }
+        Command::KickEstateUser { target } => {
+            session.kick_estate_user(*target, now)?;
+        }
+        Command::TeleportHomeUser { target } => {
+            session.teleport_home_user(*target, now)?;
+        }
+        Command::TeleportHomeAllUsers => {
+            session.teleport_home_all_users(now)?;
+        }
+        Command::RestartRegion { seconds } => {
+            session.restart_region(*seconds, now)?;
+        }
+        Command::SendEstateMessage { message } => {
+            session.send_estate_message(message, now)?;
+        }
+        Command::SetRegionInfo(update) => {
+            session.set_region_info(update, now)?;
+        }
+        Command::SetRegionDebug(update) => {
+            session.set_region_debug(update, now)?;
+        }
+        Command::SetRegionTerrain(update) => {
+            session.set_region_terrain(update, now)?;
+        }
+        Command::SetEstateInfo(update) => {
+            session.set_estate_info(update, now)?;
+        }
+        Command::RequestEstateCovenant => {
+            session.request_estate_covenant(now)?;
+        }
+        Command::RequestTelehubInfo => {
+            session.request_telehub_info(now)?;
+        }
+        Command::ConnectTelehub { object_local_id } => {
+            session.connect_telehub(*object_local_id, now)?;
+        }
+        Command::DisconnectTelehub => {
+            session.disconnect_telehub(now)?;
+        }
+        Command::AddTelehubSpawnPoint { object_local_id } => {
+            session.add_telehub_spawn_point(*object_local_id, now)?;
+        }
+        Command::RemoveTelehubSpawnPoint { spawn_index } => {
+            session.remove_telehub_spawn_point(*spawn_index, now)?;
+        }
+        Command::GodKickUser { target, reason } => {
+            session.god_kick_user(*target, reason, now)?;
+        }
+        Command::SendGodlikeMessage { method, params } => {
+            let refs: Vec<&str> = params.iter().map(String::as_str).collect();
+            session.send_godlike_message(method, &refs, now)?;
+        }
+        Command::RequestTexture {
+            texture_id,
+            discard_level,
+            priority,
+        } => {
+            session.request_texture(*texture_id, *discard_level, *priority, now)?;
+        }
+        Command::FetchTexture {
+            texture_id,
+            discard_level,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GET_TEXTURE).cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let (id, discard) = (*texture_id, *discard_level);
+                std::thread::spawn(move || {
+                    run_texture_fetch(&url, id, discard, &asset_tx);
+                });
+            }
+        }
+        Command::FetchMesh {
+            mesh_id,
+            byte_range,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps
+                    .map
+                    .get(CAP_GET_MESH2)
+                    .or_else(|| caps.map.get(CAP_GET_MESH))
+                    .cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let (id, range) = (mesh_id.uuid(), *byte_range);
+                std::thread::spawn(move || {
+                    run_asset_fetch(
+                        &url,
+                        &format!("?mesh_id={id}"),
+                        id,
+                        AssetType::Mesh,
+                        range,
+                        &asset_tx,
+                    );
+                });
+            }
+        }
+        Command::FetchAsset {
+            asset_id,
+            asset_type,
+            byte_range,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_VIEWER_ASSET).cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let (id, asset_type, range) = (asset_id.uuid(), *asset_type, *byte_range);
+                std::thread::spawn(move || {
+                    run_generic_asset_fetch(&url, id, asset_type, range, &asset_tx);
+                });
+            }
+        }
+        Command::RequestWearables => {
+            session.request_wearables(now)?;
+        }
+        Command::SetWearing(wearables) => {
+            session.set_wearing(wearables, now)?;
+        }
+        Command::SetAppearance {
+            serial,
+            size,
+            texture_entry,
+            visual_params,
+            wearable_cache,
+        } => {
+            session.set_appearance(
+                *serial,
+                size.clone(),
+                texture_entry,
+                visual_params,
+                wearable_cache,
+                now,
+            )?;
+        }
+        Command::RequestCachedTextures { serial, slots } => {
+            session.request_cached_textures(*serial, slots, now)?;
+        }
+        Command::RequestServerAppearanceUpdate { cof_version } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_UPDATE_AVATAR_APPEARANCE).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let version = *cof_version;
+                std::thread::spawn(move || {
+                    run_server_appearance_update(&url, version, &events_tx);
+                });
+            }
+        }
+        Command::SetAnimations(animations) => {
+            session.set_animations(animations, now)?;
+        }
+        Command::PlayAnimation(anim_id) => {
+            session.play_animation(*anim_id, now)?;
+        }
+        Command::StopAnimation(anim_id) => {
+            session.stop_animation(*anim_id, now)?;
+        }
+        Command::AttachObject {
+            local_id,
+            attachment_point,
+            mode,
+            rotation,
+        } => {
+            session.attach_object(*local_id, *attachment_point, *mode, rotation, now)?;
+        }
+        Command::DetachObjects { local_ids } => {
+            session.detach_objects(local_ids, now)?;
+        }
+        Command::DropAttachments { local_ids } => {
+            session.drop_attachments(local_ids, now)?;
+        }
+        Command::RemoveAttachment {
+            attachment_point,
+            item_id,
+        } => {
+            session.remove_attachment(*attachment_point, *item_id, now)?;
+        }
+        Command::RezAttachment(rez) => {
+            session.rez_attachment(rez, now)?;
+        }
+        Command::RezAttachments {
+            compound_id,
+            detach,
+            attachments,
+        } => {
+            session.rez_attachments(*compound_id, *detach, attachments, now)?;
+        }
+        Command::ViewerEffect(effects) => {
+            session.send_viewer_effect(effects, now)?;
+        }
+        Command::TrackAgent { prey_id } => {
+            session.track_agent(*prey_id, now)?;
+        }
+        Command::FindAgent { hunter, prey } => {
+            session.find_agent(*hunter, *prey, now)?;
+        }
+        Command::DirFindQuery {
+            query_id,
+            query_text,
+            flags,
+            query_start,
+        } => {
+            session.dir_find_query(*query_id, query_text, *flags, *query_start, now)?;
+        }
+        Command::DirPlacesQuery {
+            query_id,
+            query_text,
+            flags,
+            category,
+            sim_name,
+            query_start,
+        } => {
+            session.dir_places_query(
+                *query_id,
+                query_text,
+                *flags,
+                *category,
+                sim_name,
+                *query_start,
+                now,
+            )?;
+        }
+        Command::DirLandQuery {
+            query_id,
+            flags,
+            search_type,
+            price,
+            area,
+            query_start,
+        } => {
+            session.dir_land_query(
+                *query_id,
+                *flags,
+                *search_type,
+                *price,
+                *area,
+                *query_start,
+                now,
+            )?;
+        }
+        Command::DirClassifiedQuery {
+            query_id,
+            query_text,
+            flags,
+            category,
+            query_start,
+        } => {
+            session.dir_classified_query(
+                *query_id,
+                query_text,
+                *flags,
+                *category,
+                *query_start,
+                now,
+            )?;
+        }
+        Command::AvatarPickerRequest { query_id, name } => {
+            // The modern search is the `AvatarPickerSearch` GET, which
+            // matches username *and* display name; the legacy UDP message
+            // is the fallback for a grid without the cap (on Second Life it
+            // answers "no matches" to everything).
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_AVATAR_PICKER_SEARCH).cloned()
+            {
+                let url = format!(
+                    "{base}{}",
+                    avatar_picker_search_query(name, AVATAR_PICKER_PAGE_SIZE)
+                );
+                let events_tx = caps.events_tx.clone();
+                let query_uuid = query_id.get();
+                std::thread::spawn(move || {
+                    run_avatar_picker_search(&url, query_uuid, &events_tx);
+                });
+            } else {
+                session.avatar_picker_request(*query_id, name, now)?;
+            }
+        }
+        Command::PlacesQuery {
+            query_id,
+            transaction_id,
+            query_text,
+            flags,
+            category,
+            sim_name,
+        } => {
+            session.places_query(
+                *query_id,
+                *transaction_id,
+                query_text,
+                *flags,
+                *category,
+                sim_name,
+                now,
+            )?;
+        }
+        Command::EventInfoRequest { event_id } => {
+            session.event_info_request(*event_id, now)?;
+        }
+        Command::EventNotificationAddRequest { event_id } => {
+            session.event_notification_add_request(*event_id, now)?;
+        }
+        Command::EventNotificationRemoveRequest { event_id } => {
+            session.event_notification_remove_request(*event_id, now)?;
+        }
+        Command::BuyObject {
+            group_id,
+            category_id,
+            objects,
+        } => {
+            session.buy_object(*group_id, *category_id, objects, now)?;
+        }
+        Command::BuyObjectInventory {
+            object_id,
+            item_id,
+            folder_id,
+        } => {
+            session.buy_object_inventory(*object_id, *item_id, *folder_id, now)?;
+        }
+        Command::RequestPayPrice { object_id } => {
+            session.request_pay_price(*object_id, now)?;
+        }
+        Command::RequestObjectPropertiesFamily {
+            request_flags,
+            object_id,
+        } => {
+            session.request_object_properties_family(*request_flags, *object_id, now)?;
+        }
+        Command::SpinObjectStart { object_id } => {
+            session.spin_object_start(*object_id, now)?;
+        }
+        Command::SpinObjectUpdate {
+            object_id,
+            rotation,
+        } => {
+            session.spin_object_update(*object_id, rotation.clone(), now)?;
+        }
+        Command::SpinObjectStop { object_id } => {
+            session.spin_object_stop(*object_id, now)?;
+        }
+        Command::DuplicateObjectsOnRay {
+            local_ids,
+            group_id,
+            ray_start,
+            ray_end,
+            bypass_raycast,
+            ray_end_is_intersection,
+            copy_centers,
+            copy_rotates,
+            ray_target_id,
+            duplicate_flags,
+        } => {
+            session.duplicate_objects_on_ray(
+                local_ids,
+                *group_id,
+                ray_start.clone(),
+                ray_end.clone(),
+                *bypass_raycast,
+                *ray_end_is_intersection,
+                *copy_centers,
+                *copy_rotates,
+                *ray_target_id,
+                *duplicate_flags,
+                now,
+            )?;
+        }
+        Command::RezRestoreToWorld { item } => {
+            session.rez_restore_to_world(item, now)?;
+        }
+        Command::RezObjectFromNotecard { rez } => {
+            session.rez_object_from_notecard(rez, now)?;
+        }
+        Command::CopyInventoryFromNotecard {
+            notecard_id,
+            object_id,
+            item_id,
+            folder_id,
+        } => {
+            // Copy an item embedded in a notecard into inventory: a one-way
+            // LLSD POST to the cap. The copied item arrives over the normal
+            // inventory-update stream, so nothing is awaited here.
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_COPY_INVENTORY_FROM_NOTECARD).cloned()
+            {
+                let body = copy_inventory_from_notecard_body(
+                    *notecard_id,
+                    *object_id,
+                    *item_id,
+                    *folder_id,
+                );
+                std::thread::spawn(move || {
+                    post_caps_llsd_oneway(&url, body);
+                });
+            }
+        }
+        Command::RezObjectFromInventory { params } => {
+            session.rez_object_from_inventory(params, now)?;
+        }
+        Command::RezScript { target, params } => {
+            session.rez_script(*target, params, now)?;
+        }
+        Command::RevokeScriptPermissions {
+            object_id,
+            permissions,
+        } => {
+            session.revoke_script_permissions(*object_id, *permissions, now)?;
+        }
+        Command::QueryScriptPermissions => {
+            // Local query: synthesize the snapshot from the session and surface
+            // it on the event stream (no wire send).
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::ScriptPermissionState(
+                    session.script_permission_state(),
+                )),
+            );
+        }
+        Command::DetachAttachmentIntoInventory { item_id } => {
+            session.detach_attachment_into_inventory(*item_id, now)?;
+        }
+        Command::RequestTaskInventory { target } => {
+            session.request_task_inventory(*target, now)?;
+        }
+        Command::FetchTaskInventory { target } => {
+            session.fetch_task_inventory(*target, now)?;
+        }
+        Command::FetchTaskItemAsset {
+            task,
+            item_id,
+            asset_id,
+            asset_type,
+        } => {
+            session.fetch_task_item_asset(*task, *item_id, *asset_id, *asset_type, now)?;
+        }
+        Command::FetchEstateCovenantAsset => {
+            session.fetch_estate_covenant_asset(now)?;
+        }
+        Command::RequestXfer { filename } => {
+            session.request_xfer(filename, now)?;
+        }
+        Command::UpdateTaskInventory { target, key, item } => {
+            session.update_task_inventory(*target, *key, item, now)?;
+        }
+        Command::MoveTaskInventory {
+            target,
+            folder_id,
+            item_id,
+        } => {
+            session.move_task_inventory(*target, *folder_id, *item_id, now)?;
+        }
+        Command::RemoveTaskInventory { target, item_id } => {
+            session.remove_task_inventory(*target, *item_id, now)?;
+        }
+        Command::RequestScriptRunning { object_id, item_id } => {
+            session.request_script_running(*object_id, *item_id, now)?;
+        }
+        Command::SetScriptRunning {
+            object_id,
+            item_id,
+            running,
+        } => {
+            session.set_script_running(*object_id, *item_id, *running, now)?;
+        }
+        Command::ResetScript { object_id, item_id } => {
+            session.reset_script(*object_id, *item_id, now)?;
+        }
+        Command::UploadAsset { asset_type, .. } if asset_type.is_script() => {
+            // Scripts must go through `UploadScript` so the simulator's
+            // compile result is surfaced; the generic create-with-body path
+            // would discard it.
+            emit_upload_failure(
+                caps,
+                "scripts must be uploaded with UploadScript (create the item with \
+                    create_inventory_item first)"
+                    .to_owned(),
+            );
+        }
+        Command::UploadAsset {
+            folder_id,
+            asset_type,
+            inventory_type,
+            name,
+            description,
+            next_owner_mask,
+            group_mask,
+            everyone_mask,
+            expected_upload_cost,
+            data,
+        } => {
+            // The modern CAPS uploader (the only upload path — the legacy UDP
+            // asset-upload fallback was dropped): needs both the region
+            // capability and a CAPS name for the asset and inventory classes.
+            let caps_available = matches!(
+                (asset_type.caps_asset_name(), inventory_type.caps_name()),
+                (Some(_), Some(_))
+            ) && caps
+                .as_ref()
+                .is_some_and(|caps| caps.map.contains_key(CAP_NEW_FILE_AGENT_INVENTORY));
+            if caps_available {
+                spawn_new_file_upload(
+                    caps,
+                    *folder_id,
+                    *asset_type,
+                    *inventory_type,
+                    name,
+                    description,
+                    *next_owner_mask,
+                    *group_mask,
+                    *everyone_mask,
+                    *expected_upload_cost,
+                    data.clone(),
+                );
+            } else {
+                emit_upload_failure(
+                    caps,
+                    "NewFileAgentInventory capability not available".to_owned(),
+                );
+            }
+        }
+        Command::UploadBakedTexture { data } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_UPLOAD_BAKED_TEXTURE).cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let body = build_upload_baked_texture_request();
+                let data = data.clone();
+                std::thread::spawn(move || {
+                    let event = run_caps_upload(&url, body, data);
+                    deliver(&asset_tx, event);
+                });
+            } else {
+                emit_upload_unavailable(caps, "UploadBakedTexture");
+            }
+        }
+        Command::UpdateInventoryAsset {
+            location,
+            asset_type,
+            data,
+        } => {
+            // `UpdatableAssetType::cap` / `task_cap` are total — scripts
+            // (which need the compile-aware `UploadScript`) are excluded from
+            // this type by construction. The location picks the agent vs task
+            // capability and the metadata body shape.
+            let (cap, body) = match location {
+                AssetUpdateLocation::AgentInventory { item_id } => {
+                    (asset_type.cap(), build_update_item_asset_request(*item_id))
+                }
+                AssetUpdateLocation::TaskInventory { task_id, item_id } => (
+                    asset_type.task_cap(),
+                    build_update_task_item_asset_request(*task_id, *item_id),
+                ),
+            };
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(cap).cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let data = data.clone();
+                std::thread::spawn(move || {
+                    let event = run_caps_upload(&url, body, data);
+                    deliver(&asset_tx, event);
+                });
+            } else {
+                emit_upload_unavailable(caps, cap);
+            }
+        }
+        Command::UploadScript {
+            location,
+            target,
+            source,
+        } => {
+            // Choose the capability + request body by location; the completion
+            // carries the simulator's compile result.
+            let target_wire = target.to_wire();
+            let (cap, body, running) = match location {
+                ScriptUploadLocation::AgentInventory { item_id } => (
+                    CAP_UPDATE_SCRIPT_AGENT,
+                    build_update_script_agent_request(*item_id, target_wire),
+                    None,
+                ),
+                ScriptUploadLocation::TaskInventory {
+                    task_id,
+                    item_id,
+                    running,
+                    experience,
+                } => (
+                    CAP_UPDATE_SCRIPT_TASK,
+                    build_update_script_task_request(
+                        *task_id,
+                        *item_id,
+                        *running,
+                        target_wire,
+                        *experience,
+                    ),
+                    Some(*running),
+                ),
+            };
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(cap).cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let source = source.clone();
+                std::thread::spawn(move || {
+                    deliver(&asset_tx, run_script_upload(&url, body, source, running));
+                });
+            } else {
+                emit_upload_unavailable(caps, cap);
+            }
+        }
+        Command::RequestObjectMedia { object_id } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                let object = *object_id;
+                std::thread::spawn(move || {
+                    run_object_media_fetch(&url, object, &events_tx);
+                });
+            }
+        }
+        Command::SetObjectMedia { object_id, faces } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA).cloned()
+            {
+                let body = build_object_media_update_request(*object_id, faces);
+                std::thread::spawn(move || {
+                    post_caps_llsd_oneway(&url, body);
+                });
+            }
+        }
+        Command::NavigateObjectMedia {
+            object_id,
+            face,
+            url: media_url,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_OBJECT_MEDIA_NAVIGATE).cloned()
+            {
+                let body = build_object_media_navigate_request(*object_id, *face, media_url);
+                std::thread::spawn(move || {
+                    post_caps_llsd_oneway(&url, body);
+                });
+            }
+        }
+        Command::RequestRenderMaterials { material_ids } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
+            {
+                let asset_tx = caps.asset_tx.clone();
+                let ids = material_ids.clone();
+                std::thread::spawn(move || {
+                    run_render_materials_fetch(&url, ids, &asset_tx);
+                });
+            }
+        }
+        Command::SetRenderMaterials { updates } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_RENDER_MATERIALS).cloned()
+            {
+                let body = build_render_materials_put_request(updates);
+                std::thread::spawn(move || {
+                    run_set_render_materials(&url, body);
+                });
+            }
+        }
+        Command::ModifyMaterialParams { updates } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_MODIFY_MATERIAL_PARAMS).cloned()
+            {
+                let body = build_modify_material_params_request(updates);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_modify_material_params(&url, body, &events_tx);
+                });
+            }
+        }
+        Command::RequestVoiceAccount { request } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned()
+            {
+                let body = build_provision_voice_account_request(request);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
+                });
+            }
+        }
+        Command::RequestParcelVoiceInfo => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_PARCEL_VOICE_INFO).cloned()
+            {
+                let body = build_parcel_voice_info_request();
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_PARCEL_VOICE_INFO, &events_tx);
+                });
+            }
+        }
+        Command::SendVoiceSignaling {
+            viewer_session,
+            candidates,
+            completed,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_VOICE_SIGNALING).cloned()
+            {
+                let body = build_voice_signaling_request(viewer_session, candidates, *completed);
+                std::thread::spawn(move || {
+                    run_voice_signaling(&url, body);
+                });
+            }
+        }
+        Command::RequestDisplayNames(agent_ids) => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_GET_DISPLAY_NAMES).cloned()
+            {
+                let agent_uuids: Vec<Uuid> = agent_ids.iter().map(AgentKey::uuid).collect();
+                let url = format!("{base}{}", display_names_query(&agent_uuids));
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_GET_DISPLAY_NAMES, &events_tx);
+                });
+            }
+        }
+        Command::RequestRemoteParcelId {
+            location,
+            region_id,
+            region_handle,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_REMOTE_PARCEL_REQUEST).cloned()
+            {
+                let body = build_remote_parcel_request(*location, *region_id, *region_handle);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_REMOTE_PARCEL_REQUEST, &events_tx);
+                });
+            }
+        }
+        Command::RequestSimulatorFeatures => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_SIMULATOR_FEATURES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_SIMULATOR_FEATURES, &events_tx);
+                });
+            }
+        }
+        Command::RequestAgentPreferences => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
+            {
+                let body = build_agent_preferences_request(&AgentPreferences::default());
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
+                });
+            }
+        }
+        Command::SetAgentPreferences(prefs) => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_AGENT_PREFERENCES).cloned()
+            {
+                let body = build_agent_preferences_request(prefs);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_AGENT_PREFERENCES, &events_tx);
+                });
+            }
+        }
+        Command::RequestObjectCost { object_ids } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GET_OBJECT_COST).cloned()
+            {
+                let body = build_get_object_cost_request(object_ids);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_GET_OBJECT_COST, &events_tx);
+                });
+            }
+        }
+        Command::RequestSelectedCost { object_ids, roots } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_RESOURCE_COST_SELECTED).cloned()
+            {
+                let kind = if *roots {
+                    SelectedCostKind::Roots
+                } else {
+                    SelectedCostKind::Prims
+                };
+                let body = build_resource_cost_selected_request(kind, object_ids);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_RESOURCE_COST_SELECTED, &events_tx);
+                });
+            }
+        }
+        Command::RequestObjectPhysicsData { object_ids } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GET_OBJECT_PHYSICS_DATA).cloned()
+            {
+                let body = build_get_object_physics_data_request(object_ids);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_GET_OBJECT_PHYSICS_DATA, &events_tx);
+                });
+            }
+        }
+        Command::RequestAttachmentResources => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_ATTACHMENT_RESOURCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_ATTACHMENT_RESOURCES, &events_tx);
+                });
+            }
+        }
+        Command::RequestLandResources { parcel_id } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_LAND_RESOURCES).cloned()
+            {
+                let parcel_id = *parcel_id;
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_land_resources(&url, parcel_id, &events_tx);
+                });
+            }
+        }
+        Command::RequestLandStat {
+            report_type,
+            request_flags,
+            filter,
+            parcel_local_id,
+        } => {
+            session.request_land_stat(
+                *report_type,
+                *request_flags,
+                filter,
+                *parcel_local_id,
+                now,
+            )?;
+        }
+        Command::RequestExperienceInfo { experience_ids } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_GET_EXPERIENCE_INFO).cloned()
+            {
+                let url = format!("{base}{}", experience_info_query(experience_ids));
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_GET_EXPERIENCE_INFO, &events_tx);
+                });
+            }
+        }
+        Command::FindExperiences { query, page } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_FIND_EXPERIENCE_BY_NAME).cloned()
+            {
+                let url = format!("{base}{}", find_experience_query(query, *page));
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_FIND_EXPERIENCE_BY_NAME, &events_tx);
+                });
+            }
+        }
+        Command::RequestExperiencePermissions => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GET_EXPERIENCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_GET_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::SetExperiencePermission {
+            experience_id,
+            permission,
+        } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_EXPERIENCE_PREFERENCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                if permission.is_forget() {
+                    let url = format!("{base}{}", forget_experience_query(*experience_id));
+                    std::thread::spawn(move || {
+                        run_delete_caps_llsd(&url, CAP_EXPERIENCE_PREFERENCES, &events_tx);
+                    });
+                } else {
+                    let body = build_set_experience_permission_request(*experience_id, *permission);
+                    std::thread::spawn(move || {
+                        run_put_caps_llsd(&base, body, CAP_EXPERIENCE_PREFERENCES, &events_tx);
+                    });
+                }
+            }
+        }
+        Command::RequestOwnedExperiences => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_AGENT_EXPERIENCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_AGENT_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::RequestAdminExperiences => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GET_ADMIN_EXPERIENCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_GET_ADMIN_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::RequestCreatorExperiences => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_GET_CREATOR_EXPERIENCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_GET_CREATOR_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::RequestGroupExperiences { group_id } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_GROUP_EXPERIENCES).cloned()
+            {
+                let url = format!("{base}{}", group_experiences_query(group_id.uuid()));
+                let group_id = *group_id;
+                let asset_tx = caps.asset_tx.clone();
+                std::thread::spawn(move || {
+                    run_group_experiences(&url, group_id, &asset_tx);
+                });
+            }
+        }
+        Command::RequestExperienceAdmin { experience_id } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_ADMIN).cloned()
+            {
+                let url = format!("{base}{}", experience_id_query(*experience_id));
+                let experience_id = *experience_id;
+                let asset_tx = caps.asset_tx.clone();
+                std::thread::spawn(move || {
+                    run_experience_status(&url, experience_id, true, &asset_tx);
+                });
+            }
+        }
+        Command::RequestExperienceContributor { experience_id } => {
+            if let Some(caps) = caps
+                && let Some(base) = caps.map.get(CAP_IS_EXPERIENCE_CONTRIBUTOR).cloned()
+            {
+                let url = format!("{base}{}", experience_id_query(*experience_id));
+                let experience_id = *experience_id;
+                let asset_tx = caps.asset_tx.clone();
+                std::thread::spawn(move || {
+                    run_experience_status(&url, experience_id, false, &asset_tx);
+                });
+            }
+        }
+        Command::UpdateExperience { update } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_UPDATE_EXPERIENCE).cloned()
+            {
+                let body = build_update_experience_request(update);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_UPDATE_EXPERIENCE, &events_tx);
+                });
+            }
+        }
+        Command::RequestRegionExperiences => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_REGION_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::SetRegionExperiences {
+            allowed,
+            blocked,
+            trusted,
+        } => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_REGION_EXPERIENCES).cloned()
+            {
+                let body = build_region_experiences_request(allowed, blocked, trusted);
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_REGION_EXPERIENCES, &events_tx);
+                });
+            }
+        }
+        Command::OfferTeleport { targets, message } => {
+            session.offer_teleport(targets, message, now)?;
+        }
+        Command::AcceptTeleportLure { lure_id } => {
+            session.accept_teleport_lure(*lure_id, now)?;
+        }
+        Command::DeclineTeleportLure {
+            from_agent_id,
+            lure_id,
+        } => {
+            session.decline_teleport_lure(*from_agent_id, *lure_id, now)?;
+        }
+        Command::RequestTeleport {
+            to_agent_id,
+            message,
+        } => {
+            session.request_teleport(*to_agent_id, message, now)?;
+        }
+        Command::GiveInventory {
+            to_agent_id,
+            item_id,
+            asset_type,
+            item_name,
+            transaction_id,
+        } => {
+            session.give_inventory(
+                *to_agent_id,
+                *item_id,
+                *asset_type,
+                item_name,
+                *transaction_id,
+                now,
+            )?;
+        }
+        Command::GiveInventoryFolder {
+            to_agent_id,
+            folder_id,
+            folder_name,
+            transaction_id,
+        } => {
+            session.give_inventory_folder(
+                *to_agent_id,
+                *folder_id,
+                folder_name,
+                *transaction_id,
+                now,
+            )?;
+        }
+        Command::AcceptInventoryOffer { offer, folder_id } => {
+            session.accept_inventory_offer(offer, *folder_id, now)?;
+        }
+        Command::DeclineInventoryOffer {
+            offer,
+            trash_folder_id,
+        } => {
+            session.decline_inventory_offer(offer, *trash_folder_id, now)?;
+        }
+        Command::StartConference {
+            session_id,
+            invitees,
+            message,
+        } => {
+            // The modern start is a `ChatSessionRequest` POST; the
+            // deprecated `IM_SESSION_CONFERENCE_START` instant message is
+            // the fallback for a grid without the cap (OpenSim). Either
+            // way the session opens locally under the id we minted, and
+            // the grid's `ChatterBoxSessionStartReply` moves it onto the
+            // id the session really has.
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+            {
+                let body = chat_session_agents_body(
+                    CHAT_SESSION_START_CONFERENCE,
+                    session_id.get(),
+                    invitees,
+                );
+                session.open_conference(*session_id, invitees, now);
+                std::thread::spawn(move || {
+                    run_caps_oneway(&url, body);
+                });
+            } else {
+                session.start_conference(*session_id, invitees, message, now)?;
+            }
+        }
+        Command::InviteToChatSession {
+            session_id,
+            invitees,
+        } => {
+            // Adding to a session that already exists is the cap's own
+            // `invite`; the legacy path has only the conference-start IM,
+            // which a simulator without the cap treats as an add.
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+            {
+                let body =
+                    chat_session_agents_body(CHAT_SESSION_INVITE, session_id.get(), invitees);
+                session.open_conference(*session_id, invitees, now);
+                std::thread::spawn(move || {
+                    run_caps_oneway(&url, body);
+                });
+            } else {
+                session.start_conference(*session_id, invitees, "", now)?;
+            }
+        }
+        Command::SendConferenceMessage {
+            session_id,
+            message,
+        } => {
+            // As for an IM: a failed send is not transcribed.
+            session.send_conference_message(*session_id, message, now)?;
+            if let Some(own) = session.agent_id() {
+                let name = session.agent_legacy_name();
+                let roster: BTreeSet<_> = session
+                    .participants(ChatSessionKind::Conference { id: *session_id })
+                    .collect();
+                chat_log.log_conference(*session_id, &roster, own, &name, message);
+            }
+        }
+        Command::LeaveConference { session_id } => {
+            session.leave_conference(*session_id, now)?;
+        }
+        Command::MarkSessionRead {
+            session: chat_session,
+        } => {
+            session.mark_session_read(*chat_session);
+        }
+        Command::AcceptChatInvite {
+            session_id,
+            from_group,
+        } => {
+            // Promote the entry to joined locally, then drive the modern
+            // accept over the cap when present (its reply roster seeds the
+            // participants); without the cap the optimistic join suffices.
+            session.accept_chat_invite(*session_id, *from_group, now);
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+            {
+                let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_id.get());
+                let events_tx = caps.events_tx.clone();
+                let (session_uuid, from_group) = (session_id.get(), *from_group);
+                std::thread::spawn(move || {
+                    run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                });
+            }
+        }
+        Command::DeclineChatInvite {
+            session_id,
+            from_group,
+        } => {
+            // Remove the entry, then refuse on the wire: the cap `decline
+            // invitation` POST when present, else a UDP `SessionLeave`.
+            session.decline_chat_invite(*session_id, *from_group, now);
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+            {
+                let body = chat_session_request_body(CHAT_SESSION_DECLINE, session_id.get());
+                let events_tx = caps.events_tx.clone();
+                let (session_uuid, from_group) = (session_id.get(), *from_group);
+                std::thread::spawn(move || {
+                    run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                });
+            } else if *from_group {
+                session.leave_group_session(GroupKey::from(session_id.get()), now)?;
+            } else {
+                session.leave_conference(*session_id, now)?;
+            }
+        }
+        Command::JoinSessionVoice {
+            session: chat_session,
+        } => {
+            // Optimistic local join, then drive the signalling: ensure a voice
+            // account, then signal into the channel over `ChatSessionRequest`
+            // (accept invitation). Signalling only — no audio.
+            session.join_session_voice(*chat_session, now);
+            if let (Some(own), Some(caps)) = (session.agent_id(), caps) {
+                let session_uuid = chat_session.canonical_session_id(own);
+                let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
+                if let Some(url) = caps.map.get(CAP_PROVISION_VOICE_ACCOUNT).cloned() {
+                    let body =
+                        build_provision_voice_account_request(&VoiceProvisionRequest::vivox());
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_voice_cap(&url, body, CAP_PROVISION_VOICE_ACCOUNT, &events_tx);
+                    });
+                }
+                if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                    let body = chat_session_request_body(CHAT_SESSION_ACCEPT, session_uuid);
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                    });
+                }
+            }
+        }
+        Command::LeaveSessionVoice {
+            session: chat_session,
+        } => {
+            // Optimistic local leave (keeps the text conversation), then signal
+            // the voice decline on the wire: a 1:1 P2P call uses `decline p2p
+            // voice`, a group / conference the multi-agent `decline invitation`.
+            session.leave_session_voice(*chat_session);
+            if let (Some(own), Some(caps)) = (session.agent_id(), caps) {
+                let session_uuid = chat_session.canonical_session_id(own);
+                let from_group = matches!(chat_session, ChatSessionKind::Group { .. });
+                let method = if matches!(chat_session, ChatSessionKind::Direct { .. }) {
+                    CHAT_SESSION_DECLINE_P2P_VOICE
+                } else {
+                    CHAT_SESSION_DECLINE
+                };
+                if let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned() {
+                    let body = chat_session_request_body(method, session_uuid);
+                    let events_tx = caps.events_tx.clone();
+                    std::thread::spawn(move || {
+                        run_chat_session_request(&url, body, session_uuid, from_group, &events_tx);
+                    });
+                }
+            }
+        }
+        Command::FetchSessionHistory { kind } => {
+            // Explicit server-backlog fetch, bypassing the auto-fetch gate.
+            // Only group / conference sessions have a server backlog; on a
+            // grid without the cap (stock OpenSim) there is nothing to POST
+            // to, so the command silently degrades. Mirrors the tokio arm.
+            if !matches!(kind, ChatSessionKind::Direct { .. })
+                && let (Some(own), Some(caps)) = (session.agent_id(), caps)
+                && let Some(url) = caps.map.get(CAP_CHAT_SESSION_REQUEST).cloned()
+            {
+                // Suppress a later duplicate auto-fetch of the same session.
+                session.note_server_history_requested(*kind);
+                let session_uuid = kind.canonical_session_id(own);
+                let body = chat_session_request_body(CHAT_SESSION_FETCH_HISTORY, session_uuid);
+                let from_group = matches!(kind, ChatSessionKind::Group { .. });
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_chat_session_fetch_history(
+                        &url,
+                        body,
+                        session_uuid,
+                        from_group,
+                        &events_tx,
+                    );
+                });
+            }
+        }
+        Command::QueryChatSessions => {
+            // Local query: build the light session list and surface it on the
+            // event stream. (A bevy system may instead borrow the Session and
+            // call `chat_sessions_info()` directly, skipping the round-trip.)
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::ChatSessions(
+                    session.chat_sessions_info().collect(),
+                )),
+            );
+        }
+        Command::QueryChatHistoryPage {
+            session: chat_session,
+            before,
+            limit,
+        } => {
+            // Newest-first paging across the unified memory→archive view: the
+            // in-memory ring first, then older pages from the transcript (B9).
+            let consumed = before.map_or(0, MessageCursor::consumed_count);
+            let mem_len = session.history_len(*chat_session);
+            let (messages, prev): (std::sync::Arc<[SessionMessage]>, _) = if consumed < mem_len {
+                let (page, mem_prev) = session.history_page(*chat_session, *before, *limit);
+                let collected: std::sync::Arc<[_]> = page.cloned().collect();
+                let next = consumed.saturating_add(collected.len());
+                let prev = mem_prev.or_else(|| {
+                    chat_log
+                        .read_older_page(*chat_session, mem_len, next, 1)
+                        .filter(|(probe, _)| !probe.is_empty())
+                        .map(|_more| MessageCursor::from_consumed(next))
+                });
+                (collected, prev)
+            } else {
+                match chat_log.read_older_page(*chat_session, mem_len, consumed, *limit) {
+                    Some((msgs, prev)) => (msgs.into(), prev),
+                    None => (Vec::new().into(), None),
+                }
+            };
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::ChatHistoryPage {
+                    session: *chat_session,
+                    messages,
+                    prev,
+                }),
+            );
+        }
+        Command::QueryNearbyChatHistoryPage {
+            already_shown,
+            before,
+            limit,
+        } => {
+            // Nearby chat has no in-memory ring: the whole page comes from the
+            // on-disk transcript, skipping the newest `already_shown` lines the
+            // caller already shows live (B9 paging discipline).
+            let consumed = before.map_or(0, MessageCursor::consumed_count);
+            let (lines, prev): (std::sync::Arc<[NearbyHistoryLine]>, _) =
+                match chat_log.read_nearby_older_page(*already_shown, consumed, *limit) {
+                    Some((page, cursor)) => (page.into(), cursor),
+                    None => (Vec::new().into(), None),
+                };
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::NearbyChatHistoryPage { lines, prev }),
+            );
+        }
+        Command::QueryInventoryFolder {
+            folder,
+            before,
+            limit,
+        } => {
+            // Local query: page the held model into owning view types (one
+            // bounded borrow→owned transform, `Arc<[…]>` payload). A bevy
+            // system may instead borrow the Session and call
+            // `inventory_folder_page` directly, skipping the round-trip.
+            let (folders, items, prev) = session.inventory_folder_page(*folder, *before, *limit);
+            // On-demand: a query for an unfetched folder schedules its fetch
+            // (works regardless of the background-crawl flag).
+            if session.folder_fetch_state(*folder) == Some(FolderState::Unknown) {
+                fetch_folder_contents(session, *folder, caps, now)?;
+            }
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::InventoryFolderPage {
+                    folder: *folder,
+                    folders: folders.into(),
+                    items: items.into(),
+                    prev,
+                }),
+            );
+        }
+        Command::QueryInventoryRoots => {
+            // Local query: surface the agent + library roots (both `Copy`).
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::InventoryRoots {
+                    agent_root: session.inventory_root(),
+                    library_root: session.library_root(),
+                }),
+            );
+        }
+        Command::QueryInventoryFolders => {
+            // Local query: snapshot the agent tree's known folders (seeded
+            // from the login skeleton, so present before any contents fetch).
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::InventoryFolders(
+                    session.inventory_folder_infos().into(),
+                )),
+            );
+        }
+        Command::QueryFriends => {
+            // Local query: build the buddy snapshot with online flags.
+            report(
+                outbound,
+                NetOutbound::Event(SessionEvent::FriendsSnapshot(
+                    session.friends_presence().collect(),
+                )),
+            );
+        }
+        Command::RetrieveInstantMessages => {
+            session.retrieve_instant_messages(now)?;
+        }
+        Command::RequestOfflineMessages => {
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_READ_OFFLINE_MSGS).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_READ_OFFLINE_MSGS, &events_tx);
+                });
+            }
+        }
+        Command::TeleportViaLandmark { landmark } => {
+            session.teleport_via_landmark(*landmark, now)?;
+        }
+        Command::CancelTeleport => {
+            session.cancel_teleport(now)?;
+        }
+        Command::SetStartLocation {
+            slot,
+            position,
+            look_at,
+        } => {
+            session.set_start_location(*slot, *position, look_at.clone(), now)?;
+        }
+        Command::RequestAgentDataUpdate => {
+            session.request_agent_data_update(now)?;
+        }
+        Command::QuitCopy => {
+            session.quit_copy(now)?;
+        }
+        Command::SetVelocityInterpolation { enabled } => {
+            session.set_velocity_interpolation(*enabled, now)?;
+        }
+        Command::RequestUserInfo => {
+            // Cap-preferred (the modern `UserInfo` GET), falling back to
+            // the legacy `UserInfoRequest` UDP message where the region
+            // does not serve the capability (OpenSim).
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
+            {
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_get_caps_llsd(&url, CAP_USER_INFO, &events_tx);
+                });
+            } else {
+                session.request_user_info(now)?;
+            }
+        }
+        Command::UpdateUserInfo {
+            im_via_email,
+            directory_visibility,
+        } => {
+            // Cap-preferred (the modern `UserInfo` POST), falling back to
+            // the legacy `UpdateUserInfo` UDP message where the region
+            // does not serve the capability (OpenSim). `im_via_email` is
+            // always included: OpenSim needs it and Second Life ignores
+            // unknown keys (it manages the forwarding preference on the
+            // account website).
+            if let Some(caps) = caps
+                && let Some(url) = caps.map.get(CAP_USER_INFO).cloned()
+            {
+                let body = build_user_info_update(&UserInfoUpdate {
+                    im_via_email: Some(*im_via_email),
+                    dir_visibility: directory_visibility.to_wire().to_owned(),
+                });
+                let events_tx = caps.events_tx.clone();
+                std::thread::spawn(move || {
+                    run_voice_cap(&url, body, CAP_USER_INFO, &events_tx);
+                });
+            } else {
+                session.update_user_info(*im_via_email, *directory_visibility, now)?;
+            }
+        }
+        Command::SetChatLogConfig(config) => {
+            chat_log.set_config((**config).clone());
+        }
+        Command::TriggerSound {
+            sound,
+            gain,
+            region_handle,
+            position,
+        } => {
+            session.trigger_sound(*sound, *gain, *region_handle, *position, now)?;
+        }
+        Command::RequestGodlikePowers { godlike } => {
+            session.request_godlike_powers(*godlike, now)?;
+        }
+        Command::EjectUser { target, action } => {
+            session.eject_user(*target, *action, now)?;
+        }
+        Command::FreezeUser { target, action } => {
+            session.freeze_user(*target, *action, now)?;
+        }
+        Command::SimWideDeletes { owner, flags } => {
+            session.sim_wide_deletes(*owner, *flags, now)?;
+        }
+        Command::GodUpdateRegionInfo { update } => {
+            session.god_update_region_info(update, now)?;
+        }
+        Command::ParcelGodForceOwner { parcel, owner } => {
+            session.parcel_god_force_owner(*parcel, *owner, now)?;
+        }
+        Command::ParcelGodMarkAsContent { parcel } => {
+            session.parcel_god_mark_as_content(*parcel, now)?;
+        }
+        Command::EventGodDelete {
+            event,
+            query_id,
+            query_text,
+            flags,
+            query_start,
+        } => {
+            session.event_god_delete(*event, *query_id, query_text, *flags, *query_start, now)?;
+        }
+        Command::StateSave { filename } => {
+            session.state_save(filename, now)?;
+        }
+        Command::ViewerStartAuction { parcel, snapshot } => {
+            session.viewer_start_auction(*parcel, *snapshot, now)?;
+        }
+        Command::MarketplaceMerchantStatus => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::MerchantStatus,
+                    Ok(merchant_status_request()),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::MarketplaceListings => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::GetListings,
+                    Ok(listings_request()),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::MarketplaceListing(id) => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::GetListing(*id),
+                    Ok(listing_request(*id)),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::MarketplaceCreateListing(payload) => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::CreateListing,
+                    create_listing_request(payload),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::MarketplaceUpdateListing(payload) => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::UpdateListing(payload.id),
+                    update_listing_request(payload),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::MarketplaceAssociateListing(payload) => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::AssociateInventory(payload.id),
+                    associate_inventory_request(payload),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::MarketplaceDeleteListing(id) => {
+            if let Some(caps) = caps {
+                dispatch_marketplace_request(
+                    caps.map.get(CAP_DIRECT_DELIVERY).cloned(),
+                    MarketplaceOperation::DeleteListing(*id),
+                    Ok(delete_listing_request(*id)),
+                    &caps.asset_tx,
+                );
+            }
+        }
+        Command::Logout => session.initiate_logout(now),
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::Instant;
+
+    use crossbeam_channel::unbounded;
+    use pretty_assertions::assert_eq;
+    use sl_proto::{
+        ChatLogConfig, CircuitId, Command, LoginParams, LoginRequest, RegionLocalObjectId,
+        ScopedObjectId, Session, StartLocation,
+    };
+
+    use super::{NetOutbound, SessionError, apply_command, report_command_failed};
+    use crate::chat_log::ChatLog;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// A session that has never logged in, so every send fails with
+    /// [`SessionError::NoCircuit`] — the exact state the dispatcher used to
+    /// swallow 300 times over.
+    fn circuitless_session() -> Result<Box<Session>, TestError> {
+        let login = LoginParams {
+            login_uri: url::Url::parse("http://127.0.0.1:9000/")?,
+            request: LoginRequest::new(
+                "Test",
+                "Resident",
+                "secret",
+                StartLocation::Last,
+                "sl-client-bevy-test",
+                "0",
+            ),
+        };
+        Ok(Box::new(Session::new(login)))
+    }
+
+    /// A command whose request cannot reach the wire returns its error instead
+    /// of being discarded — the contract the whole dispatcher now rests on.
+    #[test]
+    fn a_command_with_no_circuit_reports_its_failure() -> Result<(), TestError> {
+        let mut session = circuitless_session()?;
+        let mut chat_log = ChatLog::new(ChatLogConfig::default(), None, String::new(), None);
+        let (outbound, _outbound_rx) = unbounded();
+        let outcome = apply_command(
+            &Command::DeleteObjects {
+                local_ids: vec![ScopedObjectId::new(
+                    CircuitId::new(1),
+                    RegionLocalObjectId::new(1),
+                )],
+            },
+            &mut session,
+            None,
+            &mut chat_log,
+            Instant::now(),
+            &outbound,
+        );
+        assert!(
+            matches!(outcome, Err(SessionError::NoCircuit)),
+            "a circuitless delete must report NoCircuit, got {outcome:?}"
+        );
+        Ok(())
+    }
+
+    /// The failure crosses to the Bevy side as a [`NetOutbound::CommandFailed`]
+    /// naming the command, which is what the viewer turns into a notification.
+    #[test]
+    fn a_reported_failure_names_the_command() -> Result<(), TestError> {
+        let (outbound, outbound_rx) = unbounded();
+        report_command_failed(&outbound, "DeleteObjects", SessionError::NoCircuit);
+        let reported = outbound_rx.try_recv()?;
+        match reported {
+            NetOutbound::CommandFailed { command, error } => {
+                assert_eq!(command, "DeleteObjects");
+                assert!(matches!(error, SessionError::NoCircuit));
+            }
+            _other => return Err("the report was not a CommandFailed".into()),
+        }
+        Ok(())
+    }
 }

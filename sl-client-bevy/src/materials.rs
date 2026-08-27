@@ -1,6 +1,6 @@
 //! Render-materials capability fetch and ModifyMaterialParams post.
 
-use crate::EVENT_QUEUE_TIMEOUT;
+use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
@@ -33,7 +33,7 @@ pub(crate) fn run_render_materials_fetch(
         .and_then(|response| response.text().ok())
         .map(|text| parse_render_materials_response(&text))
         .unwrap_or_default();
-    asset_tx.send(SessionEvent::RenderMaterials(materials)).ok();
+    deliver(asset_tx, SessionEvent::RenderMaterials(materials));
 }
 
 /// PUTs a `RenderMaterials` request that sets (or clears) legacy materials on
@@ -107,8 +107,6 @@ pub(crate) fn run_modify_material_params(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx
-            .send((CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd))
-            .ok();
+        deliver(caps_tx, (CAP_MODIFY_MATERIAL_PARAMS.to_owned(), llsd));
     }
 }

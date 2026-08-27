@@ -1,5 +1,6 @@
 //! Object-media capability fetch and update.
 
+use crate::caps::deliver;
 use reqwest::Client as ReqwestClient;
 use sl_proto::{CAP_OBJECT_MEDIA, Llsd, ObjectKey, build_object_media_get_request, parse_llsd_xml};
 use tokio::sync::mpsc;
@@ -26,7 +27,7 @@ pub(crate) async fn fetch_object_media(
         return;
     };
     if let Ok(llsd) = parse_llsd_xml(&text) {
-        caps_tx.send((CAP_OBJECT_MEDIA.to_owned(), llsd)).await.ok();
+        deliver(&caps_tx, (CAP_OBJECT_MEDIA.to_owned(), llsd)).await;
     }
 }
 
@@ -36,10 +37,5 @@ pub(crate) async fn fetch_object_media(
 /// media, so there is no event to surface — a client re-fetches with
 /// [`Command::RequestObjectMedia`] to observe the change.
 pub(crate) async fn post_object_media(cap_url: String, body: String, http: ReqwestClient) {
-    http.post(&cap_url)
-        .header("Content-Type", "application/llsd+xml")
-        .body(body)
-        .send()
-        .await
-        .ok();
+    crate::http::post_llsd_oneway(&cap_url, body, &http, "an object-media POST").await;
 }

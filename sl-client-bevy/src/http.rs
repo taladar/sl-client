@@ -1,8 +1,8 @@
 //! Blocking LLSD/byte HTTP capability helpers (GET/PUT/PATCH/DELETE).
 
-use crate::EVENT_QUEUE_TIMEOUT;
 use crate::caps::report_caps_failure;
 use crate::lsl_syntax_cache::LslSyntaxCache;
+use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{
@@ -29,21 +29,45 @@ pub(crate) fn blocking_get_llsd(url: &str) -> Option<Llsd> {
     parse_llsd_xml(&text).ok()
 }
 
+/// POSTs `body` to a capability URL and ignores the *reply* (blocking): the
+/// shared body of every fire-and-forget capability call, where the simulator
+/// answers with an HTTP status and nothing else.
+///
+/// `what` names the request family for the log. Because there is no event to
+/// carry an outcome, a transport failure or a rejecting status is logged here
+/// rather than discarded — that line is the only trace such a call leaves.
+/// The capability URL is deliberately **not** logged: it carries the region's
+/// per-session cap token.
+pub(crate) fn post_llsd_oneway(cap_url: &str, body: String, what: &str) {
+    let http = match crate::http_proxy::blocking_client_builder()
+        .timeout(EVENT_QUEUE_TIMEOUT)
+        .build()
+    {
+        Ok(http) => http,
+        Err(error) => {
+            tracing::warn!("could not build the HTTP client for {what}: {error}");
+            return;
+        }
+    };
+    match http
+        .post(cap_url)
+        .header("Content-Type", "application/llsd+xml")
+        .body(body)
+        .send()
+    {
+        Ok(response) if response.status().is_success() => {}
+        Ok(response) => {
+            tracing::warn!(status = %response.status(), "{what} was rejected");
+        }
+        Err(error) => tracing::warn!("{what} could not be sent: {error}"),
+    }
+}
+
 /// POSTs `body` to a capability URL and ignores the reply (blocking) — a
 /// fire-and-forget capability call where the simulator returns only an HTTP
 /// status (e.g. the `SendUserReport` abuse-report cap). There is no event.
 pub(crate) fn run_caps_oneway(cap_url: &str, body: String) {
-    let Ok(http) = crate::http_proxy::blocking_client_builder()
-        .timeout(EVENT_QUEUE_TIMEOUT)
-        .build()
-    else {
-        return;
-    };
-    http.post(cap_url)
-        .header("Content-Type", "application/llsd+xml")
-        .body(body)
-        .send()
-        .ok();
+    post_llsd_oneway(cap_url, body, "a fire-and-forget capability POST");
 }
 
 /// POSTs a `ChatSessionRequest` accept / decline `body` (blocking) and forwards
@@ -90,9 +114,10 @@ pub(crate) fn run_chat_session_request(
     };
     let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
     let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
-    caps_tx
-        .send((CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)))
-        .ok();
+    deliver(
+        caps_tx,
+        (CAP_CHAT_SESSION_REQUEST.to_owned(), Llsd::Map(map)),
+    );
 }
 
 /// POSTs a `ChatSessionRequest` `fetch history` `body` (blocking) and forwards
@@ -141,9 +166,10 @@ pub(crate) fn run_chat_session_fetch_history(
     let _previous = map.insert("history".to_owned(), reply);
     let _previous = map.insert("session-id".to_owned(), Llsd::Uuid(session_id));
     let _previous = map.insert("from_group".to_owned(), Llsd::Boolean(from_group));
-    caps_tx
-        .send((CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)))
-        .ok();
+    deliver(
+        caps_tx,
+        (CHAT_SESSION_FETCH_HISTORY_TAG.to_owned(), Llsd::Map(map)),
+    );
 }
 
 /// GETs an experience capability URL and forwards its LLSD reply to `caps_tx`
@@ -152,7 +178,7 @@ pub(crate) fn run_chat_session_fetch_history(
 pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(String, Llsd)>) {
     match blocking_get_llsd(url) {
         Some(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).ok();
+            deliver(caps_tx, (cap.to_owned(), llsd));
         }
         None => report_caps_failure(caps_tx, cap),
     }
@@ -177,9 +203,10 @@ pub(crate) fn run_avatar_picker_search(
         _other => HashMap::new(),
     };
     let _previous = map.insert("query-id".to_owned(), Llsd::Uuid(query_id));
-    caps_tx
-        .send((AVATAR_PICKER_SEARCH_TAG.to_owned(), Llsd::Map(map)))
-        .ok();
+    deliver(
+        caps_tx,
+        (AVATAR_PICKER_SEARCH_TAG.to_owned(), Llsd::Map(map)),
+    );
 }
 
 /// GETs the `LSLSyntax` capability (blocking), caches the raw document under
@@ -226,7 +253,7 @@ pub(crate) fn run_fetch_lsl_syntax(
     {
         cache.store(id, &text);
     }
-    caps_tx.send((CAP_LSL_SYNTAX.to_owned(), llsd)).ok();
+    deliver(caps_tx, (CAP_LSL_SYNTAX.to_owned(), llsd));
 }
 
 /// Drives the two-step `LandResources` flow (blocking): POSTs `{ parcel_id }` to
@@ -271,7 +298,7 @@ pub(crate) fn run_land_resources(
         report_caps_failure(caps_tx, CAP_LAND_RESOURCES);
         return;
     };
-    caps_tx.send((CAP_LAND_RESOURCES.to_owned(), reply)).ok();
+    deliver(caps_tx, (CAP_LAND_RESOURCES.to_owned(), reply));
 
     if let Some(summary) = urls.script_resource_summary {
         run_get_caps_llsd(summary.as_str(), LAND_RESOURCE_SUMMARY_TAG, caps_tx);
@@ -311,7 +338,7 @@ pub(crate) fn run_put_caps_llsd(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).ok();
+            deliver(caps_tx, (cap.to_owned(), llsd));
         }
         Err(_error) => report_caps_failure(caps_tx, cap),
     }
@@ -347,7 +374,7 @@ pub(crate) fn run_patch_caps_llsd(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).ok();
+            deliver(caps_tx, (cap.to_owned(), llsd));
         }
         Err(_error) => report_caps_failure(caps_tx, cap),
     }
@@ -381,7 +408,7 @@ pub(crate) fn run_delete_caps_llsd(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).ok();
+            deliver(caps_tx, (cap.to_owned(), llsd));
         }
         Err(_error) => report_caps_failure(caps_tx, cap),
     }

@@ -1,7 +1,7 @@
 //! Voice capability provisioning and signaling.
 
-use crate::EVENT_QUEUE_TIMEOUT;
 use crate::caps::report_caps_failure;
+use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
 use sl_proto::{Llsd, parse_llsd_xml};
@@ -40,7 +40,7 @@ pub(crate) fn run_voice_cap(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).ok();
+            deliver(caps_tx, (cap.to_owned(), llsd));
         }
         Err(_error) => report_caps_failure(caps_tx, cap),
     }
@@ -49,15 +49,5 @@ pub(crate) fn run_voice_cap(
 /// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the
 /// simulator returns only an HTTP status, so there is no event to surface.
 pub(crate) fn run_voice_signaling(cap_url: &str, body: String) {
-    let Ok(http) = crate::http_proxy::blocking_client_builder()
-        .timeout(EVENT_QUEUE_TIMEOUT)
-        .build()
-    else {
-        return;
-    };
-    http.post(cap_url)
-        .header("Content-Type", "application/llsd+xml")
-        .body(body)
-        .send()
-        .ok();
+    crate::http::post_llsd_oneway(cap_url, body, "a voice-signaling POST");
 }

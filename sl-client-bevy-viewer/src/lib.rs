@@ -432,7 +432,8 @@ use crate::materials::{
 use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::notification_host::{
-    NotificationHostPlugin, ingest_alert_messages, spawn_notification_demo,
+    NotificationHostPlugin, announce_command_failures, ingest_alert_messages,
+    spawn_notification_demo,
 };
 use crate::notification_persist::NotificationPersistPlugin;
 use crate::object_menu::ObjectMenuPlugin;
@@ -1404,6 +1405,10 @@ fn run_session(
     // sample spread is registered conditionally with the other env-gated debug
     // systems below.
     .add_systems(Update, ingest_alert_messages)
+    // Surface a queued command whose send failed (no circuit, a stale scoped id,
+    // an encode error), so an action that never reached the simulator says so
+    // instead of looking as if it worked.
+    .add_systems(Update, announce_command_failures)
     // The bottom toolbar (viewer-ui-bottom-toolbar): the persistent strip of
     // toggle buttons that open the main floaters (Inventory wired today, the rest
     // disabled placeholders until their tasks land), and the bottom-area layout

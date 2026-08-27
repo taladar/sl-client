@@ -1,6 +1,6 @@
 //! Two-step asset upload over NewFileAgentInventory / UploadBakedTexture.
 
-use crate::{Caps, EVENT_QUEUE_TIMEOUT};
+use crate::{Caps, EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use sl_proto::Event as SessionEvent;
 use sl_proto::{
@@ -42,11 +42,12 @@ pub(crate) fn spawn_new_file_upload(
     };
     let Some(url) = caps.map.get(CAP_NEW_FILE_AGENT_INVENTORY).cloned() else {
         let asset_tx = caps.asset_tx.clone();
-        asset_tx
-            .send(SessionEvent::AssetUploadFailed {
+        deliver(
+            &asset_tx,
+            SessionEvent::AssetUploadFailed {
                 reason: "NewFileAgentInventory capability not available".to_owned(),
-            })
-            .ok();
+            },
+        );
         return;
     };
     let body = build_new_file_agent_inventory_request(
@@ -63,7 +64,7 @@ pub(crate) fn spawn_new_file_upload(
     let asset_tx = caps.asset_tx.clone();
     std::thread::spawn(move || {
         let event = run_caps_upload(&url, body, data);
-        asset_tx.send(event).ok();
+        deliver(&asset_tx, event);
     });
 }
 
@@ -77,9 +78,7 @@ pub(crate) fn emit_upload_unavailable(caps: Option<&Caps>, cap: &str) {
 /// given reason (a no-op if no capabilities are established yet).
 pub(crate) fn emit_upload_failure(caps: Option<&Caps>, reason: String) {
     if let Some(caps) = caps {
-        caps.asset_tx
-            .send(SessionEvent::AssetUploadFailed { reason })
-            .ok();
+        deliver(&caps.asset_tx, SessionEvent::AssetUploadFailed { reason });
     }
 }
 
@@ -190,7 +189,12 @@ pub(crate) fn run_report_screenshot_upload(
         return;
     };
     if let Some(uploader) = response.uploader {
-        caps_upload_step(&uploader, "application/octet-stream", screenshot).ok();
+        // Fire-and-forget by design (no event is surfaced), but a failed
+        // snapshot upload still gets a line so a report that silently lost its
+        // screenshot is not invisible.
+        if let Err(reason) = caps_upload_step(&uploader, "application/octet-stream", screenshot) {
+            tracing::warn!("abuse-report screenshot upload failed: {reason}");
+        }
     }
 }
 

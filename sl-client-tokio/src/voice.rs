@@ -4,7 +4,7 @@ use reqwest::Client as ReqwestClient;
 use sl_proto::{Llsd, parse_llsd_xml};
 use tokio::sync::mpsc;
 
-use crate::caps::report_caps_failure;
+use crate::caps::{deliver, report_caps_failure};
 
 /// POSTs a voice-signalling capability (`ProvisionVoiceAccountRequest` or
 /// `ParcelVoiceInfoRequest`) carrying the prepared `body`, forwarding the LLSD
@@ -35,7 +35,7 @@ pub(crate) async fn post_voice_cap(
     };
     match parse_llsd_xml(&text) {
         Ok(llsd) => {
-            caps_tx.send((cap.to_owned(), llsd)).await.ok();
+            deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         Err(_error) => report_caps_failure(&caps_tx, cap).await,
     }
@@ -44,10 +44,5 @@ pub(crate) async fn post_voice_cap(
 /// POSTs a `VoiceSignalingRequest` (WebRTC ICE trickle). Fire-and-forget: the
 /// simulator returns only an HTTP status, so there is no event to surface.
 pub(crate) async fn post_voice_signaling(cap_url: String, body: String, http: ReqwestClient) {
-    http.post(&cap_url)
-        .header("Content-Type", "application/llsd+xml")
-        .body(body)
-        .send()
-        .await
-        .ok();
+    crate::http::post_llsd_oneway(&cap_url, body, &http, "a voice-signaling POST").await;
 }
