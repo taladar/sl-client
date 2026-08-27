@@ -42,6 +42,24 @@ const LEGACY_PREFIX: &[u8] = b"<? LLSD/Binary ?>";
 /// unavailable (treated like a `404`).
 const MAX_MESH_VERSION: u32 = 999;
 
+/// The largest mesh asset a header may describe, and so the ceiling on any
+/// block's `offset` / `size`.
+///
+/// The header is attacker-supplied — any resident can upload a mesh, and the
+/// viewer fetches it on walking into the region — and every block offset is
+/// taken from it directly. Without a ceiling, a header claiming
+/// `offset: 2000000000` makes the on-disk assembler zero two gigabytes for one
+/// mesh. Second Life caps an uploaded mesh far below this; the margin is
+/// deliberate so no legitimate asset is refused.
+const MAX_MESH_ASSET_BYTES: usize = 64 << 20;
+
+/// The largest a single block may inflate to.
+///
+/// zlib compresses a run of zeros about a thousand to one, so an uncapped
+/// `read_to_end` turns a one-megabyte block into a gigabyte of resident memory.
+/// Applied per block, on the same reasoning as [`MAX_MESH_ASSET_BYTES`].
+const MAX_INFLATED_BLOCK_BYTES: u64 = 64 << 20;
+
 /// A failure to decode part of an LLMesh asset.
 #[derive(Debug, thiserror::Error)]
 pub enum MeshDecodeError {
@@ -56,6 +74,17 @@ pub enum MeshDecodeError {
     Shape {
         /// The LLSD shape that was expected (e.g. `"array of submeshes"`).
         expected: &'static str,
+    },
+    /// A block inflated past the decoder's per-block ceiling. The decode is
+    /// abandoned rather than letting a compression bomb size the allocation.
+    ///
+    /// The ceiling itself is a crate-private constant — deliberately, so it can
+    /// move without being a breaking change; `limit` carries the value that was
+    /// actually applied.
+    #[error("mesh block inflated past the {limit}-byte limit")]
+    InflatedTooLarge {
+        /// The limit that was exceeded.
+        limit: u64,
     },
 }
 
@@ -262,11 +291,13 @@ pub fn parse_header(data: &[u8]) -> Option<(MeshHeader, usize)> {
     llsd.as_map()?;
     let header_size = prefix_len.checked_add(consumed)?;
 
-    let version = llsd
-        .get("version")
-        .and_then(Llsd::as_i32)
-        .and_then(|value| u32::try_from(value).ok())
-        .unwrap_or(0);
+    // A *present but negative* version is hostile, not absent: folding it to 0
+    // with `unwrap_or` would walk it straight past the `MAX_MESH_VERSION` guard
+    // on the next line. Only an absent field defaults.
+    let version = match llsd.get("version").and_then(Llsd::as_i32) {
+        Some(value) => u32::try_from(value).ok()?,
+        None => 0,
+    };
     let not_found = llsd.get("404").is_some() || version > MAX_MESH_VERSION;
 
     let mut lods: [Option<BlockRef>; sl_proto::MESH_LOD_COUNT] = [None, None, None, None];
@@ -310,6 +341,13 @@ fn block_ref(value: Option<&Llsd>) -> Option<BlockRef> {
     let offset = usize::try_from(map.get("offset").and_then(Llsd::as_i32)?).ok()?;
     let size = usize::try_from(map.get("size").and_then(Llsd::as_i32)?).ok()?;
     if size == 0 {
+        return None;
+    }
+    // The header is attacker-supplied and `offset` is used to size the on-disk
+    // assembly buffer, so a block claiming to live past the largest asset we
+    // will hold is not a block. `i32::MAX` alone is not a bound: it is two
+    // gigabytes of zero-fill per mesh.
+    if offset.saturating_add(size) > MAX_MESH_ASSET_BYTES {
         return None;
     }
     Some(BlockRef { offset, size })
@@ -374,7 +412,7 @@ fn decode_submesh(map: &Llsd) -> Submesh {
     let (tc_min, tc_max) = domain2(map.get("TexCoord0Domain"), [0.0, 0.0], [1.0, 1.0]);
     let uvs = dequantize_uvs(binary(map, "TexCoord0"), tc_min, tc_max);
 
-    let indices = decode_indices(binary(map, "TriangleList"));
+    let indices = decode_indices(binary(map, "TriangleList"), positions.len());
     let weights = map
         .get("Weights")
         .and_then(Llsd::as_binary)
@@ -448,18 +486,30 @@ fn dequantize_uvs(bytes: &[u8], min: [f32; 2], max: [f32; 2]) -> Vec<[f32; 2]> {
 }
 
 /// Decodes a `u16` triangle-list blob into `u32` indices, dropping any trailing
-/// indices that do not complete a triangle.
-fn decode_indices(bytes: &[u8]) -> Vec<u32> {
-    let mut indices: Vec<u32> = bytes
+/// indices that do not complete a triangle and any triangle that names a vertex
+/// this submesh does not have.
+///
+/// The blob is attacker-supplied and its consumers hand the indices straight to
+/// the renderer — `sl-client-bevy`'s `meshes.rs` does `insert_indices` with no
+/// filter of its own — so a triangle naming vertex 60000 of a three-vertex
+/// submesh would reach AABB computation and the draw call. Whole triangles are
+/// dropped rather than clamped: a clamped index silently welds a face to an
+/// unrelated vertex, which is worse than a missing one.
+fn decode_indices(bytes: &[u8], vertex_count: usize) -> Vec<u32> {
+    let limit = u32::try_from(vertex_count).unwrap_or(u32::MAX);
+    bytes
         .as_chunks::<2>()
         .0
         .iter()
         .map(|&[low, high]| u32::from(u16_le(low, high)))
-        .collect();
-    let remainder = indices.len().checked_rem(3).unwrap_or(0);
-    let keep = indices.len().saturating_sub(remainder);
-    indices.truncate(keep);
-    indices
+        .collect::<Vec<u32>>()
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .filter(|triangle| triangle.iter().all(|&index| index < limit))
+        .flatten()
+        .copied()
+        .collect()
 }
 
 /// Decodes the per-vertex rig-weight stream: for each vertex, `(u8 joint, u16
@@ -617,12 +667,28 @@ fn decode_hulls(map: &Llsd, min: [f32; 3], max: [f32; 3]) -> Vec<Vec<[f32; 3]>> 
 }
 
 /// Inflates a zlib-compressed block, returning its bytes.
+///
+/// Bounded by [`MAX_INFLATED_BLOCK_BYTES`]: the compressed bytes come straight
+/// off the asset CDN, and an unbounded `read_to_end` lets a small block claim
+/// arbitrary memory. Reading one byte past the limit is what detects it — the
+/// cap itself is a legal length, so stopping exactly at it would be
+/// indistinguishable from a block that simply is that big.
+///
+/// # Errors
+/// [`MeshDecodeError::Inflate`] if the stream is not valid zlib, or
+/// [`MeshDecodeError::InflatedTooLarge`] if it expands past the limit.
 fn inflate(compressed: &[u8]) -> Result<Vec<u8>, MeshDecodeError> {
-    let mut decoder = ZlibDecoder::new(compressed);
+    let ceiling = MAX_INFLATED_BLOCK_BYTES.saturating_add(1);
+    let mut decoder = ZlibDecoder::new(compressed).take(ceiling);
     let mut out = Vec::new();
     decoder
         .read_to_end(&mut out)
         .map_err(|error| MeshDecodeError::Inflate(error.to_string()))?;
+    if u64::try_from(out.len()).unwrap_or(u64::MAX) > MAX_INFLATED_BLOCK_BYTES {
+        return Err(MeshDecodeError::InflatedTooLarge {
+            limit: MAX_INFLATED_BLOCK_BYTES,
+        });
+    }
     Ok(out)
 }
 
@@ -744,7 +810,9 @@ fn identity_matrix() -> [f32; 16] {
 #[cfg(test)]
 mod tests {
     use super::{
-        MESH_HEADER_SIZE, MeshHeader, decode_lod, decode_physics_convex, decode_skin, parse_header,
+        BlockRef, MAX_INFLATED_BLOCK_BYTES, MESH_HEADER_SIZE, MeshDecodeError, MeshHeader,
+        block_ref, decode_indices, decode_lod, decode_physics_convex, decode_skin, inflate,
+        parse_header,
     };
     use flate2::Compression;
     use flate2::write::ZlibEncoder;
@@ -762,6 +830,87 @@ mod tests {
         let mut encoder = ZlibEncoder::new(Vec::new(), Compression::default());
         encoder.write_all(bytes)?;
         Ok(encoder.finish()?)
+    }
+
+    /// A block of zeros compresses about a thousand to one, so an uncapped
+    /// `read_to_end` sizes the allocation from the attacker's side. The bomb
+    /// here inflates to 256 MiB from a few hundred kilobytes.
+    #[test]
+    fn a_compression_bomb_is_refused_rather_than_inflated() -> Result<(), TestError> {
+        let bomb = zlib(&vec![0_u8; 256 << 20])?;
+        assert!(matches!(
+            inflate(&bomb),
+            Err(MeshDecodeError::InflatedTooLarge {
+                limit: MAX_INFLATED_BLOCK_BYTES,
+            })
+        ));
+        // A block within the limit still inflates.
+        let ordinary = zlib(b"mesh block")?;
+        assert_eq!(inflate(&ordinary).ok(), Some(b"mesh block".to_vec()));
+        Ok(())
+    }
+
+    /// A block whose declared position lies past the largest asset we will hold
+    /// is rejected, so it never reaches the on-disk assembler that would
+    /// zero-fill up to it.
+    #[test]
+    fn a_block_offset_past_the_asset_ceiling_is_not_a_block() {
+        let hostile = Llsd::Map(HashMap::from([
+            ("offset".to_owned(), Llsd::Integer(2_000_000_000)),
+            ("size".to_owned(), Llsd::Integer(10)),
+        ]));
+        assert_eq!(block_ref(Some(&hostile)), None);
+
+        // The size side of the same sum is bounded too.
+        let huge = Llsd::Map(HashMap::from([
+            ("offset".to_owned(), Llsd::Integer(0)),
+            ("size".to_owned(), Llsd::Integer(2_000_000_000)),
+        ]));
+        assert_eq!(block_ref(Some(&huge)), None);
+    }
+
+    /// An ordinary block is unaffected by the ceiling.
+    #[test]
+    fn an_ordinary_block_offset_still_resolves() {
+        let block = Llsd::Map(HashMap::from([
+            ("offset".to_owned(), Llsd::Integer(4096)),
+            ("size".to_owned(), Llsd::Integer(1024)),
+        ]));
+        assert_eq!(
+            block_ref(Some(&block)),
+            Some(BlockRef {
+                offset: 4096,
+                size: 1024,
+            })
+        );
+    }
+
+    /// A triangle naming a vertex the submesh does not have is dropped whole —
+    /// the consumers hand these straight to the renderer.
+    #[test]
+    fn triangles_naming_a_missing_vertex_are_dropped() {
+        // Two triangles over a 3-vertex submesh; the second names vertex 60000.
+        let blob = u16_blob(&[0, 1, 2, 0, 1, 60000]);
+        assert_eq!(decode_indices(&blob, 3), vec![0, 1, 2]);
+        // With enough vertices, both survive.
+        assert_eq!(decode_indices(&blob, 60_001), vec![0, 1, 2, 0, 1, 60000]);
+    }
+
+    /// A *present but negative* version is hostile input, not an absent field:
+    /// folding it to 0 would walk it past the `MAX_MESH_VERSION` guard.
+    #[test]
+    fn a_negative_version_is_refused_not_read_as_zero() {
+        let header = Llsd::Map(HashMap::from([
+            ("version".to_owned(), Llsd::Integer(-1)),
+            (
+                "high_lod".to_owned(),
+                Llsd::Map(HashMap::from([
+                    ("offset".to_owned(), Llsd::Integer(0)),
+                    ("size".to_owned(), Llsd::Integer(10)),
+                ])),
+            ),
+        ]));
+        assert!(parse_header(&header.to_llsd_binary()).is_none());
     }
 
     /// A little-endian `u16` blob from a list of values.

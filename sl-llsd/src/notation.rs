@@ -24,13 +24,19 @@ pub struct Scan<'a> {
     buf: &'a [u8],
     /// The current offset into `buf`.
     pos: usize,
+    /// How many arrays / maps are currently open above this point.
+    depth: usize,
 }
 
 impl<'a> Scan<'a> {
     /// Creates a scanner over `buf`, positioned at its start.
     #[must_use]
     pub const fn new(buf: &'a [u8]) -> Self {
-        Self { buf, pos: 0 }
+        Self {
+            buf,
+            pos: 0,
+            depth: 0,
+        }
     }
 
     /// Returns the byte at the cursor without advancing.
@@ -138,6 +144,20 @@ impl<'a> Scan<'a> {
     /// byte range. Nested maps/arrays and quoted strings are balanced so that
     /// delimiters inside strings are not mistaken for structure.
     pub fn skip_value(&mut self) -> Option<(usize, usize)> {
+        // `[` and `{` below recurse into `skip_value`, so this scanner's depth
+        // is the thread's stack depth. `None` is this scanner's error channel.
+        if self.depth >= crate::MAX_NESTING_DEPTH {
+            return None;
+        }
+        self.depth = self.depth.saturating_add(1);
+        let range = self.skip_value_inner();
+        self.depth = self.depth.saturating_sub(1);
+        range
+    }
+
+    /// The body of [`skip_value`](Self::skip_value), with the depth guard
+    /// already applied.
+    fn skip_value_inner(&mut self) -> Option<(usize, usize)> {
         self.skip_ws_sep();
         let start = self.pos;
         match self.peek()? {
@@ -247,7 +267,11 @@ impl<'a> Scan<'a> {
 /// Returns [`LlsdError::MalformedNotation`] if the stream ends mid-value or a
 /// byte does not begin a valid notation value.
 pub fn parse_llsd_notation(bytes: &[u8]) -> Result<Llsd, LlsdError> {
-    let mut parser = NotationParser { buf: bytes, pos: 0 };
+    let mut parser = NotationParser {
+        buf: bytes,
+        pos: 0,
+        depth: 0,
+    };
     parser.parse_value()
 }
 
@@ -258,6 +282,8 @@ struct NotationParser<'a> {
     buf: &'a [u8],
     /// The current offset into `buf`.
     pos: usize,
+    /// How many arrays / maps are currently open above this point.
+    depth: usize,
 }
 
 impl NotationParser<'_> {
@@ -276,6 +302,28 @@ impl NotationParser<'_> {
         while matches!(self.peek(), Some(b' ' | b'\t' | b'\r' | b'\n' | b',')) {
             self.bump();
         }
+    }
+
+    /// Opens a container, rejecting input that nests past
+    /// [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH).
+    ///
+    /// Checked on the way *in*: this recursion's depth is the thread's stack
+    /// depth, and notation costs a single byte per level, so an unbounded one
+    /// is a cheap remote crash rather than a catchable error.
+    const fn enter(&mut self) -> Result<(), LlsdError> {
+        if self.depth >= crate::MAX_NESTING_DEPTH {
+            return Err(LlsdError::NestingTooDeep {
+                limit: crate::MAX_NESTING_DEPTH,
+            });
+        }
+        self.depth = self.depth.saturating_add(1);
+        Ok(())
+    }
+
+    /// Closes a container opened by [`enter`](Self::enter). Only the success
+    /// path unwinds the counter; an error abandons the whole parse.
+    const fn leave(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
     }
 
     /// Consumes `byte` after leading whitespace, erroring if it is not next.
@@ -331,6 +379,7 @@ impl NotationParser<'_> {
 
     /// Parses a `{ 'key':value, … }` map.
     fn parse_map(&mut self) -> Result<Llsd, LlsdError> {
+        self.enter()?;
         self.expect(b'{')?;
         let mut map = HashMap::new();
         loop {
@@ -351,11 +400,13 @@ impl NotationParser<'_> {
             let value = self.parse_value()?;
             let _prev = map.insert(key, value);
         }
+        self.leave();
         Ok(Llsd::Map(map))
     }
 
     /// Parses a `[ value, … ]` array.
     fn parse_array(&mut self) -> Result<Llsd, LlsdError> {
+        self.enter()?;
         self.expect(b'[')?;
         let mut array = Vec::new();
         loop {
@@ -366,6 +417,7 @@ impl NotationParser<'_> {
             }
             array.push(self.parse_value()?);
         }
+        self.leave();
         Ok(Llsd::Array(array))
     }
 
@@ -624,6 +676,39 @@ mod tests {
     use super::parse_llsd_notation;
     use crate::error::LlsdError;
     use crate::value::Llsd;
+
+    /// Notation costs a **single byte** per nesting level, so an unbounded
+    /// parser is the cheapest remote crash in the crate. 100_000 levels is
+    /// 100 kB of input; without the guard it is a SIGSEGV.
+    #[test]
+    fn nesting_past_the_limit_is_rejected_not_a_stack_overflow() {
+        let bytes = "[".repeat(100_000);
+        assert_eq!(
+            parse_llsd_notation(bytes.as_bytes()),
+            Err(LlsdError::NestingTooDeep {
+                limit: crate::MAX_NESTING_DEPTH,
+            })
+        );
+    }
+
+    /// The scanner recurses through `skip_value` for the same reason, and
+    /// reports the refusal through its own `None` channel.
+    #[test]
+    fn the_scanner_refuses_to_skip_past_the_limit() {
+        let bytes = "[".repeat(100_000);
+        assert_eq!(super::Scan::new(bytes.as_bytes()).skip_value(), None);
+    }
+
+    /// Nesting the protocol actually produces still parses.
+    #[test]
+    fn ordinary_nesting_is_untouched_by_the_limit() {
+        let bytes = format!("{}i7{}", "[".repeat(16), "]".repeat(16));
+        let mut expected = Llsd::Integer(7);
+        for _ in 0..16_u32 {
+            expected = Llsd::Array(vec![expected]);
+        }
+        assert_eq!(parse_llsd_notation(bytes.as_bytes()), Ok(expected));
+    }
 
     /// A boxed error so tests can use `?` instead of the disallowed
     /// `unwrap` / `expect`.

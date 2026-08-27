@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 99 |
-| done | 871 |
+| done | 873 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1484** |
+| **total** | **1486** |
 
 ## ideas (97)
 
@@ -1185,13 +1185,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
   — The legacy-material binary LLSD codec writes Date one way and reads it
   another
-- [`protocol-audit-llsd-recursion-depth-cap`](bugs/protocol-audit-llsd-recursion-depth-cap.md)
-  — LLSD parsers recurse with no depth limit
 - [`protocol-audit-lure-region-handle`](bugs/protocol-audit-lure-region-handle.md)
   — parse_lure_region_handle reads 8 bytes of any UUID and calls it a region
   handle
-- [`protocol-audit-mesh-decode-allocation-caps`](bugs/protocol-audit-mesh-decode-allocation-caps.md)
-  — Mesh decode: unbounded inflate, unbounded header offset, unchecked indices
+- [`protocol-audit-mesh-joint-index-bounds`](bugs/protocol-audit-mesh-joint-index-bounds.md)
+  — A rig's joint indices are never checked against the skin's joint count
 - [`protocol-audit-notecard-fidelity`](bugs/protocol-audit-notecard-fidelity.md)
   — The notecard codec misreads metadata, corrupts on re-encode, and misplaces
   embedded items
@@ -1202,6 +1200,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-reliable-exhaustion-kills-session`](bugs/protocol-audit-reliable-exhaustion-kills-session.md)
   — One exhausted reliable packet of any kind closes the session as
   HandshakeFailed
+- [`protocol-audit-roxmltree-nesting-in-sl-wire`](bugs/protocol-audit-roxmltree-nesting-in-sl-wire.md)
+  — sl-wire's own XML parsing has no nesting guard
 - [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close
@@ -1407,7 +1407,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (871)
+## done (873)
 
 ### protocol
 
@@ -1530,6 +1530,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-8`](done/protocol-8-script-dialogs-permissions.md) — Script dialogs
   & permissions
 - [`protocol-9`](done/protocol-9-mute-list.md) — Mute list
+- [`protocol-audit-llsd-recursion-depth-cap`](done/protocol-audit-llsd-recursion-depth-cap.md)
+  — LLSD parsers recurse with no depth limit
+- [`protocol-audit-mesh-decode-allocation-caps`](done/protocol-audit-mesh-decode-allocation-caps.md)
+  — Mesh decode: unbounded inflate, unbounded header offset, unchecked indices
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

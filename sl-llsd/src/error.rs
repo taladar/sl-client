@@ -74,4 +74,14 @@ pub enum LlsdError {
     /// payload fails cleanly instead of yielding a bogus tree.
     #[error("notation LLSD input was malformed")]
     MalformedNotation,
+    /// An LLSD stream nested arrays / maps deeper than
+    /// [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH). The parsers are
+    /// recursive descent, so nesting depth is stack depth: the limit is
+    /// enforced *before* recursing, because a stack overflow aborts the process
+    /// rather than raising an error this type could carry.
+    #[error("LLSD nested deeper than the {limit}-level limit")]
+    NestingTooDeep {
+        /// The limit that was exceeded.
+        limit: usize,
+    },
 }

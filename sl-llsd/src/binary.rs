@@ -284,12 +284,39 @@ struct Cursor<'a> {
     bytes: &'a [u8],
     /// The offset of the next unread byte.
     pos: usize,
+    /// How many arrays / maps are currently open above this point.
+    depth: usize,
 }
 
 impl<'a> Cursor<'a> {
     /// Wraps `bytes` at offset zero.
     const fn new(bytes: &'a [u8]) -> Self {
-        Self { bytes, pos: 0 }
+        Self {
+            bytes,
+            pos: 0,
+            depth: 0,
+        }
+    }
+
+    /// Opens a container, rejecting input that nests past
+    /// [`MAX_NESTING_DEPTH`](crate::MAX_NESTING_DEPTH).
+    ///
+    /// Checked on the way *in*: this recursion's depth is the thread's stack
+    /// depth, and an overflow cannot be caught and turned into an error.
+    const fn enter(&mut self) -> Result<(), LlsdError> {
+        if self.depth >= crate::MAX_NESTING_DEPTH {
+            return Err(LlsdError::NestingTooDeep {
+                limit: crate::MAX_NESTING_DEPTH,
+            });
+        }
+        self.depth = self.depth.saturating_add(1);
+        Ok(())
+    }
+
+    /// Closes a container opened by [`enter`](Self::enter). Only the success
+    /// path unwinds the counter; an error abandons the whole parse.
+    const fn leave(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
     }
 
     /// The number of bytes consumed so far (the offset of the next unread byte).
@@ -389,18 +416,21 @@ fn parse_value(cursor: &mut Cursor<'_>) -> Result<Llsd, LlsdError> {
 /// Decodes a binary-LLSD array body (the bytes after the `[` marker): a 4-byte
 /// count, exactly that many values, then the mandatory `]` terminator.
 fn parse_array(cursor: &mut Cursor<'_>) -> Result<Llsd, LlsdError> {
+    cursor.enter()?;
     let count = cursor.take_u32()?;
     let mut values = Vec::new();
     for _ in 0..count {
         values.push(parse_value(cursor)?);
     }
     expect_terminator(cursor, MARKER_ARRAY_END, ']')?;
+    cursor.leave();
     Ok(Llsd::Array(values))
 }
 
 /// Decodes a binary-LLSD map body (the bytes after the `{` marker): a 4-byte
 /// count, exactly that many key/value pairs, then the mandatory `}` terminator.
 fn parse_map(cursor: &mut Cursor<'_>) -> Result<Llsd, LlsdError> {
+    cursor.enter()?;
     let count = cursor.take_u32()?;
     let mut map = HashMap::new();
     for _ in 0..count {
@@ -409,6 +439,7 @@ fn parse_map(cursor: &mut Cursor<'_>) -> Result<Llsd, LlsdError> {
         let _previous = map.insert(key, value);
     }
     expect_terminator(cursor, MARKER_MAP_END, '}')?;
+    cursor.leave();
     Ok(Llsd::Map(map))
 }
 
@@ -482,6 +513,38 @@ fn length_to_usize(len: u32) -> Result<usize, LlsdError> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+
+    /// Nesting past the limit is rejected instead of overflowing the stack.
+    ///
+    /// The input here is 100_000 levels deep, which without the guard is a
+    /// SIGSEGV rather than a test failure. With it the parse bails at depth
+    /// [`crate::MAX_NESTING_DEPTH`] without reading the rest, so the test is
+    /// fast however large the input.
+    #[test]
+    fn nesting_past_the_limit_is_rejected_not_a_stack_overflow() {
+        let mut bytes = Vec::new();
+        for _ in 0..100_000_u32 {
+            bytes.push(MARKER_ARRAY_BEGIN);
+            bytes.extend_from_slice(&big_endian::u32_to(1));
+        }
+        assert_eq!(
+            parse_llsd_binary(&bytes),
+            Err(LlsdError::NestingTooDeep {
+                limit: crate::MAX_NESTING_DEPTH,
+            })
+        );
+    }
+
+    /// Nesting the protocol actually produces is unaffected: a mesh header
+    /// nests twice, the deepest CAPS bodies single digits.
+    #[test]
+    fn ordinary_nesting_is_untouched_by_the_limit() {
+        let mut value = Llsd::Integer(7);
+        for _ in 0..16_u32 {
+            value = Llsd::Array(vec![value]);
+        }
+        assert_eq!(parse_llsd_binary(&to_binary(&value)), Ok(value));
+    }
 
     /// Encodes then decodes `value`, asserting the decoded tree equals the
     /// original — the per-variant round-trip the cache relies on.
