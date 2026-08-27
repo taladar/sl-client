@@ -44,8 +44,6 @@ const MAX_RESEND_ATTEMPTS: u32 = 6;
 /// The maximum number of inbound reliable sequence numbers remembered for
 /// duplicate suppression.
 const SEEN_CAPACITY: usize = 4096;
-/// The maximum number of acknowledgements packed into a single `PacketAck`.
-const MAX_ACKS_PER_PACKET: usize = 255;
 /// How long to wait for a `TeleportFinish` before declaring the teleport failed.
 const TELEPORT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for an `AvatarSitResponse` before giving up on a sit

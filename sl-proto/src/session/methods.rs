@@ -5107,8 +5107,14 @@ impl Session {
             // A child circuit never fails the session, but a reliable packet
             // exhausting its budget there is still worth surfacing.
             child_exhausted.extend(child.process_resends(now));
-            if child.timers.ack_flush.is_some_and(|d| now >= d) {
-                child.flush_acks(now)?;
+            // A child's owed acks are its own business: `flush_acks` already
+            // sends every `PacketAck` it can, so the error is informational and
+            // must not abort the tick — that would skip the remaining children
+            // and the dead-child sweep below.
+            if child.timers.ack_flush.is_some_and(|d| now >= d)
+                && let Err(error) = child.flush_acks(now)
+            {
+                tracing::warn!(%addr, %error, "failed to flush owed acks on a child circuit");
             }
             if child.timers.agent_update.is_some_and(|d| now >= d) {
                 child.send_agent_update(controls, body.clone(), head.clone(), &camera, now)?;

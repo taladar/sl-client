@@ -62,7 +62,7 @@ use sl_wire::messages::{
     EstateCovenantReply, EstateCovenantReplyDataBlock, EstateOwnerMessageParamListBlock,
     EventInfoReply, EventInfoReplyAgentDataBlock, EventInfoReplyEventDataBlock, FindAgent,
     FindAgentAgentBlockBlock, FindAgentLocationBlockBlock, LogoutReply, LogoutReplyAgentDataBlock,
-    PacketAck, PlacesReply, PlacesReplyAgentDataBlock, PlacesReplyQueryDataBlock,
+    PlacesReply, PlacesReplyAgentDataBlock, PlacesReplyQueryDataBlock,
     PlacesReplyTransactionDataBlock, StartPingCheck, StartPingCheckPingIDBlock, UUIDGroupNameReply,
     UUIDGroupNameReplyUUIDNameBlockBlock, UUIDNameReply, UUIDNameReplyUUIDNameBlockBlock,
     ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
@@ -134,6 +134,7 @@ use sl_wire::{
 use uuid::Uuid;
 
 use crate::AssetKey;
+use crate::ack_flush::send_ack_packets;
 use crate::appearance::{MAX_FACES, decode_texture_entry};
 use crate::bookkeeping_ids::{
     ImSessionId, LureId, PingId, QueryId, TransactionId, TransferId, XferId,
@@ -300,9 +301,6 @@ const SEEN_CAPACITY: usize = 4096;
 /// `UUIDGroupNameReply`. Smaller than the request batch because each entry also
 /// carries the (variable-length) name strings.
 const UUID_NAMES_PER_REPLY: usize = 40;
-
-/// The maximum number of acknowledgements packed into a single `PacketAck`.
-const MAX_ACKS_PER_PACKET: usize = 255;
 
 /// Computes `now + duration`, saturating at `now` on (impossible) overflow.
 fn deadline(now: Instant, duration: Duration) -> Instant {
@@ -7423,21 +7421,19 @@ impl SimSession {
     }
 
     /// Flushes owed acknowledgements as one or more `PacketAck` messages.
+    ///
+    /// A message that fails to encode does not take the acks batched behind it
+    /// with it — see [`send_ack_packets`] for why every message is sent even
+    /// after one fails, and why the first failure is the one returned.
     fn flush_acks(&mut self, now: Instant) -> Result<(), WireError> {
         self.ack_flush = None;
         if self.pending_acks.is_empty() {
             return Ok(());
         }
         let acks = std::mem::take(&mut self.pending_acks);
-        for chunk in acks.chunks(MAX_ACKS_PER_PACKET) {
-            let packets = chunk
-                .iter()
-                .map(|id| sl_wire::messages::PacketAckPacketsBlock { id: id.get() })
-                .collect();
-            let message = AnyMessage::PacketAck(PacketAck { packets });
-            self.send(&message, Reliability::Unreliable, now)?;
-        }
-        Ok(())
+        send_ack_packets(&acks, |message| {
+            self.send(message, Reliability::Unreliable, now)
+        })
     }
 
     /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
@@ -9076,10 +9072,13 @@ impl SimSession {
         }
         if let Some(at) = self.ack_flush
             && now >= at
+            && let Err(error) = self.flush_acks(now)
         {
-            // A flush failure is a wire-encoding bug, not a runtime condition;
-            // drop the owed acks rather than panicking.
-            let _result = self.flush_acks(now);
+            // A flush failure is a wire-encoding bug, not a runtime condition,
+            // and `flush_acks` has already sent every `PacketAck` it could — so
+            // there is nothing to do here but say so. `handle_timeout` has no
+            // way to report it and must not fail the session over it.
+            tracing::warn!(%error, "failed to flush owed acks to the client");
         }
         if self.process_resends(now) {
             self.close(ServerEvent::Disconnected);

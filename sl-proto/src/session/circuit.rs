@@ -4,11 +4,12 @@ use super::conversions::{
     OutgoingIm, compute_im_session_id, inventory_item_crc, pack_quaternion_to_vec3, with_nul,
 };
 use super::{
-    ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_ACKS_PER_PACKET, MAX_RESEND_ATTEMPTS,
-    RESEND_TIMEOUT, SeenWindow, Timers, UnackedPacket, deadline,
+    ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_RESEND_ATTEMPTS, RESEND_TIMEOUT, SeenWindow,
+    Timers, UnackedPacket, deadline,
 };
 use crate::AssetKey;
 use crate::GroupRoleKey;
+use crate::ack_flush::send_ack_packets;
 use crate::bookkeeping_ids::{InventoryCallbackId, PingId, TransferId, XferId};
 use crate::encode_texture_entry;
 use crate::extra_params::extra_param_message_blocks;
@@ -149,25 +150,25 @@ use sl_wire::messages::{
     ObjectSaleInfoObjectDataBlock, ObjectSelect, ObjectSelectAgentDataBlock,
     ObjectSelectObjectDataBlock, ObjectShape, ObjectShapeAgentDataBlock,
     ObjectShapeObjectDataBlock, OfferCallingCard, OfferCallingCardAgentBlockBlock,
-    OfferCallingCardAgentDataBlock, PacketAck, PacketAckPacketsBlock, ParcelAccessListRequest,
-    ParcelAccessListRequestAgentDataBlock, ParcelAccessListRequestDataBlock,
-    ParcelAccessListUpdate, ParcelAccessListUpdateAgentDataBlock, ParcelAccessListUpdateDataBlock,
-    ParcelAccessListUpdateListBlock, ParcelBuy, ParcelBuyAgentDataBlock, ParcelBuyDataBlock,
-    ParcelBuyParcelDataBlock, ParcelBuyPass, ParcelBuyPassAgentDataBlock,
-    ParcelBuyPassParcelDataBlock, ParcelDeedToGroup, ParcelDeedToGroupAgentDataBlock,
-    ParcelDeedToGroupDataBlock, ParcelDisableObjects, ParcelDisableObjectsAgentDataBlock,
-    ParcelDisableObjectsOwnerIDsBlock, ParcelDisableObjectsParcelDataBlock,
-    ParcelDisableObjectsTaskIDsBlock, ParcelDivide, ParcelDivideAgentDataBlock,
-    ParcelDivideParcelDataBlock, ParcelDwellRequest, ParcelDwellRequestAgentDataBlock,
-    ParcelDwellRequestDataBlock, ParcelInfoRequest, ParcelInfoRequestAgentDataBlock,
-    ParcelInfoRequestDataBlock, ParcelJoin, ParcelJoinAgentDataBlock, ParcelJoinParcelDataBlock,
-    ParcelObjectOwnersRequest, ParcelObjectOwnersRequestAgentDataBlock,
-    ParcelObjectOwnersRequestParcelDataBlock, ParcelPropertiesRequest,
-    ParcelPropertiesRequestAgentDataBlock, ParcelPropertiesRequestParcelDataBlock,
-    ParcelPropertiesUpdate, ParcelPropertiesUpdateAgentDataBlock,
-    ParcelPropertiesUpdateParcelDataBlock, ParcelReclaim, ParcelReclaimAgentDataBlock,
-    ParcelReclaimDataBlock, ParcelRelease, ParcelReleaseAgentDataBlock, ParcelReleaseDataBlock,
-    ParcelReturnObjects, ParcelReturnObjectsAgentDataBlock, ParcelReturnObjectsOwnerIDsBlock,
+    OfferCallingCardAgentDataBlock, ParcelAccessListRequest, ParcelAccessListRequestAgentDataBlock,
+    ParcelAccessListRequestDataBlock, ParcelAccessListUpdate, ParcelAccessListUpdateAgentDataBlock,
+    ParcelAccessListUpdateDataBlock, ParcelAccessListUpdateListBlock, ParcelBuy,
+    ParcelBuyAgentDataBlock, ParcelBuyDataBlock, ParcelBuyParcelDataBlock, ParcelBuyPass,
+    ParcelBuyPassAgentDataBlock, ParcelBuyPassParcelDataBlock, ParcelDeedToGroup,
+    ParcelDeedToGroupAgentDataBlock, ParcelDeedToGroupDataBlock, ParcelDisableObjects,
+    ParcelDisableObjectsAgentDataBlock, ParcelDisableObjectsOwnerIDsBlock,
+    ParcelDisableObjectsParcelDataBlock, ParcelDisableObjectsTaskIDsBlock, ParcelDivide,
+    ParcelDivideAgentDataBlock, ParcelDivideParcelDataBlock, ParcelDwellRequest,
+    ParcelDwellRequestAgentDataBlock, ParcelDwellRequestDataBlock, ParcelInfoRequest,
+    ParcelInfoRequestAgentDataBlock, ParcelInfoRequestDataBlock, ParcelJoin,
+    ParcelJoinAgentDataBlock, ParcelJoinParcelDataBlock, ParcelObjectOwnersRequest,
+    ParcelObjectOwnersRequestAgentDataBlock, ParcelObjectOwnersRequestParcelDataBlock,
+    ParcelPropertiesRequest, ParcelPropertiesRequestAgentDataBlock,
+    ParcelPropertiesRequestParcelDataBlock, ParcelPropertiesUpdate,
+    ParcelPropertiesUpdateAgentDataBlock, ParcelPropertiesUpdateParcelDataBlock, ParcelReclaim,
+    ParcelReclaimAgentDataBlock, ParcelReclaimDataBlock, ParcelRelease,
+    ParcelReleaseAgentDataBlock, ParcelReleaseDataBlock, ParcelReturnObjects,
+    ParcelReturnObjectsAgentDataBlock, ParcelReturnObjectsOwnerIDsBlock,
     ParcelReturnObjectsParcelDataBlock, ParcelReturnObjectsTaskIDsBlock, ParcelSelectObjects,
     ParcelSelectObjectsAgentDataBlock, ParcelSelectObjectsParcelDataBlock,
     ParcelSelectObjectsReturnIDsBlock, PickDelete, PickDeleteAgentDataBlock, PickDeleteDataBlock,
@@ -5938,21 +5939,19 @@ impl Circuit {
     }
 
     /// Flushes owed acknowledgements as one or more `PacketAck` messages.
+    ///
+    /// A message that fails to encode does not take the acks batched behind it
+    /// with it — see [`send_ack_packets`] for why every message is sent even
+    /// after one fails, and why the first failure is the one returned.
     pub(crate) fn flush_acks(&mut self, now: Instant) -> Result<(), WireError> {
         self.timers.ack_flush = None;
         if self.pending_acks.is_empty() {
             return Ok(());
         }
         let acks = std::mem::take(&mut self.pending_acks);
-        for chunk in acks.chunks(MAX_ACKS_PER_PACKET) {
-            let packets = chunk
-                .iter()
-                .map(|id| PacketAckPacketsBlock { id: id.get() })
-                .collect();
-            let message = AnyMessage::PacketAck(PacketAck { packets });
-            self.send(&message, Reliability::Unreliable, now)?;
-        }
-        Ok(())
+        send_ack_packets(&acks, |message| {
+            self.send(message, Reliability::Unreliable, now)
+        })
     }
 
     /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
