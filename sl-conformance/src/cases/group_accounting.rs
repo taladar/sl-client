@@ -37,23 +37,23 @@
 //!   `SendGroupAccounting*` methods exist but are dead code. The OpenSim run
 //!   therefore proves the client *encodes and transmits* all three requests in
 //!   a form a real simulator accepts: it watches the circuit past the
-//!   reliable-retransmit budget via keep-alive pings (an un-acked request would
-//!   exhaust its retransmits and close the circuit, the same
-//!   acceptance-by-absence-of-failure check [`super::throttle_set`] uses) and
-//!   then marks the dataset partial, since no reply data is observable.
+//!   reliable-retransmit budget via keep-alive pings and then asserts that none
+//!   of the three was retransmitted to exhaustion (the same
+//!   acceptance-by-absence-of-failure check [`super::throttle_set`] uses),
+//!   before marking the dataset partial, since no reply data is observable.
 //! - The **reply assertions are the Second Life variant** (deferred with the
 //!   Aditi batch): wait for all three replies, correlate each by its echoed
 //!   request id and group id, and assert the echoed interval parameters.
 
 use std::time::{Duration, Instant, SystemTime};
 
-use sl_client_tokio::{Command, Event, GroupRequestId, Uuid};
+use sl_client_tokio::{Command, Diagnostic, Event, GroupRequestId, Uuid};
 
 use crate::context::{TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{
-    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check_eq, count_metric, is_opensim,
+    self, GroupSource, REGION_TIMEOUT, REPLY_TIMEOUT, check, check_eq, count_metric, is_opensim,
     secs_metric,
 };
 
@@ -80,15 +80,26 @@ const CREATE_SETTLE: Duration = Duration::from_secs(2);
 /// How long to keep observing the circuit after the requests on the OpenSim
 /// path. OpenSim acks but never answers them, so acceptance is the *absence* of
 /// failure: a reliable request the simulator never acked would be retransmitted
-/// to exhaustion (`MAX_RESEND_ATTEMPTS` 6 × `RESEND_TIMEOUT` 1.5 s ≈ 9 s) and
-/// close the root circuit. This window covers that budget with margin.
-const ACCEPT_WINDOW: Duration = Duration::from_secs(15);
+/// to exhaustion and reported as an `ExpectedReplyMissing` diagnostic naming it.
+/// That budget is `MAX_RESEND_ATTEMPTS` (4) attempts at a round-trip-derived
+/// timeout of at most 10 s (five times the 2 s ceiling on the averaged ping), so
+/// 40 s bounds it however slow the circuit is. This window covers that bound
+/// with margin.
+const ACCEPT_WINDOW: Duration = Duration::from_secs(45);
 
 /// Per-ping timeout while spanning the [`ACCEPT_WINDOW`]. The keep-alive ping
 /// fires every 5 s, so a healthy circuit always answers well inside this; a ping
-/// that never arrives (or a `Disconnected`) fails the wait — the un-accepted
-/// signal.
+/// that never arrives (or a `Disconnected`) fails the wait, so a link that dies
+/// under us is never mistaken for accepted requests.
 const PING_WAIT: Duration = Duration::from_secs(20);
+
+/// The wire names of the three requests the case sends, as an
+/// `ExpectedReplyMissing` diagnostic would label them.
+const ACCOUNTING_REQUESTS: [&str; 3] = [
+    "GroupAccountSummaryRequest",
+    "GroupAccountDetailsRequest",
+    "GroupAccountTransactionsRequest",
+];
 
 /// Queries a group's accounting summary, details, and transaction log.
 #[derive(Debug)]
@@ -169,9 +180,8 @@ impl GridTest for GroupAccounting {
             if is_opensim(grid) {
                 // OpenSim never answers any of the three; confirm they were
                 // accepted at the LLUDP layer by keeping the circuit observed
-                // past the reliable-retransmit budget via keep-alive pings. An
-                // un-acked request would tear the circuit down and surface a
-                // `Disconnected` that fails the wait.
+                // past the reliable-retransmit budget via keep-alive pings, then
+                // asserting none of them ran out of retransmissions.
                 let mut last_rtt = None;
                 while start.elapsed() < ACCEPT_WINDOW {
                     let rtt = session
@@ -190,6 +200,32 @@ impl GridTest for GroupAccounting {
                     )
                 })?;
 
+                // Losing an ordinary reliable packet does not fail the session —
+                // it is reported as this diagnostic and the circuit carries on —
+                // so this, not the circuit's survival, is what says the
+                // simulator took the requests.
+                let dropped: Vec<&str> = ACCOUNTING_REQUESTS
+                    .iter()
+                    .copied()
+                    .filter(|name| {
+                        session.diagnostics().iter().any(|diagnostic| {
+                            matches!(
+                                diagnostic,
+                                Diagnostic::ExpectedReplyMissing { request, .. }
+                                    if request == name
+                            )
+                        })
+                    })
+                    .collect();
+                check(
+                    dropped.is_empty(),
+                    &format!(
+                        "accounting requests retransmitted to exhaustion (never acked by the \
+                         simulator): {}",
+                        dropped.join(", ")
+                    ),
+                )?;
+
                 let metrics = ctx.metrics();
                 metrics.set("group_source", group.source.label());
                 if let Some(create_rtt) = group.create_rtt {
@@ -200,7 +236,7 @@ impl GridTest for GroupAccounting {
                 metrics.set_timing(&secs_metric("ping_rtt"), rtt.as_secs_f64());
                 ctx.mark_partial(
                     "OpenSim has no group-accounting backend: the summary/details/transactions \
-                     requests are accepted (acked, the circuit stays healthy past the \
+                     requests are accepted (acked, none retransmitted to exhaustion past the \
                      reliable-retransmit budget) but never answered; the reply assertions are \
                      the Second Life variant",
                 );

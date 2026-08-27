@@ -853,7 +853,11 @@ pub enum DisconnectReason {
     },
     /// No traffic was received within the inactivity budget.
     Timeout,
-    /// A reliable handshake packet exhausted its retransmissions.
+    /// One of the reliable packets that establish the agent on a circuit —
+    /// `UseCircuitCode`, `CompleteAgentMovement`, or `RegionHandshakeReply` —
+    /// exhausted its retransmissions, so the simulator never admitted the agent.
+    /// Losing any *other* reliable packet costs that one action and leaves the
+    /// session running.
     HandshakeFailed,
     /// An unrecoverable wire-protocol error occurred.
     ProtocolError,

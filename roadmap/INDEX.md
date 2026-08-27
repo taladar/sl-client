@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 97 |
-| done | 876 |
+| bugs | 96 |
+| done | 877 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (97)
+## bugs (96)
 
 ### protocol
 
@@ -1195,9 +1195,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — OldestUnacked uses numeric min instead of wrapping-oldest
 - [`protocol-audit-region-handshake-mid-session`](bugs/protocol-audit-region-handshake-mid-session.md)
   — A root RegionHandshake outside AwaitingHandshake is silently dropped
-- [`protocol-audit-reliable-exhaustion-kills-session`](bugs/protocol-audit-reliable-exhaustion-kills-session.md)
-  — One exhausted reliable packet of any kind closes the session as
-  HandshakeFailed
 - [`protocol-audit-roxmltree-nesting-in-sl-wire`](bugs/protocol-audit-roxmltree-nesting-in-sl-wire.md)
   — sl-wire's own XML parsing has no nesting guard
 - [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
@@ -1403,7 +1400,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (876)
+## done (877)
 
 ### protocol
 
@@ -1532,6 +1529,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — LLSD parsers recurse with no depth limit
 - [`protocol-audit-mesh-decode-allocation-caps`](done/protocol-audit-mesh-decode-allocation-caps.md)
   — Mesh decode: unbounded inflate, unbounded header offset, unchecked indices
+- [`protocol-audit-reliable-exhaustion-kills-session`](done/protocol-audit-reliable-exhaustion-kills-session.md)
+  — One exhausted reliable packet of any kind closes the session as
+  HandshakeFailed
 - [`protocol-lsl-syntax`](done/protocol-lsl-syntax.md) — LSLSyntax capability —
   fetch, cache and decode the grid's language definition
 - [`protocol-sim-caps-agent-comms`](done/protocol-sim-caps-agent-comms.md) —

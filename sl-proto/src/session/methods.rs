@@ -43,11 +43,11 @@ use super::{
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, Inventory, InventoryOwner,
     LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT, MessageCursor,
-    PING_INTERVAL, PendingHandover, PendingInvite, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
-    ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
-    SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase,
-    TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo, XferDownload,
-    XferPurpose, XferUpload, deadline, merge_deadline,
+    PING_INTERVAL, PendingHandover, PendingInvite, ReliableSeverity, SIT_TIMEOUT, ScriptGrant,
+    ScriptHolder, ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session,
+    SessionMessage, SessionState, SitState, TELEPORT_TIMEOUT, TYPING_TIMEOUT, TakenControls,
+    TeleportPhase, TextureDownload, TransferDownload, TransferPurpose, VoiceChannelInfo,
+    XferDownload, XferPurpose, XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -5011,22 +5011,30 @@ impl Session {
             return Ok(());
         }
 
+        // A reliable packet that runs out of retransmissions is surfaced, but
+        // only the ones that establish the session on the circuit are fatal: a
+        // lost `ObjectSelect` or chat line costs that one action, and the dead
+        // link it might hint at is the inactivity timeout's job to declare.
         let exhausted = self
             .circuit
             .as_mut()
             .map_or_else(Vec::new, |c| c.process_resends(now));
-        if !exhausted.is_empty() {
-            for (sequence, name) in exhausted {
-                tracing::warn!(
-                    sequence = sequence.get(),
-                    message = name.unwrap_or("?"),
-                    "reliable packet exhausted its retransmission budget"
-                );
-                self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
-                    request: name.map_or_else(|| "reliable packet".to_owned(), str::to_owned),
-                    sequence: Some(sequence),
-                });
-            }
+        let mut handshake_lost = false;
+        for packet in exhausted {
+            tracing::warn!(
+                sequence = packet.sequence.get(),
+                message = packet.name.unwrap_or("?"),
+                "reliable packet exhausted its retransmission budget"
+            );
+            self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
+                request: packet
+                    .name
+                    .map_or_else(|| "reliable packet".to_owned(), str::to_owned),
+                sequence: Some(packet.sequence),
+            });
+            handshake_lost |= matches!(packet.severity, ReliableSeverity::SessionCritical);
+        }
+        if handshake_lost {
             self.close(DisconnectReason::HandshakeFailed);
             return Ok(());
         }
@@ -5129,15 +5137,17 @@ impl Session {
                 child.timers.ping = Some(deadline(now, PING_INTERVAL));
             }
         }
-        for (sequence, name) in child_exhausted {
+        for packet in child_exhausted {
             tracing::warn!(
-                sequence = sequence.get(),
-                message = name.unwrap_or("?"),
+                sequence = packet.sequence.get(),
+                message = packet.name.unwrap_or("?"),
                 "reliable packet on a child circuit exhausted its retransmission budget"
             );
             self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
-                request: name.map_or_else(|| "reliable packet".to_owned(), str::to_owned),
-                sequence: Some(sequence),
+                request: packet
+                    .name
+                    .map_or_else(|| "reliable packet".to_owned(), str::to_owned),
+                sequence: Some(packet.sequence),
             });
         }
         for addr in dead {
@@ -12824,9 +12834,16 @@ impl Session {
     /// The next datagram to transmit, if any: the root circuit's queue first,
     /// then each child circuit's, so the driver can multiplex all circuits onto
     /// one socket using [`Transmit::destination`].
+    ///
+    /// Taking a datagram is also what starts the retransmission clock of the
+    /// reliable packet it carries: until the driver collects it the datagram has
+    /// not left the host, and waiting on a backed-up driver must not be counted
+    /// against the simulator as silence. A driver that stops calling this
+    /// therefore stops retransmitting rather than retransmitting into its own
+    /// backlog.
     pub fn poll_transmit(&mut self) -> Option<Transmit> {
         if let Some(circuit) = self.circuit.as_mut()
-            && let Some(payload) = circuit.out.pop_front()
+            && let Some(payload) = circuit.pop_outbound()
         {
             return Some(Transmit {
                 destination: circuit.sim_addr,
@@ -12834,7 +12851,7 @@ impl Session {
             });
         }
         for circuit in self.children.values_mut() {
-            if let Some(payload) = circuit.out.pop_front() {
+            if let Some(payload) = circuit.pop_outbound() {
                 return Some(Transmit {
                     destination: circuit.sim_addr,
                     payload,

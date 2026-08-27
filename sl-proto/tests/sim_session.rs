@@ -4172,8 +4172,10 @@ mod test {
         );
 
         // Past the resend timeout the client re-emits the same sequence,
-        // now carrying the RESENT flag.
-        let later = after(now, 1_600)?;
+        // now carrying the RESENT flag. The timeout follows the circuit's
+        // averaged round trip (five times it, floored at a second), so this
+        // clears even the untested-circuit default of one second.
+        let later = after(now, 5_600)?;
         client.handle_timeout(later);
         let mut resent_payload = None;
         while let Some(transmit) = client.poll_transmit() {

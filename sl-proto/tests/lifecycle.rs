@@ -124,11 +124,11 @@ mod test {
         ObjectUpdateCompressedRegionDataBlock, ObjectUpdateObjectDataBlock,
         ObjectUpdateRegionDataBlock, OfferCallingCard, OfferCallingCardAgentBlockBlock,
         OfferCallingCardAgentDataBlock, OfflineNotification, OfflineNotificationAgentBlockBlock,
-        OnlineNotification, OnlineNotificationAgentBlockBlock, ParcelAccessListReply,
-        ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock, ParcelDwellReply,
-        ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock, ParcelInfoReply,
-        ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock, ParcelMediaCommandMessage,
-        ParcelMediaCommandMessageCommandBlockBlock, ParcelMediaUpdate,
+        OnlineNotification, OnlineNotificationAgentBlockBlock, PacketAck, PacketAckPacketsBlock,
+        ParcelAccessListReply, ParcelAccessListReplyDataBlock, ParcelAccessListReplyListBlock,
+        ParcelDwellReply, ParcelDwellReplyAgentDataBlock, ParcelDwellReplyDataBlock,
+        ParcelInfoReply, ParcelInfoReplyAgentDataBlock, ParcelInfoReplyDataBlock,
+        ParcelMediaCommandMessage, ParcelMediaCommandMessageCommandBlockBlock, ParcelMediaUpdate,
         ParcelMediaUpdateDataBlockBlock, ParcelMediaUpdateDataBlockExtendedBlock,
         ParcelObjectOwnersReply, ParcelObjectOwnersReplyDataBlock, ParcelProperties,
         ParcelPropertiesAgeVerificationBlockBlock, ParcelPropertiesParcelDataBlock,
@@ -257,6 +257,53 @@ mod test {
             out.push(decode(&transmit)?);
         }
         Ok(out)
+    }
+
+    /// Acknowledges every outgoing sequence number up to and including `last`,
+    /// the way the simulator does once it has taken delivery of the session's
+    /// bootstrap packets — leaving only whatever was sent afterwards
+    /// outstanding. `inbound` is the sequence number the `PacketAck` arrives on.
+    fn ack_sequences_through(
+        session: &mut Session,
+        now: Instant,
+        inbound: u32,
+        last: u32,
+    ) -> Result<(), TestError> {
+        let packets = (0..=last).map(|id| PacketAckPacketsBlock { id }).collect();
+        let ack = AnyMessage::PacketAck(PacketAck { packets });
+        let datagram = server_message(&ack, inbound, false)?;
+        session.handle_datagram(sim_addr(), &datagram, now)?;
+        Ok(())
+    }
+
+    /// Says `text` and hands every queued datagram to the (test) driver,
+    /// returning the outgoing sequence number the chat went out with.
+    fn say_and_transmit(session: &mut Session, text: &str, now: Instant) -> Result<u32, TestError> {
+        session.say(text, ChatType::Normal, ChatChannel(0), now)?;
+        let mut sequence = None;
+        while let Some(transmit) = session.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            if matches!(decode(&transmit)?, AnyMessage::ChatFromViewer(_)) {
+                sequence = Some(parsed.sequence.get());
+            }
+        }
+        sequence.ok_or_else(|| "expected a ChatFromViewer datagram".into())
+    }
+
+    /// Drains all queued transmissions, returning the retransmitted (`RESENT`)
+    /// ones that decode to a `ChatFromViewer`.
+    fn drain_resent_chat(session: &mut Session) -> Result<Vec<AnyMessage>, TestError> {
+        let mut resent = Vec::new();
+        while let Some(transmit) = session.poll_transmit() {
+            let parsed = parse_datagram(&transmit.payload)?;
+            let message = decode(&transmit)?;
+            if parsed.flags.contains(PacketFlags::RESENT)
+                && matches!(message, AnyMessage::ChatFromViewer(_))
+            {
+                resent.push(message);
+            }
+        }
+        Ok(resent)
     }
 
     /// Drains all queued events.
@@ -582,17 +629,27 @@ mod test {
 
         // Nothing is ever acked: drive the resend clock until the reliable
         // handshake packets exhaust their retransmission budget and the session
-        // gives up on the circuit.
+        // gives up on the circuit. Each retransmission is drained the way a
+        // driver would — a datagram still sitting in the outbound queue has not
+        // started its retransmission clock.
         for _ in 0..16 {
             if session.is_closed() {
                 break;
             }
             let next = session.poll_timeout().ok_or("a timeout is scheduled")?;
             session.handle_timeout(next);
+            drain(&mut session)?;
         }
         assert!(
             session.is_closed(),
             "the session should give up after exhausting its resends"
+        );
+        assert!(
+            drain_events(&mut session).iter().any(|event| matches!(
+                event,
+                Event::Disconnected(DisconnectReason::HandshakeFailed)
+            )),
+            "losing a session-critical packet fails the session as HandshakeFailed"
         );
 
         let diagnostics = drain_diagnostics(&mut session);
@@ -620,11 +677,133 @@ mod test {
             }
             let next = session.poll_timeout().ok_or("a timeout is scheduled")?;
             session.handle_timeout(next);
+            drain(&mut session)?;
         }
         assert!(session.is_closed());
         assert!(
             drain_diagnostics(&mut session).is_empty(),
             "diagnostics must stay off the normal path when not enabled"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn exhausted_best_effort_resend_keeps_the_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        session.set_diagnostics(true);
+        // Settle the bootstrap packets — those *are* session-critical, and the
+        // point of this test is what happens to an ordinary one. A second chat
+        // is then the only thing left outstanding.
+        let settled = say_and_transmit(&mut session, "delivered", now)?;
+        ack_sequences_through(&mut session, now, 2, settled)?;
+        say_and_transmit(&mut session, "into the void", now)?;
+        drain_diagnostics(&mut session);
+
+        // The simulator never acknowledges the chat. It is retransmitted until
+        // its budget runs out and then reported — but a lost chat line is one
+        // lost action, not a dead session, so the session keeps running.
+        let mut reported = false;
+        for _ in 0..32 {
+            let next = session.poll_timeout().ok_or("a timeout is scheduled")?;
+            session.handle_timeout(next);
+            drain(&mut session)?;
+            reported |= drain_diagnostics(&mut session).iter().any(|d| {
+                matches!(
+                    d,
+                    Diagnostic::ExpectedReplyMissing { request, sequence: Some(_) }
+                        if request == "ChatFromViewer"
+                )
+            });
+            if reported {
+                break;
+            }
+        }
+        assert!(reported, "the lost chat should be surfaced as a diagnostic");
+        assert!(
+            !session.is_closed(),
+            "one exhausted chat message must not fail the session"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn queued_datagram_does_not_start_its_retransmission_clock() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let settled = say_and_transmit(&mut session, "delivered", now)?;
+        ack_sequences_through(&mut session, now, 2, settled)?;
+
+        // The chat is queued but never collected: a driver that falls behind
+        // has not put it on the wire, so none of this counts as silence from
+        // the simulator and nothing is retransmitted.
+        session.say("still queued", ChatType::Normal, ChatChannel(0), now)?;
+        let mut stalled = now;
+        for _ in 0..12 {
+            stalled = after(stalled, 1_000)?;
+            session.handle_timeout(stalled);
+        }
+        assert!(
+            drain_resent_chat(&mut session)?.is_empty(),
+            "a datagram still in the outbound queue is never retransmitted"
+        );
+
+        // The drain above is what handed it to the driver, so its clock starts
+        // there and a second later it is still not due. (The stall also left the
+        // keep-alive pings unanswered, which has already attacked the averaged
+        // round trip to its two-second ceiling — so "due" here means the ten
+        // seconds that ceiling implies.)
+        session.handle_timeout(after(stalled, 1_000)?);
+        assert!(
+            drain_resent_chat(&mut session)?.is_empty(),
+            "the retransmission clock starts at transmission, not at enqueue"
+        );
+        session.handle_timeout(after(stalled, 10_500)?);
+        assert_eq!(
+            drain_resent_chat(&mut session)?.len(),
+            1,
+            "past the timeout the transmitted chat is retransmitted"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn retransmission_timeout_follows_the_measured_round_trip() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        let settled = say_and_transmit(&mut session, "delivered", now)?;
+        ack_sequences_through(&mut session, now, 2, settled)?;
+
+        // The keep-alive ping goes out on the 5 s cadence and the simulator
+        // takes two full seconds to answer it. The round-trip average attacks
+        // straight to that (it only *decays* slowly), so the retransmission
+        // timeout widens from the untested circuit's five seconds to ten.
+        let ping_at = after(now, 5_000)?;
+        session.handle_timeout(ping_at);
+        let ping_id = drain(&mut session)?
+            .into_iter()
+            .find_map(|message| match message {
+                AnyMessage::StartPingCheck(ping) => Some(ping.ping_id.ping_id),
+                _other => None,
+            })
+            .ok_or("expected a keep-alive StartPingCheck")?;
+        let answered_at = after(now, 7_000)?;
+        let complete = server_datagram(MessageId::High(2), &[ping_id], 3, false);
+        session.handle_datagram(sim_addr(), &complete, answered_at)?;
+
+        say_and_transmit(&mut session, "measure me", answered_at)?;
+        // Six seconds on — past the five an unmeasured circuit would have
+        // waited — the widened timeout has not elapsed yet.
+        session.handle_timeout(after(answered_at, 6_000)?);
+        assert!(
+            drain_resent_chat(&mut session)?.is_empty(),
+            "a slow measured circuit waits longer before retransmitting"
+        );
+        session.handle_timeout(after(answered_at, 10_500)?);
+        assert_eq!(
+            drain_resent_chat(&mut session)?.len(),
+            1,
+            "past the widened timeout the chat is retransmitted"
         );
         Ok(())
     }

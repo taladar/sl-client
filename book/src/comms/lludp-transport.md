@@ -50,13 +50,26 @@ Each [circuit](circuits.md) keeps an outgoing sequence counter, starting at 1
 and incrementing per packet. Reliability is opt-in per packet:
 
 - A packet sent with `RELIABLE` is held in an "unacknowledged" table keyed by
-  its sequence number. If it is not acknowledged within the resend timeout
-  (**1500 ms** in this implementation), it is resent with the `RESENT` flag set,
-  up to a maximum number of attempts (**6**). Exhausting the attempts during the
-  handshake is fatal to the session; in every case the exhausted packet is
-  reported as an `ExpectedReplyMissing` [diagnostic](sessions.md#diagnostics)
-  labelled with the message name, so a reply that never came is visible rather
-  than silent.
+  its sequence number. If it is not acknowledged within the resend timeout, it
+  is resent with the `RESENT` flag set, up to a maximum number of attempts
+  (**4**: the first transmission plus three retries, as in the reference
+  viewer). The timeout follows the circuit rather than being a fixed number:
+  it is **five times** the circuit's averaged round-trip time, floored at
+  **1 s** and — because the average itself is clamped to 2 s — capped at 10 s.
+  The average is measured from the keep-alive pings with the reference viewer's
+  fast-attack / slow-decay relaxation, so a link that slows down (or stops
+  answering pings at all) widens the timeout instead of piling retransmissions
+  onto it. The clock starts when the datagram is actually handed to the driver,
+  not when it is queued, so a driver that falls behind does not make its own
+  backlog look like packet loss.
+- Exhausting the attempts is fatal only for the packets that establish the
+  session on the circuit — `UseCircuitCode`, `CompleteAgentMovement`, and
+  `RegionHandshakeReply` — which fail the session as `HandshakeFailed`. Losing
+  any other reliable packet costs that one action and leaves the session
+  running; a dead link is declared by the inactivity timeout, not by one lost
+  message. In every case the exhausted packet is reported as an
+  `ExpectedReplyMissing` [diagnostic](sessions.md#diagnostics) labelled with the
+  message name, so a reply that never came is visible rather than silent.
 - The receiver acknowledges a reliable packet in one of two ways: by appending
   its sequence number to some other outgoing datagram (the `ACK` flag), or — for
   batches — by sending an explicit `PacketAck` message. Appended acks are the
@@ -116,7 +129,8 @@ When a value comes out wrong by byte-swap, this is almost always the cause.
 >   [diagnostic](sessions.md#diagnostics) records as the failure offset when a
 >   datagram cannot be parsed.
 > - The reliability bookkeeping (the unacked table, seen-window, ack queue)
->   lives per-circuit in `sl-proto/src/session/circuit.rs`; the `RESEND_TIMEOUT`
->   (1500 ms) and `MAX_RESEND_ATTEMPTS` (6) constants are in
->   `sl-proto/src/session.rs`.
+>   lives per-circuit in `sl-proto/src/session/circuit.rs` (`Circuit::send`,
+>   `process_resends`, `resend_timeout`); the `MINIMUM_RESEND_TIMEOUT`,
+>   `RELIABLE_TIMEOUT_FACTOR`, `MAX_RESEND_ATTEMPTS` and ping-average constants
+>   are in `sl-proto/src/session.rs`.
 > - `PacketAck` is a generated message (see [Messages](messages.md)).

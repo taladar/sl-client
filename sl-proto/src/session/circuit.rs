@@ -4,7 +4,9 @@ use super::conversions::{
     OutgoingIm, compute_im_session_id, inventory_item_crc, pack_quaternion_to_vec3, with_nul,
 };
 use super::{
-    ACK_FLUSH_DELAY, Circuit, INACTIVITY_TIMEOUT, MAX_RESEND_ATTEMPTS, RESEND_TIMEOUT, SeenWindow,
+    ACK_FLUSH_DELAY, Circuit, ExhaustedPacket, INACTIVITY_TIMEOUT, INITIAL_PING_AVERAGE,
+    MAX_RESEND_ATTEMPTS, MINIMUM_RESEND_TIMEOUT, Outbound, PING_AVERAGE_ALPHA, PING_AVERAGE_DECAY,
+    PING_AVERAGE_MAX, PING_AVERAGE_MIN, RELIABLE_TIMEOUT_FACTOR, ReliableSeverity, SeenWindow,
     Timers, UnackedPacket, deadline,
 };
 use crate::AssetKey;
@@ -330,6 +332,24 @@ const fn surface_coord(coord: [f32; 2]) -> Vector {
     }
 }
 
+/// What losing `message` for good costs the session.
+///
+/// Only the three packets that establish the agent's presence on a circuit —
+/// the circuit code, the movement completion, and the region-handshake reply —
+/// are session-critical: without them the simulator never admits the agent, so
+/// there is nothing left to keep the session open for. Everything else is one
+/// lost action on a live session, which the reference viewer likewise reports
+/// through the packet's failure callback rather than by tearing the circuit
+/// down.
+const fn severity_of(message: &AnyMessage) -> ReliableSeverity {
+    match *message {
+        AnyMessage::UseCircuitCode(_)
+        | AnyMessage::CompleteAgentMovement(_)
+        | AnyMessage::RegionHandshakeReply(_) => ReliableSeverity::SessionCritical,
+        _ => ReliableSeverity::BestEffort,
+    }
+}
+
 impl Circuit {
     /// Creates a circuit and arms the inactivity timer. `id` is the freshly
     /// minted [`CircuitId`] for this circuit instance, used to scope the
@@ -353,6 +373,7 @@ impl Circuit {
             pause_serial_num: 0,
             next_ping_id: PingId::default(),
             outstanding_ping: None,
+            ping_average: INITIAL_PING_AVERAGE,
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
@@ -396,19 +417,63 @@ impl Circuit {
         };
         let datagram = encode_datagram(flags, sequence, &body);
 
-        if matches!(reliability, Reliability::Reliable) {
+        let tracked = if matches!(reliability, Reliability::Reliable) {
             self.unacked.insert(
                 sequence,
                 UnackedPacket {
                     datagram: datagram.clone(),
                     sent_at: now,
+                    queued: true,
                     attempts: 1,
                     name: sl_wire::message_name(message.id()),
+                    severity: severity_of(message),
                 },
             );
-        }
-        self.out.push_back(datagram);
+            Some(sequence)
+        } else {
+            None
+        };
+        self.out.push_back(Outbound {
+            sequence: tracked,
+            payload: datagram,
+        });
         Ok(())
+    }
+
+    /// Pops the next datagram to hand to the driver, starting the
+    /// retransmission clock of the reliable packet it carries: until now that
+    /// packet was only *queued*, and time spent in the queue must not count
+    /// against its timeout (see [`UnackedPacket::sent_at`]).
+    pub(crate) fn pop_outbound(&mut self) -> Option<Vec<u8>> {
+        let outbound = self.out.pop_front()?;
+        if let Some(sequence) = outbound.sequence
+            && let Some(packet) = self.unacked.get_mut(&sequence)
+        {
+            packet.queued = false;
+        }
+        Some(outbound.payload)
+    }
+
+    /// The retransmission timeout for this circuit: the reference viewer's
+    /// `LL_RELIABLE_TIMEOUT_FACTOR` multiple of the averaged round-trip time,
+    /// floored at [`MINIMUM_RESEND_TIMEOUT`].
+    fn resend_timeout(&self) -> Duration {
+        self.ping_average
+            .mul_f32(RELIABLE_TIMEOUT_FACTOR)
+            .max(MINIMUM_RESEND_TIMEOUT)
+    }
+
+    /// Folds a round-trip `sample` into the circuit's ping average with the
+    /// reference viewer's fast-attack / slow-decay relaxation
+    /// (`LLCircuitData::setPingDelay`): the average first jumps to any worse
+    /// sample, then relaxes toward it, and the result is clamped to
+    /// `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`.
+    fn record_ping_sample(&mut self, sample: Duration) {
+        let attacked = self.ping_average.max(sample);
+        self.ping_average = attacked
+            .mul_f32(PING_AVERAGE_DECAY)
+            .saturating_add(sample.mul_f32(PING_AVERAGE_ALPHA))
+            .clamp(PING_AVERAGE_MIN, PING_AVERAGE_MAX);
     }
 
     /// Queues `UseCircuitCode` reliably.
@@ -496,6 +561,16 @@ impl Circuit {
     /// sequence number in `OldestUnacked`, letting the simulator drop its own
     /// record of anything older. Returns the ping id sent.
     pub(crate) fn send_start_ping_check(&mut self, now: Instant) -> Result<PingId, WireError> {
+        // A ping still outstanding when the next one is due is itself evidence
+        // about the link: the round trip is at least the time it has been in
+        // flight. Folding that in is this circuit's form of the reference
+        // viewer's `getPingInTransitTime`, which inflates the averaged ping
+        // while pings go unanswered — so a simulator that has stopped replying
+        // stretches the retransmission timeout instead of drawing ever more
+        // retransmissions onto an already struggling link.
+        if let Some((_, sent_at)) = self.outstanding_ping {
+            self.record_ping_sample(now.saturating_duration_since(sent_at));
+        }
         let ping_id = self.next_ping_id;
         self.next_ping_id = self.next_ping_id.wrapping_next();
         let oldest_unacked = self
@@ -525,7 +600,9 @@ impl Circuit {
         match self.outstanding_ping {
             Some((outstanding, sent_at)) if outstanding == ping_id => {
                 self.outstanding_ping = None;
-                Some(now.saturating_duration_since(sent_at))
+                let round_trip = now.saturating_duration_since(sent_at);
+                self.record_ping_sample(round_trip);
+                Some(round_trip)
             }
             _ => None,
         }
@@ -5956,22 +6033,34 @@ impl Circuit {
 
     /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
     ///
-    /// Returns the `(sequence, message name)` of every packet that has now
-    /// exhausted its retransmission budget; such packets are dropped from the
-    /// unacked set (so they are reported only once and stop driving the resend
-    /// deadline). An empty result means nothing exhausted this tick.
-    pub(crate) fn process_resends(
-        &mut self,
-        now: Instant,
-    ) -> Vec<(SequenceNumber, Option<&'static str>)> {
+    /// The timeout tracks the circuit's measured round trip
+    /// ([`Self::resend_timeout`]), and a datagram still waiting in the outbound
+    /// queue has its clock held at `now` rather than counting the wait as
+    /// silence from the simulator — so a driver that falls behind does not turn
+    /// its own backlog into a burst of retransmissions.
+    ///
+    /// Returns every packet that has now exhausted its retransmission budget;
+    /// such packets are dropped from the unacked set (so they are reported only
+    /// once and stop driving the resend deadline). An empty result means nothing
+    /// exhausted this tick.
+    pub(crate) fn process_resends(&mut self, now: Instant) -> Vec<ExhaustedPacket> {
+        let timeout = self.resend_timeout();
         let mut exhausted = Vec::new();
         let mut to_send = Vec::new();
         for (sequence, packet) in &mut self.unacked {
-            if now < deadline(packet.sent_at, RESEND_TIMEOUT) {
+            if packet.queued {
+                packet.sent_at = now;
+                continue;
+            }
+            if now < deadline(packet.sent_at, timeout) {
                 continue;
             }
             if packet.attempts >= MAX_RESEND_ATTEMPTS {
-                exhausted.push((*sequence, packet.name));
+                exhausted.push(ExhaustedPacket {
+                    sequence: *sequence,
+                    name: packet.name,
+                    severity: packet.severity,
+                });
                 continue;
             }
             let mut datagram = packet.datagram.clone();
@@ -5979,21 +6068,29 @@ impl Circuit {
                 *first |= PacketFlags::RESENT.bits();
             }
             packet.sent_at = now;
+            packet.queued = true;
             packet.attempts = packet.attempts.saturating_add(1);
-            to_send.push(datagram);
+            to_send.push(Outbound {
+                sequence: Some(*sequence),
+                payload: datagram,
+            });
         }
         self.out.extend(to_send);
-        for (sequence, _) in &exhausted {
-            self.unacked.remove(sequence);
+        for packet in &exhausted {
+            self.unacked.remove(&packet.sequence);
         }
         exhausted
     }
 
-    /// The earliest retransmission deadline across all unacked packets.
+    /// The earliest retransmission deadline across all unacked packets. A packet
+    /// whose datagram is still queued has not started its clock, so it does not
+    /// contribute a deadline — its wake-up comes from the transmission itself.
     pub(crate) fn next_resend_deadline(&self) -> Option<Instant> {
+        let timeout = self.resend_timeout();
         self.unacked
             .values()
-            .map(|packet| deadline(packet.sent_at, RESEND_TIMEOUT))
+            .filter(|packet| !packet.queued)
+            .map(|packet| deadline(packet.sent_at, timeout))
             .min()
     }
 }

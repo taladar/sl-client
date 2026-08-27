@@ -37,10 +37,37 @@ const ACK_FLUSH_DELAY: Duration = Duration::from_millis(150);
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(45);
 /// How long to wait for a `LogoutReply` before giving up on a clean logout.
 const LOGOUT_TIMEOUT: Duration = Duration::from_secs(5);
-/// The retransmission timeout for an unacknowledged reliable packet.
-const RESEND_TIMEOUT: Duration = Duration::from_millis(1500);
-/// The maximum number of times a reliable packet is sent before giving up.
-const MAX_RESEND_ATTEMPTS: u32 = 6;
+/// The floor on the retransmission timeout for an unacknowledged reliable
+/// packet, however fast the circuit's round trip is. Mirrors the reference
+/// viewer's `LL_MINIMUM_RELIABLE_TIMEOUT_SECONDS`.
+const MINIMUM_RESEND_TIMEOUT: Duration = Duration::from_secs(1);
+/// The multiple of the circuit's averaged round-trip time used as the
+/// retransmission timeout (the reference viewer's
+/// `LL_RELIABLE_TIMEOUT_FACTOR`), floored at [`MINIMUM_RESEND_TIMEOUT`].
+const RELIABLE_TIMEOUT_FACTOR: f32 = 5.0;
+/// The weight a fresh round-trip sample carries in the circuit's ping average
+/// (the reference viewer's `LL_AVERAGED_PING_ALPHA`).
+const PING_AVERAGE_ALPHA: f32 = 0.2;
+/// The weight the previous ping average keeps when a fresh sample arrives —
+/// `1.0 - PING_AVERAGE_ALPHA`, spelled out so the update is literal-only
+/// arithmetic.
+const PING_AVERAGE_DECAY: f32 = 0.8;
+/// The floor the circuit's averaged round-trip time is clamped to (the
+/// reference viewer's `LL_AVERAGED_PING_MIN`), keeping a very fast link from
+/// driving the retransmission timeout below what a briefly busy simulator
+/// needs.
+const PING_AVERAGE_MIN: Duration = Duration::from_millis(100);
+/// The ceiling the circuit's averaged round-trip time is clamped to (the
+/// reference viewer's `LL_AVERAGED_PING_MAX`), bounding the retransmission
+/// timeout at `RELIABLE_TIMEOUT_FACTOR` times this.
+const PING_AVERAGE_MAX: Duration = Duration::from_millis(2000);
+/// The circuit's assumed round-trip time before any keep-alive ping has been
+/// answered (the reference viewer's `INITIAL_PING_VALUE_MSEC`).
+const INITIAL_PING_AVERAGE: Duration = Duration::from_millis(1000);
+/// The maximum number of times a reliable packet is sent before giving up: the
+/// first transmission plus the reference viewer's
+/// `LL_DEFAULT_RELIABLE_RETRIES` retries.
+const MAX_RESEND_ATTEMPTS: u32 = 4;
 /// The maximum number of inbound reliable sequence numbers remembered for
 /// duplicate suppression.
 const SEEN_CAPACITY: usize = 4096;
@@ -706,13 +733,66 @@ fn merge_deadline(earliest: &mut Option<Instant>, candidate: Option<Instant>) {
     }
 }
 
+/// What losing a reliable packet for good costs the session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReliableSeverity {
+    /// The packet establishes the session itself (`UseCircuitCode`,
+    /// `CompleteAgentMovement`, `RegionHandshakeReply`): without it the
+    /// simulator never admits the agent, so exhausting its retransmissions
+    /// fails the session with [`DisconnectReason::HandshakeFailed`].
+    ///
+    /// [`DisconnectReason::HandshakeFailed`]: crate::types::DisconnectReason::HandshakeFailed
+    SessionCritical,
+    /// An ordinary reliable message (chat, a selection, an inventory request).
+    /// Losing it costs that one action; the session keeps running and the loss
+    /// is surfaced as a [`Diagnostic::ExpectedReplyMissing`]. This matches the
+    /// reference viewer, where an exhausted reliable packet only invokes its
+    /// per-packet failure callback (`LL_ERR_TCP_TIMEOUT`) and leaves the
+    /// circuit alone — a dead link is detected by the inactivity timeout, not
+    /// by one lost message.
+    ///
+    /// [`Diagnostic::ExpectedReplyMissing`]: crate::Diagnostic::ExpectedReplyMissing
+    BestEffort,
+}
+
+/// A reliable packet that has run out of retransmissions, reported by
+/// [`Circuit::process_resends`].
+#[derive(Debug, Clone, Copy)]
+struct ExhaustedPacket {
+    /// The outgoing sequence number the packet was sent with.
+    sequence: SequenceNumber,
+    /// The message name, for the diagnostic label (`None` for an unrecognised
+    /// id).
+    name: Option<&'static str>,
+    /// What the loss costs the session.
+    severity: ReliableSeverity,
+}
+
+/// A datagram queued for transmission on a circuit.
+#[derive(Debug, Clone)]
+struct Outbound {
+    /// The outgoing sequence number of the reliable packet this datagram
+    /// carries, so popping it can start that packet's retransmission clock.
+    /// `None` for an unreliable datagram, which nothing is waiting on.
+    sequence: Option<SequenceNumber>,
+    /// The fully encoded datagram.
+    payload: Vec<u8>,
+}
+
 /// A reliable packet awaiting acknowledgement.
 #[derive(Debug, Clone)]
 struct UnackedPacket {
     /// The fully encoded datagram, ready to resend.
     datagram: Vec<u8>,
-    /// When the packet was last sent.
+    /// When the current attempt's retransmission clock started. While the
+    /// datagram is still `queued`, this is pushed forward to the latest instant
+    /// the session is told about, so time the datagram spends waiting on a
+    /// backed-up driver does not count against its timeout — the clock only
+    /// really starts once the datagram has left the host.
     sent_at: Instant,
+    /// Whether the current attempt's datagram is still sitting in the circuit's
+    /// outbound queue rather than having been handed to the driver.
+    queued: bool,
     /// How many times the packet has been sent so far.
     attempts: u32,
     /// The message name, used to label a [`Diagnostic::ExpectedReplyMissing`]
@@ -721,6 +801,8 @@ struct UnackedPacket {
     ///
     /// [`Diagnostic::ExpectedReplyMissing`]: crate::Diagnostic::ExpectedReplyMissing
     name: Option<&'static str>,
+    /// What losing this packet for good costs the session.
+    severity: ReliableSeverity,
 }
 
 /// A bounded set of recently seen inbound reliable sequence numbers, used to
@@ -971,6 +1053,12 @@ struct Circuit {
     /// with the instant it was sent so the round-trip time can be measured.
     /// `None` when no ping is outstanding.
     outstanding_ping: Option<(PingId, Instant)>,
+    /// The fast-attack / slow-decay average of the circuit's measured
+    /// round-trip time (the reference viewer's `mPingDelayAveraged`), clamped
+    /// to `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`. Drives the retransmission
+    /// timeout, so a slow or congested link waits longer before resending
+    /// instead of piling retransmissions onto it.
+    ping_average: Duration,
     /// Inbound reliable sequence numbers we still owe acknowledgements for.
     pending_acks: Vec<SequenceNumber>,
     /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
@@ -978,7 +1066,7 @@ struct Circuit {
     /// Recently seen inbound reliable sequence numbers.
     seen: SeenWindow,
     /// Datagrams ready to be transmitted.
-    out: VecDeque<Vec<u8>>,
+    out: VecDeque<Outbound>,
     /// The draw distance (metres) advertised in keep-alive `AgentUpdate`s.
     draw_distance: Distance,
     /// The connection timers.

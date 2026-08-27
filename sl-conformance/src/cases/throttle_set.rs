@@ -14,12 +14,13 @@ use crate::support::{REGION_TIMEOUT, check, secs_metric};
 /// `AgentThrottle` is sent reliably and has no protocol reply, so the only
 /// confirmation of acceptance is that the simulator acks the packet rather than
 /// letting our client retransmit it to exhaustion. The client's retransmit
-/// budget is `MAX_RESEND_ATTEMPTS` (6) × `RESEND_TIMEOUT` (1.5 s) ≈ 9 s, after
-/// which an unacked reliable packet is abandoned and the root circuit closed.
-/// This window covers that budget with margin so a silently-dropped throttle
-/// would surface as a `Disconnected` (failing the ping wait) before we conclude
-/// it was accepted.
-const ACCEPT_WINDOW: Duration = Duration::from_secs(15);
+/// budget is `MAX_RESEND_ATTEMPTS` (4) attempts at a round-trip-derived timeout
+/// of at most 10 s (five times the 2 s ceiling on the averaged ping), so 40 s
+/// bounds it however slow the circuit is; a healthy circuit's timeout settles
+/// toward its 1 s floor and gives up far sooner. This window covers that bound
+/// with margin, so a silently-dropped throttle has surfaced its
+/// retransmit-exhaustion diagnostic before we conclude it was accepted.
+const ACCEPT_WINDOW: Duration = Duration::from_secs(45);
 
 /// Per-ping timeout while spanning the [`ACCEPT_WINDOW`].
 ///
@@ -38,15 +39,14 @@ const PING_WAIT: Duration = Duration::from_secs(20);
 /// "accepted" cannot be asserted from a reply — instead it is the *absence* of a
 /// failure: `AgentThrottle` is sent reliably, and an accepted packet is acked by
 /// the sim's reliable-UDP layer rather than retransmitted to exhaustion (which,
-/// in our client, abandons the packet and closes the root circuit).
+/// in our client, abandons the packet and records a diagnostic naming it).
 ///
 /// The case applies the 500 kbps preset (a deliberate change from the default
 /// 1000 kbps), then watches the circuit for longer than the retransmit budget by
-/// awaiting keep-alive ping round-trips. A throttle the sim never acked would
-/// exhaust its retransmits at ≈ 9 s and tear the circuit down, surfacing a
-/// `Disconnected` that fails the ping wait; a healthy ping past that point — plus
-/// no `AgentThrottle` retransmit-exhaustion diagnostic — confirms acceptance. The
-/// requested total bandwidth and the post-throttle RTT are recorded.
+/// awaiting keep-alive ping round-trips. Those pings keep the circuit's health
+/// under test throughout; the throttle itself is judged by the absence of an
+/// `AgentThrottle` retransmit-exhaustion diagnostic once the budget has run out.
+/// The requested total bandwidth and the post-throttle RTT are recorded.
 ///
 /// Runs on both grids: `AgentThrottle` is plain LLUDP, handled by OpenSim and
 /// Second Life alike.
@@ -82,12 +82,11 @@ impl GridTest for ThrottleSet {
             // Keep observing the circuit past the reliable-retransmit budget by
             // awaiting consecutive keep-alive pings, continuously, until the
             // accept window has elapsed. Each ping confirms the circuit is still
-            // live; an un-acked AgentThrottle would instead exhaust its
-            // retransmits and close the circuit, surfacing a `Disconnected` that
-            // fails the wait. A generous per-ping timeout (rather than the
-            // shrinking window remainder) avoids a spurious timeout on the final
-            // sliver of the window while still failing if a ping genuinely stops
-            // arriving.
+            // live, so a link that dies under us fails here rather than being
+            // mistaken for an accepted throttle. A generous per-ping timeout
+            // (rather than the shrinking window remainder) avoids a spurious
+            // timeout on the final sliver of the window while still failing if a
+            // ping genuinely stops arriving.
             let mut last_rtt = None;
             while start.elapsed() < ACCEPT_WINDOW {
                 let rtt = session
@@ -101,10 +100,11 @@ impl GridTest for ThrottleSet {
                 last_rtt = Some(rtt);
             }
 
-            // Belt-and-suspenders: the reliable AgentThrottle must not have been
-            // retransmitted to exhaustion (which would record this diagnostic
-            // *and* close the circuit). Surviving the accept window above already
-            // implies it, but assert it explicitly for a clear failure message.
+            // The verdict: the reliable AgentThrottle must not have been
+            // retransmitted to exhaustion. Losing an ordinary reliable packet
+            // does not fail the session — it is reported as this diagnostic and
+            // the circuit carries on — so this, not the circuit's survival, is
+            // what says the simulator took the throttle.
             let throttle_dropped = session.diagnostics().iter().any(|diagnostic| {
                 matches!(
                     diagnostic,

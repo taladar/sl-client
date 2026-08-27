@@ -34,3 +34,9 @@ are none.
 - `:6853` — `SimSitState::ResponseSent` has no timeout and no cancel, so the sit
   handshake can hang forever. The client side has `SIT_TIMEOUT`
   (`session.rs:52`); the pair is asymmetric.
+- `:7441` / `:9083` — the resend policy is the one the client shed in
+  [[protocol-audit-reliable-exhaustion-kills-session]]: a flat 1500 ms timeout
+  that never adapts, a clock started at enqueue rather than at transmit, and
+  `close(ServerEvent::Disconnected)` for *any* exhausted reliable packet
+  whatever it carried. The fixture measures no round trip at all, so porting the
+  client's ping-averaged timeout means giving it one.
