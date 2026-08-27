@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 87 |
-| done | 886 |
+| done | 887 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1487** |
+| **total** | **1488** |
 
 ## ideas (97)
 
@@ -1169,6 +1169,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### protocol
 
+- [`protocol-audit-client-xfer-download-bounds`](bugs/protocol-audit-client-xfer-download-bounds.md)
+  — The client's Xfer download has no size cap and no ordering check
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
 - [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
@@ -1181,9 +1183,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   embedded items
 - [`protocol-audit-oldest-unacked-wrap`](bugs/protocol-audit-oldest-unacked-wrap.md)
   — OldestUnacked uses numeric min instead of wrapping-oldest
-- [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
-  — SimSession accepts identity rebinding, never validates a session id, and
-  frees nothing on close
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
   SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
   fetch never retries)
@@ -1379,7 +1378,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (886)
+## done (887)
 
 ### protocol
 
@@ -1527,6 +1526,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   HandshakeFailed
 - [`protocol-audit-roxmltree-nesting-in-sl-wire`](done/protocol-audit-roxmltree-nesting-in-sl-wire.md)
   — sl-wire's own XML parsing has no nesting guard
+- [`protocol-audit-sim-session-lifecycle`](done/protocol-audit-sim-session-lifecycle.md)
+  — SimSession accepts identity rebinding, never validates a session id, and
+  frees nothing on close
 - [`protocol-audit-texture-download-completeness`](done/protocol-audit-texture-download-completeness.md)
   — A texture download completes on a chunk count, not on the chunk indices
 - [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)

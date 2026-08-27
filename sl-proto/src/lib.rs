@@ -117,9 +117,9 @@ pub use sim_experiences::SimExperiences;
 pub use sim_inventory::SimInventoryTree;
 pub use sim_session::{
     AgentPresence, AgentUpdateInfo, ArrivalPlacement, CapsUploadMetadata, FlowMirrorStatus,
-    ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, SESSION_FLOW_COVERAGE, ServerEvent,
-    SimChatSession, SimChatSessionKind, SimParcel, SimSession, SitTransform, TransferRequestSource,
-    UserRightsEntry, teleport_strings,
+    ObjectMediaState, PARCEL_OVERLAY_CHUNK_BYTES, RejectionReason, SESSION_FLOW_COVERAGE,
+    ServerEvent, SimChatSession, SimChatSessionKind, SimParcel, SimSession, SitTransform,
+    TransferRequestSource, UserRightsEntry, teleport_strings,
 };
 pub use sim_voice::{
     SimVoice, VoiceChannel, VoiceConnection, VoiceProvisionOutcome, VoiceProvisionRefusal,

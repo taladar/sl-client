@@ -143,8 +143,9 @@ use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
 use crate::session::{
     SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage, TeleportFinishInfo,
-    agent_drop_group_to_llsd, agent_list_voice_updates_to_llsd, agent_state_update_to_llsd,
-    build_map_block_reply, build_map_item_reply, build_map_layer_reply, build_task_inventory,
+    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
+    agent_list_voice_updates_to_llsd, agent_state_update_to_llsd, build_map_block_reply,
+    build_map_item_reply, build_map_layer_reply, build_task_inventory,
     chatterbox_invitation_to_llsd, chatterbox_session_start_reply_to_llsd,
     crossed_region_to_caps_llsd, display_name_update_to_llsd, enable_simulator_to_caps_llsd,
     establish_agent_communication_to_llsd, full_update_block, instant_message,
@@ -282,17 +283,69 @@ const ACK_FLUSH_DELAY: Duration = Duration::from_millis(150);
 /// dead.
 const INACTIVITY_TIMEOUT: Duration = Duration::from_secs(45);
 
-/// How long to wait for an acknowledgement before retransmitting a reliable
-/// packet.
-const RESEND_TIMEOUT: Duration = Duration::from_millis(1500);
+/// The floor on the retransmission timeout, however fast the measured round
+/// trip is (the reference's `LL_MINIMUM_RELIABLE_TIMEOUT_SECONDS`). The
+/// simulator's timeout is this or [`RELIABLE_TIMEOUT_FACTOR`] times the
+/// measured round trip, whichever is larger — the same policy the client
+/// [`Session`](crate::Session) uses.
+const MINIMUM_RESEND_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// The multiple of the measured round trip a reliable packet waits before it is
+/// retransmitted (the reference's `LL_RELIABLE_TIMEOUT_FACTOR`), floored at
+/// [`MINIMUM_RESEND_TIMEOUT`].
+const RELIABLE_TIMEOUT_FACTOR: f32 = 5.0;
+
+/// The weight a fresh round-trip sample carries in the ping average.
+const PING_AVERAGE_ALPHA: f32 = 0.2;
+
+/// `1.0 - PING_AVERAGE_ALPHA`, spelled out so the update is literal-only
+/// arithmetic.
+const PING_AVERAGE_DECAY: f32 = 0.8;
+
+/// The floor the ping average is clamped to.
+const PING_AVERAGE_MIN: Duration = Duration::from_millis(100);
+
+/// The ceiling the ping average is clamped to, capping the retransmission
+/// timeout at `RELIABLE_TIMEOUT_FACTOR` times this.
+const PING_AVERAGE_MAX: Duration = Duration::from_millis(2000);
+
+/// The ping average a circuit starts with, before any round trip is measured.
+const INITIAL_PING_AVERAGE: Duration = Duration::from_millis(1000);
 
 /// The cadence at which the simulator pings an active client with a
 /// `StartPingCheck`.
 const PING_INTERVAL: Duration = Duration::from_secs(5);
 
-/// How many times a reliable packet is retransmitted before the link is given
-/// up as dead.
-const MAX_RESEND_ATTEMPTS: u32 = 6;
+/// How many times a reliable packet is sent before it is given up on: the first
+/// transmission plus the reference's `LL_DEFAULT_RELIABLE_RETRIES`.
+const MAX_RESEND_ATTEMPTS: u32 = 4;
+
+/// How long the sit handshake may sit in
+/// [`SimSitState::ResponseSent`] awaiting the client's completing `AgentSit`
+/// before the offer is withdrawn. The mirror of the client's `SIT_TIMEOUT`.
+const SIT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// The largest asset or file the simulator will accept over an inbound `Xfer`
+/// pull. Comfortably above the largest thing a client uploads this way (a
+/// standard region's terrain RAW is 13 x 256 x 256 = 832 KiB, and an OpenSim
+/// var-region a small multiple of that) and far below what an unbounded stream
+/// of `SendXferPacket`s could grow to.
+const MAX_XFER_RECEIVE_BYTES: usize = 16 * 1024 * 1024;
+
+/// The largest number of CAPS event-queue events held for a client that is not
+/// polling. Past this the oldest are dropped, so a driver that keeps enqueuing
+/// to a client that has stopped long-polling cannot grow the queue without
+/// bound.
+const MAX_CAPS_EVENTS: usize = 4096;
+
+/// The largest number of script-permission answers recorded for one session.
+/// The registry is keyed by (task, item) and only ever grows, so it is bounded
+/// here rather than by the client's willingness to answer questions.
+const MAX_SCRIPT_GRANTS: usize = 4096;
+
+/// How long a `TransferRequest` waits for the driver to serve or refuse it
+/// before the simulator answers it itself and drops the parked request.
+const TRANSFER_SERVE_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// The bound on the recently-seen inbound reliable sequence window.
 const SEEN_CAPACITY: usize = 4096;
@@ -319,6 +372,23 @@ const fn global_to_f32(meters: f64) -> f32 {
     meters as f32
 }
 
+/// What losing `message` for good costs the simulator's session.
+///
+/// Only the two packets that establish the agent's presence on the circuit are
+/// session-critical: without the region handshake or the movement completion
+/// the client never finishes arriving, so there is nothing left to keep the
+/// circuit open for. Everything else is one lost message on a live session,
+/// which the reference likewise reports through the packet's own failure
+/// callback rather than by tearing the circuit down.
+const fn severity_of(message: &AnyMessage) -> SimReliableSeverity {
+    match *message {
+        AnyMessage::RegionHandshake(_) | AnyMessage::AgentMovementComplete(_) => {
+            SimReliableSeverity::SessionCritical
+        }
+        _ => SimReliableSeverity::BestEffort,
+    }
+}
+
 /// Updates `earliest` to the minimum of itself and `candidate`.
 fn merge_deadline(earliest: &mut Option<Instant>, candidate: Option<Instant>) {
     if let Some(candidate) = candidate {
@@ -329,15 +399,74 @@ fn merge_deadline(earliest: &mut Option<Instant>, candidate: Option<Instant>) {
     }
 }
 
+/// What losing a reliable packet for good costs the simulator's session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SimReliableSeverity {
+    /// The packet establishes the agent's presence on the circuit
+    /// (`RegionHandshake`, `AgentMovementComplete`): a client that never
+    /// receives it never finishes arriving, so there is nothing left to keep
+    /// the circuit open for.
+    SessionCritical,
+    /// An ordinary reliable message. Losing it costs that one message; the
+    /// session keeps running and the loss is surfaced as
+    /// [`ServerEvent::ReliableGiveUp`] — the reference behaviour, where an
+    /// exhausted reliable packet invokes its own failure callback and leaves
+    /// the circuit alone.
+    BestEffort,
+}
+
+/// A datagram queued for transmission to the client.
+#[derive(Debug, Clone)]
+struct SimOutbound {
+    /// The outgoing sequence number of the reliable packet this datagram
+    /// carries, so popping it can start that packet's retransmission clock.
+    /// `None` for an unreliable datagram, which nothing is waiting on.
+    sequence: Option<SequenceNumber>,
+    /// The fully encoded datagram.
+    payload: Vec<u8>,
+}
+
 /// A reliable packet awaiting acknowledgement, kept so it can be retransmitted.
 #[derive(Debug, Clone)]
 struct UnackedPacket {
     /// The fully encoded datagram, ready to resend.
     datagram: Vec<u8>,
-    /// When the packet was last sent.
+    /// When the current attempt's retransmission clock started. While the
+    /// datagram is still `queued` this is pushed forward to the latest instant
+    /// the session is told about, so time spent waiting on a backed-up driver
+    /// does not count as silence from the client.
     sent_at: Instant,
+    /// Whether the current attempt's datagram is still sitting in the outbound
+    /// queue rather than having been handed to the driver.
+    queued: bool,
     /// How many times the packet has been sent so far.
     attempts: u32,
+    /// The message name, for the give-up report.
+    name: Option<&'static str>,
+    /// What losing this packet costs the session.
+    severity: SimReliableSeverity,
+}
+
+/// A reliable packet that has run out of retransmissions, reported by
+/// [`SimSession::process_resends`].
+#[derive(Debug, Clone, Copy)]
+struct ExhaustedPacket {
+    /// The outgoing sequence number the packet was sent with.
+    sequence: SequenceNumber,
+    /// The message name (`None` for an unrecognised id).
+    name: Option<&'static str>,
+    /// What the loss costs the session.
+    severity: SimReliableSeverity,
+}
+
+/// A `TransferRequest` parked for the driver to serve, with the deadline past
+/// which the simulator answers it itself.
+#[derive(Debug, Clone)]
+struct SimTransferServe {
+    /// The raw request params, echoed back in the `TransferInfo`.
+    params: Vec<u8>,
+    /// When the request is answered as unanswerable and dropped.
+    expires: Instant,
 }
 
 /// A bounded set of recently seen inbound reliable sequence numbers, used to
@@ -396,6 +525,8 @@ struct SimXferSend {
     /// Whether the final packet (high-bit end-of-file marker) has been sent
     /// and is only awaiting its confirmation.
     last_sent: bool,
+    /// When the send is abandoned for lack of a confirmation.
+    expires: Instant,
 }
 
 /// What an inbound server-side `Xfer` pull becomes once its final packet is
@@ -433,6 +564,12 @@ struct SimXferReceive {
     purpose: SimXferReceivePurpose,
     /// The file bytes accumulated so far (the seq-0 length prefix stripped).
     buffer: Vec<u8>,
+    /// The packet number the next `SendXferPacket` must carry. `Xfer` is a
+    /// strictly ordered, one-packet-in-flight stream, so anything else is a
+    /// duplicate or a gap and is refused rather than concatenated blindly.
+    next_packet: u32,
+    /// When the pull is abandoned for lack of a packet.
+    expires: Instant,
 }
 
 /// The maximum number of asset bytes carried in a single outbound
@@ -728,6 +865,27 @@ enum SimSitState {
     },
 }
 
+/// Why the simulator refused an inbound message instead of acting on it,
+/// reported as [`ServerEvent::Rejected`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum RejectionReason {
+    /// The message arrived before the circuit was opened with `UseCircuitCode`,
+    /// so there is no session to attribute it to.
+    NoCircuit,
+    /// The message asserted an `AgentData.SessionID` other than the one the
+    /// circuit was opened with — another agent's traffic, a stale session, or a
+    /// forgery.
+    SessionIdMismatch,
+    /// A `UseCircuitCode` tried to rebind a live circuit to a different agent,
+    /// session or circuit code. A circuit's identity is fixed when it opens.
+    CircuitRebind,
+    /// The message was rejected because it would have grown a per-session store
+    /// past its bound (an oversized `Xfer` upload, a full grant registry).
+    LimitExceeded,
+    /// An `Xfer` packet arrived out of order on a strictly ordered stream.
+    OutOfOrder,
+}
+
 /// A server-side event decoded from a client-only message, the inverse of the
 /// client's [`Command`](crate::Command)/[`Event`](crate::Event) split: it is
 /// what the simulator observes a client doing.
@@ -758,6 +916,37 @@ pub enum ServerEvent {
     CircuitRetired,
     /// The client acknowledged the region handshake with `RegionHandshakeReply`.
     RegionHandshakeReplied,
+    /// The simulator refused an inbound message rather than acting on it. The
+    /// message is named by its template name so a harness can assert on the
+    /// rejection path without reconstructing the message.
+    Rejected {
+        /// The template name of the refused message (`None` if its id decoded
+        /// to no known message).
+        message: Option<String>,
+        /// Why it was refused.
+        reason: RejectionReason,
+    },
+    /// A reliable packet the simulator sent exhausted its retransmission budget
+    /// and was given up on. The session stays open: only the packets that
+    /// establish the agent's presence are fatal, and those close the session
+    /// with [`ServerEvent::Disconnected`] instead.
+    ReliableGiveUp {
+        /// The template name of the packet's message (`None` if unrecognised).
+        message: Option<String>,
+    },
+    /// A sit offer ([`SimSession::send_avatar_sit_response`]) went unanswered
+    /// and was withdrawn; the agent is not seated.
+    SitOfferExpired {
+        /// The object that had been offered as a seat.
+        on: ObjectKey,
+    },
+    /// A `TransferRequest` the driver never served or refused timed out; the
+    /// simulator has answered it with an `UnknownSource` `TransferInfo` and
+    /// dropped it.
+    TransferServeExpired {
+        /// The client-minted transfer id that went unanswered.
+        transfer_id: TransferId,
+    },
     /// The client pinged the link with `StartPingCheck`; the simulator has
     /// replied with a `CompletePingCheck`.
     PingRequested {
@@ -2356,6 +2545,13 @@ pub struct SimSession {
     next_sequence: SequenceNumber,
     /// The next `StartPingCheck` ping id.
     next_ping_id: PingId,
+    /// The ping the simulator is waiting on a `CompletePingCheck` for, and when
+    /// it went out — the round trip the retransmission timeout is derived from.
+    outstanding_ping: Option<(PingId, Instant)>,
+    /// The relaxed average of the measured round trip to the client, clamped to
+    /// `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`. Drives the retransmission
+    /// timeout ([`SimSession::resend_timeout`]).
+    ping_average: Duration,
     /// Inbound reliable sequence numbers we still owe acknowledgements for.
     pending_acks: Vec<SequenceNumber>,
     /// Outgoing reliable packets awaiting acknowledgement, keyed by sequence.
@@ -2363,7 +2559,7 @@ pub struct SimSession {
     /// Recently seen inbound reliable sequence numbers.
     seen: SeenWindow,
     /// Datagrams ready to be transmitted to the client.
-    out: VecDeque<Vec<u8>>,
+    out: VecDeque<SimOutbound>,
     /// When the link is declared dead for lack of inbound traffic.
     inactivity: Instant,
     /// When to flush owed acknowledgements, if any are pending.
@@ -2396,8 +2592,9 @@ pub struct SimSession {
     secure_session_id: Option<Uuid>,
     /// Asset Transfer requests awaiting the driver's answer, keyed by the
     /// client-minted [`TransferId`] and holding the raw request params to echo
-    /// back in the `TransferInfo` (as the reference serving side does).
-    transfer_serves: BTreeMap<TransferId, Vec<u8>>,
+    /// back in the `TransferInfo` (as the reference serving side does) plus the
+    /// deadline past which the simulator answers the request itself.
+    transfer_serves: BTreeMap<TransferId, SimTransferServe>,
     /// Whether this circuit hosts a child or the root agent: `Child` from
     /// `UseCircuitCode`, promoted to `Root` by `CompleteAgentMovement`.
     agent_presence: AgentPresence,
@@ -2409,6 +2606,10 @@ pub struct SimSession {
     /// The agent's sit state (the server-side mirror of the client's sit
     /// machine).
     sit: SimSitState,
+    /// When an outstanding sit offer is withdrawn for want of the client's
+    /// completing `AgentSit`. `Some` exactly while
+    /// [`SimSitState::ResponseSent`].
+    sit_expires: Option<Instant>,
     /// Outstanding `ScriptQuestion`s awaiting the client's `ScriptAnswerYes`,
     /// keyed by (task, item) and holding the asked permission set
     /// ([`SimSession::script_question`]).
@@ -2669,6 +2870,8 @@ impl SimSession {
             circuit_code: None,
             next_sequence: SequenceNumber::FIRST,
             next_ping_id: PingId(1),
+            outstanding_ping: None,
+            ping_average: INITIAL_PING_AVERAGE,
             pending_acks: Vec::new(),
             unacked: BTreeMap::new(),
             seen: SeenWindow::default(),
@@ -2687,6 +2890,7 @@ impl SimSession {
             agent_presence: AgentPresence::Child,
             arrival: ArrivalPlacement::default(),
             sit: SimSitState::NotSitting,
+            sit_expires: None,
             script_questions: BTreeMap::new(),
             script_grants: BTreeMap::new(),
             chat_sessions: BTreeMap::new(),
@@ -3792,12 +3996,21 @@ impl SimSession {
 
     /// Encodes and queues a message to the client, tracking it for resend when
     /// reliable.
+    ///
+    /// A closed session queues nothing: this is the single funnel every one of
+    /// the typed `send_*`/`enqueue_*` helpers goes through, so gating it here is
+    /// what stops a driver from talking to a client that is already gone.
+    /// Datagrams queued *before* the close still drain — that is how the
+    /// goodbye packet of a clean logout or a retired circuit reaches the client.
     fn send(
         &mut self,
         message: &AnyMessage,
         reliability: Reliability,
         now: Instant,
     ) -> Result<(), WireError> {
+        if self.is_closed() {
+            return Ok(());
+        }
         let mut writer = Writer::new();
         message.id().encode(&mut writer);
         message.encode_body(&mut writer)?;
@@ -3810,17 +4023,26 @@ impl SimSession {
         };
         let datagram = encode_datagram(flags, sequence, &body);
 
-        if matches!(reliability, Reliability::Reliable) {
+        let tracked = if matches!(reliability, Reliability::Reliable) {
             self.unacked.insert(
                 sequence,
                 UnackedPacket {
                     datagram: datagram.clone(),
                     sent_at: now,
+                    queued: true,
                     attempts: 1,
+                    name: sl_wire::message_name(message.id()),
+                    severity: severity_of(message),
                 },
             );
-        }
-        self.out.push_back(datagram);
+            Some(sequence)
+        } else {
+            None
+        };
+        self.out.push_back(SimOutbound {
+            sequence: tracked,
+            payload: datagram,
+        });
         Ok(())
     }
 
@@ -6619,6 +6841,8 @@ impl SimSession {
                     filename: filename.to_owned(),
                 },
                 buffer: Vec::new(),
+                next_packet: 0,
+                expires: deadline(now, XFER_STALL_TIMEOUT),
             },
         );
         let pull = AnyMessage::RequestXfer(RequestXfer {
@@ -6694,6 +6918,7 @@ impl SimSession {
         send.sent = packet.sent;
         send.last_sent = packet.id.is_last();
         send.next_sequence = sequence.wrapping_add(1);
+        send.expires = deadline(now, XFER_STALL_TIMEOUT);
         let message = AnyMessage::SendXferPacket(SendXferPacket {
             xfer_id: SendXferPacketXferIDBlock {
                 id: xfer_id.get(),
@@ -6729,7 +6954,8 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let Some(params) = self.transfer_serves.remove(&transfer_id) else {
+        let Some(SimTransferServe { params, .. }) = self.transfer_serves.remove(&transfer_id)
+        else {
             return Err(Error::UnknownTransfer);
         };
         let info = AnyMessage::TransferInfo(TransferInfo {
@@ -6795,7 +7021,8 @@ impl SimSession {
         if self.client_addr.is_none() {
             return Err(Error::NoCircuit);
         }
-        let Some(params) = self.transfer_serves.remove(&transfer_id) else {
+        let Some(SimTransferServe { params, .. }) = self.transfer_serves.remove(&transfer_id)
+        else {
             return Err(Error::UnknownTransfer);
         };
         let message = AnyMessage::TransferInfo(TransferInfo {
@@ -6849,6 +7076,11 @@ impl SimSession {
         });
         self.send(&message, Reliability::Reliable, now)?;
         self.sit = SimSitState::ResponseSent { on: sit_object };
+        // The offer is not open-ended: a client that never answers with
+        // `AgentSit` would otherwise leave the handshake half-done for the life
+        // of the session. The client's own sit machine gives up after the same
+        // interval.
+        self.sit_expires = Some(deadline(now, SIT_HANDSHAKE_TIMEOUT));
         Ok(())
     }
 
@@ -7297,6 +7529,7 @@ impl SimSession {
             },
         });
         self.send(&message, Reliability::Unreliable, now)?;
+        self.outstanding_ping = Some((ping_id, now));
         Ok(Some(ping_id))
     }
 
@@ -7374,11 +7607,34 @@ impl SimSession {
     /// [`SimSession::take_event_queue_response`]. The `*_to_llsd` serializers
     /// (e.g. [`enable_simulator_to_caps_llsd`](crate::enable_simulator_to_caps_llsd))
     /// build the `body` values.
+    ///
+    /// The queue is bounded at 4096 events. A client that has stopped
+    /// long-polling — one that crashed, or never started — would otherwise let
+    /// the queue grow for the life of the session, so past the bound the oldest
+    /// events are dropped to make room. Dropping the oldest keeps the queue
+    /// carrying what a client that comes back would most want, and every drop
+    /// is logged rather than passing silently.
     pub fn enqueue_caps_event(&mut self, message: impl Into<String>, body: Llsd) {
-        self.caps_events.push(EventQueueEvent {
-            message: message.into(),
-            body,
-        });
+        let message = message.into();
+        if self.caps_events.len() >= MAX_CAPS_EVENTS {
+            let overflow = self
+                .caps_events
+                .len()
+                .saturating_sub(MAX_CAPS_EVENTS)
+                .saturating_add(1);
+            let dropped: Vec<String> = self
+                .caps_events
+                .drain(..overflow.min(self.caps_events.len()))
+                .map(|event| event.message)
+                .collect();
+            tracing::warn!(
+                dropped = dropped.len(),
+                messages = ?dropped,
+                queued = MAX_CAPS_EVENTS,
+                "the CAPS event queue is full; dropped the oldest events to enqueue {message}"
+            );
+        }
+        self.caps_events.push(EventQueueEvent { message, body });
     }
 
     /// Whether any CAPS events are queued for the next long-poll.
@@ -7436,17 +7692,56 @@ impl SimSession {
         })
     }
 
+    /// The retransmission timeout for this circuit: the reference's
+    /// `LL_RELIABLE_TIMEOUT_FACTOR` multiple of the averaged round-trip time to
+    /// the client, floored at [`MINIMUM_RESEND_TIMEOUT`].
+    fn resend_timeout(&self) -> Duration {
+        self.ping_average
+            .mul_f32(RELIABLE_TIMEOUT_FACTOR)
+            .max(MINIMUM_RESEND_TIMEOUT)
+    }
+
+    /// Folds a round-trip `sample` into the ping average with the reference's
+    /// fast-attack / slow-decay relaxation (`LLCircuitData::setPingDelay`): the
+    /// average first jumps to any worse sample, then relaxes toward it, and the
+    /// result is clamped to `PING_AVERAGE_MIN ..= PING_AVERAGE_MAX`.
+    fn record_ping_sample(&mut self, sample: Duration) {
+        let attacked = self.ping_average.max(sample);
+        self.ping_average = attacked
+            .mul_f32(PING_AVERAGE_DECAY)
+            .saturating_add(sample.mul_f32(PING_AVERAGE_ALPHA))
+            .clamp(PING_AVERAGE_MIN, PING_AVERAGE_MAX);
+    }
+
     /// Retransmits unacknowledged reliable packets whose timeout has elapsed.
-    /// Returns `true` if any packet has exhausted its retransmission budget.
-    fn process_resends(&mut self, now: Instant) -> bool {
-        let mut exhausted = false;
+    ///
+    /// The timeout tracks the measured round trip ([`Self::resend_timeout`]),
+    /// and a datagram still waiting in the outbound queue has its clock held at
+    /// `now` rather than counting the wait as silence from the client — so a
+    /// driver that falls behind does not turn its own backlog into a burst of
+    /// retransmissions.
+    ///
+    /// Returns every packet that has now exhausted its retransmission budget;
+    /// such packets are dropped from the unacked set, so they are reported once
+    /// and stop driving the resend deadline.
+    fn process_resends(&mut self, now: Instant) -> Vec<ExhaustedPacket> {
+        let timeout = self.resend_timeout();
+        let mut exhausted = Vec::new();
         let mut to_send = Vec::new();
-        for packet in self.unacked.values_mut() {
-            if now < deadline(packet.sent_at, RESEND_TIMEOUT) {
+        for (sequence, packet) in &mut self.unacked {
+            if packet.queued {
+                packet.sent_at = now;
+                continue;
+            }
+            if now < deadline(packet.sent_at, timeout) {
                 continue;
             }
             if packet.attempts >= MAX_RESEND_ATTEMPTS {
-                exhausted = true;
+                exhausted.push(ExhaustedPacket {
+                    sequence: *sequence,
+                    name: packet.name,
+                    severity: packet.severity,
+                });
                 continue;
             }
             let mut datagram = packet.datagram.clone();
@@ -7454,18 +7749,29 @@ impl SimSession {
                 *first |= PacketFlags::RESENT.bits();
             }
             packet.sent_at = now;
+            packet.queued = true;
             packet.attempts = packet.attempts.saturating_add(1);
-            to_send.push(datagram);
+            to_send.push(SimOutbound {
+                sequence: Some(*sequence),
+                payload: datagram,
+            });
         }
         self.out.extend(to_send);
+        for packet in &exhausted {
+            self.unacked.remove(&packet.sequence);
+        }
         exhausted
     }
 
-    /// The earliest retransmission deadline across all unacked packets.
+    /// The earliest retransmission deadline across all unacked packets. A packet
+    /// whose datagram is still queued has not started its clock, so it does not
+    /// contribute a deadline — its wake-up comes from the transmission itself.
     fn next_resend_deadline(&self) -> Option<Instant> {
+        let timeout = self.resend_timeout();
         self.unacked
             .values()
-            .map(|packet| deadline(packet.sent_at, RESEND_TIMEOUT))
+            .filter(|packet| !packet.queued)
+            .map(|packet| deadline(packet.sent_at, timeout))
             .min()
     }
 
@@ -7488,14 +7794,41 @@ impl SimSession {
         if matches!(self.state, SimState::Closed) {
             return Ok(());
         }
-        // Bind to the first client address seen; ignore traffic from any other.
+        // Traffic from anywhere but the bound client is not this circuit's.
         match self.client_addr {
             Some(addr) if addr != from => return Ok(()),
             _ => {}
         }
 
         let parsed = parse_datagram(datagram)?;
-        self.client_addr = Some(from);
+
+        let decoded;
+        let body = if parsed.flags.contains(PacketFlags::ZEROCODED) {
+            decoded = zero_decode(parsed.body)?;
+            decoded.as_slice()
+        } else {
+            parsed.body
+        };
+        let mut reader = Reader::new(body);
+        let id = MessageId::decode(&mut reader)?;
+        // Unrecognized messages are ignored rather than failing the datagram.
+        let message = AnyMessage::decode(id, &mut reader).ok();
+
+        // Nothing claims this circuit's endpoint but the packet that opens it.
+        // Binding to the first parseable sender instead would let any datagram
+        // — including one from an unrelated host that happened to arrive first
+        // — take the address the circuit then answers on.
+        if self.client_addr.is_none() {
+            if !matches!(message, Some(AnyMessage::UseCircuitCode(_))) {
+                self.events.push_back(ServerEvent::Rejected {
+                    message: sl_wire::message_name(id).map(str::to_owned),
+                    reason: RejectionReason::NoCircuit,
+                });
+                return Ok(());
+            }
+            self.client_addr = Some(from);
+        }
+
         self.note_received(now);
         self.record_acks(&parsed.acks);
         let process = if parsed.flags.contains(PacketFlags::RELIABLE) {
@@ -7508,21 +7841,46 @@ impl SimSession {
             return Ok(());
         }
 
-        let decoded;
-        let body = if parsed.flags.contains(PacketFlags::ZEROCODED) {
-            decoded = zero_decode(parsed.body)?;
-            decoded.as_slice()
-        } else {
-            parsed.body
-        };
-
-        let mut reader = Reader::new(body);
-        let id = MessageId::decode(&mut reader)?;
-        // Unrecognized messages are ignored rather than failing the datagram.
-        let Ok(message) = AnyMessage::decode(id, &mut reader) else {
+        let Some(message) = message else {
             return Ok(());
         };
+        if let Some(reason) = self.refusal_for(&message) {
+            self.reject(&message, reason);
+            return Ok(());
+        }
         self.dispatch(&message, now)
+    }
+
+    /// Records that `message` was refused, and why.
+    fn reject(&mut self, message: &AnyMessage, reason: RejectionReason) {
+        self.events.push_back(ServerEvent::Rejected {
+            message: sl_wire::message_name(message.id()).map(str::to_owned),
+            reason,
+        });
+    }
+
+    /// Why this simulator refuses to act on `message`, if it does.
+    ///
+    /// A message that asserts an `AgentData.SessionID` must assert *this*
+    /// circuit's session: the identity the circuit was opened with is what the
+    /// traffic on it is attributed to. That is a check a real simulator makes
+    /// and one the dispatcher's own arms could not make consistently across
+    /// 130-odd handlers, so it is made once, here, from the session id the
+    /// message template says the message carries.
+    ///
+    /// `UseCircuitCode` itself carries its session id in a `CircuitCode` block
+    /// rather than an `AgentData` one, so it is naturally exempt: it establishes
+    /// the identity the others are checked against. Nothing else reaches this
+    /// point before the circuit is open — [`SimSession::handle_datagram`] binds
+    /// the endpoint only on the packet that opens it — so the unbound case is a
+    /// backstop rather than the live path.
+    fn refusal_for(&self, message: &AnyMessage) -> Option<RejectionReason> {
+        let asserted = message.agent_session_id()?;
+        match self.session_id {
+            None => Some(RejectionReason::NoCircuit),
+            Some(session_id) if session_id != asserted => Some(RejectionReason::SessionIdMismatch),
+            Some(_matching) => None,
+        }
     }
 
     /// Dispatches a decoded client message: answers the circuit-lifecycle
@@ -7531,22 +7889,44 @@ impl SimSession {
         match message {
             AnyMessage::UseCircuitCode(use_circuit) => {
                 let block = &use_circuit.circuit_code;
-                self.agent_id = Some(AgentKey::from(block.id));
-                self.session_id = Some(block.session_id);
-                self.circuit_code = Some(CircuitCode(block.code));
+                let agent_id = AgentKey::from(block.id);
+                let circuit_code = CircuitCode(block.code);
+                // A circuit's identity is fixed the moment it opens. A repeat
+                // carrying the same triple is the client re-sending a packet it
+                // believes was lost, and is answered again; a repeat carrying a
+                // *different* one is another agent's login (or a forgery) trying
+                // to take the circuit over, and is refused.
+                let bound = (self.agent_id, self.session_id, self.circuit_code);
+                let asserted = (Some(agent_id), Some(block.session_id), Some(circuit_code));
+                if bound == (None, None, None) {
+                    self.agent_id = Some(agent_id);
+                    self.session_id = Some(block.session_id);
+                    self.circuit_code = Some(circuit_code);
+                } else if bound != asserted {
+                    self.reject(message, RejectionReason::CircuitRebind);
+                    return Ok(());
+                }
                 if matches!(self.state, SimState::AwaitingCircuit) {
                     self.state = SimState::Active;
                     self.ping = Some(deadline(now, PING_INTERVAL));
                 }
                 self.events.push_back(ServerEvent::CircuitOpened {
-                    agent_id: AgentKey::from(block.id),
+                    agent_id,
                     session_id: block.session_id,
-                    circuit_code: CircuitCode(block.code),
+                    circuit_code,
                 });
             }
             AnyMessage::CompleteAgentMovement(_) => {
                 // The child agent becomes the root agent: login arrival, or a
-                // teleport/crossing destination confirming the handover.
+                // teleport/crossing destination confirming the handover. It only
+                // means anything on a circuit that is already up — before
+                // `UseCircuitCode` there is no agent to promote, and honouring
+                // it there would leave a rooted agent on a circuit whose
+                // keep-alive was never armed.
+                if !matches!(self.state, SimState::Active) {
+                    self.reject(message, RejectionReason::NoCircuit);
+                    return Ok(());
+                }
                 self.agent_presence = AgentPresence::Root;
                 self.send_agent_movement_complete(now)?;
                 self.events.push_back(ServerEvent::AgentArrived);
@@ -7565,8 +7945,19 @@ impl SimSession {
                 self.events
                     .push_back(ServerEvent::PingRequested { ping_id });
             }
-            // The client answering our periodic `StartPingCheck`; consumed.
-            AnyMessage::CompletePingCheck(_) => {}
+            // The client answering our periodic `StartPingCheck`. Consumed —
+            // and its round trip is the measurement the retransmission timeout
+            // is built on, so an answer to the ping we are waiting on is folded
+            // into the average. A reply to any other ping id is stale.
+            AnyMessage::CompletePingCheck(complete) => {
+                let answered = PingId(complete.ping_id.ping_id);
+                if let Some((outstanding, sent_at)) = self.outstanding_ping
+                    && outstanding == answered
+                {
+                    self.outstanding_ping = None;
+                    self.record_ping_sample(now.saturating_duration_since(sent_at));
+                }
+            }
             AnyMessage::PacketAck(ack) => {
                 let ids: Vec<SequenceNumber> = ack
                     .packets
@@ -7602,6 +7993,7 @@ impl SimSession {
                     && !matches!(self.sit, SimSitState::NotSitting)
                 {
                     self.sit = SimSitState::NotSitting;
+                    self.sit_expires = None;
                     self.events.push_back(ServerEvent::StoodUp);
                 }
             }
@@ -7615,6 +8007,7 @@ impl SimSession {
                 let on = match self.sit {
                     SimSitState::ResponseSent { on } => {
                         self.sit = SimSitState::Seated { on };
+                        self.sit_expires = None;
                         Some(on)
                     }
                     SimSitState::NotSitting | SimSitState::Seated { .. } => None,
@@ -7906,7 +8299,18 @@ impl SimSession {
                 // stated answer, enforcement stays with the simulator.
                 self.script_questions.remove(&(task_id, item_id));
                 let permissions = ScriptPermissions(answer.data.questions);
-                self.script_grants.insert((task_id, item_id), permissions);
+                // The registry only ever grows — a holder is never forgotten —
+                // so it is bounded here. Past the bound a new holder is not
+                // recorded: the lookup then reports it as never-answered, which
+                // is the safe answer (no permission), and the answer itself is
+                // still surfaced for the driver.
+                if self.script_grants.len() >= MAX_SCRIPT_GRANTS
+                    && !self.script_grants.contains_key(&(task_id, item_id))
+                {
+                    self.reject(message, RejectionReason::LimitExceeded);
+                } else {
+                    self.script_grants.insert((task_id, item_id), permissions);
+                }
                 self.events.push_back(ServerEvent::ScriptPermissionAnswer {
                     task_id,
                     item_id,
@@ -8468,6 +8872,7 @@ impl SimSession {
                             sent: 0,
                             next_sequence: 0,
                             last_sent: false,
+                            expires: deadline(now, XFER_STALL_TIMEOUT),
                         },
                     );
                     self.send_next_xfer_send_packet(xfer_id, now)?;
@@ -8545,6 +8950,8 @@ impl SimSession {
                                     transaction_id,
                                 },
                                 buffer: Vec::new(),
+                                next_packet: 0,
+                                expires: deadline(now, XFER_STALL_TIMEOUT),
                             },
                         );
                         let pull = AnyMessage::RequestXfer(RequestXfer {
@@ -8575,8 +8982,52 @@ impl SimSession {
                 let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
                 if self.xfer_receives.contains_key(&xfer_id) {
                     let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
+                    // `Xfer` is a strictly ordered, one-packet-in-flight stream:
+                    // a packet that is not the one expected is a duplicate or a
+                    // gap, and concatenating its bytes would silently corrupt
+                    // the file. Refuse it, and refuse a stream that would grow
+                    // the buffer past what any real upload needs — the two
+                    // bounds that keep a network-driven buffer from growing
+                    // without limit.
+                    let refusal = self.xfer_receives.get(&xfer_id).and_then(|receive| {
+                        if packet_id.sequence() != receive.next_packet {
+                            Some(RejectionReason::OutOfOrder)
+                        } else if receive.buffer.len().saturating_add(chunk.payload.len())
+                            > MAX_XFER_RECEIVE_BYTES
+                        {
+                            Some(RejectionReason::LimitExceeded)
+                        } else {
+                            None
+                        }
+                    });
+                    if let Some(reason) = refusal {
+                        self.reject(message, reason);
+                        // An oversized stream is over: drop it and tell the
+                        // client. An out-of-order packet is not necessarily
+                        // fatal — the confirmation it is missing may simply have
+                        // been lost — so leave the pull in place and send the
+                        // client nothing, letting its own retry find the stream
+                        // again.
+                        if matches!(reason, RejectionReason::LimitExceeded) {
+                            let _receive = self.xfer_receives.remove(&xfer_id);
+                            let abort = AnyMessage::AbortXfer(AbortXfer {
+                                xfer_id: AbortXferXferIDBlock {
+                                    id: xfer_id.get(),
+                                    result: XFER_TIMEOUT_RESULT,
+                                },
+                            });
+                            self.send(&abort, Reliability::Reliable, now)?;
+                            self.events.push_back(ServerEvent::XferAborted {
+                                xfer_id,
+                                result: XFER_TIMEOUT_RESULT,
+                            });
+                        }
+                        return Ok(());
+                    }
                     if let Some(receive) = self.xfer_receives.get_mut(&xfer_id) {
                         receive.buffer.extend_from_slice(chunk.payload);
+                        receive.next_packet = receive.next_packet.saturating_add(1);
+                        receive.expires = deadline(now, XFER_STALL_TIMEOUT);
                     }
                     let confirm = AnyMessage::ConfirmXferPacket(ConfirmXferPacket {
                         xfer_id: ConfirmXferPacketXferIDBlock {
@@ -8656,9 +9107,13 @@ impl SimSession {
                     _unknown => None,
                 };
                 if let Some(source) = source {
-                    let _prev = self
-                        .transfer_serves
-                        .insert(transfer_id, block.params.clone());
+                    let _prev = self.transfer_serves.insert(
+                        transfer_id,
+                        SimTransferServe {
+                            params: block.params.clone(),
+                            expires: deadline(now, TRANSFER_SERVE_TIMEOUT),
+                        },
+                    );
                     self.events.push_back(ServerEvent::TransferRequested {
                         transfer_id,
                         priority: block.priority,
@@ -9080,25 +9535,161 @@ impl SimSession {
             // way to report it and must not fail the session over it.
             tracing::warn!(%error, "failed to flush owed acks to the client");
         }
-        if self.process_resends(now) {
+        let exhausted = self.process_resends(now);
+        if exhausted
+            .iter()
+            .any(|packet| matches!(packet.severity, SimReliableSeverity::SessionCritical))
+        {
+            // Without the handshake or the movement completion the client never
+            // finishes arriving; there is nothing left to keep the circuit open
+            // for. Report the give-ups first so a driver sees which packet it
+            // was before the close.
+            self.report_give_ups(&exhausted);
             self.close(ServerEvent::Disconnected);
             return;
+        }
+        self.report_give_ups(&exhausted);
+        self.expire_sit_offer(now);
+        self.expire_transfers(now);
+        if let Err(error) = self.expire_xfers(now) {
+            // Encoding an `AbortXfer` cannot fail on well-formed state, and the
+            // transfer is already dropped either way, so say so and carry on
+            // rather than failing the session over it.
+            tracing::warn!(%error, "failed to tell the client about an expired Xfer");
         }
         if let Some(at) = self.ping
             && now >= at
         {
+            // A ping still in flight when the next one is due is itself a
+            // round-trip measurement in progress: fold its time so far in, so a
+            // client that stops answering widens the retransmission timeout
+            // instead of drawing more retransmissions onto a struggling link.
+            if let Some((_id, sent_at)) = self.outstanding_ping {
+                self.record_ping_sample(now.saturating_duration_since(sent_at));
+            }
             self.ping = Some(deadline(now, PING_INTERVAL));
             let _result = self.start_ping_check(now);
         }
     }
 
+    /// Surfaces each reliable packet that has run out of retransmissions as a
+    /// [`ServerEvent::ReliableGiveUp`], so a driver always learns *which*
+    /// packet was lost — including the session-critical one whose loss the
+    /// caller is about to close the session over.
+    fn report_give_ups(&mut self, exhausted: &[ExhaustedPacket]) {
+        for packet in exhausted {
+            self.events.push_back(ServerEvent::ReliableGiveUp {
+                message: packet.name.map(str::to_owned),
+            });
+        }
+    }
+
+    /// Withdraws an unanswered sit offer once its handshake timeout elapses.
+    fn expire_sit_offer(&mut self, now: Instant) {
+        let Some(at) = self.sit_expires else {
+            return;
+        };
+        if now < at {
+            return;
+        }
+        self.sit_expires = None;
+        if let SimSitState::ResponseSent { on } = self.sit {
+            self.sit = SimSitState::NotSitting;
+            self.events.push_back(ServerEvent::SitOfferExpired { on });
+        }
+    }
+
+    /// Answers and drops every parked `TransferRequest` whose serve deadline has
+    /// elapsed, so a driver that never serves one does not leave the client
+    /// waiting (and the request parked) forever.
+    fn expire_transfers(&mut self, now: Instant) {
+        let expired: Vec<TransferId> = self
+            .transfer_serves
+            .iter()
+            .filter(|(_id, serve)| now >= serve.expires)
+            .map(|(id, _serve)| *id)
+            .collect();
+        for transfer_id in expired {
+            let Some(serve) = self.transfer_serves.remove(&transfer_id) else {
+                continue;
+            };
+            let refuse = AnyMessage::TransferInfo(TransferInfo {
+                transfer_info: TransferInfoTransferInfoBlock {
+                    transfer_id: transfer_id.get(),
+                    channel_type: TRANSFER_CHANNEL_ASSET,
+                    target_type: 0,
+                    status: TransferStatus::UnknownSource.to_code(),
+                    size: 0,
+                    params: serve.params,
+                },
+            });
+            if let Err(error) = self.send(&refuse, Reliability::Reliable, now) {
+                tracing::warn!(%error, "failed to refuse an unanswered transfer request");
+            }
+            self.events
+                .push_back(ServerEvent::TransferServeExpired { transfer_id });
+        }
+    }
+
+    /// Abandons every `Xfer` in either direction that has gone quiet past
+    /// [`XFER_STALL_TIMEOUT`], telling the client with an `AbortXfer` — the
+    /// mirror of the client's own stalled-transfer reaping.
+    ///
+    /// # Errors
+    ///
+    /// Returns a wire error if an `AbortXfer` fails to encode; the transfer is
+    /// dropped either way.
+    fn expire_xfers(&mut self, now: Instant) -> Result<(), WireError> {
+        let expired: Vec<XferId> = self
+            .xfer_sends
+            .iter()
+            .filter(|(_id, send)| now >= send.expires)
+            .map(|(id, _send)| *id)
+            .chain(
+                self.xfer_receives
+                    .iter()
+                    .filter(|(_id, receive)| now >= receive.expires)
+                    .map(|(id, _receive)| *id),
+            )
+            .collect();
+        let mut result = Ok(());
+        for xfer_id in expired {
+            let _send = self.xfer_sends.remove(&xfer_id);
+            let _receive = self.xfer_receives.remove(&xfer_id);
+            let message = AnyMessage::AbortXfer(AbortXfer {
+                xfer_id: AbortXferXferIDBlock {
+                    id: xfer_id.get(),
+                    result: XFER_TIMEOUT_RESULT,
+                },
+            });
+            let sent = self.send(&message, Reliability::Reliable, now);
+            if result.is_ok() {
+                result = sent;
+            }
+            self.events.push_back(ServerEvent::XferAborted {
+                xfer_id,
+                result: XFER_TIMEOUT_RESULT,
+            });
+        }
+        result
+    }
+
     /// The next datagram to send to the client, if any.
+    ///
+    /// Popping a datagram starts the retransmission clock of the reliable packet
+    /// it carries: until now that packet was only *queued*, and time spent in
+    /// the queue must not count against its timeout.
     pub fn poll_transmit(&mut self) -> Option<Transmit> {
         let destination = self.client_addr?;
-        let payload = self.out.pop_front()?;
+        let outbound = self.out.pop_front()?;
+        if let Some(sequence) = outbound.sequence
+            && let Some(packet) = self.unacked.get_mut(&sequence)
+        {
+            packet.queued = false;
+        }
         Some(Transmit {
             destination,
-            payload,
+            payload: outbound.payload,
         })
     }
 
@@ -9113,6 +9704,19 @@ impl SimSession {
         merge_deadline(&mut earliest, self.ack_flush);
         merge_deadline(&mut earliest, self.ping);
         merge_deadline(&mut earliest, self.next_resend_deadline());
+        merge_deadline(&mut earliest, self.sit_expires);
+        merge_deadline(
+            &mut earliest,
+            self.transfer_serves.values().map(|s| s.expires).min(),
+        );
+        merge_deadline(
+            &mut earliest,
+            self.xfer_sends
+                .values()
+                .map(|send| send.expires)
+                .chain(self.xfer_receives.values().map(|receive| receive.expires))
+                .min(),
+        );
         earliest
     }
 
@@ -9121,14 +9725,37 @@ impl SimSession {
         self.events.pop_front()
     }
 
-    /// Transitions to the closed state, emitting `reason` once.
+    /// Transitions to the closed state, emitting `reason` once, and frees every
+    /// per-connection store the session was holding.
+    ///
+    /// The outbound queue is deliberately *not* dropped: a clean logout and a
+    /// retired circuit both queue their goodbye packet and then close, and that
+    /// datagram still has to reach the client. Nothing new can be queued behind
+    /// it — [`SimSession::send`] refuses once closed — so the queue drains and
+    /// stays drained.
     fn close(&mut self, reason: ServerEvent) {
-        if !matches!(self.state, SimState::Closed) {
-            self.state = SimState::Closed;
-            self.ping = None;
-            self.ack_flush = None;
-            self.events.push_back(reason);
+        if matches!(self.state, SimState::Closed) {
+            return;
         }
+        self.state = SimState::Closed;
+        self.ping = None;
+        self.ack_flush = None;
+        self.sit_expires = None;
+        self.outstanding_ping = None;
+        self.pending_acks = Vec::new();
+        self.unacked = BTreeMap::new();
+        self.caps_events = Vec::new();
+        self.xfer_files = BTreeMap::new();
+        self.xfer_sends = BTreeMap::new();
+        self.xfer_receives = BTreeMap::new();
+        self.transfer_serves = BTreeMap::new();
+        self.chat_sessions = BTreeMap::new();
+        self.script_questions = BTreeMap::new();
+        self.script_grants = BTreeMap::new();
+        self.offline_messages = Vec::new();
+        self.pending_report_screenshot = None;
+        self.pending_caps_uploads = BTreeMap::new();
+        self.events.push_back(reason);
     }
 }
 

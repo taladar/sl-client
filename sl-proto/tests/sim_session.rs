@@ -33,15 +33,16 @@ mod test {
         ParcelReturnType, ParcelStatus, Permissions, Permissions5, PingId, PlacesResult,
         PointAtType, Postcard, PrimShapeParams, ProductType, QueryId, RegionCoordinates,
         RegionHandle, RegionIdentity, RegionLocalObjectId, RegionLocalParcelId, RegionStats,
-        RegionTerrainComposition, RequiredVoiceVersion, RestoreItem, RezAttachment,
-        RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId, ScriptControl,
-        ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus, ScriptPermissions,
-        ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession, SimStatId,
-        SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot, TaskInventoryItem,
-        TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TextureEntry,
-        TextureFace, TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource,
-        TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
-        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
+        RegionTerrainComposition, RejectionReason, RequiredVoiceVersion, RestoreItem,
+        RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScopedObjectId, ScopedParcelId,
+        ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
+        ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
+        SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
+        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
+        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferId,
+        TransferRequestSource, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
+        ViewerEffect, ViewerEffectData, ViewerEffectType, XferId, enable_simulator_to_caps_llsd,
+        parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -52,13 +53,16 @@ mod test {
     };
     use sl_proto::{STANDARD_REGION_SIZE_METRES, TELEPORT_FINISH_LOCATION_ID, TeleportFinishInfo};
     use sl_wire::messages::{
-        AbortXfer, AbortXferXferIDBlock, EstateOwnerMessage, EstateOwnerMessageAgentDataBlock,
-        EstateOwnerMessageMethodDataBlock, EstateOwnerMessageParamListBlock,
-        ImprovedInstantMessage, ImprovedInstantMessageAgentDataBlock,
-        ImprovedInstantMessageEstateBlockBlock, ImprovedInstantMessageMessageBlockBlock,
-        OfflineNotification, OfflineNotificationAgentBlockBlock, OnlineNotification,
-        OnlineNotificationAgentBlockBlock, StartPingCheck, StartPingCheckPingIDBlock,
-        TransferRequest, TransferRequestTransferInfoBlock,
+        AbortXfer, AbortXferXferIDBlock, CompleteAgentMovement,
+        CompleteAgentMovementAgentDataBlock, CompletePingCheck, CompletePingCheckPingIDBlock,
+        EstateOwnerMessage, EstateOwnerMessageAgentDataBlock, EstateOwnerMessageMethodDataBlock,
+        EstateOwnerMessageParamListBlock, ImprovedInstantMessage,
+        ImprovedInstantMessageAgentDataBlock, ImprovedInstantMessageEstateBlockBlock,
+        ImprovedInstantMessageMessageBlockBlock, OfflineNotification,
+        OfflineNotificationAgentBlockBlock, OnlineNotification, OnlineNotificationAgentBlockBlock,
+        PacketAck, PacketAckPacketsBlock, SendXferPacket, SendXferPacketDataPacketBlock,
+        SendXferPacketXferIDBlock, StartPingCheck, StartPingCheckPingIDBlock, TransferRequest,
+        TransferRequestTransferInfoBlock, UseCircuitCode, UseCircuitCodeCircuitCodeBlock,
     };
     use sl_wire::{
         AnyMessage, CircuitCode, LoginRequest, LoginResponse, LoginSuccess, MessageId, PacketFlags,
@@ -4264,8 +4268,10 @@ mod test {
         );
 
         // Past the resend timeout the simulator re-emits the same sequence
-        // with the RESENT flag.
-        let later = after(now, 1_600)?;
+        // with the RESENT flag. The timeout tracks the measured round trip
+        // (`RELIABLE_TIMEOUT_FACTOR` x the ping average, five seconds on a
+        // circuit that has measured nothing yet), so wait past that.
+        let later = after(now, 5_100)?;
         sim.handle_timeout(later);
         let mut resent_payload = None;
         while let Some(transmit) = sim.poll_transmit() {
@@ -5380,7 +5386,9 @@ mod test {
         let bake = AnyMessage::EstateOwnerMessage(EstateOwnerMessage {
             agent_data: EstateOwnerMessageAgentDataBlock {
                 agent_id: uuid::Uuid::from_u128(1),
-                session_id: uuid::Uuid::nil(),
+                // The simulator refuses a message that asserts any session but
+                // the one the circuit was opened with (the `success` fixture's).
+                session_id: uuid::Uuid::from_u128(2),
                 transaction_id: uuid::Uuid::nil(),
             },
             method_data: EstateOwnerMessageMethodDataBlock {
@@ -7423,6 +7431,673 @@ mod test {
         assert_eq!(
             removed,
             vec![RegionLocalObjectId(0x10), RegionLocalObjectId(0x11)]
+        );
+        Ok(())
+    }
+
+    /// The `Result` code the simulator's `AbortXfer` carries when it gives up on
+    /// a stalled transfer (the reference's `LL_ERR_TCP_TIMEOUT`).
+    const XFER_TIMEOUT_RESULT: i32 = -23016;
+
+    /// Stands in for a live but idle client for `seconds`: steps the simulator's
+    /// clock one second at a time, feeding it an inbound (unreliable)
+    /// `StartPingCheck` each step so the inactivity timeout never fires, and
+    /// acknowledging every reliable datagram it sends *except* those carrying a
+    /// message named in `unacked` — the loss whose retransmission path a test is
+    /// measuring. Returns every server event seen along the way.
+    fn idle_sim(
+        sim: &mut SimSession,
+        now: Instant,
+        seconds: u64,
+        first_sequence: u32,
+        unacked: &[&str],
+    ) -> Result<Vec<ServerEvent>, TestError> {
+        let mut events = Vec::new();
+        for step in 1..=seconds {
+            let at = after(now, step.saturating_mul(1000))?;
+            let sequence =
+                first_sequence.saturating_add(u32::try_from(step).unwrap_or(0).saturating_mul(8));
+            let keepalive = AnyMessage::StartPingCheck(StartPingCheck {
+                ping_id: StartPingCheckPingIDBlock {
+                    ping_id: 200,
+                    oldest_unacked: 0,
+                },
+            });
+            sim.handle_datagram(
+                client_addr(),
+                &client_datagram(&keepalive, sequence, false)?,
+                at,
+            )?;
+            sim.handle_timeout(at);
+            let mut acks = Vec::new();
+            let mut answers = Vec::new();
+            while let Some(transmit) = sim.poll_transmit() {
+                let parsed = parse_datagram(&transmit.payload)?;
+                let message = decode(&transmit)?;
+                if parsed.flags.contains(PacketFlags::RELIABLE)
+                    && !unacked.contains(&message.name())
+                {
+                    acks.push(PacketAckPacketsBlock {
+                        id: parsed.sequence.get(),
+                    });
+                }
+                // Answer the simulator's own keep-alive pings, so its measured
+                // round trip stays that of a responsive client.
+                if let AnyMessage::StartPingCheck(ping) = message {
+                    answers.push(AnyMessage::CompletePingCheck(CompletePingCheck {
+                        ping_id: CompletePingCheckPingIDBlock {
+                            ping_id: ping.ping_id.ping_id,
+                        },
+                    }));
+                }
+            }
+            if !acks.is_empty() {
+                answers.push(AnyMessage::PacketAck(PacketAck { packets: acks }));
+            }
+            for (offset, answer) in answers.iter().enumerate() {
+                let seq = sequence
+                    .saturating_add(u32::try_from(offset).unwrap_or(0))
+                    .saturating_add(1);
+                sim.handle_datagram(client_addr(), &client_datagram(answer, seq, false)?, at)?;
+            }
+            events.extend(drain_server(sim));
+        }
+        Ok(events)
+    }
+
+    /// A circuit's identity is fixed when it opens: a second `UseCircuitCode`
+    /// naming a different agent, session or circuit code is refused and changes
+    /// nothing, while a repeat of the same triple — the client re-sending a
+    /// packet it believes was lost — is answered again.
+    #[test]
+    fn use_circuit_code_cannot_rebind_a_live_circuit() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let rebind = AnyMessage::UseCircuitCode(UseCircuitCode {
+            circuit_code: UseCircuitCodeCircuitCodeBlock {
+                code: 0x7777_7777,
+                session_id: uuid::Uuid::from_u128(0x999),
+                id: uuid::Uuid::from_u128(0x888),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&rebind, 9400, false)?, now)?;
+        let events = drain_server(&mut sim);
+        assert_eq!(
+            events,
+            vec![ServerEvent::Rejected {
+                message: Some("UseCircuitCode".to_owned()),
+                reason: RejectionReason::CircuitRebind,
+            }],
+            "a foreign UseCircuitCode is refused and opens nothing"
+        );
+
+        // The circuit still belongs to the agent that opened it: a message
+        // asserting the original session is still accepted.
+        let sit = AnyMessage::AgentSit(sl_wire::messages::AgentSit {
+            agent_data: sl_wire::messages::AgentSitAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&sit, 9401, false)?, now)?;
+        assert!(
+            drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::SitConfirmed { .. })),
+            "the original session's traffic is still accepted"
+        );
+
+        // The same triple again is the client retrying; it is answered.
+        let repeat = AnyMessage::UseCircuitCode(UseCircuitCode {
+            circuit_code: UseCircuitCodeCircuitCodeBlock {
+                code: 0x0011_2233,
+                session_id: uuid::Uuid::from_u128(2),
+                id: uuid::Uuid::from_u128(1),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&repeat, 9402, false)?, now)?;
+        assert!(
+            drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CircuitOpened { .. })),
+            "a repeat of the circuit's own triple is answered again"
+        );
+        Ok(())
+    }
+
+    /// The circuit's endpoint is claimed by the packet that opens it, not by
+    /// whatever datagram happens to arrive first: traffic from an unrelated
+    /// host before `UseCircuitCode` is refused and leaves the address unbound.
+    #[test]
+    fn only_the_opening_packet_claims_the_endpoint() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
+
+        let stranger = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 41_000);
+        let noise = AnyMessage::StartPingCheck(StartPingCheck {
+            ping_id: StartPingCheckPingIDBlock {
+                ping_id: 7,
+                oldest_unacked: 0,
+            },
+        });
+        sim.handle_datagram(stranger, &client_datagram(&noise, 1, false)?, now)?;
+        assert_eq!(
+            drain_server(&mut sim),
+            vec![ServerEvent::Rejected {
+                message: Some("StartPingCheck".to_owned()),
+                reason: RejectionReason::NoCircuit,
+            }],
+            "a datagram before the circuit opens claims nothing"
+        );
+        assert!(
+            sim.poll_transmit().is_none(),
+            "with no endpoint bound there is nowhere to answer"
+        );
+
+        // The real client's `UseCircuitCode` then binds the circuit to *its*
+        // address, and the stranger's traffic is ignored from then on.
+        let open = AnyMessage::UseCircuitCode(UseCircuitCode {
+            circuit_code: UseCircuitCodeCircuitCodeBlock {
+                code: 0x0011_2233,
+                session_id: uuid::Uuid::from_u128(2),
+                id: uuid::Uuid::from_u128(1),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&open, 2, false)?, now)?;
+        assert!(
+            drain_server(&mut sim)
+                .iter()
+                .any(|e| matches!(e, ServerEvent::CircuitOpened { .. })),
+            "the opening packet binds the circuit"
+        );
+        sim.handle_datagram(stranger, &client_datagram(&noise, 3, false)?, now)?;
+        assert!(
+            drain_server(&mut sim).is_empty(),
+            "traffic from another address is not this circuit's"
+        );
+        Ok(())
+    }
+
+    /// A message asserting a session id other than the one the circuit was
+    /// opened with is refused before it reaches a handler.
+    #[test]
+    fn a_foreign_session_id_is_refused() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let stolen = AnyMessage::AgentSit(sl_wire::messages::AgentSit {
+            agent_data: sl_wire::messages::AgentSitAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(0xDEAD),
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&stolen, 9410, false)?, now)?;
+        assert_eq!(
+            drain_server(&mut sim),
+            vec![ServerEvent::Rejected {
+                message: Some("AgentSit".to_owned()),
+                reason: RejectionReason::SessionIdMismatch,
+            }],
+            "a foreign session id never reaches the handler"
+        );
+        Ok(())
+    }
+
+    /// `CompleteAgentMovement` on a circuit that was never opened is refused,
+    /// and leaves the agent a child rather than rooting it on a circuit whose
+    /// keep-alive was never armed.
+    #[test]
+    fn complete_agent_movement_before_the_circuit_is_refused() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
+
+        let complete = AnyMessage::CompleteAgentMovement(CompleteAgentMovement {
+            agent_data: CompleteAgentMovementAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                circuit_code: 0x0011_2233,
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&complete, 1, false)?, now)?;
+        assert_eq!(
+            drain_server(&mut sim),
+            vec![ServerEvent::Rejected {
+                message: Some("CompleteAgentMovement".to_owned()),
+                reason: RejectionReason::NoCircuit,
+            }],
+        );
+        assert_eq!(sim.agent_presence(), AgentPresence::Child);
+        assert!(
+            sim.poll_transmit().is_none(),
+            "no AgentMovementComplete is sent for a circuit that is not open"
+        );
+        Ok(())
+    }
+
+    /// Closing frees the session's per-connection stores and refuses anything
+    /// new, but the goodbye packet queued *before* the close still drains —
+    /// that is how a clean logout's `LogoutReply` reaches the client.
+    #[test]
+    fn a_closed_session_drains_its_goodbye_and_frees_its_stores() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        sim.enqueue_caps_event(
+            "EnableSimulator",
+            enable_simulator_to_caps_llsd(REGION_HANDLE, sim_addr(), (256, 256)),
+        );
+        assert!(sim.has_caps_events());
+
+        client.initiate_logout(now);
+        while let Some(transmit) = client.poll_transmit() {
+            sim.handle_datagram(client_addr(), &transmit.payload, now)?;
+        }
+        assert!(sim.is_closed(), "a LogoutRequest closes the session");
+        assert!(
+            !sim.has_caps_events(),
+            "closing frees the queued CAPS events"
+        );
+
+        // The reply queued before the close still goes out...
+        let mut replied = false;
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::LogoutReply(_)) {
+                replied = true;
+            }
+        }
+        assert!(
+            replied,
+            "the LogoutReply queued before the close still drains"
+        );
+
+        // ...and nothing new can be queued behind it.
+        sim.send_alert_message("too late", &[], &[], now)?;
+        assert!(
+            sim.poll_transmit().is_none(),
+            "a closed session queues nothing new"
+        );
+        assert_eq!(sim.poll_timeout(), None);
+        Ok(())
+    }
+
+    /// An `Xfer` packet that is not the one the ordered stream expects is
+    /// refused rather than concatenated into the file being assembled.
+    #[test]
+    fn an_out_of_order_xfer_packet_is_refused() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        client.request_region_terrain_upload("terrain.raw", vec![3_u8; 1200], now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        let xfer_id = sim.request_xfer_upload("terrain.raw", now)?;
+        // Deliver the pull (and nothing back yet), so the client has queued its
+        // first packet but the simulator has not seen it.
+        while let Some(transmit) = sim.poll_transmit() {
+            client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+        }
+
+        // Packet 3 arrives while packet 0 is expected.
+        let ahead = AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id.get(),
+                packet: 3,
+            },
+            data_packet: SendXferPacketDataPacketBlock {
+                data: vec![0xEE; 16],
+            },
+        });
+        sim.handle_datagram(client_addr(), &client_datagram(&ahead, 9420, false)?, now)?;
+        assert_eq!(
+            drain_server(&mut sim),
+            vec![ServerEvent::Rejected {
+                message: Some("SendXferPacket".to_owned()),
+                reason: RejectionReason::OutOfOrder,
+            }],
+        );
+        assert!(
+            sim.poll_transmit().is_none(),
+            "an out-of-order packet is not confirmed"
+        );
+
+        // The pull is still live and still expecting packet 0: the client's own
+        // stream completes normally.
+        pump(&mut client, &mut sim, now)?;
+        assert!(
+            drain_server(&mut sim).iter().any(|e| matches!(
+                e,
+                ServerEvent::XferReceived { xfer_id: got, data, .. }
+                    if *got == xfer_id && *data == vec![3_u8; 1200]
+            )),
+            "the refused packet left the assembled file untouched"
+        );
+        Ok(())
+    }
+
+    /// A `SendXferPacket` stream that would grow the assembled file past the
+    /// simulator's ceiling is refused and the pull aborted, rather than letting
+    /// a network-driven buffer grow without limit.
+    #[test]
+    fn an_oversized_xfer_upload_is_aborted() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        client.request_region_terrain_upload("terrain.raw", vec![1_u8; 16], now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        let xfer_id = sim.request_xfer_upload("terrain.raw", now)?;
+        while sim.poll_transmit().is_some() {}
+
+        // Stream 60 KiB a packet — the ceiling is 16 MiB, so ~280 packets reach
+        // it — until the simulator refuses one.
+        let mut refused = None;
+        for packet in 0..400_u32 {
+            let chunk = AnyMessage::SendXferPacket(SendXferPacket {
+                xfer_id: SendXferPacketXferIDBlock {
+                    id: xfer_id.get(),
+                    packet,
+                },
+                data_packet: SendXferPacketDataPacketBlock {
+                    data: vec![0x5A; 60_000],
+                },
+            });
+            let sequence = 20_000_u32.saturating_add(packet);
+            sim.handle_datagram(
+                client_addr(),
+                &client_datagram(&chunk, sequence, false)?,
+                now,
+            )?;
+            while sim.poll_transmit().is_some() {}
+            let events = drain_server(&mut sim);
+            if let Some(event) = events.iter().find(|e| {
+                matches!(
+                    e,
+                    ServerEvent::Rejected {
+                        reason: RejectionReason::LimitExceeded,
+                        ..
+                    }
+                )
+            }) {
+                refused = Some((packet, event.clone()));
+                break;
+            }
+        }
+        let (packet, _event) = refused.ok_or("the simulator refuses an oversized Xfer stream")?;
+        assert!(
+            packet > 250,
+            "the ceiling is reached by the bytes streamed, not by an early refusal"
+        );
+        assert!(
+            matches!(
+                sim.abort_xfer(xfer_id, 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "an oversized pull is dropped, not left half-assembled"
+        );
+        Ok(())
+    }
+
+    /// A sit offer the client never completes is withdrawn once the handshake
+    /// times out, instead of leaving the machine half-done for the session's
+    /// life.
+    #[test]
+    fn an_unanswered_sit_offer_expires() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+
+        let target = ObjectKey::from(uuid::Uuid::from_u128(0x51D));
+        let transform = SitTransform {
+            autopilot: false,
+            sit_position: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.5,
+            },
+            sit_rotation: sl_types::lsl::Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            camera_eye_offset: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            camera_at_offset: sl_types::lsl::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            force_mouselook: false,
+        };
+        sim.send_avatar_sit_response(target, &transform, now)?;
+        while sim.poll_transmit().is_some() {}
+        assert_eq!(sim.seated_on(), None, "the offer is not a seat yet");
+
+        let events = idle_sim(&mut sim, now, 16, 9500, &[])?;
+        assert!(
+            events.contains(&ServerEvent::SitOfferExpired { on: target }),
+            "expected SitOfferExpired, got {events:?}"
+        );
+        assert_eq!(sim.seated_on(), None);
+        Ok(())
+    }
+
+    /// A `TransferRequest` the driver never serves is answered as unservable and
+    /// dropped, rather than parked for the session's life while the client
+    /// waits.
+    #[test]
+    fn an_unserved_transfer_request_expires() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        let transfer_id = client.fetch_task_item_asset(
+            ObjectKey::from(uuid::Uuid::from_u128(0xAAAA)),
+            InventoryKey::from(uuid::Uuid::from_u128(0xBBBB)),
+            AssetKey::from(uuid::Uuid::from_u128(0xCCCC)),
+            AssetType::ScriptText,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+
+        let events = idle_sim(&mut sim, now, 61, 9600, &[])?;
+        assert!(
+            events.contains(&ServerEvent::TransferServeExpired { transfer_id }),
+            "expected TransferServeExpired, got {events:?}"
+        );
+        assert!(
+            matches!(
+                sim.send_transfer_asset(transfer_id, b"late", now),
+                Err(sl_proto::Error::UnknownTransfer)
+            ),
+            "an expired request is no longer awaiting an answer"
+        );
+        Ok(())
+    }
+
+    /// An inbound `Xfer` pull that goes quiet is abandoned and the client told,
+    /// rather than holding its partial buffer forever.
+    #[test]
+    fn a_stalled_xfer_pull_is_abandoned() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        client.request_region_terrain_upload("terrain.raw", vec![5_u8; 2500], now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_server(&mut sim);
+        let xfer_id = sim.request_xfer_upload("terrain.raw", now)?;
+        while sim.poll_transmit().is_some() {}
+
+        let events = idle_sim(&mut sim, now, 31, 9700, &[])?;
+        assert!(
+            events.contains(&ServerEvent::XferAborted {
+                xfer_id,
+                result: XFER_TIMEOUT_RESULT,
+            }),
+            "expected a timed-out XferAborted, got {events:?}"
+        );
+        assert!(
+            matches!(
+                sim.abort_xfer(xfer_id, 0, now),
+                Err(sl_proto::Error::UnknownXfer)
+            ),
+            "the abandoned pull is gone"
+        );
+        Ok(())
+    }
+
+    /// A datagram still sitting in the outbound queue has not started its
+    /// retransmission clock: a driver that falls behind must not turn its own
+    /// backlog into a burst of retransmissions.
+    #[test]
+    fn a_queued_datagram_starts_its_clock_only_once_drained() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        while sim.poll_transmit().is_some() {}
+        drain_server(&mut sim);
+
+        sim.send_alert_message("undrained", &[], &[], now)?;
+        // Long past the timeout, but never handed to the driver.
+        sim.handle_timeout(after(now, 20_000)?);
+        let mut alerts = Vec::new();
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                alerts.push(parse_datagram(&transmit.payload)?.flags);
+            }
+        }
+        assert_eq!(alerts.len(), 1, "a queued datagram is never retransmitted");
+        assert!(
+            !alerts
+                .first()
+                .ok_or("the queued alert")?
+                .contains(PacketFlags::RESENT),
+            "the first transmission is not a resend"
+        );
+
+        // Now that it has left, the clock runs and it is retransmitted.
+        sim.handle_timeout(after(now, 25_200)?);
+        let mut resent = false;
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                resent = parse_datagram(&transmit.payload)?
+                    .flags
+                    .contains(PacketFlags::RESENT);
+            }
+        }
+        assert!(resent, "the drained datagram's clock started at the drain");
+        Ok(())
+    }
+
+    /// A measured slow round trip widens the retransmission timeout past the
+    /// five seconds a circuit that has measured nothing waits.
+    #[test]
+    fn a_slow_round_trip_widens_the_simulator_resend_timeout() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        while sim.poll_transmit().is_some() {}
+        drain_server(&mut sim);
+
+        // A ping answered 1.5 s later: the average (and with it the timeout)
+        // grows to match.
+        let pinged = after(now, 1_000)?;
+        let ping_id = sim
+            .start_ping_check(pinged)?
+            .ok_or("the circuit is open, so a ping goes out")?;
+        while sim.poll_transmit().is_some() {}
+        let answer = AnyMessage::CompletePingCheck(CompletePingCheck {
+            ping_id: CompletePingCheckPingIDBlock {
+                ping_id: ping_id.get(),
+            },
+        });
+        let answered = after(now, 2_500)?;
+        sim.handle_datagram(
+            client_addr(),
+            &client_datagram(&answer, 9800, false)?,
+            answered,
+        )?;
+
+        let sent = after(now, 2_600)?;
+        sim.send_alert_message("slow link", &[], &[], sent)?;
+        while sim.poll_transmit().is_some() {}
+
+        // 5.4 s after the send — past the unmeasured five-second timeout, but
+        // inside the 7.5 s the measured round trip earns it.
+        sim.handle_timeout(after(now, 8_000)?);
+        let mut resent = false;
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                resent = true;
+            }
+        }
+        assert!(
+            !resent,
+            "a measured slow link waits longer before resending"
+        );
+
+        sim.handle_timeout(after(now, 10_200)?);
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::AlertMessage(_)) {
+                resent = parse_datagram(&transmit.payload)?
+                    .flags
+                    .contains(PacketFlags::RESENT);
+            }
+        }
+        assert!(resent, "past the widened timeout it is retransmitted");
+        Ok(())
+    }
+
+    /// Only a packet that establishes the agent's presence is fatal: an
+    /// exhausted alert is reported and leaves the session running, while an
+    /// exhausted `AgentMovementComplete` closes it.
+    #[test]
+    fn only_a_session_critical_give_up_closes_the_session() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (_client, mut sim) = setup(now)?;
+        while sim.poll_transmit().is_some() {}
+        drain_server(&mut sim);
+
+        // An alert nobody ever acknowledges: reported, and the session lives.
+        sim.send_alert_message("unacked", &[], &[], now)?;
+        let events = idle_sim(&mut sim, now, 30, 9900, &["AlertMessage"])?;
+        assert!(
+            events.contains(&ServerEvent::ReliableGiveUp {
+                message: Some("AlertMessage".to_owned()),
+            }),
+            "expected a give-up report for the alert, got {events:?}"
+        );
+        assert!(
+            !sim.is_closed(),
+            "one lost alert does not tear the circuit down"
+        );
+
+        // The movement completion is another matter: the client never arrives.
+        let mut fresh = SimSession::new(RegionHandle(REGION_HANDLE), now);
+        let open = AnyMessage::UseCircuitCode(UseCircuitCode {
+            circuit_code: UseCircuitCodeCircuitCodeBlock {
+                code: 0x0011_2233,
+                session_id: uuid::Uuid::from_u128(2),
+                id: uuid::Uuid::from_u128(1),
+            },
+        });
+        fresh.handle_datagram(client_addr(), &client_datagram(&open, 1, false)?, now)?;
+        let complete = AnyMessage::CompleteAgentMovement(CompleteAgentMovement {
+            agent_data: CompleteAgentMovementAgentDataBlock {
+                agent_id: uuid::Uuid::from_u128(1),
+                session_id: uuid::Uuid::from_u128(2),
+                circuit_code: 0x0011_2233,
+            },
+        });
+        fresh.handle_datagram(client_addr(), &client_datagram(&complete, 2, false)?, now)?;
+        while fresh.poll_transmit().is_some() {}
+        drain_server(&mut fresh);
+        let events = idle_sim(&mut fresh, now, 30, 20_000, &["AgentMovementComplete"])?;
+        assert!(
+            events.contains(&ServerEvent::Disconnected),
+            "an unacknowledged AgentMovementComplete fails the session, got {events:?}"
         );
         Ok(())
     }

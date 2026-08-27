@@ -806,7 +806,7 @@ pub const XFER_OFFER_TIMEOUT: Duration = Duration::from_secs(60);
 /// The `Result` code an `AbortXfer` carries when *this* side gives up on a
 /// stalled transfer: the reference's `LL_ERR_TCP_TIMEOUT` (`llcircuit.h`), which
 /// is what `LLXfer::abort` sends in the same situation.
-const XFER_TIMEOUT_RESULT: i32 = -23016;
+pub(crate) const XFER_TIMEOUT_RESULT: i32 = -23016;
 
 /// How long a speculative, reliably-sent request may go unanswered before the
 /// session stops expecting its reply — used where the reply carries no

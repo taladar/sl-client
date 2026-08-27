@@ -320,7 +320,55 @@ fn push_any_message(out: &mut String, template: &Template) {
         }
     }
     out.push_str("            other => Err(WireError::UnknownMessage { id: other }),\n");
-    out.push_str("        }\n    }\n}\n");
+    out.push_str("        }\n    }\n\n");
+
+    push_agent_session_id(out, template);
+    out.push_str("}\n");
+}
+
+/// Emits `AnyMessage::agent_session_id`, reading the `SessionID` a message
+/// asserts in its single `AgentData` block.
+///
+/// Almost every message a viewer sends carries its agent and session ids in an
+/// `AgentData` block, and the simulator is expected to check the asserted
+/// session against the one the circuit was opened with. Deriving the accessor
+/// from the template keeps that check one match rather than one per handler,
+/// and keeps it in step with the template as messages change.
+fn push_agent_session_id(out: &mut String, template: &Template) {
+    out.push_str(
+        "    /// The session id this message asserts in its `AgentData` block, if it has\n\
+         \x20   /// one — what a simulator checks against the session its circuit was opened\n\
+         \x20   /// with. `None` for a message with no such block (including `UseCircuitCode`,\n\
+         \x20   /// which *establishes* the session id rather than asserting it).\n\
+         \x20   pub fn agent_session_id(&self) -> Option<uuid::Uuid> {\n        match self {\n",
+    );
+    for message in &template.messages {
+        if !asserts_agent_session_id(message) {
+            continue;
+        }
+        emit(
+            out,
+            format_args!(
+                "            Self::{0}(message) => Some(message.agent_data.session_id),\n",
+                message.name
+            ),
+        );
+    }
+    out.push_str("            _ => None,\n");
+    out.push_str("        }\n    }\n");
+}
+
+/// Whether `message` carries a `SessionID` in a single (non-repeating)
+/// `AgentData` block — the shape [`push_agent_session_id`] reads.
+fn asserts_agent_session_id(message: &MessageDef) -> bool {
+    message.blocks.iter().any(|block| {
+        block.name == "AgentData"
+            && matches!(block.cardinality, Cardinality::Single)
+            && block
+                .fields
+                .iter()
+                .any(|field| field.name == "SessionID" && matches!(field.ty, FieldType::Uuid))
+    })
 }
 
 /// Returns `", Eq"` when a struct may also derive `Eq`, otherwise `""`.
