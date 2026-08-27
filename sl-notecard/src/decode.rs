@@ -375,6 +375,29 @@ fn parse_item(cursor: &mut Cursor<'_>) -> Result<InventoryItem, NotecardError> {
     })
 }
 
+/// The fewest bytes one embedded-item entry can occupy. The shortest
+/// well-formed entry — `{`, `ext char index 0`, `inv_item`, an empty item
+/// chunk, `}` — is about 34 bytes with its newlines; this is a deliberate
+/// floor well under that.
+///
+/// Used only to bound a reservation — see [`reserve_hint`].
+const MIN_EMBEDDED_ITEM_BYTES: usize = 8;
+
+/// How much to reserve up front for a declared `count` of embedded items,
+/// given the bytes still unread: `count`, or what those bytes could actually
+/// hold, whichever is smaller.
+///
+/// The `count` line is attacker-supplied text with no upper bound, and parcel
+/// covenants decode through this path, so reserving from it directly lets
+/// about seventy bytes of notecard ask for a multi-gigabyte allocation (or
+/// overflow the capacity outright). The reference never preallocates here at
+/// all (`llnotecard.cpp`); bounding the reservation keeps the speed for a real
+/// notecard without letting the count size an allocation on its own. The parse
+/// loop below stays the authority on how many items are actually present.
+fn reserve_hint(count: usize, remaining: usize) -> usize {
+    count.min(remaining.checked_div(MIN_EMBEDDED_ITEM_BYTES).unwrap_or(0))
+}
+
 /// Parse the `LLEmbeddedItems` chunk (header, count, and each `{ ext char
 /// index / inv_item / item }` entry), whose header line has not yet been read.
 fn parse_embedded_items(
@@ -390,7 +413,7 @@ fn parse_embedded_items(
     let count_line = next_nonblank(cursor, "embedded item count")?;
     let count = parse_usize(expect_prefix(count_line, "count ")?.trim(), "count")?;
 
-    let mut items = Vec::with_capacity(count);
+    let mut items = Vec::with_capacity(reserve_hint(count, cursor.remaining()));
     for _index in 0..count {
         expect_literal(cursor, "{", "embedded item entry open brace")?;
         let ext_line = next_nonblank(cursor, "ext char index")?;

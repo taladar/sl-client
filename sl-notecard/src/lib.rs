@@ -417,6 +417,22 @@ Go here: \u{100000}\n\
         assert!(Notecard::decode(bytes).is_err(), "version 9 is unsupported");
     }
 
+    /// The embedded-item `count` is attacker-supplied text with no upper bound
+    /// — and parcel covenants decode through this path — so it must not size
+    /// the item vector on its own. Without the reservation bound these seventy
+    /// bytes panic with a capacity overflow instead of returning an error.
+    #[test]
+    fn a_huge_embedded_item_count_does_not_size_the_allocation() {
+        let bytes = format!(
+            "Linden text version 2\n{{\nLLEmbeddedItems version 1\n{{\ncount {}\n",
+            usize::MAX
+        );
+        assert!(
+            Notecard::decode(bytes.as_bytes()).is_err(),
+            "a count the stream cannot possibly hold is an error, not an allocation"
+        );
+    }
+
     #[test]
     fn a_truncated_text_body_is_rejected() {
         let bytes = "Linden text version 2\n{\nLLEmbeddedItems version 1\n{\ncount 0\n}\nText length 50\nshort\n}\n".as_bytes();

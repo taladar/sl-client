@@ -182,6 +182,25 @@ mod tests {
         );
     }
 
+    /// A key count is a signed field the decoder only checks for negativity, so
+    /// an `i32::MAX` count must not be allowed to size the keyframe vector: at
+    /// twenty bytes a key that is a 42 GB reservation from a 175-byte file.
+    ///
+    /// This pins the decode outcome; the reservation itself is checked in
+    /// `decode.rs`'s own tests, because a 42 GB reservation is one Linux
+    /// overcommit happily hands out, so it does not reliably fail here.
+    #[test]
+    fn a_huge_key_count_does_not_size_the_allocation() {
+        // num_rot_keys is the i32 at offset 53 (41 header bytes, then the
+        // joint's "mPelvis\0" name and its i32 priority).
+        let mut bytes = MINIMAL.to_vec();
+        bytes.splice(53..57, [0xff, 0xff, 0xff, 0x7f]);
+        assert!(matches!(
+            Motion::from_bytes(&bytes),
+            Err(AnimDecodeError::UnexpectedEof { .. })
+        ));
+    }
+
     #[test]
     fn rejects_zero_joints() {
         // num_joints is the u32 at offset 37 (2+2+4+4+1+4+4+4+4+4+4 header

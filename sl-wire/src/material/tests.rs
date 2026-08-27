@@ -325,3 +325,37 @@ fn render_materials_put_round_trip() -> Result<(), String> {
     assert!(!second.contains_key("Material"));
     Ok(())
 }
+
+/// A `{ "Zipped": … }` body that inflates past the ceiling is refused, rather
+/// than letting the compressed blob size the allocation. Zlib compresses a run
+/// of zeros about a thousand to one, so a few hundred kilobytes of capability
+/// response is otherwise hundreds of megabytes of resident memory.
+///
+/// Both `RenderMaterials` parse paths share the ceiling, so both are checked —
+/// and an ordinary body still decodes through each of them.
+#[test]
+fn a_zipped_body_that_inflates_past_the_ceiling_is_refused() {
+    // A payload that parses perfectly well, followed by enough padding to blow
+    // the ceiling — so the refusal can only come from the size, not from the
+    // parser rejecting the content. Without the limit this body decodes to the
+    // id and the assertions below fail.
+    let id = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f00);
+    let mut payload = Vec::new();
+    write_binary_value(
+        &Llsd::Array(vec![Llsd::Binary(id.as_bytes().to_vec())]),
+        &mut payload,
+    );
+    payload.resize(128 << 20, 0);
+
+    let bomb = miniz_oxide::deflate::compress_to_vec_zlib(&payload, 6);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&bomb);
+    let body = format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>");
+
+    assert!(parse_render_materials_request(&body).is_empty());
+    assert!(parse_render_materials_put_request(&body).is_empty());
+    assert!(parse_render_materials_response(&body).is_empty());
+
+    // The same payload without the padding still decodes through the same path.
+    let ordinary = build_render_materials_request(&[id]);
+    assert_eq!(parse_render_materials_request(&ordinary), vec![id]);
+}

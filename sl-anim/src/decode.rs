@@ -65,6 +65,13 @@ const MAX_ANIMATED_JOINTS: u32 = 216;
 /// (`MAX_CONSTRAINTS`).
 const MAX_CONSTRAINTS: i32 = 10;
 
+/// The fewest bytes one keyframe can occupy: the modern encoding's `u16` time
+/// plus three `u16` components. The legacy `0.1` encoding uses `f32`s and so
+/// costs twice as much, which is why this is a floor rather than a size.
+///
+/// Used only to bound a reservation — see [`Cursor::reserve_hint`].
+const MIN_KEY_BYTES: usize = 8;
+
 /// The largest `hand_pose` index the reference viewer accepts
 /// (`LLHandMotion::NUM_HAND_POSES`).
 const NUM_HAND_POSES: u32 = 14;
@@ -435,13 +442,13 @@ fn read_joint(
     let priority = read_joint_priority(cursor.read_i32("joint_priority")?)?;
 
     let num_rot_keys = read_key_count(cursor.read_i32("num_rot_keys")?, "num_rot_keys")?;
-    let mut rotation_keys = Vec::with_capacity(num_rot_keys);
+    let mut rotation_keys = Vec::with_capacity(cursor.reserve_hint(num_rot_keys, MIN_KEY_BYTES));
     for _ in 0..num_rot_keys {
         rotation_keys.push(read_rotation_key(cursor, duration, old_version)?);
     }
 
     let num_pos_keys = read_key_count(cursor.read_i32("num_pos_keys")?, "num_pos_keys")?;
-    let mut position_keys = Vec::with_capacity(num_pos_keys);
+    let mut position_keys = Vec::with_capacity(cursor.reserve_hint(num_pos_keys, MIN_KEY_BYTES));
     for _ in 0..num_pos_keys {
         position_keys.push(read_position_key(cursor, duration, old_version)?);
     }
@@ -708,6 +715,26 @@ impl<'a> Cursor<'a> {
         Ok(slice)
     }
 
+    /// The number of bytes still unread.
+    const fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    /// How much to reserve up front for `count` elements of `element_bytes`
+    /// each: `count`, or what the unread bytes could actually hold, whichever
+    /// is smaller.
+    ///
+    /// A keyframe count is a signed field off the wire that
+    /// [`read_key_count`] only checks for negativity, so an `i32::MAX` count
+    /// reserves about 42 GB from a file that is a few dozen bytes long. The
+    /// reference does not preallocate on key counts at all
+    /// (`llkeyframemotion.cpp`); bounding the reservation keeps the speed for a
+    /// real animation while making the count unable to size an allocation on
+    /// its own. The read loop stays the authority on what is actually there.
+    fn reserve_hint(&self, count: usize, element_bytes: usize) -> usize {
+        count.min(self.remaining().checked_div(element_bytes).unwrap_or(0))
+    }
+
     /// Read a single byte.
     fn read_u8(&mut self, field: &'static str) -> Result<u8, AnimDecodeError> {
         self.take(1, field)?
@@ -872,4 +899,23 @@ pub enum AnimDecodeError {
         /// The number of animated joints in the motion.
         joints: u32,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Cursor, MIN_KEY_BYTES};
+    use pretty_assertions::assert_eq;
+
+    /// A keyframe count comes off the wire checked only for negativity, so an
+    /// `i32::MAX` count would otherwise reserve about 42 GB from a file a few
+    /// dozen bytes long. It may not size an allocation on its own: no more
+    /// keyframes can follow than the unread bytes could hold.
+    #[test]
+    fn reserve_hint_bounds_a_count_by_the_bytes_that_remain() {
+        let data = [0_u8; 80];
+        let cursor = Cursor::new(&data);
+        assert_eq!(cursor.reserve_hint(usize::MAX, MIN_KEY_BYTES), 10);
+        // A count the stream could actually hold passes through untouched.
+        assert_eq!(cursor.reserve_hint(4, MIN_KEY_BYTES), 4);
+    }
 }

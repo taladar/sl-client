@@ -551,6 +551,27 @@ impl<'a> Cursor<'a> {
         Ok(slice)
     }
 
+    /// The number of bytes still unread.
+    const fn remaining(&self) -> usize {
+        self.data.len().saturating_sub(self.pos)
+    }
+
+    /// How much to reserve up front for `count` elements of `element_bytes`
+    /// each: `count`, or what the unread bytes could actually hold, whichever
+    /// is smaller.
+    ///
+    /// Every count in this format is a `u32` read straight off the file, and
+    /// the element reads that follow are the only thing that ever rejects one.
+    /// Reserving from the raw count therefore lets a four-byte field ask for
+    /// hundreds of gigabytes before a single byte of the elements is checked —
+    /// a [`MorphDelta`] is 48 bytes on the wire, so `u32::MAX` of them is about
+    /// 200 GB. Bounding the reservation costs a legitimate file nothing: the
+    /// read loop stays the authority on what is actually there, and a `Vec`
+    /// that guessed low still grows.
+    fn reserve_hint(&self, count: usize, element_bytes: usize) -> usize {
+        count.min(self.remaining().checked_div(element_bytes).unwrap_or(0))
+    }
+
     /// Read a single byte.
     fn read_u8(&mut self, field: &'static str) -> Result<u8, BaseMeshError> {
         self.take(1, field)?
@@ -603,7 +624,7 @@ impl<'a> Cursor<'a> {
         count: usize,
         field: &'static str,
     ) -> Result<Vec<[f32; 3]>, BaseMeshError> {
-        let mut out = Vec::with_capacity(count);
+        let mut out = Vec::with_capacity(self.reserve_hint(count, 12));
         for _ in 0..count {
             out.push(self.read_vec3(field)?);
         }
@@ -616,7 +637,7 @@ impl<'a> Cursor<'a> {
         count: usize,
         field: &'static str,
     ) -> Result<Vec<[f32; 2]>, BaseMeshError> {
-        let mut out = Vec::with_capacity(count);
+        let mut out = Vec::with_capacity(self.reserve_hint(count, 8));
         for _ in 0..count {
             out.push(self.read_vec2(field)?);
         }
@@ -629,7 +650,7 @@ impl<'a> Cursor<'a> {
         count: usize,
         field: &'static str,
     ) -> Result<Vec<f32>, BaseMeshError> {
-        let mut out = Vec::with_capacity(count);
+        let mut out = Vec::with_capacity(self.reserve_hint(count, 4));
         for _ in 0..count {
             out.push(self.read_f32(field)?);
         }
@@ -661,7 +682,7 @@ impl<'a> Cursor<'a> {
     /// Read the `NumFaces` count and that many triangle index triples.
     fn read_faces(&mut self) -> Result<Vec<[u16; 3]>, BaseMeshError> {
         let num_faces = usize::from(self.read_u16("num_faces")?);
-        let mut faces = Vec::with_capacity(num_faces);
+        let mut faces = Vec::with_capacity(self.reserve_hint(num_faces, 6));
         for _ in 0..num_faces {
             faces.push([
                 self.read_u16("face_index")?,
@@ -678,7 +699,7 @@ impl<'a> Cursor<'a> {
         count: usize,
         field: &'static str,
     ) -> Result<Vec<String>, BaseMeshError> {
-        let mut names = Vec::with_capacity(count);
+        let mut names = Vec::with_capacity(self.reserve_hint(count, NAME_LEN));
         for _ in 0..count {
             names.push(self.read_name(field)?);
         }
@@ -714,7 +735,7 @@ impl<'a> Cursor<'a> {
     /// Read one morph target's sparse per-vertex delta list.
     fn read_morph_deltas(&mut self) -> Result<Vec<MorphDelta>, BaseMeshError> {
         let count = usize::try_from(self.read_u32("morph_vertex_count")?).unwrap_or(0);
-        let mut deltas = Vec::with_capacity(count);
+        let mut deltas = Vec::with_capacity(self.reserve_hint(count, 48));
         for _ in 0..count {
             let vertex_index = usize::try_from(self.read_u32("morph_vertex_index")?).unwrap_or(0);
             deltas.push(MorphDelta {
@@ -735,7 +756,7 @@ impl<'a> Cursor<'a> {
             return Ok(Vec::new());
         };
         let count = usize::try_from(count).unwrap_or(0);
-        let mut remaps = Vec::with_capacity(count);
+        let mut remaps = Vec::with_capacity(self.reserve_hint(count, 8));
         for _ in 0..count {
             let source = usize::try_from(self.read_u32("remap_source")?).unwrap_or(0);
             let destination = usize::try_from(self.read_u32("remap_destination")?).unwrap_or(0);
@@ -1017,5 +1038,35 @@ mod tests {
         bytes.push(0); // has_detail_tex_coords
         let result = BaseMesh::from_bytes(&bytes);
         assert!(matches!(result, Err(BaseMeshError::UnexpectedEof { .. })));
+    }
+
+    /// A morph's vertex count is a raw `u32`, and a [`MorphDelta`] is 48 bytes
+    /// on the wire — so `u32::MAX` of them is a ~200 GB reservation from a
+    /// 641-byte file. The count must not size the allocation on its own; the
+    /// read loop is what decides. Without the bound this test aborts the
+    /// process instead of failing.
+    #[test]
+    fn a_huge_morph_delta_count_does_not_size_the_allocation() {
+        // morph_vertex_count is the u32 at offset 465, right after the
+        // 64-byte "Fatten" morph name.
+        let mut bytes = MINI_BASEMESH.to_vec();
+        bytes.splice(465..469, [0xff, 0xff, 0xff, 0xff]);
+        assert!(matches!(
+            BaseMesh::from_bytes(&bytes),
+            Err(BaseMeshError::UnexpectedEof { .. })
+        ));
+    }
+
+    /// The same for the trailing shared-vertex remap table, whose count is also
+    /// a raw `u32`.
+    #[test]
+    fn a_huge_remap_count_does_not_size_the_allocation() {
+        // num_remaps is the u32 at offset 629, after the "End Morphs" sentinel.
+        let mut bytes = MINI_BASEMESH.to_vec();
+        bytes.splice(629..633, [0xff, 0xff, 0xff, 0xff]);
+        assert!(matches!(
+            BaseMesh::from_bytes(&bytes),
+            Err(BaseMeshError::UnexpectedEof { .. })
+        ));
     }
 }

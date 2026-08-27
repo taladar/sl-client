@@ -15,6 +15,17 @@ use uuid::Uuid;
 /// carries `round(value * 10000)` as an integer.
 const MATERIAL_FIXED_SCALE: f32 = 10000.0;
 
+/// The largest a `{ "Zipped": … }` body may inflate to.
+///
+/// Both `RenderMaterials` paths hand a base64 blob straight to zlib, and zlib
+/// compresses a run of zeros about a thousand to one — so an uncapped inflate
+/// turns a kilobyte of capability response into a gigabyte of resident memory,
+/// sized entirely by whatever answered the request. A legacy material is a
+/// couple of hundred bytes of binary LLSD, so even a region-wide "fetch all"
+/// reply is orders of magnitude under this; the margin is deliberate so no real
+/// grid is refused.
+const MAX_INFLATED_MATERIALS_BYTES: usize = 64 << 20;
+
 // ---------------------------------------------------------------------------
 // RenderMaterials (legacy materials capability — zipped binary LLSD)
 // ---------------------------------------------------------------------------
@@ -94,7 +105,11 @@ const fn local_id_as_i32(local_id: u32) -> i32 {
 fn parse_zipped_body(xml: &str) -> Option<Llsd> {
     let root = parse_llsd_xml(xml).ok()?;
     let zipped = root.get("Zipped").and_then(Llsd::as_binary)?;
-    let raw = miniz_oxide::inflate::decompress_to_vec_zlib(zipped).ok()?;
+    let raw = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+        zipped,
+        MAX_INFLATED_MATERIALS_BYTES,
+    )
+    .ok()?;
     let mut reader = Reader::new(&raw);
     read_binary_value(&mut reader)
 }
@@ -184,7 +199,10 @@ pub fn parse_render_materials_response(xml: &str) -> Vec<RenderMaterialEntry> {
     let Some(zipped) = root.get("Zipped").and_then(Llsd::as_binary) else {
         return Vec::new();
     };
-    let Ok(raw) = miniz_oxide::inflate::decompress_to_vec_zlib(zipped) else {
+    let Ok(raw) = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
+        zipped,
+        MAX_INFLATED_MATERIALS_BYTES,
+    ) else {
         return Vec::new();
     };
     let mut reader = Reader::new(&raw);
