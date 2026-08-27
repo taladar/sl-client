@@ -41,6 +41,15 @@ identity as `Event::RegionInfoHandshake(RegionIdentity)`.
 > The estate-manager flag is about *the current agent* — it gates the estate UI.
 > The list of *all* estate managers comes from the estate access lists (below).
 
+The handshake is **not** only a login greeting: a simulator re-sends it while
+the session is already active whenever the region's identity changes — a region
+restart, an estate change, a terrain-texture change — and retries until it is
+answered. Every `RegionHandshake` is therefore replied to and re-surfaced as
+`Event::RegionInfoHandshake`, on the root circuit and on child circuits alike,
+so terrain textures and region flags refresh in place. Only the *arrival*
+transition it also drives at login (`Event::RegionHandshakeComplete`, or
+`Event::RegionChanged` after a teleport) is once-only.
+
 ## Region limits & settings (`RegionInfo`)
 
 Richer, updatable settings are requested on demand with

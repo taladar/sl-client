@@ -10502,6 +10502,54 @@ mod test {
         Ok(session)
     }
 
+    /// A simulator re-sends `RegionHandshake` outside login — on a region restart,
+    /// an estate change or a terrain-texture change — and retries until it is
+    /// answered. An already-`Active` session must still reply and refresh the
+    /// region's identity and flags, while the once-only arrival transition must
+    /// not fire a second time.
+    #[test]
+    fn region_handshake_mid_session_is_answered_and_refreshes_flags() -> Result<(), TestError> {
+        let now = Instant::now();
+        // Handshaken with no region-wide fly block, so the session is `Active`.
+        let mut session = handshaken_with_region_flags(now, 0)?;
+        assert!(!session.region_blocks_fly());
+
+        // The estate turns flying off (BLOCK_FLY = 1 << 19) and re-greets us.
+        let handshake = server_message(
+            &region_handshake_msg(13, 1 << 19, "RenamedRegion", "", ""),
+            2,
+            true,
+        )?;
+        session.handle_datagram(sim_addr(), &handshake, now)?;
+
+        let replies = drain(&mut session)?;
+        assert!(
+            replies
+                .iter()
+                .any(|m| matches!(m, AnyMessage::RegionHandshakeReply(_))),
+            "expected the re-sent handshake to be answered, got {replies:?}"
+        );
+
+        let events = drain_events(&mut session);
+        let identity = events
+            .iter()
+            .find_map(|e| match e {
+                Event::RegionInfoHandshake(identity) => Some(identity),
+                _ => None,
+            })
+            .ok_or("expected a refreshed RegionInfoHandshake event")?;
+        assert_eq!(identity.sim_name, region_name("RenamedRegion"));
+        assert_eq!(identity.region_flags, 1 << 19);
+        assert!(session.region_blocks_fly());
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, Event::RegionHandshakeComplete)),
+            "arrival is once-only, got {events:?}"
+        );
+        Ok(())
+    }
+
     /// The session resolves the agent's current parcel from the own-avatar position
     /// and the parcel bitmap, and `can_fly` tracks the parcel's `ALLOW_FLY`.
     #[test]

@@ -2796,22 +2796,27 @@ impl Session {
         }
         match message {
             AnyMessage::RegionHandshake(handshake) => {
-                if matches!(self.state, SessionState::AwaitingHandshake) {
-                    if let Some(circuit) = self.circuit.as_mut() {
-                        circuit.send_region_handshake_reply(now)?;
-                    }
-                    let region_handle = self
-                        .circuit_id_for(from)
-                        .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
-                        .unwrap_or(RegionHandle(0));
-                    let identity = region_identity(handshake, region_handle)?;
-                    if let Some(circuit_id) = self.circuit_id_for(from) {
-                        self.note_region_flags(circuit_id, identity.region_flags);
-                    }
-                    self.events
-                        .push_back(Event::RegionInfoHandshake(Box::new(identity)));
-                    self.complete_arrival(now);
+                // A simulator re-sends `RegionHandshake` outside login too — on a
+                // region restart, an estate change or a terrain-texture change —
+                // and keeps retrying until it is answered, so reply and refresh
+                // the region's identity/flags whatever the session state (the
+                // reference viewer's `process_region_handshake` is likewise
+                // ungated). Only the *arrival* transition is once-only, and
+                // `complete_arrival` guards itself.
+                if let Some(circuit) = self.circuit.as_mut() {
+                    circuit.send_region_handshake_reply(now)?;
                 }
+                let region_handle = self
+                    .circuit_id_for(from)
+                    .and_then(|circuit_id| self.regions.get(&circuit_id).copied())
+                    .unwrap_or(RegionHandle(0));
+                let identity = region_identity(handshake, region_handle)?;
+                if let Some(circuit_id) = self.circuit_id_for(from) {
+                    self.note_region_flags(circuit_id, identity.region_flags);
+                }
+                self.events
+                    .push_back(Event::RegionInfoHandshake(Box::new(identity)));
+                self.complete_arrival(now);
             }
             AnyMessage::AgentMovementComplete(complete) => {
                 // After a teleport handover the destination promotes us to root
