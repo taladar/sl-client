@@ -13,7 +13,7 @@
 
 use std::collections::HashMap;
 
-use sl_llsd::{Llsd, push_escaped};
+use sl_llsd::{Llsd, parse_guarded_xml, push_escaped};
 
 use crate::xmlrpc::{XmlRpcError, XmlRpcResponse, build_method_response, parse_method_response};
 
@@ -259,10 +259,11 @@ pub fn build_grid_info_xml(info: &GridInfo) -> String {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] if the body is not well-formed XML and
-/// [`XmlRpcError::NotXmlRpc`] if the root element is not `<gridinfo>`.
+/// Returns [`XmlRpcError::Xml`] if the body is not well-formed XML or is
+/// nested past [`sl_llsd::MAX_NESTING_DEPTH`], and [`XmlRpcError::NotXmlRpc`]
+/// if the root element is not `<gridinfo>`.
 pub fn parse_grid_info_xml(xml: &str) -> Result<GridInfo, XmlRpcError> {
-    let document = roxmltree::Document::parse(xml)?;
+    let document = parse_guarded_xml(xml)?;
     let root = document.root_element();
     if !root.has_tag_name("gridinfo") {
         return Err(XmlRpcError::NotXmlRpc);

@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-use sl_llsd::{Llsd, push_escaped};
+use sl_llsd::{Llsd, parse_guarded_xml, push_escaped};
 
 /// A decoded `<methodCall>`: the method name and its positional parameters.
 #[derive(Debug, Clone, PartialEq)]
@@ -127,10 +127,11 @@ fn push_params(out: &mut String, params: &[Llsd]) {
 
 /// Returns the `<methodName>` of a `<methodCall>` document without decoding
 /// its parameters — a cheap peek for routing a shared endpoint. `None` for a
-/// non-XML body, a response, or a call lacking a method name.
+/// non-XML body, one nested past [`sl_llsd::MAX_NESTING_DEPTH`], a response, or
+/// a call lacking a method name.
 #[must_use]
 pub fn method_name(xml: &str) -> Option<String> {
-    let document = roxmltree::Document::parse(xml).ok()?;
+    let document = parse_guarded_xml(xml).ok()?;
     let root = document.root_element();
     if !root.has_tag_name("methodCall") {
         return None;
@@ -145,11 +146,12 @@ pub fn method_name(xml: &str) -> Option<String> {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] for malformed XML, [`XmlRpcError::NotXmlRpc`]
-/// if the root is not a `<methodCall>`, and [`XmlRpcError::NoMethodName`] if
-/// the method name is absent.
+/// Returns [`XmlRpcError::Xml`] for malformed XML or a body nested past
+/// [`sl_llsd::MAX_NESTING_DEPTH`], [`XmlRpcError::NotXmlRpc`] if the root is
+/// not a `<methodCall>`, and [`XmlRpcError::NoMethodName`] if the method name
+/// is absent.
 pub fn parse_method_call(xml: &str) -> Result<XmlRpcCall, XmlRpcError> {
-    let document = roxmltree::Document::parse(xml)?;
+    let document = parse_guarded_xml(xml)?;
     let root = document.root_element();
     if !root.has_tag_name("methodCall") {
         return Err(XmlRpcError::NotXmlRpc);
@@ -170,10 +172,11 @@ pub fn parse_method_call(xml: &str) -> Result<XmlRpcCall, XmlRpcError> {
 ///
 /// # Errors
 ///
-/// Returns [`XmlRpcError::Xml`] for malformed XML and
-/// [`XmlRpcError::NotXmlRpc`] if the root is not a `<methodResponse>`.
+/// Returns [`XmlRpcError::Xml`] for malformed XML or a body nested past
+/// [`sl_llsd::MAX_NESTING_DEPTH`], and [`XmlRpcError::NotXmlRpc`] if the root
+/// is not a `<methodResponse>`.
 pub fn parse_method_response(xml: &str) -> Result<XmlRpcResponse, XmlRpcError> {
-    let document = roxmltree::Document::parse(xml)?;
+    let document = parse_guarded_xml(xml)?;
     let root = document.root_element();
     if !root.has_tag_name("methodResponse") {
         return Err(XmlRpcError::NotXmlRpc);
@@ -215,8 +218,21 @@ fn collect_params(root: roxmltree::Node<'_, '_>) -> Vec<Llsd> {
 /// Structs become maps, arrays become arrays, `i4`/`int` integers, `boolean`
 /// booleans, `double` reals, `base64` binary; everything else (including
 /// `dateTime.iso8601`) is kept as its string text, so no value is ever dropped.
+///
+/// Takes a node rather than a body, so it cannot assume the document came from
+/// [`parse_guarded_xml`]: the walk carries its own depth bound, and a value
+/// nested past [`sl_llsd::MAX_NESTING_DEPTH`] becomes [`Llsd::Undef`] rather
+/// than recursing further.
 #[must_use]
 pub fn value_to_llsd(value_node: roxmltree::Node<'_, '_>) -> Llsd {
+    value_to_llsd_at(value_node, 0)
+}
+
+/// [`value_to_llsd`], `depth` levels below the value it was called on.
+fn value_to_llsd_at(value_node: roxmltree::Node<'_, '_>, depth: usize) -> Llsd {
+    if depth >= sl_llsd::MAX_NESTING_DEPTH {
+        return Llsd::Undef;
+    }
     let Some(element) = value_node.children().find(roxmltree::Node::is_element) else {
         return Llsd::String(value_node.text().unwrap_or_default().to_owned());
     };
@@ -232,11 +248,18 @@ pub fn value_to_llsd(value_node: roxmltree::Node<'_, '_>) -> Llsd {
                         .find(|n| n.has_tag_name("name"))
                         .and_then(|n| n.text())?;
                     let value = member.children().find(|n| n.has_tag_name("value"))?;
-                    Some((name.to_owned(), value_to_llsd(value)))
+                    Some((
+                        name.to_owned(),
+                        value_to_llsd_at(value, depth.saturating_add(1)),
+                    ))
                 })
                 .collect(),
         ),
-        "array" => Llsd::Array(array_value_nodes(value_node).map(value_to_llsd).collect()),
+        "array" => Llsd::Array(
+            array_value_nodes(value_node)
+                .map(|node| value_to_llsd_at(node, depth.saturating_add(1)))
+                .collect(),
+        ),
         "i4" | "int" => element
             .text()
             .and_then(|t| t.trim().parse().ok())
@@ -349,6 +372,7 @@ mod test {
     use super::{
         XmlRpcCall, XmlRpcError, XmlRpcResponse, build_fault, build_method_call,
         build_method_response, method_name, parse_method_call, parse_method_response,
+        value_to_llsd,
     };
 
     /// A struct exercising every value kind the bridge distinguishes.
@@ -433,5 +457,47 @@ mod test {
         assert!(matches!(parse_method_call("<<"), Err(XmlRpcError::Xml(_))));
         assert!(method_name("not xml").is_none());
         assert!(method_name("<llsd><map/></llsd>").is_none());
+    }
+
+    /// The routing peek is guarded like the full parse: a body deep enough to
+    /// overflow roxmltree yields `None` instead of aborting the process. This
+    /// test aborts the test binary rather than failing if the guard is removed.
+    #[test]
+    fn method_name_refuses_a_deeply_nested_body() {
+        let depth = 4_000_usize;
+        let xml = format!(
+            "<methodCall><methodName>m</methodName>{}<value/>{}</methodCall>",
+            "<params><param>".repeat(depth),
+            "</param></params>".repeat(depth),
+        );
+        assert!(method_name(&xml).is_none());
+    }
+
+    /// `value_to_llsd` takes a node, not a body, so it cannot assume the
+    /// document came through the guard: its own walk stops at
+    /// `MAX_NESTING_DEPTH` and yields `Undef` rather than recursing further.
+    #[test]
+    fn the_value_walk_truncates_past_the_limit() {
+        // Deeper than the LLSD limit but far below roxmltree's own ceiling, so
+        // this document parses and the walk is what has to stop.
+        let depth = sl_llsd::MAX_NESTING_DEPTH + 8;
+        let xml = format!(
+            "<value>{}<string>deep</string>{}</value>",
+            "<array><data><value>".repeat(depth),
+            "</value></data></array>".repeat(depth),
+        );
+        let Ok(document) = roxmltree::Document::parse(&xml) else {
+            unreachable!("the fixture is well-formed")
+        };
+        let mut value = value_to_llsd(document.root_element());
+        let mut levels = 0_usize;
+        while let Some(inner) = value.as_array().and_then(|items| items.first()).cloned() {
+            value = inner;
+            levels = levels.saturating_add(1);
+        }
+        // The `<string>deep</string>` at the bottom is never reached: the walk
+        // stopped short of it.
+        assert_eq!(value, Llsd::Undef);
+        assert!(levels < depth, "walked {levels} of {depth} levels");
     }
 }

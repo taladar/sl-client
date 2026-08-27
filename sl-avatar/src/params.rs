@@ -380,11 +380,12 @@ impl VisualParams {
     ///
     /// # Errors
     ///
-    /// Returns [`ParamError`] if the XML is malformed, the root is not
-    /// `<linden_avatar>`, or a `<param>` (or its effect child) has a missing
-    /// required attribute or a malformed number / vector / colour.
+    /// Returns [`ParamError`] if the XML is malformed or nested past
+    /// [`sl_llsd::MAX_NESTING_DEPTH`], the root is not `<linden_avatar>`, or a
+    /// `<param>` (or its effect child) has a missing required attribute or a
+    /// malformed number / vector / colour.
     pub fn from_xml(xml: &str) -> Result<Self, ParamError> {
-        let doc = roxmltree::Document::parse(xml)?;
+        let doc = sl_llsd::parse_guarded_xml(xml)?;
         let root = doc.root_element();
         if root.tag_name().name() != "linden_avatar" {
             return Err(ParamError::UnexpectedRoot {

@@ -525,16 +525,9 @@ const fn narrow_to_f32(value: f64) -> f32 {
 ///
 /// Returns a [`roxmltree::Error`] if the body is not well-formed XML.
 pub fn parse_llsd_xml(xml: &str) -> Result<Llsd, roxmltree::Error> {
-    if !nesting_within(xml, crate::MAX_NESTING_DEPTH) {
-        // Refused *before* roxmltree, not after: its element parsing recurses
-        // and overflows the stack somewhere between 1000 and 2000 levels, so by
-        // the time we would be handed a tree to walk the process is already
-        // gone. `NodesLimitReached` is the nearest thing its error type has to
-        // "this document is too big to parse"; the alternative is a silent
-        // `Undef`, which would be hiding the refusal.
-        return Err(roxmltree::Error::NodesLimitReached);
-    }
-    let document = roxmltree::Document::parse(xml)?;
+    // Nesting is bounded *before* roxmltree, not after — see
+    // [`crate::xml::parse_guarded_xml`].
+    let document = crate::xml::parse_guarded_xml(xml)?;
     let root = document.root_element();
     // The <llsd> root wraps a single value element.
     let value = root
@@ -542,100 +535,6 @@ pub fn parse_llsd_xml(xml: &str) -> Result<Llsd, roxmltree::Error> {
         .find(roxmltree::Node::is_element)
         .map_or(Llsd::Undef, |node| node_to_llsd(node, 0));
     Ok(value)
-}
-
-/// Whether `xml`'s element nesting stays within `limit`.
-///
-/// A byte scan, run before the document is handed to roxmltree — see
-/// [`parse_llsd_xml`] for why it cannot be left to the walk in
-/// [`node_to_llsd`]. roxmltree's own `depth` guard bounds *entity references*
-/// (the billion-laughs case) and its `nodes_limit` bounds node **count**, which
-/// a deep-but-narrow document never approaches, so neither covers this.
-///
-/// Comments, CDATA sections, processing instructions and the doctype are
-/// skipped rather than counted, and a self-closing `<x/>` opens nothing — so a
-/// document of many sibling empty elements is not mistaken for a deep one.
-/// Being a scan rather than a parse it does not validate: anything malformed
-/// enough to confuse it is rejected by roxmltree immediately afterwards.
-fn nesting_within(xml: &str, limit: usize) -> bool {
-    let bytes = xml.as_bytes();
-    let mut depth: usize = 0;
-    let mut index: usize = 0;
-    while index < bytes.len() {
-        let Some(rest) = bytes.get(index..) else {
-            break;
-        };
-        if !rest.starts_with(b"<") {
-            index = index.saturating_add(1);
-            continue;
-        }
-        if rest.starts_with(b"<!--") {
-            index = skip_past(bytes, index, b"-->");
-        } else if rest.starts_with(b"<![CDATA[") {
-            index = skip_past(bytes, index, b"]]>");
-        } else if rest.starts_with(b"<?") {
-            index = skip_past(bytes, index, b"?>");
-        } else if rest.starts_with(b"</") {
-            depth = depth.saturating_sub(1);
-            index = skip_tag(bytes, index).0;
-        } else if rest.starts_with(b"<!") {
-            index = skip_tag(bytes, index).0;
-        } else {
-            let (next, self_closing) = skip_tag(bytes, index);
-            if !self_closing {
-                depth = depth.saturating_add(1);
-                if depth > limit {
-                    return false;
-                }
-            }
-            index = next;
-        }
-    }
-    true
-}
-
-/// Advances past the tag starting at `start`, reporting the offset just after
-/// its `>` and whether it closed itself (`<x/>`).
-///
-/// Quoted attribute values are honoured, so a `>` or a trailing `/` inside one
-/// neither ends the tag nor reads as self-closing.
-fn skip_tag(bytes: &[u8], start: usize) -> (usize, bool) {
-    let mut index = start.saturating_add(1);
-    let mut quote: Option<u8> = None;
-    let mut last_significant = b'<';
-    while let Some(&byte) = bytes.get(index) {
-        match quote {
-            Some(open) if byte == open => quote = None,
-            Some(_open) => {}
-            None => match byte {
-                b'"' | b'\'' => quote = Some(byte),
-                b'>' => return (index.saturating_add(1), last_significant == b'/'),
-                _other => {}
-            },
-        }
-        if !byte.is_ascii_whitespace() {
-            last_significant = byte;
-        }
-        index = index.saturating_add(1);
-    }
-    // Unterminated: roxmltree rejects it a moment later.
-    (index, false)
-}
-
-/// The offset just past the next `needle` at or after `start`, or the end of
-/// input if there is none.
-fn skip_past(bytes: &[u8], start: usize, needle: &[u8]) -> usize {
-    let mut index = start;
-    while index < bytes.len() {
-        if bytes
-            .get(index..)
-            .is_some_and(|rest| rest.starts_with(needle))
-        {
-            return index.saturating_add(needle.len());
-        }
-        index = index.saturating_add(1);
-    }
-    bytes.len()
 }
 
 /// Converts a single LLSD-XML value element into an [`Llsd`], `depth` levels
@@ -763,28 +662,6 @@ mod tests {
             expected = Llsd::Array(vec![expected]);
         }
         assert_eq!(parse_llsd_xml(&xml), Ok(expected));
-    }
-
-    /// The scan counts *nesting*, not element starts: a flat document of many
-    /// self-closing siblings is not mistaken for a deep one.
-    #[test]
-    fn self_closing_siblings_do_not_accumulate_depth() {
-        let flat = format!("<llsd><array>{}</array></llsd>", "<undef/>".repeat(500));
-        assert!(nesting_within(&flat, crate::MAX_NESTING_DEPTH));
-    }
-
-    /// Comments, CDATA and processing instructions carry no depth, and a `>` or
-    /// a trailing `/` inside a quoted attribute value ends nothing.
-    #[test]
-    fn markup_that_is_not_nesting_is_skipped() {
-        let noise = concat!(
-            "<?xml version=\"1.0\"?>",
-            "<llsd><!-- <array><array> --><string>",
-            "<![CDATA[ <array><array> ]]>",
-            "</string><uri href=\"a>b/\"/></llsd>",
-        );
-        assert!(nesting_within(noise, 3));
-        assert!(!nesting_within(noise, 1));
     }
 
     /// The walk keeps its own guard as the backstop for the scan being a scan

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 89 |
-| done | 884 |
+| bugs | 88 |
+| done | 885 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1487** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (89)
+## bugs (88)
 
 ### protocol
 
@@ -1184,8 +1184,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   embedded items
 - [`protocol-audit-oldest-unacked-wrap`](bugs/protocol-audit-oldest-unacked-wrap.md)
   — OldestUnacked uses numeric min instead of wrapping-oldest
-- [`protocol-audit-roxmltree-nesting-in-sl-wire`](bugs/protocol-audit-roxmltree-nesting-in-sl-wire.md)
-  — sl-wire's own XML parsing has no nesting guard
 - [`protocol-audit-sim-session-lifecycle`](bugs/protocol-audit-sim-session-lifecycle.md)
   — SimSession accepts identity rebinding, never validates a session id, and
   frees nothing on close
@@ -1384,7 +1382,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (884)
+## done (885)
 
 ### protocol
 
@@ -1527,6 +1525,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-reliable-exhaustion-kills-session`](done/protocol-audit-reliable-exhaustion-kills-session.md)
   — One exhausted reliable packet of any kind closes the session as
   HandshakeFailed
+- [`protocol-audit-roxmltree-nesting-in-sl-wire`](done/protocol-audit-roxmltree-nesting-in-sl-wire.md)
+  — sl-wire's own XML parsing has no nesting guard
 - [`protocol-audit-texture-download-completeness`](done/protocol-audit-texture-download-completeness.md)
   — A texture download completes on a chunk count, not on the chunk indices
 - [`protocol-audit-tokio-caps-refetch`](done/protocol-audit-tokio-caps-refetch.md)

@@ -174,11 +174,12 @@ impl Skeleton {
     ///
     /// # Errors
     ///
-    /// Returns [`SkeletonError`] if the XML is malformed, the root is not
-    /// `<linden_skeleton>`, a bone/collision-volume lacks a required attribute,
-    /// or a transform attribute is not three floats.
+    /// Returns [`SkeletonError`] if the XML is malformed or nested past
+    /// [`sl_llsd::MAX_NESTING_DEPTH`], the root is not `<linden_skeleton>`, a
+    /// bone/collision-volume lacks a required attribute, or a transform
+    /// attribute is not three floats.
     pub fn from_xml(xml: &str) -> Result<Self, SkeletonError> {
-        let doc = roxmltree::Document::parse(xml)?;
+        let doc = sl_llsd::parse_guarded_xml(xml)?;
         let root = doc.root_element();
         if root.tag_name().name() != "linden_skeleton" {
             return Err(SkeletonError::UnexpectedRoot {
@@ -464,12 +465,12 @@ impl AttachmentPoints {
     ///
     /// # Errors
     ///
-    /// Returns [`SkeletonError`] if the XML is malformed, the root is not
-    /// `<linden_avatar>`, the `<skeleton>` element is missing, or an
-    /// `<attachment_point>` lacks a required attribute / has a malformed vector
-    /// or id.
+    /// Returns [`SkeletonError`] if the XML is malformed or nested past
+    /// [`sl_llsd::MAX_NESTING_DEPTH`], the root is not `<linden_avatar>`, the
+    /// `<skeleton>` element is missing, or an `<attachment_point>` lacks a
+    /// required attribute / has a malformed vector or id.
     pub fn from_xml(xml: &str) -> Result<Self, SkeletonError> {
-        let doc = roxmltree::Document::parse(xml)?;
+        let doc = sl_llsd::parse_guarded_xml(xml)?;
         let root = doc.root_element();
         if root.tag_name().name() != "linden_avatar" {
             return Err(SkeletonError::UnexpectedRoot {
@@ -765,5 +766,27 @@ mod tests {
             ]
         );
         Ok(())
+    }
+
+    /// A bone tree deep enough to overflow roxmltree's recursion is refused
+    /// before it reaches roxmltree — `parse_raw_bone` and `flatten` recurse per
+    /// bone level too, so the guard bounds all three. This test *aborts the
+    /// test binary* rather than failing if the guard is removed.
+    #[test]
+    fn a_deeply_nested_skeleton_is_refused() {
+        let depth = 4_000_usize;
+        let bone = concat!(
+            "<bone name=\"b\" pos=\"0 0 0\" rot=\"0 0 0\" scale=\"1 1 1\" ",
+            "pivot=\"0 0 0\" end=\"0 0 0\">",
+        );
+        let xml = format!(
+            "<linden_skeleton>{}{}</linden_skeleton>",
+            bone.repeat(depth),
+            "</bone>".repeat(depth),
+        );
+        assert!(matches!(
+            Skeleton::from_xml(&xml),
+            Err(SkeletonError::Xml(roxmltree::Error::NodesLimitReached))
+        ));
     }
 }

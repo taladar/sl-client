@@ -17,6 +17,7 @@ exclude = { workspace = true }
 
 [dependencies]
 roxmltree = { workspace = true }
+sl-llsd = { workspace = true }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
 thiserror = { workspace = true }

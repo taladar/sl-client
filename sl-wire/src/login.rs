@@ -12,7 +12,7 @@ use crate::geometry::Direction;
 use crate::llsd::Llsd;
 use crate::region_handle::RegionHandle;
 use crate::xmlrpc::{array_value_nodes, push_member, push_value, value_to_llsd};
-use sl_llsd::push_escaped;
+use sl_llsd::{parse_guarded_xml, push_escaped};
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, TextureKey};
 use sl_types::map::RegionCoordinates;
 use thiserror::Error;
@@ -1050,10 +1050,11 @@ pub enum LoginParseError {
 ///
 /// # Errors
 ///
-/// Returns a [`LoginParseError`] if the body is not well-formed, is an XML-RPC
-/// fault, lacks the response struct, or is missing/has invalid required fields.
+/// Returns a [`LoginParseError`] if the body is not well-formed or is nested
+/// past [`sl_llsd::MAX_NESTING_DEPTH`], is an XML-RPC fault, lacks the response
+/// struct, or is missing/has invalid required fields.
 pub fn parse_login_response(xml: &str) -> Result<LoginResponse, LoginParseError> {
-    let document = roxmltree::Document::parse(xml)?;
+    let document = parse_guarded_xml(xml)?;
 
     if let Some(fault) = document.descendants().find(|n| n.has_tag_name("fault")) {
         let members = fault
@@ -1775,10 +1776,10 @@ pub struct ParsedLoginRequest {
 ///
 /// # Errors
 ///
-/// Returns a [`LoginParseError`] if the body is not well-formed XML or does not
-/// contain the request struct.
+/// Returns a [`LoginParseError`] if the body is not well-formed XML, is nested
+/// past [`sl_llsd::MAX_NESTING_DEPTH`], or does not contain the request struct.
 pub fn parse_login_request(xml: &str) -> Result<ParsedLoginRequest, LoginParseError> {
-    let document = roxmltree::Document::parse(xml)?;
+    let document = parse_guarded_xml(xml)?;
     let request_struct = document
         .descendants()
         .find(|n| n.has_tag_name("param"))
