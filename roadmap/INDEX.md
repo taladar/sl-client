@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 66 |
-| done | 908 |
+| done | 909 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1488** |
+| **total** | **1489** |
 
 ## ideas (97)
 
@@ -1253,8 +1253,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Eight copied texture-poll systems each leak Image assets for the session
 - [`viewer-audit-ui-widget-per-frame-writes`](bugs/viewer-audit-ui-widget-per-frame-writes.md)
   — The colour picker writes unguarded every frame and defeats the layout gate
-- [`viewer-audit-underwater-fog-nan`](bugs/viewer-audit-underwater-fog-nan.md) —
-  A negative underwater fog density NaNs the screen
 - [`viewer-audit-virtual-list-rebinding`](bugs/viewer-audit-virtual-list-rebinding.md)
   — The recycling virtual list re-binds every pooled row on a one-row scroll
 - [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
@@ -1317,8 +1315,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
+- [`viewer-water-surface-fog-fallback-flat`](bugs/viewer-water-surface-fog-fallback-flat.md)
+  — The water surface's deep-water colour is a flat tint, not the fogged one
 
-## done (908)
+## done (909)
 
 ### protocol
 
@@ -1598,6 +1598,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   pose
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-underwater-fog-nan`](done/viewer-audit-underwater-fog-nan.md) —
+  A negative underwater fog density NaNs the screen
 - [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
   WaterState is not purged on a teleport, and leaks spawned water planes
 - [`viewer-audit-world-reset-purge-completeness`](done/viewer-audit-world-reset-purge-completeness.md)

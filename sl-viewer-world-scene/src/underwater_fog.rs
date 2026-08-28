@@ -149,6 +149,38 @@ fn fog_disabled() -> bool {
     })
 }
 
+/// The water fog density the shader should use, given the water frame's density and
+/// underwater fog modifier and whether the eye is submerged — the reference
+/// `LLSettingsWater::getModifiedWaterFogDensity` (`llsettingswater.cpp:377`).
+///
+/// Submerged, the density is raised to the modifier (clamped to the reference's
+/// `[0, 10]`); above water it is the frame's density unchanged.
+///
+/// The guard on a **negative** density is the reference's fix for
+/// BUG-233797 / BUG-233798: a negative base raised to a non-integral power is not a
+/// real number, so `powf` returns `NaN`, and a `NaN` density reaches the uniform and
+/// takes the whole screen with it — the reference's comment calls it an
+/// *unrecoverable blackout*. Both are values a region may legitimately send: the
+/// density is a free `f32` off the wire, and the modifier is authored per water
+/// frame. Of the two remedies the reference weighed, it chose (and this follows)
+/// forcing the density to `1.0` in that case, which keeps some notion of fog rather
+/// than rounding the modifier and inverting the water's colour.
+///
+/// Integrality is tested on the *clamped* modifier, as in the reference — a modifier
+/// of `10.5` clamps to `10.0`, which is integral, and needs no rescue.
+fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: bool) -> f32 {
+    if !(submerged && fog_mod > 0.0) {
+        return density;
+    }
+    let fog_mod = fog_mod.clamp(0.0, 10.0);
+    let density = if density < 0.0 && fog_mod.fract() > 0.0 {
+        1.0
+    } else {
+        density
+    };
+    density.powf(fog_mod)
+}
+
 /// Fill the camera's [`UnderwaterFog`] from the region's EEP water settings, the
 /// sky sun direction, the camera pose, and the current water level — the reference
 /// `LLSettingsVOWater` uniform prep (`waterFogKS = 1 / max(lightDir.z, 0.3)`,
@@ -209,14 +241,11 @@ pub(crate) fn update_underwater_fog(
 
         let (fog_color, fog_density) = match water {
             Some(water) => {
-                let base = water.water_fog_density;
-                // `getModifiedWaterFogDensity`: raise the density to the underwater
-                // fog modifier when the eye is submerged.
-                let density = if submerged && water.underwater_fog_mod > 0.0 {
-                    base.powf(water.underwater_fog_mod.clamp(0.0, 10.0))
-                } else {
-                    base
-                };
+                let density = modified_water_fog_density(
+                    water.water_fog_density,
+                    water.underwater_fog_mod,
+                    submerged,
+                );
                 let color = Vec3::new(
                     water.water_fog_color.red(),
                     water.water_fog_color.green(),
@@ -452,10 +481,21 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
-    use super::{UnderwaterFog, update_underwater_fog};
+    use super::{UnderwaterFog, modified_water_fog_density, update_underwater_fog};
     use crate::environment::EnvironmentState;
     use crate::water::WaterLevel;
     use crate::world_api::ViewerCamera;
+
+    /// A fog density is the expected one, to within a relative tolerance that leaves
+    /// room for the last bit of a `powf` — and, since every comparison against a
+    /// `NaN` is false, an assertion that the value is a real number at all.
+    #[track_caller]
+    fn assert_density(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= expected.abs() * 1e-6,
+            "expected a fog density of {expected}, got {actual}",
+        );
+    }
 
     /// The fog reconstructs a fragment's world position from a depth buffer
     /// rendered from *this* frame's camera pose, so it must read the camera's
@@ -514,6 +554,99 @@ mod tests {
             "…and nowhere near the frame-old GlobalTransform pose {:?}",
             stale.translation,
         );
+        Ok(())
+    }
+
+    /// Above water the frame's density is the density, whatever the modifier says —
+    /// the modifier only applies to a submerged eye.
+    #[test]
+    fn above_water_the_density_is_untouched() {
+        assert_density(modified_water_fog_density(2.0, 0.25, false), 2.0);
+        // Including the value that would otherwise need the negative-base rescue:
+        // out of the water there is no `powf` to go non-real.
+        assert_density(modified_water_fog_density(-2.0, 0.25, false), -2.0);
+    }
+
+    /// A non-positive modifier is the reference's own "no modification" case
+    /// (`underwater && underwater_fog_mod > 0.0f`), submerged or not.
+    #[test]
+    fn a_non_positive_modifier_is_untouched() {
+        assert_density(modified_water_fog_density(2.0, 0.0, true), 2.0);
+        assert_density(modified_water_fog_density(2.0, -1.0, true), 2.0);
+    }
+
+    /// The ordinary submerged case: the density raised to the modifier, with the
+    /// modifier clamped to the reference's `[0, 10]`.
+    #[test]
+    fn submerged_the_density_is_raised_to_the_modifier() {
+        assert_density(modified_water_fog_density(4.0, 0.5, true), 2.0);
+        // 16 clamps to 10, not 16 — `2^10`, not `2^16`.
+        assert_density(modified_water_fog_density(2.0, 16.0, true), 1024.0);
+    }
+
+    /// BUG-233797 / BUG-233798: a negative density raised to a non-integral power is
+    /// not a real number, and the `NaN` `powf` returns would reach the uniform and
+    /// black out the whole screen. The reference forces the density to `1.0` in that
+    /// case; so does this.
+    #[test]
+    fn a_negative_density_never_yields_a_non_real_result() {
+        assert_density(modified_water_fog_density(-2.0, 0.25, true), 1.0);
+        // An *integral* modifier needs no rescue — the power is real, and the
+        // reference lets it through.
+        assert_density(modified_water_fog_density(-2.0, 2.0, true), 4.0);
+        // Integrality is tested after the clamp, as in the reference: 10.5 clamps to
+        // 10, which is integral, so this is a plain (real) power, not a rescue.
+        assert_density(modified_water_fog_density(-2.0, 10.5, true), 1024.0);
+    }
+
+    /// The end-to-end shape of that bug: a region whose water frame carries a
+    /// negative density and a fractional modifier, with the eye under the surface.
+    /// The uniform the fog shader reads must be a real number.
+    #[test]
+    fn a_hostile_water_frame_cannot_nan_the_uniform() -> Result<(), Box<dyn core::error::Error>> {
+        let mut app = App::new();
+        let mut environment = EnvironmentState::default();
+        // The values the reference's bug report describes, on every frame of the
+        // cycle so the day position in force cannot pick a benign one.
+        for water in environment.settings.day_cycle.water_frames.values_mut() {
+            water.water_fog_density = -2.0;
+            water.underwater_fog_mod = 0.25;
+        }
+        assert!(
+            !environment.settings.day_cycle.water_frames.is_empty(),
+            "the default environment defines a water frame to poison",
+        );
+        app.insert_resource(environment)
+            .init_resource::<WaterLevel>()
+            .add_systems(Update, update_underwater_fog);
+
+        // Below the default water level: the eye is submerged, so the modifier
+        // applies.
+        let camera = app
+            .world_mut()
+            .spawn((
+                ViewerCamera,
+                Transform::from_xyz(0.0, -5.0, 0.0),
+                GlobalTransform::default(),
+                Projection::default(),
+                UnderwaterFog::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let fog = app
+            .world()
+            .entity(camera)
+            .get::<UnderwaterFog>()
+            .ok_or("the camera keeps its fog component")?;
+        assert!(
+            fog.fog_density.is_finite(),
+            "the fog density stays a real number, got {}",
+            fog.fog_density,
+        );
+        // …and is the reference's rescued density.
+        assert_density(fog.fog_density, 1.0);
         Ok(())
     }
 }
