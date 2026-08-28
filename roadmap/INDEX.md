@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 84 |
-| done | 890 |
+| bugs | 83 |
+| done | 891 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,14 +1165,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (84)
+## bugs (83)
 
 ### protocol
 
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
-- [`protocol-audit-mesh-joint-index-bounds`](bugs/protocol-audit-mesh-joint-index-bounds.md)
-  — A rig's joint indices are never checked against the skin's joint count
 - [`protocol-audit-oldest-unacked-wrap`](bugs/protocol-audit-oldest-unacked-wrap.md)
   — OldestUnacked uses numeric min instead of wrapping-oldest
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
@@ -1370,7 +1368,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (890)
+## done (891)
 
 ### protocol
 
@@ -1516,6 +1514,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   handle
 - [`protocol-audit-mesh-decode-allocation-caps`](done/protocol-audit-mesh-decode-allocation-caps.md)
   — Mesh decode: unbounded inflate, unbounded header offset, unchecked indices
+- [`protocol-audit-mesh-joint-index-bounds`](done/protocol-audit-mesh-joint-index-bounds.md)
+  — A rig's joint indices are never checked against the skin's joint count
 - [`protocol-audit-notecard-fidelity`](done/protocol-audit-notecard-fidelity.md)
   — The notecard codec misreads metadata, corrupts on re-encode, and misplaces
   embedded items

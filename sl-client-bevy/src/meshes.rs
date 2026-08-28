@@ -70,9 +70,19 @@ pub fn to_bevy_mesh(submesh: &Submesh) -> Mesh {
 /// [`rigged_inverse_bindposes`] must be built in that same order). A vertex with
 /// no influence (a face without weights) binds fully to slot `0`, so it is not
 /// collapsed to the origin by an all-zero skinning matrix.
+///
+/// The `skin` is what bounds those indices. A weight byte and the joint table it
+/// indexes live in *different* blocks of the mesh asset — the weights in a
+/// geometry LOD block, `joint_names` in the `skin` block — so `sl-mesh` cannot
+/// check one against the other while decoding, and this join is the first place
+/// that can. An influence naming a joint the skin does not declare is
+/// **dropped**, not clamped: a clamped index welds the vertex to an unrelated
+/// bone, which moves it visibly wrong, while dropping it leaves the vertex on
+/// its remaining (renormalized) influences.
 #[must_use]
-pub fn to_bevy_rigged_mesh(submesh: &Submesh) -> Mesh {
+pub fn to_bevy_rigged_mesh(submesh: &Submesh, skin: &MeshSkin) -> Mesh {
     let mut mesh = to_bevy_mesh(submesh);
+    let joint_count = skin.joint_names.len();
     let vertex_count = submesh.positions.len();
     let mut joint_indices: Vec<[u16; 4]> = Vec::with_capacity(vertex_count);
     let mut joint_weights: Vec<[f32; 4]> = Vec::with_capacity(vertex_count);
@@ -81,7 +91,7 @@ pub fn to_bevy_rigged_mesh(submesh: &Submesh) -> Mesh {
             .weights
             .as_ref()
             .and_then(|weights| weights.get(index));
-        let (indices, weights) = pack_influences(influences);
+        let (indices, weights) = pack_influences(influences, joint_count);
         joint_indices.push(indices);
         joint_weights.push(weights);
     }
@@ -96,8 +106,14 @@ pub fn to_bevy_rigged_mesh(submesh: &Submesh) -> Mesh {
 }
 
 /// Pack one vertex's [`VertexWeights`] into the four `(joint index, weight)` slots
-/// a Bevy `SkinnedMesh` reads. Influences beyond the fourth are dropped (Second
-/// Life rigs carry at most four); a vertex with none binds fully to joint `0`.
+/// a Bevy `SkinnedMesh` reads, keeping only influences that name one of the skin's
+/// `joint_count` joints. Influences beyond the fourth *kept* one are dropped
+/// (Second Life rigs carry at most four); a vertex with none binds fully to joint
+/// `0`.
+///
+/// An out-of-range joint is skipped **before** the slots are filled, so it does
+/// not consume one — a rig whose first influence is bogus still skins on its
+/// remaining three.
 ///
 /// The four weights are **renormalized to sum to one**. Second Life stores each
 /// influence as an independent quantized fraction, and dropping influences past the
@@ -108,18 +124,24 @@ pub fn to_bevy_rigged_mesh(submesh: &Submesh) -> Mesh {
 /// downward "streak toward the feet" of a rigged garment). Normalizing here is the
 /// equivalent of the reference viewer's per-vertex weight scale. A vertex whose
 /// weights sum to zero (no usable influence) binds fully to joint `0`.
-fn pack_influences(weights: Option<&VertexWeights>) -> ([u16; 4], [f32; 4]) {
+fn pack_influences(weights: Option<&VertexWeights>, joint_count: usize) -> ([u16; 4], [f32; 4]) {
     let influences = weights.map_or(&[][..], |weights| weights.influences.as_slice());
-    let indices = std::array::from_fn(|slot| {
-        influences
-            .get(slot)
-            .map_or(0_u16, |&(joint, _weight)| u16::from(joint))
-    });
-    let raw: [f32; 4] = std::array::from_fn(|slot| {
-        influences
-            .get(slot)
-            .map_or(0.0_f32, |&(_joint, weight)| weight)
-    });
+    // Filled in place rather than collected: this runs once per vertex of every
+    // rigged mesh in the scene, and four slots never need a heap allocation.
+    let mut kept = [(0_u16, 0.0_f32); 4];
+    let mut filled = 0_usize;
+    for &(joint, weight) in influences {
+        if usize::from(joint) >= joint_count {
+            continue;
+        }
+        let Some(slot) = kept.get_mut(filled) else {
+            break;
+        };
+        *slot = (u16::from(joint), weight);
+        filled = filled.saturating_add(1);
+    }
+    let indices = kept.map(|(joint, _weight)| joint);
+    let raw: [f32; 4] = kept.map(|(_joint, weight)| weight);
     let sum: f32 = raw.iter().sum();
     if sum <= 0.0 {
         // No usable influence: bind fully to the first slot rather than collapse to
@@ -339,6 +361,19 @@ mod tests {
         }
     }
 
+    /// A skin declaring `joint_count` identity-bound joints — the bound a rigged
+    /// mesh's per-vertex joint indices are checked against.
+    fn skin_with(joint_count: usize) -> MeshSkin {
+        MeshSkin {
+            joint_names: (0..joint_count).map(|index| format!("j{index}")).collect(),
+            inverse_bind_matrix: vec![IDENTITY; joint_count],
+            bind_shape_matrix: IDENTITY,
+            alt_inverse_bind_matrix: Vec::new(),
+            pelvis_offset: None,
+            lock_scale_if_joint_position: false,
+        }
+    }
+
     /// The row-major, row-vector identity matrix (the `sl_mesh` skin layout).
     const IDENTITY: [f32; 16] = [
         1.0, 0.0, 0.0, 0.0, //
@@ -398,7 +433,7 @@ mod tests {
                 influences: Vec::new(),
             },
         ]);
-        let mesh = to_bevy_rigged_mesh(&submesh);
+        let mesh = to_bevy_rigged_mesh(&submesh, &skin_with(3));
         let Some(VertexAttributeValues::Uint16x4(indices)) =
             mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX)
         else {
@@ -441,7 +476,7 @@ mod tests {
                 influences: vec![(0, 0.0)],
             },
         ]);
-        let mesh = to_bevy_rigged_mesh(&submesh);
+        let mesh = to_bevy_rigged_mesh(&submesh, &skin_with(5));
         let Some(VertexAttributeValues::Float32x4(weights)) =
             mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT)
         else {
@@ -458,6 +493,70 @@ mod tests {
             let sum: f32 = slot.iter().sum();
             assert!((sum - 1.0).abs() < 1.0e-5, "weights sum to one");
         }
+        Ok(())
+    }
+
+    #[test]
+    fn an_influence_past_the_skins_joints_is_dropped() -> Result<(), TestError> {
+        // A weight byte and the joint table it indexes come out of different blocks
+        // of the mesh asset, so nothing below this join bounds one against the
+        // other. Vertex 0: a bogus joint 7 on a two-joint skin, alongside a real
+        // one — the survivor renormalizes to full weight rather than the vertex
+        // welding to a bone that does not exist. Vertex 1: the bogus influence
+        // comes first and must not eat a slot. Vertex 2: nothing survives, so the
+        // vertex binds fully to joint 0 instead of collapsing to the origin.
+        let mut submesh = triangle();
+        submesh.weights = Some(vec![
+            VertexWeights {
+                influences: vec![(1, 0.5), (7, 0.5)],
+            },
+            VertexWeights {
+                influences: vec![(9, 0.4), (0, 0.3), (1, 0.3)],
+            },
+            VertexWeights {
+                influences: vec![(2, 1.0)],
+            },
+        ]);
+        let mesh = to_bevy_rigged_mesh(&submesh, &skin_with(2));
+        let Some(VertexAttributeValues::Uint16x4(indices)) =
+            mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX)
+        else {
+            return Err("JOINT_INDEX is not a Uint16x4 attribute".into());
+        };
+        let Some(VertexAttributeValues::Float32x4(weights)) =
+            mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT)
+        else {
+            return Err("JOINT_WEIGHT is not a Float32x4 attribute".into());
+        };
+        assert_eq!(indices.first(), Some(&[1, 0, 0, 0]));
+        assert!(weights_close(weights.first(), [1.0, 0.0, 0.0, 0.0]));
+        assert_eq!(indices.get(1), Some(&[0, 1, 0, 0]));
+        assert!(weights_close(weights.get(1), [0.5, 0.5, 0.0, 0.0]));
+        assert_eq!(indices.get(2), Some(&[0, 0, 0, 0]));
+        assert!(weights_close(weights.get(2), [1.0, 0.0, 0.0, 0.0]));
+        Ok(())
+    }
+
+    #[test]
+    fn a_valid_fifth_influence_still_does_not_reach_a_slot() -> Result<(), TestError> {
+        // Dropping out-of-range influences must not turn the four-slot limit into
+        // "the first four *valid* ones after skipping": a rig with five in-range
+        // influences still keeps only the first four, as before.
+        let mut submesh = triangle();
+        submesh.weights = Some(vec![
+            VertexWeights {
+                influences: vec![(0, 0.2), (1, 0.2), (2, 0.2), (3, 0.2), (4, 0.2)],
+            },
+            VertexWeights::default(),
+            VertexWeights::default(),
+        ]);
+        let mesh = to_bevy_rigged_mesh(&submesh, &skin_with(5));
+        let Some(VertexAttributeValues::Uint16x4(indices)) =
+            mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX)
+        else {
+            return Err("JOINT_INDEX is not a Uint16x4 attribute".into());
+        };
+        assert_eq!(indices.first(), Some(&[0, 1, 2, 3]));
         Ok(())
     }
 

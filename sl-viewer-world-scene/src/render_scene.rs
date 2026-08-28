@@ -1520,7 +1520,7 @@ fn rigged_mesh(_cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut
         .add(SkinnedMeshInverseBindposes::from(rigged_inverse_bindposes(
             &skin,
         )));
-    let mesh = assets.meshes.add(to_bevy_rigged_mesh(&submesh));
+    let mesh = assets.meshes.add(to_bevy_rigged_mesh(&submesh, &skin));
     let material = assets
         .materials
         .add(inert_face_material(matte(Color::srgb(0.8, 0.7, 0.7))));

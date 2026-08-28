@@ -764,7 +764,7 @@ fn build_rigged_submeshes(
         let mesh = cache
             .revive_rigged_submesh(rigged_key, index, meshes)
             .unwrap_or_else(|| {
-                let converted = meshes.add(to_bevy_rigged_mesh(submesh));
+                let converted = meshes.add(to_bevy_rigged_mesh(submesh, skin));
                 cache.record_rigged_submesh(rigged_key, index, converted.id());
                 converted
             });
