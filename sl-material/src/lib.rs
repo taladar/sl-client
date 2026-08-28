@@ -158,6 +158,31 @@ mod tests {
         Ok(())
     }
 
+    /// Every colour factor is clamped into `0.0..=1.0` on the way in, like the
+    /// reference viewer's `setBaseColorFactor` / `setEmissiveColorFactor` — so a
+    /// hostile asset cannot push an enormous emissive into the bloom path, and a
+    /// negative base colour cannot drive a channel below black.
+    #[test]
+    fn clamps_out_of_range_colour_factors() -> Result<(), TestError> {
+        let material = parse_gltf_material_document(
+            r#"{ "materials": [{
+                   "pbrMetallicRoughness": {
+                     "baseColorFactor": [-4.0, 0.25, 8.0, 2.5],
+                     "metallicFactor": -1.0,
+                     "roughnessFactor": 7.0
+                   },
+                   "emissiveFactor": [1e30, -1e30, 0.5],
+                   "alphaCutoff": 9.0
+                 }] }"#,
+        )?;
+        approx_slice(&material.base_color, &[0.0, 0.25, 1.0, 1.0]);
+        approx_slice(&material.emissive_factor, &[1.0, 0.0, 0.5]);
+        approx(material.metallic_factor, 0.0);
+        approx(material.roughness_factor, 1.0);
+        approx(material.alpha_cutoff, 1.0);
+        Ok(())
+    }
+
     /// A document with no material is a decode error, not a silent default.
     #[test]
     fn missing_material_errors() {

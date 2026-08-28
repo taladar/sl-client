@@ -1,10 +1,10 @@
 //! The **sculpt sweep**: reading a decoded RGB sculpt map as a displacement
 //! grid and stitching it into a closed surface.
 //!
-//! [`tessellate`] resamples the sculpt map onto a fixed working grid
-//! ([`WORKING_SUBDIVISIONS`] quad cells per side) with bilinear filtering, maps
-//! each sample's `(r, g, b) / 255 - 0.5` to a vertex position in Second Life's
-//! right-handed **Z-up** space, and stitches the grid per [`SculptStitch`]:
+//! [`tessellate`] resamples the sculpt map onto a working grid sized by
+//! [`mesh_resolution`] with bilinear filtering, maps each sample's
+//! `(r, g, b) / 255 - 0.5` to a vertex position in Second Life's right-handed
+//! **Z-up** space, and stitches the grid per [`SculptStitch`]:
 //!
 //! - **plane** — an open grid, neither edge shared;
 //! - **cylinder** — the U (around) seam is a single shared column;
@@ -36,15 +36,100 @@
 //! placeholder so the function never panics and always yields drawable geometry.
 
 use crate::stitch::{SculptParams, SculptStitch};
-use sl_prim::{PrimFace, PrimFaceId, PrimMesh};
+use sl_prim::{PRIM_LOD_COUNT, PrimFace, PrimFaceId, PrimLod, PrimMesh};
 use sl_texture::DecodedImage;
 
-/// The number of quad cells per side of the fixed working grid the sculpt map is
-/// resampled onto (matching Firestorm's highest sculpt LOD, `SCULPT_REZ_4`).
+/// The number of quad cells per side of the finest sculpt working grid
+/// (Firestorm's `SCULPT_REZ_4`), the ceiling [`mesh_resolution`] works down from.
 ///
-/// The vertex lattice is therefore `WORKING_SUBDIVISIONS + 1` points per side
+/// The vertex lattice at that level is `MAX_SUBDIVISIONS + 1` points per side
 /// before any seam sharing or pole collapse reduces it.
-pub const WORKING_SUBDIVISIONS: usize = 32;
+pub const MAX_SUBDIVISIONS: usize = 32;
+
+/// The per-side cell counts of the four sculpt levels of detail, coarsest first —
+/// Firestorm's `SCULPT_REZ_1..4`, indexed by [`PrimLod`].
+///
+/// `SCULPT_REZ_1` is `6` rather than the `4` the original code used; the
+/// reference's own comment explains why: "6 looks round whereas 4 looks square".
+const SCULPT_REZ: [usize; PRIM_LOD_COUNT] = [6, 8, 16, MAX_SUBDIVISIONS];
+
+/// The smallest per-axis cell count a sculpt grid is allowed, so a very wide or
+/// very tall map cannot collapse one axis to nothing (Firestorm's "no degenerate
+/// sizes, please").
+const MIN_SUBDIVISIONS: usize = 4;
+
+/// The number of map pixels each grid vertex is worth (Firestorm's
+/// `width * height / 4`): a sculpt is never tessellated finer than a quarter of
+/// its map's pixel count, because the extra vertices would carry no new
+/// displacement.
+const PIXELS_PER_VERTEX: usize = 4;
+
+/// The per-side cell count of the sculpt grid at `lod` — Firestorm's
+/// `sculpt_sides`, which selects among `SCULPT_REZ_1..4` by the volume's detail
+/// multiplier rather than always taking the finest.
+fn sculpt_sides(lod: PrimLod) -> usize {
+    let detail = lod.detail();
+    let tier = if detail <= 1.0 {
+        0
+    } else if detail <= 2.0 {
+        1
+    } else if detail <= 3.0 {
+        2
+    } else {
+        3
+    };
+    SCULPT_REZ.get(tier).copied().unwrap_or(MAX_SUBDIVISIONS)
+}
+
+/// The working grid a `width`×`height` sculpt map is resampled onto at `lod`, as
+/// `(rows, columns)` quad cells — a faithful port of Firestorm's
+/// `sculpt_calc_mesh_resolution`.
+///
+/// Rows run along the map's height (the reference's path / `sizeS` axis) and
+/// columns along its width (its profile / `sizeT` axis). The reference states the
+/// three properties it balances: the grid's aspect ratio tracks the map's as
+/// closely as it can while still spending every vertex the budget allows; the
+/// budget is capped by the level of detail; and it is capped again by the map,
+/// since a vertex per fewer than four pixels only resamples
+/// displacement that is already there.
+///
+/// Both counts are at least four. A zero-sized map (which
+/// [`tessellate`] renders as a placeholder anyway) is treated as square and sized
+/// by the level of detail alone.
+#[must_use]
+pub fn mesh_resolution(width: u32, height: u32, lod: PrimLod) -> (usize, usize) {
+    let sides = sculpt_sides(lod);
+    let max_vertices_lod = sides.saturating_mul(sides);
+    let max_vertices_map = usize_from_u32(width)
+        .saturating_mul(usize_from_u32(height))
+        .checked_div(PIXELS_PER_VERTEX)
+        .unwrap_or(0);
+    let vertices = if max_vertices_map > 0 {
+        max_vertices_lod.min(max_vertices_map)
+    } else {
+        max_vertices_lod
+    };
+
+    let ratio = if width == 0 || height == 0 {
+        1.0
+    } else {
+        f32_from_usize(usize_from_u32(width)) / f32_from_usize(usize_from_u32(height))
+    };
+
+    // Split the vertex budget between the axes in the map's aspect ratio, then
+    // let integer division give the other axis every vertex the first leaves.
+    let mut rows = usize_from_f32_floor((f32_from_usize(vertices) / ratio).sqrt());
+    rows = rows.max(MIN_SUBDIVISIONS);
+    let columns = vertices
+        .checked_div(rows)
+        .unwrap_or(0)
+        .max(MIN_SUBDIVISIONS);
+    rows = vertices
+        .checked_div(columns)
+        .unwrap_or(0)
+        .max(MIN_SUBDIVISIONS);
+    (rows, columns)
+}
 
 /// The number of bytes per pixel in a decoded [`DecodedImage`] (canonical RGBA8).
 const RGBA_CHANNELS: usize = 4;
@@ -64,31 +149,39 @@ const PLACEHOLDER_RADIUS: f32 = 0.3;
 /// degenerate and replaced by a fallback up-vector.
 const NORMAL_EPSILON: f32 = 1.0e-12;
 
-/// Tessellate a decoded sculpt `map` into a single-face [`PrimMesh`], stitched
-/// according to the wire `sculpt_type` byte.
+/// Tessellate a decoded sculpt `map` into a single-face [`PrimMesh`] at `lod`,
+/// stitched according to the wire `sculpt_type` byte.
 ///
 /// The byte's low bits select the [`SculptStitch`] topology and its high bits
-/// the invert / mirror flags (see [`SculptParams`]). A zero-sized or truncated
-/// map falls back to a sphere placeholder.
+/// the invert / mirror flags (see [`SculptParams`]). The grid the map is
+/// resampled onto is [`mesh_resolution`] of the map size and `lod`, so a small
+/// or distant sculpt costs a fraction of the triangles a near one does. A
+/// zero-sized or truncated map falls back to a sphere placeholder.
 #[must_use]
-pub fn tessellate(map: &DecodedImage, sculpt_type: u8) -> PrimMesh {
-    tessellate_with(map, SculptParams::from_sculpt_type(sculpt_type))
+pub fn tessellate(map: &DecodedImage, sculpt_type: u8, lod: PrimLod) -> PrimMesh {
+    tessellate_with(map, SculptParams::from_sculpt_type(sculpt_type), lod)
 }
 
-/// Tessellate a decoded sculpt `map` into a single-face [`PrimMesh`] using
-/// already-parsed [`SculptParams`].
+/// Tessellate a decoded sculpt `map` at `lod` into a single-face [`PrimMesh`]
+/// using already-parsed [`SculptParams`].
 ///
 /// A zero-sized or truncated map falls back to a sphere placeholder (a sphere
-/// stitch of a procedural sphere), so the result is always drawable.
+/// stitch of a procedural sphere), so the result is always drawable. The
+/// placeholder is built on the same grid the map would have used — as in the
+/// reference, where the resolution is chosen from the *declared* map size before
+/// the data is known to be usable.
 #[must_use]
 #[expect(
     clippy::module_name_repetitions,
     reason = "re-exported at the crate root, where `tessellate_with` reads clearly"
 )]
-pub fn tessellate_with(map: &DecodedImage, params: SculptParams) -> PrimMesh {
+pub fn tessellate_with(map: &DecodedImage, params: SculptParams, lod: PrimLod) -> PrimMesh {
+    let (rows, columns) = mesh_resolution(map.width, map.height, lod);
     let mut mesh = match SculptMap::new(map) {
-        Some(sculpt) => build(params.stitch, |u, v| sculpt.sample(u, v, params)),
-        None => build(SculptStitch::Sphere, placeholder_position),
+        Some(sculpt) => build(params.stitch, rows, columns, |u, v| {
+            sculpt.sample(u, v, params)
+        }),
+        None => build(SculptStitch::Sphere, rows, columns, placeholder_position),
     };
     // The reference's `createSide` also reverses the horizontal *texture*
     // coordinate when invert XOR mirror is set (`ss = 1.f - ss`), so the
@@ -188,24 +281,28 @@ impl<'pixels> SculptMap<'pixels> {
     }
 }
 
-/// Build the stitched grid for `stitch`, taking each vertex position from
-/// `position` (the sculpt sampler, or the placeholder generator), evaluated at
-/// the vertex's normalised `(u, 1 - v)` coordinates — the V flip that maps the
-/// bottom-up grid row onto the top-down map (see the module docs); UVs keep
-/// the unflipped grid `(u, v)`.
+/// Build the stitched `rows`×`columns`-cell grid for `stitch`, taking each vertex
+/// position from `position` (the sculpt sampler, or the placeholder generator),
+/// evaluated at the vertex's normalised `(u, 1 - v)` coordinates — the V flip
+/// that maps the bottom-up grid row onto the top-down map (see the module docs);
+/// UVs keep the unflipped grid `(u, v)`.
 ///
 /// Seam and pole vertices are stored once and referenced by every incident quad,
 /// so no seam or pole vertex is duplicated. The result is a single [`PrimFace`]
 /// (face index `0`) wrapped in a [`PrimMesh`].
-fn build(stitch: SculptStitch, position: impl Fn(f32, f32) -> [f32; 3]) -> PrimMesh {
-    let cells = WORKING_SUBDIVISIONS;
-    let mut grid = GridBuilder::new(stitch, cells);
-    for row in 0..=cells {
-        for col in 0..=cells {
+fn build(
+    stitch: SculptStitch,
+    rows: usize,
+    columns: usize,
+    position: impl Fn(f32, f32) -> [f32; 3],
+) -> PrimMesh {
+    let mut grid = GridBuilder::new(stitch, rows, columns);
+    for row in 0..=rows {
+        for col in 0..=columns {
             grid.ensure_vertex(row, col, &position);
         }
     }
-    grid.stitch_indices(cells);
+    grid.stitch_indices();
 
     let mut face = PrimFace::empty(PrimFaceId::new(0));
     face.positions = grid.positions;
@@ -224,10 +321,13 @@ struct GridBuilder {
     /// The stitch topology, deciding which lattice points alias to a shared
     /// vertex.
     stitch: SculptStitch,
-    /// The number of quad cells per side (the lattice is `cells + 1` points per
-    /// side).
-    cells: usize,
-    /// For each canonical lattice slot (`row * (cells + 1) + col`), the stored
+    /// The number of quad cells down the grid's V axis (the lattice is
+    /// `rows + 1` points tall).
+    rows: usize,
+    /// The number of quad cells across the grid's U axis (the lattice is
+    /// `columns + 1` points wide).
+    columns: usize,
+    /// For each canonical lattice slot (`row * (columns + 1) + col`), the stored
     /// vertex index once created.
     slots: Vec<Option<u32>>,
     /// The stored vertex positions.
@@ -239,13 +339,15 @@ struct GridBuilder {
 }
 
 impl GridBuilder {
-    /// A builder for a `cells × cells`-quad grid stitched per `stitch`.
-    fn new(stitch: SculptStitch, cells: usize) -> Self {
-        let stride = cells.saturating_add(1);
-        let slot_count = stride.saturating_mul(stride);
+    /// A builder for a `rows × columns`-quad grid stitched per `stitch`.
+    fn new(stitch: SculptStitch, rows: usize, columns: usize) -> Self {
+        let slot_count = rows
+            .saturating_add(1)
+            .saturating_mul(columns.saturating_add(1));
         Self {
             stitch,
-            cells,
+            rows,
+            columns,
             slots: vec![None; slot_count],
             positions: Vec::new(),
             uvs: Vec::new(),
@@ -257,10 +359,10 @@ impl GridBuilder {
     /// aliasing: a wrapped far edge folds back to `0`, and a pole row collapses
     /// every column to `0`.
     const fn canonical(&self, row: usize, col: usize) -> (usize, usize) {
-        let is_pole_row = self.stitch.has_poles() && (row == 0 || row == self.cells);
-        let wraps_far_col = self.stitch.wraps_u() && col == self.cells;
+        let is_pole_row = self.stitch.has_poles() && (row == 0 || row == self.rows);
+        let wraps_far_col = self.stitch.wraps_u() && col == self.columns;
         let ccol = if is_pole_row || wraps_far_col { 0 } else { col };
-        let crow = if self.stitch.wraps_v() && row == self.cells {
+        let crow = if self.stitch.wraps_v() && row == self.rows {
             0
         } else {
             row
@@ -270,7 +372,7 @@ impl GridBuilder {
 
     /// The flat slot index for a canonical `(row, col)`.
     const fn slot(&self, crow: usize, ccol: usize) -> usize {
-        crow.saturating_mul(self.cells.saturating_add(1))
+        crow.saturating_mul(self.columns.saturating_add(1))
             .saturating_add(ccol)
     }
 
@@ -287,15 +389,15 @@ impl GridBuilder {
         if let Some(Some(existing)) = self.slots.get(slot).copied() {
             return existing;
         }
-        let is_pole_row = self.stitch.has_poles() && (crow == 0 || crow == self.cells);
+        let is_pole_row = self.stitch.has_poles() && (crow == 0 || crow == self.rows);
         // A pole samples the middle of its map row (Firestorm's `x = width / 2`
         // pinch); an ordinary vertex reads its own column.
         let u = if is_pole_row {
             CHANNEL_CENTRE
         } else {
-            f32_from_usize(ccol) / f32_from_usize(self.cells)
+            f32_from_usize(ccol) / f32_from_usize(self.columns)
         };
-        let v = f32_from_usize(crow) / f32_from_usize(self.cells);
+        let v = f32_from_usize(crow) / f32_from_usize(self.rows);
         let index = u32_from_usize(self.positions.len());
         // Positions sample at the *flipped* V (the module-level bottom-up
         // convention: grid row 0 reads the visible bottom of the top-down
@@ -312,9 +414,9 @@ impl GridBuilder {
     /// Emit the two triangles of every quad cell, sharing the canonical vertices
     /// so seams and poles are single vertices; a triangle collapsed by a pole
     /// (two equal corners) is skipped.
-    fn stitch_indices(&mut self, cells: usize) {
-        for row in 0..cells {
-            for col in 0..cells {
+    fn stitch_indices(&mut self) {
+        for row in 0..self.rows {
+            for col in 0..self.columns {
                 let a = self.vertex_index(row, col);
                 let b = self.vertex_index(row, col.saturating_add(1));
                 let c = self.vertex_index(row.saturating_add(1), col.saturating_add(1));
@@ -477,11 +579,14 @@ fn u32_from_usize(value: usize) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{WORKING_SUBDIVISIONS, tessellate, tessellate_with, usize_from_f32_floor};
+    use super::{
+        MAX_SUBDIVISIONS, MIN_SUBDIVISIONS, mesh_resolution, tessellate, tessellate_with,
+        usize_from_f32_floor,
+    };
     use crate::stitch::{SculptParams, SculptStitch};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
-    use sl_prim::PrimMesh;
+    use sl_prim::{PrimLod, PrimMesh};
     use sl_proto::DiscardLevel;
     use sl_texture::DecodedImage;
 
@@ -509,8 +614,14 @@ mod tests {
         )
     }
 
-    /// The number of quad cells per side used by the working grid.
-    const N: usize = WORKING_SUBDIVISIONS;
+    /// The number of quad cells per side the tests' 64x64 maps use at the
+    /// finest level: their pixel budget (`64 * 64 / 4`) is exactly the level's,
+    /// so the grid is square at [`MAX_SUBDIVISIONS`].
+    const N: usize = MAX_SUBDIVISIONS;
+
+    /// The finest level, which every test that is not about level of detail
+    /// tessellates at.
+    const FINE: PrimLod = PrimLod::High;
 
     /// A synthetic sphere sculpt map in the **real content convention**: the
     /// north pole (`z = +0.5`, blue = 255) on the visible *top* row, longitude
@@ -624,10 +735,139 @@ mod tests {
         }
     }
 
+    /// [`mesh_resolution`] reproduces Firestorm's `sculpt_calc_mesh_resolution`.
+    ///
+    /// The expected `(rows, columns)` were produced by compiling that function
+    /// verbatim out of `indra/llmath/llvolume.cpp` and printing its output for
+    /// each map size and detail multiplier — so this pins the port to the
+    /// reference, not to itself.
+    #[test]
+    fn resolution_matches_the_reference_viewer() {
+        use PrimLod::{High, Low, Lowest, Medium};
+        for (width, height, lod, expected) in [
+            // A 64x64 map has exactly the finest level's vertex budget, so it is
+            // the level alone that decides — the case the old fixed grid got
+            // right by accident.
+            (64_u32, 64_u32, Lowest, (6_usize, 6_usize)),
+            (64, 64, Low, (8, 8)),
+            (64, 64, Medium, (16, 16)),
+            (64, 64, High, (32, 32)),
+            // A bigger map cannot buy more than the level allows.
+            (1024, 1024, High, (32, 32)),
+            // A smaller one caps the level instead: a 32x32 map is worth 256
+            // vertices, so it stops at 16x16 however close the camera gets.
+            (32, 32, Medium, (16, 16)),
+            (32, 32, High, (16, 16)),
+            (16, 16, High, (8, 8)),
+            // A non-square map splits its budget in its own aspect ratio.
+            (64, 32, High, (16, 32)),
+            (32, 64, High, (32, 16)),
+            (256, 64, Medium, (8, 32)),
+            (256, 64, Low, (4, 16)),
+            // Neither axis is ever allowed below the floor.
+            (8, 8, Lowest, (4, 4)),
+            (8, 8, High, (4, 4)),
+            // An extremely elongated map spends the budget along its long axis
+            // and pins the short one to the floor — so a single axis can exceed
+            // MAX_SUBDIVISIONS even though the vertex budget does not.
+            (8, 512, Medium, (64, 4)),
+            (512, 8, High, (4, 256)),
+            // A map too small to be worth even one vertex per four pixels falls
+            // back to the level's own budget, like a degenerate one.
+            (1, 1, High, (32, 32)),
+            // A degenerate map is sized by the level alone (and tessellates as a
+            // placeholder).
+            (0, 0, High, (32, 32)),
+        ] {
+            assert_eq!(
+                mesh_resolution(width, height, lod),
+                expected,
+                "{width}x{height} at {lod:?}"
+            );
+        }
+    }
+
+    /// The level of detail bounds the grid's *vertex budget*, not either axis on
+    /// its own: an extremely elongated map spends the whole budget along its long
+    /// side while the short one sits on the floor. Only when the floor itself
+    /// forces the issue (a map too small to fill even a 4x4 grid) does the
+    /// product exceed the budget.
+    #[test]
+    fn resolution_spends_the_level_budget_without_degenerate_axes() {
+        for lod in PrimLod::ALL {
+            let sides = super::sculpt_sides(lod);
+            let budget = (sides * sides).max(MIN_SUBDIVISIONS * MIN_SUBDIVISIONS);
+            for (width, height) in [
+                (0_u32, 0_u32),
+                (1, 1),
+                (8, 8),
+                (8, 512),
+                (512, 8),
+                (64, 64),
+                (2048, 2048),
+            ] {
+                let (rows, columns) = mesh_resolution(width, height, lod);
+                assert!(
+                    rows >= MIN_SUBDIVISIONS,
+                    "{width}x{height} at {lod:?}: {rows} rows"
+                );
+                assert!(
+                    columns >= MIN_SUBDIVISIONS,
+                    "{width}x{height} at {lod:?}: {columns} columns"
+                );
+                assert!(
+                    rows * columns <= budget,
+                    "{width}x{height} at {lod:?}: {rows}x{columns} exceeds the {budget}-vertex budget"
+                );
+            }
+        }
+    }
+
+    /// A coarser level really does tessellate less geometry — the point of the
+    /// whole exercise. A plane's lattice is `(rows + 1) * (columns + 1)`, so the
+    /// four levels of a 64x64 map step 7x7, 9x9, 17x17, 33x33.
+    #[test]
+    fn coarser_levels_tessellate_fewer_vertices() {
+        let map = gradient_map(64, 64);
+        let counts: Vec<usize> = PrimLod::ALL
+            .into_iter()
+            .map(|lod| tessellate(&map, 3, lod).vertex_count())
+            .collect();
+        assert_eq!(counts, vec![7 * 7, 9 * 9, 17 * 17, 33 * 33]);
+        // Each stitch topology stays sound at every level, not just the finest.
+        for lod in PrimLod::ALL {
+            for sculpt_type in [1_u8, 2, 3, 4] {
+                assert_face_integrity(&tessellate(&map, sculpt_type, lod));
+            }
+        }
+    }
+
+    /// A non-square map produces a non-square grid, and the stitching still folds
+    /// the right seams: a cylinder drops exactly one column, a torus one of each.
+    #[test]
+    fn non_square_maps_stitch_on_the_right_axes() {
+        let map = gradient_map(64, 32);
+        let (rows, columns) = mesh_resolution(64, 32, FINE);
+        assert_eq!((rows, columns), (16, 32));
+        assert_eq!(
+            tessellate(&map, 3, FINE).vertex_count(),
+            (rows + 1) * (columns + 1)
+        );
+        assert_eq!(
+            tessellate(&map, 4, FINE).vertex_count(),
+            (rows + 1) * columns
+        );
+        assert_eq!(tessellate(&map, 2, FINE).vertex_count(), rows * columns);
+        assert_eq!(
+            tessellate(&map, 1, FINE).vertex_count(),
+            columns * (rows - 1) + 2
+        );
+    }
+
     #[test]
     fn plane_shares_no_edges() {
         // Sculpt type 3 = plane. An open grid has the full lattice of vertices.
-        let mesh = tessellate(&gradient_map(64, 64), 3);
+        let mesh = tessellate(&gradient_map(64, 64), 3, FINE);
         assert_face_integrity(&mesh);
         assert_eq!(mesh.vertex_count(), (N + 1) * (N + 1));
     }
@@ -636,7 +876,7 @@ mod tests {
     fn cylinder_shares_the_u_seam() {
         // Sculpt type 4 = cylinder: the U seam folds the far column onto the
         // first, so one column fewer than a plane.
-        let mesh = tessellate(&gradient_map(64, 64), 4);
+        let mesh = tessellate(&gradient_map(64, 64), 4, FINE);
         assert_face_integrity(&mesh);
         assert_eq!(mesh.vertex_count(), N * (N + 1));
         assert!(mesh.vertex_count() < (N + 1) * (N + 1), "seam is shared");
@@ -645,7 +885,7 @@ mod tests {
     #[test]
     fn sphere_shares_the_seam_and_collapses_poles() {
         // Sculpt type 1 = sphere: U seam shared plus two single pole vertices.
-        let mesh = tessellate(&gradient_map(64, 64), 1);
+        let mesh = tessellate(&gradient_map(64, 64), 1, FINE);
         assert_face_integrity(&mesh);
         // Two poles + (N - 1) interior rows of N columns each.
         assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
@@ -654,7 +894,7 @@ mod tests {
     #[test]
     fn torus_shares_both_seams() {
         // Sculpt type 2 = torus: both seams folded, so an N × N lattice.
-        let mesh = tessellate(&gradient_map(64, 64), 2);
+        let mesh = tessellate(&gradient_map(64, 64), 2, FINE);
         assert_face_integrity(&mesh);
         assert_eq!(mesh.vertex_count(), N * N);
         assert!(mesh.vertex_count() < N * (N + 1), "both seams are shared");
@@ -663,10 +903,10 @@ mod tests {
     #[test]
     fn stitch_types_produce_distinct_vertex_counts() {
         let map = gradient_map(64, 64);
-        let plane = tessellate(&map, 3).vertex_count();
-        let cylinder = tessellate(&map, 4).vertex_count();
-        let sphere = tessellate(&map, 1).vertex_count();
-        let torus = tessellate(&map, 2).vertex_count();
+        let plane = tessellate(&map, 3, FINE).vertex_count();
+        let cylinder = tessellate(&map, 4, FINE).vertex_count();
+        let sphere = tessellate(&map, 1, FINE).vertex_count();
+        let torus = tessellate(&map, 2, FINE).vertex_count();
         // Each extra shared edge / pole removes vertices.
         assert!(plane > cylinder);
         assert!(cylinder > torus);
@@ -677,7 +917,7 @@ mod tests {
     fn degenerate_map_falls_back_to_a_sphere_placeholder() {
         // A zero-sized map cannot be sampled; the placeholder is a sphere.
         let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
-        let mesh = tessellate(&empty, 3);
+        let mesh = tessellate(&empty, 3, FINE);
         assert_face_integrity(&mesh);
         // Sphere topology regardless of the requested (plane) stitch.
         assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
@@ -694,7 +934,7 @@ mod tests {
             Bytes::from_static(&[10, 20, 30, 255]),
             None,
         );
-        let mesh = tessellate(&short, 2);
+        let mesh = tessellate(&short, 2, FINE);
         assert_face_integrity(&mesh);
         assert_eq!(mesh.vertex_count(), N * (N - 1) + 2);
     }
@@ -709,6 +949,7 @@ mod tests {
                 invert: false,
                 mirror: false,
             },
+            FINE,
         );
         let mirrored = tessellate_with(
             &map,
@@ -717,6 +958,7 @@ mod tests {
                 invert: false,
                 mirror: true,
             },
+            FINE,
         );
         assert_eq!(plain.vertex_count(), mirrored.vertex_count());
         assert_face_integrity(&mirrored);
@@ -735,7 +977,7 @@ mod tests {
         // map in the real content convention (north pole on the visible top
         // row) must tessellate with outward-facing winding. Sampling the
         // top-down map without the V flip builds this exact sphere inside out.
-        let mesh = tessellate(&sphere_map(64, 64), 1);
+        let mesh = tessellate(&sphere_map(64, 64), 1, FINE);
         assert_face_integrity(&mesh);
         let volume = signed_volume(single_face(&mesh));
         assert!(volume > 0.05, "sphere faces outward (volume {volume})");
@@ -745,7 +987,7 @@ mod tests {
     fn invert_flag_turns_the_sphere_inside_out() {
         // Sculpt type 1 | 64 = sphere with the invert flag: deliberately
         // inside out, so the signed volume goes negative.
-        let mesh = tessellate(&sphere_map(64, 64), 1 | 64);
+        let mesh = tessellate(&sphere_map(64, 64), 1 | 64, FINE);
         assert_face_integrity(&mesh);
         let volume = signed_volume(single_face(&mesh));
         assert!(
@@ -758,7 +1000,7 @@ mod tests {
     fn mirror_flag_keeps_the_sphere_outward() {
         // Mirror composes an X negation with a reversed U sweep — two
         // orientation flips, so the mirrored sphere still faces outward.
-        let mesh = tessellate(&sphere_map(64, 64), 1 | 128);
+        let mesh = tessellate(&sphere_map(64, 64), 1 | 128, FINE);
         assert_face_integrity(&mesh);
         let volume = signed_volume(single_face(&mesh));
         assert!(
@@ -771,7 +1013,7 @@ mod tests {
     fn placeholder_sphere_renders_outward() {
         // The degenerate-map placeholder ball must face outward too.
         let empty = DecodedImage::new(0, 0, 3, DiscardLevel::FULL, Bytes::new(), None);
-        let mesh = tessellate(&empty, 1);
+        let mesh = tessellate(&empty, 1, FINE);
         let volume = signed_volume(single_face(&mesh));
         assert!(volume > 0.05, "placeholder faces outward (volume {volume})");
     }
@@ -783,8 +1025,8 @@ mod tests {
         // plain and inverted tessellations of the same map must carry
         // mirrored U in their UVs.
         let map = gradient_map(64, 64);
-        let plain = tessellate(&map, 3);
-        let inverted = tessellate(&map, 3 | 64);
+        let plain = tessellate(&map, 3, FINE);
+        let inverted = tessellate(&map, 3 | 64, FINE);
         let plain_face = single_face(&plain);
         let inverted_face = single_face(&inverted);
         assert_eq!(plain_face.uvs.len(), inverted_face.uvs.len());
@@ -804,7 +1046,7 @@ mod tests {
     fn every_stitch_type_yields_finite_normalized_geometry() {
         let map = gradient_map(48, 96);
         for sculpt_type in [1_u8, 2, 3, 4] {
-            assert_face_integrity(&tessellate(&map, sculpt_type));
+            assert_face_integrity(&tessellate(&map, sculpt_type, FINE));
         }
     }
 }

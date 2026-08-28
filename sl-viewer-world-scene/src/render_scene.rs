@@ -1246,9 +1246,10 @@ fn prim_twisted_torus(
 /// computes: `u` around, `v` from pole to pole.
 ///
 /// 64×64 because that is the smallest map that reproduces the class without
-/// making the stitcher's own subdivision the dominant error — a sculpt is
-/// resampled to `sl_sculpt::WORKING_SUBDIVISIONS` regardless of the map's size,
-/// so a tiny map would be measuring interpolation rather than stitching.
+/// making the stitcher's own subdivision the dominant error — at the finest
+/// level a sculpt is resampled onto `sl_sculpt::MAX_SUBDIVISIONS` cells per
+/// side, and a map smaller than that would be measuring interpolation rather
+/// than stitching.
 fn sculpt_sphere_map() -> DecodedTexture {
     const SIZE: u32 = 64;
     let extent = f32::from(u16::try_from(SIZE).unwrap_or(1));
@@ -1290,7 +1291,7 @@ fn sculpt_sphere(
     let map = sculpt_sphere_map();
     // Sculpt type 1 = the sphere stitch (`LL_SCULPT_TYPE_SPHERE`): the map's
     // top/bottom rows collapse to poles and its left/right edges join.
-    let prim = tessellate_sculpt(&map, 1);
+    let prim = tessellate_sculpt(&map, 1, PrimLod::FINEST);
     for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
         let face = spawn_geometry(
             format!("sculpt-sphere/face-{index}"),

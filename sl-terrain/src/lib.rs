@@ -18,9 +18,15 @@
 //!
 //! The algorithm mirrors Firestorm's
 //! `indra/newview/llvlcomposition.cpp::LLVLComposition::generateHeights` and
-//! its terrain shaders, reimplemented idiomatically rather than copied.
+//! its terrain shaders, reimplemented idiomatically rather than copied — with
+//! one deliberate exception. The Perlin noise itself is a *verbatim*
+//! port, tables and all: its exact values decide where one ground texture gives
+//! way to the next, so an idiomatic substitute would put every transition band
+//! somewhere the region's map tile and every other viewer do not.
 
-use core::f32::consts::TAU;
+mod noise;
+
+use noise::{noise2, turbulence2};
 
 /// The number of detail (ground) textures a region blends between.
 pub const DETAIL_COUNT: usize = 4;
@@ -40,9 +46,15 @@ const DETAIL_SPAN: f32 = 4.0;
 const XY_SCALE_INV: f32 = 1.0 / 4.9215;
 
 /// The scale applied to the low-frequency noise component before sampling
-/// (Firestorm `0.2222222`), giving it a ~22 m period versus the high-frequency
+/// (Firestorm `0.2222222222`), giving it a ~22 m period versus the high-frequency
 /// turbulence.
-const LOW_FREQUENCY_SCALE: f32 = 0.222_222_2;
+///
+/// This is every digit of the reference's literal that an `f32` can tell apart,
+/// and it matters: a region's global coordinates are tens of thousands of metres,
+/// so rounding the constant one digit *short* of that shifts the noise lattice by
+/// about a thousandth of a cell — and the transition bands visibly with it. It
+/// was the last divergence to fall, after the raw noise already matched.
+const LOW_FREQUENCY_SCALE: f32 = 0.222_222_22;
 
 /// The amplitude of the low-frequency noise component (Firestorm `6.5`).
 const LOW_FREQUENCY_AMPLITUDE: f32 = 6.5;
@@ -63,11 +75,6 @@ const TURBULENCE_FREQUENCY: f32 = 2.0;
 /// The smallest height range used, guarding the elevation-band division against
 /// a zero or negative range (which would otherwise yield a non-finite value).
 const MIN_HEIGHT_RANGE: f32 = 1.0e-3;
-
-/// The period over which lattice coordinates are wrapped before hashing, keeping
-/// the hash's `sin` argument bounded (and thus stable) for the large global
-/// coordinates of a live grid.
-const HASH_PERIOD: f32 = 289.0;
 
 /// A region's terrain-compositing parameters: the four per-corner start heights
 /// and height ranges, the region edge length, and the region's global
@@ -135,11 +142,11 @@ impl TerrainComposition {
 
         // Low-frequency component for large divisions, plus high-frequency
         // turbulence, scaled by the overall noise magnitude.
-        let low = perlin2(
+        let low = noise2(
             sample_x * LOW_FREQUENCY_SCALE,
             sample_y * LOW_FREQUENCY_SCALE,
         ) * LOW_FREQUENCY_AMPLITUDE;
-        let high = turbulence2(sample_x, sample_y) * TURBULENCE_AMPLITUDE;
+        let high = turbulence2(sample_x, sample_y, TURBULENCE_FREQUENCY) * TURBULENCE_AMPLITUDE;
         let twiddle = (low + high) * NOISE_MAGNITUDE;
 
         let scaled = (elevation + twiddle - start_height) * DETAIL_SPAN / height_range;
@@ -189,66 +196,10 @@ fn bilinear(corners: [f32; DETAIL_COUNT], x_frac: f32, y_frac: f32) -> f32 {
         + x_frac * y_frac * north_east
 }
 
-/// The Perlin fade / ease curve `6t⁵ − 15t⁴ + 10t³`, smoothing the lattice
-/// interpolation so the noise has continuous first and second derivatives.
-fn fade(t: f32) -> f32 {
-    t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
-}
-
-/// Linear interpolation from `a` to `b` by `t`.
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + t * (b - a)
-}
-
-/// The dot product of the pseudo-random unit gradient at integer lattice point
-/// (`lattice_x`, `lattice_y`) with the offset (`offset_x`, `offset_y`) from that
-/// lattice point. The gradient direction is a hash of the (wrapped) lattice
-/// coordinate, keeping the noise deterministic and free of any table indexing.
-fn gradient_dot(lattice_x: f32, lattice_y: f32, offset_x: f32, offset_y: f32) -> f32 {
-    let wrapped_x = lattice_x.rem_euclid(HASH_PERIOD);
-    let wrapped_y = lattice_y.rem_euclid(HASH_PERIOD);
-    let seed = (wrapped_x * 127.1 + wrapped_y * 311.7).sin() * 43_758.547;
-    let angle = (seed - seed.floor()) * TAU;
-    angle.cos() * offset_x + angle.sin() * offset_y
-}
-
-/// Two-dimensional Perlin gradient noise at (`x`, `y`), in roughly `[-1, 1]`.
-fn perlin2(x: f32, y: f32) -> f32 {
-    let x0 = x.floor();
-    let y0 = y.floor();
-    let x1 = x0 + 1.0;
-    let y1 = y0 + 1.0;
-    let frac_x = x - x0;
-    let frac_y = y - y0;
-    let ease_x = fade(frac_x);
-    let ease_y = fade(frac_y);
-
-    let n00 = gradient_dot(x0, y0, frac_x, frac_y);
-    let n10 = gradient_dot(x1, y0, frac_x - 1.0, frac_y);
-    let n01 = gradient_dot(x0, y1, frac_x, frac_y - 1.0);
-    let n11 = gradient_dot(x1, y1, frac_x - 1.0, frac_y - 1.0);
-
-    let bottom = lerp(n00, n10, ease_x);
-    let top = lerp(n01, n11, ease_x);
-    lerp(bottom, top, ease_y)
-}
-
-/// Summed-octave turbulence at (`x`, `y`), matching Firestorm's
-/// `turbulence2(vec, 2)`: octaves at frequency `2` then `1`, each weighted by
-/// the inverse of its frequency.
-fn turbulence2(x: f32, y: f32) -> f32 {
-    let mut frequency = TURBULENCE_FREQUENCY;
-    let mut total = 0.0;
-    while frequency >= 1.0 {
-        total += perlin2(frequency * x, frequency * y) / frequency;
-        frequency *= 0.5;
-    }
-    total
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{DETAIL_COUNT, TerrainComposition, detail_blend_weights, perlin2};
+    use super::noise::{noise2, turbulence2};
+    use super::{DETAIL_COUNT, TURBULENCE_FREQUENCY, TerrainComposition, detail_blend_weights};
     use pretty_assertions::assert_eq;
 
     /// The absolute tolerance for float comparisons in these tests.
@@ -351,15 +302,114 @@ mod tests {
     /// The Perlin noise is deterministic and bounded, and varies with position.
     #[test]
     fn perlin_is_deterministic_and_bounded() {
-        let a = perlin2(12.3, 45.6);
-        let b = perlin2(12.3, 45.6);
+        let a = noise2(12.3, 45.6);
+        let b = noise2(12.3, 45.6);
         assert_eq!(a.to_bits(), b.to_bits());
         assert!(a.abs() <= 1.5, "noise {a} out of expected bound");
         // At least one nearby sample differs, so the field is not constant.
         let differs = (0_u8..8).any(|i| {
             let offset = f32::from(i) * 0.37;
-            (perlin2(12.3 + offset, 45.6) - a).abs() > EPSILON
+            (noise2(12.3 + offset, 45.6) - a).abs() > EPSILON
         });
         assert!(differs, "noise field appears constant");
+    }
+
+    /// Assert a value matches a reference-viewer sample within [`EPSILON`].
+    fn assert_reference(actual: f32, expected: f32, what: &str) {
+        assert!(
+            (actual - expected).abs() < EPSILON,
+            "{what}: {actual} differs from the reference's {expected}"
+        );
+    }
+
+    /// [`noise2`] reproduces the reference viewer's `noise2` value for value.
+    ///
+    /// These are not self-generated regression values: each was produced by
+    /// compiling a verbatim extract of Firestorm's `indra/newview/noise.{h,cpp}`
+    /// (its tables plus `noise2` / `turbulence2`) and printing the result. They
+    /// are what pins our port to the reference rather than to itself — the whole
+    /// reason for reproducing its gradient tables instead of substituting a
+    /// modern Perlin.
+    #[test]
+    fn noise_matches_reference_viewer_samples() {
+        // Classic Perlin is zero at every integer lattice point, in both
+        // implementations — the cheapest check that the lattice lines up.
+        assert_reference(noise2(0.0, 0.0), 0.0, "noise2 at the origin");
+        assert_reference(noise2(1000.0, 2000.0), 0.0, "noise2 at a lattice point");
+
+        assert_reference(noise2(0.5, 2.5), 0.246_166_65, "noise2 mid-cell");
+        assert_reference(noise2(1.25, -7.5), 0.323_311_4, "noise2 negative y");
+        assert_reference(noise2(-3.75, 0.25), -0.131_473_93, "noise2 negative x");
+        assert_reference(noise2(17.125, 33.75), 0.003_635_108_5, "noise2 mid-range");
+        // Region-scale global coordinates, where the lattice index wraps.
+        assert_reference(
+            noise2(123.456, -654.321),
+            -0.383_213_76,
+            "noise2 at grid scale",
+        );
+        // Just inside the reference's +4096 lattice offset, either side of zero.
+        assert_reference(
+            noise2(4095.5, -4095.5),
+            0.387_040_17,
+            "noise2 at the offset edge",
+        );
+        // A sub-cell sample, where the ease curve dominates: the cubic
+        // `3t² − 2t³` and the quintic `6t⁵ − 15t⁴ + 10t³` differ most here.
+        assert_reference(
+            noise2(-0.001, 0.002),
+            -0.000_815_997_66,
+            "noise2 close to the origin",
+        );
+
+        // The summed octaves the terrain's high-frequency term uses.
+        assert_reference(
+            turbulence2(1.25, -7.5, TURBULENCE_FREQUENCY),
+            0.407_186_3,
+            "turbulence2 negative y",
+        );
+        assert_reference(
+            turbulence2(123.456, -654.321, TURBULENCE_FREQUENCY),
+            -0.356_719_55,
+            "turbulence2 at grid scale",
+        );
+    }
+
+    /// The whole composition value — bilinear band interpolation plus the noise
+    /// twiddle — matches the reference viewer's `LLVLComposition::generateHeights`
+    /// for a region with four differing corners.
+    ///
+    /// Same provenance as [`noise_matches_reference_viewer_samples`]: the
+    /// expected values come from that same verbatim extract, extended with
+    /// `generateHeights`' per-texel math. This is the end-to-end pin — it would
+    /// catch a corner-ordering slip or a wrong scale constant that the raw noise
+    /// samples cannot.
+    #[test]
+    fn composition_value_matches_the_reference_viewer() {
+        // A region at grid 1000,1000 (global 256 km), corners deliberately all
+        // different so a transposed corner would show.
+        let comp = TerrainComposition::new(
+            [10.0, 20.0, 30.0, 40.0],
+            [40.0, 50.0, 60.0, 70.0],
+            256.0,
+            [256_000.0, 256_000.0],
+        );
+        for (x, y, elevation, expected) in [
+            (0.0_f32, 0.0_f32, 20.0_f32, 0.959_388_55_f32),
+            (64.0, 128.0, 25.0, 0.223_824_77),
+            (128.0, 128.0, 30.0, 0.282_789_2),
+            // Ground below the band: clamped to the lowest detail texture.
+            (200.0, 50.0, 15.0, 0.0),
+            (255.0, 255.0, 60.0, 1.260_850_2),
+            (32.0, 224.0, 42.5, 1.354_598_5),
+        ] {
+            assert_reference(
+                comp.composition_value(x, y, elevation),
+                expected,
+                &format!("composition at ({x}, {y}, {elevation})"),
+            );
+        }
+
+        // The weights the renderer actually consumes follow from that value.
+        assert_weights(comp.blend_weights(200.0, 50.0, 15.0), [1.0, 0.0, 0.0, 0.0]);
     }
 }

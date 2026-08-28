@@ -17,7 +17,10 @@
 //!   sculpt map into a single-face [`PrimMesh`], honouring the four sculpt
 //!   types (plane / cylinder / sphere / torus) and the mirror / invert flags,
 //!   following Firestorm's `LLVolume::sculpt` / `sculptGenerateMapVertices`,
-//!   reimplemented idiomatically.
+//!   reimplemented idiomatically. The grid it resamples onto is sized by
+//!   [`mesh_resolution`] from the map's dimensions and the requested
+//!   [`PrimLod`](sl_prim::PrimLod), as the reference sizes it from the volume's
+//!   detail — a distant sculpt is not tessellated at full rez.
 
 pub mod stitch;
 pub mod tessellate;
@@ -25,4 +28,4 @@ pub mod tessellate;
 pub use sl_prim::{PrimFace, PrimFaceId, PrimMesh};
 pub use sl_texture::DecodedImage;
 pub use stitch::{SculptParams, SculptStitch};
-pub use tessellate::{WORKING_SUBDIVISIONS, tessellate, tessellate_with};
+pub use tessellate::{MAX_SUBDIVISIONS, mesh_resolution, tessellate, tessellate_with};

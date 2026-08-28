@@ -24,6 +24,12 @@ scaled into the `[0, 3]` detail-texture index range, and that scalar is
 resolved into a normalised four-weight linear blend between the two adjacent
 detail textures.
 
-The Perlin noise is a self-contained gradient noise in `f32` (no permutation
-table indexing), matching the low-frequency plus turbulence structure of the
-viewer's terrain noise in character rather than bit-for-bit.
+The Perlin noise is the one part that is **not** idiomatic but a verbatim port,
+tables and all: it is Firestorm's `indra/newview/noise.{h,cpp}` — the classic
+256-entry permutation and gradient tables under a cubic ease — because its exact
+values decide where one ground texture gives way to the next. Anything else,
+however well-shaped, would put the transition bands somewhere the region's map
+tile and every other viewer do not. The reference builds those tables at run
+time from a fixed-seed `rand()`, so they are baked in here; the unit tests check
+both the raw noise and whole composition values against samples taken from the
+reference's own code.

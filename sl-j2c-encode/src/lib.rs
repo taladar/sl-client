@@ -19,7 +19,9 @@
 //! A fully-opaque image is encoded as three (RGB) components; one with any
 //! transparency keeps its alpha as a fourth component, so an alpha-masked bake
 //! round-trips its cut-outs. Encoding is lossy (the reference viewer's bake path
-//! is too).
+//! is too). The pixels are taken to be 8-bit **sRGB-encoded** samples, which is
+//! what every Second Life texture is — see the colour-space note at the
+//! `opj_image_create` call.
 
 use core::ffi::c_void;
 
@@ -248,6 +250,13 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
     let comptparms = params.as_ptr().cast_mut();
     let numcomps_u32 = u32::try_from(numcomps).unwrap_or(3);
 
+    // The declared colour space is sRGB: the input is 8-bit encoded RGBA, which
+    // is how Second Life stores every texture, bakes included. It is *only* a
+    // declaration — a raw J2K codestream has no colour-space signalling (that is
+    // a JP2 `colr` box), and OpenJPEG's `j2k.c` never reads `color_space`, so the
+    // value never reaches the output bytes. Were this crate ever to grow a JP2
+    // output or a non-sRGB input, the colour space would have to become an
+    // argument rather than this constant.
     // SAFETY: `comptparms` points at `numcomps` (<= 4) initialised descriptors.
     let image = Image(unsafe {
         opj_image_create(numcomps_u32, comptparms, OPJ_COLOR_SPACE::OPJ_CLRSPC_SRGB)

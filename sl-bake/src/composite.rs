@@ -7,6 +7,19 @@
 //! layers carve the destination alpha so the underlying body shows through as
 //! transparent. Each layer texture is bilinearly resampled to the bake
 //! resolution, so the input images need not share a size.
+//!
+//! **Every blend here is in the encoded (sRGB) domain, not linear light.** A
+//! layer's texels arrive as a [`DecodedImage`]'s 8-bit sRGB bytes, this module
+//! only divides them by 255, and the bake is quantised straight back to 8 bits —
+//! there is no sRGB-to-linear transfer anywhere in the crate, and the `f32`
+//! working canvas exists for blend precision, not for a change of colour space.
+//! That is deliberate and load-bearing: the reference viewer's `LLTexLayer`
+//! composite is an 8-bit-per-channel blend of the same encoded texels, so
+//! converting to linear here would produce visibly different bakes from every
+//! other viewer. It is called out because the rest of this workspace holds the
+//! opposite rule (a data or lighting texture must be linear — see the
+//! `normal-maps-must-be-linear` finding), and blending math ported *in* from a
+//! shader would otherwise carry the wrong assumption.
 
 use crate::region::BakeRegion;
 use sl_proto::DiscardLevel;
@@ -91,7 +104,7 @@ pub struct Layer {
     pub image: Option<DecodedImage>,
     /// How this layer combines with the layers below it.
     pub kind: LayerKind,
-    /// A linear RGBA multiply applied to the layer's texels; the alpha component
+    /// An RGBA multiply applied to the layer's (encoded) texels; the alpha component
     /// is the layer's overall opacity (the reference viewer's `net_color`). Each
     /// channel is `0.0..=1.0`.
     pub tint: [f32; 4],
@@ -256,7 +269,8 @@ const RGBA_CHANNELS_U16: u16 = 4;
 pub fn composite_region(region: BakeRegion, size: u32, layers: &[Layer]) -> BakedImage {
     let side = usize_from_u32(size);
     let pixel_count = side.saturating_mul(side);
-    // A working canvas of linear RGBA in `0.0..=1.0`, transparent to start.
+    // A working canvas of (sRGB-encoded) RGBA in `0.0..=1.0`, transparent to
+    // start — see the module docs on the colour space.
     let mut canvas = vec![[0.0_f32; 4]; pixel_count];
 
     for layer in layers {
@@ -290,7 +304,7 @@ struct MaskSampler<'pixels> {
     multiply_blend: bool,
 }
 
-/// Apply one `layer` to the working `canvas` (`side`×`side` linear RGBA).
+/// Apply one `layer` to the working `canvas` (`side`×`side` sRGB-encoded RGBA).
 fn apply_layer(canvas: &mut [[f32; 4]], side: usize, layer: &Layer) {
     let sampler = layer.image.as_ref().and_then(LayerSampler::new);
     // Whether the source carries a real alpha channel; a solid fill (no image)
@@ -523,8 +537,11 @@ impl<'pixels> LayerSampler<'pixels> {
     }
 }
 
-/// Rec. 601 luma of a linear RGBA source's colour, the reference viewer's
-/// grey-mask reading for an alpha wearable stored without an alpha channel.
+/// Rec. 601 luma of an RGBA source's colour, the reference viewer's grey-mask
+/// reading for an alpha wearable stored without an alpha channel.
+///
+/// The weights are applied to the *encoded* channels, as the reference applies
+/// them to its 8-bit texels — this is not a linear-light luminance.
 fn luminance(rgba: [f32; 4]) -> f32 {
     rgba[0] * 0.299 + rgba[1] * 0.587 + rgba[2] * 0.114
 }
@@ -574,8 +591,9 @@ fn usize_from_u32(value: u32) -> usize {
     usize::try_from(value).unwrap_or(0)
 }
 
-/// Quantise a linear `0.0..=1.0` channel to an 8-bit value, rounding to nearest;
-/// out-of-range inputs are clamped.
+/// Quantise a `0.0..=1.0` channel back to its 8-bit encoded value, rounding to
+/// nearest; out-of-range inputs are clamped. The inverse of the sampler's
+/// divide-by-255, with no transfer function between them.
 #[expect(
     clippy::as_conversions,
     clippy::cast_possible_truncation,
@@ -589,7 +607,8 @@ fn u8_from_unit_f32(value: f32) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        BakedImage, Layer, LayerKind, ShapeMask, TexGen, composite_region, process_mask_alpha,
+        BakedImage, Layer, LayerKind, RGBA_CHANNELS, ShapeMask, TexGen, composite_region,
+        process_mask_alpha,
     };
     use crate::region::BakeRegion;
     use bytes::Bytes;
@@ -613,6 +632,39 @@ mod tests {
             Bytes::from(pixels),
             None,
         )
+    }
+
+    /// A 1-pixel-wide image of the given rows, top row first (the row order a
+    /// decoded J2C arrives in).
+    fn column_image(rows: &[[u8; 4]]) -> DecodedImage {
+        let mut pixels = Vec::with_capacity(rows.len().saturating_mul(4));
+        for row in rows {
+            pixels.extend_from_slice(row);
+        }
+        DecodedImage::new(
+            1,
+            u32::try_from(rows.len()).unwrap_or(0),
+            4,
+            sl_proto::DiscardLevel::FULL,
+            Bytes::from(pixels),
+            None,
+        )
+    }
+
+    /// The RGBA of the pixel at `(x, y)` of a bake, counting rows from the top.
+    fn pixel_at(bake: &BakedImage, x: usize, y: usize) -> [u8; 4] {
+        let side = usize::try_from(bake.size).unwrap_or(0);
+        let base = y
+            .saturating_mul(side)
+            .saturating_add(x)
+            .saturating_mul(RGBA_CHANNELS);
+        let at = |offset: usize| {
+            bake.pixels
+                .get(base.saturating_add(offset))
+                .copied()
+                .unwrap_or(0)
+        };
+        [at(0), at(1), at(2), at(3)]
     }
 
     /// The RGBA of the centre pixel of a bake.
@@ -818,5 +870,25 @@ mod tests {
         ]);
         let bake = composite_region(BakeRegion::UpperBody, 8, &[base, garment]);
         assert_eq!(centre_pixel(&bake), [255, 0, 0, 255]);
+    }
+
+    /// Compositing preserves the source's row order: the bake comes out top-down,
+    /// exactly as the layer textures went in, with no implicit vertical flip.
+    ///
+    /// This is the premise the *explicit* client-bake flip rests on. An SL avatar
+    /// mesh's UVs are authored bottom-up, so the viewer mirrors a composited bake's
+    /// rows before draping or uploading it (`composite_region_from_layers`); that
+    /// flip is correct only because this function is orientation-neutral. Were a
+    /// flip to creep in here the head bake would land chin-on-forehead — and with
+    /// two flips in the chain, nothing downstream would say which one was wrong.
+    #[test]
+    fn compositing_preserves_source_row_order() {
+        // One pixel wide, red over blue — asymmetric top-to-bottom.
+        let layer = Layer::base(column_image(&[[255, 0, 0, 255], [0, 0, 255, 255]]));
+        let bake = composite_region(BakeRegion::Head, 4, &[layer]);
+        // Row 0 centre-samples at v = 0.125, so it is 7/8 the source's top row.
+        assert_eq!(pixel_at(&bake, 0, 0), [223, 0, 32, 255]);
+        // Row 3 samples at v = 0.875, the mirror weighting of the bottom row.
+        assert_eq!(pixel_at(&bake, 0, 3), [32, 0, 223, 255]);
     }
 }

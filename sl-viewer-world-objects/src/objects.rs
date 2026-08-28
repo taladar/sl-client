@@ -22,7 +22,8 @@
 //!   and any tracked descendants — from the map.
 //!
 //! Since Phase 5.2 a plain prim ([`ObjectCategory::Prim`]) is tessellated with
-//! [`sl_prim`](sl_client_bevy) at a fixed high level of detail and rendered as
+//! [`sl_prim`](sl_client_bevy) — since P21.3 at the [`PrimLod`] its on-screen
+//! size warrants, not a fixed level — and rendered as
 //! one child entity per [`PrimFace`](sl_client_bevy::PrimFace) parented to the
 //! object entity — so each face can carry its own material — kept in Second Life
 //! space with the object entity's `Transform` carrying the single basis change
@@ -33,7 +34,8 @@
 //! and decodes its `LLMesh` asset through the shared [`MeshManager`] and spawns
 //! one child entity per submesh; since Phase 9 a sculpted prim fetches its sculpt
 //! map through the shared [`TextureManager`], stitches it into geometry with
-//! [`tessellate_sculpt`], and spawns its face the same way. Avatar placeholders
+//! [`tessellate_sculpt`] (likewise at its own [`PrimLod`]), and spawns its face
+//! the same way. Avatar placeholders
 //! (P10) attach their geometry to these entities in the same way.
 
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -304,10 +306,15 @@ pub struct PendingRiggedMesh {
     pub texture_entry: Vec<u8>,
 }
 
-/// A sculpted prim's deferred geometry build: the sculpt map texture key it is
-/// waiting on, the sculpt topology byte, and the object's texture-entry bytes,
-/// retained so its face entity can be spawned (and textured) once
-/// [`TextureManager`] decodes the map.
+/// A sculpted prim's geometry build inputs: the sculpt map texture key, the
+/// sculpt topology byte, and the object's texture-entry bytes, retained so its
+/// face entity can be spawned (and textured) once [`TextureManager`] decodes the
+/// map — and kept afterwards so [`apply_prim_lod`] can re-stitch the same face at
+/// a different [`PrimLod`] as the sculpt's on-screen size changes.
+///
+/// The same inputs serve both, so this is one type in two slots of
+/// [`ObjectBuilds`]: `pending` while the map is still fetching, `sculpt_rebuild`
+/// once the face exists.
 #[derive(Debug)]
 pub struct PendingSculpt {
     /// The sculpt map texture key whose decoded pixels are the geometry input.
@@ -333,9 +340,10 @@ pub struct PendingSculpt {
 /// re-tessellate the prim at a different [`PrimLod`] as its on-screen size
 /// changes, without needing the live [`Object`] (which the driver does not hold).
 ///
-/// Only a **plain prim** carries this — a sculpt tessellates from its decoded
-/// map (no [`PrimLod`] input) and a mesh from fetched geometry blocks, so neither
-/// is client-tessellation LOD managed.
+/// Only a **plain prim** carries this; a sculpt is client-tessellation LOD managed
+/// too but rebuilds from its decoded map, so it carries a [`PendingSculpt`]
+/// instead (see [`ClientTessellated`]). A mesh comes from fetched geometry blocks
+/// and is managed by the mesh store's own level of detail.
 #[derive(Debug)]
 struct PendingPrim {
     /// The object's quantized prim shape, re-hydrated to a float
@@ -412,24 +420,61 @@ pub struct ObjectBuilds {
     mesh_rebuild: Option<PendingMesh>,
     /// For a **plain prim**, the inputs needed to re-tessellate its face entities
     /// when the pixel-area LOD driver picks a different [`PrimLod`] for its
-    /// on-screen size (P21.3). `None` for a sculpt, mesh, or non-rendered
-    /// category (none of which is client-tessellation LOD managed).
+    /// on-screen size (P21.3). `None` for a sculpt (which carries
+    /// [`sculpt_rebuild`](Self::sculpt_rebuild) instead), a mesh, or a
+    /// non-rendered category.
     prim_rebuild: Option<PendingPrim>,
     /// For a **tree**, the inputs needed to regenerate its geometry when the
     /// pixel-area LOD driver picks a different `TreeTier` for its on-screen size
     /// (P26.2). `None` for a non-tree.
     tree_rebuild: Option<PendingTree>,
+    /// For a **built sculpt**, the inputs needed to re-stitch its face when the
+    /// pixel-area LOD driver picks a different [`PrimLod`] for its on-screen size.
+    /// `None` for a prim, mesh, or a sculpt whose map has not decoded yet — that
+    /// one still carries a [`PendingGeometry::Sculpt`], and gets its rebuild
+    /// inputs when [`apply_object_sculpts`] builds it.
+    sculpt_rebuild: Option<PendingSculpt>,
 }
 
 impl ObjectBuilds {
     /// Whether this object has no outstanding build work left at all — the state
-    /// an entry is dropped in rather than kept as four `None`s.
+    /// an entry is dropped in rather than kept as five `None`s.
     const fn is_empty(&self) -> bool {
         self.pending.is_none()
             && self.mesh_rebuild.is_none()
             && self.prim_rebuild.is_none()
             && self.tree_rebuild.is_none()
+            && self.sculpt_rebuild.is_none()
     }
+
+    /// The client-tessellated rebuild inputs this object holds, if any — what
+    /// [`apply_prim_lod`] re-runs at a new level. `None` for a mesh, a tree (which
+    /// has its own tier and driver), or anything not tessellated on the CPU.
+    const fn client_tessellated(&self) -> Option<ClientTessellated<'_>> {
+        if let Some(prim) = self.prim_rebuild.as_ref() {
+            return Some(ClientTessellated::Prim(prim));
+        }
+        if let Some(sculpt) = self.sculpt_rebuild.as_ref() {
+            return Some(ClientTessellated::Sculpt(sculpt));
+        }
+        None
+    }
+}
+
+/// The client-tessellated geometry an object rebuilds when the pixel-area driver
+/// picks a new [`PrimLod`] for it — the two categories whose geometry is produced
+/// on the CPU from parameters rather than fetched.
+///
+/// An object is one or the other, never both: [`ObjectBuilds`] carries
+/// `prim_rebuild` for a plain prim and `sculpt_rebuild` for a sculpt, and this is
+/// how [`apply_prim_lod`] asks which it is holding.
+#[derive(Debug, Clone, Copy)]
+enum ClientTessellated<'inputs> {
+    /// A plain prim, re-run through the shape sweep at the new level.
+    Prim(&'inputs PendingPrim),
+    /// A sculpt, re-sampled from its decoded map onto a grid sized for the new
+    /// level.
+    Sculpt(&'inputs PendingSculpt),
 }
 
 /// Every object's outstanding deferred geometry work, reached through the object
@@ -485,10 +530,14 @@ impl PendingBuilds<'_, '_> {
     }
 
     /// Drop `entity`'s record if the take above left nothing outstanding — for a
-    /// caller that knows it is *not* about to park another build on it (a sculpt
-    /// and a rigged mesh both carry no LOD-rebuild inputs, so their record is done
-    /// the moment their build is). An object that needs no deferred work carries no
-    /// record, exactly as it did while this was a map.
+    /// caller that knows it is *not* about to park another build or set rebuild
+    /// inputs on it (a rigged mesh carries none, so its record is done the moment
+    /// its build is). An object that needs no deferred work carries no record,
+    /// exactly as it did while this was a map.
+    ///
+    /// The removal is queued through `Commands`, so a caller that *does* go on to
+    /// write rebuild inputs must not call this — the queued removal would land
+    /// after the write and silently take it.
     pub fn drop_if_resolved(&self, entity: Entity, commands: &mut Commands) {
         if self.get(entity).is_some_and(ObjectBuilds::is_empty) {
             commands.entity(entity).remove::<ObjectBuilds>();
@@ -508,6 +557,14 @@ impl PendingBuilds<'_, '_> {
     fn set_mesh_rebuild(&mut self, entity: Entity, rebuild: PendingMesh) {
         if let Ok((_entity, _scene, mut builds)) = self.builds.get_mut(entity) {
             builds.mesh_rebuild = Some(rebuild);
+        }
+    }
+
+    /// Set `entity`'s sculpt LOD rebuild inputs, on the same terms as
+    /// [`set_pending`](Self::set_pending).
+    fn set_sculpt_rebuild(&mut self, entity: Entity, rebuild: PendingSculpt) {
+        if let Ok((_entity, _scene, mut builds)) = self.builds.get_mut(entity) {
+            builds.sculpt_rebuild = Some(rebuild);
         }
     }
 
@@ -574,11 +631,12 @@ fn set_object_builds(entity: Entity, builds: ObjectBuilds, commands: &mut Comman
 #[derive(Component, Debug)]
 pub struct GeometryHolder;
 
-/// The [`PrimLod`] the render-priority driver (P21.3) wants each plain prim
-/// re-tessellated at, keyed by scoped id. The driver ([`drive_render_priority`])
-/// computes a prim's level from its on-screen size each throttled pass and writes
-/// it here; [`apply_prim_lod`] drains the map and re-tessellates any prim whose
-/// desired level differs from its current one. Kept separate from [`ObjectState`]
+/// The [`PrimLod`] the render-priority driver (P21.3) wants each
+/// client-tessellated object — a plain prim or a sculpt — re-tessellated at,
+/// keyed by scoped id. The driver ([`drive_render_priority`]) computes an
+/// object's level from its on-screen size each throttled pass and writes it here;
+/// [`apply_prim_lod`] drains the map and re-tessellates any object whose desired
+/// level differs from its current one. Kept separate from [`ObjectState`]
 /// because the driver holds no `Commands` / asset resources to rebuild geometry.
 ///
 /// [`drive_render_priority`]: crate::render_priority::drive_render_priority
@@ -1524,26 +1582,35 @@ fn apply_texture_animation(geometry: Entity, object: &Object, commands: &mut Com
     }
 }
 
-/// The result of [`build_object_geometry`]: the spawned face entities plus the
-/// category-specific follow-up state — a deferred asset build ([`PendingGeometry`],
-/// a mesh / sculpt), the plain-prim LOD re-tessellation inputs ([`PendingPrim`]),
-/// the tree regeneration inputs ([`PendingTree`]), and a flexi prim's seeded
-/// [`FlexiChain`]; at most one of the last three is ever `Some`.
-type ObjectGeometryBuild = (
-    Vec<Entity>,
-    Option<PendingGeometry>,
-    Option<PendingPrim>,
-    Option<PendingTree>,
-    Option<FlexiChain>,
-    // The mesh LOD-rebuild inputs, set when a mesh is built immediately from an
-    // already-decoded (warm-cache) asset — the cold-cache path instead sets them
-    // in `apply_object_meshes` when its `PendingGeometry::Mesh` resolves. Without
-    // this a warm-built shared mesh has no `mesh_rebuild` and so never rebuilds its
-    // submeshes when the pixel-area driver swaps the shared geometry's LOD, leaving
-    // it frozen at the level the first instance decoded at (the coarse
-    // `INITIAL_MANAGED_LOD`).
-    Option<PendingMesh>,
-);
+/// The result of [`build_object_geometry`]: the spawned face entities, the
+/// outstanding build work the object is left owing ([`ObjectBuilds`] — a deferred
+/// asset fetch plus whichever category's LOD-rebuild inputs apply), and a flexi
+/// prim's seeded [`FlexiChain`].
+///
+/// The rebuild inputs are category-exclusive: at most one of `prim_rebuild`,
+/// `tree_rebuild`, `sculpt_rebuild`, `mesh_rebuild` and `flexi_chain` is ever
+/// `Some`, since an object is one category at a time.
+#[derive(Debug, Default)]
+struct ObjectGeometryBuild {
+    /// The child entities spawned for the object's faces / submeshes; empty when
+    /// the geometry is still waiting on an asset (or the category renders
+    /// nothing).
+    face_entities: Vec<Entity>,
+    /// The outstanding build work: the deferred asset fetch and the retained
+    /// inputs of whichever level-of-detail rebuild the category has.
+    ///
+    /// `mesh_rebuild` is set here only when a mesh is built immediately from an
+    /// already-decoded (warm-cache) asset — the cold-cache path instead sets it in
+    /// `apply_object_meshes` when its `PendingGeometry::Mesh` resolves. Without
+    /// that a warm-built shared mesh had no `mesh_rebuild` and so never rebuilt its
+    /// submeshes when the pixel-area driver swapped the shared geometry's LOD,
+    /// leaving it frozen at the coarse level the first instance decoded at.
+    builds: ObjectBuilds,
+    /// A **flexi** prim's seeded chain (P32.2), which [`simulate_flexi`] drives; a
+    /// flexi prim is chain-driven rather than pixel-area LOD managed, so it
+    /// carries this in place of `prim_rebuild`.
+    flexi_chain: Option<FlexiChain>,
+}
 
 /// Build an object's renderable geometry for its category, returning the spawned
 /// child entities and — for a mesh or sculpt whose asset has not decoded yet — the
@@ -1560,11 +1627,13 @@ type ObjectGeometryBuild = (
 /// (P26.2) and returns a [`PendingTree`] so [`apply_tree_lod`] can regenerate it
 /// at a different `TreeTier`. Every other category renders nothing here.
 ///
-/// The last three returns are the plain-prim re-tessellation inputs
-/// ([`PendingPrim`], P21.3), the tree regeneration inputs ([`PendingTree`],
-/// P26.2), and a **flexi** prim's seeded [`FlexiChain`] (P32.2, in place of
-/// `PendingPrim` — a flexi prim is chain-driven, not pixel-area LOD managed); at
-/// most one of the three is ever `Some`.
+/// Alongside the spawned faces the result carries whatever the object still owes:
+/// its deferred asset fetch and the retained inputs of its level-of-detail
+/// rebuild — a plain prim's re-tessellation inputs ([`PendingPrim`], P21.3), a
+/// tree's regeneration inputs ([`PendingTree`], P26.2), a sculpt's re-stitch
+/// inputs ([`PendingSculpt`]) — or, for a **flexi** prim, its seeded
+/// [`FlexiChain`] (P32.2, in place of `PendingPrim`: a flexi prim is
+/// chain-driven, not pixel-area LOD managed).
 #[expect(
     clippy::too_many_arguments,
     reason = "threads the several ECS resources the geometry build needs"
@@ -1607,10 +1676,14 @@ fn build_object_geometry(
                 intern,
                 material_cache,
             );
-            (faces, None, None, None, Some(chain), None)
+            ObjectGeometryBuild {
+                face_entities: faces,
+                flexi_chain: Some(chain),
+                ..ObjectGeometryBuild::default()
+            }
         }
-        ObjectCategory::Prim => (
-            build_prim_faces(
+        ObjectCategory::Prim => ObjectGeometryBuild {
+            face_entities: build_prim_faces(
                 object,
                 entity,
                 commands,
@@ -1625,24 +1698,24 @@ fn build_object_geometry(
                 intern,
                 material_cache,
             ),
-            None,
-            // Retain the re-tessellation inputs so the pixel-area LOD driver can
-            // rebuild this prim at a different level as its on-screen size
-            // changes (P21.3).
-            Some(PendingPrim {
-                shape: object.shape,
-                texture_entry: object.texture_entry.clone(),
-                scale: [object.scale.x, object.scale.y, object.scale.z],
-                priority,
-                intern: intern.clone(),
-            }),
-            None,
-            None,
-            None,
-        ),
+            builds: ObjectBuilds {
+                // Retain the re-tessellation inputs so the pixel-area LOD driver
+                // can rebuild this prim at a different level as its on-screen
+                // size changes (P21.3).
+                prim_rebuild: Some(PendingPrim {
+                    shape: object.shape,
+                    texture_entry: object.texture_entry.clone(),
+                    scale: [object.scale.x, object.scale.y, object.scale.z],
+                    priority,
+                    intern: intern.clone(),
+                }),
+                ..ObjectBuilds::default()
+            },
+            ..ObjectGeometryBuild::default()
+        },
         ObjectCategory::Mesh => {
             let Some(key) = mesh_key(object) else {
-                return (Vec::new(), None, None, None, None, None);
+                return ObjectGeometryBuild::default();
             };
             mesh_manager.request(key, priority);
             // The store hands back an `Arc`; clone it out so the immutable borrow
@@ -1662,20 +1735,19 @@ fn build_object_geometry(
                 // unless it is worn on a HUD, which has no skeleton to skin to.
                 Some(_decoded) if !is_hud && mesh_manager.skin(key).is_some() => {
                     mesh_manager.upgrade_to_finest(key);
-                    (
-                        Vec::new(),
-                        Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
-                            key,
-                            texture_entry: object.texture_entry.clone(),
-                        })),
-                        None,
-                        None,
-                        None,
-                        None,
-                    )
+                    ObjectGeometryBuild {
+                        builds: ObjectBuilds {
+                            pending: Some(PendingGeometry::RiggedMesh(PendingRiggedMesh {
+                                key,
+                                texture_entry: object.texture_entry.clone(),
+                            })),
+                            ..ObjectBuilds::default()
+                        },
+                        ..ObjectGeometryBuild::default()
+                    }
                 }
-                Some(decoded) => (
-                    build_mesh_submeshes(
+                Some(decoded) => ObjectGeometryBuild {
+                    face_entities: build_mesh_submeshes(
                         &decoded,
                         key,
                         &object.texture_entry,
@@ -1692,49 +1764,57 @@ fn build_object_geometry(
                         intern,
                         material_cache,
                     ),
-                    None,
-                    None,
-                    None,
-                    None,
-                    // Warm cache: the submeshes were built immediately above, so
-                    // (unlike the cold path) no `PendingGeometry::Mesh` will later
-                    // set the rebuild inputs. Carry them out here so the pixel-area
-                    // LOD driver can rebuild this instance when the shared geometry's
-                    // level of detail changes on approach (the stuck-low-LOD fix).
-                    Some(PendingMesh {
-                        key,
-                        texture_entry: object.texture_entry.clone(),
-                        scale: [object.scale.x, object.scale.y, object.scale.z],
-                        priority,
-                        intern: intern.clone(),
-                    }),
-                ),
-                None => (
-                    Vec::new(),
-                    Some(PendingGeometry::Mesh(PendingMesh {
-                        key,
-                        texture_entry: object.texture_entry.clone(),
-                        scale: [object.scale.x, object.scale.y, object.scale.z],
-                        priority,
-                        intern: intern.clone(),
-                    })),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
+                    builds: ObjectBuilds {
+                        // Warm cache: the submeshes were built immediately above,
+                        // so (unlike the cold path) no `PendingGeometry::Mesh` will
+                        // later set the rebuild inputs. Carry them out here so the
+                        // pixel-area LOD driver can rebuild this instance when the
+                        // shared geometry's level of detail changes on approach
+                        // (the stuck-low-LOD fix).
+                        mesh_rebuild: Some(PendingMesh {
+                            key,
+                            texture_entry: object.texture_entry.clone(),
+                            scale: [object.scale.x, object.scale.y, object.scale.z],
+                            priority,
+                            intern: intern.clone(),
+                        }),
+                        ..ObjectBuilds::default()
+                    },
+                    ..ObjectGeometryBuild::default()
+                },
+                None => ObjectGeometryBuild {
+                    builds: ObjectBuilds {
+                        pending: Some(PendingGeometry::Mesh(PendingMesh {
+                            key,
+                            texture_entry: object.texture_entry.clone(),
+                            scale: [object.scale.x, object.scale.y, object.scale.z],
+                            priority,
+                            intern: intern.clone(),
+                        })),
+                        ..ObjectBuilds::default()
+                    },
+                    ..ObjectGeometryBuild::default()
+                },
             }
         }
         ObjectCategory::Sculpt => {
             let Some((map, sculpt_type)) = sculpt_key(object) else {
-                return (Vec::new(), None, None, None, None, None);
+                return ObjectGeometryBuild::default();
             };
             manager.request_boosted(map, priority);
+            let rebuild = PendingSculpt {
+                map,
+                sculpt_type,
+                texture_entry: object.texture_entry.clone(),
+                scale: [object.scale.x, object.scale.y, object.scale.z],
+                priority,
+                intern: intern.clone(),
+            };
             // The store hands back an `Arc`; clone it out so the immutable borrow
             // of `manager` ends before the face build borrows it mutably.
             match store.get(map).map(Arc::clone) {
-                Some(map_image) => (
-                    build_sculpt_faces(
+                Some(map_image) => ObjectGeometryBuild {
+                    face_entities: build_sculpt_faces(
                         &map_image,
                         map,
                         sculpt_type,
@@ -1748,35 +1828,33 @@ fn build_object_geometry(
                         store,
                         prim_textures,
                         priority,
+                        INITIAL_MANAGED_PRIM_LOD,
                         cache,
                         intern,
                         material_cache,
                     ),
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
-                None => (
-                    Vec::new(),
-                    Some(PendingGeometry::Sculpt(PendingSculpt {
-                        map,
-                        sculpt_type,
-                        texture_entry: object.texture_entry.clone(),
-                        scale: [object.scale.x, object.scale.y, object.scale.z],
-                        priority,
-                        intern: intern.clone(),
-                    })),
-                    None,
-                    None,
-                    None,
-                    None,
-                ),
+                    builds: ObjectBuilds {
+                        // Retain the re-stitch inputs so the pixel-area LOD driver
+                        // can rebuild this sculpt at a different level as its
+                        // on-screen size changes, exactly as a plain prim's.
+                        sculpt_rebuild: Some(rebuild),
+                        ..ObjectBuilds::default()
+                    },
+                    ..ObjectGeometryBuild::default()
+                },
+                // The map has not decoded yet; `apply_object_sculpts` builds the
+                // face — and sets the rebuild inputs — when it does.
+                None => ObjectGeometryBuild {
+                    builds: ObjectBuilds {
+                        pending: Some(PendingGeometry::Sculpt(rebuild)),
+                        ..ObjectBuilds::default()
+                    },
+                    ..ObjectGeometryBuild::default()
+                },
             }
         }
-        ObjectCategory::Tree => (
-            build_tree_faces(
+        ObjectCategory::Tree => ObjectGeometryBuild {
+            face_entities: build_tree_faces(
                 tree_species_byte(object),
                 INITIAL_TREE_TIER,
                 entity,
@@ -1788,19 +1866,23 @@ fn build_object_geometry(
                 prim_textures,
                 priority,
             ),
-            None,
-            None,
-            // Retain the regeneration inputs so the pixel-area LOD driver can
-            // rebuild this tree at a different tier as its size changes (P26.2).
-            Some(PendingTree {
-                species: tree_species_byte(object),
-                priority,
-            }),
-            None,
-            None,
-        ),
-        ObjectCategory::Grass => (
-            build_grass_faces(
+            builds: ObjectBuilds {
+                // Retain the regeneration inputs so the pixel-area LOD driver can
+                // rebuild this tree at a different tier as its size changes (P26.2).
+                tree_rebuild: Some(PendingTree {
+                    species: tree_species_byte(object),
+                    priority,
+                }),
+                ..ObjectBuilds::default()
+            },
+            ..ObjectGeometryBuild::default()
+        },
+        // A grass clump is generated immediately from its species and scale (like
+        // a tree) and never needs a deferred asset build or an LOD rebuild; a
+        // scale change rebuilds it through the shape fingerprint
+        // ([`ShapeFingerprint::grass_spread`]).
+        ObjectCategory::Grass => ObjectGeometryBuild {
+            face_entities: build_grass_faces(
                 object.state,
                 [object.scale.x, object.scale.y],
                 entity,
@@ -1812,19 +1894,9 @@ fn build_object_geometry(
                 prim_textures,
                 priority,
             ),
-            // A grass clump is generated immediately from its species and scale
-            // (like a tree) and never needs a deferred asset build or an LOD
-            // rebuild; a scale change rebuilds it through the shape fingerprint
-            // ([`ShapeFingerprint::grass_spread`]).
-            None,
-            None,
-            None,
-            None,
-            None,
-        ),
-        ObjectCategory::Avatar | ObjectCategory::Other => {
-            (Vec::new(), None, None, None, None, None)
-        }
+            ..ObjectGeometryBuild::default()
+        },
+        ObjectCategory::Avatar | ObjectCategory::Other => ObjectGeometryBuild::default(),
     }
 }
 
@@ -2037,13 +2109,19 @@ fn apply_flexi_sim(
 /// `Transform` carries its scale / rotation / position and the single basis
 /// change, like a plain prim.
 ///
+/// `lod` is the pixel-area-selected tessellation level: a sculpt is grid-resampled
+/// at [`sl_client_bevy::mesh_resolution`] of its map size and that level, so a
+/// small or distant one costs a fraction of the triangles a near one does. A new
+/// sculpt starts at [`INITIAL_MANAGED_PRIM_LOD`] and [`apply_prim_lod`] re-stitches
+/// it toward the level its on-screen size warrants, exactly as for a plain prim.
+///
 /// The geometry is shared across identical instances through the
-/// [`GeometryCache`] keyed by the map asset (`map_key`), sculpt type, and the
-/// decoded map's pixel size — copies of one sculpt stitch the map once, and a
-/// re-decode at another discard level is a clean different key.
+/// [`GeometryCache`] keyed by the map asset (`map_key`), sculpt type, the decoded
+/// map's pixel size, and the level — copies of one sculpt stitch the map once, and
+/// a re-decode at another discard level (or a LOD swap) is a clean different key.
 #[expect(
     clippy::too_many_arguments,
-    reason = "threads the several ECS resources the geometry build needs"
+    reason = "threads the several ECS resources the geometry build needs, plus the fetch priority and LOD"
 )]
 fn build_sculpt_faces(
     map: &DecodedTexture,
@@ -2059,6 +2137,7 @@ fn build_sculpt_faces(
     store: &DecodedTextures,
     prim_textures: &mut PrimTextures,
     priority: Priority,
+    lod: PrimLod,
     cache: &mut GeometryCache,
     intern: &MaterialInternContext,
     material_cache: &mut MaterialCache,
@@ -2069,8 +2148,9 @@ fn build_sculpt_faces(
             sculpt_type,
             width: map.width,
             height: map.height,
+            lod,
         },
-        || tessellate_sculpt(map, sculpt_type),
+        || tessellate_sculpt(map, sculpt_type, lod),
         texture_entry,
         scale,
         parent,
@@ -3110,34 +3190,33 @@ fn apply_object(
             // here, since the fingerprint covers pcode and the sculpt/mesh key.
             debug!("object {scoped} shape/texture changed; re-tessellating");
             despawn_prim_faces(&existing.face_entities, commands);
-            let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain, mesh_rebuild) =
-                build_object_geometry(
-                    object,
-                    category,
-                    existing.geometry,
-                    is_hud,
-                    commands,
-                    meshes,
-                    materials,
-                    manager,
-                    store,
-                    prim_textures,
-                    mesh_manager,
-                    cache,
-                    &intern,
-                    material_cache,
-                );
+            let build = build_object_geometry(
+                object,
+                category,
+                existing.geometry,
+                is_hud,
+                commands,
+                meshes,
+                materials,
+                manager,
+                store,
+                prim_textures,
+                mesh_manager,
+                cache,
+                &intern,
+                material_cache,
+            );
             // Seed or clear the flexi chain state (P32.2): a prim that is (still) flexi
             // gets a fresh chain at the new softness / geometry; one toggled rigid drops
             // it so [`simulate_flexi`] stops driving stale faces.
             apply_flexi_sim(
                 existing.entity,
-                flexi_chain,
+                build.flexi_chain,
                 object,
-                &face_entities,
+                &build.face_entities,
                 commands,
             );
-            existing.face_entities = face_entities;
+            existing.face_entities = build.face_entities;
             // The geometry was re-requested from scratch; any prior deferred build
             // is stale (the mesh key, scale, or category may have changed) and the
             // whole record is replaced by what the new build asked for: a
@@ -3147,16 +3226,7 @@ fn apply_object(
             // tree's (P26.2). An object that changed category drops the rebuild
             // inputs it no longer has (each is `None`), and one that now needs no
             // deferred work at all drops its entry entirely.
-            set_object_builds(
-                existing.entity,
-                ObjectBuilds {
-                    pending,
-                    mesh_rebuild,
-                    prim_rebuild,
-                    tree_rebuild,
-                },
-                commands,
-            );
+            set_object_builds(existing.entity, build.builds, commands);
             existing.prim_lod = INITIAL_MANAGED_PRIM_LOD;
             existing.tree_tier = INITIAL_TREE_TIER;
             existing.shape = shape;
@@ -3266,43 +3336,41 @@ fn apply_object(
     // A plain prim tessellates immediately; a mesh or sculpt requests its asset and
     // builds its geometry now if already decoded, else on decode; an avatar grows
     // its placeholder in a later phase.
-    let (face_entities, pending, prim_rebuild, tree_rebuild, flexi_chain, mesh_rebuild) =
-        build_object_geometry(
-            object,
-            category,
-            geometry,
-            is_hud,
-            commands,
-            meshes,
-            materials,
-            manager,
-            store,
-            prim_textures,
-            mesh_manager,
-            cache,
-            &intern,
-            material_cache,
-        );
+    let build = build_object_geometry(
+        object,
+        category,
+        geometry,
+        is_hud,
+        commands,
+        meshes,
+        materials,
+        manager,
+        store,
+        prim_textures,
+        mesh_manager,
+        cache,
+        &intern,
+        material_cache,
+    );
     // A flexi prim carries its seeded chain state so [`simulate_flexi`] can drive it
     // (P32.2); a rigid prim gets nothing.
-    apply_flexi_sim(entity, flexi_chain, object, &face_entities, commands);
+    apply_flexi_sim(
+        entity,
+        build.flexi_chain,
+        object,
+        &build.face_entities,
+        commands,
+    );
+    let face_entities = build.face_entities;
     // What this build still owes: a cold-cache mesh / sculpt's fetch (`pending`),
     // a warm-cache mesh's LOD-rebuild inputs (`mesh_rebuild` — set only when the
     // mesh built immediately, since a cold-cache one has it set on decode in
     // `apply_object_meshes`), a plain prim's re-tessellation inputs
     // (`prim_rebuild`, first tessellated at the coarse placeholder level), and a
-    // tree's regeneration inputs (`tree_rebuild`). An object that owes none —
-    // an avatar, a grass clump — gets no entry at all.
-    set_object_builds(
-        entity,
-        ObjectBuilds {
-            pending,
-            mesh_rebuild,
-            prim_rebuild,
-            tree_rebuild,
-        },
-        commands,
-    );
+    // tree's regeneration inputs (`tree_rebuild`), a sculpt's re-stitch inputs
+    // (`sculpt_rebuild`). An object that owes none — an avatar, a grass clump —
+    // gets no entry at all.
+    set_object_builds(entity, build.builds, commands);
     state.objects.insert(
         scoped,
         TrackedObject {
@@ -3598,19 +3666,25 @@ pub fn apply_object_meshes(
     }
 }
 
-/// Re-tessellate every plain prim whose pixel-area-selected [`PrimLod`] just
-/// changed (P21.3): drain the [`PrimLodTargets`] the render-priority driver
-/// filled this pass and, for each prim whose desired level differs from its
-/// current one, despawn its old face entities and rebuild them from a fresh
-/// tessellation at the new level.
+/// Re-tessellate every client-tessellated object whose pixel-area-selected
+/// [`PrimLod`] just changed (P21.3): drain the [`PrimLodTargets`] the
+/// render-priority driver filled this pass and, for each object whose desired
+/// level differs from its current one, despawn its old face entities and rebuild
+/// them at the new level.
+///
+/// Both **plain prims** and **sculpts** are client-tessellated and so both belong
+/// here: a prim re-runs the shape sweep, a sculpt re-samples its decoded map onto
+/// a grid sized for the new level. Which one an object is follows from the rebuild
+/// inputs it carries — `prim_rebuild` for a prim, `sculpt_rebuild` for a sculpt,
+/// never both — so there is no separate target map to keep in step.
 ///
 /// The mirror of the mesh LOD swap in [`apply_object_meshes`], but with no async
-/// fetch: prim geometry is tessellated on the CPU here and now — through the
+/// fetch: the geometry is tessellated on the CPU here and now — through the
 /// cross-instance [`GeometryCache`], so a level another instance of the same
-/// shape already sits at revives its shared meshes instead of re-tessellating
-/// (the camera-move LOD-thrash win). A target for a non-prim, an untracked
-/// (removed) object, or a prim already at the desired level is a no-op —
-/// `prim_rebuild` is `Some` only for a plain prim.
+/// shape (or the same sculpt map) already sits at revives its shared meshes
+/// instead of re-tessellating (the camera-move LOD-thrash win). A target for an
+/// object with neither set, an untracked (removed) one, or one already at the
+/// desired level is a no-op.
 #[expect(
     clippy::too_many_arguments,
     reason = "a Bevy system reading the LOD targets and the ECS resources the geometry build needs"
@@ -3640,11 +3714,11 @@ pub fn apply_prim_lod(
                 return LodOutcome::Resolved;
             };
             let entity = tracked.entity;
-            // Only a plain prim carries re-tessellation inputs; a sculpt / mesh /
+            // Only a client-tessellated object carries rebuild inputs; a mesh or
             // avatar has none and is left untouched.
             let Some(rebuild) = builds
                 .get(entity)
-                .and_then(|entry| entry.prim_rebuild.as_ref())
+                .and_then(ObjectBuilds::client_tessellated)
             else {
                 return LodOutcome::Resolved;
             };
@@ -3654,38 +3728,66 @@ pub fn apply_prim_lod(
             if remaining == 0 {
                 return LodOutcome::Deferred;
             }
-            // Clone the rebuild inputs out so the immutable borrow of `tracked` ends
-            // before the mutable rebuild of its face entities below.
-            let shape = rebuild.shape;
-            let texture_entry = rebuild.texture_entry.clone();
-            let scale = rebuild.scale;
-            let priority = rebuild.priority;
-            let intern = rebuild.intern.clone();
             let geometry = tracked.geometry;
-            despawn_prim_faces(&tracked.face_entities, &mut commands);
-            tracked.face_entities = spawn_cached_prim_faces(
-                GeometryKey::Prim {
-                    shape,
-                    lod: desired,
-                },
-                || tessellate(&PrimShapeFloat::from_params(&shape), desired),
-                &texture_entry,
-                scale,
-                geometry,
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &mut manager,
-                &store,
-                &mut prim_textures,
-                priority,
-                &mut cache,
-                &intern,
-                &mut material_cache,
-            );
+            // Each arm despawns only once its replacement geometry is certain: a
+            // sculpt's decoded map can have left the store since the first build,
+            // and despawning before finding that out would leave it with no faces
+            // at all. Without the map it keeps the faces — and the level — it has
+            // until the map returns.
+            tracked.face_entities = match rebuild {
+                ClientTessellated::Prim(prim) => {
+                    let shape = prim.shape;
+                    despawn_prim_faces(&tracked.face_entities, &mut commands);
+                    spawn_cached_prim_faces(
+                        GeometryKey::Prim {
+                            shape,
+                            lod: desired,
+                        },
+                        || tessellate(&PrimShapeFloat::from_params(&shape), desired),
+                        &prim.texture_entry,
+                        prim.scale,
+                        geometry,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut manager,
+                        &store,
+                        &mut prim_textures,
+                        prim.priority,
+                        &mut cache,
+                        &prim.intern,
+                        &mut material_cache,
+                    )
+                }
+                ClientTessellated::Sculpt(sculpt) => {
+                    let Some(map) = store.get(sculpt.map).map(Arc::clone) else {
+                        return LodOutcome::Resolved;
+                    };
+                    despawn_prim_faces(&tracked.face_entities, &mut commands);
+                    build_sculpt_faces(
+                        &map,
+                        sculpt.map,
+                        sculpt.sculpt_type,
+                        &sculpt.texture_entry,
+                        sculpt.scale,
+                        geometry,
+                        &mut commands,
+                        &mut meshes,
+                        &mut materials,
+                        &mut manager,
+                        &store,
+                        &mut prim_textures,
+                        sculpt.priority,
+                        desired,
+                        &mut cache,
+                        &sculpt.intern,
+                        &mut material_cache,
+                    )
+                }
+            };
             tracked.prim_lod = desired;
             debug!(
-                "re-tessellated prim {scoped} at {desired:?}: {} faces",
+                "re-tessellated {scoped} at {desired:?}: {} faces",
                 tracked.face_entities.len()
             );
             LodOutcome::Rebuilt
@@ -3836,7 +3938,6 @@ pub fn apply_object_sculpts(
             let Some(PendingGeometry::Sculpt(pending)) = builds.take_pending(entity) else {
                 continue;
             };
-            builds.drop_if_resolved(entity, &mut commands);
             let Some(geometry) = state.objects.get(&scoped).map(|tracked| tracked.geometry) else {
                 continue;
             };
@@ -3854,12 +3955,18 @@ pub fn apply_object_sculpts(
                 &store,
                 &mut prim_textures,
                 pending.priority,
+                INITIAL_MANAGED_PRIM_LOD,
                 &mut cache,
                 &pending.intern,
                 &mut material_cache,
             );
             budget.remaining = budget.remaining.saturating_sub(1);
             debug!("built sculpt {id}: {} face entities", face_entities.len());
+            // Hand the same inputs on as the sculpt's LOD-rebuild inputs, so the
+            // pixel-area driver can re-stitch it as its on-screen size changes —
+            // the cold-cache counterpart of what `build_object_geometry` sets when
+            // the map was already decoded.
+            builds.set_sculpt_rebuild(entity, pending);
             if let Some(tracked) = state.objects.get_mut(&scoped) {
                 tracked.face_entities = face_entities;
             }

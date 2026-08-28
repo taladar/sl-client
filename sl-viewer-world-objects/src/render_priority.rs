@@ -29,11 +29,13 @@
 //!   and calls `MeshManager::set_lod_for_area`, so a small / distant mesh is
 //!   fetched (and kept) at a coarser geometry block and upgraded as the camera
 //!   approaches;
-//! - and prim level-of-detail (P21.3): it computes each plain prim's
-//!   [`PrimLod`] the same way ([`PrimLod::for_distance`], the same
+//! - and prim level-of-detail (P21.3): it computes each client-tessellated
+//!   object's [`PrimLod`] the same way ([`PrimLod::for_distance`], the same
 //!   `LLVolumeLODGroup` tier selection) and records it in [`PrimLodTargets`], so
-//!   `apply_prim_lod` re-tessellates a small / distant prim at a coarser detail
-//!   and refines it as the camera approaches.
+//!   `apply_prim_lod` re-tessellates a small / distant one at a coarser detail and
+//!   refines it as the camera approaches. Both plain prims and **sculpts** are
+//!   client-tessellated, and both are ranked here — a sculpt's grid is sized from
+//!   its level exactly as the reference sizes it from the volume's detail.
 //!
 //! Assets the pixel-area pass does not cover — terrain detail textures and avatar
 //! textures / bakes — are requested at a fixed boost (`AVATAR_BOOST_PRIORITY`)
@@ -237,6 +239,8 @@ pub fn drive_render_priority(
             // A plain prim (no mesh / sculpt asset) is client-tessellation LOD
             // managed (P21.3): pick the tier its on-screen size warrants and hand
             // it to `apply_prim_lod`, which re-tessellates the prim on a change.
+            // A sculpt is too, but it has an asset (its map), so it is ranked in
+            // the branch below rather than here.
             // Each prim tessellates its own shape, so — unlike a shared mesh asset
             // — there is no cross-instance aggregation.
             if scene.category == ObjectCategory::Prim {
@@ -262,6 +266,19 @@ pub fn drive_render_priority(
         } else {
             metrics.pixel_area(0.5 * scale_length, distance)
         };
+        // A sculpt's asset is its *map texture*, not mesh geometry: it is
+        // client-tessellated like a plain prim, so it takes a `PrimLod` target
+        // rather than the mesh-store LOD below (which its key would not match
+        // anyway). Its map's pixel area still flows into the texture aggregation
+        // at the end of the loop, as it did before.
+        if scene.category == ObjectCategory::Sculpt {
+            let desired = if hud {
+                PrimLod::FINEST
+            } else {
+                PrimLod::for_distance(scale_length, distance, lod_factor)
+            };
+            prim_targets.0.insert(scene.scoped_id, desired);
+        }
         let mesh_key = MeshKey::from(asset);
         if hud {
             hud_meshes.insert(mesh_key);

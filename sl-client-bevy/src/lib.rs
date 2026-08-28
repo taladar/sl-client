@@ -215,7 +215,7 @@ pub use sl_prim::{
 // function, and a bare `tessellate as …` would rename both and make doc links to
 // the name ambiguous.
 pub use sl_sculpt::tessellate::tessellate as tessellate_sculpt;
-pub use sl_sculpt::{SculptParams, SculptStitch};
+pub use sl_sculpt::{MAX_SUBDIVISIONS, SculptParams, SculptStitch, mesh_resolution};
 
 // The pure Linden-tree geometry (the `LLVOTree` counterpart of `sl_prim` /
 // `sl_sculpt`; likewise no store/fetcher — a tree's branch / leaf geometry is

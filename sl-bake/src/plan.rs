@@ -610,8 +610,10 @@ pub const fn region_plan(region: BakeRegion) -> &'static [PlannedLayer] {
 ///   `None` when it could not be loaded (a static base then falls back to a solid
 ///   tint fill; a static detail layer is omitted; a garment-shape mask whose TGA
 ///   is absent is simply not applied).
-/// - `tint_for(tint, wearable)` — the linear-RGBA tint for a layer, resolved from
-///   the wearable's visual params (opaque white for [`LayerTint::White`]).
+/// - `tint_for(tint, wearable)` — the RGBA tint for a layer, resolved from the
+///   wearable's visual params (opaque white for [`LayerTint::White`]). It
+///   multiplies the layer's encoded texels, not linear light — see the
+///   [`composite`](crate::composite) module docs.
 /// - `mask_weight(param_id, wearable)` — the worn wearable's weight for a
 ///   garment-shape mask's driving param (the raw param value, e.g. sleeve length),
 ///   falling back to the param's default when the wearable does not set it (R14).

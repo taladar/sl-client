@@ -137,12 +137,25 @@ const fn trim_leading_ascii_whitespace(bytes: &[u8]) -> &[u8] {
     rest
 }
 
+/// Clamp every component of a colour factor into `0.0..=1.0`.
+///
+/// The reference viewer clamps both factors on the way in
+/// (`LLGLTFMaterial::setBaseColorFactor` → `LLColor4::clamp`,
+/// `setEmissiveColorFactor` → `LLColor3::clamp`), so an asset carrying an
+/// out-of-range factor — `emissiveFactor: [1e30, 1e30, 1e30]`, a negative base
+/// colour — renders as the clamped colour rather than blowing out the lighting
+/// and bloom paths. A `NaN` component survives, exactly as the reference's
+/// `if (< 0) … else if (> 1) …` leaves it.
+fn clamp_unit<const N: usize>(factor: [f32; N]) -> [f32; N] {
+    factor.map(|component| component.clamp(0.0, 1.0))
+}
+
 /// Assemble a [`GltfMaterial`] from a parsed glTF material and the document it
 /// belongs to (needed to resolve each texture slot's asset id).
 fn build_material(material: &GltfMaterialJson, document: &GltfDocument) -> GltfMaterial {
     let pbr = &material.pbr_metallic_roughness;
     GltfMaterial {
-        base_color: pbr.base_color_factor.unwrap_or([1.0, 1.0, 1.0, 1.0]),
+        base_color: clamp_unit(pbr.base_color_factor.unwrap_or([1.0, 1.0, 1.0, 1.0])),
         base_color_texture: pbr
             .base_color_texture
             .as_ref()
@@ -157,7 +170,7 @@ fn build_material(material: &GltfMaterialJson, document: &GltfDocument) -> GltfM
             .normal_texture
             .as_ref()
             .and_then(|info| resolve_texture(info, document)),
-        emissive_factor: material.emissive_factor.unwrap_or([0.0, 0.0, 0.0]),
+        emissive_factor: clamp_unit(material.emissive_factor.unwrap_or([0.0, 0.0, 0.0])),
         emissive_texture: material
             .emissive_texture
             .as_ref()

@@ -82,10 +82,11 @@ pub enum GeometryKey {
         lod: PrimLod,
     },
     /// A sculpted prim: its map asset, sculpt-type byte (including the
-    /// invert / mirror flags), and the decoded map's pixel size — a re-decode
-    /// of the same map at another discard level produces different geometry,
-    /// so the dimensions make it a clean different key (the stale-resolution
-    /// entry dies by pruning once its instances rebuild).
+    /// invert / mirror flags), the decoded map's pixel size, and the
+    /// tessellation level — a re-decode of the same map at another discard
+    /// level produces different geometry, so the dimensions make it a clean
+    /// different key (the stale-resolution entry dies by pruning once its
+    /// instances rebuild), and the level does the same for a LOD swap.
     Sculpt {
         /// The sculpt map texture asset id.
         map: TextureKey,
@@ -95,6 +96,8 @@ pub enum GeometryKey {
         width: u32,
         /// The decoded map height in pixels.
         height: u32,
+        /// The client-tessellation level of detail the grid was sized for.
+        lod: PrimLod,
     },
     /// A mesh asset at one decoded level of detail. The decoded geometry is
     /// already shared per asset (`MeshManager`); this key additionally shares
