@@ -35,6 +35,17 @@
 //! `exp_scale` multiplying `RenderExposure`) is supplied by [`exposure`](crate::exposure),
 //! whose 1×1 map this pass samples; the static `RenderExposure` setting is the scale
 //! it multiplies.
+//!
+//! **Which skies are tone mapped.** Not all of them: the reference exempts a *legacy*
+//! (classic-mode) sky from the transfer entirely, and both aditi and the local OpenSim
+//! serve legacy skies. It says so twice over — `LLSettingsSky::getTonemapMix` returns
+//! `0` when `mCanAutoAdjust && !RenderSkyAutoAdjustLegacy`, and `LLPipeline::tonemap`
+//! sets `no_post` for the same sky and binds `gNoPostTonemapProgram`, whose
+//! `postDeferredTonemap.glsl` never calls `toneMap` at all and merely clamps to
+//! `[0, 1]`. The second is the stronger of the two: it drops the `RenderExposure`
+//! multiply as well as the curve. `is_classic_sky` resolves the condition and
+//! [`SlTonemap`]'s `no_post` carries it to the shader, which then takes the same
+//! clamp-only path.
 
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
@@ -91,6 +102,14 @@ const DEFAULT_TONEMAP_MIX: f32 = 0.7;
 /// ahead of the curve.
 const DEFAULT_EXPOSURE: f32 = 1.0;
 
+/// The reference's floor on `RenderExposure` (`llclamp(exposure(), 0.5f, 4.f)` in
+/// `LLPipeline::tonemap`): the setting is a user-editable float, and the reference
+/// never lets it darken the frame past half.
+const EXPOSURE_MIN: f32 = 0.5;
+/// The reference's ceiling on `RenderExposure` (the other half of the same
+/// `llclamp`).
+const EXPOSURE_MAX: f32 = 4.0;
+
 /// The tone-mapper settings, mirroring the reference's three `Render*` settings.
 /// Sits on the camera — which both carries them to the GPU as a uniform and *selects*
 /// the view the pass runs on, so the reflection probes' capture cameras (which must
@@ -107,8 +126,14 @@ pub struct SlTonemap {
     /// [`TONEMAP_KHRONOS_NEUTRAL`] / [`TONEMAP_ACES`] / [`TONEMAP_NONE`]).
     /// Overridable by `SL_VIEWER_TONEMAP`.
     pub(crate) tonemap_type: u32,
-    /// std140 padding to a 16-byte boundary.
-    pub(crate) padding: f32,
+    /// The reference's `no_post` gate (`LLPipeline::tonemap`): `1` when the active
+    /// sky is a legacy / classic one, which the reference exempts from the tone
+    /// mapper altogether — the shader then merely clamps, skipping the
+    /// `RenderExposure` multiply, the curve and the mix alike, exactly as
+    /// `gNoPostTonemapProgram` does. Driven from the active sky each frame by
+    /// [`refresh_tonemap_settings`]; also the u32 that pads the uniform to a 16-byte
+    /// boundary.
+    pub(crate) no_post: u32,
 }
 
 impl Default for SlTonemap {
@@ -116,10 +141,14 @@ impl Default for SlTonemap {
     /// variable so a capture can sweep the tone mapper without a rebuild.
     fn default() -> Self {
         Self {
-            exposure: env_f32("SL_VIEWER_EXPOSURE", DEFAULT_EXPOSURE),
+            exposure: env_f32("SL_VIEWER_EXPOSURE", DEFAULT_EXPOSURE)
+                .clamp(EXPOSURE_MIN, EXPOSURE_MAX),
             tonemap_mix: env_f32("SL_VIEWER_TONEMAP_MIX", DEFAULT_TONEMAP_MIX).clamp(0.0, 1.0),
             tonemap_type: tonemap_type_from_env(),
-            padding: 0.0,
+            // The legacy exemption, until the first `refresh_tonemap_settings` reads
+            // the resolved sky — matching `ExposureRange`'s own legacy default, so the
+            // two never disagree about what the unresolved sky is.
+            no_post: u32::from(!force_post_from_env()),
         }
     }
 }
@@ -149,6 +178,49 @@ const ENV_TONEMAP_TYPE: &str = "SL_VIEWER_TONEMAP";
 const ENV_TONEMAP_MIX: &str = "SL_VIEWER_TONEMAP_MIX";
 /// The environment variable overriding the exposure.
 const ENV_EXPOSURE: &str = "SL_VIEWER_EXPOSURE";
+/// The environment variable forcing the tone mapper to run on a legacy sky too (an
+/// A/B knob: the reference exempts one, so a capture pair taken with and without
+/// this shows exactly what the exemption is worth on the grid in front of you).
+const ENV_FORCE_POST: &str = "SL_VIEWER_TONEMAP_FORCE_POST";
+
+/// Whether [`ENV_FORCE_POST`] is set, i.e. the legacy-sky exemption is pinned off.
+fn force_post_from_env() -> bool {
+    std::env::var_os(ENV_FORCE_POST).is_some()
+}
+
+/// The reference's classic-mode test (`LLSettingsVOSky::applySpecial`'s
+/// `classic_mode = psky->canAutoAdjust() && !should_auto_adjust()`, and the identical
+/// condition behind `LLSettingsSky::getTonemapMix`'s `0` and `LLPipeline::tonemap`'s
+/// `no_post`): a legacy sky, unless `RenderSkyAutoAdjustLegacy` promotes it.
+///
+/// `can_auto_adjust` is the reference's `mCanAutoAdjust`, which our decode collapses
+/// to `reflection_probe_ambiance == 0` (see
+/// [`ExposureRange`](crate::exposure::ExposureRange)). Under that collapse the
+/// reference's two spellings — this one and `getReflectionProbeAmbiance(auto) == 0`,
+/// which is what `no_post` actually tests — agree exactly, so one flag serves both.
+///
+/// `force_post` is the [`ENV_FORCE_POST`] A/B override, which pins the exemption off.
+#[must_use]
+pub(crate) const fn is_classic_sky(
+    can_auto_adjust: bool,
+    sky_auto_adjust_legacy: bool,
+    force_post: bool,
+) -> bool {
+    can_auto_adjust && !sky_auto_adjust_legacy && !force_post
+}
+
+/// The reference `LLSettingsSky::getTonemapMix`: a classic sky's mix is `0`
+/// ("legacy settings do not support tonemaping") whatever `RenderTonemapMix` says —
+/// the reference does not even call `setTonemapMix` on one. Any other sky takes the
+/// stored setting, clamped to the `[0, 1]` its shader `mix` expects.
+#[must_use]
+pub(crate) const fn effective_tonemap_mix(stored_mix: f32, classic_sky: bool) -> f32 {
+    if classic_sky {
+        0.0
+    } else {
+        stored_mix.clamp(0.0, 1.0)
+    }
+}
 
 /// The persisted-file section the tone-mapper settings are grouped under
 /// (`[render.tonemap]`), matching the reference's `Render*` naming.
@@ -196,26 +268,47 @@ pub fn register_settings(settings: &mut ViewerSettings) {
 /// the screenshot harness to sweep the tone mapper without a config, **wins** over
 /// the stored value: a set variable pins its field and the store no longer drives
 /// it, so a capture is reproducible regardless of the user's saved preferences.
+///
+/// The *sky*, though, wins over both: a legacy / classic sky is exempt from the tone
+/// mapper (see the module docs), so its `no_post` is set and its mix forced to `0`
+/// whatever the store or `SL_VIEWER_TONEMAP_MIX` asked for — `SL_VIEWER_TONEMAP_FORCE_POST`
+/// is the one knob that overrides *that*.
 pub(crate) fn refresh_tonemap_settings(
     store: Res<ViewerSettings>,
+    range: Res<crate::exposure::ExposureRange>,
     mut cameras: Query<&mut SlTonemap>,
 ) {
     let store = store.store();
+    let sky_auto_adjust_legacy = store
+        .get_bool(crate::exposure::SETTING_AUTO_ADJUST_LEGACY)
+        .unwrap_or(crate::exposure::DEFAULT_AUTO_ADJUST_LEGACY);
+    let classic_sky = is_classic_sky(
+        range.can_auto_adjust,
+        sky_auto_adjust_legacy,
+        force_post_from_env(),
+    );
     for mut tonemap in &mut cameras {
         if std::env::var_os(ENV_TONEMAP_TYPE).is_none()
             && let Ok(value) = store.get_u32(SETTING_TONEMAP_TYPE)
         {
             tonemap.tonemap_type = value;
         }
-        if std::env::var_os(ENV_TONEMAP_MIX).is_none()
-            && let Ok(value) = store.get_f32(SETTING_TONEMAP_MIX)
-        {
-            tonemap.tonemap_mix = value.clamp(0.0, 1.0);
-        }
+        // Re-derived from source every frame rather than read back off the component:
+        // a classic sky zeroes the live field, so carrying that zero forward would
+        // make the exemption stick when the sky stops being a legacy one.
+        let stored_mix = if std::env::var_os(ENV_TONEMAP_MIX).is_some() {
+            env_f32(ENV_TONEMAP_MIX, DEFAULT_TONEMAP_MIX)
+        } else {
+            store
+                .get_f32(SETTING_TONEMAP_MIX)
+                .unwrap_or(DEFAULT_TONEMAP_MIX)
+        };
+        tonemap.tonemap_mix = effective_tonemap_mix(stored_mix, classic_sky);
+        tonemap.no_post = u32::from(classic_sky);
         if std::env::var_os(ENV_EXPOSURE).is_none()
             && let Ok(value) = store.get_f32(SETTING_EXPOSURE)
         {
-            tonemap.exposure = value;
+            tonemap.exposure = value.clamp(EXPOSURE_MIN, EXPOSURE_MAX);
         }
     }
 }
@@ -437,8 +530,9 @@ mod tests {
     use sl_settings::{Scope, SettingValue, SettingsStore};
 
     use super::{
-        DEFAULT_EXPOSURE, DEFAULT_TONEMAP_MIX, SETTING_EXPOSURE, SETTING_TONEMAP_MIX,
-        SETTING_TONEMAP_TYPE, TONEMAP_ACES, register_settings,
+        DEFAULT_EXPOSURE, DEFAULT_TONEMAP_MIX, EXPOSURE_MAX, EXPOSURE_MIN, SETTING_EXPOSURE,
+        SETTING_TONEMAP_MIX, SETTING_TONEMAP_TYPE, TONEMAP_ACES, effective_tonemap_mix,
+        is_classic_sky, register_settings,
     };
     use crate::settings::ViewerSettings;
 
@@ -472,5 +566,63 @@ mod tests {
         assert_eq!(store.get_u32(SETTING_TONEMAP_TYPE).ok(), Some(0));
         assert_eq!(store.get_f32(SETTING_TONEMAP_MIX).ok(), Some(0.25));
         assert_eq!(store.get_f32(SETTING_EXPOSURE).ok(), Some(1.5));
+    }
+
+    /// The reference's classic-mode test, all four ways round. A legacy sky
+    /// (`mCanAutoAdjust`) is classic unless `RenderSkyAutoAdjustLegacy` promotes it;
+    /// an EEP sky never is. This is what both the reference's `getTonemapMix` zero
+    /// and its `gNoPostTonemapProgram` selection hang off, so getting it wrong
+    /// tone-maps a sky the reference leaves alone — which is every sky aditi and the
+    /// local OpenSim serve.
+    #[test]
+    fn a_legacy_sky_is_classic_unless_auto_adjust_promotes_it() {
+        // A legacy sky with the shipped `RenderSkyAutoAdjustLegacy = false`.
+        assert!(is_classic_sky(true, false, false));
+        // …and with it turned on, which lifts the sky into the EEP/HDR path.
+        assert!(!is_classic_sky(true, true, false));
+        // An EEP sky is never classic, either way.
+        assert!(!is_classic_sky(false, false, false));
+        assert!(!is_classic_sky(false, true, false));
+    }
+
+    /// `SL_VIEWER_TONEMAP_FORCE_POST` is the one override of the exemption — the A/B
+    /// knob that runs the curve on a legacy sky so a capture pair can show what the
+    /// exemption is worth.
+    #[test]
+    fn forcing_post_pins_the_exemption_off() {
+        assert!(!is_classic_sky(true, false, true));
+    }
+
+    /// `LLSettingsSky::getTonemapMix`: a classic sky mixes in `0` of the curve no
+    /// matter what `RenderTonemapMix` holds, and any other sky takes the setting,
+    /// clamped to the `[0, 1]` the shader's `mix` expects.
+    #[test]
+    fn a_classic_sky_zeroes_the_tonemap_mix() {
+        for stored in [DEFAULT_TONEMAP_MIX, 1.0, 0.0] {
+            let mix = effective_tonemap_mix(stored, true);
+            assert!(mix.abs() < 1e-6, "classic mix from {stored} is {mix}");
+        }
+        let mix = effective_tonemap_mix(DEFAULT_TONEMAP_MIX, false);
+        assert!((mix - DEFAULT_TONEMAP_MIX).abs() < 1e-6, "eep mix {mix}");
+        // Out-of-range stored values are held to what the shader's `mix` expects.
+        let high = effective_tonemap_mix(1.5, false);
+        assert!((high - 1.0).abs() < 1e-6, "clamped high mix {high}");
+        let low = effective_tonemap_mix(-0.5, false);
+        assert!(low.abs() < 1e-6, "clamped low mix {low}");
+    }
+
+    /// The reference's `llclamp(exposure(), 0.5f, 4.f)` on `RenderExposure`: the
+    /// bounds the store's value and the `SL_VIEWER_EXPOSURE` override are both held
+    /// to, so a hand-edited setting cannot black out or blow out the frame.
+    #[test]
+    fn the_exposure_clamp_matches_the_reference_bounds() {
+        assert!((EXPOSURE_MIN - 0.5).abs() < 1e-6, "min {EXPOSURE_MIN}");
+        assert!((EXPOSURE_MAX - 4.0).abs() < 1e-6, "max {EXPOSURE_MAX}");
+        // The shipped default sits inside them, so a fresh install is unclamped.
+        let clamped = DEFAULT_EXPOSURE.clamp(EXPOSURE_MIN, EXPOSURE_MAX);
+        assert!(
+            (clamped - DEFAULT_EXPOSURE).abs() < 1e-6,
+            "default exposure {clamped}"
+        );
     }
 }

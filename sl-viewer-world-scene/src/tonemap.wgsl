@@ -10,6 +10,8 @@
 // the reference then does explicitly is left to the hardware here, which writes the
 // view target through an sRGB surface.
 //
+// A *legacy* (classic-mode) sky is exempt from all of that: see `no_post` below.
+//
 // Everything the viewer draws — the custom sky / terrain / water materials and
 // Bevy's `StandardMaterial` prims, meshes and avatars alike — reaches this pass in
 // one linear space and leaves it through one transfer, which is what makes a
@@ -26,11 +28,12 @@ struct SlTonemap {
     // colour toward the tone-mapped one.
     tonemap_mix: f32,
     // The reference `RenderTonemapType`: 0 = Khronos PBR Neutral, 1 = ACES (Hill).
-    // 2 is this port's own addition: no curve at all (the reference's `NO_POST`
-    // path), an A/B knob for judging what the curve is doing.
+    // 2 is this port's own addition: no curve at all (exposure and clamp only), an
+    // A/B knob for judging what the curve is doing.
     tonemap_type: u32,
-    // std140 padding to a 16-byte boundary.
-    padding: f32,
+    // The reference's `no_post`: non-zero for a legacy / classic sky, which the
+    // reference exempts from the tone mapper entirely (`gNoPostTonemapProgram`).
+    no_post: u32,
 }
 
 @group(0) @binding(0) var screen_texture: texture_2d<f32>;
@@ -104,6 +107,17 @@ fn tone_map_khronos_neutral(color: vec3<f32>) -> vec3<f32> {
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let source = textureSample(screen_texture, screen_sampler, in.uv);
+    // The reference's `NO_POST` path. `LLPipeline::tonemap` binds
+    // `gNoPostTonemapProgram` when the active sky's probe ambiance is zero — a
+    // legacy / classic sky — and that program's `postDeferredTonemap.glsl` never
+    // calls `toneMap`: it writes `clamp(diff.rgb, 0, 1)` and nothing else. So the
+    // exemption drops the `RenderExposure` multiply along with the curve and the
+    // mix, which is why it is a branch here rather than just a zero `tonemap_mix`
+    // (the reference's `getTonemapMix` returns that zero too, but under `NO_POST`
+    // nothing reads it).
+    if tonemap.no_post != 0u {
+        return vec4<f32>(clamp(source.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), source.a);
+    }
     // The reference `toneMap`: `final_exposure = RenderExposure * exposureMap`. The
     // 1×1 exposure map holds the scene-luminance-driven dynamic scale (`1.0` for a
     // legacy sky / when disabled), so this multiply is the counterweight that keeps

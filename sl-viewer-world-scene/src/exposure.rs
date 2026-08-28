@@ -143,8 +143,9 @@ const DEFAULT_SPEED_TARGET: f32 = 2.0;
 /// derives the range from the probe-ambiance `hdr_scale`).
 const DEFAULT_USE_SKY: bool = false;
 /// The reference `RenderSkyAutoAdjustLegacy` default (off — a legacy sky stays
-/// inert).
-const DEFAULT_AUTO_ADJUST_LEGACY: bool = false;
+/// inert). Also read by [`tonemap`](crate::tonemap), whose legacy-sky exemption
+/// turns on the same setting.
+pub(crate) const DEFAULT_AUTO_ADJUST_LEGACY: bool = false;
 
 /// The reference `LLSettingsSky::mHDROffset` (a fixed constant, not a decoded field):
 /// the centre of the `RenderUseExposureSkySettings` exposure range.
