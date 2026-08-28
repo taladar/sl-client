@@ -4,7 +4,10 @@ use crate::deliver;
 use crate::http::blocking_get_llsd;
 use crossbeam_channel::Sender;
 use sl_proto::Event as SessionEvent;
-use sl_proto::{ExperienceKey, GroupKey, parse_experience_ids, parse_experience_status};
+use sl_proto::{
+    CAP_GROUP_EXPERIENCES, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, ExperienceKey,
+    GroupKey, parse_experience_ids, parse_experience_status,
+};
 
 /// GETs the `GroupExperiences` capability and forwards an
 /// [`SlSessionEvent::GroupExperiences`] over `asset_tx`, echoing the queried
@@ -14,7 +17,7 @@ pub(crate) fn run_group_experiences(
     group_id: GroupKey,
     asset_tx: &Sender<SessionEvent>,
 ) {
-    if let Some(llsd) = blocking_get_llsd(url) {
+    if let Some(llsd) = blocking_get_llsd(url, CAP_GROUP_EXPERIENCES) {
         let Ok(experience_ids) = parse_experience_ids(&llsd) else {
             return;
         };
@@ -37,7 +40,12 @@ pub(crate) fn run_experience_status(
     admin: bool,
     asset_tx: &Sender<SessionEvent>,
 ) {
-    let Some(llsd) = blocking_get_llsd(url) else {
+    let cap = if admin {
+        CAP_IS_EXPERIENCE_ADMIN
+    } else {
+        CAP_IS_EXPERIENCE_CONTRIBUTOR
+    };
+    let Some(llsd) = blocking_get_llsd(url, cap) else {
         return;
     };
     let Ok(status) = parse_experience_status(&llsd) else {

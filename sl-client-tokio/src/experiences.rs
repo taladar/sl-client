@@ -3,7 +3,10 @@
 use crate::caps::deliver;
 use crate::http::get_llsd;
 use reqwest::Client as ReqwestClient;
-use sl_proto::{Event, ExperienceKey, GroupKey, parse_experience_ids, parse_experience_status};
+use sl_proto::{
+    CAP_GROUP_EXPERIENCES, CAP_IS_EXPERIENCE_ADMIN, CAP_IS_EXPERIENCE_CONTRIBUTOR, Event,
+    ExperienceKey, GroupKey, parse_experience_ids, parse_experience_status,
+};
 use tokio::sync::mpsc;
 
 /// GETs the `GroupExperiences` capability and forwards an [`Event::GroupExperiences`]
@@ -14,7 +17,7 @@ pub(crate) async fn fetch_group_experiences(
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
-    if let Some(llsd) = get_llsd(&url, &http).await {
+    if let Some(llsd) = get_llsd(&url, CAP_GROUP_EXPERIENCES, &http).await {
         let Ok(experience_ids) = parse_experience_ids(&llsd) else {
             return;
         };
@@ -37,7 +40,7 @@ pub(crate) async fn fetch_experience_admin(
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
-    if let Some(llsd) = get_llsd(&url, &http).await {
+    if let Some(llsd) = get_llsd(&url, CAP_IS_EXPERIENCE_ADMIN, &http).await {
         let Ok(is_admin) = parse_experience_status(&llsd) else {
             return;
         };
@@ -61,7 +64,7 @@ pub(crate) async fn fetch_experience_contributor(
     http: ReqwestClient,
     events: mpsc::Sender<Event>,
 ) {
-    if let Some(llsd) = get_llsd(&url, &http).await {
+    if let Some(llsd) = get_llsd(&url, CAP_IS_EXPERIENCE_CONTRIBUTOR, &http).await {
         let Ok(is_contributor) = parse_experience_status(&llsd) else {
             return;
         };

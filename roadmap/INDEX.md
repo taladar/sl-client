@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 77 |
-| done | 897 |
+| bugs | 76 |
+| done | 898 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,13 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (77)
-
-### protocol
-
-- [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
-  SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
-  fetch never retries)
+## bugs (76)
 
 ### viewer
 
@@ -1349,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (897)
+## done (898)
 
 ### protocol
 
@@ -1553,6 +1547,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-sim-voice-signalling`](done/protocol-sim-voice-signalling.md) —
   Server-side voice provisioning and WebRTC signalling stub (blocked by
   `protocol-sim-caps-framework` (done))
+- [`protocol-simfeatures-503`](done/protocol-simulator-features-caps-503.md) —
+  SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
+  fetch never retries)
 - [`protocol-slm-directdelivery`](done/protocol-slm-directdelivery.md) —
   sl-marketplace crate — SLM DirectDelivery JSON transport
 - [`protocol-teleport-deferred-teardown-handover`](done/protocol-teleport-deferred-teardown-handover.md)

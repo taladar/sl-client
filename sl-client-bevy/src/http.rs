@@ -2,6 +2,7 @@
 
 use crate::caps::report_caps_failure;
 use crate::lsl_syntax_cache::LslSyntaxCache;
+use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 use crate::{EVENT_QUEUE_TIMEOUT, deliver};
 use bevy::prelude::*;
 use crossbeam_channel::Sender;
@@ -13,20 +14,88 @@ use sl_proto::{
 };
 use std::collections::HashMap;
 
-/// GETs `url` and parses the LLSD-XML reply, returning `None` on any
-/// transport/parse failure. Shared by the experience capability fetches.
-pub(crate) fn blocking_get_llsd(url: &str) -> Option<Llsd> {
-    let http = crate::http_proxy::blocking_client_builder()
+/// GETs `url` and parses the LLSD-XML reply, retrying a **transient** answer
+/// with the shared exponential backoff and returning `None` once every attempt
+/// has failed. Shared by every one-shot capability GET. Mirrors the tokio
+/// `get_llsd`; every caller runs on its own spawned thread, so the backoff
+/// sleeps block nothing but the fetch.
+///
+/// `cap` names the capability for the log lines. The URL is deliberately **not**
+/// logged: it carries the region's per-session cap token.
+///
+/// The retry is not a theoretical robustness knob. OpenSim's
+/// `SimulatorFeaturesModule` answers `503 Service Unavailable` (plus
+/// `Retry-After`) for as long as the requesting agent has no `ScenePresence` in
+/// the scene — and both runtimes fire that GET the moment the capability map
+/// lands, which is the same instant the deferred `CompleteAgentMovement` is
+/// released. A one-shot fetch therefore loses that race on *every* login, which
+/// is why the local grid never surfaced its feature flags (and so never fired
+/// the `LSLSyntax` fetch keyed off them). The reference viewer retries the same
+/// way: `LLViewerRegionImpl::requestSimulatorFeatureCoro` re-issues the GET on
+/// any non-success status, up to 30 attempts.
+///
+/// A status that is *not* transient (a `404`, a `500`) is a real rejection, so
+/// it fails the fetch immediately rather than spending the whole budget on an
+/// answer that will not change.
+pub(crate) fn blocking_get_llsd(url: &str, cap: &str) -> Option<Llsd> {
+    let http = match crate::http_proxy::blocking_client_builder()
         .timeout(EVENT_QUEUE_TIMEOUT)
         .build()
-        .ok()?;
-    let response = http
-        .get(url)
-        .header("Accept", "application/llsd+xml")
-        .send()
-        .ok()?;
-    let text = response.text().ok()?;
-    parse_llsd_xml(&text).ok()
+    {
+        Ok(http) => http,
+        Err(error) => {
+            tracing::warn!(capability = cap, %error, "could not build the HTTP client for a CAPS GET");
+            return None;
+        }
+    };
+    for attempt in 0..=MAX_TRANSIENT_RETRIES {
+        match http
+            .get(url)
+            .header("Accept", "application/llsd+xml")
+            .send()
+        {
+            Ok(response) if is_transient_status(response.status()) => {
+                tracing::debug!(
+                    capability = cap,
+                    status = %response.status(),
+                    attempt,
+                    "a CAPS GET answered a transient status"
+                );
+            }
+            Ok(response) if !response.status().is_success() => {
+                tracing::warn!(
+                    capability = cap,
+                    status = %response.status(),
+                    "a CAPS GET was rejected"
+                );
+                return None;
+            }
+            Ok(response) => {
+                let text = match response.text() {
+                    Ok(text) => text,
+                    Err(error) => {
+                        tracing::warn!(capability = cap, %error, "a CAPS GET reply could not be read");
+                        return None;
+                    }
+                };
+                return match parse_llsd_xml(&text) {
+                    Ok(llsd) => Some(llsd),
+                    Err(error) => {
+                        tracing::warn!(capability = cap, %error, "a CAPS GET reply did not parse");
+                        None
+                    }
+                };
+            }
+            Err(error) => {
+                tracing::debug!(capability = cap, %error, attempt, "a CAPS GET failed");
+            }
+        }
+        if attempt < MAX_TRANSIENT_RETRIES {
+            std::thread::sleep(transient_backoff(attempt));
+        }
+    }
+    tracing::warn!(capability = cap, "a CAPS GET failed every attempt");
+    None
 }
 
 /// POSTs `body` to a capability URL and ignores the *reply* (blocking): the
@@ -176,7 +245,7 @@ pub(crate) fn run_chat_session_fetch_history(
 /// tagged `cap`, for the session to decode in
 /// [`Session::handle_caps_event`](sl_proto::Session::handle_caps_event).
 pub(crate) fn run_get_caps_llsd(url: &str, cap: &'static str, caps_tx: &Sender<(String, Llsd)>) {
-    match blocking_get_llsd(url) {
+    match blocking_get_llsd(url, cap) {
         Some(llsd) => {
             deliver(caps_tx, (cap.to_owned(), llsd));
         }
@@ -194,7 +263,7 @@ pub(crate) fn run_avatar_picker_search(
     query_id: Uuid,
     caps_tx: &Sender<(String, Llsd)>,
 ) {
-    let Some(reply) = blocking_get_llsd(url) else {
+    let Some(reply) = blocking_get_llsd(url, AVATAR_PICKER_SEARCH_TAG) else {
         report_caps_failure(caps_tx, AVATAR_PICKER_SEARCH_TAG);
         return;
     };

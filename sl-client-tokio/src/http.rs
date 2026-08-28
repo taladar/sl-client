@@ -12,6 +12,7 @@ use uuid::Uuid;
 
 use crate::caps::{deliver, report_caps_failure};
 use crate::lsl_syntax_cache::LslSyntaxCache;
+use crate::retry::{MAX_TRANSIENT_RETRIES, is_transient_status, transient_backoff};
 
 /// POSTs `body` to a capability URL and ignores the *reply*: the shared body of
 /// every fire-and-forget capability call, where the simulator answers with an
@@ -146,17 +147,77 @@ pub(crate) async fn post_chat_session_fetch_history(
     .await;
 }
 
-/// GETs `url` and parses the LLSD-XML reply, returning `None` on any
-/// transport/parse failure. Shared by the experience capability fetches.
-pub(crate) async fn get_llsd(url: &str, http: &ReqwestClient) -> Option<Llsd> {
-    let response = http
-        .get(url)
-        .header("Accept", "application/llsd+xml")
-        .send()
-        .await
-        .ok()?;
-    let text = response.text().await.ok()?;
-    parse_llsd_xml(&text).ok()
+/// GETs `url` and parses the LLSD-XML reply, retrying a **transient** answer
+/// with the shared exponential backoff and returning `None` once every attempt
+/// has failed. Shared by every one-shot capability GET.
+///
+/// `cap` names the capability for the log lines. The URL is deliberately **not**
+/// logged: it carries the region's per-session cap token.
+///
+/// The retry is not a theoretical robustness knob. OpenSim's
+/// `SimulatorFeaturesModule` answers `503 Service Unavailable` (plus
+/// `Retry-After`) for as long as the requesting agent has no `ScenePresence` in
+/// the scene — and both runtimes fire that GET the moment the capability map
+/// lands, which is the same instant the deferred `CompleteAgentMovement` is
+/// released. A one-shot fetch therefore loses that race on *every* login, which
+/// is why the local grid never surfaced its feature flags (and so never fired
+/// the `LSLSyntax` fetch keyed off them). The reference viewer retries the same
+/// way: `LLViewerRegionImpl::requestSimulatorFeatureCoro` re-issues the GET on
+/// any non-success status, up to 30 attempts.
+///
+/// A status that is *not* transient (a `404`, a `500`) is a real rejection, so
+/// it fails the fetch immediately rather than spending the whole budget on an
+/// answer that will not change.
+pub(crate) async fn get_llsd(url: &str, cap: &str, http: &ReqwestClient) -> Option<Llsd> {
+    for attempt in 0..=MAX_TRANSIENT_RETRIES {
+        match http
+            .get(url)
+            .header("Accept", "application/llsd+xml")
+            .send()
+            .await
+        {
+            Ok(response) if is_transient_status(response.status()) => {
+                tracing::debug!(
+                    capability = cap,
+                    status = %response.status(),
+                    attempt,
+                    "a CAPS GET answered a transient status"
+                );
+            }
+            Ok(response) if !response.status().is_success() => {
+                tracing::warn!(
+                    capability = cap,
+                    status = %response.status(),
+                    "a CAPS GET was rejected"
+                );
+                return None;
+            }
+            Ok(response) => {
+                let text = match response.text().await {
+                    Ok(text) => text,
+                    Err(error) => {
+                        tracing::warn!(capability = cap, %error, "a CAPS GET reply could not be read");
+                        return None;
+                    }
+                };
+                return match parse_llsd_xml(&text) {
+                    Ok(llsd) => Some(llsd),
+                    Err(error) => {
+                        tracing::warn!(capability = cap, %error, "a CAPS GET reply did not parse");
+                        None
+                    }
+                };
+            }
+            Err(error) => {
+                tracing::debug!(capability = cap, %error, attempt, "a CAPS GET failed");
+            }
+        }
+        if attempt < MAX_TRANSIENT_RETRIES {
+            tokio::time::sleep(transient_backoff(attempt)).await;
+        }
+    }
+    tracing::warn!(capability = cap, "a CAPS GET failed every attempt");
+    None
 }
 
 /// GETs an experience capability URL and forwards its LLSD reply to `caps_tx`
@@ -169,7 +230,7 @@ pub(crate) async fn get_caps_llsd(
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
-    match get_llsd(&url, &http).await {
+    match get_llsd(&url, cap, &http).await {
         Some(llsd) => {
             deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
@@ -188,7 +249,7 @@ pub(crate) async fn get_avatar_picker_search(
     http: ReqwestClient,
     caps_tx: mpsc::Sender<(String, Llsd)>,
 ) {
-    let Some(reply) = get_llsd(&url, &http).await else {
+    let Some(reply) = get_llsd(&url, AVATAR_PICKER_SEARCH_TAG, &http).await else {
         report_caps_failure(&caps_tx, AVATAR_PICKER_SEARCH_TAG).await;
         return;
     };
@@ -400,5 +461,153 @@ pub(crate) async fn delete_caps_llsd(
             deliver(&caps_tx, (cap.to_owned(), llsd)).await;
         }
         Err(_error) => report_caps_failure(&caps_tx, cap).await,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+
+    use super::get_llsd;
+    use crate::retry::MAX_TRANSIENT_RETRIES;
+    use pretty_assertions::assert_eq;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
+    use tokio::net::TcpListener;
+
+    /// The capability under test: the one whose one-shot fetch this retry exists
+    /// for.
+    const CAP: &str = sl_proto::CAP_SIMULATOR_FEATURES;
+
+    /// A minimal `SimulatorFeatures` document the fetch must decode once the
+    /// stub stops refusing.
+    const FEATURES_BODY: &str = concat!(
+        "<?xml version=\"1.0\" ?>",
+        "<llsd><map><key>MeshRezEnabled</key><boolean>1</boolean></map></llsd>"
+    );
+
+    /// A client that ignores every proxy — the crate's own
+    /// `http_proxy::client_builder` reads a process-global the sibling
+    /// `proxy_lifecycle` test installs, and these tests must reach the loopback
+    /// stub whatever order the harness runs them in.
+    fn direct_client() -> reqwest::Client {
+        reqwest::Client::builder()
+            .no_proxy()
+            .build()
+            .expect("a direct client builds")
+    }
+
+    /// A stub capability server: it answers `refusals` requests with the
+    /// `refusal` status line before serving [`FEATURES_BODY`], counting every
+    /// request in `served`. Each answer closes its connection, so one request is
+    /// one connection and the count is exact.
+    async fn serve_after_refusals(
+        listener: TcpListener,
+        refusals: usize,
+        refusal: &'static str,
+        served: Arc<AtomicUsize>,
+    ) {
+        loop {
+            let Ok((mut stream, _peer)) = listener.accept().await else {
+                return;
+            };
+            let seen = served.fetch_add(1, Ordering::SeqCst);
+            // One read is enough for a bare GET head; the answer does not depend
+            // on it, so a short read is harmless.
+            let mut head = [0_u8; 1024];
+            let _read = stream.read(&mut head).await;
+            let answer = if seen < refusals {
+                format!(
+                    "HTTP/1.1 {refusal}\r\nContent-Length: 0\r\nRetry-After: 5\r\nConnection: close\r\n\r\n"
+                )
+            } else {
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/llsd+xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{FEATURES_BODY}",
+                    FEATURES_BODY.len()
+                )
+            };
+            stream.write_all(answer.as_bytes()).await.ok();
+            stream.shutdown().await.ok();
+        }
+    }
+
+    /// Starts the stub on a loopback port and returns its URL plus the counter
+    /// of requests it has answered.
+    async fn start_stub(refusals: usize, refusal: &'static str) -> (String, Arc<AtomicUsize>) {
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("a loopback port binds");
+        let address = listener.local_addr().expect("the bound port is readable");
+        let served = Arc::new(AtomicUsize::new(0));
+        let _server = tokio::spawn(serve_after_refusals(
+            listener,
+            refusals,
+            refusal,
+            Arc::clone(&served),
+        ));
+        (format!("http://{address}/cap/features"), served)
+    }
+
+    /// The bug this retry exists for: OpenSim answers the `SimulatorFeatures`
+    /// GET `503` until the agent has a `ScenePresence`, which is *after* the
+    /// runtime fires it. The fetch must keep asking and decode the document the
+    /// moment it is served — a one-shot GET loses that race every time.
+    #[tokio::test]
+    async fn a_transient_refusal_is_retried_until_the_document_arrives() {
+        let (url, served) = start_stub(2, "503 Service Unavailable").await;
+        let http = direct_client();
+
+        let llsd = get_llsd(&url, CAP, &http)
+            .await
+            .expect("the document arrives");
+
+        let features = sl_proto::parse_simulator_features(&llsd).expect("the document decodes");
+        assert_eq!(
+            features.mesh_rez_enabled,
+            Some(true),
+            "the served flags are decoded"
+        );
+        assert_eq!(
+            served.load(Ordering::SeqCst),
+            3,
+            "two refusals then the answer"
+        );
+    }
+
+    /// A rejection that is not transient will not change on the next ask, so it
+    /// fails the fetch at once rather than spending the retry budget on it.
+    #[tokio::test]
+    async fn a_hard_rejection_is_not_retried() {
+        let (url, served) = start_stub(1, "404 Not Found").await;
+        let http = direct_client();
+
+        assert!(
+            get_llsd(&url, CAP, &http).await.is_none(),
+            "a 404 fails the fetch"
+        );
+        assert_eq!(served.load(Ordering::SeqCst), 1, "asked exactly once");
+    }
+
+    /// The retry is bounded: an endpoint that refuses forever costs the budget
+    /// and no more, then reports failure. Time is paused so the backoffs cost no
+    /// wall clock.
+    #[tokio::test(start_paused = true)]
+    async fn a_permanent_refusal_exhausts_the_budget_and_stops() {
+        let (url, served) = start_stub(usize::MAX, "503 Service Unavailable").await;
+        let http = direct_client();
+
+        assert!(
+            get_llsd(&url, CAP, &http).await.is_none(),
+            "a refusal that never lifts fails the fetch"
+        );
+        assert_eq!(
+            served.load(Ordering::SeqCst),
+            usize::try_from(MAX_TRANSIENT_RETRIES).expect("the retry budget fits a usize") + 1,
+            "the first ask plus one per retry, and no more"
+        );
     }
 }
