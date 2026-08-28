@@ -169,7 +169,8 @@ mod test {
     use sl_wire::{
         AnyMessage, CircuitCode, HomeLocation, Llsd, LoginFailure, LoginRequest, LoginResponse,
         LoginSuccess, MessageId, PacketFlags, Reader, SequenceNumber, SkeletonFolder,
-        StartLocation, WireError, Writer, encode_datagram, parse_datagram, parse_llsd_xml,
+        StartLocation, WireError, Writer, XferPacketId, encode_datagram, encode_xfer_chunk,
+        parse_datagram, parse_llsd_xml,
     };
 
     /// A boxed test error.
@@ -5798,16 +5799,9 @@ mod test {
         let muted = uuid::Uuid::from_u128(0x9002);
         let file =
             format!("1 {muted} Bad Actor|0\n0 00000000-0000-0000-0000-000000000000 SpamBot|3\n");
-        // A 4-byte length prefix the parser strips and ignores, then the file.
-        let mut data = vec![0u8; 4];
-        data.extend_from_slice(file.as_bytes());
-        let packet = AnyMessage::SendXferPacket(SendXferPacket {
-            xfer_id: SendXferPacketXferIDBlock {
-                id: xfer_id,
-                packet: 0x8000_0000, // sequence 0 + last-packet flag
-            },
-            data_packet: SendXferPacketDataPacketBlock { data },
-        });
+        // Framed as a real sender frames it: the total-length prefix ahead of
+        // the file bytes, on a first-and-last packet.
+        let packet = xfer_packet(xfer_id, 0, true, file.len(), file.as_bytes());
         session.handle_datagram(sim_addr(), &server_message(&packet, 10, true)?, now)?;
 
         // The client confirms the packet and surfaces the parsed list.
@@ -5888,19 +5882,10 @@ mod test {
         assert_ne!(xfer_id, 0);
         assert_eq!(trimmed(&request.xfer_id.filename), sim_filename);
 
-        // The sim streams the file in a single (first+last) packet: a 4-byte
-        // length prefix the handler strips and ignores (as the mute-list test
-        // does), then the RAW bytes.
+        // The sim streams the file in a single (first+last) packet: the
+        // total-length prefix (as the mute-list test does), then the RAW bytes.
         let raw = vec![7u8; 26]; // two 13-byte LL RAW points
-        let mut data = vec![0u8; 4];
-        data.extend_from_slice(&raw);
-        let packet = AnyMessage::SendXferPacket(SendXferPacket {
-            xfer_id: SendXferPacketXferIDBlock {
-                id: xfer_id,
-                packet: 0x8000_0000, // sequence 0 + last-packet flag
-            },
-            data_packet: SendXferPacketDataPacketBlock { data },
-        });
+        let packet = xfer_packet(xfer_id, 0, true, raw.len(), &raw);
         session.handle_datagram(sim_addr(), &server_message(&packet, 10, true)?, now)?;
 
         // The client confirms the packet and surfaces the assembled file, tagged
@@ -21907,6 +21892,227 @@ mod test {
             fresh.online_friends().count(),
             0,
             "a fresh session has no presence"
+        );
+        Ok(())
+    }
+
+    /// The `Result` code an `AbortXfer` carries when this side refuses a
+    /// download it cannot assemble (the reference's `LL_ERR_CANNOT_OPEN_FILE`).
+    const XFER_REFUSED_RESULT: i32 = -42;
+
+    /// Builds one inbound `SendXferPacket` for `xfer_id` through the shared
+    /// framing codec: packet 0 carries the total-length prefix `declared` ahead
+    /// of its payload, as a real sender writes it (`declared` is ignored on
+    /// every later packet, which is raw file bytes).
+    fn xfer_packet(
+        xfer_id: u64,
+        sequence: u32,
+        is_last: bool,
+        declared: usize,
+        payload: &[u8],
+    ) -> AnyMessage {
+        let packet_id = XferPacketId::new(sequence, is_last);
+        AnyMessage::SendXferPacket(SendXferPacket {
+            xfer_id: SendXferPacketXferIDBlock {
+                id: xfer_id,
+                packet: packet_id.raw(),
+            },
+            data_packet: SendXferPacketDataPacketBlock {
+                data: encode_xfer_chunk(packet_id, declared, payload),
+            },
+        })
+    }
+
+    /// Starts a caller-initiated `Xfer` download and returns the id the session
+    /// minted for it, with the `RequestXfer` already drained.
+    fn start_download(session: &mut Session, now: Instant) -> Result<u64, TestError> {
+        let xfer_id = session.request_xfer("somefile", now)?.get();
+        let _sent = drain(session)?;
+        Ok(xfer_id)
+    }
+
+    /// The packet numbers of every `ConfirmXferPacket` the session queued.
+    fn drain_confirms(session: &mut Session) -> Result<Vec<u32>, TestError> {
+        Ok(drain(session)?
+            .iter()
+            .filter_map(|message| match message {
+                AnyMessage::ConfirmXferPacket(confirm) => Some(confirm.xfer_id.packet),
+                _ => None,
+            })
+            .collect())
+    }
+
+    /// `Xfer` is a strictly ordered stream: a packet from further down it is
+    /// ignored rather than concatenated at the end of the buffer, and the
+    /// transfer stays live so the packet actually being waited on can arrive.
+    #[test]
+    fn an_out_of_order_xfer_download_packet_is_ignored() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let xfer_id = start_download(&mut session, now)?;
+
+        // Packet 0 opens a two-packet file.
+        let first = xfer_packet(xfer_id, 0, false, 6, b"abc");
+        session.handle_datagram(sim_addr(), &server_message(&first, 20, true)?, now)?;
+        assert_eq!(drain_confirms(&mut session)?, vec![0], "packet 0 confirmed");
+
+        // Packet 5 is a gap, not the packet being waited on.
+        let ahead = xfer_packet(xfer_id, 5, false, 0, b"XX");
+        session.handle_datagram(sim_addr(), &server_message(&ahead, 21, true)?, now)?;
+        assert!(
+            drain_confirms(&mut session)?.is_empty(),
+            "a gap is not confirmed"
+        );
+
+        // The packet actually expected still completes the file, unpolluted.
+        let second = xfer_packet(xfer_id, 1, true, 0, b"def");
+        session.handle_datagram(sim_addr(), &server_message(&second, 22, true)?, now)?;
+        let downloaded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::XferDownloaded { data, .. } => Some(data),
+                _ => None,
+            })
+            .ok_or("expected the assembled download")?;
+        assert_eq!(downloaded, b"abcdef".to_vec(), "the gap's bytes are absent");
+        Ok(())
+    }
+
+    /// A repeat of the packet just taken is the sender not having seen the
+    /// confirmation: confirm it again (as `LLXferManager::processReceiveData`
+    /// does) but do not append its bytes a second time.
+    #[test]
+    fn a_repeated_xfer_download_packet_is_reconfirmed() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let xfer_id = start_download(&mut session, now)?;
+
+        let first = xfer_packet(xfer_id, 0, false, 6, b"abc");
+        session.handle_datagram(sim_addr(), &server_message(&first, 20, true)?, now)?;
+        assert_eq!(drain_confirms(&mut session)?, vec![0], "packet 0 confirmed");
+
+        // The same packet again, on a fresh sequence so the reliable-dedupe
+        // window does not swallow it.
+        session.handle_datagram(sim_addr(), &server_message(&first, 21, true)?, now)?;
+        assert_eq!(
+            drain_confirms(&mut session)?,
+            vec![0],
+            "a repeat of the last packet is confirmed again"
+        );
+
+        let second = xfer_packet(xfer_id, 1, true, 0, b"def");
+        session.handle_datagram(sim_addr(), &server_message(&second, 22, true)?, now)?;
+        let downloaded = drain_events(&mut session)
+            .into_iter()
+            .find_map(|event| match event {
+                Event::XferDownloaded { data, .. } => Some(data),
+                _ => None,
+            })
+            .ok_or("expected the assembled download")?;
+        assert_eq!(
+            downloaded,
+            b"abcdef".to_vec(),
+            "the repeat did not double the bytes"
+        );
+        Ok(())
+    }
+
+    /// A stream that delivers more bytes than packet 0 declared is refused: the
+    /// assembled file would be wrong either way, so the download is aborted
+    /// rather than completed.
+    #[test]
+    fn an_xfer_download_past_its_declared_length_is_refused() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let xfer_id = start_download(&mut session, now)?;
+
+        // Declares six bytes, then sends a hundred.
+        let first = xfer_packet(xfer_id, 0, false, 6, b"abc");
+        session.handle_datagram(sim_addr(), &server_message(&first, 20, true)?, now)?;
+        assert_eq!(drain_confirms(&mut session)?, vec![0], "packet 0 confirmed");
+
+        let overrun = xfer_packet(xfer_id, 1, false, 0, &[0x5A; 100]);
+        session.handle_datagram(sim_addr(), &server_message(&overrun, 21, true)?, now)?;
+
+        let aborted = drain(&mut session)?
+            .iter()
+            .find_map(|message| match message {
+                AnyMessage::AbortXfer(abort) => Some(abort.xfer_id.result),
+                _ => None,
+            })
+            .ok_or("expected the refusal to reach the simulator")?;
+        assert_eq!(aborted, XFER_REFUSED_RESULT, "refused, not timed out");
+        let events = drain_events(&mut session);
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                Event::XferAborted { xfer_id: got, result }
+                    if got.get() == xfer_id && *result == XFER_REFUSED_RESULT
+            )),
+            "expected an XferAborted, got {events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, Event::XferDownloaded { .. })),
+            "a refused download never completes"
+        );
+
+        // The registry entry is gone: a late packet finds nothing to append to.
+        let late = xfer_packet(xfer_id, 2, true, 0, b"z");
+        session.handle_datagram(sim_addr(), &server_message(&late, 22, true)?, now)?;
+        assert!(
+            drain_confirms(&mut session)?.is_empty(),
+            "the refused download is no longer in flight"
+        );
+        Ok(())
+    }
+
+    /// A sender that declares no length of its own is still bounded: the stream
+    /// stops at the ceiling instead of growing for as long as packets arrive.
+    #[test]
+    fn an_undeclared_xfer_download_stops_at_the_ceiling() -> Result<(), TestError> {
+        // A zero prefix is read as "declared nothing", so only the ceiling
+        // bounds this stream. `MAX_XFER_DOWNLOAD_BYTES` is private, so the
+        // ceiling is restated here — the assertion is what pins the two
+        // together.
+        const CEILING: usize = 16 * 1024 * 1024;
+        const CHUNK: usize = 60_000;
+        let now = Instant::now();
+        let mut session = established(now)?;
+        drain(&mut session)?;
+        let xfer_id = start_download(&mut session, now)?;
+        let chunk = vec![0x5A_u8; CHUNK];
+        let first = xfer_packet(xfer_id, 0, false, 0, &chunk);
+        session.handle_datagram(sim_addr(), &server_message(&first, 20, true)?, now)?;
+        assert_eq!(drain_confirms(&mut session)?, vec![0], "packet 0 confirmed");
+
+        let mut refused_at = None;
+        for packet in 1..2_000_u32 {
+            let sequence = 20_u32.saturating_add(packet);
+            let more = xfer_packet(xfer_id, packet, false, 0, &chunk);
+            session.handle_datagram(sim_addr(), &server_message(&more, sequence, true)?, now)?;
+            let events = drain_events(&mut session);
+            let _sent = drain(&mut session)?;
+            if events
+                .iter()
+                .any(|event| matches!(event, Event::XferAborted { .. }))
+            {
+                refused_at = Some(packet);
+                break;
+            }
+        }
+        let refused_at = refused_at.ok_or("an undeclared stream is bounded by the ceiling")?;
+        // The refusal lands on the first packet that would carry the buffer
+        // past the ceiling, and not one packet later.
+        let accepted = usize::try_from(refused_at)? * CHUNK;
+        assert!(accepted <= CEILING, "{accepted} bytes were accepted");
+        assert!(
+            accepted.saturating_add(CHUNK) > CEILING,
+            "the stream stopped early at {accepted} bytes"
         );
         Ok(())
     }

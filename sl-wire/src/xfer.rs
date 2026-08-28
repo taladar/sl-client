@@ -96,7 +96,14 @@ impl XferPacketId {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct XferChunk<'a> {
     /// The sender's declared total file length — `Some` on the first packet
-    /// only. Informational: the reference receivers accept whatever arrives.
+    /// only.
+    ///
+    /// Not merely informational: it is the sender's contract for how much the
+    /// stream will deliver, and the reference holds it to that — `LLXfer_Mem`
+    /// allocates exactly this many bytes (`setXferSize`) and
+    /// `LLXfer::receiveData` refuses to append past the allocation. Both grids
+    /// write the true total (OpenSim's `LLClientView.SendXferPacket` writes
+    /// `XferData.Length`), so a receiver may bound its buffer by it.
     pub declared_len: Option<u32>,
     /// The file bytes of this packet (prefix stripped).
     pub payload: &'a [u8],

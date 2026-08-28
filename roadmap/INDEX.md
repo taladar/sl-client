@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 87 |
-| done | 887 |
+| bugs | 86 |
+| done | 888 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,12 +1165,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (87)
+## bugs (86)
 
 ### protocol
 
-- [`protocol-audit-client-xfer-download-bounds`](bugs/protocol-audit-client-xfer-download-bounds.md)
-  — The client's Xfer download has no size cap and no ordering check
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
 - [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
@@ -1378,7 +1376,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (887)
+## done (888)
 
 ### protocol
 
@@ -1506,6 +1504,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   wire-supplied count
 - [`protocol-audit-asset-transfer-timeouts`](done/protocol-audit-asset-transfer-timeouts.md)
   — No asset transfer has a timeout — six registries only ever grow
+- [`protocol-audit-client-xfer-download-bounds`](done/protocol-audit-client-xfer-download-bounds.md)
+  — The client's Xfer download has no size cap and no ordering check
 - [`protocol-audit-flush-acks-loses-acks`](done/protocol-audit-flush-acks-loses-acks.md)
   — flush_acks drops every remaining ack on a wire error, in both directions
 - [`protocol-audit-inventory-fetch-deadlock`](done/protocol-audit-inventory-fetch-deadlock.md)

@@ -808,6 +808,24 @@ pub const XFER_OFFER_TIMEOUT: Duration = Duration::from_secs(60);
 /// is what `LLXfer::abort` sends in the same situation.
 pub(crate) const XFER_TIMEOUT_RESULT: i32 = -23016;
 
+/// The `Result` code an `AbortXfer` carries when this side refuses a download it
+/// cannot assemble: the reference's `LL_ERR_CANNOT_OPEN_FILE` (`llxfer.h`),
+/// which is what `LLXferManager::processReceiveData` aborts with when
+/// `receiveData` cannot make room for the bytes that arrived.
+const XFER_REFUSED_RESULT: i32 = -42;
+
+/// The largest file this side will assemble from an inbound `Xfer` download,
+/// when the sender declared no usable length of its own.
+///
+/// A stream is normally bounded by the total length packet 0 declares — the
+/// reference allocates exactly that (`LLXfer_Mem::setXferSize`) and
+/// `LLXfer::receiveData` refuses to append past it. This is the backstop for a
+/// sender that declares nothing, or declares a length no real file has: the
+/// largest thing a simulator sends this way is a region's terrain RAW
+/// (13 x 256 x 256 = 832 KiB for a standard region, a small multiple of that
+/// for an OpenSim var-region).
+const MAX_XFER_DOWNLOAD_BYTES: usize = 16 * 1024 * 1024;
+
 /// How long a speculative, reliably-sent request may go unanswered before the
 /// session stops expecting its reply — used where the reply carries no
 /// correlation id of its own, so a claim left standing would be filled by an
@@ -1265,6 +1283,15 @@ struct XferDownload {
     /// The file bytes accumulated so far (the seq-0 length prefix already
     /// stripped).
     buffer: Vec<u8>,
+    /// The packet number the next `SendXferPacket` must carry. `Xfer` is a
+    /// strictly ordered, one-packet-in-flight stream, so anything else is a
+    /// duplicate or a gap and is refused rather than concatenated blindly
+    /// (`LLXferManager::processReceiveData`'s `mPacketNum` check).
+    next_packet: u32,
+    /// The total file length the sender declared in packet 0's prefix, once
+    /// that packet has arrived. The stream may not deliver more than it said
+    /// it would; until it is known, [`MAX_XFER_DOWNLOAD_BYTES`] is the bound.
+    declared_len: Option<usize>,
     /// When this download last made progress — the `RequestXfer` going out, or
     /// a `SendXferPacket` arriving. [`XFER_STALL_TIMEOUT`] past this the session
     /// abandons it.

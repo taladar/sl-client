@@ -43,14 +43,14 @@ use super::{
     ChatSessionKind, ChatSessionLifecycle, Circuit, DEFAULT_DRAW_DISTANCE, FolderState,
     FriendPresence, GrantStatus, HolderKind, IDENTITY_ROTATION, INVENTORY_FETCH_MAX_ATTEMPTS,
     Inventory, InventoryOwner, LAND_RESOURCE_DETAIL_TAG, LAND_RESOURCE_SUMMARY_TAG, LOGOUT_TIMEOUT,
-    MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover, PendingInvite,
-    RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
+    MAX_XFER_DOWNLOAD_BYTES, MessageCursor, OfferedUpload, PING_INTERVAL, PendingHandover,
+    PendingInvite, RELIABLE_REPLY_GRACE, ReliableSeverity, SIT_TIMEOUT, ScriptGrant, ScriptHolder,
     ServerHistoryFetch, ServerHistoryMessage, ServerHistoryState, Session, SessionMessage,
     SessionState, SitState, TELEPORT_TIMEOUT, TEXTURE_DOWNLOAD_MAX_ATTEMPTS,
     TEXTURE_DOWNLOAD_STALL_TIMEOUT, TYPING_TIMEOUT, TakenControls, TeleportPhase, TextureDownload,
     TransferDownload, TransferProgress, TransferPurpose, VoiceChannelInfo, XFER_OFFER_TIMEOUT,
-    XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose, XferUpload, deadline,
-    merge_deadline,
+    XFER_REFUSED_RESULT, XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, XferDownload, XferPurpose,
+    XferUpload, deadline, merge_deadline,
 };
 use crate::GroupRoleKey;
 use crate::asset_keys::{AnimationKey, AssetKey};
@@ -3647,20 +3647,89 @@ impl Session {
             AnyMessage::SendXferPacket(packet) => {
                 let xfer_id = XferId(packet.xfer_id.id);
                 let packet_id = XferPacketId::from_raw(packet.xfer_id.packet);
-                if self.xfer_downloads.contains_key(&xfer_id) {
-                    let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
-                    if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
-                        download.buffer.extend_from_slice(chunk.payload);
-                        download.last_progress = now;
-                    }
-                    if let Some(circuit) = self.circuit.as_mut() {
+                let Some(download) = self.xfer_downloads.get(&xfer_id) else {
+                    return Ok(());
+                };
+                let (expected, buffered, declared_so_far) =
+                    (download.next_packet, download.buffer.len(), download.declared_len);
+                let chunk = decode_xfer_chunk(packet_id, &packet.data_packet.data);
+
+                // `Xfer` is a strictly ordered, one-packet-in-flight stream, so
+                // a packet that is not the expected one carries bytes that do
+                // not belong at the end of the buffer. The reference makes the
+                // same two distinctions: a repeat of the packet just taken is
+                // the sender not having seen our confirmation, so confirm it
+                // again and drop the bytes; anything else is a gap, and is
+                // ignored (a later retransmission of the packet we are waiting
+                // for puts the stream back on track, and the stall timeout
+                // catches a stream that never does).
+                if packet_id.sequence() != expected {
+                    let reconfirm = expected
+                        .checked_sub(1)
+                        .is_some_and(|previous| packet_id.sequence() == previous);
+                    tracing::warn!(
+                        xfer_id = xfer_id.get(),
+                        packet = packet_id.sequence(),
+                        expected,
+                        reconfirm,
+                        "out-of-order Xfer download packet ignored"
+                    );
+                    if reconfirm && let Some(circuit) = self.circuit.as_mut() {
                         circuit.send_confirm_xfer_packet(xfer_id, packet_id.raw(), now)?;
                     }
-                    if packet_id.is_last()
-                        && let Some(download) = self.xfer_downloads.remove(&xfer_id)
-                    {
-                        self.finish_xfer_download(xfer_id, download)?;
-                    }
+                    return Ok(());
+                }
+
+                // The stream may not deliver more bytes than packet 0 said it
+                // would — the sender's own contract, which both the reference
+                // (`LLXfer_Mem::setXferSize` allocates exactly that much) and
+                // OpenSim (`LLClientView.SendXferPacket` writes the real
+                // `XferData.Length`) honour exactly — nor, if it declared
+                // nothing, more than any real file. Either way the assembled
+                // bytes would be wrong, so the download is refused rather than
+                // completed from a buffer that grew past what it was told to
+                // expect.
+                //
+                // A declared length of **zero** is read as "declared nothing"
+                // rather than as an empty file: a genuinely empty file carries
+                // no payload and so never reaches the bound anyway, while a
+                // sender that simply did not fill the prefix in would otherwise
+                // have its whole stream refused. Such a stream still stops at
+                // [`MAX_XFER_DOWNLOAD_BYTES`].
+                let declared = chunk
+                    .declared_len
+                    .filter(|len| *len != 0)
+                    .map(|len| usize::try_from(len).unwrap_or(usize::MAX))
+                    .or(declared_so_far);
+                let limit = declared.map_or(MAX_XFER_DOWNLOAD_BYTES, |len| {
+                    len.min(MAX_XFER_DOWNLOAD_BYTES)
+                });
+                let assembled = buffered.saturating_add(chunk.payload.len());
+                if assembled > limit {
+                    tracing::warn!(
+                        xfer_id = xfer_id.get(),
+                        assembled,
+                        limit,
+                        "Xfer download ran past the length it may occupy"
+                    );
+                    let _download = self.xfer_downloads.remove(&xfer_id);
+                    self.abandon_xfer(xfer_id, "download", XFER_REFUSED_RESULT, now);
+                    return Ok(());
+                }
+
+                if let Some(download) = self.xfer_downloads.get_mut(&xfer_id) {
+                    download.buffer.extend_from_slice(chunk.payload);
+                    download.next_packet = download.next_packet.saturating_add(1);
+                    download.last_progress = now;
+                    download.declared_len = declared;
+                }
+                if let Some(circuit) = self.circuit.as_mut() {
+                    circuit.send_confirm_xfer_packet(xfer_id, packet_id.raw(), now)?;
+                }
+                if packet_id.is_last()
+                    && let Some(download) = self.xfer_downloads.remove(&xfer_id)
+                {
+                    self.finish_xfer_download(xfer_id, download)?;
                 }
             }
             AnyMessage::RequestXfer(request) => {
@@ -5368,7 +5437,7 @@ impl Session {
             .collect();
         for xfer_id in downloads {
             let _download = self.xfer_downloads.remove(&xfer_id);
-            self.abandon_xfer(xfer_id, "download", now);
+            self.abandon_xfer(xfer_id, "download", XFER_TIMEOUT_RESULT, now);
         }
         let uploads: Vec<XferId> = self
             .xfer_uploads
@@ -5378,31 +5447,32 @@ impl Session {
             .collect();
         for xfer_id in uploads {
             let _upload = self.xfer_uploads.remove(&xfer_id);
-            self.abandon_xfer(xfer_id, "upload", now);
+            self.abandon_xfer(xfer_id, "upload", XFER_TIMEOUT_RESULT, now);
         }
     }
 
     /// Tells the simulator this side has given up on `xfer_id` and surfaces the
     /// give-up, so a caller waiting on the transfer's completion is not left
-    /// hanging. `direction` only labels the log line.
-    fn abandon_xfer(&mut self, xfer_id: XferId, direction: &str, now: Instant) {
+    /// hanging. `direction` only labels the log line; `result` is the
+    /// `LLTErrorCode` the `AbortXfer` and the surfaced event carry, which says
+    /// *why* this side gave up.
+    fn abandon_xfer(&mut self, xfer_id: XferId, direction: &str, result: i32, now: Instant) {
         // Best-effort, like every other send on the timer loop.
         if let Some(circuit) = self.circuit.as_mut() {
-            let _ignored = circuit.send_abort_xfer(xfer_id, XFER_TIMEOUT_RESULT, now);
+            let _ignored = circuit.send_abort_xfer(xfer_id, result, now);
         }
         tracing::warn!(
             xfer_id = xfer_id.get(),
             direction,
-            "giving up on a stalled Xfer"
+            result,
+            "giving up on an Xfer"
         );
         self.push_diagnostic(Diagnostic::ExpectedReplyMissing {
             request: Diagnostic::XFER_REQUEST.to_owned(),
             sequence: None,
         });
-        self.events.push_back(Event::XferAborted {
-            xfer_id,
-            result: XFER_TIMEOUT_RESULT,
-        });
+        self.events
+            .push_back(Event::XferAborted { xfer_id, result });
     }
 
     /// Withdraws every upload offer the simulator never picked up, dropping the
@@ -8298,6 +8368,8 @@ impl Session {
             XferDownload {
                 purpose,
                 buffer: Vec::new(),
+                next_packet: 0,
+                declared_len: None,
                 last_progress: now,
             },
         );

@@ -742,9 +742,13 @@ pub enum Event {
         /// The transfer id that was aborted.
         xfer_id: XferId,
         /// The abort reason code (an `LLTErrorCode`; negative on error, per the
-        /// reference viewer). A local give-up reports the reference's
-        /// `LL_ERR_TCP_TIMEOUT` (`-23016`), which is what `LLXfer::abort` sends
-        /// in the same situation.
+        /// reference viewer). A local give-up on a stalled transfer reports the
+        /// reference's `LL_ERR_TCP_TIMEOUT` (`-23016`), which is what
+        /// `LLXfer::abort` sends in the same situation; a download refused for
+        /// running past the length it may occupy reports
+        /// `LL_ERR_CANNOT_OPEN_FILE` (`-42`), which is what
+        /// `LLXferManager::processReceiveData` sends when the receiver cannot
+        /// take the bytes that arrived.
         result: i32,
     },
     /// A task-inventory item's asset arrived over the legacy UDP Transfer path
