@@ -356,7 +356,10 @@ pub(crate) fn drive_water(
 
     // Compare-then-`get_mut` (the texture_anim idiom): under a static sky the
     // params are identical every frame — the waves animate GPU-side from
-    // `globals.time` — so the shared water material is never re-prepared.
+    // `globals.time` — so the shared water material is never re-prepared. Under
+    // a live day cycle they are identical for a whole day-cycle sampling step
+    // (`sky::DAY_POSITION_STEPS`), which is what makes this float-equality
+    // compare hold at all off the screenshot harness.
     let params = water_params(&water, light_dir, reflection, sunlight);
     if materials
         .get(&state.material)

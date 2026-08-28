@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 75 |
-| done | 899 |
+| bugs | 74 |
+| done | 900 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (75)
+## bugs (74)
 
 ### viewer
 
@@ -1239,9 +1239,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   chain
 - [`viewer-audit-rlv-behaviour-lookup`](bugs/viewer-audit-rlv-behaviour-lookup.md)
   — RLV behaviour lookup is param-type-blind and has no modifier fallback
-- [`viewer-audit-scene-change-guards-day-cycle`](bugs/viewer-audit-scene-change-guards-day-cycle.md)
-  — The scene crate's write-on-change guards were reasoned about under a pinned
-  sky
 - [`viewer-audit-search-sentinel-row`](bugs/viewer-audit-search-sentinel-row.md)
   — The directory 'there is more' sentinel row is rendered as a result
 - [`viewer-audit-settings-write-race`](bugs/viewer-audit-settings-write-race.md)
@@ -1341,7 +1338,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (899)
+## done (900)
 
 ### protocol
 
@@ -1605,6 +1602,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
+  — The scene crate's write-on-change guards were reasoned about under a pinned
+  sky
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))

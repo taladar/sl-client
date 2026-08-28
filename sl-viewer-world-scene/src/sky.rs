@@ -45,6 +45,15 @@
 //! between the two day-cycle keyframes bounding the moment (P22.6), so the
 //! atmosphere and the sun / moon animate continuously through the day rather
 //! than snapping between keyframes.
+//!
+//! The moment they pull it for is `day_position`, which quantises the day to
+//! `DAY_POSITION_STEPS` sampling cells. That is what every write-on-change
+//! guard in the scene rests on: those guards are float equality on values
+//! derived from the sky frame, so a position that advanced with the wall clock
+//! made each of them miss on every single frame — including
+//! `drive_terrain_lighting`, which then re-prepared every region's terrain
+//! material forever. The cell is finer than the shadow-caster direction snap,
+//! so nothing visible steps that was not already stepping.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -676,7 +685,10 @@ pub fn sun_shadows_enabled() -> bool {
 /// direction unchanged, which recomputes the four shadow cascades and re-culls
 /// every outdoor caster each frame; the material / ambient / exposure writes
 /// likewise re-prepared or re-flagged their targets per frame. Under a static
-/// environment and camera this system now writes nothing.
+/// environment and camera this system now writes nothing; under a live day cycle
+/// it writes once per day-cycle sampling step ([`DAY_POSITION_STEPS`]) rather
+/// than once per frame, because every one of those guards is float equality on a
+/// value derived from the sampled day position.
 #[expect(
     clippy::type_complexity,
     reason = "one query over both directional lights (shadow sun + shadow-free mirror)"
@@ -1234,7 +1246,9 @@ pub(crate) fn drive_clouds(
 
     // Compare-then-`get_mut` (the texture_anim idiom): with a static sky and a
     // stable anchor the params are identical every frame, so a steadily
-    // scrolling cloud layer re-prepares nothing.
+    // scrolling cloud layer re-prepares nothing — and with a live day cycle they
+    // are identical between day-cycle sampling steps (`DAY_POSITION_STEPS`),
+    // which is the only reason this float-equality compare ever holds on a grid.
     let params = cloud_params(
         &sky,
         resolved.lightnorm,
@@ -1978,34 +1992,72 @@ fn calculate_light_settings(sky: &SkySettings, light_up: f32, moon_up: bool) -> 
     }
 }
 
+/// The number of sampling steps the day cycle is quantised to — the day-position
+/// counterpart of [`snap_shadow_direction`]'s angular grid, and the reason every
+/// write-on-change guard downstream of the sky actually holds on a live grid.
+///
+/// The environment is sampled at a *continuously* advancing day position, so
+/// without a grid `blended_sky_settings` synthesises a slightly different frame
+/// every frame, every value derived from it differs in its last bits, and every
+/// float-equality guard below it — the sky / cloud / star / water material
+/// compare-then-`get_mut`, and above all `drive_terrain_lighting`'s
+/// `Assets::iter_mut` over *every* region's terrain material — fires on every
+/// frame forever. Rounding the position down to a grid holds the sampled frame
+/// **bit-identical** across the frames whose true position falls in one cell, so
+/// those guards hold between steps and the scene settles.
+///
+/// The step is a fraction of the day rather than a fixed number of seconds
+/// because what must stay imperceptible is how far the sun *moves* per step, and
+/// that is `360° / steps` whatever the region's day length: a region running a
+/// five-minute day rotates its sun 48× faster than Second Life's four-hour one,
+/// and gets 48× more frequent samples out of the same grid. At 32768 steps one
+/// step turns the sun by 0.011°, below the ~0.014° the shadow-caster direction is
+/// already snapped to (`1 / SHADOW_MAP_SIZE` radians), so the day cycle steps no
+/// more coarsely than the light direction the renderer already quantises — while
+/// a four-hour day resamples every 0.44 s instead of every frame.
+const DAY_POSITION_STEPS: f64 = 32768.0;
+
 /// The normalised day-cycle position (`0.0..=1.0`) for the current region time,
 /// the reference `LLEnvironment::convert_time_to_position`: `fmod(now +
-/// day_offset, day_length) / day_length` over the Unix clock.
+/// day_offset, day_length) / day_length` over the Unix clock, quantised to
+/// [`DAY_POSITION_STEPS`] steps per day so the sampled environment settles
+/// between steps.
 ///
 /// The debug override `SL_VIEWER_SKY_DAY_POSITION` (a `0.0..=1.0` float) pins the
 /// position instead, so the offline screenshot harness can inspect any point in
-/// the day (e.g. midday) regardless of the wall clock.
+/// the day (e.g. midday) regardless of the wall clock. A pinned position is
+/// already stable, so it is honoured exactly rather than rounded to the grid.
 pub(crate) fn day_position(settings: &sl_client_bevy::EnvironmentSettings) -> f32 {
     if let Ok(value) = std::env::var("SL_VIEWER_SKY_DAY_POSITION")
         && let Ok(position) = value.parse::<f32>()
     {
         return position.clamp(0.0, 1.0);
     }
-    // The wrap must be in f64 (the Unix clock overflows f32's integer precision);
-    // the result is a normalised fraction in `0.0..1.0`, so narrowing to f32 loses
-    // only sub-epsilon precision.
-    let day_length = f64::from(settings.day_length.max(1));
-    let day_offset = f64::from(settings.day_offset);
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64());
+    quantised_day_position(now, settings.day_length, settings.day_offset)
+}
+
+/// [`day_position`] without the clock and the debug override: the normalised
+/// position of `now` (seconds since the Unix epoch) in a `day_length`-second day
+/// phase-shifted by `day_offset`, rounded down to the [`DAY_POSITION_STEPS`]
+/// grid.
+pub(crate) fn quantised_day_position(now: f64, day_length: i32, day_offset: i32) -> f32 {
+    // The wrap must be in f64 (the Unix clock overflows f32's integer precision);
+    // the result is a normalised fraction in `0.0..1.0`, so narrowing to f32 loses
+    // only sub-epsilon precision — and a grid step is a power of two, so the
+    // quantised fraction is exact in both widths.
+    let day_length = f64::from(day_length.max(1));
+    let day_offset = f64::from(day_offset);
     let position = (now + day_offset).rem_euclid(day_length) / day_length;
+    let stepped = (position * DAY_POSITION_STEPS).floor() / DAY_POSITION_STEPS;
     #[expect(
         clippy::cast_possible_truncation,
         clippy::as_conversions,
         reason = "a normalised 0.0..1.0 day fraction; the wrap needs f64 but the result fits f32"
     )]
-    let fraction = position as f32;
+    let fraction = stepped as f32;
     fraction
 }
 
@@ -2042,9 +2094,127 @@ pub(crate) fn placeholder_image() -> Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{SHADOW_MAP_SIZE, snap_shadow_direction};
+    use super::{
+        DAY_POSITION_STEPS, SHADOW_MAP_SIZE, quantised_day_position, snap_shadow_direction,
+    };
     use bevy::math::Vec3;
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
+
+    /// A Second Life day, in seconds (the grid default, and the length the
+    /// day-position tests reason in).
+    const SL_DAY_SECS: i32 = 14400;
+
+    /// One day-cycle sampling step of an [`SL_DAY_SECS`] day, in seconds. Exact
+    /// in binary (both operands are powers of two times a whole number), so a
+    /// time built from it lands exactly on a cell boundary.
+    fn step_secs() -> f64 {
+        f64::from(SL_DAY_SECS) / DAY_POSITION_STEPS
+    }
+
+    /// Every sample taken inside one grid cell returns the **same** position, so
+    /// the sky frame blended from it — and every colour and scalar derived from
+    /// that frame — is bit-identical across those frames and the write-on-change
+    /// guards downstream hold.
+    #[test]
+    fn day_position_is_stable_within_a_step() {
+        let step = step_secs();
+        // A whole number of steps since the epoch, i.e. exactly a cell boundary.
+        let start = 3_000_000.0 * step;
+        let first = quantised_day_position(start, SL_DAY_SECS, 0);
+        for fraction in [0.0, 0.1, 0.25, 0.5, 0.75, 0.99] {
+            // Bit patterns: the claim is that the sampled position is *identical*,
+            // which is what the float-equality guards downstream test (and what
+            // `float_cmp` forbids asserting with `==`).
+            assert_eq!(
+                quantised_day_position(start + fraction * step, SL_DAY_SECS, 0).to_bits(),
+                first.to_bits(),
+                "a sample {fraction} of the way through a cell left it"
+            );
+        }
+    }
+
+    /// The position still advances: the next cell is a different position, and a
+    /// step is exactly one part in [`DAY_POSITION_STEPS`] of the day.
+    #[test]
+    fn day_position_advances_one_step_per_cell() {
+        let step = step_secs();
+        let start = 3_000_000.0 * step;
+        let first = quantised_day_position(start, SL_DAY_SECS, 0);
+        let next = quantised_day_position(start + step, SL_DAY_SECS, 0);
+        assert_ne!(
+            first.to_bits(),
+            next.to_bits(),
+            "the day cycle must not freeze"
+        );
+        #[expect(
+            clippy::cast_possible_truncation,
+            clippy::as_conversions,
+            reason = "the grid step is a power of two, exact in f32"
+        )]
+        let expected = (1.0 / DAY_POSITION_STEPS) as f32;
+        assert!(
+            (next - first - expected).abs() < f32::EPSILON,
+            "one cell should advance the position by exactly one step, got {}",
+            next - first
+        );
+    }
+
+    /// A region running a *short* day gets proportionally more frequent samples
+    /// out of the same grid — the step is a fraction of the day, not a fixed
+    /// number of seconds, because what must stay imperceptible is how far the sun
+    /// moves per step.
+    #[test]
+    fn day_position_step_scales_with_the_day_length() {
+        // A five-minute day: 48x shorter than Second Life's, so its cells are
+        // 48x shorter in wall-clock seconds.
+        let short_day = 300;
+        let step = f64::from(short_day) / DAY_POSITION_STEPS;
+        let start = 3_000_000.0 * step;
+        assert_eq!(
+            quantised_day_position(start + 0.5 * step, short_day, 0).to_bits(),
+            quantised_day_position(start, short_day, 0).to_bits(),
+        );
+        assert_ne!(
+            quantised_day_position(start + step, short_day, 0).to_bits(),
+            quantised_day_position(start, short_day, 0).to_bits(),
+        );
+    }
+
+    /// The day-cycle grid is finer than the angular grid the shadow-caster
+    /// direction is already snapped to, so quantising the day position adds no
+    /// sun motion coarser than the renderer already quantises away.
+    #[test]
+    fn a_day_step_turns_the_sun_less_than_a_shadow_snap_step() {
+        let day_step_deg = 360.0 / DAY_POSITION_STEPS;
+        let shadow_step_deg = (1.0 / f64::from(SHADOW_MAP_SIZE)).to_degrees();
+        assert!(
+            day_step_deg < shadow_step_deg,
+            "a day step turns the sun {day_step_deg}°, coarser than the \
+             {shadow_step_deg}° shadow-direction snap"
+        );
+    }
+
+    /// The day offset phase-shifts the position, and the position wraps at the
+    /// end of the day rather than running past 1.0.
+    #[test]
+    fn day_position_wraps_and_honours_the_offset() {
+        let quarter = SL_DAY_SECS / 4;
+        let midnight = 0.0;
+        assert_eq!(
+            quantised_day_position(midnight, SL_DAY_SECS, 0).to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(
+            quantised_day_position(midnight, SL_DAY_SECS, quarter).to_bits(),
+            0.25_f32.to_bits(),
+            "a quarter-day offset should start the day a quarter in"
+        );
+        let position = quantised_day_position(f64::from(SL_DAY_SECS) * 3.5, SL_DAY_SECS, 0);
+        assert!(
+            (position - 0.5).abs() < f32::EPSILON,
+            "three and a half days in is midday, got {position}"
+        );
+    }
 
     /// The snapped direction stays a unit vector (a valid light orientation).
     #[test]
