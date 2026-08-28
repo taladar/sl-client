@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 76 |
-| done | 898 |
+| bugs | 75 |
+| done | 899 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (76)
+## bugs (75)
 
 ### viewer
 
@@ -1205,8 +1205,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A cell about one ellipsis wide latches a permanent spurious ellipsis
 - [`viewer-audit-env-overrides-preferences`](bugs/viewer-audit-env-overrides-preferences.md)
   — Environment variables silently override live graphics preferences
-- [`viewer-audit-environment-parcel-reply`](bugs/viewer-audit-environment-parcel-reply.md)
-  — A parcel environment reply is accepted as the shared one
 - [`viewer-audit-gpu-pick-slot-lifecycle`](bugs/viewer-audit-gpu-pick-slot-lifecycle.md)
   — Pick slots are recycled with no generation, and a lost try_insert leaks one
 - [`viewer-audit-inventory-delete-guard-parity`](bugs/viewer-audit-inventory-delete-guard-parity.md)
@@ -1343,7 +1341,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (898)
+## done (899)
 
 ### protocol
 
@@ -1602,6 +1600,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — The bevy command dispatcher discards 300 protocol send results with no log
 - [`viewer-audit-diagnostic-stream-unread`](done/viewer-audit-diagnostic-stream-unread.md)
   — The viewer collects protocol diagnostics and drains none of them
+- [`viewer-audit-environment-parcel-reply`](done/viewer-audit-environment-parcel-reply.md)
+  — A parcel environment reply is accepted as the shared one
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet

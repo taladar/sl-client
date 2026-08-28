@@ -1,7 +1,7 @@
 //! Environment (EEP) ingest — the Phase 22.1 slice.
 //!
-//! The viewer holds one [`EnvironmentState`] resource: the region's (or a
-//! parcel's) Extended-Environment settings — its sky, water, and day cycle. It
+//! The viewer holds one [`EnvironmentState`] resource: the region's
+//! Extended-Environment settings — its sky, water, and day cycle. It
 //! starts at the built-in **legacy WindLight default**
 //! ([`EnvironmentSettings::legacy_windlight_default`]), the same fallback the
 //! reference viewer uses on a region that advertises no `ExtEnvironment`
@@ -49,15 +49,33 @@ impl FixedEnvironment {
     }
 }
 
-/// Where the current [`EnvironmentState::settings`] came from.
+/// Where the current [`EnvironmentState::settings`] came from — and, as
+/// [`EnvironmentSource::of_reply`], the scope an incoming reply describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum EnvironmentSource {
     /// The built-in legacy WindLight default — no grid settings ingested yet.
     Default,
     /// The whole-region environment (a `parcel_id` of `-1`).
     Region,
-    /// A specific parcel's environment override.
+    /// A specific parcel's environment override. Never the source of
+    /// [`EnvironmentState::shared`]: the reference viewer keeps a parcel
+    /// override in its own `ENV_PARCEL` layer, above (not instead of) the
+    /// region's `ENV_REGION` — see [`EnvironmentState::ingest_reply`].
     Parcel,
+}
+
+impl EnvironmentSource {
+    /// The scope a reply's [`EnvironmentSettings::parcel_id`] names: the
+    /// whole region for the `-1` sentinel
+    /// (`LLEnvironment::INVALID_PARCEL_ID`), a specific parcel's override for
+    /// any real parcel id — including `0`, which is a parcel like any other.
+    const fn of_reply(parcel_id: i32) -> Self {
+        if parcel_id < 0 {
+            Self::Region
+        } else {
+            Self::Parcel
+        }
+    }
 }
 
 /// How many times to (re)request the region environment before giving up and
@@ -160,6 +178,34 @@ impl EnvironmentState {
         self.shared = settings;
         self.shared_source = source;
         self.apply();
+    }
+
+    /// Fold one grid environment reply in, and report the scope it described.
+    ///
+    /// Only a **region**-scoped reply is the shared environment: it becomes
+    /// [`Self::shared`] — what renders, and what "Use Shared Environment"
+    /// restores — and satisfies the outstanding [`Command::RequestEnvironment`],
+    /// ending the retry loop.
+    ///
+    /// A **parcel**-scoped reply is an override of the region's settings for one
+    /// parcel, not the region's settings; the reference viewer records it in a
+    /// separate `ENV_PARCEL` layer that sits *above* `ENV_REGION`
+    /// (`LLEnvironment::recordEnvironment`, `llenvironment.cpp:1874`) and never
+    /// touches the region layer with it. Treating one as the shared environment
+    /// would make a parcel override what "Use Shared Environment" restores, and
+    /// would cancel the region retry loop before the region's own settings ever
+    /// arrived. The viewer therefore leaves the shared environment (and the
+    /// request cycle) alone here; rendering the parcel layer belongs to the
+    /// environment-override work (`viewer-environment-personal-lighting`), which
+    /// is also what will first ask for a parcel-scoped environment.
+    fn ingest_reply(&mut self, settings: EnvironmentSettings) -> EnvironmentSource {
+        let source = EnvironmentSource::of_reply(settings.parcel_id);
+        if matches!(source, EnvironmentSource::Region) {
+            self.ingest_shared(settings, source);
+            // The region's reply landed — stop the request/retry loop.
+            self.req_pending = false;
+        }
+        source
     }
 
     /// Recompute the active [`Self::settings`] from the shared environment and
@@ -303,26 +349,126 @@ pub fn request_environment(
 }
 
 /// Fold an incoming [`SlSessionEvent::Environment`] into [`EnvironmentState`],
-/// replacing the legacy default (or a previous region/parcel environment) with
-/// the grid's settings.
+/// replacing the legacy default (or the previously ingested region environment)
+/// with the grid's settings. A parcel-scoped reply is logged and dropped rather
+/// than mistaken for the region's — see `EnvironmentState::ingest_reply`.
 pub fn ingest_environment(mut events: MessageReader<SlEvent>, mut state: ResMut<EnvironmentState>) {
     for event in events.read() {
         if let SlSessionEvent::Environment(settings) = &event.0 {
-            let source = if settings.parcel_id < 0 {
-                EnvironmentSource::Region
-            } else {
-                EnvironmentSource::Parcel
-            };
             let sky_count = settings.day_cycle.sky_frames.len();
             let water_count = settings.day_cycle.water_frames.len();
-            info!(
-                "environment ingested ({source:?}): day_length={}s, day_offset={}s, \
-                 {sky_count} sky frame(s), {water_count} water frame(s), cycle {:?}",
-                settings.day_length, settings.day_offset, settings.day_cycle.name,
-            );
-            state.ingest_shared((**settings).clone(), source);
-            // The reply landed — stop the request/retry loop for this region.
-            state.req_pending = false;
+            match state.ingest_reply((**settings).clone()) {
+                // Kept out of the shared environment on purpose — see
+                // `EnvironmentState::ingest_reply`.
+                EnvironmentSource::Parcel => info!(
+                    "environment reply for parcel {} ignored: a parcel override is not the \
+                     region's shared environment ({sky_count} sky frame(s), \
+                     {water_count} water frame(s), cycle {:?})",
+                    settings.parcel_id, settings.day_cycle.name,
+                ),
+                EnvironmentSource::Region | EnvironmentSource::Default => info!(
+                    "environment ingested (region): day_length={}s, day_offset={}s, \
+                     {sky_count} sky frame(s), {water_count} water frame(s), cycle {:?}",
+                    settings.day_length, settings.day_offset, settings.day_cycle.name,
+                ),
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::{EnvironmentSettings, EnvironmentSource, EnvironmentState, FixedEnvironment};
+    use crate::sky_presets::FixedSky;
+
+    /// An environment reply for `parcel_id` (`-1` = the whole region), tagged by
+    /// its day length so the folded settings are identifiable.
+    fn reply(parcel_id: i32, day_length: i32) -> EnvironmentSettings {
+        let mut settings = EnvironmentSettings::legacy_windlight_default();
+        settings.parcel_id = parcel_id;
+        settings.day_length = day_length;
+        settings
+    }
+
+    /// `-1` is the whole region; every non-negative id — `0` included — is a
+    /// parcel's own override.
+    #[test]
+    fn reply_scope_follows_the_parcel_id_sentinel() {
+        assert_eq!(EnvironmentSource::of_reply(-1), EnvironmentSource::Region);
+        assert_eq!(EnvironmentSource::of_reply(0), EnvironmentSource::Parcel);
+        assert_eq!(EnvironmentSource::of_reply(37), EnvironmentSource::Parcel);
+    }
+
+    #[test]
+    fn a_region_reply_becomes_the_shared_environment_and_ends_the_retry_loop() {
+        let mut state = EnvironmentState {
+            req_pending: true,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+
+        assert_eq!(state.shared.day_length, 1234);
+        assert_eq!(state.settings.day_length, 1234);
+        assert_eq!(state.shared_source, EnvironmentSource::Region);
+        assert_eq!(state.source, EnvironmentSource::Region);
+        assert!(
+            !state.req_pending,
+            "the region's reply satisfies the request"
+        );
+    }
+
+    #[test]
+    fn a_parcel_reply_does_not_replace_the_region_environment() {
+        let mut state = EnvironmentState::default();
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+
+        assert_eq!(state.ingest_reply(reply(7, 999)), EnvironmentSource::Parcel);
+
+        assert_eq!(state.shared.day_length, 1234, "the region's settings stand");
+        assert_eq!(state.settings.day_length, 1234);
+        assert_eq!(state.shared_source, EnvironmentSource::Region);
+    }
+
+    /// The bug this guards: a parcel reply used to clear `req_pending`, so the
+    /// region environment was never re-requested and the sky stayed on the
+    /// legacy WindLight defaults.
+    #[test]
+    fn a_parcel_reply_leaves_the_region_request_outstanding() {
+        let mut state = EnvironmentState {
+            req_pending: true,
+            ..Default::default()
+        };
+
+        assert_eq!(state.ingest_reply(reply(3, 999)), EnvironmentSource::Parcel);
+
+        assert!(state.req_pending, "the region is still unanswered");
+        assert_eq!(state.shared_source, EnvironmentSource::Default);
+        assert_eq!(state.source, EnvironmentSource::Default);
+    }
+
+    /// The other half of the bug: "Use Shared Environment" restores the region's
+    /// settings, never a parcel's override.
+    #[test]
+    fn unpinning_a_fixed_sky_restores_the_region_not_a_parcel() {
+        let mut state = EnvironmentState::default();
+        state.set_fixed(Some(FixedEnvironment::Legacy(FixedSky::Midnight)));
+        assert_eq!(
+            state.ingest_reply(reply(-1, 1234)),
+            EnvironmentSource::Region
+        );
+        assert_eq!(state.ingest_reply(reply(7, 999)), EnvironmentSource::Parcel);
+
+        state.set_fixed(None);
+
+        assert_eq!(state.settings.day_length, 1234);
     }
 }
