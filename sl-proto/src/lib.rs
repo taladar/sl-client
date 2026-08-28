@@ -24,6 +24,7 @@ mod sim_session;
 mod sim_voice;
 mod terrain;
 mod types;
+mod unacked;
 
 pub use appearance::{MAX_FACES, decode_texture_entry, encode_texture_entry};
 pub use asset_caps::{AssetCapHandler, AssetCaps};

@@ -558,9 +558,11 @@ impl Circuit {
     /// Queues a keep-alive `StartPingCheck` unreliably, recording it as the
     /// outstanding ping so the matching `CompletePingCheck` can be timed.
     ///
-    /// Like the reference viewer, the ping carries the lowest unacked outgoing
+    /// Like the reference viewer, the ping carries the oldest unacked outgoing
     /// sequence number in `OldestUnacked`, letting the simulator drop its own
-    /// record of anything older. Returns the ping id sent.
+    /// record of anything older. "Oldest" is read off the wrapping counter
+    /// rather than the numeric order of the set — see
+    /// [`unacked::oldest`](crate::unacked::oldest). Returns the ping id sent.
     pub(crate) fn send_start_ping_check(&mut self, now: Instant) -> Result<PingId, WireError> {
         // A ping still outstanding when the next one is due is itself evidence
         // about the link: the round trip is at least the time it has been in
@@ -574,16 +576,11 @@ impl Circuit {
         }
         let ping_id = self.next_ping_id;
         self.next_ping_id = self.next_ping_id.wrapping_next();
-        let oldest_unacked = self
-            .unacked
-            .keys()
-            .next()
-            .copied()
-            .map_or(0, SequenceNumber::get);
+        let oldest = crate::unacked::oldest(&self.unacked, self.next_sequence);
         let message = AnyMessage::StartPingCheck(StartPingCheck {
             ping_id: StartPingCheckPingIDBlock {
                 ping_id: ping_id.get(),
-                oldest_unacked,
+                oldest_unacked: oldest.get(),
             },
         });
         self.send(&message, Reliability::Unreliable, now)?;

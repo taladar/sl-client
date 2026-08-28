@@ -7507,6 +7507,13 @@ impl SimSession {
     /// `CompletePingCheck`. Returns the ping id sent (so a caller can match the
     /// reply), or `None` if the circuit is not open.
     ///
+    /// The ping carries this end's oldest unacknowledged outgoing sequence
+    /// number in `OldestUnacked`, letting the client retire its own
+    /// duplicate-suppression record of anything older. "Oldest" is read off the
+    /// wrapping counter rather than the numeric order of the set: once the
+    /// counter has wrapped, the numerically smallest outstanding sequence
+    /// number is the newest packet, not the oldest.
+    ///
     /// # Errors
     ///
     /// Returns a wire error if the message fails to encode.
@@ -7516,16 +7523,11 @@ impl SimSession {
         }
         let ping_id = self.next_ping_id;
         self.next_ping_id = self.next_ping_id.wrapping_next();
-        let oldest_unacked = self
-            .unacked
-            .keys()
-            .next()
-            .copied()
-            .map_or(0, SequenceNumber::get);
+        let oldest = crate::unacked::oldest(&self.unacked, self.next_sequence);
         let message = AnyMessage::StartPingCheck(StartPingCheck {
             ping_id: StartPingCheckPingIDBlock {
                 ping_id: ping_id.get(),
-                oldest_unacked,
+                oldest_unacked: oldest.get(),
             },
         });
         self.send(&message, Reliability::Unreliable, now)?;

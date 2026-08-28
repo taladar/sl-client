@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 82 |
-| done | 892 |
+| bugs | 81 |
+| done | 893 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,12 +1165,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (82)
+## bugs (81)
 
 ### protocol
 
-- [`protocol-audit-oldest-unacked-wrap`](bugs/protocol-audit-oldest-unacked-wrap.md)
-  — OldestUnacked uses numeric min instead of wrapping-oldest
 - [`protocol-simfeatures-503`](bugs/protocol-simulator-features-caps-503.md) —
   SimulatorFeatures capability GET returns 503 on the local OpenSim (one-shot
   fetch never retries)
@@ -1366,7 +1364,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (892)
+## done (893)
 
 ### protocol
 
@@ -1519,6 +1517,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`protocol-audit-notecard-fidelity`](done/protocol-audit-notecard-fidelity.md)
   — The notecard codec misreads metadata, corrupts on re-encode, and misplaces
   embedded items
+- [`protocol-audit-oldest-unacked-wrap`](done/protocol-audit-oldest-unacked-wrap.md)
+  — OldestUnacked uses numeric min instead of wrapping-oldest
 - [`protocol-audit-region-handshake-mid-session`](done/protocol-audit-region-handshake-mid-session.md)
   — A root RegionHandshake outside AwaitingHandshake is silently dropped
 - [`protocol-audit-reliable-exhaustion-kills-session`](done/protocol-audit-reliable-exhaustion-kills-session.md)
