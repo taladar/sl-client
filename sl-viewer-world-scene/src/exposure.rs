@@ -48,6 +48,8 @@
 //! [`SlTonemap`](crate::tonemap::SlTonemap); this module supplies only the dynamic
 //! factor it is multiplied by.
 
+use std::sync::OnceLock;
+
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
@@ -128,6 +130,28 @@ const ENV_COEFFICIENT: &str = "SL_VIEWER_EXPOSURE_COEFFICIENT";
 /// every frame, which the screenshot harness needs so a single-frame capture shows
 /// the converged exposure rather than one `dt` of ramp from the initial `1.0`.
 const ENV_NO_FADE: &str = "SL_VIEWER_EXPOSURE_NO_FADE";
+
+/// Whether the three exposure overrides are set, resolved once per process (the
+/// environment is fixed at launch): [`refresh_exposure`] runs every frame and would
+/// otherwise take the process env lock twice up front plus once per camera.
+struct ExposureOverrides {
+    /// Whether [`ENV_DISABLE`] is set.
+    disable: bool,
+    /// Whether [`ENV_COEFFICIENT`] is set (its value is read by [`env_f32`]).
+    coefficient: bool,
+    /// Whether [`ENV_NO_FADE`] is set.
+    no_fade: bool,
+}
+
+/// The process's [`ExposureOverrides`], read from the environment on first use.
+fn exposure_overrides() -> &'static ExposureOverrides {
+    static OVERRIDES: OnceLock<ExposureOverrides> = OnceLock::new();
+    OVERRIDES.get_or_init(|| ExposureOverrides {
+        disable: std::env::var_os(ENV_DISABLE).is_some(),
+        coefficient: std::env::var_os(ENV_COEFFICIENT).is_some(),
+        no_fade: std::env::var_os(ENV_NO_FADE).is_some(),
+    })
+}
 
 /// The reference `RenderDynamicExposureCoefficient` default (`exposureF.glsl`'s
 /// `max_L`): the average luminance at which the dynamic scale reaches its floor.
@@ -318,7 +342,7 @@ impl Default for SlExposure {
             exp_min: 1.0,
             exp_max: 1.0,
             coefficient: env_f32(ENV_COEFFICIENT, DEFAULT_EXPOSURE_COEFFICIENT),
-            enabled: if std::env::var_os(ENV_DISABLE).is_some() {
+            enabled: if exposure_overrides().disable {
                 0.0
             } else {
                 f32::from(u8::from(DEFAULT_EXPOSURE_ENABLED))
@@ -326,7 +350,7 @@ impl Default for SlExposure {
             dt: 0.0,
             speed_error: DEFAULT_SPEED_ERROR,
             speed_target: DEFAULT_SPEED_TARGET,
-            fade: if std::env::var_os(ENV_NO_FADE).is_some() {
+            fade: if exposure_overrides().no_fade {
                 0.0
             } else {
                 1.0
@@ -400,8 +424,9 @@ pub(crate) fn refresh_exposure(
     mut cameras: Query<&mut SlExposure>,
 ) {
     let store = store.store();
-    let disabled_by_env = std::env::var_os(ENV_DISABLE).is_some();
-    let no_fade_by_env = std::env::var_os(ENV_NO_FADE).is_some();
+    let overrides = exposure_overrides();
+    let disabled_by_env = overrides.disable;
+    let no_fade_by_env = overrides.no_fade;
     let dynamic_enabled = store
         .get_bool(SETTING_ENABLED)
         .unwrap_or(DEFAULT_EXPOSURE_ENABLED);
@@ -438,7 +463,7 @@ pub(crate) fn refresh_exposure(
     for mut exposure in &mut cameras {
         exposure.exp_min = exp_min;
         exposure.exp_max = exp_max;
-        if std::env::var_os(ENV_COEFFICIENT).is_none()
+        if !overrides.coefficient
             && let Ok(value) = store.get_f32(SETTING_COEFFICIENT)
         {
             exposure.coefficient = value;

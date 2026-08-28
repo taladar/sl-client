@@ -47,6 +47,8 @@
 //! [`SlTonemap`]'s `no_post` carries it to the shader, which then takes the same
 //! clamp-only path.
 
+use std::sync::OnceLock;
+
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
@@ -183,9 +185,39 @@ const ENV_EXPOSURE: &str = "SL_VIEWER_EXPOSURE";
 /// this shows exactly what the exemption is worth on the grid in front of you).
 const ENV_FORCE_POST: &str = "SL_VIEWER_TONEMAP_FORCE_POST";
 
+/// Whether the four tone-mapper overrides are set, resolved once per process (the
+/// environment is fixed at launch): [`refresh_tonemap_settings`] runs every frame and
+/// would otherwise take the process env lock once up front plus three times per
+/// camera.
+struct TonemapOverrides {
+    /// Whether [`ENV_TONEMAP_TYPE`] is set (its value is read by
+    /// [`tonemap_type_from_env`]).
+    tonemap_type: bool,
+    /// [`ENV_TONEMAP_MIX`]'s value when it is set, else `None`. A set-but-unparsable
+    /// value still wins over the stored setting, at [`DEFAULT_TONEMAP_MIX`].
+    tonemap_mix: Option<f32>,
+    /// Whether [`ENV_EXPOSURE`] is set.
+    exposure: bool,
+    /// Whether [`ENV_FORCE_POST`] is set.
+    force_post: bool,
+}
+
+/// The process's [`TonemapOverrides`], read from the environment on first use.
+fn tonemap_overrides() -> &'static TonemapOverrides {
+    static OVERRIDES: OnceLock<TonemapOverrides> = OnceLock::new();
+    OVERRIDES.get_or_init(|| TonemapOverrides {
+        tonemap_type: std::env::var_os(ENV_TONEMAP_TYPE).is_some(),
+        tonemap_mix: std::env::var_os(ENV_TONEMAP_MIX)
+            .is_some()
+            .then(|| env_f32(ENV_TONEMAP_MIX, DEFAULT_TONEMAP_MIX)),
+        exposure: std::env::var_os(ENV_EXPOSURE).is_some(),
+        force_post: std::env::var_os(ENV_FORCE_POST).is_some(),
+    })
+}
+
 /// Whether [`ENV_FORCE_POST`] is set, i.e. the legacy-sky exemption is pinned off.
 fn force_post_from_env() -> bool {
-    std::env::var_os(ENV_FORCE_POST).is_some()
+    tonemap_overrides().force_post
 }
 
 /// The reference's classic-mode test (`LLSettingsVOSky::applySpecial`'s
@@ -282,13 +314,14 @@ pub(crate) fn refresh_tonemap_settings(
     let sky_auto_adjust_legacy = store
         .get_bool(crate::exposure::SETTING_AUTO_ADJUST_LEGACY)
         .unwrap_or(crate::exposure::DEFAULT_AUTO_ADJUST_LEGACY);
+    let overrides = tonemap_overrides();
     let classic_sky = is_classic_sky(
         range.can_auto_adjust,
         sky_auto_adjust_legacy,
-        force_post_from_env(),
+        overrides.force_post,
     );
     for mut tonemap in &mut cameras {
-        if std::env::var_os(ENV_TONEMAP_TYPE).is_none()
+        if !overrides.tonemap_type
             && let Ok(value) = store.get_u32(SETTING_TONEMAP_TYPE)
         {
             tonemap.tonemap_type = value;
@@ -296,16 +329,14 @@ pub(crate) fn refresh_tonemap_settings(
         // Re-derived from source every frame rather than read back off the component:
         // a classic sky zeroes the live field, so carrying that zero forward would
         // make the exemption stick when the sky stops being a legacy one.
-        let stored_mix = if std::env::var_os(ENV_TONEMAP_MIX).is_some() {
-            env_f32(ENV_TONEMAP_MIX, DEFAULT_TONEMAP_MIX)
-        } else {
+        let stored_mix = overrides.tonemap_mix.unwrap_or_else(|| {
             store
                 .get_f32(SETTING_TONEMAP_MIX)
                 .unwrap_or(DEFAULT_TONEMAP_MIX)
-        };
+        });
         tonemap.tonemap_mix = effective_tonemap_mix(stored_mix, classic_sky);
         tonemap.no_post = u32::from(classic_sky);
-        if std::env::var_os(ENV_EXPOSURE).is_none()
+        if !overrides.exposure
             && let Ok(value) = store.get_f32(SETTING_EXPOSURE)
         {
             tonemap.exposure = value.clamp(EXPOSURE_MIN, EXPOSURE_MAX);

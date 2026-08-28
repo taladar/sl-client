@@ -55,6 +55,7 @@
 //! material forever. The cell is finer than the shadow-caster direction snap,
 //! so nothing visible steps that was not already stepping.
 
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use bevy::asset::RenderAssetUsages;
@@ -172,12 +173,18 @@ fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, f32) {
 /// and the shadow-map render both scale with the cascade count × caster count,
 /// so cutting cascades isolates how much the shadow *view count* costs — an
 /// entity/view lever distinct from the sun-movement churn one.
+///
+/// Resolved once per process: the environment is fixed at launch, and this is read
+/// from a per-frame preference-apply system.
 #[must_use]
 pub fn shadow_cascade_count() -> Option<usize> {
-    std::env::var("SL_VIEWER_SHADOW_CASCADES")
-        .ok()
-        .and_then(|value| value.parse::<usize>().ok())
-        .map(|count| count.clamp(1, 4))
+    static COUNT: OnceLock<Option<usize>> = OnceLock::new();
+    *COUNT.get_or_init(|| {
+        std::env::var("SL_VIEWER_SHADOW_CASCADES")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .map(|count| count.clamp(1, 4))
+    })
 }
 
 /// Cascaded-shadow-map coverage for the scene sun / moon (P24.1). Tuned to a
@@ -690,18 +697,42 @@ pub(crate) fn center_sky_on_camera(
     }
 }
 
+/// Whether the `SL_VIEWER_LOG_SKY_HDR` diagnostic is on: the sky's "fake HDR"
+/// scale, the sun's altitude, and the decoded sun-disc texture are logged as they
+/// change. Resolved once per process — the gate is tested from three per-frame
+/// sites, and the environment is fixed at launch.
+fn log_sky_hdr() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("SL_VIEWER_LOG_SKY_HDR").is_some())
+}
+
+/// Whether the `SL_VIEWER_LOG_CLOUDS` diagnostic is on: the EEP cloud settings and
+/// the resolved cloud-noise texture are logged (throttled) for an A/B against
+/// Firestorm. Resolved once per process — the gate is tested from three per-frame
+/// sites, and the environment is fixed at launch.
+fn log_clouds() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var_os("SL_VIEWER_LOG_CLOUDS").is_some())
+}
+
 /// Whether the sun casts shadows (`SL_VIEWER_SUN_SHADOWS`, default on): set to
 /// `0` to disable `shadow_maps_enabled` on [`SceneSun`] at spawn, so an A/B
 /// (frame time via Tracy or the status bar) measures the total per-frame cost of
 /// the directional-shadow subsystem. That cost is the more decisive number than the
 /// sun-churn slice, because the shadow-caster cull runs every frame regardless
 /// of sun movement.
+///
+/// Resolved once per process: the environment is fixed at launch, and this is read
+/// from a per-frame preference-apply system.
 #[must_use]
 pub fn sun_shadows_enabled() -> bool {
-    !matches!(
-        std::env::var("SL_VIEWER_SUN_SHADOWS").ok().as_deref(),
-        Some("0")
-    )
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        !matches!(
+            std::env::var("SL_VIEWER_SUN_SHADOWS").ok().as_deref(),
+            Some("0")
+        )
+    })
 }
 
 /// Fold the current environment + camera altitude into the sky material, the
@@ -1043,7 +1074,7 @@ pub(crate) fn drive_sun_moon_discs(
     // whether the active sky is on the EEP "fake HDR" path — a non-zero
     // `reflection_probe_ambiance` gives `sky_hdr_scale > 1.0`. A legacy sky logs
     // `1.0` (a no-op).
-    if std::env::var("SL_VIEWER_LOG_SKY_HDR").is_ok() && *last_logged_hdr != Some(hdr_scale) {
+    if log_sky_hdr() && *last_logged_hdr != Some(hdr_scale) {
         *last_logged_hdr = Some(hdr_scale);
         info!(
             "sky hdr: reflection_probe_ambiance={:.4} gamma={:.4} sky_hdr_scale={:.4}",
@@ -1054,9 +1085,7 @@ pub(crate) fn drive_sun_moon_discs(
     // comparing where a World ▸ Environment selection puts the sun (a Day Cycle
     // frame sampled from the region's own cycle vs an authored Legacy / Modern
     // preset). `sun_up` says whether the disc is drawn at all.
-    if std::env::var("SL_VIEWER_LOG_SKY_HDR").is_ok()
-        && last_logged_sun_y.is_none_or(|prev| (prev - sun_dir.y).abs() > 0.02)
-    {
+    if log_sky_hdr() && last_logged_sun_y.is_none_or(|prev| (prev - sun_dir.y).abs() > 0.02) {
         *last_logged_sun_y = Some(sun_dir.y);
         info!(
             "sun position: selection={:?} up_component={:.3} (sun_up={sun_up}) sun_dir=({:.3},{:.3},{:.3})",
@@ -1137,7 +1166,7 @@ pub(crate) fn apply_disc_textures(
         // and a few RGBA samples (centre / mid-radius / corner). The reference sun
         // texture is a soft, low-alpha glow that lets the bright near-sun haze show
         // through; if ours decodes as a hard opaque disc it reads as a grey hole.
-        if std::env::var("SL_VIEWER_LOG_SKY_HDR").is_ok() {
+        if log_sky_hdr() {
             let (w, h) = (decoded.width, decoded.height);
             // Integer texel fetch (no `as` casts, per the workspace lints): clamp
             // the requested texel into range and index the RGBA8 buffer.
@@ -1314,7 +1343,7 @@ pub(crate) fn drive_clouds(
     // settings + the resolved cloud-noise texture id so a live aditi session can be
     // compared against Firestorm (R18 — the cloud distribution mismatch). Throttled
     // to ~2 s; purely a log, no rendering effect.
-    if time.elapsed_secs() >= state.next_log_at && std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
+    if time.elapsed_secs() >= state.next_log_at && log_clouds() {
         state.next_log_at = time.elapsed_secs() + 2.0;
         let pd1 = sky.cloud_pos_density1;
         let pd2 = sky.cloud_pos_density2;
@@ -1357,12 +1386,12 @@ pub(crate) fn apply_cloud_textures(
         }
         let Some(decoded) = store.get(id) else {
             // The fetch/decode failed; the layer keeps its (transparent) placeholder.
-            if std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
+            if log_clouds() {
                 warn!("cloud texture {id:?} fetch/decode FAILED (using placeholder)");
             }
             continue;
         };
-        if std::env::var("SL_VIEWER_LOG_CLOUDS").is_ok() {
+        if log_clouds() {
             info!(
                 "cloud texture {id:?} decoded ({}x{}, {} components)",
                 decoded.width, decoded.height, decoded.components
@@ -1834,12 +1863,18 @@ const fn visible_if(up: bool) -> Visibility {
 /// default (the reference behaviour), off when `SL_VIEWER_SKY_LINEARIZE=0` — an
 /// A/B knob to isolate the linearisation's effect, including on what the
 /// reflection-probe / environment-map capture reads of the sky.
+///
+/// Resolved once per process (the environment is fixed at launch); it is read from
+/// the per-frame sky / cloud params builds.
 fn sky_linearize() -> f32 {
-    if std::env::var("SL_VIEWER_SKY_LINEARIZE").as_deref() == Ok("0") {
-        0.0
-    } else {
-        1.0
-    }
+    static LINEARIZE: OnceLock<f32> = OnceLock::new();
+    *LINEARIZE.get_or_init(|| {
+        if std::env::var("SL_VIEWER_SKY_LINEARIZE").as_deref() == Ok("0") {
+            0.0
+        } else {
+            1.0
+        }
+    })
 }
 
 /// The active sky "fake HDR" scale (`SKY_HDR_SCALE`) for a sky frame: the value
@@ -1854,12 +1889,21 @@ fn sky_linearize() -> f32 {
 /// on-grid way to see the sun disc, clouds, and sky expand into HDR. A value `< 0`
 /// is clamped to `0`.
 fn resolved_sky_hdr_scale(sky: &SkySettings) -> f32 {
-    if let Ok(value) = std::env::var("SL_VIEWER_SKY_HDR_SCALE")
-        && let Ok(scale) = value.parse::<f32>()
-    {
-        return scale.max(0.0);
-    }
-    sky.sky_hdr_scale()
+    sky_hdr_scale_override().unwrap_or_else(|| sky.sky_hdr_scale())
+}
+
+/// The `SL_VIEWER_SKY_HDR_SCALE` override (clamped to `>= 0`), or `None` when unset
+/// or unparsable — see [`resolved_sky_hdr_scale`]. Resolved once per process (the
+/// environment is fixed at launch); the override is consulted from the per-frame
+/// sky / cloud / star / disc params builds.
+fn sky_hdr_scale_override() -> Option<f32> {
+    static OVERRIDE: OnceLock<Option<f32>> = OnceLock::new();
+    *OVERRIDE.get_or_init(|| {
+        std::env::var("SL_VIEWER_SKY_HDR_SCALE")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .map(|scale| scale.max(0.0))
+    })
 }
 
 /// Build the sky-shader uniform block from a sky frame plus the per-frame light
@@ -2061,15 +2105,28 @@ const DAY_POSITION_STEPS: f64 = 32768.0;
 /// the day (e.g. midday) regardless of the wall clock. A pinned position is
 /// already stable, so it is honoured exactly rather than rounded to the grid.
 pub(crate) fn day_position(settings: &sl_client_bevy::EnvironmentSettings) -> f32 {
-    if let Ok(value) = std::env::var("SL_VIEWER_SKY_DAY_POSITION")
-        && let Ok(position) = value.parse::<f32>()
-    {
-        return position.clamp(0.0, 1.0);
+    if let Some(position) = pinned_day_position() {
+        return position;
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64());
     quantised_day_position(now, settings.day_length, settings.day_offset)
+}
+
+/// The `SL_VIEWER_SKY_DAY_POSITION` override (clamped to `0.0..=1.0`), or `None`
+/// when unset or unparsable — see [`day_position`]. Resolved once per process (the
+/// environment is fixed at launch), because [`day_position`] is called from seven
+/// per-frame sites: the sky, cloud, star, and disc drives plus terrain, water, and
+/// the underwater fog.
+pub(crate) fn pinned_day_position() -> Option<f32> {
+    static PINNED: OnceLock<Option<f32>> = OnceLock::new();
+    *PINNED.get_or_init(|| {
+        std::env::var("SL_VIEWER_SKY_DAY_POSITION")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .map(|position| position.clamp(0.0, 1.0))
+    })
 }
 
 /// [`day_position`] without the clock and the debug override: the normalised

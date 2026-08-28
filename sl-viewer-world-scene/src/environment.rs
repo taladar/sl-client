@@ -243,7 +243,11 @@ impl EnvironmentState {
         // environment (the World ▸ Environment menu) already selects a specific
         // frame and takes precedence, so the override only applies when none is
         // pinned.
-        if self.fixed.is_none() && std::env::var_os("SL_VIEWER_SKY_DAY_POSITION").is_some() {
+        // Gated on the *resolved* override rather than on the variable merely being
+        // present, so the synthesised cycle is installed exactly when the pin will
+        // actually drive it (`crate::sky::day_position`); a malformed value falls
+        // back to the clock, which the region's own environment already follows.
+        if self.fixed.is_none() && crate::sky::pinned_day_position().is_some() {
             crate::sky_presets::install_preset_day_cycle(&mut self.settings);
         }
     }

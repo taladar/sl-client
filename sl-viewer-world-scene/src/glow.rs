@@ -29,6 +29,8 @@
 //! `SL_VIEWER_DISABLE_GLOW=1` forces it off (an A/B knob); `SL_VIEWER_GLOW_STRENGTH`
 //! / `_WIDTH` and the `RenderGlow*` settings tune it.
 
+use std::sync::OnceLock;
+
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
@@ -87,6 +89,28 @@ const ENV_STRENGTH: &str = "SL_VIEWER_GLOW_STRENGTH";
 /// The env var overriding the glow width (`RenderGlowWidth`).
 const ENV_WIDTH: &str = "SL_VIEWER_GLOW_WIDTH";
 
+/// Whether the three glow overrides are set, resolved once per process (the
+/// environment is fixed at launch): [`refresh_glow`] runs every frame and would
+/// otherwise take the process env lock once up front plus twice per camera.
+struct GlowOverrides {
+    /// Whether [`ENV_DISABLE`] is set.
+    disable: bool,
+    /// Whether [`ENV_STRENGTH`] is set (its value is read by [`env_f32`]).
+    strength: bool,
+    /// Whether [`ENV_WIDTH`] is set (its value is read by [`env_f32`]).
+    width: bool,
+}
+
+/// The process's [`GlowOverrides`], read from the environment on first use.
+fn glow_overrides() -> &'static GlowOverrides {
+    static OVERRIDES: OnceLock<GlowOverrides> = OnceLock::new();
+    OVERRIDES.get_or_init(|| GlowOverrides {
+        disable: std::env::var_os(ENV_DISABLE).is_some(),
+        strength: std::env::var_os(ENV_STRENGTH).is_some(),
+        width: std::env::var_os(ENV_WIDTH).is_some(),
+    })
+}
+
 /// The persisted-file section the glow settings are grouped under (`[render.glow]`),
 /// matching the reference's `RenderGlow*` naming.
 const GLOW_SECTION: &[&str] = &["render", "glow"];
@@ -136,19 +160,19 @@ pub fn register_settings(settings: &mut ViewerSettings) {
 /// used by the screenshot harness, **wins** over the stored value.
 pub(crate) fn refresh_glow(store: Res<ViewerSettings>, mut cameras: Query<&mut SlGlow>) {
     let store = store.store();
-    let disabled_by_env = std::env::var_os(ENV_DISABLE).is_some();
+    let overrides = glow_overrides();
     for mut glow in &mut cameras {
-        glow.enabled = if disabled_by_env {
+        glow.enabled = if overrides.disable {
             false
         } else {
             store.get_bool(SETTING_ENABLED).unwrap_or(true)
         };
-        if std::env::var_os(ENV_STRENGTH).is_none()
+        if !overrides.strength
             && let Ok(value) = store.get_f32(SETTING_STRENGTH)
         {
             glow.strength = value;
         }
-        if std::env::var_os(ENV_WIDTH).is_none()
+        if !overrides.width
             && let Ok(value) = store.get_f32(SETTING_WIDTH)
         {
             glow.delta = value / GLOW_RESOLUTION_F32;
@@ -188,7 +212,7 @@ impl Default for SlGlow {
     /// variable so a capture can sweep the glow without a rebuild.
     fn default() -> Self {
         Self {
-            enabled: std::env::var_os(ENV_DISABLE).is_none(),
+            enabled: !glow_overrides().disable,
             strength: env_f32(ENV_STRENGTH, DEFAULT_STRENGTH),
             delta: env_f32(ENV_WIDTH, DEFAULT_WIDTH) / GLOW_RESOLUTION_F32,
             iterations: DEFAULT_ITERATIONS,

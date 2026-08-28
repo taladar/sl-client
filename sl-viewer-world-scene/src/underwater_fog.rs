@@ -45,6 +45,8 @@
 //! gave the camera an HDR target and a tone mapper of its own, the viewer's main pass
 //! wrote an already-tonemapped, clipped 8-bit image, and this pass fogged that.)
 
+use std::sync::OnceLock;
+
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
@@ -133,6 +135,20 @@ impl ExtractComponent for UnderwaterFog {
     }
 }
 
+/// A debug affordance: `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces the fog off
+/// (zero density is a shader no-op) so a capture can A/B the underwater-fog pass
+/// against the plain water-surface shading (used to localise the R21 dark slab).
+///
+/// Resolved once per process: the environment is fixed at launch, and this gates a
+/// per-frame system.
+fn fog_disabled() -> bool {
+    static DISABLED: OnceLock<bool> = OnceLock::new();
+    *DISABLED.get_or_init(|| {
+        std::env::var("SL_VIEWER_DISABLE_UNDERWATER_FOG")
+            .is_ok_and(|value| value != "0" && !value.is_empty())
+    })
+}
+
 /// Fill the camera's [`UnderwaterFog`] from the region's EEP water settings, the
 /// sky sun direction, the camera pose, and the current water level — the reference
 /// `LLSettingsVOWater` uniform prep (`waterFogKS = 1 / max(lightDir.z, 0.3)`,
@@ -142,12 +158,7 @@ pub(crate) fn update_underwater_fog(
     level: Res<WaterLevel>,
     mut cameras: Query<(&GlobalTransform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
 ) {
-    // A debug affordance: `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces the fog off
-    // (zero density is a shader no-op) so a capture can A/B the underwater-fog pass
-    // against the plain water-surface shading (used to localise the R21 dark slab).
-    let disabled = std::env::var("SL_VIEWER_DISABLE_UNDERWATER_FOG")
-        .ok()
-        .is_some_and(|value| value != "0" && !value.is_empty());
+    let disabled = fog_disabled();
     for (global, projection, mut fog) in &mut cameras {
         let camera_pos = global.translation();
         let position = day_position(&environment.settings);

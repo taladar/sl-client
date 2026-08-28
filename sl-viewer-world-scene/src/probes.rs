@@ -135,6 +135,7 @@ use bevy::render::{Render, RenderApp, RenderSystems};
 use sl_settings::SettingValue;
 use std::collections::VecDeque;
 use std::f32::consts::FRAC_PI_2;
+use std::sync::OnceLock;
 
 /// The per-face cubemap capture resolution, in texels. Must be a power of two
 /// (and ≤ 8192) for [`GeneratedEnvironmentMapLight`]'s filter to accept the cube.
@@ -202,21 +203,31 @@ const PROBE_GAIN: f32 = 1.0;
 /// gallery lights a stage without one, and it has to split the ambient with the
 /// probes by the same rule or its scenes are lit differently from the world they
 /// stand in for.
+///
+/// Resolved once per process (the environment is fixed at launch); the sky's
+/// per-frame ambient write reads it.
 #[must_use]
 pub fn probe_ambient_scale() -> f32 {
-    std::env::var("SL_VIEWER_PROBE_AMBIENT_SCALE")
-        .ok()
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(0.0)
+    static SCALE: OnceLock<f32> = OnceLock::new();
+    *SCALE.get_or_init(|| {
+        std::env::var("SL_VIEWER_PROBE_AMBIENT_SCALE")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(0.0)
+    })
 }
 
 /// The gain to apply to the probes' image-based lighting, overridable at runtime by
 /// `SL_VIEWER_PROBE_GAIN` (an A/B knob — the calibrated value is `PROBE_GAIN`).
+/// Resolved once per process; `probe_intensity` reads it from per-frame systems.
 fn probe_gain() -> f32 {
-    std::env::var("SL_VIEWER_PROBE_GAIN")
-        .ok()
-        .and_then(|value| value.parse::<f32>().ok())
-        .unwrap_or(PROBE_GAIN)
+    static GAIN: OnceLock<f32> = OnceLock::new();
+    *GAIN.get_or_init(|| {
+        std::env::var("SL_VIEWER_PROBE_GAIN")
+            .ok()
+            .and_then(|value| value.parse::<f32>().ok())
+            .unwrap_or(PROBE_GAIN)
+    })
 }
 
 /// The [`EnvironmentMapLight`] intensity that gives the probes a [`probe_gain`] gain
@@ -1290,10 +1301,14 @@ fn drive_probe_captures(
 /// Whether the reflection-probe diagnostic mirror ball is enabled
 /// (`SL_VIEWER_PROBE_TEST_SPHERE=1`). Off by default; a debug affordance to *see* the
 /// captured environment, since ordinary Second Life / OpenSim content rarely carries
-/// the metallic PBR materials a probe visibly reflects.
+/// the metallic PBR materials a probe visibly reflects. Resolved once per process —
+/// it gates a per-frame system that is otherwise a no-op.
 fn probe_test_sphere_enabled() -> bool {
-    std::env::var("SL_VIEWER_PROBE_TEST_SPHERE")
-        .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("SL_VIEWER_PROBE_TEST_SPHERE")
+            .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+    })
 }
 
 /// Tracks whether the diagnostic mirror ball has been spawned yet (it is deferred
