@@ -2,7 +2,7 @@
 id: viewer-audit-water-state-purge
 title: WaterState is not purged on a teleport, and leaks spawned water planes
 topic: viewer
-status: bugs
+status: done
 origin: static code audit (2026-08-26)
 points: 2
 refs: [viewer-audit-world-reset-purge-completeness]
@@ -27,3 +27,15 @@ fifty planes scattered across the grid, permanently in the transparency sort.
 Fix: purge `region_heights` on `world_reset` — and prefer adding water to the
 purge list over adding a sixth hand-maintained entry, see
 [[viewer-audit-world-reset-purge-completeness]].
+
+## Resolved (2026-08-29)
+
+Done as part of [[viewer-audit-world-reset-purge-completeness]], and the way
+that task's note preferred: `WaterState` implements `WorldScoped` rather than
+becoming a sixth entry on a hand-maintained list. Its purge despawns every
+per-region plane and clears `region_heights`; the shared material, plane mesh
+and requested normal-map key are kept (the region-independent water look, which
+`drive_water` refreshes from the destination's environment anyway).
+
+Unit-verified in `water.rs`: after a purge both maps are empty and the spawned
+plane entity is despawned.

@@ -259,7 +259,6 @@ pub(crate) use sl_viewer_notices::script_permission;
 pub(crate) use sl_viewer_search::search;
 pub(crate) use sl_viewer_world_avatar::replay_bundle;
 pub(crate) use sl_viewer_world_avatar::rigged_attachments;
-pub(crate) use sl_viewer_world_view::scene_reset;
 pub(crate) use sl_viewer_world_view::screenshot;
 pub(crate) use sl_viewer_world_view::session;
 // The settings store is its own crate now that it no longer names the
@@ -496,6 +495,7 @@ use crate::world_api::DecodedTextures;
 use crate::world_api::HudState;
 use crate::world_api::ObjectState;
 use crate::world_api::TerrainState;
+use crate::world_api::world_scoped::{WorldResetSystems, WorldScopedAppExt as _};
 use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
@@ -1718,6 +1718,19 @@ fn run_session(
     // draws a HUD. Propagation runs before Bevy decides what each camera sees, so a
     // just-routed attachment is layered in the very frame it is parented.
     .add_plugins(HierarchyPropagatePlugin::<RenderLayers>::new(PostUpdate))
+    // A distant teleport replaced the world: every store that declared itself
+    // `WorldScoped` empties itself in `WorldResetSystems::Purge`, and that has to
+    // happen before the re-centring pass. Each purge drops its subsystem's origin
+    // anchor, so re-centring afterwards simply anchors on the destination instead
+    // of shifting the (already purged) scene by a delta from the region we left.
+    // A crossing or a neighbour teleport keeps the world and never purges at all.
+    .configure_sets(
+        Update,
+        WorldResetSystems::Purge
+            .before(recenter_terrain)
+            .before(recenter_objects)
+            .before(recenter_avatars),
+    )
     .configure_sets(
         PostUpdate,
         PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
@@ -1801,19 +1814,19 @@ fn run_session(
         // The live A/B state of the shape's collision-volume displacement (P34.3), seeded
         // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
         .init_resource::<VolumeMorphGain>()
-        .init_resource::<TerrainState>()
-        .init_resource::<TerrainTextures>()
+        .init_world_scoped::<TerrainState>()
+        .init_world_scoped::<TerrainTextures>()
         .init_resource::<PendingPatchRebuilds>()
         // One shared per-frame mesh-upload lane spent by object spawn / geometry /
         // LOD / terrain apply (replaces their old independent budgets).
         .init_resource::<MeshUploadBudget>()
         .init_resource::<crate::terrain::CurrentTerrainLighting>()
-        .init_resource::<ObjectState>()
+        .init_world_scoped::<ObjectState>()
         // The deferred geometry builds of the objects `ObjectState` tracks, kept
         // beside it rather than inside a tracked object: an in-flight asset fetch
         // or a retained LOD rebuild is machinery, not world state.
-        .init_resource::<PendingObjectEvents>()
-        .init_resource::<RiggedBindSkipLog>()
+        .init_world_scoped::<PendingObjectEvents>()
+        .init_world_scoped::<RiggedBindSkipLog>()
         .init_resource::<PendingDecodedMeshes>()
         .init_resource::<PendingDecodedSculpts>()
         // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
@@ -1830,7 +1843,7 @@ fn run_session(
         // identical face content, so matched copies batch into instanced draws
         // (`viewer-perf-material-intern`).
         .init_resource::<material_cache::MaterialCache>()
-        .init_resource::<AvatarState>()
+        .init_world_scoped::<AvatarState>()
         .init_resource::<avatars::AvatarPlaceholderAssets>()
         .init_resource::<AppearanceApplyBudget>()
         .init_resource::<world_api::MuteModel>()
@@ -1986,19 +1999,12 @@ fn run_session(
                     poll_wearable_assets,
                     assemble_own_bake,
                 ),
-                // Scene re-base / purge on a region change, then fold terrain +
-                // object events. Nested into one tuple to stay within Bevy's
-                // per-tuple system limit.
+                // Scene re-base on a region change, then fold terrain + object
+                // events. (The purge half of a *distant* teleport is each store's
+                // own `WorldScoped` impl, ordered ahead of this by the
+                // `WorldResetSystems::Purge` set above.) Nested into one tuple to
+                // stay within Bevy's per-tuple system limit.
                 (
-                    // A distant teleport purged the session's world; despawn the
-                    // stale scene mirror (objects / avatars / terrain) before the
-                    // recenter systems, so each re-anchors on the destination
-                    // without a spurious shift. A crossing / neighbour teleport
-                    // keeps the world (no-op).
-                    scene_reset::reset_scene_on_world_reset
-                        .before(recenter_terrain)
-                        .before(recenter_objects)
-                        .before(recenter_avatars),
                     // Recenter (origin follows the root region) before folding
                     // terrain events, so patches are placed on the current origin;
                     // then drain a few of the queued seam / whole-region patch

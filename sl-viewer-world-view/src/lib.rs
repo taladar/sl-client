@@ -34,7 +34,6 @@ pub(crate) use sl_viewer_world_api as world_api;
 pub(crate) use sl_viewer_world_avatar::avatars;
 pub(crate) use sl_viewer_world_objects::meshes;
 pub(crate) use sl_viewer_world_objects::objects;
-pub(crate) use sl_viewer_world_scene::terrain;
 pub(crate) use sl_viewer_world_scene::water;
 
 pub mod camera;
@@ -46,7 +45,6 @@ pub mod input_context;
 pub mod media_prim;
 pub mod movement;
 pub mod physics;
-pub mod scene_reset;
 pub mod screenshot;
 pub mod session;
 pub mod sit_camera;

@@ -186,6 +186,16 @@ impl TerrainTextures {
     }
 }
 
+impl crate::world_api::world_scoped::WorldScoped for TerrainTextures {
+    fn purge_world(
+        &mut self,
+        _purge: crate::world_api::world_scoped::WorldPurge,
+        _commands: &mut Commands,
+    ) {
+        self.purge_materials();
+    }
+}
+
 /// Keep the scene origin on the root region: when a border crossing promotes a
 /// neighbour to root, re-centre every terrain patch on the new region and shift
 /// the camera by the same delta, so coordinates stay small while the world stays

@@ -235,6 +235,20 @@ impl RiggedBindSkipLog {
     }
 }
 
+impl crate::world_api::world_scoped::WorldScoped for RiggedBindSkipLog {
+    /// Forget every stall reason. The keys are region-local ids the departed
+    /// region's local-id space owns, and an attachment that never bound never
+    /// reached `RiggedBindSkipLog::bound` to be removed — so without
+    /// this the map only ever grew.
+    fn purge_world(
+        &mut self,
+        _purge: crate::world_api::world_scoped::WorldPurge,
+        _commands: &mut Commands,
+    ) {
+        self.0.clear();
+    }
+}
+
 /// One-word description of a tracked object's geometry-pending state, for the
 /// wearer-walk terminus diagnostic (`log_attachment_bind_enabled`).
 const fn pending_kind(pending: Option<&PendingGeometry>) -> &'static str {

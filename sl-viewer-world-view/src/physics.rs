@@ -88,6 +88,7 @@ use crate::world_api::ObjectState;
 
 use crate::world_api::AvatarState;
 use crate::world_api::TerrainState;
+use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
 use crate::world_api::{
     AvatarInterp, AvatarMotion, MotionState, PhysicalObject, ViewerCamera, bevy_rotation_of,
 };
@@ -114,6 +115,20 @@ pub(crate) struct RegionTimeDilation {
     per_region: HashMap<RegionHandle, f32>,
 }
 
+impl WorldScoped for RegionTimeDilation {
+    /// Forget every region's dilation.
+    ///
+    /// The map doubles as the viewer's "which regions are live" answer
+    /// ([`neighbours_known`]), so leaving the departed grid's entries in it made
+    /// [`clamp_prediction`] treat long-gone neighbours as present and stay on the
+    /// `crossing: true` branch instead of clipping a mover to the void edge. The
+    /// destination re-fills it from its first `RegionData`, and until then "no
+    /// neighbour known" is the conservative answer.
+    fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
+        self.per_region.clear();
+    }
+}
+
 /// The viewer's physics plugin: dead-reckoning of kinematic movers + building
 /// collision geometry for the custom raycast index. No physics *engine* — see
 /// the module docs; the viewer simulates nothing, so there is no solver, no
@@ -123,9 +138,9 @@ pub struct PhysicsPlugin;
 
 impl Plugin for PhysicsPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RegionTimeDilation>()
+        app.init_world_scoped::<RegionTimeDilation>()
             .init_resource::<CircuitLiveness>()
-            .init_resource::<ObjectPhysicsShapes>()
+            .init_world_scoped::<ObjectPhysicsShapes>()
             .add_systems(
                 Update,
                 (
@@ -1388,6 +1403,19 @@ pub(crate) struct ObjectPhysicsShapes {
     requested: HashSet<ObjectKey>,
 }
 
+impl WorldScoped for ObjectPhysicsShapes {
+    /// Forget every learned shape and every "already asked" mark.
+    ///
+    /// Both are keyed by objects only the departed region streams; neither map
+    /// had a removal of any kind, so they grew for the whole session. The
+    /// destination's physical objects re-request on their first
+    /// [`PhysicalObject`] insertion, exactly as they did on login.
+    fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
+        self.data.clear();
+        self.requested.clear();
+    }
+}
+
 /// Request the `GetObjectPhysicsData` capability data for every newly-flagged
 /// physical object exactly once. The grid only *pushes* `ObjectPhysicsProperties`
 /// when a prim's physics material changes (OpenSim `SceneGraph.UpdateExtraPhysics`),
@@ -2446,15 +2474,20 @@ mod tests {
         shape_wants_geometry, smoothing_alpha, submesh_trimesh, to_parry_points,
     };
     use crate::objects::ObjectCategory;
-    use crate::physics::RegionTimeDilation;
+    use crate::physics::{ObjectPhysicsShapes, RegionTimeDilation};
+    use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
+    use bevy::ecs::world::CommandQueue;
+    use bevy::ecs::world::World;
     use bevy::math::{Quat, Vec3};
     use bevy::mesh::Indices;
+    use bevy::prelude::Commands;
     use bevy::transform::components::Transform;
     use parry3d::math::Pose as ParryPose;
     use parry3d::shape::SharedShape;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
-        MeshPhysics, PhysicsConvex, PhysicsShapeType, RegionHandle, Rotation, Submesh, Vector,
+        MeshPhysics, ObjectKey, PhysicsConvex, PhysicsShapeType, RegionHandle, Rotation, Submesh,
+        Vector,
     };
 
     /// Assert two `f32` are equal within a tight tolerance (the workspace lints
@@ -2673,6 +2706,55 @@ mod tests {
             neighbours_known(&dilations, home),
             [false, true, false, false]
         );
+    }
+
+    /// A distant teleport empties the dilation map, so a long-departed neighbour
+    /// stops being reported as live. Leaving it in kept `clamp_prediction` on
+    /// its `crossing: true` branch instead of clipping a mover to the void edge.
+    #[test]
+    fn a_world_reset_forgets_every_region_dilation() {
+        let width = 256_u32;
+        let home = RegionHandle::from_global(1000 * width, 1000 * width);
+        let east = RegionHandle::from_global(1001 * width, 1000 * width);
+        let mut dilations = RegionTimeDilation::default();
+        dilations.per_region.insert(home, 1.0);
+        dilations.per_region.insert(east, 1.0);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            dilations.purge_world(WorldPurge::default(), &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert_eq!(
+            neighbours_known(&dilations, home),
+            [false, false, false, false],
+            "a purged map knows no neighbours, which is the conservative answer"
+        );
+    }
+
+    /// The physics-shape maps had no removal of any kind, so every physical
+    /// object of every region ever visited accumulated — including the
+    /// "already asked" marks, which then suppressed the destination's requests
+    /// had an id ever repeated.
+    #[test]
+    fn a_world_reset_forgets_learned_physics_shapes() {
+        let key = ObjectKey::from(sl_client_bevy::Uuid::from_u128(7));
+        let mut shapes = ObjectPhysicsShapes::default();
+        shapes.requested.insert(key);
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            shapes.purge_world(WorldPurge::default(), &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert!(shapes.data.is_empty());
+        assert!(shapes.requested.is_empty());
     }
 
     /// Convex hull and prim shapes need the object geometry to build a collider;

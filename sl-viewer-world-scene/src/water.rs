@@ -59,6 +59,7 @@ use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::WaterSurface;
+use crate::world_api::world_scoped::WorldScopedAppExt as _;
 use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
 
 /// The water surface's own scheduling: the endless ocean and the per-region
@@ -72,7 +73,10 @@ pub struct WaterPlugin;
 
 impl Plugin for WaterPlugin {
     fn build(&self, app: &mut App) {
+        // `WaterState` is inserted by `setup_water` (it needs the shared material
+        // and mesh), so only its purge is registered here.
         app.init_resource::<WaterLevel>()
+            .register_world_scoped::<WaterState>()
             .add_systems(Startup, setup_water)
             .add_systems(
                 Update,
@@ -181,6 +185,31 @@ impl WaterState {
     /// ([`crate::water_exclusion`]) can bind its screen-space mask into it.
     pub(crate) const fn material(&self) -> &Handle<WaterMaterial> {
         &self.material
+    }
+}
+
+impl crate::world_api::world_scoped::WorldScoped for WaterState {
+    /// Despawn every per-region plane and forget every learned water height.
+    ///
+    /// Both are keyed by regions the distant teleport just disconnected. The
+    /// heights map used to be insert-only, so after a few hops
+    /// `reconcile_region_planes` measured every region *ever visited* against
+    /// the new agent region's sea level and spawned a 256 m alpha plane for each
+    /// one that differed — scattered across the grid, permanently in the
+    /// transparency sort, and re-collected into a `Vec` every frame.
+    ///
+    /// The shared material, the plane mesh and the requested normal-map key are
+    /// kept: they are the region-independent water *look*, which
+    /// `drive_water` refreshes from the destination's environment anyway.
+    fn purge_world(
+        &mut self,
+        _purge: crate::world_api::world_scoped::WorldPurge,
+        commands: &mut Commands,
+    ) {
+        for (_region, entity) in self.region_planes.drain() {
+            commands.entity(entity).try_despawn();
+        }
+        self.region_heights.clear();
     }
 }
 
@@ -638,4 +667,60 @@ pub(crate) fn flat_normal_image() -> Image {
         TextureFormat::Rgba8Unorm,
         RenderAssetUsages::default(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{WaterRegionPlane, WaterState};
+    use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
+    use bevy::ecs::world::CommandQueue;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_client_bevy::RegionHandle;
+    use std::collections::HashMap;
+
+    /// A region handle at the given grid coordinates (in region units).
+    fn region(x: u32, y: u32) -> RegionHandle {
+        RegionHandle::from_global(x.saturating_mul(256), y.saturating_mul(256))
+    }
+
+    /// A distant teleport must leave no learned height and no spawned plane
+    /// behind: the heights map is what `reconcile_region_planes` measures the
+    /// destination's sea level against, so a surviving entry from a grid we are
+    /// no longer connected to spawns a 256 m alpha plane out in the void.
+    #[test]
+    fn a_world_reset_drops_every_region_plane_and_height() {
+        let mut world = World::new();
+        let far = world
+            .spawn(WaterRegionPlane {
+                region: region(1000, 1000),
+                height: 42.0,
+            })
+            .id();
+
+        let mut state = WaterState {
+            material: Handle::default(),
+            region_mesh: Handle::default(),
+            region_planes: HashMap::from([(region(1000, 1000), far)]),
+            region_heights: HashMap::from([(region(1000, 1000), 42.0), (region(1001, 1000), 20.0)]),
+            normal_key: None,
+        };
+
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            state.purge_world(WorldPurge::default(), &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert!(state.region_planes.is_empty());
+        assert!(state.region_heights.is_empty());
+        assert!(
+            world.get_entity(far).is_err(),
+            "the departed region's water plane must be despawned"
+        );
+        // The region-independent water look survives — the destination's
+        // environment refines it rather than rebuilding it.
+        assert_eq!(state.normal_key, None);
+    }
 }

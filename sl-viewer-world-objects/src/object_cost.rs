@@ -38,6 +38,9 @@ use sl_client_bevy::{
 };
 
 use crate::world_api::ObjectState;
+use crate::world_api::world_scoped::{
+    WorldPurge, WorldResetFrame, WorldResetSystems, WorldScoped, WorldScopedAppExt as _,
+};
 
 /// The state of a linkset's land impact in the shared model.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -172,6 +175,19 @@ impl CostFingerprint {
     }
 }
 
+impl WorldScoped for ObjectCostModel {
+    fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
+        // Costs are keyed by objects the departed region streamed; the
+        // destination's own linksets are re-costed on demand.
+        //
+        // `cap_available` is deliberately kept: it is the *region's* answer, and
+        // the destination's seed caps overwrite it a moment later. Clearing it
+        // would make every land-impact line read `CapUnavailable` in between,
+        // which is a wrong answer rather than a missing one.
+        self.invalidate_all();
+    }
+}
+
 /// Invalidate cached costs whose linkset's land impact an edit changed: a prim
 /// scale / shape change drops just that prim's linkset-root cost, while a relink
 /// (a changed parent) clears the cache (it can re-cost several linksets). Runs
@@ -182,8 +198,16 @@ fn invalidate_stale_costs(
     mut events: MessageReader<SlEvent>,
     state: Res<ObjectState>,
     mut model: ResMut<ObjectCostModel>,
+    reset: Res<WorldResetFrame>,
     mut seen: Local<HashMap<ObjectKey, CostFingerprint>>,
 ) {
+    // The fingerprints are keyed by objects only the departed region streams, so
+    // a world reset drops them with the model itself. This one is a `Local`, so
+    // it cannot be a registered [`WorldScoped`] store and is cleared here (which
+    // is why the system is ordered after the reset is detected).
+    if reset.is_reset() {
+        seen.clear();
+    }
     for event in events.read() {
         let object = match &event.0 {
             SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object) => object,
@@ -216,12 +240,14 @@ pub struct ObjectCostPlugin;
 
 impl Plugin for ObjectCostPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<ObjectCostModel>().add_systems(
+        app.init_world_scoped::<ObjectCostModel>().add_systems(
             Update,
             (
                 ingest_capabilities,
                 ingest_object_costs,
-                invalidate_stale_costs.after(crate::objects::update_objects),
+                invalidate_stale_costs
+                    .after(crate::objects::update_objects)
+                    .after(WorldResetSystems::Detect),
             ),
         );
     }
@@ -229,7 +255,9 @@ impl Plugin for ObjectCostPlugin {
 
 #[cfg(test)]
 mod tests {
-    use super::{LandImpact, ObjectCostModel};
+    use super::{LandImpact, ObjectCostModel, WorldPurge, WorldScoped as _};
+    use bevy::ecs::world::{CommandQueue, World};
+    use bevy::prelude::Commands;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{ObjectKey, Uuid};
 
@@ -258,5 +286,32 @@ mod tests {
         model.pending.remove(&key(1));
         model.known.insert(key(1), 7.0);
         assert_eq!(model.land_impact(key(1)), LandImpact::Known(7.0));
+    }
+
+    /// A distant teleport drops the costs — they are keyed by objects the
+    /// departed region streamed — but keeps `cap_available`, which is the
+    /// *region's* answer and is overwritten by the destination's seed caps a
+    /// moment later. Clearing it would make every land-impact line read
+    /// `CapUnavailable` in between: a wrong answer where `NotRequested` is the
+    /// right one.
+    #[test]
+    fn a_world_reset_drops_costs_but_keeps_the_cap() {
+        let mut model = ObjectCostModel {
+            cap_available: true,
+            ..ObjectCostModel::default()
+        };
+        model.known.insert(key(1), 7.0);
+        model.pending.insert(key(2));
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            model.purge_world(WorldPurge::default(), &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert_eq!(model.land_impact(key(1)), LandImpact::NotRequested);
+        assert_eq!(model.land_impact(key(2)), LandImpact::NotRequested);
     }
 }

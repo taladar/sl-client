@@ -64,6 +64,7 @@ use crate::flexi::{FLEXI_LOD, FlexiSimState, apply_flexi, flexi_attributes, flex
 use crate::geometry_cache::{GeometryCache, GeometryKey, ScaleMm, scale_mm};
 use crate::world_api::DecodedTextures;
 use crate::world_api::world_has_keyboard;
+use crate::world_api::world_scoped::{WorldPurge, WorldScoped};
 use crate::world_api::{
     AVATAR_BOOST_PRIORITY, INITIAL_TREE_TIER, MAX_PARENT_WALK, ObjectLight, ObjectParticleSystem,
     ObjectPickSummary, ObjectReflectionProbe, ObjectState, PhysicalObject, ShapeFingerprint,
@@ -904,6 +905,15 @@ impl PendingObjectEvents {
         self.queue.clear();
         self.payloads.clear();
         self.queued_removes.clear();
+    }
+}
+
+impl WorldScoped for PendingObjectEvents {
+    fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
+        // The backlog's deferred *builds* are components on the entities
+        // `ObjectState`'s own purge despawns, so they go with them; this drops
+        // the queued events themselves.
+        self.clear();
     }
 }
 

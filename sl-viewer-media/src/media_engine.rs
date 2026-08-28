@@ -149,7 +149,15 @@ pub struct MediaSlot {
     /// view and nothing watches `AssetEvent<Image>` for materials (see
     /// `textures::PrimTextures::materials`), so each new frame marks
     /// these changed.
-    pub touch_materials: Vec<Handle<FaceMaterial>>,
+    ///
+    /// Held as **ids**, not handles, and that is load-bearing: a face is
+    /// re-materialised on every rebuild and resize, so the list only stays
+    /// bounded if its pruners can *see* that an entry's material is dead. A
+    /// strong `Handle` here would keep it alive and the prune would never drop
+    /// anything — every material the surface ever wore would be retained, and
+    /// touched, for the rest of the session. Pruned where the entries are added
+    /// (`media_prim::apply_media_material`) and again on every resize below.
+    pub touch_materials: Vec<AssetId<FaceMaterial>>,
     /// The last frame generation mirrored into [`image`](Self::image).
     seen_frame: u64,
     /// Whether a close was requested; the slot is pruned once the engine
@@ -475,9 +483,13 @@ fn pump_media_engine(
             // A new GPU texture: rebuild the bind group of every material
             // sampling this image (see MediaSlot::touch_materials). With no
             // material store (a UI-only host), there are no faces to touch.
+            // `get_mut` *is* the touch, so the prune and the refresh are the
+            // same pass: a material still alive is marked changed and kept, one
+            // whose last strong handle (the face's `MeshMaterial3d`) is gone is
+            // dropped from the list.
             if let Some(materials) = materials.as_mut() {
                 slot.touch_materials
-                    .retain(|handle| materials.get_mut(handle.id()).is_some());
+                    .retain(|material| materials.get_mut(*material).is_some());
             }
             debug!(
                 "media surface resized to {}x{} ({:?}, {} material(s) touched)",

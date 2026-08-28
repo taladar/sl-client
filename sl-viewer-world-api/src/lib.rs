@@ -16,6 +16,8 @@
 //! a single upward reference added here would put the whole feature tier back
 //! underneath the world.
 
+pub mod world_scoped;
+
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -4268,6 +4270,12 @@ impl AvatarState {
     }
 }
 
+impl world_scoped::WorldScoped for AvatarState {
+    fn purge_world(&mut self, purge: world_scoped::WorldPurge, commands: &mut Commands) {
+        self.purge(purge.own_agent, commands);
+    }
+}
+
 /// Despawn both entities of an avatar (its anchor — sphere or body root, whose
 /// sub-hierarchy goes with it — and its name tag).
 pub fn despawn_avatar(entities: AvatarEntities, commands: &mut Commands) {
@@ -4537,6 +4545,12 @@ impl TerrainState {
         // avatar ground floor keeps a stable answer instead of dropping to `None`.
         land_height_in(&self.raw_patches, region, x, y)
             .or_else(|| land_height_in(&self.land_cache, region, x, y))
+    }
+}
+
+impl world_scoped::WorldScoped for TerrainState {
+    fn purge_world(&mut self, _purge: world_scoped::WorldPurge, commands: &mut Commands) {
+        self.purge(commands);
     }
 }
 
@@ -5466,6 +5480,12 @@ impl ObjectState {
             is_root: tracked.is_root,
             texture_animated: tracked.texture_animation.is_some(),
         })
+    }
+}
+
+impl world_scoped::WorldScoped for ObjectState {
+    fn purge_world(&mut self, _purge: world_scoped::WorldPurge, commands: &mut Commands) {
+        self.purge(commands);
     }
 }
 

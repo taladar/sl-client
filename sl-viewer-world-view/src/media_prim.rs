@@ -45,6 +45,7 @@ use crate::world_api::InputContext;
 use crate::world_api::ObjectState;
 use crate::world_api::pointer_over_blocking_ui;
 use crate::world_api::surface_info_from_hit;
+use crate::world_api::world_scoped::{WorldPurge, WorldScoped, WorldScopedAppExt as _};
 use crate::world_api::{
     FLAGS_OBJECT_YOU_OWNER, MediaFocus, MediaTarget, MediaWorldClick, ViewerCamera,
 };
@@ -76,6 +77,21 @@ pub struct MediaData {
     /// The media version string last *requested* per object, so one version
     /// is fetched once.
     requested: HashMap<ObjectKey, String>,
+}
+
+impl WorldScoped for MediaData {
+    /// Forget every object's media data and the versions asked for.
+    ///
+    /// Both maps are keyed by objects the departed region streamed and neither
+    /// had a removal, so `drive_media_surfaces` re-scanned every media face of
+    /// every object seen all session, twice a second, forever. Dropping them
+    /// also retires the live surfaces: with no candidates left, the very next
+    /// drive finds every entry of [`MediaPrimState`] stale and closes it
+    /// (the face entities it was painting are gone with the object purge).
+    fn purge_world(&mut self, _purge: WorldPurge, _commands: &mut Commands) {
+        self.objects.clear();
+        self.requested.clear();
+    }
 }
 
 impl MediaData {
@@ -163,7 +179,7 @@ fn register_media_settings(settings: Option<ResMut<crate::settings::ViewerSettin
 impl Plugin for MediaPrimPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, register_media_settings)
-            .init_resource::<MediaData>()
+            .init_world_scoped::<MediaData>()
             .init_resource::<MediaFocus>()
             .init_resource::<MediaPrimState>()
             .add_message::<MediaWorldClick>()
@@ -690,7 +706,13 @@ fn apply_media_material(
         uv_transform,
         ..default()
     }));
-    slot.touch_materials.push(material.clone());
+    // Drop the ids of materials this face has already stopped wearing (the
+    // engine's own prune only runs on a surface resize, which need never
+    // happen), then record the new one. `get`, not `get_mut`: a prune must not
+    // mark a live material changed and re-prepare it for nothing.
+    slot.touch_materials
+        .retain(|worn| materials.get(*worn).is_some());
+    slot.touch_materials.push(material.id());
     let Ok(mut entity_commands) = commands.get_entity(entity) else {
         return;
     };
@@ -1175,10 +1197,16 @@ fn enforce_media_whitelists(
 
 #[cfg(test)]
 mod tests {
+    use bevy::ecs::world::{CommandQueue, World};
     use bevy::math::{UVec2, Vec2};
+    use bevy::prelude::Commands;
     use pretty_assertions::assert_eq;
+    use sl_client_bevy::{ObjectKey, Uuid};
 
-    use super::{media_permission_allows, media_pixel_from_uv};
+    use super::{
+        MediaData, ObjectMediaData, WorldPurge, WorldScoped as _, media_permission_allows,
+        media_pixel_from_uv,
+    };
 
     #[test]
     fn permissions_gate_anyone_and_owner() {
@@ -1204,5 +1232,34 @@ mod tests {
         assert_eq!(media_pixel_from_uv(Vec2::new(1.25, 0.5), size), (250, 250));
         // Negative wraps upward: uv.x = -0.25 samples x = 0.75.
         assert_eq!(media_pixel_from_uv(Vec2::new(-0.25, 0.5), size), (750, 250));
+    }
+
+    /// Both maps were insert-only, so `drive_media_surfaces` kept re-scanning
+    /// the media faces of every object seen all session. A distant teleport
+    /// drops them: their objects are gone, and the live surfaces they were the
+    /// wanted-set input for retire on the next drive.
+    #[test]
+    fn a_world_reset_forgets_every_object_s_media() {
+        let object = ObjectKey::from(Uuid::from_u128(3));
+        let mut data = MediaData::default();
+        data.objects.insert(
+            object,
+            ObjectMediaData {
+                version: "1".to_owned(),
+                faces: Vec::new(),
+            },
+        );
+        data.requested.insert(object, "1".to_owned());
+
+        let mut world = World::new();
+        let mut queue = CommandQueue::default();
+        {
+            let mut commands = Commands::new(&mut queue, &world);
+            data.purge_world(WorldPurge::default(), &mut commands);
+        }
+        queue.apply(&mut world);
+
+        assert!(data.objects.is_empty());
+        assert!(data.requested.is_empty());
     }
 }

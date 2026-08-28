@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 70 |
-| done | 904 |
+| bugs | 68 |
+| done | 906 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (70)
+## bugs (68)
 
 ### viewer
 
@@ -1260,13 +1260,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   A negative underwater fog density NaNs the screen
 - [`viewer-audit-virtual-list-rebinding`](bugs/viewer-audit-virtual-list-rebinding.md)
   — The recycling virtual list re-binds every pooled row on a one-row scroll
-- [`viewer-audit-water-state-purge`](bugs/viewer-audit-water-state-purge.md) —
-  WaterState is not purged on a teleport, and leaks spawned water planes
 - [`viewer-audit-world-map-clipboard`](bugs/viewer-audit-world-map-clipboard.md)
   — The world map keeps a second live arboard handle
-- [`viewer-audit-world-reset-purge-completeness`](bugs/viewer-audit-world-reset-purge-completeness.md)
-  — The world-reset purge is a hand-maintained list of five, and several stores
-  are missing
 - [`viewer-avatar-face-bone-shape-brow-spike`](bugs/viewer-avatar-face-bone-shape-brow-spike.md)
   — Mesh-head brow spikes forward from face-bone shape deformation
 - [`viewer-clouds-horizon-waterline-contact`](bugs/viewer-clouds-horizon-waterline-contact.md)
@@ -1328,7 +1323,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (904)
+## done (906)
 
 ### protocol
 
@@ -1605,6 +1600,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   sky
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
+- [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
+  WaterState is not purged on a teleport, and leaks spawned water planes
+- [`viewer-audit-world-reset-purge-completeness`](done/viewer-audit-world-reset-purge-completeness.md)
+  — The world-reset purge is a hand-maintained list of five, and several stores
+  are missing
 - [`viewer-auto-reject-offers`](done/viewer-auto-reject-offers.md) —
   Auto-decline teleport/friendship/group-invite modes (blocked by
   `viewer-dialog-offers-invites` (done))

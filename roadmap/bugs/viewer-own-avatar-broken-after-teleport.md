@@ -49,6 +49,7 @@ match it.
 **Isolate:** reproduce on committed `master` (no ground-probe changes at
 all). If it repros there — almost certainly will, given the symptom — it is
 a pre-existing teleport/appearance bug. Machinery to check: the scene purge
-on `world_reset` (`scene_reset.rs`), the own-avatar re-stream after handover
+on `world_reset` (`sl-viewer-world-api/src/world_scoped.rs` and the
+`WorldScoped` impls it collects), the own-avatar re-stream after handover
 ([[viewer-perf-avatar-ground-probe]] is unrelated), and the destination
 sim's re-request of the bake/appearance and attachments (COF).
