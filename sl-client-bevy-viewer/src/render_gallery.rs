@@ -70,7 +70,7 @@ use sl_client_bevy::{
 use tracing::{error, info};
 
 use crate::face_material::SlFaceMaterialPlugin;
-use crate::probes::ReflectionProbePlugin;
+use crate::probes::{ReflectionProbePlugin, probe_ambient_scale};
 use crate::render_scene::{
     DeclaredBounds, RenderScene, SCENES, SamplerMayClamp, SceneAssets, SceneCx, SceneLighting,
     SceneRuntimePlugin, SymmetricAbout, UvsInUnitSquare, WorldScaleGeometry, scene_root,
@@ -146,6 +146,13 @@ const MAX_PITCH: f32 = 1.5;
 
 /// The stage rig's ambient brightness, in nits — enough that an unlit face is
 /// still a shape rather than a silhouette.
+///
+/// What reaches [`GlobalAmbientLight`] is this times
+/// [`probe_ambient_scale`](sl_viewer_world_scene::probes::probe_ambient_scale),
+/// exactly as the viewer's sky scales the ambient *it* asks for: the gallery runs
+/// the viewer's real reflection probes, so a flat fill added on top of their
+/// image-based ambient would be the double-count the probe calibration exists to
+/// avoid. At the default scale of `0.0` the probes are the stage's only ambient.
 const STAGE_AMBIENT: f32 = 200.0;
 
 /// The ambient a [`SceneLighting::Own`] scene gets: nearly none.
@@ -488,13 +495,10 @@ fn setup_stage(mut commands: Commands) {
         StageLight,
         Name::new("gallery-fill-light"),
     ));
-    // The resource, not the per-camera component: `GlobalAmbientLight` is what
-    // the viewer's own sky drives (`crate::sky`), so the gallery lights a scene
-    // through the same knob.
-    commands.insert_resource(GlobalAmbientLight {
-        brightness: STAGE_AMBIENT,
-        ..default()
-    });
+    // The ambient is `hold_stage_ambient`'s alone — it is per-scene (a
+    // `SceneLighting::Own` scene wants almost none) and it is split with the
+    // probes, so a second writer here would only be a value with a shorter life
+    // than the first frame.
 }
 
 /// Spawn the chrome: the scene's id, its summary, and the keys.
@@ -719,28 +723,38 @@ fn drive_keys(
     );
 }
 
-/// Re-set the stage ambient every frame.
+/// Set the stage ambient for the selected scene — the resource, not the per-camera
+/// component: [`GlobalAmbientLight`] is what the viewer's own sky drives
+/// (`sl_viewer_world_scene::sky`), so the gallery lights a scene through the same
+/// knob, and splits it with the probes by the same rule ([`STAGE_AMBIENT`]).
 ///
-/// Necessary because of how the probes and the ambient interact, and the
-/// interaction is not obvious. `crate::probes`'s `suppress_global_ambient` runs
-/// in `PostUpdate` and *multiplies* `GlobalAmbientLight` down each frame, so the
-/// probe's image-based lighting is not stacked on a second flat ambient term. In
-/// the viewer that is safe: the sky system re-sets the ambient every frame in
-/// `Update`, so the multiply is a per-frame attenuation of a per-frame-set value.
+/// A scene that lights itself gets [`OWN_LIGHTING_AMBIENT`] rather than the stage's
+/// fill, for the same reason `rebuild` stands the stage rig down: a projector's cone
+/// is a *contrast*, and 200 nits of fill erases it.
 ///
-/// The gallery has no sky. Without this the multiply would compound frame after
-/// frame and the ambient would decay to nothing — a scene that dims to black over
-/// a few seconds for no visible reason. So the gallery plays the sky's part: it
-/// sets the value the attenuation is applied to.
+/// Compare-then-write, not write-every-frame. `GlobalAmbientLight` is a resource
+/// every view's lighting uniforms are built from, so rewriting it with an identical
+/// value each frame marks it dirty each frame for nothing — the same shape the
+/// viewer's own sky uses on the same resource.
+///
+/// It used to write unconditionally, and had to: `probes` once *multiplied* the
+/// ambient down in `PostUpdate`, which in the viewer attenuated a value the sky
+/// re-set every `Update` but in the sky-less gallery would have compounded frame
+/// after frame until the stage went black. The probes' share is a factor of the
+/// value asked for now, on both sides, so holding it is enough.
 fn hold_stage_ambient(cell: Res<GalleryCell>, mut ambient: ResMut<GlobalAmbientLight>) {
     let own = cell
         .scene()
         .is_some_and(|scene| scene.lighting == SceneLighting::Own);
-    ambient.brightness = if own {
+    let stage = if own {
         OWN_LIGHTING_AMBIENT
     } else {
         STAGE_AMBIENT
     };
+    let brightness = stage * probe_ambient_scale();
+    if ambient.brightness.to_bits() != brightness.to_bits() {
+        ambient.brightness = brightness;
+    }
 }
 
 /// Orbit the camera: arrows swing it around the scene, `+` / `-` dolly.

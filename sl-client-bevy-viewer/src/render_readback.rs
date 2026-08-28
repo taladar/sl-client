@@ -202,6 +202,16 @@ fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
         ))
         .add_plugins(SceneRuntimePlugin)
         .insert_resource(DirectionalLightShadowMap::default())
+        // No flat ambient, stated rather than inherited from Bevy's default. Every
+        // assertion here is about a *reflection*, and the probes supplying the
+        // ambient is precisely the viewer's lighting model (the sky scales the
+        // ambient it asks for by `probes::probe_ambient_scale`, `0.0` by default).
+        // Bevy's default 80 nits of fill would wash the very contrast between a
+        // mirror's four coloured neighbours that decides which side each landed on.
+        .insert_resource(GlobalAmbientLight {
+            brightness: 0.0,
+            ..default()
+        })
         .init_resource::<Captured>();
 
     let captured = app.world().resource::<Captured>().clone();

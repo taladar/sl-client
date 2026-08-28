@@ -1457,9 +1457,11 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
     active on desktop — the singular `diffuse_environment_map` is NOT in scope,
     that was the first WGSL error) with a local `quat_rotate(view_rotation,dir)`
     - `dir.z=-dir.z`. Sky stays the source (not probe-lit). To avoid
-  double-counting a flat ambient on the probe's diffuse IBL,
-  `suppress_global_ambient` drops the sky-set `GlobalAmbientLight` in
-  PostUpdate.
+  double-counting a flat ambient on the probe's diffuse IBL, `drive_sky`
+  scales the `GlobalAmbientLight` it writes by `probe_ambient_scale`
+  (default `0.0`, i.e. dropped). It is a factor of the absolute value the
+  sky asks for, never an attenuation applied to the resource afterwards —
+  that shape decayed geometrically and defeated the sky's own guard.
   - **RESOLVED by P33.3** (this entry's "no visible change between
     `SL_VIEWER_PROBE_INTENSITY=400` and `4000`" was a **bad measurement**, not a
     Bevy bug — `intensity_for_view` does track

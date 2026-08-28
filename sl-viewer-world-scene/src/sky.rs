@@ -88,7 +88,17 @@ pub struct SkyPlugin;
 
 impl Plugin for SkyPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        // The ambient before any sky resolves, stated rather than left at Bevy's
+        // default 80 nits: this crate's lighting model is that the reflection probe
+        // supplies the ambient (`probes::probe_ambient_scale`), so a world with no
+        // sky yet — between login and the first `EnvironmentSettings`, or in a
+        // region whose environment never arrives — must not flash a flat fill the
+        // sky would then take away. `drive_sky` owns the value from its first frame.
+        app.insert_resource(GlobalAmbientLight {
+            brightness: 0.0,
+            ..default()
+        })
+        .add_systems(
             Startup,
             (setup_sky, setup_sun_moon_discs, setup_clouds, setup_stars),
         )
@@ -134,6 +144,25 @@ pub(crate) const SCENE_LIGHT_ILLUMINANCE: f32 = 10_000.0;
 /// Maps the sky's ambient colour luminance to the Bevy ambient-light brightness
 /// (lux). The reference default ambient (`0.25` grey) lands at a soft fill.
 const AMBIENT_BRIGHTNESS_SCALE: f32 = 400.0;
+
+/// The [`GlobalAmbientLight`] a sky's total ambient asks for: its luminance sets the
+/// fill strength, its (normalised) hue the tint, and `probe_scale`
+/// ([`crate::probes::probe_ambient_scale`]) says how much of that flat fill survives
+/// once the reflection probe is supplying image-based ambient of its own.
+///
+/// The probe suppression belongs *here*, in the absolute value the sky writes, and
+/// not in a later system that multiplies the resource down: an attenuation applied
+/// to whatever the resource holds compounds every frame the sky does not rewrite it
+/// (`drive_sky` early-returns whenever no sky frame resolves), and it also makes the
+/// caller's write-on-change guard compare the sky's value against a scaled one, so
+/// the guard misses and the resource is dirty every frame. Neither showed while the
+/// scale sat at its idempotent `0.0` default.
+fn sky_ambient_light(ambient: [f32; 3], probe_scale: f32) -> (Color, f32) {
+    let luminance = 0.2126 * ambient[0] + 0.7152 * ambient[1] + 0.0722 * ambient[2];
+    let peak = ambient[0].max(ambient[1]).max(ambient[2]).max(1.0e-4);
+    let color = Color::linear_rgb(ambient[0] / peak, ambient[1] / peak, ambient[2] / peak);
+    (color, luminance * AMBIENT_BRIGHTNESS_SCALE * probe_scale)
+}
 
 /// Read the `SL_VIEWER_SHADOW_CASCADES` experiment env: how many sun shadow
 /// cascades to build (clamped `1..=4`; `None` when unset, so the stored
@@ -689,6 +718,13 @@ pub fn sun_shadows_enabled() -> bool {
 /// it writes once per day-cycle sampling step ([`DAY_POSITION_STEPS`]) rather
 /// than once per frame, because every one of those guards is float equality on a
 /// value derived from the sampled day position.
+///
+/// That holds for the ambient because the write is the *whole* value the frame
+/// asks for, reflection-probe suppression included ([`sky_ambient_light`]). A
+/// second system scaling [`GlobalAmbientLight`] afterwards would break the guard
+/// here — the sky would compare its own value against a scaled one and rewrite
+/// every frame — as well as decaying the resource whenever this system
+/// early-returns.
 #[expect(
     clippy::type_complexity,
     reason = "one query over both directional lights (shadow sun + shadow-free mirror)"
@@ -789,13 +825,10 @@ pub(crate) fn drive_sky(
         }
     }
 
-    // Ambient from the sky's total ambient: its luminance sets the fill strength,
-    // its (normalised) hue the tint.
-    let amb = resolved.ambient;
-    let luminance = 0.2126 * amb[0] + 0.7152 * amb[1] + 0.0722 * amb[2];
-    let peak = amb[0].max(amb[1]).max(amb[2]).max(1.0e-4);
-    let ambient_color = Color::linear_rgb(amb[0] / peak, amb[1] / peak, amb[2] / peak);
-    let ambient_brightness = luminance * AMBIENT_BRIGHTNESS_SCALE;
+    // Ambient from the sky's total ambient, already carrying the reflection probe's
+    // share of it — see `sky_ambient_light`.
+    let (ambient_color, ambient_brightness) =
+        sky_ambient_light(resolved.ambient, crate::probes::probe_ambient_scale());
     if ambient.color != ambient_color
         || ambient.brightness.to_bits() != ambient_brightness.to_bits()
     {
@@ -2095,7 +2128,8 @@ pub(crate) fn placeholder_image() -> Image {
 #[cfg(test)]
 mod tests {
     use super::{
-        DAY_POSITION_STEPS, SHADOW_MAP_SIZE, quantised_day_position, snap_shadow_direction,
+        AMBIENT_BRIGHTNESS_SCALE, DAY_POSITION_STEPS, SHADOW_MAP_SIZE, quantised_day_position,
+        sky_ambient_light, snap_shadow_direction,
     };
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
@@ -2264,6 +2298,84 @@ mod tests {
         assert!(
             (snapped - dir).length() < 2.0 * step,
             "snapped {snapped:?} drifted too far from {dir:?}"
+        );
+    }
+
+    /// A daylight sky's total ambient — a warm off-white, the shape
+    /// `resolve_sky` hands `drive_sky`.
+    const DAYLIGHT_AMBIENT: [f32; 3] = [0.32, 0.30, 0.25];
+
+    /// The probe scale is the share of the sky's *own* ambient that survives:
+    /// `0.0` drops the flat fill entirely (the probe is then the single ambient
+    /// source), `1.0` keeps all of it, and a half keeps exactly half.
+    #[test]
+    fn ambient_brightness_is_the_probes_share_of_the_sky_value() {
+        let (_, full) = sky_ambient_light(DAYLIGHT_AMBIENT, 1.0);
+        let (_, half) = sky_ambient_light(DAYLIGHT_AMBIENT, 0.5);
+        let (_, none) = sky_ambient_light(DAYLIGHT_AMBIENT, 0.0);
+        assert!(full > 0.0, "a lit sky should ask for some ambient");
+        assert!(
+            (half - 0.5 * full).abs() < f32::EPSILON * AMBIENT_BRIGHTNESS_SCALE,
+            "half the share should be half the brightness, got {half} of {full}"
+        );
+        assert_eq!(none.to_bits(), 0.0_f32.to_bits());
+    }
+
+    /// The regression: the share is a factor of the value the frame asks for, so
+    /// a frame's ambient is the **same** however many frames have gone before it.
+    ///
+    /// The multiplicative `PostUpdate` post-pass this replaced computed
+    /// `brightness * scale` against the resource, so a steady sky decayed as
+    /// `scale^frames` — 120 frames at `0.5` is a factor of `1e-37`, i.e. black —
+    /// and, because the product never equalled what the sky asked for,
+    /// `drive_sky`'s write-on-change guard missed on every frame as well. Both
+    /// are asserted against here: bit-identical, and never the decayed value.
+    #[test]
+    fn ambient_brightness_does_not_decay_across_frames() {
+        let scale = 0.5;
+        let (_, first) = sky_ambient_light(DAYLIGHT_AMBIENT, scale);
+        let mut decaying = first;
+        for frame in 1..120_u32 {
+            let (_, this) = sky_ambient_light(DAYLIGHT_AMBIENT, scale);
+            // Bit patterns: what `drive_sky`'s guard compares, so this is the
+            // guard holding, not merely the value being close.
+            assert_eq!(
+                this.to_bits(),
+                first.to_bits(),
+                "frame {frame} asked for a different ambient than frame 0"
+            );
+            decaying *= scale;
+        }
+        assert!(
+            decaying < first * 1.0e-30,
+            "the post-pass this replaced should have collapsed, got {decaying}"
+        );
+    }
+
+    /// The share scales the fill strength only; the tint is the sky's normalised
+    /// hue and is the same whatever the probe supplies — including at `0.0`,
+    /// where the colour still has to be a valid one rather than whatever a
+    /// zero-brightness light happens to hold.
+    #[test]
+    fn ambient_tint_is_independent_of_the_probes_share() {
+        let (full, _) = sky_ambient_light(DAYLIGHT_AMBIENT, 1.0);
+        for scale in [0.0, 0.25, 0.5] {
+            let (tinted, _) = sky_ambient_light(DAYLIGHT_AMBIENT, scale);
+            assert_eq!(tinted, full, "a share of {scale} changed the ambient hue");
+        }
+    }
+
+    /// A black sky (a fully overcast midnight authors one) divides by its own
+    /// peak, so the tint is guarded against a zero denominator rather than
+    /// reaching `GlobalAmbientLight` as a NaN colour.
+    #[test]
+    fn a_black_ambient_stays_finite() {
+        let (color, brightness) = sky_ambient_light([0.0, 0.0, 0.0], 1.0);
+        assert_eq!(brightness.to_bits(), 0.0_f32.to_bits());
+        let linear = color.to_linear();
+        assert!(
+            linear.red.is_finite() && linear.green.is_finite() && linear.blue.is_finite(),
+            "a black sky produced a non-finite ambient tint: {color:?}"
         );
     }
 }

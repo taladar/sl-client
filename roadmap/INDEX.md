@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 74 |
-| done | 900 |
+| bugs | 73 |
+| done | 901 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (74)
+## bugs (73)
 
 ### viewer
 
@@ -1229,9 +1229,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its cloud
 - [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
   — Two plugins read resources they never register
-- [`viewer-audit-probe-ambient-multiply`](bugs/viewer-audit-probe-ambient-multiply.md)
-  — suppress_global_ambient multiplies an absolute producer and decays it
-  geometrically
 - [`viewer-audit-probe-nonuniform-scale-shear`](bugs/viewer-audit-probe-nonuniform-scale-shear.md)
   — A reflection probe's non-uniform volume scale shears its sampling frame
 - [`viewer-audit-render-path-env-reads`](bugs/viewer-audit-render-path-env-reads.md)
@@ -1338,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (900)
+## done (901)
 
 ### protocol
 
@@ -1602,6 +1599,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-parcel-access-list-accumulate`](done/viewer-audit-parcel-access-list-accumulate.md)
   — Editing a multi-packet parcel ban list unbans everyone not in the last
   packet
+- [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
+  — suppress_global_ambient multiplies an absolute producer and decays it
+  geometrically
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky

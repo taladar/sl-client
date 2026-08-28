@@ -70,8 +70,9 @@
 //! **Consistent image-based lighting.** Bevy applies the view environment map only
 //! to `StandardMaterial` (prims, meshes, avatars). The viewer's custom sky / terrain
 //! / water materials do not sample it, so — to avoid double-counting a flat ambient
-//! on top of the probe's diffuse contribution — `suppress_global_ambient` drops the
-//! sky-set `GlobalAmbientLight`, and the terrain and water shaders sample the probe
+//! on top of the probe's diffuse contribution — the sky scales the
+//! `GlobalAmbientLight` it writes by `probe_ambient_scale` (`0.0`: dropped
+//! entirely), and the terrain and water shaders sample the probe
 //! themselves (terrain reads its diffuse irradiance for ambient; water reflects the
 //! specular cube). Sky stays the source and is not itself lit by the probe.
 //!
@@ -106,7 +107,7 @@
 //! and the reflection must stay at unit gain. Every probe therefore runs at the
 //! reference's ambiance-1 point (its `RenderSkyAutoAdjustLegacy` default), where the
 //! probe's irradiance *is* the ambient and no flat fill is added — which is exactly
-//! what `suppress_global_ambient` arranges. A probe's **dynamic** flag is implicitly
+//! what a `probe_ambient_scale` of `0.0` arranges. A probe's **dynamic** flag is implicitly
 //! always on (a rig re-renders the whole scene, avatars included); its **mirror** flag
 //! (the reference's separate screen-space "hero" probe) is out of scope.
 //!
@@ -187,19 +188,26 @@ const PROBE_GAIN: f32 = 1.0;
 /// probe is providing image-based ambient to both PBR objects and the terrain.
 /// Default `0.0` drops it entirely (the probe is the single ambient source, so it
 /// is not double-counted); overridable by `SL_VIEWER_PROBE_AMBIENT_SCALE`.
-fn probe_ambient_scale() -> f32 {
+///
+/// This is a **factor of the ambient the sky asks for**, not an attenuation applied
+/// to whatever the resource happens to hold: `crate::sky`'s `drive_sky` folds it into
+/// the absolute brightness it writes. A `PostUpdate` system that multiplied the
+/// resource down instead would decay geometrically toward zero on every frame the
+/// sky did not rewrite it — and, because the product is never the value the sky
+/// asked for, would make the sky's own write-on-change guard miss every frame. It is
+/// idempotent only at the default `0.0`, which is what hid that for as long as the
+/// knob was left alone.
+///
+/// Public because the sky is not the only producer of a flat ambient: the login-free
+/// gallery lights a stage without one, and it has to split the ambient with the
+/// probes by the same rule or its scenes are lit differently from the world they
+/// stand in for.
+#[must_use]
+pub fn probe_ambient_scale() -> f32 {
     std::env::var("SL_VIEWER_PROBE_AMBIENT_SCALE")
         .ok()
         .and_then(|value| value.parse::<f32>().ok())
         .unwrap_or(0.0)
-}
-
-/// Attenuate the sky-set [`GlobalAmbientLight`] each frame (after the sky system
-/// re-sets it) so the reflection probe's image-based lighting is not stacked on top
-/// of a second flat ambient term — the double-count that otherwise over-brightens
-/// probe-lit PBR surfaces.
-fn suppress_global_ambient(mut ambient: ResMut<GlobalAmbientLight>) {
-    ambient.brightness *= probe_ambient_scale();
 }
 
 /// The gain to apply to the probes' image-based lighting, overridable at runtime by
@@ -247,7 +255,7 @@ fn probe_intensity(exposure: &Exposure) -> f32 {
 /// A capture camera is an ordinary view, and Bevy lights a view's surfaces from that
 /// view's own [`EnvironmentMapLight`] — which a capture camera has none of. Left
 /// alone, then, every rig renders a world with no ambient whatsoever: the sky-set
-/// `GlobalAmbientLight` is dropped (`suppress_global_ambient`) precisely because the
+/// `GlobalAmbientLight` is dropped ([`probe_ambient_scale`]) precisely because the
 /// probe replaces it, so a prim's shadowed side comes out black and the terrain shader
 /// falls back to its flat no-probe fill. That darker world is what the cubemap would
 /// then hold, and what a mirror would show — visibly *not* the world beside it.
@@ -533,9 +541,7 @@ impl Plugin for ReflectionProbePlugin {
                 )
                     .chain()
                     .after(sync_mirror_settings),
-            )
-            // Runs after the sky system (Update) re-sets the ambient each frame.
-            .add_systems(PostUpdate, suppress_global_ambient);
+            );
 
         // The face → cube-layer blit runs in the render world after the capture
         // cameras have drawn this frame's faces; the view's env-map filter reads the

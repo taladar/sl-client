@@ -30,7 +30,7 @@ Settings, modelled on the reference's tiers:
 - **Probe detail** — off / static / dynamic / realtime
   (`RenderReflectionProbeDetail` analogue). `off` despawns/skips the
   rigs entirely **and restores the non-probe lighting model**: keep the
-  flat sky `GlobalAmbientLight` (bypass `suppress_global_ambient`) and
+  flat sky `GlobalAmbientLight` (a `probe_ambient_scale` of `1.0`) and
   the terrain / water shaders' no-probe fallbacks — the world must stay
   lit. `static` freezes captures after each rig's first fill; `dynamic`
   honours the DYNAMIC flag ([[viewer-perf-probe-capture-content]]);

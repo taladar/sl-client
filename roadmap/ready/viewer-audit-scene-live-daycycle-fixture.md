@@ -25,6 +25,15 @@ meaningfully changed, (b) `GlobalAmbientLight` converges rather than decaying
 under a non-zero `probe_ambient_scale`, and (c) a legacy sky produces a zero
 tonemap mix.
 
+(a) and (b) now have pure-level tests from the two fixes that landed
+([[viewer-audit-scene-change-guards-day-cycle]] quantises the day position and
+samples `terrain_lighting` across a moving cycle;
+[[viewer-audit-probe-ambient-multiply]] asserts the ambient is bit-identical
+across frames under a non-zero share). What is still missing here is the
+**app-level** version — a real `App` whose `GlobalAmbientLight` and
+`TerrainMaterial` change ticks are the thing asserted, so a future system that
+reintroduces a per-frame write fails a test rather than a profile.
+
 Zero-test scene files this would give a home to: `water.rs` (638 lines — with
 the pure `reconcile_region_planes:388` region-set diff and `water_params`),
 `glow.rs` (619), `underwater_fog.rs` (427), `environment.rs` (328).
