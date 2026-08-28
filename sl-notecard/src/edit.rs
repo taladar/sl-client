@@ -10,7 +10,7 @@
 //! rebuild the table so every surviving marker `FIRST_EMBEDDED_CHAR + i` lines
 //! up with a fresh item at index `i`, in order of first appearance.
 
-use crate::item::{EmbeddedItem, InventoryItem};
+use crate::item::InventoryItem;
 use crate::{Notecard, NotecardVersion, embedded_char, embedded_char_index};
 
 #[expect(
@@ -42,7 +42,7 @@ impl Notecard {
     /// — an edit produces a fresh version 2 notecard.
     #[must_use]
     pub fn with_edited_text(&self, edited_text: &str) -> Self {
-        let mut items: Vec<EmbeddedItem> = Vec::new();
+        let mut items: Vec<InventoryItem> = Vec::new();
         let mut text = String::with_capacity(edited_text.len());
         for character in edited_text.chars() {
             match embedded_char_index(character) {
@@ -59,17 +59,13 @@ impl Notecard {
                         // hold; drop the overflow rather than corrupt the text.
                         continue;
                     };
-                    items.push(EmbeddedItem {
-                        char_index: new_index,
-                        item: InventoryItem::clone(&source.item),
-                    });
+                    items.push(InventoryItem::clone(source));
                     text.push(new_marker);
                 }
             }
         }
         Self {
             source_version: NotecardVersion::V2,
-            embedded_items_version: self.embedded_items_version.max(1),
             items,
             text,
         }
@@ -78,7 +74,7 @@ impl Notecard {
 
 #[cfg(test)]
 mod tests {
-    use crate::item::{AssetIdEncoding, EmbeddedItem, InventoryItem, Permissions, SaleInfo};
+    use crate::item::{AssetIdEncoding, InventoryItem, Permissions, SaleInfo};
     use crate::types::{AssetType, InventoryType, SaleType};
     use crate::{Notecard, NotecardVersion, embedded_char};
     use pretty_assertions::assert_eq;
@@ -122,7 +118,7 @@ mod tests {
         notecard
             .items
             .iter()
-            .map(|embedded| embedded.item.name.as_str())
+            .map(|item| item.name.as_str())
             .collect()
     }
 
@@ -130,17 +126,7 @@ mod tests {
     fn two_item_notecard() -> Result<Notecard, Box<dyn std::error::Error>> {
         Ok(Notecard {
             source_version: NotecardVersion::V2,
-            embedded_items_version: 1,
-            items: vec![
-                EmbeddedItem {
-                    char_index: 0,
-                    item: item("first")?,
-                },
-                EmbeddedItem {
-                    char_index: 1,
-                    item: item("second")?,
-                },
-            ],
+            items: vec![item("first")?, item("second")?],
             text: format!(
                 "A{}B{}C",
                 embedded_char(0).ok_or("bad char")?,
@@ -166,11 +152,7 @@ mod tests {
         let reconciled = notecard.with_edited_text(&edited);
         assert_eq!(reconciled.items.len(), 1, "only the second item survives");
         let survivor = reconciled.items.first().ok_or("no item")?;
-        assert_eq!(survivor.item.name, "second");
-        assert_eq!(
-            survivor.char_index, 0,
-            "the surviving item is renumbered to index 0"
-        );
+        assert_eq!(survivor.name, "second");
         // The surviving marker in the text is now the index-0 marker.
         assert_eq!(
             reconciled.text,
@@ -209,8 +191,16 @@ mod tests {
             vec!["first", "first"],
             "each occurrence gets its own item"
         );
-        let indices: Vec<u32> = reconciled.items.iter().map(|e| e.char_index).collect();
-        assert_eq!(indices, vec![0, 1]);
+        // The two markers in the reconciled text are the index-0 and index-1
+        // markers, in that order, so each names its own table entry.
+        assert_eq!(
+            reconciled.text,
+            format!(
+                "{}{}",
+                embedded_char(0).ok_or("bad char")?,
+                embedded_char(1).ok_or("bad char")?
+            )
+        );
         Ok(())
     }
 

@@ -111,8 +111,13 @@ pub struct InventoryItem {
     /// The permission scopes and ownership.
     pub permissions: Permissions,
     /// The metadata blob (thumbnail / favourite LLSD), preserved verbatim as
-    /// the raw value written after the `metadata` keyword (without the trailing
-    /// `|` separator) when present. Rare on embedded items.
+    /// the raw value written after the `metadata` keyword. Rare on embedded
+    /// items.
+    ///
+    /// The field spans **two** lines on the wire: the reference writes the
+    /// keyword, a tab and the LLSD XML (which ends in its own newline), then a
+    /// lone `|` terminator line. This holds only the XML; the terminator is
+    /// structure, not content.
     pub metadata: Option<String>,
     /// The asset the item points at (always the real id; obfuscation is undone
     /// on decode and re-applied on encode per
@@ -129,8 +134,13 @@ pub struct InventoryItem {
     /// The sale terms.
     pub sale_info: SaleInfo,
     /// The item's display name.
+    ///
+    /// A `|` terminates the field on the wire and a newline ends the line, so
+    /// neither can be represented; both are replaced by a space on encode, the
+    /// way the reference sanitises them on import.
     pub name: String,
-    /// The item's description.
+    /// The item's description. Sanitised on encode like
+    /// [`name`](InventoryItem::name).
     pub description: String,
     /// The item's creation date (Unix seconds).
     pub creation_date: i64,
@@ -148,18 +158,4 @@ impl InventoryItem {
     pub fn shadow_id(&self) -> Key {
         xor_magic(self.asset_id)
     }
-}
-
-/// An embedded item together with the character index the notecard text refers
-/// to it by (the `index` in `FIRST_EMBEDDED_CHAR + index`).
-#[expect(
-    clippy::module_name_repetitions,
-    reason = "the type is used across the crate as sl_notecard::EmbeddedItem"
-)]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmbeddedItem {
-    /// The index the text references this item by.
-    pub char_index: u32,
-    /// The embedded inventory item.
-    pub item: InventoryItem,
 }

@@ -5,10 +5,57 @@
 //! **version 2** container (as the reference viewer does on save) with the same
 //! field order, tab indentation and `%08x` mask formatting, so a notecard
 //! decoded from a live grid re-encodes byte-for-byte.
+//!
+//! Two of those fields the writer does not take from the decoded notecard,
+//! because the reference does not either: the `LLEmbeddedItems` chunk version
+//! is the constant 1, and each item's `ext char index` is its position in the
+//! table. Free-text values are sanitised on the way out, since a `|` or a
+//! newline in one would otherwise change the shape of the stream rather than
+//! its content.
 
 use crate::item::{AssetIdEncoding, InventoryItem, Permissions, SaleInfo};
-use crate::{Notecard, PermissionMask};
+use crate::{EMBEDDED_ITEMS_VERSION, Notecard, PermissionMask};
 use std::fmt::Write as _;
+
+/// What a character that cannot survive the format is replaced with, the way
+/// the reference's `replaceChar(mName, '|', ' ')` /
+/// `replaceNonstandardASCII(mName, ' ')` do on import.
+const SANITISED: &str = " ";
+
+/// The line terminators no field value may contain, whatever it is.
+///
+/// A `\n` in a value would write extra lines into the item chunk, letting an
+/// item's name or description forge an `asset_id` or a whole `permissions`
+/// block on save.
+const LINE_BREAKS: [char; 2] = ['\n', '\r'];
+
+/// Additionally, the `|` that terminates a `name` / `desc` value on the wire —
+/// a value containing one is truncated there on the way back in.
+const FIELD_END: char = '|';
+
+/// Make a value safe to write as one line of the container.
+///
+/// The reference never has to do this on export because it sanitises the same
+/// characters on **import** (`llinventory.cpp`'s `replaceNonstandardASCII` /
+/// `replaceChar`); this crate accepts a value from a caller who never went
+/// through a decode, so it sanitises on the way out instead.
+fn sanitise_line(value: &str) -> std::borrow::Cow<'_, str> {
+    if value.contains(LINE_BREAKS) {
+        std::borrow::Cow::Owned(value.replace(LINE_BREAKS, SANITISED))
+    } else {
+        std::borrow::Cow::Borrowed(value)
+    }
+}
+
+/// [`sanitise_line`] plus the `|` field terminator, for the values written in
+/// the `keyword\tvalue|` form.
+fn sanitise_field(value: &str) -> std::borrow::Cow<'_, str> {
+    if value.contains(FIELD_END) {
+        std::borrow::Cow::Owned(sanitise_line(value).replace(FIELD_END, SANITISED))
+    } else {
+        sanitise_line(value)
+    }
+}
 
 /// Append a permission mask as the simulator's eight-digit lowercase hex.
 fn write_mask(out: &mut String, label: &str, mask: PermissionMask) -> std::fmt::Result {
@@ -52,7 +99,10 @@ fn write_item(out: &mut String, item: &InventoryItem) -> std::fmt::Result {
     writeln!(out, "\t\tparent_id\t{}", item.parent_id)?;
     write_permissions(out, &item.permissions)?;
     if let Some(metadata) = &item.metadata {
-        writeln!(out, "\t\tmetadata\t{metadata}|")?;
+        // Two lines, as `LLInventoryItem::exportLegacyStream` writes it: the
+        // keyword and the LLSD XML, then the `|` terminator on its own line.
+        writeln!(out, "\t\tmetadata\t{}", sanitise_line(metadata))?;
+        out.push_str("|\n");
     }
     match item.asset_id_encoding {
         AssetIdEncoding::Plain => writeln!(out, "\t\tasset_id\t{}", item.asset_id)?,
@@ -64,11 +114,13 @@ fn write_item(out: &mut String, item: &InventoryItem) -> std::fmt::Result {
     }
     writeln!(out, "\t\tflags\t{:08x}", item.flags)?;
     write_sale_info(out, &item.sale_info)?;
-    writeln!(out, "\t\tname\t{}|", item.name)?;
-    writeln!(out, "\t\tdesc\t{}|", item.description)?;
+    writeln!(out, "\t\tname\t{}|", sanitise_field(&item.name))?;
+    writeln!(out, "\t\tdesc\t{}|", sanitise_field(&item.description))?;
     writeln!(out, "\t\tcreation_date\t{}", item.creation_date)?;
     for unknown in &item.unknown_fields {
-        writeln!(out, "\t\t{unknown}")?;
+        // A preserved line is one line: a newline smuggled in here would forge
+        // fields the same way a name could. Its `|`, if any, is content.
+        writeln!(out, "\t\t{}", sanitise_line(unknown))?;
     }
     out.push_str("\t}\n");
     Ok(())
@@ -87,17 +139,16 @@ impl Notecard {
     /// fails, which it never does — [`encode`](Self::encode) relies on this.
     pub fn encode_into(&self, out: &mut String) -> std::fmt::Result {
         out.push_str("Linden text version 2\n{\n");
-        writeln!(
-            out,
-            "LLEmbeddedItems version {}",
-            self.embedded_items_version
-        )?;
+        writeln!(out, "LLEmbeddedItems version {EMBEDDED_ITEMS_VERSION}")?;
         out.push_str("{\n");
         writeln!(out, "count {}", self.items.len())?;
-        for embedded in &self.items {
+        for (index, item) in self.items.iter().enumerate() {
             out.push_str("{\n");
-            writeln!(out, "ext char index {}", embedded.char_index)?;
-            write_item(out, &embedded.item)?;
+            // The index is the item's position, which is what the text's
+            // markers resolve against — `exportEmbeddedItemsStream` numbers
+            // them the same way rather than echoing anything it read.
+            writeln!(out, "ext char index {index}")?;
+            write_item(out, item)?;
             out.push_str("}\n");
         }
         out.push_str("}\n");

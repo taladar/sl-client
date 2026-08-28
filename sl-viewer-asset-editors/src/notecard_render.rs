@@ -138,8 +138,8 @@ fn spawn_line(
                 prose.clear();
                 rendered = true;
             }
-            if let Some(embedded) = notecard.item_by_index(index) {
-                spawn_embedded_box(commands, row, embedded, source, style);
+            if let Some(item) = notecard.item_by_index(index) {
+                spawn_embedded_box(commands, row, item, source, style);
                 rendered = true;
             }
         } else {
@@ -252,11 +252,11 @@ fn texture_item_info(item: &sl_notecard::InventoryItem) -> ItemInfo {
 fn spawn_embedded_box(
     commands: &mut Commands,
     row: Entity,
-    embedded: &sl_notecard::EmbeddedItem,
+    item: &sl_notecard::InventoryItem,
     source: NotecardSource,
     style: LinkTextStyle,
 ) {
-    let action = resolve_action(&embedded.item, source);
+    let action = resolve_action(item, source);
     let item_box = commands
         .spawn((
             Node {
@@ -275,14 +275,14 @@ fn spawn_embedded_box(
         ))
         .id();
     commands.spawn((
-        Text::new(embedded_icon(&embedded.item.asset_type).to_owned()),
+        Text::new(embedded_icon(&item.asset_type).to_owned()),
         UiFont::Sans.at(style.font_size),
         TextColor(style.link_color),
         Pickable::IGNORE,
         ChildOf(item_box),
     ));
     commands.spawn((
-        Text::new(embedded.item.name.clone()),
+        Text::new(item.name.clone()),
         UiFont::Sans.at(style.font_size),
         TextColor(style.link_color),
         Pickable::IGNORE,

@@ -28,9 +28,16 @@
 //! }
 //! ```
 //!
-//! The text references each embedded item positionally: a Unicode code point
-//! `FIRST_EMBEDDED_CHAR + index` (version 2) — or a byte `0x80 | index`
-//! (the legacy version 1) — stands in the text where the item is shown inline.
+//! The text references each embedded item **by its position in the stream**: a
+//! Unicode code point `FIRST_EMBEDDED_CHAR + index` (version 2) — or a byte
+//! `0x80 | index` (the legacy version 1) — stands in the text where the `index`th
+//! item of the `LLEmbeddedItems` chunk is shown inline. The `ext char index`
+//! line the chunk writes before each item is *not* the identity: the reference
+//! reads it into a local it never uses (`llnotecard.cpp`) and resolves markers
+//! against the load order (`LLEmbeddedItems::addItems`), rewriting the line to
+//! the position on save. So does this crate — [`Notecard::items`] is the
+//! authority and its order is the numbering.
+//!
 //! [`Notecard::decode`] reproduces both the prose and where each item sits in
 //! it; [`Notecard::encode`] round-trips a notecard it did not create without
 //! corrupting items it does not understand, always writing the current
@@ -45,8 +52,14 @@ pub mod encode;
 pub mod item;
 pub mod types;
 
-pub use item::{AssetIdEncoding, EmbeddedItem, InventoryItem, Permissions, SaleInfo};
+pub use item::{AssetIdEncoding, InventoryItem, Permissions, SaleInfo};
 pub use types::{AssetType, InventoryType, PermissionMask, SaleType};
+
+/// The only `LLEmbeddedItems` chunk version the format has ever had. The
+/// reference refuses to import anything else (`llnotecard.cpp`'s
+/// `Invalid LLEmbeddedItems version`) and hardcodes it on export, so it is a
+/// constant here rather than a field that could disagree with the writer.
+pub const EMBEDDED_ITEMS_VERSION: u32 = 1;
 
 /// The first Unicode code point that stands in the (version 2) text for an
 /// embedded item: `FIRST_EMBEDDED_CHAR + index` marks embedded item `index`
@@ -74,10 +87,9 @@ pub struct Notecard {
     /// always writes [`V2`](NotecardVersion::V2) regardless, upgrading a
     /// version 1 notecard the way the reference viewer does on save.
     pub source_version: NotecardVersion,
-    /// The `LLEmbeddedItems` chunk version (always 1 in practice).
-    pub embedded_items_version: u32,
-    /// The embedded inventory items, in stream order.
-    pub items: Vec<EmbeddedItem>,
+    /// The embedded inventory items, in stream order — which **is** the
+    /// numbering the text's markers use.
+    pub items: Vec<InventoryItem>,
     /// The notecard text, with each embedded-item reference represented as the
     /// Unicode code point `FIRST_EMBEDDED_CHAR + index` — uniform across source
     /// versions, so a version 1 notecard's `0x80 | index` markers appear here as
@@ -105,11 +117,14 @@ impl Notecard {
             .collect()
     }
 
-    /// The embedded item the text references by `index`
-    /// ([`EmbeddedItem::char_index`]), if any.
+    /// The embedded item the text references by `index`, if any — the
+    /// `index`th item of the chunk, resolved by position exactly as
+    /// `LLEmbeddedItems::getEmbeddedCharFromIndex` does.
     #[must_use]
-    pub fn item_by_index(&self, index: u32) -> Option<&EmbeddedItem> {
-        self.items.iter().find(|item| item.char_index == index)
+    pub fn item_by_index(&self, index: u32) -> Option<&InventoryItem> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|index| self.items.get(index))
     }
 }
 
@@ -118,8 +133,8 @@ impl Notecard {
 pub struct EmbeddedReference {
     /// The character offset (counting `char`s, not bytes) into the text.
     pub offset: usize,
-    /// The embedded-item index this reference points at (matching
-    /// [`EmbeddedItem::char_index`]).
+    /// The embedded-item index this reference points at — a position into
+    /// [`Notecard::items`].
     pub index: u32,
 }
 
@@ -145,9 +160,7 @@ pub fn embedded_char(index: u32) -> Option<char> {
 
 #[cfg(test)]
 mod tests {
-    use crate::item::{
-        AssetIdEncoding, EmbeddedItem, InventoryItem, Permissions, SaleInfo, xor_magic,
-    };
+    use crate::item::{AssetIdEncoding, InventoryItem, Permissions, SaleInfo, xor_magic};
     use crate::types::{AssetType, InventoryType, PermissionMask, SaleType};
     use crate::{Notecard, NotecardVersion, embedded_char};
     use pretty_assertions::{assert_eq, assert_ne};
@@ -198,11 +211,7 @@ mod tests {
         };
         Ok(Notecard {
             source_version: NotecardVersion::V2,
-            embedded_items_version: 1,
-            items: vec![EmbeddedItem {
-                char_index: 0,
-                item,
-            }],
+            items: vec![item],
             text: "Go here: \u{100000}\n".to_owned(),
         })
     }
@@ -281,7 +290,7 @@ Go here: \u{100000}\n\
         assert_eq!(reference.offset, 9);
         assert_eq!(reference.index, 0);
         let resolved = notecard.item_by_index(reference.index).ok_or("no item")?;
-        assert_eq!(resolved.item.asset_type, AssetType::Landmark);
+        assert_eq!(resolved.asset_type, AssetType::Landmark);
         Ok(())
     }
 
@@ -291,13 +300,13 @@ Go here: \u{100000}\n\
         let real = key("dddddddd-dddd-dddd-dddd-dddddddddddd")?;
         {
             let item = notecard.items.first_mut().ok_or("no item")?;
-            item.item.asset_id_encoding = AssetIdEncoding::Shadow;
+            item.asset_id_encoding = AssetIdEncoding::Shadow;
         }
         let round_tripped = Notecard::decode(&notecard.encode())?;
         let item = round_tripped.items.first().ok_or("no item")?;
         // The real asset id survives even though it was stored obfuscated.
-        assert_eq!(item.item.asset_id, real);
-        assert_eq!(item.item.asset_id_encoding, AssetIdEncoding::Shadow);
+        assert_eq!(item.asset_id, real);
+        assert_eq!(item.asset_id_encoding, AssetIdEncoding::Shadow);
         Ok(())
     }
 
@@ -337,7 +346,6 @@ Go here: \u{100000}\n\
     fn empty_notecard_round_trips() -> TestResult {
         let empty = Notecard {
             source_version: NotecardVersion::V2,
-            embedded_items_version: 1,
             items: Vec::new(),
             text: String::new(),
         };
@@ -351,14 +359,11 @@ Go here: \u{100000}\n\
         let mut notecard = sample()?;
         {
             let item = notecard.items.first_mut().ok_or("no item")?;
-            item.item.unknown_fields.push("future_field\t42".to_owned());
+            item.unknown_fields.push("future_field\t42".to_owned());
         }
         let round_tripped = Notecard::decode(&notecard.encode())?;
         let item = round_tripped.items.first().ok_or("no item")?;
-        assert_eq!(
-            item.item.unknown_fields,
-            vec!["future_field\t42".to_owned()]
-        );
+        assert_eq!(item.unknown_fields, vec!["future_field\t42".to_owned()]);
         Ok(())
     }
 
@@ -367,19 +372,16 @@ Go here: \u{100000}\n\
         let mut notecard = sample()?;
         {
             let item = notecard.items.first_mut().ok_or("no item")?;
-            item.item.asset_type = AssetType::Other("weird".to_owned());
-            item.item.inventory_type = InventoryType::Other("odd".to_owned());
-            item.item.sale_info.sale_type = SaleType::Other("xyzzy".to_owned());
+            item.asset_type = AssetType::Other("weird".to_owned());
+            item.inventory_type = InventoryType::Other("odd".to_owned());
+            item.sale_info.sale_type = SaleType::Other("xyzzy".to_owned());
         }
         let round_tripped = Notecard::decode(&notecard.encode())?;
         let item = round_tripped.items.first().ok_or("no item")?;
-        assert_eq!(item.item.asset_type, AssetType::Other("weird".to_owned()));
+        assert_eq!(item.asset_type, AssetType::Other("weird".to_owned()));
+        assert_eq!(item.inventory_type, InventoryType::Other("odd".to_owned()));
         assert_eq!(
-            item.item.inventory_type,
-            InventoryType::Other("odd".to_owned())
-        );
-        assert_eq!(
-            item.item.sale_info.sale_type,
+            item.sale_info.sale_type,
             SaleType::Other("xyzzy".to_owned())
         );
         Ok(())
@@ -390,13 +392,13 @@ Go here: \u{100000}\n\
         let mut notecard = sample()?;
         {
             let item = notecard.items.first_mut().ok_or("no item")?;
-            item.item.inventory_type = InventoryType::None;
+            item.inventory_type = InventoryType::None;
         }
         let encoded = String::from_utf8(notecard.encode())?;
         assert!(!encoded.contains("inv_type"), "the field is omitted");
         let round_tripped = Notecard::decode(encoded.as_bytes())?;
         let item = round_tripped.items.first().ok_or("no item")?;
-        assert_eq!(item.item.inventory_type, InventoryType::None);
+        assert_eq!(item.inventory_type, InventoryType::None);
         Ok(())
     }
 

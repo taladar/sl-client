@@ -639,15 +639,11 @@ fn ingest_added_items(
         if state.baseline.is_none() {
             continue;
         }
-        // A fresh index past every existing one, so it never aliases a marker
-        // already in the text (`with_edited_text` resolves markers by index).
+        // The item's index is its position in the table, so appending it gives
+        // it the next index — which no marker already in the text can alias
+        // (`with_edited_text` resolves markers by position).
         let next_index = state.baseline.as_ref().map_or(0, |notecard| {
-            notecard
-                .items
-                .iter()
-                .map(|embedded| embedded.char_index)
-                .max()
-                .map_or(0, |max| max.saturating_add(1))
+            u32::try_from(notecard.items.len()).unwrap_or(u32::MAX)
         });
         let Some(marker) = sl_notecard::embedded_char(next_index) else {
             warn!("notecard already holds the maximum embedded items; drop ignored");
@@ -655,10 +651,7 @@ fn ingest_added_items(
         };
         let embedded = to_embedded_item(&add.item);
         if let Some(baseline) = state.baseline.as_mut() {
-            baseline.items.push(sl_notecard::EmbeddedItem {
-                char_index: next_index,
-                item: embedded,
-            });
+            baseline.items.push(embedded);
         }
         if let Ok(mut editable) = fields.get_mut(field_entity) {
             let mut value = editable.value().to_string();
@@ -980,11 +973,7 @@ pub fn spawn_notecard_reader_specimen(
     };
     let notecard = sl_notecard::Notecard {
         source_version: sl_notecard::NotecardVersion::V2,
-        embedded_items_version: 1,
-        items: vec![sl_notecard::EmbeddedItem {
-            char_index: 0,
-            item,
-        }],
+        items: vec![item],
         text: format!(
             "{welcome} https://example.com\n{visit} {marker}",
             welcome = cx.text("Welcome! See"),
@@ -1020,11 +1009,7 @@ fn specimen_notecard(text: &str) -> sl_notecard::Notecard {
     let marker = sl_notecard::embedded_char(0).unwrap_or(' ');
     sl_notecard::Notecard {
         source_version: sl_notecard::NotecardVersion::V2,
-        embedded_items_version: 1,
-        items: vec![sl_notecard::EmbeddedItem {
-            char_index: 0,
-            item,
-        }],
+        items: vec![item],
         text: format!("{text} {marker}"),
     }
 }
@@ -1090,28 +1075,21 @@ mod tests {
         let marker = sl_notecard::embedded_char(0).ok_or("no marker")?;
         let notecard = sl_notecard::Notecard {
             source_version: sl_notecard::NotecardVersion::V2,
-            embedded_items_version: 1,
-            items: vec![sl_notecard::EmbeddedItem {
-                char_index: 0,
-                item: to_embedded_item(&item),
-            }],
+            items: vec![to_embedded_item(&item)],
             text: format!("See {marker}"),
         };
         let decoded =
             sl_notecard::Notecard::decode(&notecard.encode()).map_err(|error| error.to_string())?;
         let survivor = decoded.items.first().ok_or("no embedded item")?;
-        assert_eq!(survivor.item.asset_type, sl_notecard::AssetType::Landmark);
+        assert_eq!(survivor.asset_type, sl_notecard::AssetType::Landmark);
         assert_eq!(
-            survivor.item.inventory_type,
+            survivor.inventory_type,
             sl_notecard::InventoryType::Landmark
         );
-        assert_eq!(survivor.item.name, "My Landmark");
-        assert_eq!(survivor.item.permissions.owner_mask.0, 0x7fff_ffff);
-        assert_eq!(
-            survivor.item.permissions.creator_id.0,
-            Uuid::from_u128(0x60)
-        );
-        assert_eq!(survivor.item.asset_id.0, Uuid::from_u128(0x30));
+        assert_eq!(survivor.name, "My Landmark");
+        assert_eq!(survivor.permissions.owner_mask.0, 0x7fff_ffff);
+        assert_eq!(survivor.permissions.creator_id.0, Uuid::from_u128(0x60));
+        assert_eq!(survivor.asset_id.0, Uuid::from_u128(0x30));
         Ok(())
     }
 }

@@ -5,10 +5,16 @@
 //! container and the embedded-item chunks, tolerant of the leading indentation
 //! whitespace the simulator writes, followed by a fixed-length read of the raw
 //! text body.
+//!
+//! It is stricter than the reference in one place, deliberately. The reference
+//! skips a `{` it does not expect, which lets an unrecognised chunk-shaped
+//! field close the *enclosing* chunk with its own `}` and misparse every item
+//! after it. A chunk's braces are required here, and a stray one is an error —
+//! there is no recovering the framing, and this is somebody's inventory.
 
-use crate::item::{AssetIdEncoding, EmbeddedItem, InventoryItem, Permissions, SaleInfo, xor_magic};
+use crate::item::{AssetIdEncoding, InventoryItem, Permissions, SaleInfo, xor_magic};
 use crate::types::{AssetType, InventoryType, PermissionMask, SaleType};
-use crate::{Notecard, NotecardVersion, embedded_char};
+use crate::{EMBEDDED_ITEMS_VERSION, Notecard, NotecardVersion, embedded_char};
 use sl_types::key::{Key, NULL_KEY};
 use uuid::Uuid;
 
@@ -50,6 +56,19 @@ pub enum NotecardError {
     /// The container version is neither 1 nor 2.
     #[error("unsupported Linden text version {0}")]
     UnsupportedVersion(u32),
+    /// The `LLEmbeddedItems` chunk version is not 1, the only version the
+    /// format has.
+    #[error("unsupported LLEmbeddedItems version {0}")]
+    UnsupportedEmbeddedItemsVersion(u32),
+    /// A `{` opened a chunk where a field was expected, so the decoder can no
+    /// longer tell where the enclosing chunk ends.
+    #[error("unexpected {{ inside a {context} chunk: nested chunk {keyword:?} is not understood")]
+    UnexpectedChunk {
+        /// The chunk whose body the stray brace appeared in.
+        context: &'static str,
+        /// The field line that preceded the brace, which named the chunk.
+        keyword: String,
+    },
     /// A line was not valid UTF-8.
     #[error("notecard line is not valid UTF-8: {source}")]
     InvalidLine {
@@ -117,6 +136,17 @@ impl<'a> Cursor<'a> {
     /// The number of bytes still unread.
     const fn remaining(&self) -> usize {
         self.data.len().saturating_sub(self.pos)
+    }
+
+    /// The current read position, for [`rewind_to`](Cursor::rewind_to).
+    const fn mark(&self) -> usize {
+        self.pos
+    }
+
+    /// Put the read position back to a [`mark`](Cursor::mark), so a line that
+    /// turned out not to belong here is left for the next reader.
+    const fn rewind_to(&mut self, mark: usize) {
+        self.pos = mark;
     }
 }
 
@@ -233,27 +263,75 @@ fn parse_key(value: &str, field: &'static str) -> Result<Key, NotecardError> {
         })
 }
 
-/// The value of a tab-then-`|`-terminated field (`name`, `desc`, `metadata`),
-/// i.e. everything after the first tab up to the first `|`.
+/// The value of a tab-then-`|`-terminated field (`name`, `desc`), i.e.
+/// everything after the first tab up to the first `|` — matching the
+/// reference's ` %254s%254[\t]%254[^|]` rescan of the line.
 fn tabbed_value(line: &str) -> &str {
     let rest = line.split_once('\t').map_or("", |(_keyword, value)| value);
     rest.split_once('|').map_or(rest, |(value, _rest)| value)
+}
+
+/// The value of the `metadata` field: everything after the first tab, kept
+/// whole.
+///
+/// Unlike `name` / `desc` the reference does **not** rescan this line for a `|`
+/// terminator — it reads the value with a plain `%254s` and the `|` lives on
+/// the following line (`llinventory.cpp`'s `toXML(...)` then `"|\n"`), where it
+/// is warned about and dropped. A one-line variant with a trailing `|` is
+/// accepted too so a writer that folds the terminator onto this line still
+/// decodes to the same value.
+fn metadata_value(line: &str) -> &str {
+    let rest = line.split_once('\t').map_or("", |(_keyword, value)| value);
+    rest.strip_suffix('|').unwrap_or(rest)
+}
+
+/// Consume the lone `|` line that terminates a `metadata` field, if it is the
+/// next thing in the stream. A writer that put the terminator on the metadata
+/// line itself leaves nothing to consume here, so its absence is not an error.
+fn consume_metadata_terminator(cursor: &mut Cursor<'_>) {
+    let mark = cursor.mark();
+    if !matches!(next_nonblank(cursor, "metadata terminator"), Ok("|")) {
+        cursor.rewind_to(mark);
+    }
+}
+
+/// Consume the `{` that opens a chunk body, which the simulator always writes
+/// on its own line after the chunk's keyword line.
+fn expect_chunk_open(cursor: &mut Cursor<'_>, context: &'static str) -> Result<(), NotecardError> {
+    expect_literal(cursor, "{", context)
+}
+
+/// Reject a `{` that opens an unrecognised nested chunk inside a chunk body.
+///
+/// The reference simply `continue`s past it, which desynchronises its parser:
+/// the nested chunk's own `}` then closes the *enclosing* chunk and every
+/// following field lands in the wrong item. There is no way to recover the
+/// framing once that happens, so a decoder that returns a `Result` says so
+/// instead of handing back silently mangled inventory.
+fn nested_chunk_error(context: &'static str, previous_keyword: &str) -> NotecardError {
+    NotecardError::UnexpectedChunk {
+        context,
+        keyword: previous_keyword.to_owned(),
+    }
 }
 
 /// Parse a permissions chunk (`permissions 0 { ... }`), whose opening `{` has
 /// not yet been consumed.
 fn parse_permissions(cursor: &mut Cursor<'_>) -> Result<Permissions, NotecardError> {
     let mut permissions = Permissions::default();
+    expect_chunk_open(cursor, "permissions open brace")?;
+    let mut previous_keyword = String::new();
     loop {
         let line = next_nonblank(cursor, "permissions")?;
         if line == "{" {
-            continue;
+            return Err(nested_chunk_error("permissions", &previous_keyword));
         }
         if line == "}" {
             break;
         }
         let keyword = keyword_of(line);
         let value = value_of(line);
+        keyword.clone_into(&mut previous_keyword);
         match keyword {
             "base_mask" | "creator_mask" => {
                 permissions.base_mask = PermissionMask(parse_hex_u32(value, "base_mask")?);
@@ -286,16 +364,19 @@ fn parse_permissions(cursor: &mut Cursor<'_>) -> Result<Permissions, NotecardErr
 /// yet been consumed.
 fn parse_sale_info(cursor: &mut Cursor<'_>) -> Result<SaleInfo, NotecardError> {
     let mut sale_info = SaleInfo::default();
+    expect_chunk_open(cursor, "sale_info open brace")?;
+    let mut previous_keyword = String::new();
     loop {
         let line = next_nonblank(cursor, "sale_info")?;
         if line == "{" {
-            continue;
+            return Err(nested_chunk_error("sale_info", &previous_keyword));
         }
         if line == "}" {
             break;
         }
         let keyword = keyword_of(line);
         let value = value_of(line);
+        keyword.clone_into(&mut previous_keyword);
         match keyword {
             "sale_type" => sale_info.sale_type = SaleType::from_type_name(value),
             "sale_price" => sale_info.sale_price = parse_i32(value, "sale_price")?,
@@ -323,22 +404,28 @@ fn parse_item(cursor: &mut Cursor<'_>) -> Result<InventoryItem, NotecardError> {
     let mut creation_date = 0i64;
     let mut unknown_fields = Vec::new();
 
+    expect_chunk_open(cursor, "inventory item open brace")?;
+    let mut previous_keyword = String::new();
     loop {
         let line = next_nonblank(cursor, "inventory item")?;
         if line == "{" {
-            continue;
+            return Err(nested_chunk_error("inventory item", &previous_keyword));
         }
         if line == "}" {
             break;
         }
         let keyword = keyword_of(line);
         let value = value_of(line);
+        keyword.clone_into(&mut previous_keyword);
         match keyword {
             "item_id" => item_id = parse_key(value, "item_id")?,
             "parent_id" => parent_id = parse_key(value, "parent_id")?,
             "permissions" => permissions = parse_permissions(cursor)?,
             "sale_info" => sale_info = parse_sale_info(cursor)?,
-            "metadata" => metadata = Some(tabbed_value(line).to_owned()),
+            "metadata" => {
+                metadata = Some(metadata_value(line).to_owned());
+                consume_metadata_terminator(cursor);
+            }
             "asset_id" => {
                 asset_id = parse_key(value, "asset_id")?;
                 asset_id_encoding = AssetIdEncoding::Plain;
@@ -400,14 +487,21 @@ fn reserve_hint(count: usize, remaining: usize) -> usize {
 
 /// Parse the `LLEmbeddedItems` chunk (header, count, and each `{ ext char
 /// index / inv_item / item }` entry), whose header line has not yet been read.
-fn parse_embedded_items(
-    cursor: &mut Cursor<'_>,
-) -> Result<(u32, Vec<EmbeddedItem>), NotecardError> {
+///
+/// The `ext char index` line is parsed for its shape but its value is
+/// discarded: the reference reads it into a local it never uses
+/// (`llnotecard.cpp`) and numbers the items by load order instead
+/// (`LLEmbeddedItems::addItems`), so the returned order **is** the numbering
+/// the text's markers resolve against.
+fn parse_embedded_items(cursor: &mut Cursor<'_>) -> Result<Vec<InventoryItem>, NotecardError> {
     let header = next_nonblank(cursor, "LLEmbeddedItems header")?;
     let version = parse_u32(
         expect_prefix(header, "LLEmbeddedItems version ")?.trim(),
         "LLEmbeddedItems version",
     )?;
+    if version != EMBEDDED_ITEMS_VERSION {
+        return Err(NotecardError::UnsupportedEmbeddedItemsVersion(version));
+    }
     expect_literal(cursor, "{", "LLEmbeddedItems open brace")?;
 
     let count_line = next_nonblank(cursor, "embedded item count")?;
@@ -417,7 +511,7 @@ fn parse_embedded_items(
     for _index in 0..count {
         expect_literal(cursor, "{", "embedded item entry open brace")?;
         let ext_line = next_nonblank(cursor, "ext char index")?;
-        let char_index = parse_u32(
+        let _ignored_index = parse_u32(
             expect_prefix(ext_line, "ext char index ")?.trim(),
             "ext char index",
         )?;
@@ -428,13 +522,12 @@ fn parse_embedded_items(
                 found: inv_line.to_owned(),
             });
         }
-        let item = parse_item(cursor)?;
+        items.push(parse_item(cursor)?);
         expect_literal(cursor, "}", "embedded item entry close brace")?;
-        items.push(EmbeddedItem { char_index, item });
     }
 
     expect_literal(cursor, "}", "LLEmbeddedItems close brace")?;
-    Ok((version, items))
+    Ok(items)
 }
 
 /// Decode the raw text body, mapping the version's embedded markers to the
@@ -482,7 +575,7 @@ impl Notecard {
 
         expect_literal(&mut cursor, "{", "container open brace")?;
 
-        let (embedded_items_version, items) = parse_embedded_items(&mut cursor)?;
+        let items = parse_embedded_items(&mut cursor)?;
 
         let length_line = next_nonblank(&mut cursor, "Text length")?;
         let text_length = parse_usize(
@@ -501,7 +594,6 @@ impl Notecard {
 
         Ok(Self {
             source_version,
-            embedded_items_version,
             items,
             text,
         })
