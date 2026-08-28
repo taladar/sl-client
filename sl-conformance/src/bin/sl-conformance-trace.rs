@@ -10,12 +10,12 @@
 //! Direction is taken from the log's `#Messaging#` lines; without a log, pass
 //! `--sim-addr` / `--viewer-addr` to identify the endpoints.
 
-use std::net::IpAddr;
 use std::path::PathBuf;
 
 use clap::Parser as _;
 use sl_conformance::trace::logfile::{self, LogFile};
-use sl_conformance::trace::timeline::{self, Endpoints};
+use sl_conformance::trace::pcap::Capture;
+use sl_conformance::trace::timeline::{self, EndpointSpec, Endpoints, Timeline};
 use sl_conformance::trace::{TraceError, pcap};
 
 /// Command-line options.
@@ -35,13 +35,15 @@ struct Options {
     /// Where to write the JSON-Lines timeline (optional).
     #[clap(long)]
     jsonl: Option<PathBuf>,
-    /// Treat this IP as the simulator side (repeatable). Needed only without a
-    /// `--log`.
+    /// Treat this `ip` or `ip:port` as the simulator side (repeatable). Needed
+    /// only without a `--log`. On a loopback capture, where both sides share an
+    /// IP, give the **port** — a bare IP cannot tell the two directions apart.
     #[clap(long = "sim-addr")]
-    sim_addr: Vec<IpAddr>,
-    /// Treat this IP as the viewer side (repeatable). Optional fallback.
+    sim_addr: Vec<EndpointSpec>,
+    /// Treat this `ip` or `ip:port` as the viewer side (repeatable). Optional
+    /// fallback.
     #[clap(long = "viewer-addr")]
-    viewer_addr: Vec<IpAddr>,
+    viewer_addr: Vec<EndpointSpec>,
     /// Also dump raw hex for successfully-decoded messages in the text output.
     #[clap(long)]
     include_raw: bool,
@@ -82,38 +84,56 @@ fn report_error(error: &Error) {
 
 /// Reads the inputs, builds the timeline, and writes the outputs.
 fn run(options: &Options) -> Result<(), Error> {
-    let datagrams = pcap::read_udp_datagrams(&options.pcap)?;
-    let total_datagrams = datagrams.len();
+    let capture = pcap::read_capture(&options.pcap)?;
 
     let log = match &options.log {
         Some(path) => logfile::read_log(path)?,
         None => LogFile::default(),
     };
+    if options.log.is_some() {
+        report_log_health(&log);
+    }
 
     let mut endpoints = Endpoints::default();
-    endpoints.sim_ips.extend(log.sim_hosts.iter().copied());
-    endpoints.sim_ips.extend(options.sim_addr.iter().copied());
-    endpoints
-        .viewer_ips
-        .extend(options.viewer_addr.iter().copied());
-    if endpoints.sim_ips.is_empty() && endpoints.viewer_ips.is_empty() {
+    endpoints.sim.sockets.extend(log.sim_hosts.iter().copied());
+    for spec in &options.sim_addr {
+        endpoints.sim.insert(*spec);
+    }
+    for spec in &options.viewer_addr {
+        endpoints.viewer.insert(*spec);
+    }
+    if endpoints.sim.is_empty() && endpoints.viewer.is_empty() {
         return Err(Error::Trace(TraceError::NoEndpoints));
     }
 
-    let entries = timeline::build_timeline(datagrams, &log, &endpoints);
-    let errors = timeline::error_count(&entries);
+    let Capture {
+        datagrams,
+        stopped_early,
+        snaplen_truncated,
+        skipped_frames,
+    } = capture;
+    let total_datagrams = datagrams.len();
+    let timeline = timeline::build_timeline(datagrams, &log, &endpoints);
 
-    let text = timeline::render_text(&entries, options.include_raw);
+    let text = timeline::render_text(&timeline.entries, options.include_raw);
     match &options.out {
         Some(path) => write_file(path, &text)?,
         None => print_stdout(&text),
     }
     if let Some(path) = &options.jsonl {
-        let jsonl = timeline::render_jsonl(&entries)?;
+        let jsonl = timeline::render_jsonl(&timeline.entries)?;
         write_file(path, &jsonl)?;
     }
 
-    report_summary(total_datagrams, entries.len(), errors);
+    report_summary(
+        &CaptureHealth {
+            total_datagrams,
+            stopped_early,
+            snaplen_truncated,
+            skipped_frames,
+        },
+        &timeline,
+    );
     Ok(())
 }
 
@@ -134,15 +154,83 @@ fn print_stdout(text: &str) {
     print!("{text}");
 }
 
-/// Prints a one-line summary to stderr.
+/// What reading the capture cost, for the run summary.
+struct CaptureHealth {
+    /// How many UDP datagrams were recovered in all.
+    total_datagrams: usize,
+    /// The error that ended the read early, if the file was truncated.
+    stopped_early: Option<String>,
+    /// How many recovered datagrams were snaplen-truncated.
+    snaplen_truncated: usize,
+    /// How many frames were skipped whole.
+    skipped_frames: usize,
+}
+
+/// Prints a run summary to stderr, including everything that was **not** in the
+/// timeline: a capture that stopped early, frames skipped, datagrams cut short
+/// by the snaplen, and datagrams whose direction could not be told.
 #[expect(
     clippy::print_stderr,
     reason = "a CLI binary reports its run summary on stderr"
 )]
-fn report_summary(total_datagrams: usize, entries: usize, errors: usize) {
-    let dropped = total_datagrams.saturating_sub(entries);
+fn report_summary(capture: &CaptureHealth, timeline: &Timeline) {
+    let entries = timeline.entries.len();
+    let errors = timeline::error_count(&timeline.entries);
+    let truncated = timeline::truncated_count(&timeline.entries);
     eprintln!(
-        "traced {entries} UDP message(s): {errors} parse error(s), \
-         {dropped} non-circuit datagram(s) dropped"
+        "traced {entries} UDP message(s) of {} datagram(s): {errors} parse error(s), \
+         {truncated} snaplen-truncated, {} non-circuit dropped",
+        capture.total_datagrams, timeline.unlabelled
     );
+    if timeline.ambiguous > 0 {
+        eprintln!(
+            "warning: {} datagram(s) dropped with an undecidable direction — \
+             both ends match a known side equally well; pass --sim-addr with \
+             the simulator's port (e.g. 127.0.0.1:9000)",
+            timeline.ambiguous
+        );
+    }
+    if capture.skipped_frames > 0 {
+        eprintln!(
+            "warning: {} capture frame(s) skipped (unsupported link type or \
+             unrepresentable timestamp)",
+            capture.skipped_frames
+        );
+    }
+    if capture.snaplen_truncated > 0 {
+        eprintln!(
+            "warning: {} datagram(s) were cut short by the capture snaplen — \
+             their bodies are incomplete, so a decode failure there is the \
+             capture, not a protocol divergence",
+            capture.snaplen_truncated
+        );
+    }
+    if let Some(error) = &capture.stopped_early {
+        eprintln!("warning: the capture ended mid-record and was read only that far: {error}");
+    }
+}
+
+/// Warns if the log yielded nothing, or if lines that looked like
+/// `#Messaging#` lines could not be parsed — otherwise a log whose format has
+/// drifted silently produces a timeline with no viewer timestamps at all and
+/// nothing saying why.
+#[expect(
+    clippy::print_stderr,
+    reason = "a CLI binary reports input problems on stderr"
+)]
+fn report_log_health(log: &LogFile) {
+    if log.messages.is_empty() {
+        eprintln!(
+            "warning: the log contained no #Messaging# lines — was it captured \
+             with the LogMessages debug setting enabled? Direction and viewer \
+             timestamps will be missing"
+        );
+    }
+    if log.skipped_lines > 0 {
+        eprintln!(
+            "warning: {} log line(s) looked like #Messaging# lines but did not \
+             parse; their viewer timestamps are missing from the timeline",
+            log.skipped_lines
+        );
+    }
 }

@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 80 |
-| done | 894 |
+| bugs | 79 |
+| done | 895 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (80)
+## bugs (79)
 
 ### protocol
 
@@ -1353,16 +1353,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-audit-conformance-runner-isolation`](bugs/test-audit-conformance-runner-isolation.md)
   — A panicking or hung conformance case aborts the run and strands the avatar
-- [`test-audit-conformance-trace-correctness`](bugs/test-audit-conformance-trace-correctness.md)
-  — sl-conformance-trace mislabels every datagram on loopback and correlates
-  across circuits
 
 ### repl
 
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (894)
+## done (895)
 
 ### protocol
 
@@ -2977,6 +2974,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — upload an asset via CAPS NewFileAgentInventory uploader
 - [`test-attach-detach`](done/test-attach-detach-rez-attachment-then-detach-into-inventory.md)
   — rez attachment, then detach into inventory
+- [`test-audit-conformance-trace-correctness`](done/test-audit-conformance-trace-correctness.md)
+  — sl-conformance-trace mislabels every datagram on loopback and correlates
+  across circuits
 - [`test-audit-fake-grid-session-teardown`](done/test-audit-fake-grid-session-teardown.md)
   — sl-fake-grid never prunes sessions, and its tasks outlive shutdown
 - [`test-avatar-notes`](done/test-avatar-notes-write-and-read-avatar-notes.md) —

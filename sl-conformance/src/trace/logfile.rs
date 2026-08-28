@@ -8,7 +8,7 @@
 //! full body comes from the pcap.
 
 use std::collections::HashSet;
-use std::net::{IpAddr, SocketAddr};
+use std::net::SocketAddr;
 use std::path::Path;
 
 use time::OffsetDateTime;
@@ -40,13 +40,29 @@ pub struct LogMessage {
     pub acks: bool,
 }
 
-/// The parsed `#Messaging#` lines plus the simulator IPs they mention.
+/// The parsed `#Messaging#` lines plus the simulator endpoints they mention.
 #[derive(Debug, Clone, Default)]
 pub struct LogFile {
     /// Every parsed message line, in file (chronological) order.
     pub messages: Vec<LogMessage>,
-    /// The distinct simulator IP addresses seen, used to label pcap direction.
-    pub sim_hosts: HashSet<IpAddr>,
+    /// The distinct simulator `ip:port` endpoints seen, used to label pcap
+    /// direction. The **port** matters: on a loopback grid the simulator and
+    /// the viewer share an IP, and only the port tells the two sides apart.
+    pub sim_hosts: HashSet<SocketAddr>,
+    /// How many lines looked like `#Messaging#` lines but did not parse — a
+    /// silent zero here is what tells the caller the log format has not
+    /// drifted out from under the tool.
+    pub skipped_lines: usize,
+}
+
+/// What one log line turned out to be.
+enum LineKind {
+    /// A well-formed `#Messaging#` line.
+    Message(Box<LogMessage>),
+    /// A `MSG: ->` / `MSG: <-` line whose fields did not parse.
+    Malformed,
+    /// Some other log line, of no interest here.
+    Other,
 }
 
 /// Reads and parses the `#Messaging#` lines of the log at `path`.
@@ -56,32 +72,51 @@ pub struct LogFile {
 /// Returns [`TraceError`] if the file cannot be read.
 pub fn read_log(path: &Path) -> Result<LogFile, TraceError> {
     let text = fs_err::read_to_string(path)?;
-    let mut messages = Vec::new();
-    let mut sim_hosts = HashSet::new();
+    let mut log = LogFile::default();
     for line in text.lines() {
-        if let Some(message) = parse_message_line(line) {
-            sim_hosts.insert(message.host.ip());
-            messages.push(message);
+        match classify_line(line) {
+            LineKind::Message(message) => {
+                log.sim_hosts.insert(message.host);
+                log.messages.push(*message);
+            }
+            LineKind::Malformed => {
+                log.skipped_lines = log.skipped_lines.saturating_add(1);
+            }
+            LineKind::Other => {}
         }
     }
-    Ok(LogFile {
-        messages,
-        sim_hosts,
-    })
+    Ok(log)
 }
 
-/// Parses a single line, returning the message if it is a well-formed
-/// `MSG: -> / <-` line and `None` otherwise.
-fn parse_message_line(line: &str) -> Option<LogMessage> {
-    let marker = line.find("MSG:")?;
-    let tokens: Vec<&str> = line.get(marker..)?.split_whitespace().collect();
+/// Classifies a single line as a parsed message, a malformed message line, or
+/// an unrelated log line.
+///
+/// A line counts as a message line — and so as *malformed* when its fields do
+/// not parse — as soon as its `MSG:` marker is followed by a direction arrow.
+/// Anything else is simply another log line.
+fn classify_line(line: &str) -> LineKind {
+    let Some(marker) = line.find("MSG:") else {
+        return LineKind::Other;
+    };
+    let Some(rest) = line.get(marker..) else {
+        return LineKind::Other;
+    };
+    let tokens: Vec<&str> = rest.split_whitespace().collect();
     // tokens: 0=MSG:, 1=arrow, 2=host, 3=size, 4=compressed, 5=packet_id,
     //         6=name, 7..=flags
-    let direction = match *tokens.get(1)? {
-        "->" => Direction::ViewerToSim,
-        "<-" => Direction::SimToViewer,
-        _ => return None,
+    let direction = match tokens.get(1) {
+        Some(&"->") => Direction::ViewerToSim,
+        Some(&"<-") => Direction::SimToViewer,
+        _ => return LineKind::Other,
     };
+    match parse_fields(line, &tokens, direction) {
+        Some(message) => LineKind::Message(Box::new(message)),
+        None => LineKind::Malformed,
+    }
+}
+
+/// Parses the fields after the direction arrow of a `#Messaging#` line.
+fn parse_fields(line: &str, tokens: &[&str], direction: Direction) -> Option<LogMessage> {
     let host: SocketAddr = tokens.get(2)?.parse().ok()?;
     let size: u32 = tokens.get(3)?.parse().ok()?;
     let packet_id: u32 = tokens.get(5)?.parse().ok()?;
@@ -112,13 +147,22 @@ mod test {
     use pretty_assertions::assert_eq;
 
     use crate::trace::Direction;
+    use crate::trace::logfile::{LineKind, LogMessage, classify_line};
+
+    /// The parsed message of a line, or `None` if it was not one.
+    fn parse(line: &str) -> Option<LogMessage> {
+        match classify_line(line) {
+            LineKind::Message(message) => Some(*message),
+            LineKind::Malformed | LineKind::Other => None,
+        }
+    }
 
     #[test]
     fn parses_an_outgoing_line() {
         let line = "2024-01-15T10:30:45Z INFO #Messaging# message.cpp(1319) \
                     LLMessageSystem::sendMessage : MSG: -> 192.168.1.100:13000\t1024\t\
                     1024\t12345 StartAvatarMovement reliable";
-        let parsed = super::parse_message_line(line);
+        let parsed = parse(line);
         assert!(parsed.is_some());
         if let Some(message) = parsed {
             assert_eq!(message.direction, Direction::ViewerToSim);
@@ -136,7 +180,7 @@ mod test {
         let line = "2024-01-15T10:30:45Z INFO #Messaging# message.cpp(1443) \
                     LLMessageSystem::logValidMsg : MSG: <- 192.168.1.100:13000\t512\t512\t\
                     54321 AvatarAnimation reliable resent acks";
-        let parsed = super::parse_message_line(line);
+        let parsed = parse(line);
         assert!(parsed.is_some());
         if let Some(message) = parsed {
             assert_eq!(message.direction, Direction::SimToViewer);
@@ -149,9 +193,24 @@ mod test {
 
     #[test]
     fn ignores_non_message_lines() {
-        assert!(
-            super::parse_message_line("2024-01-15T10:30:45Z INFO #Foo# a.cpp(1) f : hi").is_none()
-        );
-        assert!(super::parse_message_line("").is_none());
+        assert!(matches!(
+            classify_line("2024-01-15T10:30:45Z INFO #Foo# a.cpp(1) f : hi"),
+            LineKind::Other
+        ));
+        assert!(matches!(classify_line(""), LineKind::Other));
+    }
+
+    #[test]
+    fn a_message_line_the_tool_cannot_parse_is_counted_not_ignored() {
+        // The arrow says this is a message line, so a host field the tool does
+        // not understand is format drift worth reporting — not a line to skip
+        // in silence.
+        assert!(matches!(
+            classify_line(
+                "2024-01-15T10:30:45Z INFO #Messaging# message.cpp(1319) f : \
+                 MSG: -> sim.example.com:13000\t1024\t1024\t12345 AgentUpdate"
+            ),
+            LineKind::Malformed
+        ));
     }
 }
