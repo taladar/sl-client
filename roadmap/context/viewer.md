@@ -1513,6 +1513,22 @@ The pure blend/ease maths live in the new `sl-anim` `blend` module +
     `none` reproduces the old clipped look), `SL_VIEWER_TONEMAP_MIX`,
     `SL_VIEWER_EXPOSURE`; `SL_VIEWER_PROBE_INTENSITY` is **gone**, replaced by
     the dimensionless `SL_VIEWER_PROBE_GAIN` (1 = calibrated).
+  - **A `GeneratedEnvironmentMapLight` is filtered into an
+    `EnvironmentMapLight` exactly once** — `generate_environment_map_light`'s
+    query is `Without<EnvironmentMapLight>` — and the derived component is what
+    the light-probe pass actually samples through
+    (`gather_light_probes::<EnvironmentMapLight>`). Every per-frame property
+    (intensity, rotation) must therefore be written to **both** components or it
+    never reaches the shader, and the symptom is a probe frozen at whatever it
+    was bound with rather than an error.
+  - **A probe's `Transform` is its influence volume and nothing else** (our fork
+    from 2026-08-28 on): stock Bevy 0.19 composed `EnvironmentMapLight.rotation`
+    into that same affine and read the reflection direction through it, so a
+    non-uniformly scaled probe got `R·S·R⁻¹` — a sheared volume off its prim's
+    box *and* anisotropically bent reflections. The fork ships the rotation as a
+    separate per-probe quaternion
+    (`LightProbeComponent::get_sample_rotation`). Anything that wants to reshape
+    how a probe is *read* must go through that, never through its transform.
 
 ## P34.1 body-physics ingest — cross-cutting notes
 

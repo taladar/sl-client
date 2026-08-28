@@ -875,19 +875,19 @@ fn spawn_probe_holder(
 /// holder's world rotation (R22i).
 ///
 /// The subtlety, which cost a visibly wrong reflection: Bevy builds a probe's
-/// sampling frame from the probe entity's **world transform**, not from its
+/// sampling frame from the probe entity's **world rotation**, not from its
 /// `rotation` field alone —
 ///
 /// ```text
 /// // bevy_pbr/src/light_probe/environment_map.rs
-/// fn get_world_from_light_matrix(&self, original_transform: &Affine3A) -> Affine3A {
-///     *original_transform * Affine3A::from_quat(self.rotation)
+/// fn get_sample_rotation(&self, world_rotation: Quat) -> Quat {
+///     (world_rotation * self.rotation).inverse()
 /// }
 /// ```
 ///
-/// — and the shader transforms the reflection direction *into* that frame
-/// (`light_from_world`) before sampling. But `copy_probe_faces` captures the cube
-/// in **Bevy world space**. So any rotation the holder inherits rotates the
+/// — and the shader rotates the world-space reflection direction by that
+/// quaternion before sampling. But `copy_probe_faces` captures the cube in
+/// **Bevy world space**. So any rotation the holder inherits rotates the
 /// reflection.
 ///
 /// It always inherits one. The holder is a child of the prim's object entity, and
@@ -900,11 +900,48 @@ fn spawn_probe_holder(
 /// [`Transform`] — and therefore the **influence volume** — still tracking the prim,
 /// which is the whole reason the holder is parented to it.
 ///
+/// Only the **rotation** is in that composition, which is the point: the
+/// holder's `Transform` (and so its scale) defines the influence volume and
+/// nothing else. Stock Bevy 0.19 instead composed the `rotation` field into the
+/// probe's whole affine, `*transform * Affine3A::from_quat(rotation)`, and used
+/// the one matrix for both jobs — `R * S * R⁻¹`, which shears the volume of a
+/// non-uniformly scaled probe off its prim's box and bends its reflected
+/// directions anisotropically (worst on a mirror, whose volume is deliberately
+/// flattened by [`hero_volume_scale`]). Our Bevy fork splits the two; see
+/// `LightProbeComponent::get_sample_rotation` there.
+///
 /// The **default** probe needs no such thing: it hangs off the view, and Bevy takes
 /// only the `rotation` field for a view environment map (`view_rotation`), never the
 /// camera's transform.
 fn sample_rotation(world_rotation: Quat) -> Quat {
     world_rotation.inverse()
+}
+
+/// Re-aim a bound holder's sampling frame after its prim turned (a spinning
+/// mirror), writing [`sample_rotation`] to **both** of the components that carry
+/// it.
+///
+/// The second write is the one that reaches the shader, and is easy to miss.
+/// Bevy's [`GeneratedEnvironmentMapLight`] filter derives the
+/// [`EnvironmentMapLight`] the light-probe pass actually samples through
+/// (`gather_light_probes::<EnvironmentMapLight>`) **once** — its query is
+/// `Without<EnvironmentMapLight>` — and never refreshes it, so re-aiming only the
+/// source component leaves a turning prim reflecting the world at whatever angle
+/// it happened to be bound at. [`calibrate_probe_intensity`] carries the same
+/// both-components discipline for the intensity, and for the same reason.
+fn reaim_sample_frame(commands: &mut Commands, holder: Entity, world_rotation: Quat) {
+    let rotation = sample_rotation(world_rotation);
+    let mut holder = commands.entity(holder);
+    holder
+        .entry::<GeneratedEnvironmentMapLight>()
+        .and_modify(move |mut light| {
+            light.rotation = rotation;
+        });
+    holder
+        .entry::<EnvironmentMapLight>()
+        .and_modify(move |mut light| {
+            light.rotation = rotation;
+        });
 }
 
 /// Hand the nearest probe prims the pool of capture rigs (P33.2).
@@ -983,12 +1020,7 @@ fn drive_local_probes(
                 // `abs_diff_eq` so a prim at rest does no per-frame churn.
                 if !bound.sample_rotation.abs_diff_eq(world_rotation, 1.0e-5) {
                     bound.sample_rotation = world_rotation;
-                    commands
-                        .entity(bound.holder)
-                        .entry::<GeneratedEnvironmentMapLight>()
-                        .and_modify(move |mut light| {
-                            light.rotation = sample_rotation(world_rotation);
-                        });
+                    reaim_sample_frame(&mut commands, bound.holder, world_rotation);
                 }
             }
             // A newcomer: bind it to a free rig, if the budget still has one.
@@ -1864,12 +1896,7 @@ fn drive_hero_probes(
                 }
                 if !bound.sample_rotation.abs_diff_eq(world_rotation, 1.0e-5) {
                     bound.sample_rotation = world_rotation;
-                    commands
-                        .entity(bound.holder)
-                        .entry::<GeneratedEnvironmentMapLight>()
-                        .and_modify(move |mut light| {
-                            light.rotation = sample_rotation(world_rotation);
-                        });
+                    reaim_sample_frame(&mut commands, bound.holder, world_rotation);
                 }
             }
             // A newcomer: bind it to a free rig if the cap has one.
@@ -2014,25 +2041,39 @@ fn copy_hero_faces(
 mod tests {
     use super::sample_rotation;
     use crate::coords::sl_to_bevy_rotation;
-    use bevy::math::EulerRot;
-    use bevy::prelude::Quat;
+    use bevy::light::EnvironmentMapLight;
+    use bevy::math::{Affine3A, EulerRot};
+    use bevy::pbr::LightProbeComponent as _;
+    use bevy::prelude::{Handle, Quat};
 
     /// A local probe must sample its cube in the space the cube was **captured**
-    /// in — world space — however its prim is turned (R22i).
+    /// in — world space — however its prim is turned (R22i), and its influence
+    /// volume must stay the prim's own box while it does.
     ///
     /// The failure this pins is not subtle once seen and was invisible until
     /// someone looked at a mirror: Bevy builds the sampling frame from the probe
-    /// entity's *world transform*, and every object entity carries the Second Life
+    /// entity's *world rotation*, and every object entity carries the Second Life
     /// → Bevy basis change, so an identity `rotation` reflected the world rotated
     /// 90° about X — a neighbour below the prim appeared to one side, one behind
     /// appeared below.
     ///
-    /// Asserting the composition Bevy actually performs
-    /// (`world_from_light = world_transform * rotation`) resolves to identity is
-    /// the whole claim, and it holds for any prim rotation rather than only the
-    /// basis change.
+    /// Both claims are put to **Bevy's own** composition functions rather than
+    /// restated here, so this fails if a Bevy bump changes either rule (or drops
+    /// our fork's split of them). `GeneratedEnvironmentMapLight` is filtered into
+    /// an `EnvironmentMapLight` carrying the same `rotation`, which is the type
+    /// those functions live on.
+    ///
+    /// The second assertion is the one the `Quat`-only version of this test
+    /// structurally could not make: it feeds Bevy the **whole affine** it builds
+    /// the influence volume from and pins the result to `R * S` — the prim's
+    /// oriented box. Stock Bevy 0.19 folded the `rotation` field into that same
+    /// affine, giving `R * S * R⁻¹`: a shear for any non-uniform `S`, which both
+    /// moved the volume off the prim's box and bent every reflected direction.
     #[test]
     fn a_local_probe_samples_its_cube_in_world_space() {
+        // A box probe on a 2 × 3 × 1 m prim: the anisotropy that made the shear
+        // visible, and what `volume_scale` hands the holder.
+        let volume_scale = Vec3::new(2.0, 3.0, 1.0);
         for world_rotation in [
             // The basis change alone: an unrotated prim.
             sl_to_bevy_rotation(),
@@ -2043,13 +2084,37 @@ mod tests {
             Quat::from_euler(EulerRot::XYZ, 0.3, -1.1, 2.4),
             Quat::IDENTITY,
         ] {
-            // Exactly Bevy's `get_world_from_light_matrix`.
-            let world_from_light = world_rotation.mul_quat(sample_rotation(world_rotation));
+            let probe = EnvironmentMapLight {
+                diffuse_map: Handle::default(),
+                specular_map: Handle::default(),
+                intensity: 1.0,
+                rotation: sample_rotation(world_rotation),
+                affects_lightmapped_mesh_diffuse: true,
+            };
+
+            let sampling_frame = probe.get_sample_rotation(world_rotation);
             assert!(
-                world_from_light.abs_diff_eq(Quat::IDENTITY, 1.0e-5),
+                sampling_frame.abs_diff_eq(Quat::IDENTITY, 1.0e-5),
                 "a probe whose prim is rotated by {world_rotation:?} must still sample its \
                  world-space cube unrotated, but the sampling frame came out \
-                 {world_from_light:?} — every reflection it casts is turned by that much"
+                 {sampling_frame:?} — every reflection it casts is turned by that much"
+            );
+
+            // The holder's world transform: the object entity's rotation (the
+            // prim's metre scale lives on the holder, as `volume_scale`
+            // documents) times the holder's own `Transform::from_scale`.
+            let prim_box = Affine3A::from_quat(world_rotation) * Affine3A::from_scale(volume_scale);
+            let world_from_light = probe.get_world_from_light_matrix(&prim_box);
+            assert!(
+                world_from_light
+                    .matrix3
+                    .abs_diff_eq(prim_box.matrix3, 1.0e-5),
+                "a probe's influence volume must stay its prim's oriented box, but the \
+                 affine Bevy builds it from came out {:?} rather than {:?} for a prim \
+                 rotated by {world_rotation:?} — the volume is sheared off the prim, and \
+                 that scale lands in the sampling frame too",
+                world_from_light.matrix3,
+                prim_box.matrix3
             );
         }
     }

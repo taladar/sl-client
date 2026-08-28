@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 72 |
-| done | 902 |
+| bugs | 71 |
+| done | 903 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (72)
+## bugs (71)
 
 ### viewer
 
@@ -1229,8 +1229,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   its cloud
 - [`viewer-audit-plugin-resource-registration`](bugs/viewer-audit-plugin-resource-registration.md)
   — Two plugins read resources they never register
-- [`viewer-audit-probe-nonuniform-scale-shear`](bugs/viewer-audit-probe-nonuniform-scale-shear.md)
-  — A reflection probe's non-uniform volume scale shears its sampling frame
 - [`viewer-audit-render-path-env-reads`](bugs/viewer-audit-render-path-env-reads.md)
   — About a dozen getenv calls and allocations per frame in the sky and post
   chain
@@ -1333,7 +1331,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (902)
+## done (903)
 
 ### protocol
 
@@ -1600,6 +1598,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-probe-ambient-multiply`](done/viewer-audit-probe-ambient-multiply.md)
   — suppress_global_ambient multiplies an absolute producer and decays it
   geometrically
+- [`viewer-audit-probe-nonuniform-scale-shear`](done/viewer-audit-probe-nonuniform-scale-shear.md)
+  — A reflection probe's non-uniform volume scale shears its sampling frame
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
