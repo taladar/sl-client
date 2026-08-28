@@ -19,6 +19,8 @@
 //!   handed to each test, and the per-avatar aditi cooldown guard.
 //! - [`support`] — shared scaffolding (timeouts, combinators, assertion and
 //!   metric-name helpers, well-known id fixtures) the cases build on.
+//! - [`isolate`] — runs a case body under a caught unwind and an overall
+//!   timeout, so a panicking or hung case fails only itself.
 //! - [`cases`] — the concrete test implementations.
 
 pub mod cases;
@@ -26,6 +28,7 @@ pub mod context;
 pub mod fixtures;
 pub mod gitinfo;
 pub mod grid;
+pub mod isolate;
 pub mod metrics;
 pub mod record;
 pub mod registry;

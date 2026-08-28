@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 79 |
-| done | 895 |
+| bugs | 78 |
+| done | 896 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (79)
+## bugs (78)
 
 ### protocol
 
@@ -1349,17 +1349,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-### test
-
-- [`test-audit-conformance-runner-isolation`](bugs/test-audit-conformance-runner-isolation.md)
-  — A panicking or hung conformance case aborts the run and strands the avatar
-
 ### repl
 
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (895)
+## done (896)
 
 ### protocol
 
@@ -2974,6 +2969,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — upload an asset via CAPS NewFileAgentInventory uploader
 - [`test-attach-detach`](done/test-attach-detach-rez-attachment-then-detach-into-inventory.md)
   — rez attachment, then detach into inventory
+- [`test-audit-conformance-runner-isolation`](done/test-audit-conformance-runner-isolation.md)
+  — A panicking or hung conformance case aborts the run and strands the avatar
 - [`test-audit-conformance-trace-correctness`](done/test-audit-conformance-trace-correctness.md)
   — sl-conformance-trace mislabels every datagram on loopback and correlates
   across circuits

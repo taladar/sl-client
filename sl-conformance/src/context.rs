@@ -45,6 +45,30 @@ const ALREADY_LOGGED_IN_RETRY_DELAY: Duration = Duration::from_secs(1);
 /// run loop down.
 const LOGOUT_GRACE: Duration = Duration::from_secs(15);
 
+/// A cloned handle to a session's command channel that can be used where
+/// `async` is not available.
+///
+/// The case that matters is a `Drop` guard restoring grid state its case
+/// mutated: when the case body is cancelled (the runner's overall timeout) or
+/// unwinds, the guard runs with no executor to await on and no session left to
+/// borrow. The command it queues is picked up by the still-running run loop and
+/// goes out ahead of the runner's logout, which is queued after it.
+#[derive(Clone, Debug)]
+pub struct Commander {
+    /// Outbound commands to the run loop, cloned from the session.
+    commands: mpsc::Sender<Command>,
+}
+
+impl Commander {
+    /// Queue `command` for the run loop without awaiting, reporting whether it
+    /// was accepted (`false` when the run loop has stopped or its queue is
+    /// full).
+    #[must_use]
+    pub fn try_send(&self, command: Command) -> bool {
+        self.commands.try_send(command).is_ok()
+    }
+}
+
 /// A logged-in client session: the spawned run loop plus its event and command
 /// channels.
 #[derive(Debug)]
@@ -191,6 +215,16 @@ impl Session {
             |poisoned| poisoned.into_inner().clone(),
             |guard| guard.clone(),
         )
+    }
+
+    /// A cloned handle to this session's command channel, for the one job
+    /// [`Session::send`] cannot do: getting a last command out from a `Drop`
+    /// guard, where there is no `await` and no borrow of the session left.
+    #[must_use]
+    pub fn commander(&self) -> Commander {
+        Commander {
+            commands: self.commands.clone(),
+        }
     }
 
     /// Send a command to the run loop.
@@ -929,6 +963,11 @@ pub enum TestFailure {
     /// The run task panicked.
     #[error("run task join error: {0}")]
     Join(String),
+    /// The case body itself panicked; the harness caught the unwind so the run
+    /// could still be recorded and the avatars logged out (see
+    /// [`crate::isolate`]).
+    #[error("case panicked: {0}")]
+    Panic(String),
     /// The aditi login cooldown is still active for this avatar.
     #[error(
         "aditi cooldown active for {avatar}: {remaining_secs}s remaining (use --force to override)"

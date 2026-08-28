@@ -7,7 +7,8 @@
 ```text
 sl-conformance run    --grid <opensim|aditi> [--avatar <name>]
                       [--secondary <name>] [--credentials <path>]
-                      [--fixtures <path>] [--force] <TEST>
+                      [--fixtures <path>] [--force] [--timeout <secs>]
+                      <TEST>
 sl-conformance list   [--grid <opensim|aditi>]
 sl-conformance generate-manpage --output-dir <dir>
 sl-conformance generate-shell-completion --output-file <f> --shell <shell>
@@ -78,6 +79,33 @@ Before an aditi login, if the same avatar logged in within the last two minutes,
 the run is refused (naming the seconds remaining) unless you pass `--force`. The
 local OpenSim grid has no cooldown. A two-account test guards each avatar
 independently.
+
+## Case isolation: panics, hangs, and grid state
+
+The case body runs isolated (`src/isolate.rs`), because everything after it —
+the logouts and the record write — matters even when it goes wrong:
+
+- a **panic** in the body is caught and becomes a `TestFailure::Panic`. Without
+  that the process would unwind past the logout, leaving the avatar logged in on
+  the grid so the next run's login has to evict a ghost presence;
+- a **hung** body is cancelled at an overall timeout and becomes a
+  `TestFailure::Timeout`. The default is generous (15 minutes — a backstop
+  against an unbounded wait, not a performance assertion); a case overrides it
+  with `GridTest::timeout`, and `--timeout <secs>` overrides both.
+
+Either way the run is recorded as a failure and the avatars are logged out. The
+failure reason is printed on the `FAIL:` line and written to the log, not into
+the record — records are committed and a message can quote grid content.
+
+A case that **mutates grid state** must restore it on the failure path too, not
+only at the end of a happy flow. `parcel-divide-join` is the worked example: its
+divide leaves the region genuinely split, so the exercise runs under an awaited
+join that covers every path that returns, plus a `Drop` guard that queues the
+same join (via `Session::commander()`, since `Drop` cannot await) for the paths
+that never return — a cancelled body or an unwind. Cases that create *grid-side*
+resources they cannot delete (a group created by `support::membership_group`
+after a retry) name the leftovers in the log and in an `orphan_group_count`
+metric instead.
 
 ## Adding a test
 

@@ -23,7 +23,10 @@
 //!      different region-local id) whose area is the corner's area; and
 //!    - the region centre still resolves to the **original** parcel id, now with a
 //!      reduced area — and the two areas sum back to `A0`.
-//! 3. Join the whole region back into one parcel. Re-query:
+//! 3. Join the whole region back into one parcel (also issued as a cleanup guard
+//!    on every failure path, so a step that gives up between the divide and the
+//!    join does not leave the region permanently split for the next run — or for
+//!    anyone else on the grid). Re-query:
 //!    - the region centre resolves to the original parcel id again, with area `A0`
 //!      fully restored; and
 //!    - the chopped corner now resolves to that **same** parcel id — the region is
@@ -39,7 +42,7 @@ use std::time::Duration;
 
 use sl_client_tokio::{Command, Event, ParcelInfo};
 
-use crate::context::{Session, TestContext, TestFailure};
+use crate::context::{Commander, Session, TestContext, TestFailure};
 use crate::grid::Grid;
 use crate::registry::{GridTest, TestFuture};
 use crate::support::{LONG_TIMEOUT, REGION_TIMEOUT, check, check_eq};
@@ -139,129 +142,216 @@ impl GridTest for ParcelDivideJoin {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            let session = ctx.primary();
-            session.wait_for_region(REGION_TIMEOUT).await?;
-
-            let agent = session
-                .agent_id()
-                .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
-
-            // 0. Defensively join the whole region into a single parcel first, so
-            //    the divide/join cycle starts from a known single-parcel baseline
-            //    (this also heals any parcels a prior interrupted run left behind).
-            //    A join of an already-single parcel is a no-op on the simulator.
-            session
-                .send(Command::JoinParcels {
-                    west: WHOLE_REGION.west,
-                    south: WHOLE_REGION.south,
-                    east: WHOLE_REGION.east,
-                    north: WHOLE_REGION.north,
-                })
-                .await?;
-            tokio::time::sleep(EDIT_SETTLE).await;
-
-            // 1. Learn the region-centre parcel's local id, owner, and total area.
-            //    Confirm we own it (divide/join need land-divide/join rights).
-            let initial = query_parcel(session, CENTRE_SQUARE, SEQ_INITIAL).await?;
-            let original_id = initial.local_id;
-            let a0 = initial.area.0;
-            check_eq(
-                "parcel owner is the logged-in (estate-owner) avatar",
-                &initial.owner.uuid(),
-                &agent.uuid(),
-            )?;
-            check(
-                a0 > CHOP_AREA,
-                &format!(
-                    "region-centre parcel area {a0} m² is not larger than the {CHOP_AREA} m² chop; \
-                 the region is not a single divisible parcel"
-                ),
-            )?;
-
-            // 2. Divide the corner out into a new parcel, then read both pieces.
-            session
-                .send(Command::DivideParcel {
-                    west: CHOP.west,
-                    south: CHOP.south,
-                    east: CHOP.east,
-                    north: CHOP.north,
-                })
-                .await?;
-            tokio::time::sleep(EDIT_SETTLE).await;
-            let chopped = query_parcel(session, CORNER_SQUARE, SEQ_CHOPPED).await?;
-            let remainder = query_parcel(session, CENTRE_SQUARE, SEQ_REMAINDER).await?;
-
-            check(
-                chopped.local_id != original_id,
-                &format!(
-                    "divide did not create a new parcel: the chopped corner still reports the \
-                     original local id {}",
-                    original_id.0
-                ),
-            )?;
-            check_eq(
-                "region-centre remainder keeps the original parcel local id",
-                &remainder.local_id,
-                &original_id,
-            )?;
-            check_eq(
-                "chopped-out corner parcel covers exactly the divided rectangle",
-                &chopped.area.0,
-                &CHOP_AREA,
-            )?;
-            let combined_area = chopped
-                .area
-                .0
-                .checked_add(remainder.area.0)
-                .ok_or_else(|| {
-                    TestFailure::Assertion("chopped + remainder area overflowed u32".to_owned())
-                })?;
-            check_eq(
-                "chopped + remainder areas sum back to the original parcel area",
-                &combined_area,
-                &a0,
-            )?;
-
-            // 3. Join the whole region back into one parcel, then read it back.
-            session
-                .send(Command::JoinParcels {
-                    west: WHOLE_REGION.west,
-                    south: WHOLE_REGION.south,
-                    east: WHOLE_REGION.east,
-                    north: WHOLE_REGION.north,
-                })
-                .await?;
-            tokio::time::sleep(EDIT_SETTLE).await;
-            let joined_centre = query_parcel(session, CENTRE_SQUARE, SEQ_JOINED_CENTRE).await?;
-            let joined_corner = query_parcel(session, CORNER_SQUARE, SEQ_JOINED_CORNER).await?;
-
-            check_eq(
-                "joined parcel keeps the original region-centre local id",
-                &joined_centre.local_id,
-                &original_id,
-            )?;
-            check_eq(
-                "joined parcel area is fully restored to the original",
-                &joined_centre.area.0,
-                &a0,
-            )?;
-            check_eq(
-                "the formerly chopped corner is now part of the same single parcel",
-                &joined_corner.local_id,
-                &joined_centre.local_id,
-            )?;
-
-            let metrics = ctx.metrics();
-            metrics.set("original_local_id", i64::from(original_id.0));
-            metrics.set("owner_id", initial.owner.uuid().to_string());
-            metrics.set("initial_area", i64::from(a0));
-            metrics.set("chopped_local_id", i64::from(chopped.local_id.0));
-            metrics.set("chopped_area", i64::from(chopped.area.0));
-            metrics.set("remainder_area", i64::from(remainder.area.0));
-            metrics.set("joined_area", i64::from(joined_centre.area.0));
-            Ok(())
+            // Every step below can return early — an assertion that does not
+            // hold, a reply that never comes — and the divide at step 2 leaves
+            // the region genuinely split until step 3 joins it back. So the
+            // exercise runs under two cleanup guards: the awaited join below
+            // covers every path that *returns*, and `RestoreOnDrop` covers the
+            // paths that never return at all (the runner's overall timeout
+            // cancelling the body, or the body unwinding).
+            let mut guard = RestoreOnDrop {
+                commander: ctx.primary().commander(),
+                armed: true,
+            };
+            let outcome = exercise(ctx).await;
+            let restored = restore_single_parcel(ctx.primary()).await;
+            guard.armed = false;
+            match (outcome, restored) {
+                (Ok(()), restored) => restored,
+                (Err(failure), Ok(())) => Err(failure),
+                (Err(failure), Err(cleanup)) => {
+                    // Report the original failure; the cleanup error is almost
+                    // always the same cause (a dead session) seen twice.
+                    tracing::warn!(
+                        "parcel-divide-join: the region may be left divided — cleanup join \
+                         failed: {cleanup}"
+                    );
+                    Err(failure)
+                }
+            }
         })
     }
+}
+
+/// The last-resort half of the cleanup: queues the whole-region join when the
+/// case body is dropped without having reached its own awaited cleanup — the
+/// runner cancelling a hung body at its overall timeout, or an unwind.
+///
+/// A `Drop` cannot await, so it queues the command on the session's channel
+/// ([`Commander`]) instead; the run loop is still up at that point and transmits
+/// it ahead of the logout the runner queues next.
+struct RestoreOnDrop {
+    /// The primary session's command channel.
+    commander: Commander,
+    /// Whether the join still needs to be issued. Cleared once the awaited
+    /// cleanup on the normal path has run, so the guard fires only when the body
+    /// never got there.
+    armed: bool,
+}
+
+impl Drop for RestoreOnDrop {
+    /// Queue the restoring join if the awaited cleanup never ran.
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let queued = self.commander.try_send(Command::JoinParcels {
+            west: WHOLE_REGION.west,
+            south: WHOLE_REGION.south,
+            east: WHOLE_REGION.east,
+            north: WHOLE_REGION.north,
+        });
+        if queued {
+            tracing::warn!(
+                "parcel-divide-join: case body dropped without cleaning up; queued the \
+                 whole-region join to leave the region as one parcel"
+            );
+        } else {
+            tracing::error!(
+                "parcel-divide-join: case body dropped and the join could not be queued; the \
+                 region may be left divided until the next run's baseline join heals it"
+            );
+        }
+    }
+}
+
+/// Join the whole region back into a single parcel, the state the case both
+/// starts and ends in.
+///
+/// Idempotent: a join over an already-single parcel is a no-op on the simulator,
+/// so this is safe to issue on the success path as well as the failure one.
+///
+/// # Errors
+///
+/// Propagates a [`Session::send`] failure (a closed channel or a session that
+/// has already gone down).
+async fn restore_single_parcel(session: &Session) -> Result<(), TestFailure> {
+    session
+        .send(Command::JoinParcels {
+            west: WHOLE_REGION.west,
+            south: WHOLE_REGION.south,
+            east: WHOLE_REGION.east,
+            north: WHOLE_REGION.north,
+        })
+        .await?;
+    tokio::time::sleep(EDIT_SETTLE).await;
+    Ok(())
+}
+
+/// The divide-verify-join-verify exercise itself, run by
+/// [`ParcelDivideJoin::run`] under its cleanup guard.
+///
+/// # Errors
+///
+/// Returns a [`TestFailure`] for any send/wait failure or unmet assertion in the
+/// flow described on the module.
+async fn exercise(ctx: &mut TestContext) -> Result<(), TestFailure> {
+    let session = ctx.primary();
+    session.wait_for_region(REGION_TIMEOUT).await?;
+
+    let agent = session
+        .agent_id()
+        .ok_or_else(|| TestFailure::Assertion("login reported no agent id".to_owned()))?;
+
+    // 0. Defensively join the whole region into a single parcel first, so
+    //    the divide/join cycle starts from a known single-parcel baseline
+    //    (this also heals any parcels a prior interrupted run left behind,
+    //    from before the cleanup guard, or one whose cleanup could not be
+    //    delivered). A join of an already-single parcel is a no-op.
+    restore_single_parcel(session).await?;
+
+    // 1. Learn the region-centre parcel's local id, owner, and total area.
+    //    Confirm we own it (divide/join need land-divide/join rights).
+    let initial = query_parcel(session, CENTRE_SQUARE, SEQ_INITIAL).await?;
+    let original_id = initial.local_id;
+    let a0 = initial.area.0;
+    check_eq(
+        "parcel owner is the logged-in (estate-owner) avatar",
+        &initial.owner.uuid(),
+        &agent.uuid(),
+    )?;
+    check(
+        a0 > CHOP_AREA,
+        &format!(
+            "region-centre parcel area {a0} m² is not larger than the {CHOP_AREA} m² chop; \
+                 the region is not a single divisible parcel"
+        ),
+    )?;
+
+    // 2. Divide the corner out into a new parcel, then read both pieces.
+    session
+        .send(Command::DivideParcel {
+            west: CHOP.west,
+            south: CHOP.south,
+            east: CHOP.east,
+            north: CHOP.north,
+        })
+        .await?;
+    tokio::time::sleep(EDIT_SETTLE).await;
+    let chopped = query_parcel(session, CORNER_SQUARE, SEQ_CHOPPED).await?;
+    let remainder = query_parcel(session, CENTRE_SQUARE, SEQ_REMAINDER).await?;
+
+    check(
+        chopped.local_id != original_id,
+        &format!(
+            "divide did not create a new parcel: the chopped corner still reports the \
+                     original local id {}",
+            original_id.0
+        ),
+    )?;
+    check_eq(
+        "region-centre remainder keeps the original parcel local id",
+        &remainder.local_id,
+        &original_id,
+    )?;
+    check_eq(
+        "chopped-out corner parcel covers exactly the divided rectangle",
+        &chopped.area.0,
+        &CHOP_AREA,
+    )?;
+    let combined_area = chopped
+        .area
+        .0
+        .checked_add(remainder.area.0)
+        .ok_or_else(|| {
+            TestFailure::Assertion("chopped + remainder area overflowed u32".to_owned())
+        })?;
+    check_eq(
+        "chopped + remainder areas sum back to the original parcel area",
+        &combined_area,
+        &a0,
+    )?;
+
+    // 3. Join the whole region back into one parcel, then read it back.
+    restore_single_parcel(session).await?;
+    let joined_centre = query_parcel(session, CENTRE_SQUARE, SEQ_JOINED_CENTRE).await?;
+    let joined_corner = query_parcel(session, CORNER_SQUARE, SEQ_JOINED_CORNER).await?;
+
+    check_eq(
+        "joined parcel keeps the original region-centre local id",
+        &joined_centre.local_id,
+        &original_id,
+    )?;
+    check_eq(
+        "joined parcel area is fully restored to the original",
+        &joined_centre.area.0,
+        &a0,
+    )?;
+    check_eq(
+        "the formerly chopped corner is now part of the same single parcel",
+        &joined_corner.local_id,
+        &joined_centre.local_id,
+    )?;
+
+    let metrics = ctx.metrics();
+    metrics.set("original_local_id", i64::from(original_id.0));
+    metrics.set("owner_id", initial.owner.uuid().to_string());
+    metrics.set("initial_area", i64::from(a0));
+    metrics.set("chopped_local_id", i64::from(chopped.local_id.0));
+    metrics.set("chopped_area", i64::from(chopped.area.0));
+    metrics.set("remainder_area", i64::from(remainder.area.0));
+    metrics.set("joined_area", i64::from(joined_centre.area.0));
+    Ok(())
 }
 
 /// Sends a `ParcelPropertiesRequest` for the `square` metre rectangle with the

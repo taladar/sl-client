@@ -5,9 +5,12 @@
 //! The runner looks tests up by name; there is deliberately no facility to run
 //! them all at once.
 
+use std::time::Duration;
+
 use crate::context::TestContext;
 pub use crate::context::TestFailure;
 use crate::grid::Grid;
+use crate::isolate::DEFAULT_CASE_TIMEOUT;
 
 /// The boxed future returned by a test body.
 pub type TestFuture<'a> =
@@ -49,6 +52,18 @@ pub trait GridTest: Send + Sync {
     /// OpenSim region is meaningless on Second Life, where `"last"` is kept).
     fn start_location(&self, _grid: Grid) -> &'static str {
         "last"
+    }
+
+    /// The overall wall-clock budget the runner gives this case's body before
+    /// cancelling it as hung ([`crate::isolate::run_isolated`]).
+    ///
+    /// Defaults to [`DEFAULT_CASE_TIMEOUT`], which is far above any case's own
+    /// internal waits: this is a backstop against a body that loops forever
+    /// waiting for a reply that never comes, not a performance assertion. A case
+    /// that legitimately runs longer (a large upload, say) raises it; the
+    /// operator can override either with `--timeout`.
+    fn timeout(&self) -> Duration {
+        DEFAULT_CASE_TIMEOUT
     }
 
     /// Run the exercise against the (already logged-in) context.

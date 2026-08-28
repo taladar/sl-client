@@ -52,6 +52,8 @@ tracing-journald = "0.3.2"
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# `test-util` for the paused clock the case-isolation timeout test runs on.
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

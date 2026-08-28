@@ -129,6 +129,15 @@ const GROUP_CREATE_ATTEMPT_WINDOW: Duration = Duration::from_secs(15);
 /// How many creation attempts before concluding the grid genuinely refuses.
 const GROUP_CREATE_ATTEMPTS: u32 = 3;
 
+/// After a *retried* group creation answered, how long to keep watching for a
+/// second `CreateGroupReply` — the late answer to an earlier attempt, which
+/// means that attempt did create a group after all and nothing else will ever
+/// use it.
+///
+/// Only entered when a retry actually happened, because the wait discards the
+/// events that arrive during it (see [`dispose_of_orphan_groups`]).
+const GROUP_CREATE_ORPHAN_WINDOW: Duration = Duration::from_secs(10);
+
 /// Confirm `session`'s agent is no longer a member of `group_id`.
 ///
 /// The membership-list confirmation differs per grid: OpenSim pushes an
@@ -252,9 +261,9 @@ pub async fn membership_group(
     // Second Life silently drops a `CreateGroupRequest` that arrives too soon
     // after another create by the same agent (observed live: a case needing
     // two groups back-to-back got only one `CreateGroupReply`), so retry with
-    // a per-attempt name suffix. A retry after a merely-slow first reply can
-    // leave an orphan single-member group; SL purges those within ~24-48 h,
-    // and the wait accepts whichever attempt's reply arrives first.
+    // a per-attempt name suffix. The wait accepts whichever attempt's reply
+    // arrives first; a retry after a merely-slow first reply can still leave an
+    // orphan single-member group, which the disposal below names and leaves.
     let mut attempt: u32 = 0;
     let (group_id, create_ok, create_message) = loop {
         attempt = attempt.saturating_add(1);
@@ -296,11 +305,92 @@ pub async fn membership_group(
         create_ok,
         &format!("group creation failed: {create_message}"),
     )?;
+
+    // A retry that raced a merely-slow first reply leaves an orphan group behind
+    // — on Second Life that is L$100 and a founder group slot per orphan. Give
+    // the late reply a moment to arrive so the orphan is at least named, and ask
+    // to leave it (a group its founder has left drops to zero members and the
+    // grid purges it).
+    if attempt > 1 {
+        let orphans = dispose_of_orphan_groups(ctx.primary(), group_id).await?;
+        if !orphans.is_empty() {
+            let listed = orphans
+                .iter()
+                .map(|orphan| orphan.uuid().to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            tracing::warn!(
+                "group creation retried {attempt} times and left {} orphan group(s): {listed}",
+                orphans.len()
+            );
+            let metrics = ctx.metrics();
+            metrics.set(
+                &count_metric("orphan_group"),
+                i64::try_from(orphans.len()).unwrap_or(i64::MAX),
+            );
+            metrics.set("orphan_groups", listed);
+        }
+    }
+
     Ok(MembershipGroup {
         group_id,
         source: GroupSource::Created,
         create_rtt: Some(create_rtt),
     })
+}
+
+/// Collect the groups an earlier creation attempt created after all — every
+/// `CreateGroupReply` other than `kept`'s that still arrives within
+/// [`GROUP_CREATE_ORPHAN_WINDOW`] — and ask to leave each one.
+///
+/// The departure is issued but not awaited: the point is to stop owning the
+/// orphan, and a second wait here would discard yet more of the caller's events.
+/// The ids are returned so the caller can name them in the log and the record;
+/// on a grid that refuses to let a lone owner leave, that log line is the only
+/// trace an operator has to clean up by hand.
+///
+/// Note this *does* consume events: [`Session::wait_for`] drops what does not
+/// match, so this runs only on the retry path, where an orphan is possible.
+///
+/// # Errors
+///
+/// Propagates a [`Session::send`] failure; a timeout is the expected, quiet
+/// outcome (no late reply, hence no orphan).
+async fn dispose_of_orphan_groups(
+    session: &mut Session,
+    kept: GroupKey,
+) -> Result<Vec<GroupKey>, TestFailure> {
+    let mut orphans: Vec<GroupKey> = Vec::new();
+    let started = Instant::now();
+    loop {
+        let remaining = GROUP_CREATE_ORPHAN_WINDOW.saturating_sub(started.elapsed());
+        if remaining.is_zero() {
+            break;
+        }
+        match session
+            .wait_for(remaining, |event| match event {
+                Event::CreateGroupResult {
+                    group_id,
+                    success,
+                    message: _,
+                } if *success && *group_id != kept => Some(*group_id),
+                _ => None,
+            })
+            .await
+        {
+            Ok(orphan) => {
+                if !orphans.contains(&orphan) {
+                    orphans.push(orphan);
+                }
+            }
+            Err(TestFailure::Timeout(_)) => break,
+            Err(other) => return Err(other),
+        }
+    }
+    for orphan in &orphans {
+        session.send(Command::LeaveGroup(*orphan)).await?;
+    }
+    Ok(orphans)
 }
 
 /// Well-known ids and labels reused across cases.

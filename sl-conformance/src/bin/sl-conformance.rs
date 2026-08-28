@@ -14,7 +14,7 @@ use sl_conformance::fixtures::Fixtures;
 use sl_conformance::grid::Grid;
 use sl_conformance::record::{Outcome, Record, Run};
 use sl_conformance::registry::{GridTest, find, registry};
-use sl_conformance::{gitinfo, record};
+use sl_conformance::{gitinfo, isolate, record};
 use sl_repl::{Avatar, Credentials};
 use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt as _;
@@ -328,7 +328,13 @@ async fn run(args: RunArgs) -> Result<(), Error> {
         tertiary_session,
         fixtures,
     );
-    let outcome = test.run(&mut ctx).await;
+    // Run the body isolated: a panic or a hang inside it fails this one case and
+    // still reaches the logout + record path below, rather than aborting the
+    // process with the avatars left logged in on the grid.
+    let case_timeout = args
+        .timeout
+        .map_or_else(|| test.timeout(), std::time::Duration::from_secs);
+    let outcome = isolate::run_isolated(test.run(&mut ctx), case_timeout).await;
     let (metrics, completeness, completeness_note, primary_sess, secondary_sess, tertiary_sess) =
         ctx.into_parts();
 
@@ -392,17 +398,26 @@ fn write_record(
         metric_meta: meta,
     };
     Record::append(records_dir, grid, test.name(), run).map_err(Error::Record)?;
+    // The record deliberately carries no failure text (it is committed, and a
+    // message can quote grid content), so the reason is reported here and in the
+    // log instead.
     print_line(&format!(
-        "{}: {} on {} at {}",
+        "{}: {} on {} at {}{}",
         if passed { "PASS" } else { "FAIL" },
         test.name(),
         grid,
         describe.describe_string(),
+        match &outcome {
+            Ok(()) => String::new(),
+            Err(failure) => format!(" — {failure}"),
+        },
     ));
-    if passed {
-        Ok(())
-    } else {
-        Err(Error::Test(format!("test `{}` failed", test.name())))
+    match outcome {
+        Ok(()) => Ok(()),
+        Err(failure) => Err(Error::Test(format!(
+            "test `{}` failed: {failure}",
+            test.name()
+        ))),
     }
 }
 
@@ -532,6 +547,10 @@ struct RunArgs {
     /// Bypass the per-avatar aditi login cooldown.
     #[clap(long)]
     force: bool,
+    /// Override the case's overall timeout, in seconds. A case body still
+    /// running when it elapses is cancelled and recorded as a timeout failure.
+    #[clap(long, value_name = "SECONDS")]
+    timeout: Option<u64>,
     /// The single test to run.
     test: String,
 }
