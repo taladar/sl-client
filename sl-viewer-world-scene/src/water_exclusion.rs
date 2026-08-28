@@ -237,22 +237,27 @@ pub(crate) fn convert_water_exclusion_faces(
 /// Slave the mask camera to the main [`ViewerCamera`] (pose + projection) and keep
 /// the mask target sized to the window, so the mask lines up pixel-for-pixel with
 /// the main view the water samples it against.
+///
+/// Reads the main camera's **`Transform`**, not its `GlobalTransform`: propagation
+/// runs in `PostUpdate`, so `.after(WorldPhase::CameraPositioned)` orders this
+/// system after the pose is written but the `GlobalTransform` it would read is
+/// still last frame's. Copying that would render the mask from a different
+/// viewpoint than the main view it must line up with, pixel-for-pixel, this frame.
+/// Both cameras are top-level entities (spawned with no parent), so the copy is a
+/// plain `Transform` → `Transform` assignment and stays exact.
 #[expect(
     clippy::type_complexity,
     reason = "a Bevy query pairing the main camera's pose and projection, kept disjoint \
               from the mask camera it is copied onto"
 )]
 pub(crate) fn sync_water_exclusion_camera(
-    main: Query<
-        (&GlobalTransform, &Projection),
-        (With<ViewerCamera>, Without<WaterExclusionCamera>),
-    >,
+    main: Query<(&Transform, &Projection), (With<ViewerCamera>, Without<WaterExclusionCamera>)>,
     mut mask_camera: Query<(&mut Transform, &mut Projection), With<WaterExclusionCamera>>,
     windows: Query<&Window, With<PrimaryWindow>>,
     mask: Option<Res<WaterExclusionMask>>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let (Ok((main_global, main_projection)), Ok((mut mask_transform, mut mask_projection))) =
+    let (Ok((main_transform, main_projection)), Ok((mut mask_transform, mut mask_projection))) =
         (main.single(), mask_camera.single_mut())
     else {
         return;
@@ -262,7 +267,7 @@ pub(crate) fn sync_water_exclusion_camera(
     // `Projection` has no `PartialEq` (its `Custom` variant is a boxed trait
     // object), so compare the clip matrices — they capture everything the mask
     // render sees of the projection.
-    mask_transform.set_if_neq(Transform::from_matrix(main_global.to_matrix()));
+    mask_transform.set_if_neq(*main_transform);
     if mask_projection.get_clip_from_view() != main_projection.get_clip_from_view() {
         *mask_projection = main_projection.clone();
     }
@@ -316,11 +321,15 @@ mod tests {
     use sl_client_bevy::{TextureKey, Uuid};
     use sl_proto::{IMG_ALPHA_GRAD, TextureFace};
 
-    use super::{WaterExclusionFace, WaterExclusionMask, convert_water_exclusion_faces};
+    use super::{
+        WaterExclusionCamera, WaterExclusionFace, WaterExclusionMask,
+        convert_water_exclusion_faces, sync_water_exclusion_camera,
+    };
     use crate::face_material::FaceMaterial;
     use crate::material_cache::SharedFaceMaterial;
     use crate::objects::FaceTextureDebug;
     use crate::probe_layers::WATER_EXCLUSION_LAYER;
+    use crate::world_api::ViewerCamera;
 
     /// A face carrying the invisiprim-successor sentinel is converted into a
     /// water-exclusion surface: it loses its visible material, gains the flat-black
@@ -374,5 +383,47 @@ mod tests {
         let plain_ref = app.world().entity(plain);
         assert!(!plain_ref.contains::<WaterExclusionFace>());
         assert!(plain_ref.contains::<MeshMaterial3d<FaceMaterial>>());
+    }
+
+    /// The mask must render from the *same* viewpoint as the main view it is
+    /// sampled against, this frame — so the sync copies the main camera's
+    /// current-frame `Transform`, not the `GlobalTransform` propagation only
+    /// refreshes in `PostUpdate` (a frame behind whenever the camera moves).
+    ///
+    /// Stage a main camera whose two poses disagree and check the mask camera
+    /// followed the `Transform`.
+    #[test]
+    fn slaves_the_mask_to_the_current_frame_pose() {
+        let mut app = App::new();
+        app.init_resource::<Assets<Image>>()
+            .add_systems(Update, sync_water_exclusion_camera);
+
+        // This frame's pose, as `position_camera` just wrote it, against last
+        // frame's as propagation left the `GlobalTransform`.
+        let current = Transform::from_xyz(7.0, 8.0, 9.0)
+            .with_rotation(Quat::from_rotation_y(core::f32::consts::FRAC_PI_3));
+        let stale = Transform::from_xyz(-7.0, -8.0, -9.0);
+        app.world_mut().spawn((
+            ViewerCamera,
+            current,
+            GlobalTransform::from(stale),
+            Projection::default(),
+        ));
+        let mask = app
+            .world_mut()
+            .spawn((
+                WaterExclusionCamera,
+                Transform::default(),
+                Projection::default(),
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            app.world().entity(mask).get::<Transform>().copied(),
+            Some(current),
+            "the mask camera rides this frame's main-camera pose",
+        );
     }
 }

@@ -201,10 +201,18 @@ impl Plugin for MediaPrimPlugin {
                     .after(MediaEngineSystems::Pump),
             )
             // The wheel claim must run before the camera consumes the same
-            // scroll accumulator for its orbit zoom.
+            // scroll accumulator for its orbit zoom, and after the hover pass in
+            // the set above — it decides whether to claim the wheel from
+            // `MediaFocus::hover` / `hover_pixel`, which `hover_media_faces`
+            // writes. Without that second edge the two are unordered, so which
+            // frame's hovered pixel a scroll lands on is scheduler-order-dependent
+            // (and a scroll on the frame the cursor moves onto a media face can go
+            // to the camera zoom instead).
             .add_systems(
                 Update,
-                claim_media_wheel.before(crate::world_api::WorldPhase::CameraOrbited),
+                claim_media_wheel
+                    .after(MediaPrimSystems::Drive)
+                    .before(crate::world_api::WorldPhase::CameraOrbited),
             );
     }
 }

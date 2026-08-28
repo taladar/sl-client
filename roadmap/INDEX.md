@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 68 |
-| done | 906 |
+| bugs | 66 |
+| done | 908 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (68)
+## bugs (66)
 
 ### viewer
 
@@ -1238,9 +1238,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-sit-camera-gating`](bugs/viewer-audit-sit-camera-gating.md) —
   The scripted sit camera arms on any SitResult and never clears forced
   mouselook
-- [`viewer-audit-stale-globaltransform-readers`](bugs/viewer-audit-stale-globaltransform-readers.md)
-  — Depth-reconstructing passes and the interest camera read a frame-old camera
-  pose
 - [`viewer-audit-system-ordering-claims`](bugs/viewer-audit-system-ordering-claims.md)
   — Update tuples claim a pipeline order the scheduler does not enforce
 - [`viewer-audit-tab-panel-focus-order`](bugs/viewer-audit-tab-panel-focus-order.md)
@@ -1318,12 +1315,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-underwater-fog-background-flicker`](bugs/viewer-underwater-fog-background-flicker.md)
-  — Background flickers behind the underwater fog while walking underwater
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (906)
+## done (908)
 
 ### protocol
 
@@ -1598,6 +1593,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-audit-scene-change-guards-day-cycle`](done/viewer-audit-scene-change-guards-day-cycle.md)
   — The scene crate's write-on-change guards were reasoned about under a pinned
   sky
+- [`viewer-audit-stale-globaltransform-readers`](done/viewer-audit-stale-globaltransform-readers.md)
+  — Depth-reconstructing passes and the interest camera read a frame-old camera
+  pose
 - [`viewer-audit-tonemap-legacy-sky`](done/viewer-audit-tonemap-legacy-sky.md) —
   ACES tonemapping is applied to legacy skies the reference exempts
 - [`viewer-audit-water-state-purge`](done/viewer-audit-water-state-purge.md) —
@@ -2661,6 +2659,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   scaffold (bevy_ui plugin + conventions anchor) (blocked by
   `viewer-ui-text-foundation` (done), `viewer-ui-text-grapheme-backdelete`
   (done))
+- [`viewer-underwater-fog-background-flicker`](done/viewer-underwater-fog-background-flicker.md)
+  — Background flickers behind the underwater fog while walking underwater
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +

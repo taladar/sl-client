@@ -171,12 +171,20 @@ const CAMERA_INTEREST_LOOK_EPS: f32 = 1.0e-3;
 ///
 /// Reporting the camera does **not** move the agent — the `AgentUpdate` camera
 /// fields are the viewpoint only; the agent moves solely via its control flags.
+///
+/// Reads the camera's **`Transform`**, not its `GlobalTransform`: the camera is a
+/// top-level entity (spawned with no parent), so its `Transform` is its world pose,
+/// and `GlobalTransform` is only recomputed by propagation in `PostUpdate` — a
+/// frame old by the time this reads it. At the ~45 Hz cadence below that frame is a
+/// whole report interval, so the sim's interest list would trail the viewpoint by
+/// one report the entire time the camera is moving. Scheduled
+/// `.after(WorldPhase::CameraPositioned)` so the pose it reads is this frame's.
 pub fn report_camera_interest(
     time: Res<Time>,
     mut since_last: Local<f32>,
     mut last_view: Local<Option<(Vec3, Vec3)>>,
     session: Res<ViewerSession>,
-    camera: Query<&GlobalTransform, With<ViewerCamera>>,
+    camera: Query<&Transform, With<ViewerCamera>>,
     mut commands: MessageWriter<SlCommand>,
 ) {
     // Only once the agent is in-world (its avatar object has arrived, so a circuit
@@ -196,7 +204,7 @@ pub fn report_camera_interest(
     let Ok(transform) = camera.single() else {
         return;
     };
-    let eye = transform.translation();
+    let eye = transform.translation;
     // A point one metre ahead along the camera's forward (Bevy `-Z`) gives the
     // look axis `Camera::looking_at` needs; the distance is irrelevant to it.
     // Per-component `f32` maths keeps clear of the workspace
@@ -589,6 +597,77 @@ mod tests {
         app.update();
         assert_eq!(app.world().resource::<Sent>().count, 3);
         assert_eq!(app.world().resource::<Sent>().last, Some(256.0));
+        Ok(())
+    }
+
+    /// The interest camera is the viewpoint the simulator builds the agent's
+    /// object stream around, so it must be *this* frame's pose: the camera's
+    /// `Transform`, not the `GlobalTransform` propagation only refreshes in
+    /// `PostUpdate`. At the report's ~45 Hz cadence a frame is a whole report
+    /// interval, so a stale read has the sim streaming toward where the camera was
+    /// the entire time it is moving.
+    ///
+    /// Stage a camera whose two poses disagree and read back the reported centre.
+    #[test]
+    fn interest_camera_reports_the_current_frame_pose() -> Result<(), TestError> {
+        use core::time::Duration;
+
+        use super::{ViewerSession, report_camera_interest};
+        use crate::world_api::ViewerCamera;
+
+        /// The centre of the most recent `SetCamera` command.
+        #[derive(Resource, Default)]
+        struct Reported(Option<sl_client_bevy::Vector>);
+
+        /// Drain `SlCommand`s, recording each interest-camera report.
+        fn collect(mut reader: MessageReader<SlCommand>, mut out: ResMut<Reported>) {
+            for command in reader.read() {
+                if let Command::SetCamera(camera) = &command.0 {
+                    out.0 = Some(camera.center.clone());
+                }
+            }
+        }
+
+        let mut app = App::new();
+        // The report is gated on the agent being in-world.
+        let session = ViewerSession {
+            agent_in_world: true,
+            ..ViewerSession::default()
+        };
+        app.add_message::<SlCommand>()
+            .init_resource::<Time>()
+            .init_resource::<Reported>()
+            .insert_resource(session)
+            .add_systems(Update, (report_camera_interest, collect).chain());
+
+        // This frame's pose, as `position_camera` just wrote it, against last
+        // frame's as propagation left the `GlobalTransform`.
+        let current = Transform::from_xyz(40.0, 5.0, -60.0);
+        let stale = Transform::from_xyz(-40.0, -5.0, 60.0);
+        app.world_mut()
+            .spawn((ViewerCamera, current, GlobalTransform::from(stale)));
+
+        // Past the ~45 Hz rate limit, so this frame reports.
+        app.world_mut()
+            .resource_mut::<Time>()
+            .advance_by(Duration::from_millis(100));
+        app.update();
+
+        // The report is in Second Life coordinates; converting the two candidate
+        // poses the same way keeps the assertion about *which pose was read*.
+        let reported = app
+            .world()
+            .resource::<Reported>()
+            .0
+            .clone()
+            .ok_or("a moving camera in-world reports its viewpoint")?;
+        assert_eq!(
+            reported,
+            crate::coords::bevy_to_sl_vec(current.translation),
+            "the interest camera is this frame's pose, not the frame-old \
+             GlobalTransform's ({:?})",
+            crate::coords::bevy_to_sl_vec(stale.translation),
+        );
         Ok(())
     }
 }

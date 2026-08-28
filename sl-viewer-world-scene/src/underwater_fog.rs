@@ -153,14 +153,24 @@ fn fog_disabled() -> bool {
 /// sky sun direction, the camera pose, and the current water level — the reference
 /// `LLSettingsVOWater` uniform prep (`waterFogKS = 1 / max(lightDir.z, 0.3)`,
 /// `getModifiedWaterFogDensity` — `pow(density, fogMod)` when the eye is submerged).
+///
+/// Reads the camera's **`Transform`**, not its `GlobalTransform`: the fog pass
+/// reconstructs a fragment's world position from a depth buffer rendered from
+/// *this* frame's pose, and `GlobalTransform` is only recomputed by propagation in
+/// `PostUpdate` — `.after(WorldPhase::CameraPositioned)` buys ordering, not
+/// freshness. A frame-old `world_from_clip` against a current-frame depth buffer
+/// displaces every fogged fragment by exactly the frame's camera motion, which
+/// reads as the background swimming behind the fog while walking. The camera is a
+/// top-level entity (spawned with no parent), so its `Transform` *is* its world
+/// pose.
 pub(crate) fn update_underwater_fog(
     environment: Res<EnvironmentState>,
     level: Res<WaterLevel>,
-    mut cameras: Query<(&GlobalTransform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
+    mut cameras: Query<(&Transform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
 ) {
     let disabled = fog_disabled();
-    for (global, projection, mut fog) in &mut cameras {
-        let camera_pos = global.translation();
+    for (camera_transform, projection, mut fog) in &mut cameras {
+        let camera_pos = camera_transform.translation;
         let position = day_position(&environment.settings);
         let water = environment.settings.blended_water_settings(position);
         let sky = environment
@@ -170,7 +180,7 @@ pub(crate) fn update_underwater_fog(
         // world_from_clip = inverse(clip_from_view * view_from_world), to
         // reconstruct a fragment's world position from its depth in the shader.
         let clip_from_view = projection.get_clip_from_view();
-        let view_from_world = global.to_matrix().inverse();
+        let view_from_world = camera_transform.to_matrix().inverse();
         // `mul_mat4` rather than the `*` operator, which trips the workspace
         // `arithmetic_side_effects` lint.
         let world_from_clip = clip_from_view.mul_mat4(&view_from_world).inverse();
@@ -435,4 +445,75 @@ fn underwater_fog_system(
     render_pass.set_render_pipeline(pipeline);
     render_pass.set_bind_group(0, &bind_group, &[fog_index.index()]);
     render_pass.draw(0..3, 0..1);
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use super::{UnderwaterFog, update_underwater_fog};
+    use crate::environment::EnvironmentState;
+    use crate::water::WaterLevel;
+    use crate::world_api::ViewerCamera;
+
+    /// The fog reconstructs a fragment's world position from a depth buffer
+    /// rendered from *this* frame's camera pose, so it must read the camera's
+    /// current-frame `Transform` — not the `GlobalTransform` propagation only
+    /// refreshes in `PostUpdate`, which is a frame behind whenever the camera is
+    /// moving.
+    ///
+    /// Stage a camera whose two poses disagree (the shape of every `Update` frame
+    /// after the camera has moved) and check the uniform followed the `Transform`.
+    #[test]
+    fn reads_the_current_frame_camera_pose() -> Result<(), Box<dyn core::error::Error>> {
+        let mut app = App::new();
+        app.init_resource::<EnvironmentState>()
+            .init_resource::<WaterLevel>()
+            .add_systems(Update, update_underwater_fog);
+
+        // This frame's pose, as `position_camera` just wrote it.
+        let current = Transform::from_xyz(10.0, 20.0, 30.0);
+        // Last frame's pose, as propagation left the `GlobalTransform`.
+        let stale = Transform::from_xyz(-1.0, -2.0, -3.0);
+        let camera = app
+            .world_mut()
+            .spawn((
+                ViewerCamera,
+                current,
+                GlobalTransform::from(stale),
+                Projection::default(),
+                UnderwaterFog::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let fog = app
+            .world()
+            .entity(camera)
+            .get::<UnderwaterFog>()
+            .ok_or("the camera keeps its fog component")?;
+        assert_eq!(
+            fog.camera_pos.truncate(),
+            current.translation,
+            "the fog eye position is this frame's camera pose",
+        );
+        // The reconstruction matrix must agree with that eye. Bevy's perspective is
+        // reverse-Z infinite, so the *near* plane is clip `z = 1`: unprojecting its
+        // centre gives a point just in front of this frame's eye, not the stale one.
+        let near = fog.world_from_clip.project_point3(Vec3::new(0.0, 0.0, 1.0));
+        assert!(
+            near.distance(current.translation) < 1.0,
+            "world_from_clip unprojects the near-plane centre next to this frame's \
+             eye, got {near:?} against {:?}",
+            current.translation,
+        );
+        assert!(
+            near.distance(stale.translation) > 1.0,
+            "…and nowhere near the frame-old GlobalTransform pose {:?}",
+            stale.translation,
+        );
+        Ok(())
+    }
 }

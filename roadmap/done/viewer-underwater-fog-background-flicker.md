@@ -2,7 +2,7 @@
 id: viewer-underwater-fog-background-flicker
 title: Background flickers behind the underwater fog while walking underwater
 topic: viewer
-status: bugs
+status: done
 origin: observed while live-testing the teleport-handover fixes on local OpenSim (2026-08-07)
 ---
 
@@ -33,3 +33,31 @@ and compare consecutive frames' pixels rather than eyeballing the live window.
 
 Not yet root-caused — filed as a follow-up so it does not block the
 teleport-handover work.
+
+## Fixed (2026-08-29)
+
+Root cause: `update_underwater_fog` built `world_from_clip` from a **frame-old**
+camera pose while the depth buffer it unprojects is rendered from the current
+one, so every fogged fragment was reconstructed off by exactly the frame's
+camera motion — nothing while parked, growing with speed. That is the shape of
+this report ("while walking", "as the camera moves along the bottom"): not an
+unstable input, a reprojection error proportional to how fast the camera is
+going.
+
+It was not the fog pass compositing an unstable background, which is what the
+`SL_VIEWER_DISABLE_UNDERWATER_FOG=1` A/B above was written to distinguish — the
+fog pass was sampling a *correct* depth buffer through a stale matrix.
+
+Fixed under
+[`viewer-audit-stale-globaltransform-readers`](viewer-audit-stale-globaltransform-readers.md),
+which found it by static audit along with three sibling readers: the camera's
+`GlobalTransform` is only recomputed by propagation in `PostUpdate`, so
+`.after(WorldPhase::CameraPositioned)` buys ordering and not freshness. The
+system reads the camera's `Transform` now.
+
+### Verified
+
+Walking underwater with the camera moving, on **both** grids — a local OpenSim
+session and an aditi session — shows no flicker. Both were checked because the
+origin line above names the local grid but the sighting was remembered as
+aditi, whose water is a real region EEP setting over denser content.

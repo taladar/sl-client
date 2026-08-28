@@ -204,7 +204,14 @@ impl Plugin for PhysicsPlugin {
                     // off-thread raycast index (viewer-perf-custom-static-raycast-index),
                     // the replacement for avian's `SpatialQuery`. Change-driven — only
                     // added / moved / removed colliders touch it — so it never re-scans
-                    // the whole prim set. Runs after the collider is installed.
+                    // the whole prim set. The `.after` edges below order it against the
+                    // installer and the detacher, but `apply_static_colliders` installs
+                    // through `Commands`, so the component only exists once those are
+                    // applied at the end of the schedule: a freshly built collider is
+                    // in fact picked up on the *next* frame's `Added<StaticCollider>`.
+                    // That one-frame lag is harmless — a collider that does not exist
+                    // yet cannot be missing from the index — but the edges are not what
+                    // makes it correct, so do not read them as "same frame".
                     sync_raycast_index
                         .after(apply_static_colliders)
                         .after(detach_static_colliders),
@@ -2317,17 +2324,32 @@ pub(crate) fn sync_raycast_index(
 /// off-thread rebuild. A prim contributes only once its [`RefinedCollider`] holds
 /// a shape (a `PhysicsShapeType::None` prim has no collider and is skipped, so it
 /// neither blocks the camera nor makes collision sounds).
+///
+/// Reads each prim's **`Transform`**, not its `GlobalTransform`: this system is
+/// `.after(drive_physical_objects)`, but that driver writes the local `Transform`
+/// and propagation runs in `PostUpdate` — the ordering edge buys no freshness, so a
+/// `GlobalTransform` here would put the whole moving-collider set one frame behind
+/// the pose the same frame renders (the seat placement in this crate handles the
+/// same hazard the same way). A physical prim is a physical *root*
+/// (`is_physical_root` requires no parent object and no attachment point), so it is
+/// a top-level entity and its `Transform` is its world pose; the object scale is
+/// baked into the collider geometry, so only the translation and rotation matter.
 pub(crate) fn sync_dynamic_colliders(
     mut dynamic: ResMut<DynamicColliders>,
-    physical: Query<(Entity, &GlobalTransform, &RefinedCollider), With<PhysicsInterp>>,
+    physical: Query<(Entity, &Transform, &RefinedCollider), With<PhysicsInterp>>,
 ) {
     dynamic.clear();
-    for (entity, global, refined) in &physical {
+    for (entity, transform, refined) in &physical {
         let Some(shape) = refined.collider.as_ref() else {
             continue;
         };
-        let (_scale, rotation, translation) = global.to_scale_rotation_translation();
-        dynamic.push(entity, shape.clone(), translation, rotation, true);
+        dynamic.push(
+            entity,
+            shape.clone(),
+            transform.translation,
+            transform.rotation,
+            true,
+        );
     }
 }
 
@@ -3444,5 +3466,55 @@ mod tests {
             "the despawned prim's build died with it, unpolled"
         );
         Ok(())
+    }
+
+    /// The moving-collider set must hold each physical prim's *current-frame*
+    /// pose: `sync_dynamic_colliders` runs after `drive_physical_objects`, but that
+    /// driver writes the local `Transform` and propagation only refreshes the
+    /// `GlobalTransform` in `PostUpdate` — so reading the latter would leave camera
+    /// collision and the collision sounds chasing the pose a frame behind what the
+    /// same frame draws.
+    ///
+    /// Stage a physical prim whose two poses disagree and probe the published set
+    /// with a ray: it hits at the `Transform` pose and misses at the stale one.
+    #[test]
+    fn dynamic_colliders_take_the_current_frame_pose() {
+        use super::{RefinedCollider, sync_dynamic_colliders};
+        use bevy::prelude::{App, GlobalTransform, Update};
+        use sl_viewer_kit::raycast_index::DynamicColliders;
+        use std::collections::HashSet;
+
+        let mut app = App::new();
+        app.init_resource::<DynamicColliders>()
+            .add_systems(Update, sync_dynamic_colliders);
+
+        // This frame's pose, as `drive_physical_objects` just wrote it, against
+        // last frame's as propagation left the `GlobalTransform`.
+        let current = Vec3::new(0.0, 0.0, 20.0);
+        let stale = Vec3::new(0.0, 0.0, 60.0);
+        app.world_mut().spawn((
+            interp_at([1.0, 2.0, 3.0]),
+            Transform::from_translation(current),
+            GlobalTransform::from(Transform::from_translation(stale)),
+            RefinedCollider {
+                collider: Some(SharedShape::ball(1.0)),
+                shape: Some(PhysicsShapeType::Prim),
+                from_geometry: true,
+                scale: [1.0, 1.0, 1.0],
+            },
+        ));
+
+        app.update();
+
+        // A ray down +Z from the origin. The unit ball at this frame's pose is hit
+        // at 19 m; one at the stale pose would sit at 59 m, past this ray's reach,
+        // so a stale read shows up as a miss rather than a near-miss.
+        let dynamic = app.world().resource::<DynamicColliders>();
+        let hit = dynamic.cast_ray(Vec3::ZERO, Vec3::Z, 30.0, true, false, &HashSet::new());
+        assert!(
+            hit.is_some_and(|distance| (distance - 19.0).abs() < 0.1),
+            "the collider sits at this frame's pose ({current:?}), not the frame-old \
+             GlobalTransform's ({stale:?}) — got {hit:?}",
+        );
     }
 }

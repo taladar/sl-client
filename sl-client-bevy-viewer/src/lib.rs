@@ -2299,7 +2299,11 @@ fn run_session(
             (
                 environment_assets::update_environment_asset_caps,
                 environment_assets::poll_environment_assets,
-                report_camera_interest,
+                // The interest camera is the viewpoint the simulator builds the
+                // agent's object stream around, so it must be *this* frame's pose:
+                // after the camera, or every report describes where the camera was a
+                // frame ago (a whole report interval at its ~45 Hz cadence).
+                report_camera_interest.after(world_api::WorldPhase::CameraPositioned),
                 report_agent_viewport,
             ),
         );
