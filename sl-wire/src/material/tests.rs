@@ -11,10 +11,9 @@ use super::{
     build_modify_material_params_response, build_render_materials_put_request,
     build_render_materials_request, build_render_materials_response, parse_gltf_material_override,
     parse_modify_material_params_request, parse_render_materials_put_request,
-    parse_render_materials_request, parse_render_materials_response, read_binary_value,
-    write_binary_value,
+    parse_render_materials_request, parse_render_materials_response,
 };
-use crate::field::Reader;
+use crate::llsd::parse_llsd_binary;
 use sl_types::key::TextureKey;
 use uuid::Uuid;
 
@@ -28,12 +27,80 @@ fn binary_llsd_round_trip() -> Result<(), String> {
     map.insert("r".to_owned(), Llsd::Real(1.5));
     let value = Llsd::Array(vec![Llsd::Map(map)]);
 
-    let mut bytes = Vec::new();
-    write_binary_value(&value, &mut bytes);
-    let mut reader = Reader::new(&bytes);
-    let decoded = read_binary_value(&mut reader).ok_or("decode failed")?;
+    let bytes = value.to_llsd_binary();
+    let decoded = parse_llsd_binary(&bytes).map_err(|error| format!("{error:?}"))?;
     assert_eq!(decoded, value);
     Ok(())
+}
+
+/// Wraps raw binary-LLSD bytes in the `{ "Zipped": … }` envelope the
+/// `RenderMaterials` capability carries, so a test can feed the parsers a
+/// payload the builders would never emit.
+fn zipped_envelope(binary: &[u8]) -> String {
+    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(binary, 6);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
+    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+}
+
+/// A `Date` in a `RenderMaterials` payload does not desynchronise the values
+/// that follow it.
+///
+/// The crate used to carry its own binary-LLSD codec, which wrote `Date` as a
+/// length-prefixed string and read it back as eight raw bytes — so every value
+/// after a date in the same stream was decoded from the wrong offset. A stray
+/// date sorts before the `Norm*` / `Spec*` keys, so with that codec the whole
+/// material decoded as defaults.
+#[test]
+fn a_date_in_the_payload_does_not_desynchronise_the_fields_after_it() -> Result<(), String> {
+    let id = Uuid::from_u128(0x00ab_cdef_0011_2233_4455_6677_8899_aabb);
+    let mut material = std::collections::HashMap::new();
+    material.insert(
+        "Extra".to_owned(),
+        Llsd::Date("2026-08-26T12:34:56Z".to_owned()),
+    );
+    material.insert("NormOffsetX".to_owned(), Llsd::Integer(5000));
+    material.insert("SpecExp".to_owned(), Llsd::Integer(51));
+    let mut entry = std::collections::HashMap::new();
+    entry.insert("ID".to_owned(), Llsd::Binary(id.as_bytes().to_vec()));
+    entry.insert("Material".to_owned(), Llsd::Map(material));
+    let body = zipped_envelope(&Llsd::Array(vec![Llsd::Map(entry)]).to_llsd_binary());
+
+    let entries = parse_render_materials_response(&body);
+    assert_eq!(entries.len(), 1);
+    let decoded = entries.first().ok_or("no entry")?;
+    assert_eq!(decoded.material_id, id);
+    assert!((decoded.material.normal_offset.0 - 0.5).abs() < f32::EPSILON);
+    assert_eq!(decoded.material.specular_exponent, 51);
+    Ok(())
+}
+
+/// An array or map whose closing terminator is missing is refused rather than
+/// silently accepted. The reference's `LLSDBinaryParser` fails the parse, and
+/// the codec the crate used to carry did not.
+#[test]
+fn a_payload_with_no_terminator_is_refused() {
+    let id = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f00);
+    let mut binary = Llsd::Array(vec![Llsd::Binary(id.as_bytes().to_vec())]).to_llsd_binary();
+    assert_eq!(binary.pop(), Some(b']'));
+
+    assert!(parse_render_materials_request(&zipped_envelope(&binary)).is_empty());
+}
+
+/// A payload that nests past the LLSD depth cap is refused rather than
+/// overflowing the stack. Its inflated size is a few hundred kilobytes, well
+/// inside the inflate ceiling, so only the depth guard stops it.
+#[test]
+fn a_payload_nested_past_the_depth_cap_is_refused() {
+    let mut binary = Vec::new();
+    for _ in 0..100_000_u32 {
+        binary.push(b'[');
+        // A big-endian count of one, spelled out: the crate denies
+        // `to_be_bytes` outside the `endian` module.
+        binary.extend_from_slice(&[0, 0, 0, 1]);
+    }
+    binary.push(b'!');
+
+    assert!(parse_render_materials_request(&zipped_envelope(&binary)).is_empty());
 }
 
 /// A `RenderMaterials` request round-trips through the response parser
@@ -64,8 +131,7 @@ fn render_materials_zip_round_trip() -> Result<(), String> {
     entry.insert("ID".to_owned(), Llsd::Binary(id.as_bytes().to_vec()));
     entry.insert("Material".to_owned(), Llsd::Map(material));
     let array = Llsd::Array(vec![Llsd::Map(entry)]);
-    let mut binary = Vec::new();
-    write_binary_value(&array, &mut binary);
+    let binary = array.to_llsd_binary();
     let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
     let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
     let response = format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>");
@@ -295,8 +361,7 @@ fn render_materials_put_round_trip() -> Result<(), String> {
     };
     let unzipped = miniz_oxide::inflate::decompress_to_vec_zlib(zipped)
         .map_err(|error| format!("{error:?}"))?;
-    let mut reader = Reader::new(&unzipped);
-    let value = read_binary_value(&mut reader).ok_or("decode failed")?;
+    let value = parse_llsd_binary(&unzipped).map_err(|error| format!("{error:?}"))?;
     let Llsd::Map(top) = value else {
         return Err("payload not a map".to_owned());
     };
@@ -340,11 +405,7 @@ fn a_zipped_body_that_inflates_past_the_ceiling_is_refused() {
     // parser rejecting the content. Without the limit this body decodes to the
     // id and the assertions below fail.
     let id = Uuid::from_u128(0x0102_0304_0506_0708_090a_0b0c_0d0e_0f00);
-    let mut payload = Vec::new();
-    write_binary_value(
-        &Llsd::Array(vec![Llsd::Binary(id.as_bytes().to_vec())]),
-        &mut payload,
-    );
+    let mut payload = Llsd::Array(vec![Llsd::Binary(id.as_bytes().to_vec())]).to_llsd_binary();
     payload.resize(128 << 20, 0);
 
     let bomb = miniz_oxide::deflate::compress_to_vec_zlib(&payload, 6);

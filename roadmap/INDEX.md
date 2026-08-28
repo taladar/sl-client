@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 86 |
-| done | 888 |
+| bugs | 85 |
+| done | 889 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,15 +1165,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (86)
+## bugs (85)
 
 ### protocol
 
 - [`protocol-audit-decoder-reference-fidelity`](bugs/protocol-audit-decoder-reference-fidelity.md)
   — Four decoder divergences from the reference viewer
-- [`protocol-audit-legacy-material-date-codec`](bugs/protocol-audit-legacy-material-date-codec.md)
-  — The legacy-material binary LLSD codec writes Date one way and reads it
-  another
 - [`protocol-audit-mesh-joint-index-bounds`](bugs/protocol-audit-mesh-joint-index-bounds.md)
   — A rig's joint indices are never checked against the skin's joint count
 - [`protocol-audit-notecard-fidelity`](bugs/protocol-audit-notecard-fidelity.md)
@@ -1376,7 +1373,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
   — 15 commands the REPL formatter can print cannot be parsed back
 
-## done (888)
+## done (889)
 
 ### protocol
 
@@ -1512,6 +1509,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Lost folder replies permanently deadlock the background inventory crawl
 - [`protocol-audit-j2c-dimension-caps`](done/protocol-audit-j2c-dimension-caps.md)
   — No MAX_IMAGE_SIZE / MAX_IMAGE_AREA cap on a JPEG-2000 header
+- [`protocol-audit-legacy-material-date-codec`](done/protocol-audit-legacy-material-date-codec.md)
+  — The legacy-material binary LLSD codec writes Date one way and reads it
+  another
 - [`protocol-audit-llsd-recursion-depth-cap`](done/protocol-audit-llsd-recursion-depth-cap.md)
   — LLSD parsers recurse with no depth limit
 - [`protocol-audit-lure-region-handle`](done/protocol-audit-lure-region-handle.md)

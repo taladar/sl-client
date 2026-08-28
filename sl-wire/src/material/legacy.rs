@@ -2,9 +2,7 @@
 
 use super::{FaceMaterialPut, LegacyMaterial, RenderMaterialEntry};
 use crate::WireError;
-use crate::endian;
-use crate::field::Reader;
-use crate::llsd::{Llsd, parse_llsd_xml};
+use crate::llsd::{Llsd, parse_llsd_binary, parse_llsd_xml};
 use base64::Engine as _;
 use sl_types::key::TextureKey;
 use std::collections::HashMap;
@@ -30,6 +28,16 @@ const MAX_INFLATED_MATERIALS_BYTES: usize = 64 << 20;
 // RenderMaterials (legacy materials capability — zipped binary LLSD)
 // ---------------------------------------------------------------------------
 
+/// Wraps a binary-LLSD value in the `{ "Zipped": <binary> }` LLSD-XML envelope
+/// every `RenderMaterials` body — request, PUT and response alike — is carried
+/// in: zlib-compress the header-less binary LLSD, base64 it, and emit the
+/// one-key map (`MaterialsModule::ZCompressOSD(osd, useHeader: false)`).
+fn zipped_body(value: &Llsd) -> String {
+    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&value.to_llsd_binary(), 6);
+    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
+    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+}
+
 /// Builds the LLSD-XML body for a `RenderMaterials` capability POST that
 /// requests the legacy materials for `material_ids`: a `{ "Zipped": <binary> }`
 /// map whose binary is the zlib-compressed binary-LLSD array of the 16-byte
@@ -42,11 +50,7 @@ pub fn build_render_materials_request(material_ids: &[Uuid]) -> String {
             .map(|id| Llsd::Binary(id.as_bytes().to_vec()))
             .collect(),
     );
-    let mut binary = Vec::new();
-    write_binary_value(&array, &mut binary);
-    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
-    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+    zipped_body(&array)
 }
 
 /// Builds the LLSD-XML body for a `RenderMaterials` capability **PUT** that sets
@@ -61,11 +65,7 @@ pub fn build_render_materials_put_request(updates: &[FaceMaterialPut]) -> String
     let faces = Llsd::Array(updates.iter().map(face_material_put_to_llsd).collect());
     let mut map = HashMap::new();
     map.insert("FullMaterialsPerFace".to_owned(), faces);
-    let mut binary = Vec::new();
-    write_binary_value(&Llsd::Map(map), &mut binary);
-    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
-    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+    zipped_body(&Llsd::Map(map))
 }
 
 /// Encodes one `{ "Face", "ID", "Material" }` PUT entry; a cleared face omits
@@ -96,12 +96,11 @@ const fn local_id_as_i32(local_id: u32) -> i32 {
     local_id as i32
 }
 
-/// Unzips the `{ "Zipped": <binary> }` envelope both `RenderMaterials` request
-/// bodies share into its inner binary-LLSD value — the inverse of the
-/// `format!("<llsd><map><key>Zipped</key>…")` the builders emit. `None` when the
-/// body is not the expected map, the binary does not inflate, or it is not
-/// well-formed binary-LLSD. An empty body (the "fetch all region materials"
-/// GET) has no `Zipped` and yields `None` too.
+/// Unzips the `{ "Zipped": <binary> }` envelope every `RenderMaterials` body
+/// shares into its inner binary-LLSD value — the inverse of [`zipped_body`].
+/// `None` when the body is not the expected map, the binary does not inflate,
+/// or it is not well-formed binary-LLSD. An empty body (the "fetch all region
+/// materials" GET) has no `Zipped` and yields `None` too.
 fn parse_zipped_body(xml: &str) -> Option<Llsd> {
     let root = parse_llsd_xml(xml).ok()?;
     let zipped = root.get("Zipped").and_then(Llsd::as_binary)?;
@@ -110,8 +109,7 @@ fn parse_zipped_body(xml: &str) -> Option<Llsd> {
         MAX_INFLATED_MATERIALS_BYTES,
     )
     .ok()?;
-    let mut reader = Reader::new(&raw);
-    read_binary_value(&mut reader)
+    parse_llsd_binary(&raw).ok()
 }
 
 /// Parses a `RenderMaterials` capability POST **request** — the inverse of
@@ -193,20 +191,7 @@ const fn local_id_from_i32(id: i32) -> u32 {
 /// Best-effort: a malformed or empty response yields an empty vector.
 #[must_use]
 pub fn parse_render_materials_response(xml: &str) -> Vec<RenderMaterialEntry> {
-    let Ok(root) = parse_llsd_xml(xml) else {
-        return Vec::new();
-    };
-    let Some(zipped) = root.get("Zipped").and_then(Llsd::as_binary) else {
-        return Vec::new();
-    };
-    let Ok(raw) = miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(
-        zipped,
-        MAX_INFLATED_MATERIALS_BYTES,
-    ) else {
-        return Vec::new();
-    };
-    let mut reader = Reader::new(&raw);
-    let Some(Llsd::Array(items)) = read_binary_value(&mut reader) else {
+    let Some(Llsd::Array(items)) = parse_zipped_body(xml) else {
         return Vec::new();
     };
     items
@@ -295,141 +280,6 @@ const fn narrow_to_f32(value: f64) -> f32 {
     value as f32
 }
 
-// ---------------------------------------------------------------------------
-// Minimal binary LLSD codec (header-less, as OpenSim's MaterialsModule emits)
-// ---------------------------------------------------------------------------
-
-/// Reads one header-less binary-LLSD value from `reader`, or `None` on a
-/// malformed/truncated stream.
-pub(crate) fn read_binary_value(reader: &mut Reader<'_>) -> Option<Llsd> {
-    match reader.u8().ok()? {
-        b'!' => Some(Llsd::Undef),
-        b'1' => Some(Llsd::Boolean(true)),
-        b'0' => Some(Llsd::Boolean(false)),
-        b'i' => Some(Llsd::Integer(read_be_i32(reader)?)),
-        b'r' => Some(Llsd::Real(endian::f64_from_be(
-            reader.take_array::<8>().ok()?,
-        ))),
-        b'u' => Some(Llsd::Uuid(Uuid::from_bytes(
-            reader.take_array::<16>().ok()?,
-        ))),
-        b'b' => {
-            let len = read_len(reader)?;
-            Some(Llsd::Binary(reader.take(len).ok()?.to_vec()))
-        }
-        b's' => Some(Llsd::String(read_sized_string(reader)?)),
-        b'l' => Some(Llsd::Uri(read_sized_string(reader)?)),
-        b'd' => {
-            reader.take_array::<8>().ok()?;
-            Some(Llsd::Date(String::new()))
-        }
-        b'[' => read_binary_array(reader),
-        b'{' => read_binary_map(reader),
-        _ => None,
-    }
-}
-
-/// Reads a big-endian binary-LLSD `i32` (integers and size prefixes).
-fn read_be_i32(reader: &mut Reader<'_>) -> Option<i32> {
-    Some(endian::i32_from_be(reader.take_array::<4>().ok()?))
-}
-
-/// Reads a binary-LLSD size prefix as a `usize`, rejecting negatives.
-fn read_len(reader: &mut Reader<'_>) -> Option<usize> {
-    usize::try_from(read_be_i32(reader)?).ok()
-}
-
-/// Reads a size-prefixed binary-LLSD string body (UTF-8, lossily decoded).
-fn read_sized_string(reader: &mut Reader<'_>) -> Option<String> {
-    let len = read_len(reader)?;
-    Some(String::from_utf8_lossy(reader.take(len).ok()?).into_owned())
-}
-
-/// Reads a binary-LLSD array body (count, elements, then the trailing `]`).
-fn read_binary_array(reader: &mut Reader<'_>) -> Option<Llsd> {
-    let count = read_len(reader)?;
-    let mut items = Vec::with_capacity(count.min(4096));
-    for _ in 0..count {
-        items.push(read_binary_value(reader)?);
-    }
-    reader.u8().ok();
-    Some(Llsd::Array(items))
-}
-
-/// Reads a binary-LLSD map body (count, `k`-prefixed entries, then `}`).
-fn read_binary_map(reader: &mut Reader<'_>) -> Option<Llsd> {
-    let count = read_len(reader)?;
-    let mut map = HashMap::with_capacity(count.min(4096));
-    for _ in 0..count {
-        // The key tag (`k`) precedes a size-prefixed name; consume it.
-        reader.u8().ok()?;
-        let key = read_sized_string(reader)?;
-        let value = read_binary_value(reader)?;
-        map.insert(key, value);
-    }
-    reader.u8().ok();
-    Some(Llsd::Map(map))
-}
-
-/// Writes one header-less binary-LLSD value to `out`.
-pub(crate) fn write_binary_value(value: &Llsd, out: &mut Vec<u8>) {
-    match value {
-        Llsd::Undef => out.push(b'!'),
-        Llsd::Boolean(flag) => out.push(if *flag { b'1' } else { b'0' }),
-        Llsd::Integer(number) => {
-            out.push(b'i');
-            out.extend_from_slice(&endian::i32_to_be(*number));
-        }
-        Llsd::Real(number) => {
-            out.push(b'r');
-            out.extend_from_slice(&endian::f64_to_be(*number));
-        }
-        Llsd::Uuid(id) => {
-            out.push(b'u');
-            out.extend_from_slice(id.as_bytes());
-        }
-        Llsd::Binary(bytes) => {
-            out.push(b'b');
-            out.extend_from_slice(&endian::i32_to_be(len_as_i32(bytes.len())));
-            out.extend_from_slice(bytes);
-        }
-        Llsd::String(text) => write_binary_string(b's', text, out),
-        Llsd::Uri(text) => write_binary_string(b'l', text, out),
-        Llsd::Date(text) => write_binary_string(b'd', text, out),
-        Llsd::Array(items) => {
-            out.push(b'[');
-            out.extend_from_slice(&endian::i32_to_be(len_as_i32(items.len())));
-            for item in items {
-                write_binary_value(item, out);
-            }
-            out.push(b']');
-        }
-        Llsd::Map(map) => {
-            out.push(b'{');
-            out.extend_from_slice(&endian::i32_to_be(len_as_i32(map.len())));
-            for (key, item) in map {
-                out.push(b'k');
-                out.extend_from_slice(&endian::i32_to_be(len_as_i32(key.len())));
-                out.extend_from_slice(key.as_bytes());
-                write_binary_value(item, out);
-            }
-            out.push(b'}');
-        }
-    }
-}
-
-/// Writes a tagged, size-prefixed binary-LLSD string body.
-fn write_binary_string(tag: u8, text: &str, out: &mut Vec<u8>) {
-    out.push(tag);
-    out.extend_from_slice(&endian::i32_to_be(len_as_i32(text.len())));
-    out.extend_from_slice(text.as_bytes());
-}
-
-/// Narrows a byte length to the `i32` a binary-LLSD size prefix uses.
-fn len_as_i32(len: usize) -> i32 {
-    i32::try_from(len).unwrap_or(0)
-}
-
 /// Builds a `RenderMaterials` capability response — the inverse of
 /// [`parse_render_materials_response`].
 ///
@@ -440,11 +290,7 @@ fn len_as_i32(len: usize) -> i32 {
 #[must_use]
 pub fn build_render_materials_response(entries: &[RenderMaterialEntry]) -> String {
     let array = Llsd::Array(entries.iter().map(render_material_entry_to_llsd).collect());
-    let mut binary = Vec::new();
-    write_binary_value(&array, &mut binary);
-    let zipped = miniz_oxide::deflate::compress_to_vec_zlib(&binary, 6);
-    let encoded = base64::engine::general_purpose::STANDARD.encode(&zipped);
-    format!("<llsd><map><key>Zipped</key><binary>{encoded}</binary></map></llsd>")
+    zipped_body(&array)
 }
 
 /// Encodes one `{ "ID", "Material" }` entry of a `RenderMaterials` response.

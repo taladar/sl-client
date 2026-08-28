@@ -8,8 +8,9 @@
 //!   `RenderMaterials` capability, whose payload is a *zlib-compressed binary
 //!   LLSD* document — the only path stock OpenSim implements. This module ports
 //!   that codec ([`build_render_materials_request`] /
-//!   [`parse_render_materials_response`]) including a minimal binary-LLSD
-//!   reader/writer.
+//!   [`parse_render_materials_response`]); the binary-LLSD layer itself is
+//!   `sl-llsd`'s, so the `RenderMaterials` bodies and the inventory cache share
+//!   one codec.
 //! - **Modern GLTF (PBR) materials**, where per-object/per-face *overrides* are
 //!   pushed in a `GenericStreamingMessage` (method `0x4175`) as *notation* LLSD,
 //!   and set with a `ModifyMaterialParams` capability POST. Per the project's
@@ -39,8 +40,6 @@ pub use legacy::{
     build_render_materials_response, parse_render_materials_put_request,
     parse_render_materials_request, parse_render_materials_response,
 };
-#[cfg(test)]
-pub(crate) use legacy::{read_binary_value, write_binary_value};
 pub use types::{
     FaceMaterialPut, GLTF_MATERIAL_OVERRIDE_METHOD, GltfMaterialOverride, LegacyMaterial,
     MaterialOverrideUpdate, RenderMaterialEntry,
