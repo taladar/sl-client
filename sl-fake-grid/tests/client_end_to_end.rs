@@ -912,6 +912,32 @@ mod test {
         Ok(())
     }
 
+    /// A logout does not merely close the session machine: the grid forgets
+    /// the session, so the socket, the scenario clone and the terrain it held
+    /// are freed instead of leaking for the life of the process.
+    #[tokio::test]
+    async fn a_logged_out_session_is_pruned() -> Result<(), TestError> {
+        let running = start().await?;
+        let seq = running.agent.session_seq().await;
+        assert!(
+            running._grid.agent_by_seq(seq).await.is_some(),
+            "the live session is in the grid's table"
+        );
+
+        running.commands.send(Command::Logout).await?;
+        tokio::time::timeout(WAIT, async {
+            while running._grid.agent_by_seq(seq).await.is_some() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await?;
+        assert!(
+            running.agent.is_closed(),
+            "the session machine closed on the logout"
+        );
+        Ok(())
+    }
+
     /// A request for the agent's own region finishes as a `TeleportLocal`
     /// at the requested position — no new session.
     #[tokio::test]

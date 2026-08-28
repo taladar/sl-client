@@ -402,9 +402,9 @@ impl GridCore {
         })
     }
 
-    /// Registers a prepared session and starts its pump, timer and teleport
-    /// responder tasks — called only once the login server answered success
-    /// (or a teleport destination is about to be announced).
+    /// Registers a prepared session and starts its pump, timer, teleport
+    /// responder and reaper tasks — called only once the login server
+    /// answered success (or a teleport destination is about to be announced).
     pub(crate) async fn activate_session(self: &Arc<Self>, prepared: &PreparedSession) {
         self.sessions
             .lock()
@@ -414,6 +414,11 @@ impl GridCore {
         tokio::spawn(run_timer(prepared.shared.clone()));
         tokio::spawn(crate::teleport::run_teleport_responder(
             Arc::clone(self),
+            prepared.shared.clone(),
+        ));
+        tokio::spawn(reap_closed_session(
+            Arc::clone(self),
+            prepared.seq,
             prepared.shared.clone(),
         ));
     }
@@ -431,9 +436,18 @@ impl GridCore {
 
     /// The live **root** session of `agent_id` — where the avatar currently
     /// is — if it is logged in.
+    ///
+    /// A closed session is skipped even in the window before its reaper
+    /// pruned it: `SimSession` never resets `agent_presence` on close, so a
+    /// logged-out circuit still reports itself a root agent, and after a
+    /// relogin `HashMap` order would otherwise decide which of the two a lure
+    /// teleport targets.
     pub(crate) async fn root_session_of(&self, agent_id: AgentKey) -> Option<SharedSim> {
         let sessions: Vec<SharedSim> = self.sessions.lock().await.values().cloned().collect();
         for shared in sessions {
+            if shared.is_closed() {
+                continue;
+            }
             let state = shared.state.lock().await;
             if state.avatar.agent_id == agent_id && state.sim.is_root_agent() {
                 drop(state);
@@ -461,6 +475,34 @@ impl GridCore {
             ..SimulatorFeatures::default()
         }
     }
+}
+
+/// Prunes a session from the grid's table once its machine closes — logout,
+/// inactivity, retirement after a teleport away, or abandonment — or the grid
+/// shuts down.
+///
+/// Without it every login leaks its UDP socket, its clone of the scenario's
+/// assets and its terrain for the life of the process, and
+/// [`GridCore::root_session_of`] can hand a lure teleport a circuit whose
+/// client is long gone.
+async fn reap_closed_session(core: Arc<GridCore>, seq: u64, shared: SharedSim) {
+    let mut closed_rx = shared.closed_tx.subscribe();
+    let mut shutdown_rx = shared.shutdown_rx.clone();
+    while !*closed_rx.borrow_and_update() {
+        tokio::select! {
+            changed = closed_rx.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+            }
+            changed = shutdown_rx.changed() => {
+                if changed.is_err() || *shutdown_rx.borrow() {
+                    break;
+                }
+            }
+        }
+    }
+    core.remove_session(seq).await;
 }
 
 /// Derives the `get_grid_info` document: the login URI doubles as the
@@ -997,9 +1039,109 @@ impl FakeAgent {
 
 #[cfg(test)]
 mod test {
+    use std::net::IpAddr;
+
     use pretty_assertions::assert_eq;
+    use sl_wire::messages::{
+        CompleteAgentMovement, CompleteAgentMovementAgentDataBlock, UseCircuitCode,
+        UseCircuitCodeCircuitCodeBlock,
+    };
+    use sl_wire::{AnyMessage, PacketFlags, SequenceNumber, Writer, encode_datagram};
 
     use super::*;
+
+    /// A boxed error for terse test signatures.
+    type TestError = Box<dyn std::error::Error>;
+
+    /// Encodes one client-direction message as an unreliable datagram.
+    fn client_datagram(message: &AnyMessage, sequence: u32) -> Result<Vec<u8>, TestError> {
+        let mut writer = Writer::new();
+        message.id().encode(&mut writer);
+        message.encode_body(&mut writer)?;
+        Ok(encode_datagram(
+            PacketFlags::EMPTY,
+            SequenceNumber(sequence),
+            &writer.into_bytes(),
+        ))
+    }
+
+    /// Drives a prepared session's machine through the circuit handshake the
+    /// way a client does, leaving it hosting the root agent.
+    async fn root_the_agent(
+        shared: &SharedSim,
+        agent_id: AgentKey,
+        ids: SessionIds,
+    ) -> Result<(), TestError> {
+        let from = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 40_001);
+        let open = AnyMessage::UseCircuitCode(UseCircuitCode {
+            circuit_code: UseCircuitCodeCircuitCodeBlock {
+                code: ids.circuit_code.0,
+                session_id: ids.session_id,
+                id: agent_id.uuid(),
+            },
+        });
+        let complete = AnyMessage::CompleteAgentMovement(CompleteAgentMovement {
+            agent_data: CompleteAgentMovementAgentDataBlock {
+                agent_id: agent_id.uuid(),
+                session_id: ids.session_id,
+                circuit_code: ids.circuit_code.0,
+            },
+        });
+        for (sequence, message) in [(1, open), (2, complete)] {
+            let datagram = client_datagram(&message, sequence)?;
+            shared
+                .with_sim(|sim| sim.handle_datagram(from, &datagram, Instant::now()))
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// A closed session stops being a candidate for a lure the moment it
+    /// closes — its `agent_presence` still says root — and is pruned from the
+    /// session table rather than leaking its socket and world for the life of
+    /// the process.
+    #[tokio::test]
+    async fn a_closed_session_is_skipped_and_pruned() -> Result<(), TestError> {
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .region(RegionConfig::default())
+            .start()
+            .await?;
+        let core = Arc::clone(&grid.core);
+        let account = core.accounts.first().ok_or("no account")?.clone();
+        let (prepared, _success) = core.prepare_session(&account, 0).await?;
+        core.activate_session(&prepared).await;
+        let ids = prepared.shared.state.lock().await.ids;
+        root_the_agent(&prepared.shared, account.agent_id, ids).await?;
+
+        assert!(
+            core.root_session_of(account.agent_id).await.is_some(),
+            "the arrived session hosts the agent"
+        );
+
+        prepared.shared.with_sim(SimSession::abandon).await;
+        assert!(
+            prepared.shared.is_closed(),
+            "abandoning closes the session machine"
+        );
+        assert!(
+            prepared.shared.state.lock().await.sim.is_root_agent(),
+            "a closed session still reports itself a root agent, which is why \
+             the closed check is needed",
+        );
+        assert!(
+            core.root_session_of(account.agent_id).await.is_none(),
+            "a closed session must never host a lure teleport"
+        );
+
+        for _ in 0..100_u32 {
+            if core.session(prepared.seq).await.is_none() {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        Err("the closed session was never pruned from the table".into())
+    }
 
     #[test]
     fn duplicate_names_are_rejected() {

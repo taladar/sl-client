@@ -17,6 +17,9 @@ mod test {
     /// A boxed error for terse test signatures.
     type TestError = Box<dyn std::error::Error>;
 
+    /// How long any single wait in these tests may take.
+    const WAIT: Duration = Duration::from_secs(10);
+
     /// Starts a one-account grid on ephemeral ports.
     async fn start_grid() -> Result<FakeGrid, TestError> {
         Ok(FakeGridBuilder::new()
@@ -247,6 +250,96 @@ mod test {
             .send()
             .await?;
         assert_eq!(after.status().as_u16(), 404);
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_refused_login_mints_no_session() -> Result<(), TestError> {
+        let grid = start_grid().await?;
+        let mut logins = grid.logins();
+        for _attempt in 0_u8..3 {
+            let text = post_login(
+                &grid,
+                "text/xml",
+                build_login_request(&login_request("wrong")),
+            )
+            .await?;
+            assert!(
+                matches!(parse_login_response(&text)?, LoginResponse::Failure(_)),
+                "a wrong password is refused"
+            );
+        }
+
+        let text = post_login(
+            &grid,
+            "text/xml",
+            build_login_request(&login_request("password")),
+        )
+        .await?;
+        assert!(matches!(
+            parse_login_response(&text)?,
+            LoginResponse::Success(_)
+        ));
+        let notice = tokio::time::timeout(WAIT, logins.recv()).await??;
+        assert_eq!(
+            notice.session_seq, 1,
+            "the refused logins bound no socket and consumed no session number"
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_releases_a_held_event_queue_poll() -> Result<(), TestError> {
+        // A hold far longer than the test is willing to wait for: only the
+        // shutdown can end this poll.
+        let grid = FakeGridBuilder::new()
+            .account(AccountConfig::new("Test", "User", "password"))
+            .region(RegionConfig::default())
+            .event_queue_hold(Duration::from_secs(300))
+            .start()
+            .await?;
+        let text = post_login(
+            &grid,
+            "text/xml",
+            build_login_request(&login_request("password")),
+        )
+        .await?;
+        let LoginResponse::Success(success) = parse_login_response(&text)? else {
+            return Err("expected a successful login".into());
+        };
+        let http = reqwest::Client::new();
+        let seed_reply = http
+            .post(success.seed_capability.clone())
+            .header("Content-Type", "application/llsd+xml")
+            .body(build_seed_request(&["EventQueueGet"]))
+            .send()
+            .await?
+            .text()
+            .await?;
+        let eq_url = parse_seed_response(&seed_reply)?
+            .get("EventQueueGet")
+            .cloned()
+            .ok_or("EventQueueGet not granted")?;
+
+        let held = tokio::spawn({
+            let http = http.clone();
+            let body = build_event_queue_request(None, false);
+            async move {
+                http.post(&eq_url)
+                    .header("Content-Type", "application/llsd+xml")
+                    .body(body)
+                    .send()
+                    .await
+            }
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        grid.shutdown();
+        let answered = tokio::time::timeout(WAIT, held).await???;
+        assert_eq!(
+            answered.status().as_u16(),
+            502,
+            "the held poll ends as the re-poll answer instead of outliving the grid"
+        );
         Ok(())
     }
 }

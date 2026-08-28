@@ -2388,6 +2388,9 @@ impl LoginServer {
     ///   [`LoginGates::already_logged_in`] is set;
     /// - otherwise [`LoginResponse::Success`] wrapping the supplied `success`
     ///   facts.
+    ///
+    /// The checks are [`LoginServer::rejection`], which a caller that has not
+    /// built its `success` facts yet can run on its own.
     #[must_use]
     pub fn respond(
         request: &ParsedLoginRequest,
@@ -2395,43 +2398,62 @@ impl LoginServer {
         gates: &LoginGates,
         success: Box<LoginSuccess>,
     ) -> LoginResponse {
+        Self::rejection(request, credential, gates).unwrap_or(LoginResponse::Success(success))
+    }
+
+    /// The checks half of [`LoginServer::respond`]: the response to send when
+    /// this login must **not** succeed (in the same order), or `None` when it
+    /// may.
+    ///
+    /// A grid that mints an expensive session — sockets, a region state
+    /// machine, a copy of the world — calls this first, so a wrong password
+    /// or an ungated request costs nothing but the check.
+    #[must_use]
+    pub fn rejection(
+        request: &ParsedLoginRequest,
+        credential: &Credential,
+        gates: &LoginGates,
+    ) -> Option<LoginResponse> {
         if let Some(redirect) = &gates.redirect {
-            return LoginResponse::Redirect(redirect.clone());
+            return Some(LoginResponse::Redirect(redirect.clone()));
         }
         if !credential.password_matches(request) {
-            return LoginResponse::Failure(LoginFailure::new(
+            return Some(LoginResponse::Failure(LoginFailure::new(
                 Self::BAD_CREDENTIALS_REASON,
                 "Could not authenticate your avatar. Check your user name and password.",
-            ));
+            )));
         }
         if let Some(tos_message) = &gates.tos_message
             && !request.agree_to_tos
         {
-            return LoginResponse::Failure(LoginFailure::new(Self::TOS_REASON, tos_message));
+            return Some(LoginResponse::Failure(LoginFailure::new(
+                Self::TOS_REASON,
+                tos_message,
+            )));
         }
         if let Some(critical_message) = &gates.critical_message
             && !request.read_critical
         {
-            return LoginResponse::Failure(LoginFailure::new(
+            return Some(LoginResponse::Failure(LoginFailure::new(
                 Self::CRITICAL_REASON,
                 critical_message,
-            ));
+            )));
         }
         if let Some(mfa) = &credential.mfa
             && !mfa.is_satisfied_by(request)
         {
-            return LoginResponse::MfaChallenge(MfaChallenge {
+            return Some(LoginResponse::MfaChallenge(MfaChallenge {
                 mfa_hash: Some(mfa.mfa_hash.clone()),
                 message: mfa.challenge_message.clone(),
-            });
+            }));
         }
         if gates.already_logged_in {
-            return LoginResponse::Failure(LoginFailure::new(
+            return Some(LoginResponse::Failure(LoginFailure::new(
                 Self::PRESENCE_REASON,
                 Self::ALREADY_LOGGED_IN_MESSAGE,
-            ));
+            )));
         }
-        LoginResponse::Success(success)
+        None
     }
 }
 

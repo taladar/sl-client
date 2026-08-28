@@ -25,7 +25,7 @@ use sl_proto::{
 };
 use sl_types::map::{RegionCoordinates, TeleportFlags};
 use sl_wire::{FakeParcelId, LandmarkAsset};
-use tokio::sync::broadcast;
+use tokio::sync::{broadcast, watch};
 
 use crate::driver::SharedSim;
 use crate::error::Error;
@@ -162,7 +162,8 @@ pub(crate) async fn teleport_session(
         })
         .await?;
 
-    if !wait_for_arrival(&mut dest_events, TELEPORT_ARRIVAL_TIMEOUT).await {
+    let mut shutdown_rx = dest.shutdown_rx.clone();
+    if !wait_for_arrival(&mut dest_events, &mut shutdown_rx, TELEPORT_ARRIVAL_TIMEOUT).await {
         tracing::warn!(
             "teleport of session {source_seq} to {dest_name:?} timed out; abandoning session {}",
             prepared.seq
@@ -332,16 +333,25 @@ async fn resolve_request(
     }
 }
 /// Waits for the destination's `AgentArrived`, or gives up after `timeout`
-/// (also on a closed or hopelessly lagged event stream).
+/// (also on a closed or hopelessly lagged event stream, and on the grid
+/// shutting down — teardown must not wait out the arrival budget).
 async fn wait_for_arrival(
     events: &mut broadcast::Receiver<ServerEvent>,
+    shutdown_rx: &mut watch::Receiver<bool>,
     timeout: Duration,
 ) -> bool {
     let Some(deadline) = tokio::time::Instant::now().checked_add(timeout) else {
         return false;
     };
+    if *shutdown_rx.borrow_and_update() {
+        return false;
+    }
     loop {
-        match tokio::time::timeout_at(deadline, events.recv()).await {
+        let received = tokio::select! {
+            received = tokio::time::timeout_at(deadline, events.recv()) => received,
+            _ = shutdown_rx.changed() => return false,
+        };
+        match received {
             Ok(Ok(ServerEvent::AgentArrived)) => return true,
             Ok(
                 Ok(ServerEvent::Disconnected | ServerEvent::LoggedOut)
@@ -358,9 +368,13 @@ async fn wait_for_arrival(
 
 /// The per-session responder: answers the client's own teleport requests
 /// (`TeleportLocationRequest`, `TeleportLandmarkRequest`, `TeleportLureRequest`)
-/// the way a simulator does, and exits when the session closes. A request
-/// that resolves nowhere is refused with the matching `TeleportFailed` key, so
-/// the viewer's teleport screen never hangs.
+/// the way a simulator does, and exits when the session closes or the grid
+/// shuts down. A request that resolves nowhere is refused with the matching
+/// `TeleportFailed` key, so the viewer's teleport screen never hangs.
+///
+/// The closed and shutdown branches are load-bearing: this task owns a
+/// [`SharedSim`], and therefore the session's own `events_tx`, so the
+/// broadcast it awaits can never report `Closed` on its own.
 ///
 /// Boxed: activating a session spawns a responder, and a responder's teleport
 /// activates the destination session — the explicit `dyn Future` breaks the
@@ -371,8 +385,28 @@ pub(crate) fn run_teleport_responder(
 ) -> Pin<Box<dyn Future<Output = ()> + Send>> {
     Box::pin(async move {
         let mut events = shared.subscribe_events();
+        let mut closed_rx = shared.closed_tx.subscribe();
+        let mut shutdown_rx = shared.shutdown_rx.clone();
         loop {
-            let event = match events.recv().await {
+            if *closed_rx.borrow_and_update() || *shutdown_rx.borrow_and_update() {
+                break;
+            }
+            let received = tokio::select! {
+                received = events.recv() => received,
+                changed = closed_rx.changed() => {
+                    if changed.is_err() || *closed_rx.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+                changed = shutdown_rx.changed() => {
+                    if changed.is_err() || *shutdown_rx.borrow() {
+                        break;
+                    }
+                    continue;
+                }
+            };
+            let event = match received {
                 Ok(event) => event,
                 Err(broadcast::error::RecvError::Lagged(missed)) => {
                     tracing::warn!("teleport responder missed {missed} events");

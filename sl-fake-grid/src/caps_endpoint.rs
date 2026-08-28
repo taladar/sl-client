@@ -6,11 +6,13 @@ use std::time::{Duration, Instant};
 
 use sl_proto::{CapsDispatch, CapsRequest, CapsResponse};
 
-use crate::driver::{SharedSim, SimState};
+use crate::driver::{SharedSim, SimState, sleep_until_opt};
 
 /// Dispatches one CAPS request against a session, holding an empty
 /// `EventQueueGet` poll for up to `eq_hold` before answering the 502 the
-/// client reads as "nothing yet, re-poll".
+/// client reads as "nothing yet, re-poll". The hold also ends the moment the
+/// grid shuts down, so teardown is never held hostage by a poll that would
+/// otherwise sit for the whole `eq_hold`.
 ///
 /// Asset-delivery caps (`GetTexture`, `GetMesh`, `ViewerAsset`, …) route to
 /// the session-free asset surface against the scenario's asset store;
@@ -27,6 +29,7 @@ pub(crate) async fn dispatch_caps(
 ) -> CapsResponse {
     // The hold deadline covers the whole poll, not each re-dispatch.
     let deadline = Instant::now().checked_add(eq_hold);
+    let mut shutdown_rx = shared.shutdown_rx.clone();
     loop {
         let request = CapsRequest {
             method,
@@ -51,20 +54,16 @@ pub(crate) async fn dispatch_caps(
         match dispatch {
             CapsDispatch::Response(response) => return response,
             CapsDispatch::EventQueueWouldBlock => {
-                let expired = match deadline {
-                    Some(deadline) => {
-                        tokio::select! {
-                            () = shared.eq_notify.notified() => false,
-                            () = tokio::time::sleep_until(
-                                tokio::time::Instant::from_std(deadline),
-                            ) => true,
-                        }
-                    }
-                    // An unbounded hold: wait for the wakeup alone.
-                    None => {
-                        shared.eq_notify.notified().await;
-                        false
-                    }
+                if *shutdown_rx.borrow_and_update() {
+                    let guard = shared.state.lock().await;
+                    return guard.caps.event_queue_timeout();
+                }
+                // A hold with no deadline waits for the wakeup (or the
+                // shutdown) alone.
+                let expired = tokio::select! {
+                    () = shared.eq_notify.notified() => false,
+                    () = sleep_until_opt(deadline) => true,
+                    changed = shutdown_rx.changed() => changed.is_err() || *shutdown_rx.borrow(),
                 };
                 if expired {
                     let guard = shared.state.lock().await;

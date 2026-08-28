@@ -6,10 +6,13 @@
 //!
 //! Connections are served one spawned task each, so a held `EventQueueGet`
 //! long-poll never starves other requests (the client's HTTP stack pools
-//! connections and opens new ones as needed).
+//! connections and opens new ones as needed). Each connection task holds a
+//! semaphore permit (a bound on concurrent connections), is dropped if it
+//! does not send its request head in time, and shuts down with the grid.
 
 use std::convert::Infallible;
 use std::sync::Arc;
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::header::CONTENT_TYPE;
@@ -18,7 +21,8 @@ use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
 use sl_proto::CapsResponse;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
 use crate::caps_endpoint::dispatch_caps;
 use crate::economy_endpoint::{handle_helper, is_helper_path};
@@ -32,9 +36,26 @@ const XML_RPC_CONTENT_TYPE: &str = "text/xml";
 /// The largest request body accepted, uploads included.
 const MAX_BODY_BYTES: usize = 16 * 1024 * 1024;
 
+/// The most connections served at once; a peer beyond this is dropped rather
+/// than allowed to pin an unbounded number of tasks and file descriptors.
+const MAX_CONNECTIONS: usize = 256;
+
+/// How long the accept loop waits after a failed `accept` before trying
+/// again, so an exhausted descriptor table cannot spin the task.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
+/// How long a connection may take to send its request head before it is
+/// dropped — a peer that connects and then says nothing never pins a task.
+const HEADER_READ_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// How long a connection may take to finish its in-flight request after the
+/// grid asked it to shut down, before it is dropped outright.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(1);
+
 /// The accept loop: serves connections until shutdown.
 pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
     let mut shutdown_rx = core.shutdown_tx.subscribe();
+    let connections = Arc::new(Semaphore::new(MAX_CONNECTIONS));
     loop {
         tokio::select! {
             accepted = listener.accept() => {
@@ -42,21 +63,23 @@ pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
                     Ok(pair) => pair,
                     Err(error) => {
                         tracing::warn!("accepting an HTTP connection failed: {error}");
+                        tokio::time::sleep(ACCEPT_ERROR_BACKOFF).await;
                         continue;
                     }
                 };
-                let core = Arc::clone(&core);
-                tokio::spawn(async move {
-                    let service = hyper::service::service_fn(move |request| {
-                        let core = Arc::clone(&core);
-                        async move { handle_request(core, request).await }
-                    });
-                    let connection = hyper::server::conn::http1::Builder::new()
-                        .serve_connection(hyper_util::rt::TokioIo::new(stream), service);
-                    if let Err(error) = connection.await {
-                        tracing::debug!("HTTP connection ended with an error: {error}");
-                    }
-                });
+                let Ok(permit) = Arc::clone(&connections).try_acquire_owned() else {
+                    tracing::warn!(
+                        "refusing an HTTP connection: {MAX_CONNECTIONS} already open"
+                    );
+                    drop(stream);
+                    continue;
+                };
+                tokio::spawn(serve_connection(
+                    Arc::clone(&core),
+                    stream,
+                    core.shutdown_tx.subscribe(),
+                    permit,
+                ));
             }
             changed = shutdown_rx.changed() => {
                 if changed.is_err() || *shutdown_rx.borrow() {
@@ -65,6 +88,49 @@ pub(crate) async fn run_http(core: Arc<GridCore>, listener: TcpListener) {
             }
         }
     }
+}
+
+/// Serves one accepted connection, holding `permit` for its lifetime: the
+/// request head must arrive within [`HEADER_READ_TIMEOUT`], and a shutdown
+/// ends the connection gracefully — or, if it does not finish within
+/// [`SHUTDOWN_GRACE`], by dropping it.
+async fn serve_connection(
+    core: Arc<GridCore>,
+    stream: TcpStream,
+    mut shutdown_rx: watch::Receiver<bool>,
+    permit: OwnedSemaphorePermit,
+) {
+    let service = hyper::service::service_fn(move |request| {
+        let core = Arc::clone(&core);
+        async move { handle_request(core, request).await }
+    });
+    let mut builder = hyper::server::conn::http1::Builder::new();
+    // The header-read timeout is inert without a timer.
+    builder
+        .timer(hyper_util::rt::TokioTimer::new())
+        .header_read_timeout(HEADER_READ_TIMEOUT);
+    let connection = builder.serve_connection(hyper_util::rt::TokioIo::new(stream), service);
+    let mut connection = std::pin::pin!(connection);
+    tokio::select! {
+        result = connection.as_mut() => {
+            if let Err(error) = result {
+                tracing::debug!("HTTP connection ended with an error: {error}");
+            }
+        }
+        _ = shutdown_rx.changed() => {
+            connection.as_mut().graceful_shutdown();
+            match tokio::time::timeout(SHUTDOWN_GRACE, connection).await {
+                Ok(Err(error)) => {
+                    tracing::debug!("HTTP connection ended with an error: {error}");
+                }
+                Ok(Ok(())) => {}
+                Err(_) => tracing::debug!(
+                    "dropping an HTTP connection still busy after the shutdown grace"
+                ),
+            }
+        }
+    }
+    drop(permit);
 }
 
 /// Routes one request: `POST /` → login (or the XML-RPC `get_grid_info`

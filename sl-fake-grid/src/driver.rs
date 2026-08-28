@@ -7,7 +7,7 @@
 //! event-queue wakeups can never be stranded inside the state machine.
 
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use sl_proto::{InMemoryAssetSource, RegionIdentity, ServerEvent, SimCaps, SimSession, Transmit};
 use tokio::net::UdpSocket;
@@ -238,12 +238,19 @@ pub(crate) fn new_shared_sim(
 /// Receive buffer size for the UDP pump; comfortably above the LLUDP MTU.
 const RECV_BUFFER_BYTES: usize = 64 * 1024;
 
+/// How long the UDP pump waits after a failed receive before trying again,
+/// so a persistently-failing socket cannot spin the task at 100% CPU.
+const RECV_ERROR_BACKOFF: Duration = Duration::from_millis(50);
+
 /// The UDP pump: receive datagrams into the machine and flush, until the
 /// grid shuts down or the session closes.
 pub(crate) async fn run_udp_pump(shared: SharedSim) {
     let mut shutdown_rx = shared.shutdown_rx.clone();
     let mut closed_rx = shared.closed_tx.subscribe();
     let mut buffer = vec![0_u8; RECV_BUFFER_BYTES];
+    // Consecutive receive failures, to keep a broken socket from flooding
+    // the log at the backoff rate.
+    let mut failures: u32 = 0;
     loop {
         tokio::select! {
             changed = closed_rx.changed() => {
@@ -254,9 +261,18 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
             }
             received = shared.socket.recv_from(&mut buffer) => {
                 let (length, from) = match received {
-                    Ok(pair) => pair,
+                    Ok(pair) => {
+                        failures = 0;
+                        pair
+                    }
                     Err(error) => {
-                        tracing::warn!("UDP receive failed: {error}");
+                        failures = failures.saturating_add(1);
+                        if failures == 1 {
+                            tracing::warn!("UDP receive failed: {error}");
+                        } else {
+                            tracing::debug!("UDP receive failed ({failures} in a row): {error}");
+                        }
+                        tokio::time::sleep(RECV_ERROR_BACKOFF).await;
                         continue;
                     }
                 };
@@ -286,8 +302,9 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
     }
 }
 
-/// Sleeps until `deadline`, or forever when the machine has no timer armed.
-async fn sleep_until_opt(deadline: Option<Instant>) {
+/// Sleeps until `deadline`, or forever when there is none (the machine has
+/// no timer armed, or a poll is held without a deadline).
+pub(crate) async fn sleep_until_opt(deadline: Option<Instant>) {
     match deadline {
         Some(instant) => tokio::time::sleep_until(tokio::time::Instant::from_std(instant)).await,
         None => std::future::pending().await,

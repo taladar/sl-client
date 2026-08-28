@@ -75,6 +75,12 @@ async fn respond(core: &Arc<GridCore>, parsed: &ParsedLoginRequest) -> LoginResp
         ));
     };
     let account = account.clone();
+    // The password, the gates and MFA decide before anything is minted: a
+    // wrong-password POST must not bind a socket, consume a session sequence
+    // number and deep clone the scenario only to throw all of it away.
+    if let Some(rejection) = LoginServer::rejection(parsed, &account.credential, &core.gates) {
+        return rejection;
+    }
     let Some(region) = core.start_region(&account) else {
         return LoginResponse::Failure(LoginFailure::new(
             "key",

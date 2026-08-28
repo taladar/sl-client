@@ -2,7 +2,7 @@
 id: test-audit-fake-grid-session-teardown
 title: sl-fake-grid never prunes sessions, and its tasks outlive shutdown
 topic: test
-status: bugs
+status: done
 origin: static code audit (2026-08-26)
 points: 5
 refs: [test-audit-fake-grid-conformance-grid]
@@ -53,3 +53,50 @@ throttles and dispatch all living in `sl-proto`. The one real duplication is the
 teleport ordering contract (`teleport.rs:118-163`), hand-rolled three more times
 in `sl-proto/tests/sim_session.rs` — two independent authorities for a sequence
 that can drift.
+
+## Resolution
+
+**A session is a lifetime, not an entry.** The table held sessions because
+nothing owned the question "is this one still alive?". Now every activation
+spawns a fourth task beside the pump, the timer and the teleport responder — a
+reaper that waits on the same per-session closed watch the flush rule already
+flips (logout, inactivity, retirement, abandonment) and then removes the entry.
+The two hand-placed `remove_session` calls in `teleport.rs` still stand and are
+simply redundant: they run at the moment the source is retired rather than a
+scheduling hop later, which the teleport's own ordering wants.
+
+**A closed circuit still says it is the root agent.** `SimSession` never resets
+`agent_presence` on close, so pruning alone would still leave a window — and
+`root_session_of` is what a lure with an opaque id resolves against. It now
+skips a closed session outright, which makes the answer right *before* the
+reaper runs rather than eventually. The crate test drives a real circuit
+handshake (`UseCircuitCode` + `CompleteAgentMovement`) to root the agent, then
+abandons it and asserts both halves: `is_root_agent()` is still true, and
+`root_session_of` refuses it anyway.
+
+**A task that owns its own sender can never hear the channel close.** The
+teleport responder awaited only `events.recv()`, and it holds the `SharedSim`
+that owns `events_tx`, so `Closed` was unreachable; it now selects the closed
+and shutdown watches alongside. The same applies one level up: a held
+`EventQueueGet` poll waits on the shutdown watch as well as its hold deadline
+and returns its 502 re-poll answer immediately, an in-flight teleport stops
+waiting out `TELEPORT_ARRIVAL_TIMEOUT`, and a connection task is shut down
+gracefully with a one-second grace before it is dropped. Teardown is bounded
+instead of "up to `eq_hold`".
+
+**Nothing unbounded, nothing spinning.** Connections are capped (256) and must
+send their request head within 15 s (hyper's `header_read_timeout`, which is
+inert without a timer — the timer is why it never applied), and both the accept
+loop and the UDP pump back off after a failure instead of retrying a broken
+descriptor as fast as the runtime allows.
+
+**A refused login costs a check.** `LoginServer::respond` grew a `rejection`
+half — the same checks, in the same order, without the success facts — so the
+endpoint runs the password, gate and MFA checks *before* it binds a socket,
+consumes a session number and deep clones the scenario. One authority for the
+ordering, and a test asserts the first accepted login is still session 1 after
+three refusals.
+
+The teleport-ordering duplication noted above is left alone: deduplicating it
+would mean `sl-proto`'s tests depending on `sl-fake-grid`, which depends on
+`sl-proto`.

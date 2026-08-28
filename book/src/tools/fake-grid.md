@@ -42,6 +42,30 @@ deadline, and wake a held event-queue poll if events are queued. Socket
 I/O happens only after the lock is released, so nothing ever awaits
 while holding the state.
 
+## Session lifetime
+
+A session lives exactly as long as its machine is open. Four tasks
+attend it — the UDP pump, the timer, the teleport responder and a reaper
+— and all four exit on the per-session closed watch the flush rule flips
+(logout, inactivity, retirement after a teleport away, abandonment) or on
+the grid's shutdown watch. The reaper is what removes the session from
+the grid's table, so a logout frees its socket, its clone of the
+scenario's assets and its terrain instead of holding them for the life of
+the process, and `/sim/<n>/…` stops resolving. Until it does, a closed
+session is skipped anyway when the grid looks for the circuit hosting an
+agent: `SimSession` never resets its `agent_presence`, so a logged-out
+circuit still reports itself the root agent, and after a relogin a lure
+must not be handed the dead one.
+
+The grid shuts down with its handle (`FakeGrid::shutdown`, also on
+drop): the accept loop stops, every held `EventQueueGet` poll ends
+immediately with its 502 re-poll answer rather than sitting out the
+hold, an in-flight teleport stops waiting for an arrival, and each
+connection is shut down gracefully — or dropped if it has not finished
+within a second. Connections are bounded (256 at once, each of which
+must send its request head within 15 s), so neither a wedged peer nor a
+flood of them can pin tasks and file descriptors.
+
 ## As a library
 
 ```rust,ignore
