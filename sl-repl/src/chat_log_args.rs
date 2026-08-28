@@ -90,3 +90,109 @@ impl ChatLogArgs {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser as _;
+    use pretty_assertions::assert_eq;
+    use sl_proto::LoggedChatType;
+
+    use super::ChatLogArgs;
+
+    /// A parser for [`ChatLogArgs`] alone, standing in for the `RunArgs` each
+    /// binary flattens it into.
+    #[derive(clap::Parser, Debug)]
+    struct Harness {
+        /// The flattened chat-log flags under test.
+        #[clap(flatten)]
+        chat_log: ChatLogArgs,
+    }
+
+    /// Parse `flags` (without a program name) into the chat-log arguments.
+    fn parse(flags: &[&str]) -> ChatLogArgs {
+        let mut argv = vec!["harness"];
+        argv.extend_from_slice(flags);
+        Harness::parse_from(argv).chat_log
+    }
+
+    #[test]
+    fn the_feature_is_off_unless_a_kind_is_asked_for() {
+        let config = parse(&[]).to_config();
+        assert!(
+            !config.any_enabled(),
+            "no --chat-log-* flag should leave logging fully off"
+        );
+        assert_eq!(parse(&[]).chat_log_dir(), None);
+    }
+
+    #[test]
+    fn each_flag_enables_exactly_its_own_kind() {
+        for (flag, kind) in [
+            ("--chat-log-nearby", LoggedChatType::Nearby),
+            ("--chat-log-im", LoggedChatType::InstantMessage),
+            ("--chat-log-group", LoggedChatType::Group),
+            ("--chat-log-conference", LoggedChatType::Conference),
+        ] {
+            let enabled = parse(&[flag]).to_config().enabled;
+            assert_eq!(
+                enabled.iter().copied().collect::<Vec<_>>(),
+                vec![kind],
+                "{flag} should enable {kind:?} and nothing else"
+            );
+        }
+    }
+
+    #[test]
+    fn seconds_are_on_until_they_are_turned_off() {
+        assert_eq!(
+            parse(&[])
+                .to_config()
+                .timestamp
+                .map(|format| format.seconds),
+            Some(true),
+            "seconds are included by default"
+        );
+        assert_eq!(
+            parse(&["--chat-log-no-seconds"])
+                .to_config()
+                .timestamp
+                .map(|format| format.seconds),
+            Some(false)
+        );
+    }
+
+    #[test]
+    fn the_format_knobs_left_alone_keep_their_defaults() {
+        let defaults = sl_proto::ChatLogConfig::default();
+        let config = parse(&["--chat-log-nearby"]).to_config();
+        assert_eq!(config.recall_window, defaults.recall_window);
+        assert_eq!(
+            config.conversation_log_retention_days,
+            defaults.conversation_log_retention_days
+        );
+        assert!(!config.legacy_im_names);
+        assert!(!config.date_suffix);
+        assert!(!config.conversation_log);
+    }
+
+    #[test]
+    fn the_remaining_flags_each_set_their_own_field() {
+        let config = parse(&[
+            "--chat-log-legacy-names",
+            "--chat-log-date-suffix",
+            "--conversation-log",
+        ])
+        .to_config();
+        assert!(config.legacy_im_names);
+        assert!(config.date_suffix);
+        assert!(config.conversation_log);
+    }
+
+    #[test]
+    fn the_transcript_directory_is_whatever_was_passed() {
+        assert_eq!(
+            parse(&["--chat-log-dir", "/tmp/transcripts"]).chat_log_dir(),
+            Some(std::path::PathBuf::from("/tmp/transcripts"))
+        );
+    }
+}

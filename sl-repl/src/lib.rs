@@ -14,7 +14,8 @@
 //! - [`parse`] — the line classifier ([`parse_line`]).
 //! - [`args`] — the tokenizer and typed argument accessors ([`Args`]).
 //! - [`meta`] — REPL control lines ([`MetaCommand`]).
-//! - [`registry`] — one build entry per `Command` variant ([`Registry`]).
+//! - [`registry`] — one build entry per `Command` variant ([`Registry`]), plus
+//!   the [`help_lines`] a `help` / `?` line prints.
 //! - [`context`] — the [`ReplContext`] placeholder-resolution interface.
 //! - [`format`](mod@format) — symbolized renderers for events, commands, and
 //!   diagnostics ([`format_event`], [`format_command`], [`format_diagnostic`],
@@ -44,5 +45,5 @@ pub use format::{format_command, format_diagnostic, format_event, hexdump};
 pub use meta::MetaCommand;
 pub use parse::{PendingCommand, ReplAction, parse_line};
 pub use record::ScriptRecorder;
-pub use registry::{CommandSpec, Registry};
+pub use registry::{CommandSpec, Registry, help_lines};
 pub use smoke::smoke_battery;

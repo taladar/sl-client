@@ -19,7 +19,7 @@ use sl_client_bevy::{
 };
 use sl_repl::{
     Avatar, Credentials, MetaCommand, ReplAction, ScriptRecorder, SessionContext, format_command,
-    format_diagnostic, format_event, parse_line, smoke_battery,
+    format_diagnostic, format_event, help_lines, parse_line, smoke_battery,
 };
 use tracing::{error, info, warn};
 use tracing_subscriber::{
@@ -507,6 +507,14 @@ fn apply_meta(meta: MetaCommand, ctx: &mut SessionContext) {
                 info!("var ${name} = {value}");
             }
         }
+        MetaCommand::Help(name) => match help_lines(name.as_deref()) {
+            Ok(lines) => {
+                for line in lines {
+                    info!("{line}");
+                }
+            }
+            Err(error) => warn!("{error}"),
+        },
     }
 }
 

@@ -79,6 +79,19 @@ fn resolve(ctx: &dyn ReplContext, raw: &str) -> Result<String, ReplError> {
     }
 }
 
+/// The lowest positional index a registry build function uses to mean
+/// **keyword-only**: a field addressable as `field=value` but with no
+/// positional spelling at all.
+///
+/// The typed accessors take one index for both the keyword and the positional
+/// lookup, so a field that should not be positional is given an index at or
+/// above this, and [`Args::raw`] then skips the positional lookup entirely.
+/// Families of such fields number upward from `KEYWORD_ONLY`,
+/// `KEYWORD_ONLY + 100`, … so the sub-fields of two different structs built for
+/// the same command do not collide — the numbering documents which struct a
+/// field belongs to and nothing more.
+pub(crate) const KEYWORD_ONLY: usize = 100;
+
 /// Parse `value` into `T` via [`FromStr`], mapping a failure to
 /// [`ReplError::InvalidArg`] describing `field` and `expected`.
 fn parse_scalar<T>(field: &str, value: &str, expected: &str) -> Result<T, ReplError>
@@ -120,58 +133,49 @@ pub(crate) fn literal_bool(field: &str, value: &str) -> Result<bool, ReplError> 
     parse_bool(field, value)
 }
 
-/// Parse an LSL-style `<x,y,z>` vector.
-fn parse_vector(field: &str, value: &str) -> Result<Vector, ReplError> {
+/// Parse an LSL-style bracketed tuple: `<a,b,…>` with **exactly** `N`
+/// comma-separated components, each trimmed and parsed via [`FromStr`] into
+/// `T`.
+///
+/// The REPL accepts three bracketed grammars — an `<x,y,z>` [`Vector`] of
+/// `f32`, an `<x,y,z,s>` [`Rotation`] of `f32`, and an `<x,y,z>` global
+/// position of `f64` — which are the same shape at two widths and two scalar
+/// types. They all go through this one parser so a fix to whitespace handling,
+/// a missing bracket or a trailing component cannot land on one grammar and
+/// miss the other two.
+pub(crate) fn parse_components<T, const N: usize>(
+    field: &str,
+    value: &str,
+    expected: &str,
+) -> Result<[T; N], ReplError>
+where
+    T: FromStr,
+{
     let invalid = || ReplError::InvalidArg {
         field: field.to_owned(),
         value: value.to_owned(),
-        expected: "vector <x,y,z>".to_owned(),
+        expected: expected.to_owned(),
     };
     let inner = value
         .strip_prefix('<')
         .and_then(|s| s.strip_suffix('>'))
         .ok_or_else(invalid)?;
-    let mut parts = inner.split(',');
-    let mut next = || -> Result<f32, ReplError> {
-        parts
-            .next()
-            .and_then(|p| p.trim().parse::<f32>().ok())
-            .ok_or_else(invalid)
-    };
-    let x = next()?;
-    let y = next()?;
-    let z = next()?;
-    if parts.next().is_some() {
-        return Err(invalid());
+    let mut parts = Vec::with_capacity(N);
+    for part in inner.split(',') {
+        parts.push(part.trim().parse::<T>().ok().ok_or_else(invalid)?);
     }
+    <[T; N]>::try_from(parts).ok().ok_or_else(invalid)
+}
+
+/// Parse an LSL-style `<x,y,z>` vector.
+fn parse_vector(field: &str, value: &str) -> Result<Vector, ReplError> {
+    let [x, y, z] = parse_components::<f32, 3>(field, value, "vector <x,y,z>")?;
     Ok(Vector { x, y, z })
 }
 
 /// Parse an LSL-style `<x,y,z,s>` rotation (quaternion).
 fn parse_rotation(field: &str, value: &str) -> Result<Rotation, ReplError> {
-    let invalid = || ReplError::InvalidArg {
-        field: field.to_owned(),
-        value: value.to_owned(),
-        expected: "rotation <x,y,z,s>".to_owned(),
-    };
-    let inner = value
-        .strip_prefix('<')
-        .and_then(|s| s.strip_suffix('>'))
-        .ok_or_else(invalid)?;
-    let mut parts = inner.split(',');
-    let mut next = || -> Result<f32, ReplError> {
-        parts
-            .next()
-            .and_then(|p| p.trim().parse::<f32>().ok())
-            .ok_or_else(invalid)
-    };
-    let x = next()?;
-    let y = next()?;
-    let z = next()?;
-    let s = next()?;
-    if parts.next().is_some() {
-        return Err(invalid());
-    }
+    let [x, y, z, s] = parse_components::<f32, 4>(field, value, "rotation <x,y,z,s>")?;
     Ok(Rotation { x, y, z, s })
 }
 
@@ -266,11 +270,16 @@ impl Args {
 
     /// The raw (unresolved) value for `field`, preferring the keyword argument
     /// then the positional slot `pos`.
+    ///
+    /// A `pos` at or above [`KEYWORD_ONLY`] marks a field with no positional
+    /// spelling at all, so the positional lookup is skipped outright rather
+    /// than merely being out of practical reach.
     fn raw(&self, field: &str, pos: usize) -> Option<&str> {
-        self.keyword
-            .get(field)
-            .map(String::as_str)
-            .or_else(|| self.positional.get(pos).map(String::as_str))
+        self.keyword.get(field).map(String::as_str).or_else(|| {
+            (pos < KEYWORD_ONLY)
+                .then(|| self.positional.get(pos).map(String::as_str))
+                .flatten()
+        })
     }
 
     /// Build a [`ReplError::MissingArg`] for `field`.

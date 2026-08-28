@@ -6,8 +6,6 @@
 //! `$placeholder` tokens left unresolved until the registry builds it against a
 //! [`ReplContext`] at dispatch time.
 
-use std::sync::LazyLock;
-
 use sl_proto::Command;
 
 use crate::args::Args;
@@ -15,11 +13,6 @@ use crate::context::ReplContext;
 use crate::error::ReplError;
 use crate::meta::MetaCommand;
 use crate::registry::Registry;
-
-/// The shared default [`Registry`], built once, that [`PendingCommand::resolve`]
-/// dispatches through. A binary that already holds a [`Registry`] should call
-/// [`Registry::build`] directly instead.
-static DEFAULT_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
 
 /// A grid command named on a REPL line, with its arguments parsed but not yet
 /// resolved or type-checked. The [registry](crate::registry) turns this into a
@@ -36,8 +29,9 @@ impl PendingCommand {
     /// Resolve and build this pending command into a [`Command`], resolving its
     /// `$placeholder` arguments against `ctx` at dispatch time.
     ///
-    /// This is a convenience over the shared default [`Registry`]; a binary that
-    /// keeps its own [`Registry`] should call [`Registry::build`] directly.
+    /// This is a convenience over the [shared](Registry::shared) default
+    /// [`Registry`]; a binary that keeps its own [`Registry`] should call
+    /// [`Registry::build`] directly.
     ///
     /// # Errors
     ///
@@ -45,7 +39,7 @@ impl PendingCommand {
     /// whatever the command's build function returns when an argument is
     /// missing, malformed, or an unresolvable placeholder.
     pub fn resolve(&self, ctx: &dyn ReplContext) -> Result<Command, ReplError> {
-        DEFAULT_REGISTRY.build(self, ctx)
+        Registry::shared().build(self, ctx)
     }
 }
 

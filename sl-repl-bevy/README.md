@@ -24,6 +24,10 @@ With no subcommand the binary opens a REPL session. The two subcommands
 `generate-manpage` and `generate-shell-completion` emit packaging artifacts and
 exit.
 
+At the prompt, `help` lists every command with its arguments and `help
+<command>` prints just one; the other meta lines are `#` comments, `sleep
+<seconds>`, and `set` / `unset` / `vars`.
+
 Key options (identical to `sl-repl-tokio`):
 
 - `--credentials <path>` — the TOML credentials file (see below).

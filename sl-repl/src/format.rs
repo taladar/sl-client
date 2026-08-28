@@ -15,7 +15,7 @@
 //! [`Command`] or [`Event`] variant fails to compile here until it is named,
 //! so the formatter can never silently fall back to an anonymous rendering.
 
-use sl_proto::{Command, Diagnostic, Event};
+use sl_proto::{Command, Diagnostic, Event, ScriptUploadLocation};
 
 pub use sl_proto::hexdump;
 
@@ -728,7 +728,17 @@ const fn command_name(command: &Command) -> &'static str {
         Command::UploadBakedTexture { .. } => "upload_baked_texture",
         Command::UpdateInventoryAsset { .. } => "update_inventory_asset",
         Command::CreateScript { .. } => "create_script",
-        Command::UploadScript { .. } => "upload_script",
+        // One `Command` variant, two registry spellings: the `location` picks
+        // which one, so naming it `upload_script` would print a token no
+        // registry entry answers to.
+        Command::UploadScript {
+            location: ScriptUploadLocation::AgentInventory { .. },
+            ..
+        } => "upload_script_agent",
+        Command::UploadScript {
+            location: ScriptUploadLocation::TaskInventory { .. },
+            ..
+        } => "upload_script_task",
         Command::RequestObjectMedia { .. } => "request_object_media",
         Command::SetObjectMedia { .. } => "set_object_media",
         Command::NavigateObjectMedia { .. } => "navigate_object_media",
@@ -853,6 +863,45 @@ mod tests {
         assert!(
             formatted.contains("\"hi there\""),
             "the message is rendered literally: {formatted}"
+        );
+    }
+
+    /// A script upload of the given location, for naming.
+    fn upload(location: sl_proto::ScriptUploadLocation) -> Command {
+        Command::UploadScript {
+            location,
+            target: sl_proto::ScriptTarget::Mono,
+            source: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_split_command_is_named_by_the_registry_entry_that_builds_it() {
+        // One `Command` variant, two registry entries: the bare `upload_script`
+        // this used to print is a token neither of them answers to, so a
+        // transcript naming it could not be replayed.
+        let agent = format_command(
+            &upload(sl_proto::ScriptUploadLocation::AgentInventory {
+                item_id: sl_proto::InventoryKey::from(uuid('1')),
+            }),
+            &NoContext,
+        );
+        let task = format_command(
+            &upload(sl_proto::ScriptUploadLocation::TaskInventory {
+                task_id: sl_proto::ObjectKey::from(uuid('2')),
+                item_id: sl_proto::InventoryKey::from(uuid('1')),
+                running: true,
+                experience: None,
+            }),
+            &NoContext,
+        );
+        assert!(
+            agent.starts_with("upload_script_agent"),
+            "an agent-inventory upload is named for its own registry entry: {agent}"
+        );
+        assert!(
+            task.starts_with("upload_script_task"),
+            "a task-inventory upload is named for its own registry entry: {task}"
         );
     }
 

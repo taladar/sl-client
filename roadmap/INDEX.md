@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 78 |
-| done | 896 |
+| bugs | 77 |
+| done | 897 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1488** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (78)
+## bugs (77)
 
 ### protocol
 
@@ -1349,12 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-### repl
-
-- [`repl-audit-format-registry-parity`](bugs/repl-audit-format-registry-parity.md)
-  — 15 commands the REPL formatter can print cannot be parsed back
-
-## done (896)
+## done (897)
 
 ### protocol
 
@@ -3253,6 +3248,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Diagnostic type + decode/CAPS surfacing
 - [`repl-a3`](done/repl-a3-expected-reply-missing-diagnostics.md) —
   Expected-reply-missing diagnostics
+- [`repl-audit-format-registry-parity`](done/repl-audit-format-registry-parity.md)
+  — 15 commands the REPL formatter can print cannot be parsed back
 - [`repl-b1`](done/repl-b1-sl-client-tokio-diagnostics-stream.md) —
   sl-client-tokio diagnostics stream
 - [`repl-b2`](done/repl-b2-sl-client-bevy-diagnostics-stream.md) —

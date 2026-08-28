@@ -14,8 +14,22 @@
 //! - Enums accept their lowercase name (underscores optional) and/or their
 //!   numeric wire code (e.g. `texture`, `lsl_text`, or `0` for an asset type).
 //! - Optional struct fields are set by `key=value`; missing ones take a default.
+//!
+//! Every accessor takes one index used for **both** the `key=value` lookup and
+//! the positional slot. A field with no positional spelling at all — the
+//! sub-fields of a struct-shaped command, which have no meaningful argument
+//! order — is given an index at or above the crate's `KEYWORD_ONLY` base
+//! (`100`), which [`Args`] refuses to look up positionally. Where one command
+//! builds several such structs, each numbers upward from its own multiple of
+//! that base, so the index says which struct a field belongs to and nothing
+//! else.
+//!
+//! Each [`CommandSpec::usage`] must name every field its build function reads,
+//! since `help <command>` prints it and a name that appears nowhere in the
+//! usage cannot be passed as a keyword; a test asserts it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::sync::LazyLock;
 
 use sl_proto::AgentKey;
 use sl_proto::AnimationKey;
@@ -50,14 +64,15 @@ use sl_proto::TextureKey;
 use sl_proto::TransactionId;
 use sl_proto::{
     AbuseReport, AbuseReportType, AgentPreferences, AssetType, AssociateInventory, AttachmentMode,
-    AttachmentPoint, Camera, ChatType, ClassifiedCategory, ClassifiedUpdate, Command, ControlFlags,
-    CreateGroupParams, CreateListing, DeRezDestination, DetachOrder, DirFindFlags,
-    DirectoryVisibility, EjectAction, EstateAccessDelta, ExperiencePermission, ExperienceUpdate,
-    ExtendedMesh, FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation,
-    GodRegionUpdate, GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange,
-    GroupRoleEdit, GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer,
-    InventoryType, LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType,
-    LightData, LightImage, LindenAmount, ListingId, LookAtType, MapItemType,
+    AttachmentPoint, Camera, ChatLogConfig, ChatType, ClassifiedCategory, ClassifiedUpdate,
+    ClockStyle, Command, ControlFlags, CreateGroupParams, CreateListing, DeRezDestination,
+    DetachOrder, DirFindFlags, DirectoryVisibility, EjectAction, EstateAccessDelta,
+    EstateInfoUpdate, ExperiencePermission, ExperienceUpdate, ExtendedMesh, FaceMaterialPut,
+    FlexibleData, FolderType, FreezeAction, FriendRights, GestureActivation, GodRegionUpdate,
+    GridCoordinates, GroupNoticeAttachment, GroupNoticeKey, GroupRoleChange, GroupRoleEdit,
+    GroupRoleMemberChange, InterestsUpdate, InventoryItem, InventoryOffer, InventoryType,
+    LandBrushAction, LandBrushSize, LandEdit, LandSearchType, LandStatReportType, LegacyMaterial,
+    LightData, LightImage, LindenAmount, ListingId, LoggedChatType, LookAtType, MapItemType,
     MarketplaceAssociateInventoryInfo, MarketplaceInventoryInfo, Material, MaterialOverrideUpdate,
     Maturity, MediaEntry, MoneyTransactionType, MovementMode, MuteFlags, MuteType,
     NewInventoryItem, NewInventoryLink, NotecardRez, ObjectBuyItem, ObjectExtraParams,
@@ -65,13 +80,14 @@ use sl_proto::{
     ParcelAccessScope, ParcelCategory, ParcelFlags, ParcelReturnType, ParcelUpdate,
     PermissionField, Permissions, Permissions5, PickKey, PickUpdate, PointAtType, Postcard,
     PrimShape, PrimShapeParams, ProfileUpdate, ProposalVoteId, ReflectionProbe,
-    ReflectionProbeFlags, RegionHandle, RegionInfoUpdate, RegionLocalObjectId, RegionLocalParcelId,
-    RegionName, RenderMaterialRef, RestoreItem, RezAttachment, RezObjectParams, RezScriptParams,
-    Rotation, SaleType, ScopedObjectId, ScopedParcelId, ScriptLanguage, ScriptPermissions,
-    ScriptTarget, ScriptUploadLocation, SculptData, SculptOrMeshKey, SimWideDeleteFlags,
-    StartLocationSlot, TaskInventoryKey, TerraformArea, TextureEntry, TextureFace, Throttle,
-    UpdatableAssetType, UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect,
-    ViewerEffectData, ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
+    ReflectionProbeFlags, RegionDebugUpdate, RegionHandle, RegionInfoUpdate, RegionLocalObjectId,
+    RegionLocalParcelId, RegionName, RegionTerrainUpdate, RenderMaterialRef, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, Rotation, SaleType, ScopedObjectId,
+    ScopedParcelId, ScriptLanguage, ScriptPermissions, ScriptTarget, ScriptUploadLocation,
+    SculptData, SculptOrMeshKey, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey,
+    TerraformArea, TextureEntry, TextureFace, Throttle, TimestampFormat, UpdatableAssetType,
+    UpdateGroupInfoParams, UpdateListing, Uuid, Vector, ViewerEffect, ViewerEffectData,
+    ViewerEffectType, VoiceProvisionRequest, Wearable, WearableType,
 };
 
 use crate::args::{self, Args};
@@ -153,7 +169,30 @@ impl Default for Registry {
     }
 }
 
+/// The shared default [`Registry`], built once on first use.
+static DEFAULT_REGISTRY: LazyLock<Registry> = LazyLock::new(Registry::new);
+
+/// The help lines for `name` (or every command) from the
+/// [shared](Registry::shared) registry — what a binary prints for a
+/// [`MetaCommand::Help`](crate::meta::MetaCommand::Help) line.
+///
+/// # Errors
+///
+/// Returns [`ReplError::UnknownCommand`] when `name` names no command.
+pub fn help_lines(name: Option<&str>) -> Result<Vec<String>, ReplError> {
+    Registry::shared().help(name)
+}
+
 impl Registry {
+    /// The process-wide default registry, built once.
+    ///
+    /// [`PendingCommand::resolve`] and [`help_lines`] both dispatch through it
+    /// so a binary need not thread a registry of its own to every call site.
+    #[must_use]
+    pub fn shared() -> &'static Self {
+        &DEFAULT_REGISTRY
+    }
+
     /// Build the registry with every command entry.
     #[must_use]
     pub fn new() -> Self {
@@ -177,6 +216,39 @@ impl Registry {
         self.by_name
             .get(name)
             .and_then(|index| self.specs.get(*index))
+    }
+
+    /// The help lines a [`MetaCommand::Help`](crate::meta::MetaCommand::Help)
+    /// asks for: one `name — usage` line per command when `name` is `None`
+    /// (in registration order), or the single matching line.
+    ///
+    /// This is what reads [`CommandSpec::usage`]. A usage hint that no one can
+    /// ask for is a comment that drifts silently, which is exactly what these
+    /// had done.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ReplError::UnknownCommand`] when `name` is given but not
+    /// registered.
+    pub fn help(&self, name: Option<&str>) -> Result<Vec<String>, ReplError> {
+        /// Render one spec as its help line, omitting the dash for a command
+        /// that takes no arguments.
+        fn line(spec: &CommandSpec) -> String {
+            if spec.usage.is_empty() {
+                spec.name.to_owned()
+            } else {
+                format!("{} — {}", spec.name, spec.usage)
+            }
+        }
+        match name {
+            Some(name) => {
+                let spec = self
+                    .spec(name)
+                    .ok_or_else(|| ReplError::UnknownCommand(name.to_owned()))?;
+                Ok(vec![line(spec)])
+            }
+            None => Ok(self.specs.iter().map(line).collect()),
+        }
     }
 
     /// Build the [`Command`] named by a [`PendingCommand`], resolving its
@@ -252,23 +324,7 @@ fn record_field<'a>(field: &str, record: &'a [String], idx: usize) -> Result<&'a
 
 /// Parse a `<x,y,z>` triple of `f64`s (a global position).
 fn parse_global(field: &str, value: &str) -> Result<(f64, f64, f64), ReplError> {
-    let inner = value
-        .strip_prefix('<')
-        .and_then(|s| s.strip_suffix('>'))
-        .ok_or_else(|| invalid(field, value, "global <x,y,z>"))?;
-    let mut parts = inner.split(',');
-    let mut next = || -> Result<f64, ReplError> {
-        parts
-            .next()
-            .and_then(|p| p.trim().parse::<f64>().ok())
-            .ok_or_else(|| invalid(field, value, "global <x,y,z>"))
-    };
-    let x = next()?;
-    let y = next()?;
-    let z = next()?;
-    if parts.next().is_some() {
-        return Err(invalid(field, value, "global <x,y,z>"));
-    }
+    let [x, y, z] = args::parse_components::<f64, 3>(field, value, "global <x,y,z>")?;
     Ok((x, y, z))
 }
 
@@ -833,37 +889,79 @@ fn parse_attachment_point(field: &str, value: &str) -> Result<AttachmentPoint, R
     })
 }
 
-/// Parse an [`AttachmentMode`] from `add`/`replace` (or the legacy boolean
-/// spelling: `true`/`yes`/`1` = [`AttachmentMode::Add`],
-/// `false`/`no`/`0` = [`AttachmentMode::Replace`]).
+/// Parse a two-valued enum spelled by name, falling back to the shared boolean
+/// grammar.
+///
+/// Several commands carry an enum that reads as a labelled boolean and still
+/// accepts the boolean spelling it replaced. Rather than each parser re-listing
+/// `true`/`yes`/`1` — and each forgetting a different spelling, as all three
+/// forgot `on`/`off` — the domain names are matched first and anything else
+/// goes to [`args::parse_bool`], so every boolean spelling the rest of the REPL
+/// accepts works here too. `on_names` and `off_names` are matched against the
+/// [normalised](norm) value, and `expected` names the pair in the error.
+fn parse_named_bool<T>(
+    field: &str,
+    value: &str,
+    on_names: &[&str],
+    on: T,
+    off_names: &[&str],
+    off: T,
+    expected: &str,
+) -> Result<T, ReplError> {
+    let normalised = norm(value);
+    if on_names.contains(&normalised.as_str()) {
+        return Ok(on);
+    }
+    if off_names.contains(&normalised.as_str()) {
+        return Ok(off);
+    }
+    match args::parse_bool(field, value) {
+        Ok(true) => Ok(on),
+        Ok(false) => Ok(off),
+        Err(_not_a_boolean) => Err(invalid(field, value, expected)),
+    }
+}
+
+/// Parse an [`AttachmentMode`] from `add`/`replace` (or the boolean spelling:
+/// true = [`AttachmentMode::Add`], false = [`AttachmentMode::Replace`]).
 fn parse_attachment_mode(field: &str, value: &str) -> Result<AttachmentMode, ReplError> {
-    Ok(match norm(value).as_str() {
-        "add" | "true" | "yes" | "1" => AttachmentMode::Add,
-        "replace" | "false" | "no" | "0" => AttachmentMode::Replace,
-        _ => return Err(invalid(field, value, "add|replace")),
-    })
+    parse_named_bool(
+        field,
+        value,
+        &["add"],
+        AttachmentMode::Add,
+        &["replace"],
+        AttachmentMode::Replace,
+        "add|replace",
+    )
 }
 
-/// Parse a [`MovementMode`] from `run`/`walk` (or the legacy boolean spelling:
-/// `true`/`yes`/`1` = [`MovementMode::AlwaysRun`],
-/// `false`/`no`/`0` = [`MovementMode::Walk`]).
+/// Parse a [`MovementMode`] from `run`/`walk` (or the boolean spelling:
+/// true = [`MovementMode::AlwaysRun`], false = [`MovementMode::Walk`]).
 fn parse_movement_mode(field: &str, value: &str) -> Result<MovementMode, ReplError> {
-    Ok(match norm(value).as_str() {
-        "run" | "alwaysrun" | "always_run" | "true" | "yes" | "1" => MovementMode::AlwaysRun,
-        "walk" | "false" | "no" | "0" => MovementMode::Walk,
-        _ => return Err(invalid(field, value, "run|walk")),
-    })
+    parse_named_bool(
+        field,
+        value,
+        &["run", "alwaysrun"],
+        MovementMode::AlwaysRun,
+        &["walk"],
+        MovementMode::Walk,
+        "run|walk",
+    )
 }
 
-/// Parse a [`DetachOrder`] from `detach`/`keep` (or the legacy boolean spelling:
-/// `true`/`yes`/`1` = [`DetachOrder::DetachAllFirst`],
-/// `false`/`no`/`0` = [`DetachOrder::Keep`]).
+/// Parse a [`DetachOrder`] from `detach`/`keep` (or the boolean spelling:
+/// true = [`DetachOrder::DetachAllFirst`], false = [`DetachOrder::Keep`]).
 fn parse_detach_order(field: &str, value: &str) -> Result<DetachOrder, ReplError> {
-    Ok(match norm(value).as_str() {
-        "detach" | "detachall" | "detach_all" | "true" | "yes" | "1" => DetachOrder::DetachAllFirst,
-        "keep" | "false" | "no" | "0" => DetachOrder::Keep,
-        _ => return Err(invalid(field, value, "detach|keep")),
-    })
+    parse_named_bool(
+        field,
+        value,
+        &["detach", "detachall"],
+        DetachOrder::DetachAllFirst,
+        &["keep"],
+        DetachOrder::Keep,
+        "detach|keep",
+    )
 }
 
 /// Parse a [`ViewerEffectType`] from its name or wire byte.
@@ -937,21 +1035,36 @@ fn parse_pointat_type(field: &str, value: &str) -> Result<PointAtType, ReplError
     })
 }
 
-/// Parse a `[u8; 4]` `RGBA` colour from an 8-hex-digit string, defaulting to
+/// Parse an `RGBA` colour argument into the wire `[u8; 4]`, defaulting to
 /// opaque white when the field is absent.
+///
+/// Two spellings are accepted, because two of them were already in use and a
+/// transcript written against either must keep replaying: **8 hex digits**
+/// (`ff8000ff`), and a **comma-separated** `r,g,b[,a]` of decimal `u8`s with any
+/// missing channel defaulting to `255`. They cannot be confused — a hex colour
+/// carries no comma, and a `u8` list is never eight bare hex digits long
+/// (`12345678` parses as a single out-of-range channel, which is an error
+/// either way).
 fn color_or_white(
     args: &Args,
     ctx: &dyn ReplContext,
     field: &str,
     pos: usize,
 ) -> Result<[u8; 4], ReplError> {
+    let mut color = [255_u8; 4];
     let Some(value) = args.opt_str(ctx, field, pos)? else {
-        return Ok([255, 255, 255, 255]);
+        return Ok(color);
     };
+    if value.contains(',') {
+        for (slot, channel) in color.iter_mut().zip(value.split(',')) {
+            *slot = args::literal::<u8>(field, channel.trim(), "u8")?;
+        }
+        return Ok(color);
+    }
     let bytes = args::parse_hex(field, &value)?;
     <[u8; 4]>::try_from(bytes.as_slice())
         .ok()
-        .ok_or_else(|| invalid(field, &value, "RGBA colour (8 hex digits)"))
+        .ok_or_else(|| invalid(field, &value, "RGBA colour (8 hex digits or r,g,b[,a])"))
 }
 
 /// The default [`ViewerEffectData`] kind for an effect type: structured for the
@@ -1476,6 +1589,191 @@ fn build_region_info_update(
     })
 }
 
+/// A comma-separated list of exactly `N` values parsed via [`FromStr`], or
+/// `default` when the field is absent. Used for the fixed-width per-corner
+/// terrain arrays, where a partial list is a mistake rather than a shorthand.
+fn fixed_list<T, const N: usize>(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    field: &str,
+    pos: usize,
+    expected: &str,
+    default: [T; N],
+) -> Result<[T; N], ReplError>
+where
+    T: std::str::FromStr,
+{
+    let values = args.vec_parse::<T>(ctx, field, pos, expected)?;
+    if values.is_empty() {
+        return Ok(default);
+    }
+    let given = values.len();
+    <[T; N]>::try_from(values).ok().ok_or_else(|| {
+        invalid(
+            field,
+            &format!("{given} value(s)"),
+            &format!("exactly {N} comma-separated {expected} values"),
+        )
+    })
+}
+
+/// Build a [`RegionTerrainUpdate`] from keyword fields, each defaulting to the
+/// type's own default so only the differing settings need be given.
+fn build_region_terrain_update(
+    args: &Args,
+    ctx: &dyn ReplContext,
+) -> Result<RegionTerrainUpdate, ReplError> {
+    let defaults = RegionTerrainUpdate::default();
+    let given = args.vec_uuid(ctx, "detail_textures", 6)?;
+    let detail_textures = if given.is_empty() {
+        defaults.detail_textures
+    } else {
+        let count = given.len();
+        <[Uuid; 4]>::try_from(given).ok().ok_or_else(|| {
+            invalid(
+                "detail_textures",
+                &format!("{count} value(s)"),
+                "exactly 4 comma-separated UUIDs",
+            )
+        })?
+    };
+    Ok(RegionTerrainUpdate {
+        water_height: args.parse_or(ctx, "water_height", 0, "f32", defaults.water_height)?,
+        terrain_raise_limit: args.parse_or(
+            ctx,
+            "terrain_raise_limit",
+            1,
+            "f32",
+            defaults.terrain_raise_limit,
+        )?,
+        terrain_lower_limit: args.parse_or(
+            ctx,
+            "terrain_lower_limit",
+            2,
+            "f32",
+            defaults.terrain_lower_limit,
+        )?,
+        use_estate_sun: args.bool_or(ctx, "use_estate_sun", 3, defaults.use_estate_sun)?,
+        fixed_sun: args.bool_or(ctx, "fixed_sun", 4, defaults.fixed_sun)?,
+        sun_hour: args.parse_or(ctx, "sun_hour", 5, "f32", defaults.sun_hour)?,
+        detail_textures,
+        start_heights: fixed_list::<f32, 4>(
+            args,
+            ctx,
+            "start_heights",
+            7,
+            "f32",
+            defaults.start_heights,
+        )?,
+        height_ranges: fixed_list::<f32, 4>(
+            args,
+            ctx,
+            "height_ranges",
+            8,
+            "f32",
+            defaults.height_ranges,
+        )?,
+    })
+}
+
+/// Parse a [`LoggedChatType`] from its name.
+fn parse_logged_chat_type(field: &str, value: &str) -> Result<LoggedChatType, ReplError> {
+    Ok(match norm(value).as_str() {
+        "nearby" | "local" => LoggedChatType::Nearby,
+        "im" | "instantmessage" => LoggedChatType::InstantMessage,
+        "group" => LoggedChatType::Group,
+        "conference" | "adhoc" => LoggedChatType::Conference,
+        _ => return Err(invalid(field, value, "nearby|im|group|conference")),
+    })
+}
+
+/// Build a [`ChatLogConfig`] from keyword fields, layered over the type's own
+/// defaults so an unmentioned knob keeps its default rather than being reset.
+///
+/// `timestamp` selects the `[…]` prefix: `none` omits it, `time` renders
+/// `[HH:MM:SS]`, `datetime` prepends the date. `clock` and `seconds` refine
+/// whichever prefix is left.
+fn build_chat_log_config(args: &Args, ctx: &dyn ReplContext) -> Result<ChatLogConfig, ReplError> {
+    let defaults = ChatLogConfig::default();
+    let mut enabled = BTreeSet::new();
+    for record in args.vec_records(ctx, "enabled", 0)? {
+        enabled.insert(parse_logged_chat_type(
+            "enabled",
+            record_field("enabled", &record, 0)?,
+        )?);
+    }
+    let date = match args.str_or(ctx, "timestamp", 3, "datetime")?.as_str() {
+        "none" | "off" => None,
+        "time" => Some(false),
+        "datetime" | "date" => Some(true),
+        other => return Err(invalid("timestamp", other, "none|time|datetime")),
+    };
+    let clock = match args.str_or(ctx, "clock", 4, "24")?.as_str() {
+        "24" => ClockStyle::TwentyFourHour,
+        "12" => ClockStyle::TwelveHour,
+        other => return Err(invalid("clock", other, "24|12")),
+    };
+    let seconds = args.bool_or(ctx, "seconds", 5, true)?;
+    Ok(ChatLogConfig {
+        enabled,
+        legacy_im_names: args.bool_or(ctx, "legacy_im_names", 1, defaults.legacy_im_names)?,
+        date_suffix: args.bool_or(ctx, "date_suffix", 2, defaults.date_suffix)?,
+        timestamp: date.map(|date| TimestampFormat {
+            date,
+            seconds,
+            clock,
+        }),
+        recall_window: args.parse_or(ctx, "recall_window", 6, "usize", defaults.recall_window)?,
+        conversation_log: args.bool_or(ctx, "conversation_log", 7, defaults.conversation_log)?,
+        conversation_log_retention_days: args.parse_or(
+            ctx,
+            "conversation_log_retention_days",
+            8,
+            "u32",
+            defaults.conversation_log_retention_days,
+        )?,
+    })
+}
+
+/// An `<s,t>` pair of `f32`s, or `default` when the field is absent (a texture
+/// transform's offset or repeats).
+fn pair_or(
+    args: &Args,
+    ctx: &dyn ReplContext,
+    field: &str,
+    pos: usize,
+    default: (f32, f32),
+) -> Result<(f32, f32), ReplError> {
+    match args.opt_str(ctx, field, pos)? {
+        Some(value) => {
+            let [s, t] = args::parse_components::<f32, 2>(field, &value, "pair <s,t>")?;
+            Ok((s, t))
+        }
+        None => Ok(default),
+    }
+}
+
+/// Build a [`LegacyMaterial`] from keyword fields, each defaulting to the
+/// no-op value (no maps, identity transforms, opaque white highlight) so only
+/// the channels being set need be given.
+fn build_legacy_material(args: &Args, ctx: &dyn ReplContext) -> Result<LegacyMaterial, ReplError> {
+    Ok(LegacyMaterial {
+        normal_map: TextureKey::from(args.uuid_or_nil(ctx, "normal_map", 100)?),
+        normal_offset: pair_or(args, ctx, "normal_offset", 101, (0.0, 0.0))?,
+        normal_repeat: pair_or(args, ctx, "normal_repeat", 102, (1.0, 1.0))?,
+        normal_rotation: args.parse_or(ctx, "normal_rotation", 103, "f32", 0.0)?,
+        specular_map: TextureKey::from(args.uuid_or_nil(ctx, "specular_map", 104)?),
+        specular_offset: pair_or(args, ctx, "specular_offset", 105, (0.0, 0.0))?,
+        specular_repeat: pair_or(args, ctx, "specular_repeat", 106, (1.0, 1.0))?,
+        specular_rotation: args.parse_or(ctx, "specular_rotation", 107, "f32", 0.0)?,
+        specular_color: color_or_white(args, ctx, "specular_color", 108)?,
+        specular_exponent: args.parse_or(ctx, "specular_exponent", 109, "u8", 0)?,
+        environment_intensity: args.parse_or(ctx, "environment_intensity", 110, "u8", 0)?,
+        diffuse_alpha_mode: args.parse_or(ctx, "diffuse_alpha_mode", 111, "u8", 0)?,
+        alpha_mask_cutoff: args.parse_or(ctx, "alpha_mask_cutoff", 112, "u8", 0)?,
+    })
+}
+
 /// Build an [`ObjectTransform`] from optional position/rotation/scale fields.
 fn build_object_transform(
     args: &Args,
@@ -1533,22 +1831,6 @@ fn build_prim_shape_params(
     })
 }
 
-/// Parse an RGBA `r,g,b,a` colour argument into the wire `[u8; 4]`, defaulting
-/// any missing channel to `255` (so an absent field is opaque white).
-fn parse_color(
-    args: &Args,
-    ctx: &dyn ReplContext,
-    field: &str,
-    pos: usize,
-) -> Result<[u8; 4], ReplError> {
-    let values = args.vec_parse::<u8>(ctx, field, pos, "u8")?;
-    let mut color = [255_u8; 4];
-    for (slot, value) in color.iter_mut().zip(values) {
-        *slot = value;
-    }
-    Ok(color)
-}
-
 /// Build [`ObjectExtraParams`] from keyword fields covering every subtype. A
 /// subtype is included only when enabled (`flexi=true`, `light=true`,
 /// `reflection_probe=true`, or a `sculpt_texture` / `projector_texture` /
@@ -1577,7 +1859,7 @@ fn build_object_extra_params(
     };
     let light = if args.bool_or(ctx, "light", 110, false)? {
         Some(LightData {
-            color: parse_color(args, ctx, "light_color", 111)?,
+            color: color_or_white(args, ctx, "light_color", 111)?,
             radius: args.parse_or(ctx, "light_radius", 112, "f32", 5.0)?,
             cutoff: args.parse_or(ctx, "light_cutoff", 113, "f32", 0.0)?,
             falloff: args.parse_or(ctx, "light_falloff", 114, "f32", 1.0)?,
@@ -1820,7 +2102,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "typing",
-            usage: "<true|false>",
+            usage: "<typing: true|false>",
             build: |args, ctx| Ok(Command::Typing(args.req_bool(ctx, "typing", 0)?)),
         },
         CommandSpec {
@@ -1845,7 +2127,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "im_typing",
-            usage: "<to_agent_id> <true|false>",
+            usage: "<to_agent_id> <typing: true|false>",
             build: |args, ctx| {
                 Ok(Command::ImTyping {
                     to_agent_id: AgentKey::from(args.req_uuid(ctx, "to_agent_id", 0)?),
@@ -2059,7 +2341,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "fetch_inventory_folders",
-            usage: "<folder_id,folder_id,…>",
+            usage: "<folder_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::FetchInventoryFolders(
                     args.vec_uuid(ctx, "folder_ids", 0)?
@@ -2086,6 +2368,11 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "query_inventory_roots",
             usage: "",
             build: |_args, _ctx| Ok(Command::QueryInventoryRoots),
+        },
+        CommandSpec {
+            name: "query_inventory_folders",
+            usage: "",
+            build: |_args, _ctx| Ok(Command::QueryInventoryFolders),
         },
         CommandSpec {
             name: "create_inventory_folder",
@@ -2137,7 +2424,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "remove_inventory_folders",
-            usage: "<folder_id,folder_id,…>",
+            usage: "<folder_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RemoveInventoryFolders(
                     args.vec_uuid(ctx, "folder_ids", 0)?
@@ -2208,7 +2495,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "remove_inventory_items",
-            usage: "<item_id,item_id,…>",
+            usage: "<item_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RemoveInventoryItems(
                     args.vec_uuid(ctx, "item_ids", 0)?
@@ -2575,7 +2862,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "invite_to_group",
-            usage: "<group_id> <invitee:role,invitee:role,…>",
+            usage: "<group_id> <invitees: invitee:role,…>",
             build: |args, ctx| {
                 let mut invitees = Vec::new();
                 for record in args.vec_records(ctx, "invitees", 1)? {
@@ -2590,6 +2877,28 @@ fn all_specs() -> Vec<CommandSpec> {
                 Ok(Command::InviteToGroup {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
                     invitees,
+                })
+            },
+        },
+        CommandSpec {
+            name: "accept_group_invitation",
+            usage: "<group_id> <transaction_id> [use_offline_cap=false]",
+            build: |args, ctx| {
+                Ok(Command::AcceptGroupInvitation {
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 1)?),
+                    use_offline_cap: args.bool_or(ctx, "use_offline_cap", 2, false)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "decline_group_invitation",
+            usage: "<group_id> <transaction_id> [use_offline_cap=false]",
+            build: |args, ctx| {
+                Ok(Command::DeclineGroupInvitation {
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
+                    transaction_id: TransactionId::from(args.req_uuid(ctx, "transaction_id", 1)?),
+                    use_offline_cap: args.bool_or(ctx, "use_offline_cap", 2, false)?,
                 })
             },
         },
@@ -2644,7 +2953,8 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "update_group_roles",
-            usage: "<group_id> [role_id=] [name=] [powers=] [update_type=]",
+            usage: "<group_id> [role_id=] [name=] [description=] [title=] [powers=] \
+                    [update_type=]",
             build: |args, ctx| {
                 let update_type = match args.opt_str(ctx, "update_type", 100)? {
                     Some(value) => parse_group_role_update_type("update_type", &value)?,
@@ -2669,7 +2979,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "change_group_role_members",
-            usage: "<group_id> <role:member:add|remove,…>",
+            usage: "<group_id> <changes: role:member:add|remove,…>",
             build: |args, ctx| {
                 let mut changes = Vec::new();
                 for record in args.vec_records(ctx, "changes", 1)? {
@@ -2699,7 +3009,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "eject_group_members",
-            usage: "<group_id> <member_id,member_id,…>",
+            usage: "<group_id> <member_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::EjectGroupMembers {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
@@ -2788,7 +3098,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "start_group_proposal",
-            usage: "<group_id> <quorum> <majority> <duration_secs> <proposal_text>",
+            usage: "<group_id> <quorum> <majority> <duration> <proposal_text>",
             build: |args, ctx| {
                 Ok(Command::StartGroupProposal {
                     group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 0)?),
@@ -2936,6 +3246,22 @@ fn all_specs() -> Vec<CommandSpec> {
             name: "request_user_info",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestUserInfo),
+        },
+        CommandSpec {
+            name: "set_diagnostics",
+            usage: "<enabled>",
+            build: |args, ctx| Ok(Command::SetDiagnostics(args.req_bool(ctx, "enabled", 0)?)),
+        },
+        CommandSpec {
+            name: "set_chat_log_config",
+            usage: "[enabled=nearby,im,group,conference] [legacy_im_names=] [date_suffix=] \
+                    [timestamp=none|time|datetime] [clock=24|12] [seconds=] [recall_window=] \
+                    [conversation_log=] [conversation_log_retention_days=]",
+            build: |args, ctx| {
+                Ok(Command::SetChatLogConfig(Box::new(build_chat_log_config(
+                    args, ctx,
+                )?)))
+            },
         },
         CommandSpec {
             name: "update_user_info",
@@ -3226,7 +3552,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_parcel_access_list",
-            usage: "<local_id> <access|ban>",
+            usage: "<local_id> <scope: access|ban>",
             build: |args, ctx| {
                 Ok(Command::RequestParcelAccessList {
                     local_id: scoped_parcel(ctx, args.req_parse(ctx, "local_id", 0, "i32")?)?,
@@ -3236,7 +3562,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "update_parcel_access_list",
-            usage: "<local_id> <access|ban> [entries=<id:time:flags,…>]",
+            usage: "<local_id> <scope: access|ban> [entries=<id:time:flags,…>]",
             build: |args, ctx| {
                 let mut entries = Vec::new();
                 for record in args.vec_records(ctx, "entries", 2)? {
@@ -3559,6 +3885,58 @@ fn all_specs() -> Vec<CommandSpec> {
             build: |args, ctx| Ok(Command::SetRegionInfo(build_region_info_update(args, ctx)?)),
         },
         CommandSpec {
+            name: "set_region_debug",
+            usage: "[disable_scripts=false] [disable_collisions=false] [disable_physics=false]",
+            build: |args, ctx| {
+                Ok(Command::SetRegionDebug(RegionDebugUpdate {
+                    disable_scripts: args.bool_or(ctx, "disable_scripts", 0, false)?,
+                    disable_collisions: args.bool_or(ctx, "disable_collisions", 1, false)?,
+                    disable_physics: args.bool_or(ctx, "disable_physics", 2, false)?,
+                }))
+            },
+        },
+        CommandSpec {
+            name: "set_region_terrain",
+            usage: "[water_height=] [terrain_raise_limit=] [terrain_lower_limit=] \
+                    [use_estate_sun=] [fixed_sun=] [sun_hour=] [detail_textures=<id,id,id,id>] \
+                    [start_heights=<f,f,f,f>] [height_ranges=<f,f,f,f>]",
+            build: |args, ctx| {
+                Ok(Command::SetRegionTerrain(build_region_terrain_update(
+                    args, ctx,
+                )?))
+            },
+        },
+        CommandSpec {
+            name: "set_estate_info",
+            usage: "<estate_name> <flags> [sun_hour=0]",
+            build: |args, ctx| {
+                Ok(Command::SetEstateInfo(EstateInfoUpdate {
+                    estate_name: args.req_str(ctx, "estate_name", 0)?,
+                    flags: args.req_parse(ctx, "flags", 1, "u32")?,
+                    sun_hour: args.parse_or(ctx, "sun_hour", 2, "f32", 0.0)?,
+                }))
+            },
+        },
+        CommandSpec {
+            name: "request_region_terrain_download",
+            usage: "<viewer_filename>",
+            build: |args, ctx| {
+                Ok(Command::RequestRegionTerrainDownload {
+                    viewer_filename: args.req_str(ctx, "viewer_filename", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "request_region_terrain_upload",
+            usage: "<viewer_filename> <data-hex>",
+            build: |args, ctx| {
+                Ok(Command::RequestRegionTerrainUpload {
+                    viewer_filename: args.req_str(ctx, "viewer_filename", 0)?,
+                    data: args::parse_hex("data", &args.req_str(ctx, "data", 1)?)?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_estate_covenant",
             usage: "",
             build: |_args, _ctx| Ok(Command::RequestEstateCovenant),
@@ -3746,7 +4124,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestObjects {
                     local_ids: scoped_objects(
@@ -3757,8 +4135,20 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "resend_cached_objects",
+            usage: "<local_ids: id,id,…>",
+            build: |args, ctx| {
+                Ok(Command::ResendCachedObjects {
+                    local_ids: scoped_objects(
+                        ctx,
+                        args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
+                    )?,
+                })
+            },
+        },
+        CommandSpec {
             name: "request_object_properties",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestObjectProperties {
                     local_ids: scoped_objects(
@@ -3770,7 +4160,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "deselect_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::DeselectObjects {
                     local_ids: scoped_objects(
@@ -3839,7 +4229,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "duplicate_objects",
-            usage: "<local_id,…> <offset-vec> [group_id]",
+            usage: "<local_ids: id,…> <offset-vec> [group_id]",
             build: |args, ctx| {
                 Ok(Command::DuplicateObjects {
                     local_ids: scoped_objects(
@@ -3853,7 +4243,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "delete_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::DeleteObjects {
                     local_ids: scoped_objects(
@@ -3865,7 +4255,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "derez_objects",
-            usage: "<local_id,…> <destination> <destination_id> <transaction_id> [group_id]",
+            usage: "<local_ids: id,…> <destination> <destination_id> <transaction_id> [group_id]",
             build: |args, ctx| {
                 Ok(Command::DerezObjects {
                     local_ids: scoped_objects(
@@ -3995,7 +4385,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "set_object_group",
-            usage: "<local_id,…> <group_id>",
+            usage: "<local_ids: id,…> <group_id>",
             build: |args, ctx| {
                 Ok(Command::SetObjectGroup {
                     local_ids: scoped_objects(
@@ -4007,8 +4397,21 @@ fn all_specs() -> Vec<CommandSpec> {
             },
         },
         CommandSpec {
+            name: "deed_objects_to_group",
+            usage: "<local_ids: id,…> <group_id>",
+            build: |args, ctx| {
+                Ok(Command::DeedObjectsToGroup {
+                    local_ids: scoped_objects(
+                        ctx,
+                        args.vec_parse::<u32>(ctx, "local_ids", 0, "u32")?,
+                    )?,
+                    group_id: GroupKey::from(args.req_uuid(ctx, "group_id", 1)?),
+                })
+            },
+        },
+        CommandSpec {
             name: "set_object_permissions",
-            usage: "<local_id,…> <field> <set-bool> <mask-u32>",
+            usage: "<local_ids: id,…> <field> <set-bool> <mask-u32>",
             build: |args, ctx| {
                 Ok(Command::SetObjectPermissions {
                     local_ids: scoped_objects(
@@ -4054,7 +4457,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "link_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::LinkObjects {
                     local_ids: scoped_objects(
@@ -4066,7 +4469,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "delink_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::DelinkObjects {
                     local_ids: scoped_objects(
@@ -4078,7 +4481,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "undo_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::UndoObjects {
                     local_ids: scoped_objects(
@@ -4090,7 +4493,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "redo_objects",
-            usage: "<local_id,local_id,…>",
+            usage: "<local_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RedoObjects {
                     local_ids: scoped_objects(
@@ -4102,7 +4505,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "buy_object",
-            usage: "<group_id> <category_id> <local_id:sale_type:sale_price,…>",
+            usage: "<group_id> <category_id> <objects: local_id:sale_type:sale_price,…>",
             build: |args, ctx| {
                 let group_id = GroupKey::from(args.uuid_or_nil(ctx, "group_id", 0)?);
                 let category_id = args.uuid_or_nil(ctx, "category_id", 1)?;
@@ -4192,7 +4595,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "duplicate_objects_on_ray",
-            usage: "<local_id,…> <ray_start-vec> <ray_end-vec> [group_id=] [ray_target_id=] \
+            usage: "<local_ids: id,…> <ray_start-vec> <ray_end-vec> [group_id=] [ray_target_id=] \
                     [bypass_raycast=] [ray_end_is_intersection=] [copy_centers=] [copy_rotates=] \
                     [duplicate_flags=]",
             build: |args, ctx| {
@@ -4233,8 +4636,8 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "rez_object_from_notecard",
-            usage: "<notecard_item_id> <ray_start-vec> <ray_end-vec> <item_id,…> [group_id=] \
-                    [from_task_id=] [object_id=] [ray_target_id=] [bypass_raycast=] \
+            usage: "<notecard_item_id> <ray_start-vec> <ray_end-vec> <item_ids: id,…> \
+                    [group_id=] [from_task_id=] [object_id=] [ray_target_id=] [bypass_raycast=] \
                     [ray_end_is_intersection=] [rez_selected=] [remove_item=] [item_flags=] \
                     [group_mask=] [everyone_mask=] [next_owner_mask=]",
             build: |args, ctx| {
@@ -4270,6 +4673,20 @@ fn all_specs() -> Vec<CommandSpec> {
                         everyone_mask: args.parse_or(ctx, "everyone_mask", 110, "u32", 0)?,
                         next_owner_mask: args.parse_or(ctx, "next_owner_mask", 111, "u32", 0)?,
                     },
+                })
+            },
+        },
+        CommandSpec {
+            name: "copy_inventory_from_notecard",
+            usage: "<notecard_id> <item_id> [object_id=] [folder_id=]",
+            build: |args, ctx| {
+                Ok(Command::CopyInventoryFromNotecard {
+                    notecard_id: InventoryKey::from(args.req_uuid(ctx, "notecard_id", 0)?),
+                    item_id: InventoryKey::from(args.req_uuid(ctx, "item_id", 1)?),
+                    object_id: args.opt_object(ctx, "object_id", 2)?,
+                    folder_id: args
+                        .opt_uuid(ctx, "folder_id", 3)?
+                        .map(InventoryFolderKey::from),
                 })
             },
         },
@@ -4535,7 +4952,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "set_wearing",
-            usage: "<item_id:asset_id:wearable_type,…>",
+            usage: "<wearables: item_id:asset_id:wearable_type,…>",
             build: |args, ctx| {
                 let mut wearables = Vec::new();
                 for record in args.vec_records(ctx, "wearables", 0)? {
@@ -4592,7 +5009,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "detach_objects",
-            usage: "<local_id,…>",
+            usage: "<local_ids: id,…>",
             build: |args, ctx| {
                 Ok(Command::DetachObjects {
                     local_ids: scoped_objects(
@@ -4604,7 +5021,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "drop_attachments",
-            usage: "<local_id,…>",
+            usage: "<local_ids: id,…>",
             build: |args, ctx| {
                 Ok(Command::DropAttachments {
                     local_ids: scoped_objects(
@@ -4660,7 +5077,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "rez_attachments",
-            usage: "<compound_id> <item_id:owner_id:attachment_point[:add|replace],…> \
+            usage: "<compound_id> <attachments: item_id:owner_id:attachment_point[:add|replace],…> \
                     [detach=detach|keep]",
             build: |args, ctx| {
                 let compound_id = TransactionId::from(args.uuid_or_nil(ctx, "compound_id", 0)?);
@@ -4886,7 +5303,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "set_animations",
-            usage: "<anim_id:start,anim_id:start,…>",
+            usage: "<animations: anim_id:start,…>",
             build: |args, ctx| {
                 Ok(Command::SetAnimations(
                     uuid_bool_pairs(args, ctx, "animations", 0)?
@@ -4916,7 +5333,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "activate_gestures",
-            usage: "<item_id:asset_id,item_id:asset_id,…>",
+            usage: "<gestures: item_id:asset_id,…>",
             build: |args, ctx| {
                 let mut gestures = Vec::new();
                 for record in args.vec_records(ctx, "gestures", 0)? {
@@ -4936,7 +5353,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "deactivate_gestures",
-            usage: "<item_id,item_id,…>",
+            usage: "<item_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::DeactivateGestures {
                     item_ids: args
@@ -4997,7 +5414,9 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "upload_asset",
-            usage: "folder_id=<id> asset_type=<code> inventory_type=<code> name=<n> data=<hex> …",
+            usage: "folder_id=<id> asset_type=<code> inventory_type=<code> name=<n> \
+                    [description=] [group_mask=] [everyone_mask=] [next_owner_mask=] \
+                    [expected_upload_cost=] data=<hex>",
             build: |args, ctx| {
                 Ok(Command::UploadAsset {
                     folder_id: InventoryFolderKey::from(args.req_uuid(ctx, "folder_id", 100)?),
@@ -5044,6 +5463,22 @@ fn all_specs() -> Vec<CommandSpec> {
                     },
                     asset_type: enum_arg(args, ctx, "asset_type", 1, parse_updatable_asset_type)?,
                     data: args.bytes_or_empty(ctx, "data", 100)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "save_inventory_asset",
+            usage: "item_id=<id> asset_type=<code> transaction_id=<id> data=<hex> [name=] …",
+            build: |args, ctx| {
+                Ok(Command::SaveInventoryAsset {
+                    item: Box::new(build_inventory_item(args, ctx)?),
+                    asset_type: enum_arg(args, ctx, "asset_type", 100, parse_asset_type)?,
+                    transaction_id: TransactionId::from(args.uuid_or_nil(
+                        ctx,
+                        "transaction_id",
+                        101,
+                    )?),
+                    data: args.bytes_or_empty(ctx, "data", 102)?,
                 })
             },
         },
@@ -5160,10 +5595,32 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_render_materials",
-            usage: "<material_id,material_id,…>",
+            usage: "<material_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestRenderMaterials {
                     material_ids: args.vec_uuid(ctx, "material_ids", 0)?,
+                })
+            },
+        },
+        CommandSpec {
+            name: "set_render_materials",
+            usage: "<local_id> <face> [clear=false] [normal_map=] [normal_offset=<s,t>] \
+                    [normal_repeat=<s,t>] [normal_rotation=] [specular_map=] \
+                    [specular_offset=<s,t>] [specular_repeat=<s,t>] [specular_rotation=] \
+                    [specular_color=<hex8>] [specular_exponent=] [environment_intensity=] \
+                    [diffuse_alpha_mode=] [alpha_mask_cutoff=]",
+            build: |args, ctx| {
+                let material = if args.bool_or(ctx, "clear", 2, false)? {
+                    None
+                } else {
+                    Some(build_legacy_material(args, ctx)?)
+                };
+                Ok(Command::SetRenderMaterials {
+                    updates: vec![FaceMaterialPut {
+                        local_id: args.req_parse(ctx, "local_id", 0, "u32")?,
+                        face: args.req_parse(ctx, "face", 1, "u8")?,
+                        material,
+                    }],
                 })
             },
         },
@@ -5220,7 +5677,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "request_experience_info",
-            usage: "<experience_id,experience_id,…>",
+            usage: "<experience_ids: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::RequestExperienceInfo {
                     experience_ids: args
@@ -5248,7 +5705,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "set_experience_permission",
-            usage: "<experience_id> <allow|block|forget>",
+            usage: "<experience_id> <permission: allow|block|forget>",
             build: |args, ctx| {
                 Ok(Command::SetExperiencePermission {
                     experience_id: ExperienceKey::from(args.req_uuid(ctx, "experience_id", 0)?),
@@ -5337,7 +5794,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "offer_teleport",
-            usage: "<target,target,…> [message]",
+            usage: "<targets: id,id,…> [message]",
             build: |args, ctx| {
                 Ok(Command::OfferTeleport {
                     targets: args.vec_agent(ctx, "targets", 0)?,
@@ -5433,7 +5890,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "start_conference",
-            usage: "<session_id> <invitee,invitee,…> [message]",
+            usage: "<session_id> <invitees: id,id,…> [message]",
             build: |args, ctx| {
                 Ok(Command::StartConference {
                     session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
@@ -5448,7 +5905,7 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "invite_to_chat_session",
-            usage: "<session_id> <invitee,invitee,…>",
+            usage: "<session_id> <invitees: id,id,…>",
             build: |args, ctx| {
                 Ok(Command::InviteToChatSession {
                     session_id: ImSessionId::from(args.req_uuid(ctx, "session_id", 0)?),
@@ -5772,15 +6229,17 @@ mod tests {
 
     use sl_proto::{
         AbuseReportType, AgentKey, AgentPreferences, AssetKey, AssetType, ChatChannel, ChatType,
-        CircuitId, Command, ControlFlags, DirFindFlags, DirectoryVisibility, EjectAction, EventId,
-        FolderType, FreezeAction, FriendRights, GridCoordinates, GroupKey, InventoryFolderKey,
-        InventoryItemOrFolderKey, InventoryKey, InventoryType, LandBrushAction, LandBrushSize,
-        LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode, ObjectBuyItem,
-        ObjectKey, OwnerKey, ReflectionProbeFlags, RegionHandle, RegionLocalObjectId,
-        RegionLocalParcelId, RenderMaterialRef, SaleType, ScopedObjectId, ScopedParcelId,
-        ScriptPermissions, SimWideDeleteFlags, StartLocationSlot, TaskInventoryKey, TerraformArea,
-        TextureKey, TransactionId, Uuid,
+        CircuitId, ClockStyle, Command, ControlFlags, DirFindFlags, DirectoryVisibility,
+        EjectAction, EventId, FolderType, FreezeAction, FriendRights, GridCoordinates, GroupKey,
+        InventoryFolderKey, InventoryItemOrFolderKey, InventoryKey, InventoryType, LandBrushAction,
+        LandBrushSize, LandEdit, LandStatReportType, LindenAmount, MapItemType, MovementMode,
+        ObjectBuyItem, ObjectKey, OwnerKey, ReflectionProbeFlags, RegionDebugUpdate, RegionHandle,
+        RegionLocalObjectId, RegionLocalParcelId, RegionTerrainUpdate, RenderMaterialRef, SaleType,
+        ScopedObjectId, ScopedParcelId, ScriptPermissions, SimWideDeleteFlags, StartLocationSlot,
+        TaskInventoryKey, TerraformArea, TextureKey, TimestampFormat, TransactionId, Uuid,
     };
+
+    use pretty_assertions::assert_eq;
 
     use super::Registry;
     use crate::context::{NoContext, ReplContext};
@@ -5799,6 +6258,16 @@ mod tests {
     /// A test UUID (nil on a malformed literal, which the tests never pass).
     fn uuid(text: &str) -> Uuid {
         Uuid::parse_str(text).unwrap_or_else(|_unused| Uuid::nil())
+    }
+
+    /// Whether two `f32` slices agree elementwise within one epsilon — the
+    /// float comparison the terrain-array tests need without an exact `==`.
+    fn close(left: &[f32], right: &[f32]) -> bool {
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right)
+                .all(|(one, other)| (one - other).abs() <= f32::EPSILON)
     }
 
     /// Parse and build a command line against `ctx`.
@@ -6993,6 +7462,313 @@ mod tests {
                 if proposal_id.uuid() == Uuid::from_u128(0x1111_1111_1111_1111_1111_1111_1111_1111)
                     && group_id == GroupKey::from(Uuid::from_u128(0x2222_2222_2222_2222_2222_2222_2222_2222))
                     && vote_cast == "yes"
+        ));
+    }
+
+    // ---- the commands the formatter could print but nothing could parse ----
+
+    #[test]
+    fn query_inventory_folders_parses() {
+        assert!(matches!(
+            build("query_inventory_folders"),
+            Ok(Command::QueryInventoryFolders)
+        ));
+    }
+
+    #[test]
+    fn group_invitation_replies_parse_both_ways() {
+        assert!(matches!(
+            build(&format!("accept_group_invitation {ONE} {TWO}")),
+            Ok(Command::AcceptGroupInvitation {
+                use_offline_cap: false,
+                ..
+            })
+        ));
+        assert!(matches!(
+            build(&format!(
+                "decline_group_invitation {ONE} {TWO} use_offline_cap=true"
+            )),
+            Ok(Command::DeclineGroupInvitation {
+                use_offline_cap: true,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn resend_cached_objects_scopes_its_ids() {
+        assert!(matches!(
+            build_scoped("resend_cached_objects 7,8"),
+            Ok(Command::ResendCachedObjects { local_ids })
+                if local_ids == vec![
+                    ScopedObjectId::new(TEST_CIRCUIT, RegionLocalObjectId(7)),
+                    ScopedObjectId::new(TEST_CIRCUIT, RegionLocalObjectId(8)),
+                ]
+        ));
+    }
+
+    #[test]
+    fn deed_objects_to_group_parses() {
+        assert!(matches!(
+            build_scoped(&format!("deed_objects_to_group 7 {ONE}")),
+            Ok(Command::DeedObjectsToGroup { local_ids, .. }) if local_ids.len() == 1
+        ));
+    }
+
+    #[test]
+    fn copy_inventory_from_notecard_defaults_its_optional_ids() {
+        assert!(matches!(
+            build(&format!("copy_inventory_from_notecard {ONE} {TWO}")),
+            Ok(Command::CopyInventoryFromNotecard {
+                object_id: None,
+                folder_id: None,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn region_terrain_transfer_parses() {
+        assert!(matches!(
+            build("request_region_terrain_download region.raw"),
+            Ok(Command::RequestRegionTerrainDownload { viewer_filename })
+                if viewer_filename == "region.raw"
+        ));
+        assert!(matches!(
+            build("request_region_terrain_upload region.raw deadbeef"),
+            Ok(Command::RequestRegionTerrainUpload { data, .. })
+                if data == vec![0xde, 0xad, 0xbe, 0xef]
+        ));
+    }
+
+    #[test]
+    fn set_region_debug_defaults_to_disabling_nothing() {
+        assert!(matches!(
+            build("set_region_debug"),
+            Ok(Command::SetRegionDebug(update)) if update == RegionDebugUpdate::default()
+        ));
+        assert!(matches!(
+            build("set_region_debug disable_scripts=true"),
+            Ok(Command::SetRegionDebug(RegionDebugUpdate {
+                disable_scripts: true,
+                disable_collisions: false,
+                disable_physics: false,
+            }))
+        ));
+    }
+
+    #[test]
+    fn set_region_terrain_keeps_the_defaults_it_is_not_given() -> Result<(), String> {
+        let built = build("set_region_terrain water_height=25 start_heights=1,2,3,4");
+        let Ok(Command::SetRegionTerrain(update)) = built else {
+            return Err(format!("set_region_terrain should build: {built:?}"));
+        };
+        let defaults = RegionTerrainUpdate::default();
+        assert!(
+            close(&update.start_heights, &[1.0, 2.0, 3.0, 4.0]),
+            "the four given corner heights land in order: {:?}",
+            update.start_heights
+        );
+        assert!(
+            close(&update.height_ranges, &defaults.height_ranges),
+            "an unmentioned per-corner array keeps its default: {:?}",
+            update.height_ranges
+        );
+        assert_eq!(update.detail_textures, defaults.detail_textures);
+        assert!(
+            close(&[update.water_height], &[25.0]),
+            "water_height should be the given 25, got {}",
+            update.water_height
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_short_fixed_width_terrain_list_is_rejected() {
+        assert!(matches!(
+            build("set_region_terrain start_heights=1,2,3"),
+            Err(ReplError::InvalidArg { ref field, .. }) if field == "start_heights"
+        ));
+    }
+
+    #[test]
+    fn set_estate_info_parses() {
+        assert!(matches!(
+            build(r#"set_estate_info "Test Estate" 16 sun_hour=6"#),
+            Ok(Command::SetEstateInfo(update))
+                if update.estate_name == "Test Estate" && update.flags == 16
+        ));
+    }
+
+    #[test]
+    fn save_inventory_asset_reuses_the_inventory_item_grammar() {
+        assert!(matches!(
+            build(&format!(
+                "save_inventory_asset item_id={ONE} name=shirt asset_type=5 \
+                 transaction_id={TWO} data=00ff"
+            )),
+            Ok(Command::SaveInventoryAsset { item, data, .. })
+                if item.name == "shirt" && data == vec![0x00, 0xff]
+        ));
+    }
+
+    #[test]
+    fn set_render_materials_can_set_and_clear_a_face() {
+        assert!(matches!(
+            build(&format!("set_render_materials 7 2 normal_map={ONE}")),
+            Ok(Command::SetRenderMaterials { updates })
+                if updates.len() == 1 && updates.first().is_some_and(|put| {
+                    put.local_id == 7 && put.face == 2 && put.material.is_some()
+                })
+        ));
+        assert!(matches!(
+            build("set_render_materials 7 2 clear=true"),
+            Ok(Command::SetRenderMaterials { updates })
+                if updates.first().is_some_and(|put| put.material.is_none())
+        ));
+    }
+
+    #[test]
+    fn set_diagnostics_parses() {
+        assert!(matches!(
+            build("set_diagnostics on"),
+            Ok(Command::SetDiagnostics(true))
+        ));
+    }
+
+    #[test]
+    fn set_chat_log_config_collects_the_enabled_kinds() -> Result<(), String> {
+        let built = build("set_chat_log_config enabled=nearby,im timestamp=time seconds=false");
+        let Ok(Command::SetChatLogConfig(config)) = built else {
+            return Err(format!("set_chat_log_config should build: {built:?}"));
+        };
+        assert_eq!(config.enabled.len(), 2, "nearby and im are enabled");
+        assert!(config.logs_nearby());
+        assert_eq!(
+            config.timestamp,
+            Some(TimestampFormat {
+                date: false,
+                seconds: false,
+                clock: ClockStyle::TwentyFourHour,
+            })
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn set_chat_log_config_can_switch_the_timestamp_off() {
+        assert!(matches!(
+            build("set_chat_log_config timestamp=none"),
+            Ok(Command::SetChatLogConfig(config)) if config.timestamp.is_none()
+        ));
+    }
+
+    // ---- the argument grammars that used to have several spellings ----
+
+    #[test]
+    fn a_colour_reads_as_hex_or_as_channels() {
+        let from_hex = build("viewer_effect beam color=ff800040");
+        let from_channels = build("viewer_effect beam color=255,128,0,64");
+        let effect_colour = |built: &Result<Command, ReplError>| match built {
+            Ok(Command::ViewerEffect(effects)) => effects.first().map(|effect| effect.color),
+            _ => None,
+        };
+        assert_eq!(effect_colour(&from_hex), Some([255, 128, 0, 64]));
+        assert_eq!(
+            effect_colour(&from_channels),
+            effect_colour(&from_hex),
+            "the two colour spellings must mean the same thing"
+        );
+    }
+
+    #[test]
+    fn a_colour_channel_list_may_be_short() {
+        assert!(matches!(
+            build("viewer_effect beam color=255,0,0"),
+            Ok(Command::ViewerEffect(ref effects))
+                if effects.first().map(|effect| effect.color) == Some([255, 0, 0, 255])
+        ));
+    }
+
+    #[test]
+    fn a_labelled_boolean_accepts_every_boolean_spelling() {
+        for (spelling, expected) in [("run", true), ("on", true), ("1", true), ("off", false)] {
+            let built = build(&format!("set_always_run {spelling}"));
+            assert!(
+                matches!(
+                    built,
+                    Ok(Command::SetAlwaysRun { mode })
+                        if (mode == MovementMode::AlwaysRun) == expected
+                ),
+                "`set_always_run {spelling}` should mean always-run = {expected}"
+            );
+        }
+        assert!(matches!(
+            build("set_always_run sideways"),
+            Err(ReplError::InvalidArg { .. })
+        ));
+    }
+
+    #[test]
+    fn a_bracketed_tuple_rejects_the_wrong_width() {
+        assert!(matches!(
+            build_scoped("update_object 7 position=<1,2>"),
+            Err(ReplError::InvalidArg { ref field, .. }) if field == "position"
+        ));
+        assert!(matches!(
+            build_scoped("update_object 7 position=<1,2,3,4>"),
+            Err(ReplError::InvalidArg { ref field, .. }) if field == "position"
+        ));
+    }
+
+    #[test]
+    fn a_keyword_only_field_has_no_positional_spelling() {
+        // `transaction_id` sits at a keyword-only index, so a bare positional
+        // token can never land in it however many are supplied.
+        let positional = build(&format!("update_inventory_item {ONE} {TWO}"));
+        assert!(
+            matches!(
+                positional,
+                Ok(Command::UpdateInventoryItem { ref transaction_id, .. })
+                    if transaction_id.get().is_nil()
+            ),
+            "a second positional token must not become the transaction id: {positional:?}"
+        );
+        assert!(matches!(
+            build(&format!("update_inventory_item {ONE} transaction_id={TWO}")),
+            Ok(Command::UpdateInventoryItem { transaction_id, .. })
+                if !transaction_id.get().is_nil()
+        ));
+    }
+
+    // ---- the reader that keeps the usage hints honest ----
+
+    #[test]
+    fn help_renders_one_line_per_command() {
+        let registry = Registry::new();
+        let all = registry.help(None).unwrap_or_default();
+        assert_eq!(all.len(), registry.specs().len());
+        assert_eq!(
+            registry.help(Some("chat")).ok(),
+            Some(vec![
+                "chat — <message> [chat_type=normal] [channel=0]".to_owned()
+            ])
+        );
+    }
+
+    #[test]
+    fn help_for_an_argumentless_command_is_just_its_name() {
+        assert_eq!(
+            Registry::new().help(Some("logout")).ok(),
+            Some(vec!["logout".to_owned()])
+        );
+    }
+
+    #[test]
+    fn help_for_an_unknown_command_says_so() {
+        assert!(matches!(
+            Registry::new().help(Some("not_a_command")),
+            Err(ReplError::UnknownCommand(ref name)) if name == "not_a_command"
         ));
     }
 }
