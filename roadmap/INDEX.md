@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 66 |
-| done | 910 |
+| bugs | 67 |
+| done | 911 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1490** |
+| **total** | **1492** |
 
 ## ideas (97)
 
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (66)
+## bugs (67)
 
 ### viewer
 
@@ -1290,6 +1290,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-face-entity-respawn-churn`](bugs/viewer-object-face-entity-respawn-churn.md)
   — Object face entities are despawned + respawned same-frame (despawn-race
   churn)
+- [`viewer-ocean-covers-lower-region-water`](bugs/viewer-ocean-covers-lower-region-water.md)
+  — The endless ocean is drawn through every region, so a lower sea level is
+  hidden under it
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1315,11 +1318,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
-- [`viewer-water-surface-alpha-not-refraction`](bugs/viewer-water-surface-alpha-not-refraction.md)
-  — The water surface fakes refraction with alpha, so the sea cannot match the
-  reference
+- [`viewer-water-wave-phase-jumps-far-from-origin`](bugs/viewer-water-wave-phase-jumps-far-from-origin.md)
+  — The sea's ripple phase jumps instead of scrolling, worse the further from
+  the origin
 
-## done (910)
+## done (911)
 
 ### protocol
 
@@ -2671,6 +2674,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
+- [`viewer-water-surface-alpha-not-refraction`](done/viewer-water-surface-alpha-not-refraction.md)
+  — The water surface fakes refraction with alpha, so the sea cannot match the
+  reference
 - [`viewer-water-surface-fog-fallback-flat`](done/viewer-water-surface-fog-fallback-flat.md)
   — The water surface's deep-water colour is a flat tint, not the fogged one
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life

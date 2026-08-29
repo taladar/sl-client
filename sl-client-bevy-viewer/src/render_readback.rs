@@ -682,86 +682,51 @@ mod tests {
         Ok(())
     }
 
-    /// **The water's fog density reaches the pixels.**
+    /// **The sea shows what is behind it.**
     ///
-    /// The surface's deep-water colour is the reference's non-transparent-water
-    /// fallback, `applyWaterFogViewLinear(viewVec * 2048.0, white)` — white pushed
-    /// 2048 m along the view ray and fogged by the water it crosses. That makes the
-    /// sea answer to the region's authored fog **density**, not only to its fog
-    /// colour. Ours did not: `water.wgsl` took the fog colour flat and never sampled
-    /// the density, which sat in the uniform block read by nothing, so every region's
-    /// water looked the same however thick it said it was.
+    /// The water surface is opaque, as the reference's is, and everything you see
+    /// through it is a sample of a copy of the screen taken before the surface was
+    /// drawn (`WaterMaterial::reads_view_transmission_texture`, the reference's
+    /// `screenTex`). So the `water-surface` scene puts a strongly red slab on the sea
+    /// bed, under the water and in front of the camera: with the refraction sample
+    /// working, its colour reaches the frame *through* the sea; with the sample gone
+    /// — an unbound copy, a wrong uv, a surface that went back to being a flat tint —
+    /// an opaque sea hides it completely and no pixel is red.
     ///
-    /// A CPU-state check cannot see this — the uniform was always correct, it was the
-    /// shader that ignored it — and neither can a geometry check. Rendering the water
-    /// scene twice with two densities and requiring the frames to differ is what
-    /// fails if the density is unused again. The clock is frozen (a zero timestep) so
-    /// the scrolling waves cannot supply the difference: with the density unread,
-    /// the two frames are byte-identical.
+    /// Nothing else in that scene is red, so this needs no golden image and no
+    /// driver-stable exact value: it asks whether any pixel of the sea is dominated by
+    /// the one channel only the submerged slab can supply.
     #[test]
-    fn the_water_fog_density_changes_what_is_drawn() -> Result<(), TestError> {
-        use sl_client_bevy::WaterMaterial;
-
+    fn the_sea_shows_what_is_behind_it() -> Result<(), TestError> {
         let scene = SCENES
             .iter()
             .find(|scene| scene.id == "water-surface")
             .ok_or("the `water-surface` scene is not registered")?;
-        let (mut app, captured) = build_readback_app(scene, SceneCx::new());
-        // A zero timestep freezes `globals.time`, so the wave scroll — which is
-        // driven GPU-side from that clock — renders identically in both captures and
-        // the only thing that can move a pixel is the density.
-        app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-            core::time::Duration::ZERO,
-        ));
-        app.finish();
-        app.cleanup();
-        for _frame in 0..WARMUP_FRAMES {
-            app.update();
-        }
-        let Some(thick) = captured.0.lock().ok().and_then(|mut slot| slot.take()) else {
+        let Some((frame, _projected)) = capture(scene, SceneCx::new(), &[]) else {
             // No GPU adapter: skip, like the rest of this pixel tier.
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
             return Ok(());
         };
 
-        // The scene's water, at the legacy default density of 2.0. Thin it: a
-        // sparser water scatters less of its own colour into the ray and lets more
-        // of the white through, which is a different colour on screen at every angle.
-        let ids: Vec<AssetId<WaterMaterial>> = app
-            .world()
-            .resource::<Assets<WaterMaterial>>()
-            .iter()
-            .map(|(id, _material)| id)
-            .collect();
-        assert!(
-            !ids.is_empty(),
-            "the water scene has no water material to retune — the fixture changed"
-        );
-        {
-            let mut materials = app.world_mut().resource_mut::<Assets<WaterMaterial>>();
-            for id in &ids {
-                if let Some(mut material) = materials.get_mut(*id) {
-                    material.params.water_fog_density = 0.05;
+        // Count the pixels the slab's red could have reached. A whole-frame sweep
+        // rather than a projected point: the refraction *displaces* the sample, so
+        // where exactly the slab lands is precisely what this must not assume.
+        let mut red = 0_u32;
+        for y in 0..FRAME {
+            for x in 0..FRAME {
+                let Some(pixel) = frame.pixel(x, y) else {
+                    continue;
+                };
+                if pixel.x > 0.25 && pixel.x > pixel.y * 2.0 && pixel.x > pixel.z * 2.0 {
+                    red = red.saturating_add(1);
                 }
             }
         }
-        for _frame in 0..8 {
-            app.update();
-        }
-        let Some(thin) = captured.0.lock().ok().and_then(|mut slot| slot.take()) else {
-            return Ok(());
-        };
-
-        let differing = thick
-            .iter()
-            .zip(&thin)
-            .filter(|(before, after)| before != after)
-            .count();
         assert!(
-            differing > 1000,
-            "the sea rendered near-identically at two very different fog densities \
-             ({differing} of {} bytes differ), so the water shader is not reading the \
-             density the region authored",
-            thick.len(),
+            red > 100,
+            "no part of the sea shows the red slab lying on the sea bed ({red} pixels \
+             are red), so the water surface is not sampling the screen copy behind it \
+             — an opaque sea with no refraction hides whatever is under it",
         );
         Ok(())
     }

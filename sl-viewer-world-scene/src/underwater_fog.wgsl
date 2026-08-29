@@ -35,10 +35,8 @@ struct UnderwaterFog {
     _pad: f32,
 };
 
-@group(0) @binding(0) var screen_texture: texture_2d<f32>;
-@group(0) @binding(1) var screen_sampler: sampler;
-@group(0) @binding(2) var<uniform> fog: UnderwaterFog;
-@group(0) @binding(3) var depth_texture: texture_depth_multisampled_2d;
+@group(0) @binding(0) var<uniform> fog: UnderwaterFog;
+@group(0) @binding(1) var depth_texture: texture_depth_multisampled_2d;
 
 // The reference `srgb_to_linear` (`class1/environment/srgbF.glsl`), as ported in
 // `sky.wgsl` / `clouds.wgsl` / `water.wgsl`. `getWaterFogViewNoClip` decodes the
@@ -51,38 +49,80 @@ fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
 
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
-    let scene = textureSample(screen_texture, screen_sampler, in.uv);
+    // This pass **blends** over the scene rather than reading and rewriting it, which
+    // is the reference's own arrangement: its haze is drawn with a `(ONE,
+    // SOURCE_ALPHA)` blend, so the shader emits the in-scatter as colour and the
+    // transmittance as alpha and the blender does `dst * D + L`. That is not a
+    // stylistic choice here — the pass runs *inside* the main pass, where the scene
+    // lives in the multisampled attachment and the resolved texture a post-process
+    // would read is a frame's worth of stale, so blending into the attachment is the
+    // only way to fog what is actually being drawn.
+    //
+    // "Leave this pixel alone" is therefore `vec4(0, 0, 0, 1)`: add nothing, keep all
+    // of the destination.
+    let unchanged = vec4<f32>(0.0, 0.0, 0.0, 1.0);
 
-    // The underwater fog is an *underwater* effect: only fog the scene when the eye
-    // itself is submerged. When the eye is above water, the water-surface shader
-    // (water.wgsl) already gives the from-above appearance (deep-water tint +
-    // fresnel reflection), and fogging here would darken the sea / the underwater
-    // seafloor into a flat dark slab Firestorm does not show — starkest over the
-    // void past a region edge with no neighbour (R21). An eye above the surface
-    // therefore leaves the whole scene untouched; a submerged eye fogs it below.
-    if (fog.camera_pos.y > fog.water_height) {
-        return scene;
+    // Which eye state this pipeline is for. The two run at different points in the
+    // frame and each does nothing in the other's state, so exactly one fogs any given
+    // frame. The reference likewise carries an `above_water` uniform through one
+    // shader (`class3/deferred/waterHazeF.glsl`).
+    //
+    // Above water this pass runs **before** the water surface, because the surface
+    // refracts a copy of what this leaves behind — that is where the sea's colour
+    // comes from. Submerged it runs **after everything**, because then the fog is not
+    // a backdrop but the medium the whole picture is seen through, including the
+    // translucent content drawn after the water (the cloud dome above all, which
+    // would otherwise hang unfogged in the distance) and the surface itself, whose
+    // underside the reference fogs by exactly this distance.
+#ifdef WATER_HAZE_ABOVE
+    if (fog.camera_pos.y <= fog.water_height) {
+        return unchanged;
     }
+#else
+    if (fog.camera_pos.y > fog.water_height) {
+        return unchanged;
+    }
+#endif
 
-    // Read the (multisampled) depth for this pixel. Reverse-Z: the far plane / empty
-    // sky is depth 0.0, which has no geometry to fog.
+    // Read the (multisampled) depth for this pixel. Reverse-Z: the far plane — empty
+    // sky, or the void past a region edge — is depth 0.0.
     let coord = vec2<i32>(in.position.xy);
     let depth = textureLoad(depth_texture, coord, 0);
+    // uv -> clip xy, with the y flip between the top-left uv origin and clip space.
+    let ndc_xy = vec2<f32>(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0);
+    var world_pos: vec3<f32>;
+
+    // Where this pixel's geometry is, in the world. With no geometry at all — open
+    // sky, or the void past a region edge — the reference's haze reads the far depth
+    // and fogs it just the same, which is what gives open water its colour where
+    // there is no sea floor to fog. Reverse-Z's far plane is a point at infinity, so
+    // take a point far down this pixel's view ray instead: 2048 m, the distance the
+    // reference itself pushes white through the water for the same purpose
+    // (`waterF.glsl:285`). A ray that ends up *above* the surface is then rejected by
+    // the water-plane clip below, so this fogs the sea and not the sky.
     if (depth <= 0.0) {
-        return scene;
+        let mid = fog.world_from_clip * vec4<f32>(ndc_xy, 0.5, 1.0);
+        let dir = normalize(mid.xyz / mid.w - fog.camera_pos.xyz);
+        world_pos = fog.camera_pos.xyz + dir * 2048.0;
+    } else {
+        let world_h = fog.world_from_clip * vec4<f32>(ndc_xy, depth, 1.0);
+        world_pos = world_h.xyz / world_h.w;
     }
 
-    // Reconstruct the fragment's world position from its NDC (uv -> clip xy, with the
-    // y flip between the top-left uv origin and clip space).
-    let ndc = vec3<f32>(in.uv.x * 2.0 - 1.0, 1.0 - in.uv.y * 2.0, depth);
-    let world_h = fog.world_from_clip * vec4<f32>(ndc, 1.0);
-    let world_pos = world_h.xyz / world_h.w;
-
     // getWaterFogView per-fragment clip: a fragment above the water surface is not
-    // fogged, so a submerged camera looking up past the waterline (e.g. at the shore
-    // or a half-submerged object) splits cleanly along the surface.
-    if (world_pos.y > fog.water_height) {
-        return scene;
+    // fogged, so the waterline splits cleanly — a submerged camera looking up past it
+    // (at the shore, or a half-submerged object) sees the part above unfogged.
+    //
+    // With a tolerance that grows with distance, which the reference does not need and
+    // this does: the position is reconstructed from a depth buffer, and the further
+    // the fragment the coarser that reconstruction, while the thing most often sitting
+    // *exactly* on the plane is the water surface itself. Without the tolerance its
+    // far pixels fall on either side of the test from one to the next and the fog
+    // breaks up along the horizon. A fragment this admits is at most a thousandth of
+    // its own distance above the surface, where the fog it gets is imperceptible
+    // anyway.
+    if (world_pos.y > fog.water_height + length(world_pos - fog.camera_pos.xyz) * 1.0e-3) {
+        return unchanged;
     }
 
     // --- getWaterFogViewNoClip, re-derived for a horizontal plane (+Y up). ---
@@ -120,7 +160,8 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let scatter = pow(clamp(t1 / t2 * t3, 0.0, 1.0), 1.0 / 1.7);
     let transmittance = pow(0.98, l * kd);
 
-    // applyWaterFogViewLinearNoClip: color = color * D + srgb_to_linear(fogColor) * L.
-    let fogged = scene.rgb * transmittance + srgb_to_linear(fog.fog_color.rgb) * scatter;
-    return vec4<f32>(fogged, scene.a);
+    // The in-scatter as colour, the transmittance as alpha: the blender then computes
+    // `dst * D + srgb_to_linear(fogColor) * L`, which is
+    // `applyWaterFogViewLinearNoClip`.
+    return vec4<f32>(srgb_to_linear(fog.fog_color.rgb) * scatter, transmittance);
 }

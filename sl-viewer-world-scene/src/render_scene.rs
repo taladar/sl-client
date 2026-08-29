@@ -3213,6 +3213,12 @@ fn water_wavelet_texture() -> DecodedTexture {
 /// which is a wrong picture with no other symptom, since it still renders.
 const WATER_CAMERA: Vec3 = Vec3::new(0.0, -40.0, 26.0);
 
+/// The colour of the slab on the sea bed in the `water-surface` scene: strongly red,
+/// and nothing else in that scene is, so a pixel dominated by red is the slab seen
+/// through the water and cannot be anything else. Read by the readback tier's
+/// refraction check (`crate::render_readback`).
+pub(crate) const SUBMERGED_MARKER: Color = Color::srgb(0.9, 0.05, 0.05);
+
 /// [`SCENES`] `water-surface`: the endless ocean and a region's water plane.
 ///
 /// Both, because they are two surfaces the viewer draws at almost the same height
@@ -3272,6 +3278,31 @@ fn water_surface(
             ChildOf(root),
         ))
         .id();
+    // A brightly coloured slab on the sea bed, which is the only thing in the scene
+    // that can prove the sea is **refracting** rather than merely tinted: the water
+    // surface is opaque (`WaterMaterial::reads_view_transmission_texture`), so the
+    // only way this reaches the frame at all is through the screen copy the surface
+    // samples. Emissive as well as coloured so the scene's own lighting cannot be
+    // what decides whether it is visible.
+    let sea_bed = assets
+        .meshes
+        .add(Cuboid::new(24.0, 2.0, 24.0).mesh().build());
+    let sea_bed_material = assets.materials.add(inert_face_material(StandardMaterial {
+        base_color: SUBMERGED_MARKER,
+        // Bright enough that the scene's own lighting is not what decides whether
+        // it is visible; written out rather than scaled, since the workspace's
+        // `arithmetic_side_effects` lint bans the multiply.
+        emissive: LinearRgba::rgb(3.0, 0.05, 0.05),
+        ..default()
+    }));
+    commands.spawn((
+        Mesh3d(sea_bed),
+        MeshMaterial3d(sea_bed_material),
+        // Well under the surface, in front of the camera, so the water covers it.
+        Transform::from_xyz(0.0, DEFAULT_WATER_HEIGHT - 9.0, 0.0),
+        Name::new("water-surface/sea-bed-marker"),
+        ChildOf(space),
+    ));
     for (name, extent, height) in [
         ("ocean", 20_000.0_f32, DEFAULT_WATER_HEIGHT),
         // The region plane, a hair above the ocean — `crate::water`'s

@@ -58,8 +58,6 @@ use crate::environment::EnvironmentState;
 use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
-use crate::transparency::WaterSurface;
-use crate::underwater_fog::modified_water_fog_density;
 use crate::world_api::world_scoped::WorldScopedAppExt as _;
 use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
 
@@ -102,6 +100,19 @@ const REGION_SIZE_METRES: f32 = 256.0;
 /// direction as the plane follows the camera, without the plane ever being frustum
 /// culled.
 const OCEAN_HALF_EXTENT: f32 = 20_000.0;
+
+/// How many times the endless-ocean plane is subdivided along each axis.
+///
+/// Not a detail: as **one** 40 km quad it shows a seam along its own triangle
+/// diagonal, with the wave pattern visibly offset from one side to the other. The
+/// fragment's world position is interpolated across a triangle whose `w` ranges over
+/// four orders of magnitude, and at a grazing angle — which is how the sea is nearly
+/// always seen — that interpolation loses enough precision for the two triangles to
+/// disagree about where a fragment is by something the wave texcoords turn into a
+/// visible step. Cutting the plane into cells collapses the range each triangle has
+/// to interpolate over. 64 gives ~625 m cells for a few thousand triangles, which is
+/// nothing next to a region of prims.
+const OCEAN_SUBDIVISIONS: u32 = 64;
 
 /// The default water height, in metres, used for the endless ocean until the agent
 /// region's handshake supplies the real one (the standard Second Life sea level;
@@ -248,6 +259,7 @@ pub(crate) fn setup_water(
         Plane3d::default()
             .mesh()
             .size(2.0 * OCEAN_HALF_EXTENT, 2.0 * OCEAN_HALF_EXTENT)
+            .subdivisions(OCEAN_SUBDIVISIONS)
             .build(),
     );
     commands.spawn((
@@ -258,7 +270,6 @@ pub(crate) fn setup_water(
         NotShadowCaster,
         // Marks this as a water surface for the transparency-ordering re-sort, which
         // pins it to its own bucket between below- and above-water translucency.
-        WaterSurface,
         // Environment content: also visible to reflection-probe captures.
         environment_render_layers(),
         WaterOcean,
@@ -459,7 +470,6 @@ fn reconcile_region_planes(
                         Transform::from_translation(translation),
                         NotShadowCaster,
                         // See the ocean plane: pins this plane to the water bucket.
-                        WaterSurface,
                         // Environment content: also visible to probe captures.
                         environment_render_layers(),
                         WaterRegionPlane { region, height },
@@ -545,7 +555,7 @@ pub(crate) fn apply_water_textures(
 /// here that follows the camera rather than the environment, and it is a step
 /// function of it — it changes only when the eye crosses the waterline, so it does
 /// not turn the material's compare-then-`get_mut` into a per-frame re-prepare.
-pub(crate) fn water_params(
+pub(crate) const fn water_params(
     water: &WaterSettings,
     light_dir: Vec3,
     reflection_color: Vec3,
@@ -561,18 +571,20 @@ pub(crate) fn water_params(
             water.normal_scale.z(),
         ),
         fresnel_offset: water.fresnel_offset,
-        water_fog_color: color_rgb(water.water_fog_color),
-        water_fog_density: modified_water_fog_density(
-            water.water_fog_density,
-            water.underwater_fog_mod,
-            submerged,
-        ),
         sunlight_color,
         blur_multiplier: water.blur_multiplier,
         reflection_color,
         blend_factor: 0.0,
         wave1_dir: Vec2::from_array(water.wave1_direction),
         wave2_dir: Vec2::from_array(water.wave2_direction),
+        // `refScale`, the reference's screen-space refraction displacement: the
+        // frame's `scaleBelow` when the eye is under the surface, `scaleAbove` when
+        // it is over it (`lldrawpoolwater.cpp:299`).
+        ref_scale: if submerged {
+            water.scale_below
+        } else {
+            water.scale_above
+        },
     }
 }
 
@@ -746,36 +758,31 @@ mod tests {
         assert_eq!(state.normal_key, None);
     }
 
-    /// The surface shader's fog density is the **eye-state-modified** one, as the
-    /// reference binds it (`lldrawpoolwater.cpp:242`,
-    /// `getModifiedWaterFogDensity(underwater)`): submerged, the frame's density is
-    /// raised to its underwater fog modifier. The density is what the shader's
-    /// deep-water colour is computed from, so getting the wrong one gives the diver
-    /// the surface-dweller's sea.
+    /// The surface shader's refraction displacement is the **eye-state** one, as the
+    /// reference picks it (`lldrawpoolwater.cpp:299`): the water frame's `scaleAbove`
+    /// over the surface and `scaleBelow` under it. It decides how far the wave normal
+    /// moves the screen sample, and the two differ by nearly an order of magnitude in
+    /// the legacy default — a diver given the surface-dweller's value gets a sea with
+    /// almost no ripple in it.
     #[test]
-    fn a_submerged_eye_gets_the_modified_fog_density() {
+    fn the_eye_state_picks_the_refraction_scale() {
         let water = sl_client_bevy::WaterSettings::legacy_default("Default");
         let above = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false);
         let below = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, true);
 
-        let expected = water
-            .water_fog_density
-            .powf(water.underwater_fog_mod.clamp(0.0, 10.0));
         assert!(
-            (above.water_fog_density - water.water_fog_density).abs() <= 1e-6,
-            "above water the frame's own density is bound, got {}",
-            above.water_fog_density,
+            (above.ref_scale - water.scale_above).abs() <= 1e-6,
+            "above water the frame's `scaleAbove` is bound, got {}",
+            above.ref_scale,
         );
         assert!(
-            (below.water_fog_density - expected).abs() <= 1e-6,
-            "submerged, the density raised to the underwater fog modifier is bound: \
-             expected {expected}, got {}",
-            below.water_fog_density,
+            (below.ref_scale - water.scale_below).abs() <= 1e-6,
+            "submerged, the frame's `scaleBelow` is bound, got {}",
+            below.ref_scale,
         );
-        // The legacy default's modifier is not 1, so the two are genuinely different
-        // numbers — a fixture whose modifier drifted to 1 would make this vacuous.
+        // The legacy default's two scales genuinely differ, so this is not vacuous.
         assert!(
-            (above.water_fog_density - below.water_fog_density).abs() > 1e-3,
+            (above.ref_scale - below.ref_scale).abs() > 1e-3,
             "the default water frame no longer distinguishes the two eye states",
         );
     }

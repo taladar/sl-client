@@ -51,7 +51,6 @@ use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
 use bevy::core_pipeline::schedule::Core3d;
-use bevy::core_pipeline::tonemapping::tonemapping;
 use bevy::ecs::query::QueryItem;
 use bevy::ecs::system::lifetimeless::Read;
 use bevy::prelude::*;
@@ -60,17 +59,14 @@ use bevy::render::extract_component::{
     ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
     UniformComponentPlugin,
 };
-use bevy::render::render_resource::binding_types::{
-    sampler, texture_2d, texture_depth_2d_multisampled, uniform_buffer,
-};
+use bevy::render::render_resource::binding_types::{texture_depth_2d_multisampled, uniform_buffer};
 use bevy::render::render_resource::{
-    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, CachedRenderPipelineId,
-    ColorTargetState, ColorWrites, FragmentState, Operations, PipelineCache,
-    RenderPassColorAttachment, RenderPassDescriptor, RenderPipelineDescriptor, Sampler,
-    SamplerBindingType, SamplerDescriptor, ShaderStages, ShaderType, SpecializedRenderPipeline,
-    SpecializedRenderPipelines, TextureFormat, TextureSampleType,
+    BindGroupEntries, BindGroupLayoutDescriptor, BindGroupLayoutEntries, BlendComponent,
+    BlendFactor, BlendOperation, BlendState, CachedRenderPipelineId, ColorTargetState, ColorWrites,
+    FragmentState, MultisampleState, PipelineCache, RenderPassDescriptor, RenderPipelineDescriptor,
+    ShaderStages, ShaderType, SpecializedRenderPipeline, SpecializedRenderPipelines, TextureFormat,
 };
-use bevy::render::renderer::{RenderContext, RenderDevice, ViewQuery};
+use bevy::render::renderer::{RenderContext, ViewQuery};
 use bevy::render::sync_component::SyncComponent;
 use bevy::render::view::{ExtractedView, ViewDepthTexture, ViewTarget};
 use bevy::render::{GpuResourceAppExt as _, Render, RenderApp, RenderStartup, RenderSystems};
@@ -168,10 +164,6 @@ fn fog_disabled() -> bool {
 ///
 /// Integrality is tested on the *clamped* modifier, as in the reference — a modifier
 /// of `10.5` clamps to `10.0`, which is integral, and needs no rescue.
-///
-/// The water *surface* shader needs the same value ([`crate::water::water_params`]):
-/// the reference binds this one density to both (`lldrawpoolwater.cpp:242`,
-/// `llsettingsvo.cpp:1130`).
 pub(crate) fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: bool) -> f32 {
     if !(submerged && fog_mod > 0.0) {
         return density;
@@ -321,16 +313,21 @@ impl Plugin for UnderwaterFogPlugin {
             .add_systems(Render, prepare_fog_pipelines.in_set(RenderSystems::Prepare))
             .add_systems(
                 Core3d,
-                underwater_fog_system
-                    .in_set(Core3dSystems::PostProcess)
-                    .in_set(UnderwaterFogPass)
-                    .before(tonemapping)
-                    // Pin the post-process order fog → bloom → `SlTonemap` fully:
-                    // all three run in `PostProcess`, and without this edge fog and
-                    // bloom are unordered, so Bevy's parallel executor runs them in a
-                    // different order on random frames — flipping the view-target
-                    // ping-pong parity and flickering the whole screen.
-                    .before(bevy::post_process::bloom::bloom),
+                (
+                    // Above water: after the opaque geometry and the below-water
+                    // translucency it fogs, and before the water surface, whose
+                    // refraction sample is a copy of what this pass has just fogged.
+                    // That is where the sea's colour comes from.
+                    water_haze_above_system
+                        .after(crate::transparency::PreWaterPass)
+                        .before(bevy::pbr::main_transmissive_pass_3d),
+                    // Submerged: after everything, so the fog covers the translucent
+                    // content drawn after the water as well as the water itself.
+                    water_haze_submerged_system
+                        .after(bevy::core_pipeline::core_3d::main_transparent_pass_3d),
+                )
+                    .in_set(Core3dSystems::MainPass)
+                    .in_set(UnderwaterFogPass),
             );
     }
 }
@@ -339,93 +336,161 @@ impl Plugin for UnderwaterFogPlugin {
 /// fullscreen vertex shader, which pipeline specialization needs per view format).
 #[derive(Resource)]
 struct UnderwaterFogPipeline {
-    /// The bind-group layout descriptor (source texture, sampler, fog uniform,
-    /// depth texture), resolved to a real layout per frame via the pipeline cache.
+    /// The bind-group layout descriptor (fog uniform, depth texture), resolved to a
+    /// real layout per frame via the pipeline cache.
     layout: BindGroupLayoutDescriptor,
-    /// The sampler used to read the scene colour texture.
-    sampler: Sampler,
     /// The shared fullscreen-triangle vertex shader, needed by pipeline
     /// specialization (which has no world access to fetch it).
     fullscreen_shader: FullscreenShader,
 }
 
 /// Build the fog pipeline's shared data once, in the render world.
-fn init_fog_pipeline(
-    mut commands: Commands,
-    render_device: Res<RenderDevice>,
-    fullscreen_shader: Res<FullscreenShader>,
-) {
+fn init_fog_pipeline(mut commands: Commands, fullscreen_shader: Res<FullscreenShader>) {
     let layout = BindGroupLayoutDescriptor::new(
-        "underwater_fog_bind_group_layout",
+        "water_haze_bind_group_layout",
         &BindGroupLayoutEntries::sequential(
             ShaderStages::FRAGMENT,
             (
-                // The scene colour texture.
-                texture_2d(TextureSampleType::Float { filterable: true }),
-                // Its sampler.
-                sampler(SamplerBindingType::Filtering),
                 // The per-frame fog parameters (dynamic-offset uniform).
                 uniform_buffer::<UnderwaterFog>(true),
-                // The (multisampled) depth prepass texture.
+                // The (multisampled) main-pass depth texture.
                 texture_depth_2d_multisampled(),
             ),
         ),
     );
-    let sampler = render_device.create_sampler(&SamplerDescriptor::default());
     commands.insert_resource(UnderwaterFogPipeline {
         layout,
-        sampler,
         fullscreen_shader: fullscreen_shader.clone(),
     });
 }
 
+/// The pipeline key: the view's target format and its MSAA sample count. Both vary
+/// per view, and the sample count matters because this pass draws **into the main
+/// pass's attachment** — a pipeline whose sample count disagrees with the attachment
+/// is a validation error, not a subtle artifact.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+struct FogPipelineKey {
+    /// The colour attachment's format.
+    format: TextureFormat,
+    /// The colour attachment's MSAA sample count.
+    samples: u32,
+    /// Which eye state this pipeline fogs for.
+    half: HazeHalf,
+}
+
+/// Which eye state a haze pipeline is specialized for. One shader with an `#ifdef`,
+/// as the reference is one shader with an `above_water` uniform, but the two run at
+/// different points in the frame and so need pipelines of their own.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum HazeHalf {
+    /// The eye is **above** the surface: fog before the water is drawn, so the water
+    /// refracts a fogged scene.
+    Above,
+    /// The eye is **submerged**: fog after everything, so the fog is the medium the
+    /// whole picture is seen through.
+    Submerged,
+}
+
 impl SpecializedRenderPipeline for UnderwaterFogPipeline {
-    // The post-process source / destination format varies per view (HDR vs the
-    // swapchain format), so specialize on it.
-    type Key = TextureFormat;
+    type Key = FogPipelineKey;
 
     fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
         RenderPipelineDescriptor {
-            label: Some("underwater_fog_pipeline".into()),
+            label: Some(
+                match key.half {
+                    HazeHalf::Above => "water_haze_above_pipeline",
+                    HazeHalf::Submerged => "water_haze_submerged_pipeline",
+                }
+                .into(),
+            ),
             layout: vec![self.layout.clone()],
             vertex: self.fullscreen_shader.to_vertex_state(),
             fragment: Some(FragmentState {
                 shader: FOG_SHADER_HANDLE,
+                shader_defs: match key.half {
+                    HazeHalf::Above => vec!["WATER_HAZE_ABOVE".into()],
+                    HazeHalf::Submerged => vec![],
+                },
                 targets: vec![Some(ColorTargetState {
-                    format: key,
-                    blend: None,
+                    format: key.format,
+                    // The reference's own blend for this pass: `(ONE, SOURCE_ALPHA)`,
+                    // so the shader's colour is the in-scatter and its alpha is the
+                    // transmittance and the blender computes `dst * D + L`.
+                    blend: Some(BlendState {
+                        color: BlendComponent {
+                            src_factor: BlendFactor::One,
+                            dst_factor: BlendFactor::SrcAlpha,
+                            operation: BlendOperation::Add,
+                        },
+                        // Keep the destination alpha: it is the scene's glow mask
+                        // (`glow.rs`), not a coverage value.
+                        alpha: BlendComponent {
+                            src_factor: BlendFactor::Zero,
+                            dst_factor: BlendFactor::One,
+                            operation: BlendOperation::Add,
+                        },
+                    }),
                     write_mask: ColorWrites::ALL,
                 })],
                 ..default()
             }),
+            multisample: MultisampleState {
+                count: key.samples,
+                ..default()
+            },
             ..default()
         }
     }
 }
 
-/// The specialized pipeline id for a view.
+/// The specialized pipeline ids for a view — one per eye state.
 #[derive(Component)]
-struct UnderwaterFogPipelineId(CachedRenderPipelineId);
+struct UnderwaterFogPipelineId {
+    /// Runs before the water, and fogs only when the eye is above the surface.
+    above: CachedRenderPipelineId,
+    /// Runs after everything, and fogs only when the eye is under the surface.
+    submerged: CachedRenderPipelineId,
+}
 
-/// Specialize the fog pipeline for each view's target format.
+/// Specialize the haze pipeline for each view's target format.
 fn prepare_fog_pipelines(
     mut commands: Commands,
     pipeline_cache: Res<PipelineCache>,
     mut pipelines: ResMut<SpecializedRenderPipelines<UnderwaterFogPipeline>>,
     pipeline: Res<UnderwaterFogPipeline>,
-    views: Query<(Entity, &ExtractedView), With<ExtractedCamera>>,
+    views: Query<(Entity, &ExtractedView, &Msaa), With<ExtractedCamera>>,
 ) {
-    for (entity, view) in &views {
-        let pipeline_id = pipelines.specialize(&pipeline_cache, &pipeline, view.target_format);
-        commands
-            .entity(entity)
-            .insert(UnderwaterFogPipelineId(pipeline_id));
+    for (entity, view, msaa) in &views {
+        let key = |half| FogPipelineKey {
+            format: view.target_format,
+            samples: msaa.samples(),
+            half,
+        };
+        commands.entity(entity).insert(UnderwaterFogPipelineId {
+            above: pipelines.specialize(&pipeline_cache, &pipeline, key(HazeHalf::Above)),
+            submerged: pipelines.specialize(&pipeline_cache, &pipeline, key(HazeHalf::Submerged)),
+        });
     }
 }
 
-/// The fog pass: reconstruct world position from depth and apply the water fog to
-/// the scene colour for every pixel that is underwater.
-fn underwater_fog_system(
+/// The water-haze pass: fog every pixel that lies under the water surface, before
+/// the water itself is drawn.
+///
+/// This is the reference's `class3/deferred/waterHazeF.glsl`, which likewise runs
+/// before its water pool: it is what gives the sea its colour, because the surface
+/// shows a *sample of this fogged scene* rather than a tint of its own. It fogs from
+/// either side of the surface — an eye above the water sees a fogged sea floor
+/// through the surface, an eye under it sees the fogged world around it — the
+/// difference being only where the ray enters the water, which the shader works out
+/// per fragment.
+///
+/// What it deliberately does not fog: anything drawn after it. Above water that is
+/// the water surface (which shows the fogged scene through the refraction sample
+/// instead) and above-water translucency (correctly unfogged); submerged it is the
+/// surface (which fogs itself, as the reference's underwater surface shader does)
+/// and the pre-water translucency, which the reference fogs in its alpha shaders and
+/// we do not yet.
+fn water_haze_above_system(
     view: ViewQuery<(
         &ViewTarget,
         &DynamicUniformIndex<UnderwaterFog>,
@@ -438,37 +503,99 @@ fn underwater_fog_system(
     mut ctx: RenderContext,
 ) {
     let (view_target, fog_index, pipeline_id, view_depth) = view.into_inner();
+    draw_haze(
+        "water_haze_above",
+        pipeline_id.above,
+        view_target,
+        fog_index,
+        view_depth,
+        &pipeline_cache,
+        &pipeline_res,
+        &uniforms,
+        &mut ctx,
+    );
+}
 
-    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id.0) else {
+/// The **submerged** haze pass: after every other pass of the main pass, so the fog
+/// is applied to the whole picture — the terrain and objects, the translucent content
+/// drawn after the water (the cloud dome most visibly), and the water surface itself,
+/// whose underside the reference fogs by exactly the distance the depth buffer here
+/// gives.
+///
+/// Still inside the main pass rather than a post-process, because under MSAA the
+/// resolved texture a post-process would read and rewrite is discarded by the next
+/// resolve; blending into the attachment is what actually reaches the frame.
+fn water_haze_submerged_system(
+    view: ViewQuery<(
+        &ViewTarget,
+        &DynamicUniformIndex<UnderwaterFog>,
+        &UnderwaterFogPipelineId,
+        &ViewDepthTexture,
+    )>,
+    pipeline_cache: Res<PipelineCache>,
+    pipeline_res: Res<UnderwaterFogPipeline>,
+    uniforms: Res<ComponentUniforms<UnderwaterFog>>,
+    mut ctx: RenderContext,
+) {
+    let (view_target, fog_index, pipeline_id, view_depth) = view.into_inner();
+    draw_haze(
+        "water_haze_submerged",
+        pipeline_id.submerged,
+        view_target,
+        fog_index,
+        view_depth,
+        &pipeline_cache,
+        &pipeline_res,
+        &uniforms,
+        &mut ctx,
+    );
+}
+
+/// Draw one haze pass: bind the fog uniform and the main-pass depth, and blend a
+/// fullscreen triangle over the scene. Shared by both eye states, which differ only
+/// in the pipeline (and so the shader branch) and in where in the frame they run.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the two callers are render systems whose params this simply forwards"
+)]
+fn draw_haze(
+    label: &str,
+    pipeline_id: CachedRenderPipelineId,
+    view_target: &ViewTarget,
+    fog_index: &DynamicUniformIndex<UnderwaterFog>,
+    view_depth: &ViewDepthTexture,
+    pipeline_cache: &PipelineCache,
+    pipeline_res: &UnderwaterFogPipeline,
+    uniforms: &ComponentUniforms<UnderwaterFog>,
+    ctx: &mut RenderContext,
+) {
+    let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
         return;
     };
     let Some(uniform_binding) = uniforms.uniforms().binding() else {
         return;
     };
 
-    let post_process = view_target.post_process_write();
     let bind_group = ctx.render_device().create_bind_group(
-        "underwater_fog_bind_group",
+        Some(label),
         &pipeline_cache.get_bind_group_layout(&pipeline_res.layout),
         &BindGroupEntries::sequential((
-            post_process.source,
-            &pipeline_res.sampler,
             uniform_binding.clone(),
             // The main-pass depth texture (made sampleable via
             // `Camera3d::depth_texture_usages`), from which the shader reconstructs
-            // each fragment's world position.
+            // each fragment's world position. Sampled, not attached — this pass does
+            // no depth testing, so the buffer it reads is not bound against it.
             view_depth.view(),
         )),
     );
 
     let pass_descriptor = RenderPassDescriptor {
-        label: Some("underwater_fog_pass"),
-        color_attachments: &[Some(RenderPassColorAttachment {
-            view: post_process.destination,
-            depth_slice: None,
-            resolve_target: None,
-            ops: Operations::default(),
-        })],
+        label: Some(label),
+        // The main pass's own colour attachment, loaded: this blends into the scene
+        // being drawn (and, under MSAA, into the multisampled texture that *is* the
+        // scene until it resolves), rather than reading and rewriting a resolved copy
+        // that the next resolve would throw away.
+        color_attachments: &[Some(view_target.get_color_attachment())],
         depth_stencil_attachment: None,
         timestamp_writes: None,
         occlusion_query_set: None,

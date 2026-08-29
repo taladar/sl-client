@@ -71,11 +71,6 @@ pub struct WaterParams {
     /// The fresnel offset (`fresnelOffset`): the base reflectivity looking straight
     /// down.
     pub fresnel_offset: f32,
-    /// The water fog colour (`waterFogColor`) — the deep-water tint seen looking
-    /// into the water.
-    pub water_fog_color: Vec3,
-    /// The water fog density (`waterFogDensity`).
-    pub water_fog_density: f32,
     /// The sky's sunlight colour, tinting the sun specular highlight.
     pub sunlight_color: Vec3,
     /// The reflection blur multiplier (`blurMultiplier`) — the surface roughness,
@@ -91,6 +86,12 @@ pub struct WaterParams {
     pub wave1_dir: Vec2,
     /// Wave-layer 2 scroll direction (`waveDir2`).
     pub wave2_dir: Vec2,
+    /// How far the wave normal displaces the refraction sample in screen space
+    /// (`refScale`): the reference binds the water frame's `scaleAbove` when the eye
+    /// is above the surface and `scaleBelow` when it is under
+    /// (`lldrawpoolwater.cpp:299`), so the eye state is resolved before this is
+    /// filled.
+    pub ref_scale: f32,
 }
 
 /// The water-surface material: one [`WaterParams`] uniform block plus the current
@@ -141,29 +142,48 @@ impl Material for WaterMaterial {
         ShaderRef::Handle(WATER_SHADER_HANDLE)
     }
 
-    /// The water surface is alpha-blended so shallow water reveals the ground
-    /// beneath it and the sea composites over the terrain / sea floor.
+    /// The water surface is **opaque**, as the reference's is
+    /// (`LLDrawPoolWater::renderPostDeferred` opens with `LLGLDisable
+    /// blend(GL_BLEND)`): what you see through the sea is a *sample of the screen
+    /// behind it*, displaced by the wave normal, not the scene blended through a
+    /// translucent plane. See `reads_view_transmission_texture` below, which is
+    /// what puts the surface in the phase where that sample exists.
     fn alpha_mode(&self) -> AlphaMode {
-        AlphaMode::Blend
+        AlphaMode::Opaque
+    }
+
+    /// Read the screen copy Bevy takes for screen-space transmission — our
+    /// refraction source, and the reason the surface can be opaque.
+    ///
+    /// This moves the water out of `Transparent3d` and into `Transmissive3d`, whose
+    /// pass copies the main texture and then draws the phase
+    /// (`bevy_pbr::transmission`), which is exactly the shape of the reference's own
+    /// water pass: it copies the deferred colour buffer at `lldrawpoolwater.cpp:116`
+    /// and samples it as `screenTex`. It also means the surface is pipelined as
+    /// opaque — no blending, depth written — which is the reference's state too.
+    ///
+    /// The copy is taken after the opaque and alpha-mask passes and before
+    /// `Transparent3d`, so translucent content *below* the surface has to be drawn
+    /// before it or it would not be in the sample at all; the viewer's
+    /// `transparency` module draws it in a pre-water pass for that reason.
+    fn reads_view_transmission_texture(&self) -> bool {
+        true
     }
 
     /// Pin the vertex buffer layout to the position attribute (the shader derives
     /// the wave texcoords, view vector, and fresnel per fragment from the world
     /// position, reading no UV or normal), disable back-face culling so the surface
-    /// is visible from below (an avatar underwater still sees the surface), and make
-    /// the surface **write depth**.
+    /// is visible from below (an avatar underwater still sees the surface), and keep
+    /// the surface's **depth write**.
     ///
-    /// Depth-writing a translucent surface is deliberate and matches the reference
-    /// (`LLDrawPoolWater` renders with `LLGLDepthTest(GL_TRUE, GL_TRUE)`). On its own
-    /// it would turn the sea into an opaque depth occluder and hide everything
-    /// translucent behind it, so it is correct **only** in concert with the viewer's
-    /// water-relative transparency ordering (the `transparency` module in
-    /// `sl-client-bevy-viewer`): all translucent content *below* the water is drawn
-    /// before the surface (already composited, so it shows through the translucent
-    /// water), the water is drawn next writing depth, and all translucent content
-    /// *above* the water is drawn after — where the depth write now gives per-pixel
-    /// occlusion of anything that dips behind the surface (a fountain's spray, a boat
-    /// wake) rather than the whole-plane back-to-front sort that painted it out.
+    /// The depth write matches the reference (`LLDrawPoolWater` renders with
+    /// `LLGLDepthTest(GL_TRUE, GL_TRUE)`) and is what gives per-pixel occlusion of
+    /// above-water translucency that dips behind the surface — a fountain's spray, a
+    /// boat wake — rather than the whole-plane back-to-front sort that painted it
+    /// out. It is stated here rather than left to the transmissive pipeline's default
+    /// because it is load-bearing, and because it is only correct in concert with the
+    /// draw order the viewer's `transparency` module keeps: below-water translucency
+    /// first, then the water, then above-water translucency.
     fn specialize(
         _pipeline: &MaterialPipeline,
         descriptor: &mut RenderPipelineDescriptor,
@@ -181,9 +201,10 @@ impl Material for WaterMaterial {
         if let Some(depth) = descriptor.depth_stencil.as_mut() {
             depth.depth_write_enabled = Some(true);
         }
-        // Keep the water surface's coverage out of the scene alpha (the glow mask)
-        // so it does not bloom under the viewer's glow pass.
-        crate::preserve_glow_mask_alpha(descriptor);
+        // No `preserve_glow_mask_alpha` here, unlike the viewer's alpha-blended
+        // materials: that helper rewrites a blend component, and an opaque pipeline
+        // has no blending to rewrite. The shader writes the glow mask itself — zero,
+        // since water does not glow.
         Ok(())
     }
 }
