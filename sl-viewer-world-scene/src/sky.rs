@@ -74,6 +74,7 @@ use crate::coords::sl_to_bevy_object_rotation;
 use crate::environment::EnvironmentState;
 use crate::probe_layers::{environment_render_layers, mirror_sun_render_layers};
 use crate::textures::{TextureDecoded, TextureManager};
+use crate::transparency::SkyBackdrop;
 use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
 
 /// The sky stack's own scheduling: the dome, the sun / moon discs, the cloud
@@ -972,6 +973,9 @@ pub(crate) fn setup_sun_moon_discs(
         Visibility::Hidden,
         NotShadowCaster,
         SunDisc,
+        // A sky backdrop, so the discs sort behind world-anchored transparent
+        // overlays (name tags and the like) instead of by their 2000 m distance.
+        SkyBackdrop::HeavenlyBody,
         environment_render_layers(),
     ));
     commands.spawn((
@@ -981,6 +985,7 @@ pub(crate) fn setup_sun_moon_discs(
         Visibility::Hidden,
         NotShadowCaster,
         MoonDisc,
+        SkyBackdrop::HeavenlyBody,
         environment_render_layers(),
     ));
 
@@ -1237,6 +1242,10 @@ pub(crate) fn setup_clouds(
         // The cloud layer never casts shadows (like the sky dome).
         NotShadowCaster,
         CloudDome,
+        // A sky backdrop: the dome is centred on the camera, so Bevy's distance sort
+        // would make it the *nearest* transparent object and draw it over every
+        // world-anchored overlay in front of it (`viewer-nametags-occluded-by-clouds`).
+        SkyBackdrop::Clouds,
         environment_render_layers(),
     ));
     commands.insert_resource(CloudState {
@@ -1470,6 +1479,9 @@ pub(crate) fn setup_stars(
         // The star field never casts shadows (like the sky / cloud domes).
         NotShadowCaster,
         StarField,
+        // A sky backdrop, for the same reason as the cloud dome: `drive_stars` keeps
+        // the field centred on the camera.
+        SkyBackdrop::Stars,
         environment_render_layers(),
     ));
     commands.insert_resource(StarState {
@@ -2184,12 +2196,44 @@ pub(crate) fn placeholder_image() -> Image {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+
     use super::{
-        AMBIENT_BRIGHTNESS_SCALE, DAY_POSITION_STEPS, SHADOW_MAP_SIZE, quantised_day_position,
-        sky_ambient_light, snap_shadow_direction,
+        AMBIENT_BRIGHTNESS_SCALE, CLOUD_DOME_RADIUS, DAY_POSITION_STEPS, SHADOW_MAP_SIZE,
+        build_cloud_dome_mesh, quantised_day_position, sky_ambient_light, snap_shadow_direction,
     };
+    use bevy::camera::primitives::MeshAabb as _;
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
+
+    /// The cloud dome's **mesh centre** — the one point Bevy's [`Transparent3d`]
+    /// distance sort looks at — sits essentially *at* the camera the dome is
+    /// anchored to, because the reference's `getCamHeight` offset is baked into the
+    /// vertices and the visible cap is only the `[0, π/8]` crown of a 15 km sphere.
+    ///
+    /// That is why the dome cannot be ordered by distance at all: a sort distance of
+    /// ~0 makes it the *nearest* transparent object in the scene and it is drawn
+    /// last, over every world-anchored overlay in front of it (the name-tag bug,
+    /// `viewer-nametags-occluded-by-clouds`). The fix is the
+    /// [`SkyBackdrop`](crate::transparency::SkyBackdrop) bucket, and this test pins
+    /// the premise: if the dome geometry ever moved its centre out into the sky, the
+    /// bucket would stop being load-bearing and this test should be revisited rather
+    /// than silently drifting.
+    #[test]
+    fn the_cloud_dome_mesh_is_centred_on_the_camera() {
+        let aabb = build_cloud_dome_mesh()
+            .compute_aabb()
+            .expect("the cloud dome mesh has vertex positions");
+        let centre = Vec3::from(aabb.center).length();
+        assert!(
+            centre < CLOUD_DOME_RADIUS / 100.0,
+            "the cloud dome's mesh centre is {centre} m from the camera, \
+             more than 1% of its {CLOUD_DOME_RADIUS} m radius",
+        );
+    }
 
     /// A Second Life day, in seconds (the grid default, and the length the
     /// day-position tests reason in).

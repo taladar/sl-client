@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 65 |
-| done | 913 |
+| bugs | 66 |
+| done | 914 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1492** |
+| **total** | **1494** |
 
 ## ideas (97)
 
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (65)
+## bugs (66)
 
 ### viewer
 
@@ -1283,8 +1283,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Mouselook — parts of the own avatar's head render from the inside
 - [`viewer-muted-residents-text-still-shown`](bugs/viewer-muted-residents-text-still-shown.md)
   — A blocked resident's chat and IMs are still shown
-- [`viewer-nametags-occluded-by-clouds`](bugs/viewer-nametags-occluded-by-clouds.md)
-  — Name tags render behind the cloud layer (near tag occluded by far clouds)
 - [`viewer-near-avatar-stuck-coarse-sphere`](bugs/viewer-near-avatar-stuck-coarse-sphere.md)
   — A nearby avatar stays a coarse sphere even as the camera closes in
 - [`viewer-object-face-entity-respawn-churn`](bugs/viewer-object-face-entity-respawn-churn.md)
@@ -1305,6 +1303,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-sea-distance-band-hard-seam`](bugs/viewer-sea-distance-band-hard-seam.md)
+  — The open sea has a hard ring at a fixed distance, light beyond it and dark
+  inside
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1313,10 +1314,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
+- [`viewer-underwater-name-tags-not-drawn`](bugs/viewer-underwater-name-tags-not-drawn.md)
+  — Name tags are not drawn at all while submerged
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (913)
+## done (914)
 
 ### protocol
 
@@ -1952,6 +1955,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   cameras
 - [`viewer-name-tags-preferences`](done/viewer-name-tags-preferences.md) — Name
   tags — preference toggles (blocked by `viewer-preferences-floater` (done))
+- [`viewer-nametags-occluded-by-clouds`](done/viewer-nametags-occluded-by-clouds.md)
+  — Name tags render behind the cloud layer (near tag occluded by far clouds)
 - [`viewer-notecard-format`](done/viewer-notecard-format.md) — Notecard format —
   a pure crate (sl-notecard)
 - [`viewer-notification-catalogue`](done/viewer-notification-catalogue.md) —

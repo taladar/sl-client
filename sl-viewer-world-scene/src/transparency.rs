@@ -1,8 +1,11 @@
-//! Water-relative transparency ordering (`viewer-particle-water-ordering`) and the
+//! Water-relative transparency ordering (`viewer-particle-water-ordering`), the
 //! **pre-water pass** the refracting water surface is built on
-//! (`viewer-water-surface-alpha-not-refraction`): translucent content below the
+//! (`viewer-water-surface-alpha-not-refraction`) — translucent content below the
 //! surface is drawn before the water, in a pass of its own, so it is in the screen
-//! copy the water refracts.
+//! copy the water refracts — and the **sky-backdrop bucket**
+//! (`viewer-nametags-occluded-by-clouds`), which keeps the camera-anchored sun,
+//! moon, star, and cloud backdrops behind every world-anchored transparent overlay
+//! instead of on top of them (the crate-private `SkyBackdrop` marker).
 //!
 //! **The problem this started as.** Bevy draws the whole [`Transparent3d`] phase
 //! back-to-front by each item's *mesh centre*. The water plane follows the camera,
@@ -17,7 +20,7 @@
 //! `POOL_ALPHA_POST_WATER`. This module ports that split. Every [`Transparent3d`]
 //! item — particles, translucent prims, whoever queued them — is bucketed by its
 //! centre height against the water level, and `sort_transparent_by_water` re-sorts
-//! each view's phase by `(water_bucket, distance)` in
+//! each view's phase by `(bucket, backdrop order, distance)` in
 //! [`RenderSystems::PhaseSort`], after Bevy's own
 //! [`sort_phase_system::<Transparent3d>`](sort_phase_system) has recomputed the
 //! distances. The below-water items therefore sit at the head of the phase, in
@@ -66,8 +69,9 @@ use bevy::render::extract_resource::ExtractResourcePlugin;
 use bevy::render::render_phase::{PhaseItem as _, ViewSortedRenderPhases, sort_phase_system};
 use bevy::render::render_resource::{RenderPassDescriptor, StoreOp};
 use bevy::render::renderer::{RenderContext, ViewQuery};
+use bevy::render::sync_world::{MainEntity, MainEntityHashMap};
 use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthTexture, ViewTarget};
-use bevy::render::{Render, RenderApp, RenderSystems};
+use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
 
@@ -82,23 +86,98 @@ pub(crate) struct PreWaterPass;
 /// in [`pre_water_transparent_pass_3d`], before the water is drawn over it — so it
 /// is in the screen copy the water refracts rather than hidden behind it.
 const BELOW_WATER_BUCKET: u8 = 0;
+/// The sort bucket for the camera-anchored sky backdrops ([`SkyBackdrop`]): drawn
+/// before every world-anchored transparent overlay, because their depth is forced to
+/// the far clip plane and their *centre* — the camera — makes Bevy's distance sort
+/// place them last, on top of everything (`viewer-nametags-occluded-by-clouds`).
+const BACKDROP_BUCKET: u8 = 1;
 /// The sort bucket for translucent content **above** the water surface: left to
 /// Bevy's transparent pass, which runs after the water and depth-tests against the
 /// depth the water wrote.
-const ABOVE_WATER_BUCKET: u8 = 1;
+const ABOVE_WATER_BUCKET: u8 = 2;
 /// The sort bucket for [`TransparentSortingInfo3d::AlwaysOnTop`] items: drawn after
 /// everything else so they stay on top, as their name promises (selection
 /// highlights and the like).
-const ALWAYS_ON_TOP_BUCKET: u8 = 2;
+const ALWAYS_ON_TOP_BUCKET: u8 = 3;
 
-/// The buckets must ascend below → above → always-on-top, because
+/// The buckets must ascend below → backdrop → above → always-on-top, because
 /// `sort_transparent_by_water` sorts by bucket ascending and that is the order the
 /// items are drawn in — and because [`PreWaterSplit`] takes the below-water items to
 /// be a *prefix* of the sorted phase.
 const _: () = assert!(
-    BELOW_WATER_BUCKET < ABOVE_WATER_BUCKET && ABOVE_WATER_BUCKET < ALWAYS_ON_TOP_BUCKET,
-    "water sort buckets must ascend below < above < always-on-top"
+    BELOW_WATER_BUCKET < BACKDROP_BUCKET
+        && BACKDROP_BUCKET < ABOVE_WATER_BUCKET
+        && ABOVE_WATER_BUCKET < ALWAYS_ON_TOP_BUCKET,
+    "water sort buckets must ascend below < backdrop < above < always-on-top"
 );
+
+/// Marks one of the camera-anchored **sky backdrops** — the sun / moon discs, the
+/// star field, the cloud dome — and says where in the backdrop stack it belongs.
+///
+/// All three sit in the [`Transparent3d`] phase but are *not* world-anchored: their
+/// fragment depth is forced to the far clip plane (`clouds.wgsl`, `stars.wgsl`) or,
+/// for the discs, is a fixed 2000 m from the eye, and the meshes themselves are
+/// centred on (or aimed from) the camera. Bevy sorts the phase by each item's mesh
+/// centre, so a camera-centred dome has a sort distance of ~0 — the *nearest*
+/// transparent object — and is drawn last, painting over every world-anchored
+/// overlay in front of it (a name tag on a nearby avatar, hover text, a parcel
+/// border, a particle system). [`BACKDROP_BUCKET`] takes them out of that sort
+/// entirely and draws them, in the reference's own order, before the rest of the
+/// phase.
+///
+/// The order is `LLDrawPoolWLSky::renderDeferred` (`lldrawpoolwlsky.cpp`): the sky
+/// haze dome, then the heavenly bodies, then the stars, then the clouds. The sky
+/// dome itself is opaque and so is drawn in the [`Opaque3d`](bevy::core_pipeline::core_3d::Opaque3d)
+/// phase, before any of this; it needs no marker.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SkyBackdrop {
+    /// The sun and moon discs — the reference's `renderHeavenlyBodies`, drawn first
+    /// of the three so the stars twinkle over the moon and the clouds pass in front
+    /// of the sun.
+    HeavenlyBody,
+    /// The star field — the reference's `renderStarsDeferred`.
+    Stars,
+    /// The cloud dome — the reference's `renderSkyCloudsDeferred`, drawn last of the
+    /// backdrops (clouds occlude the sun, the moon, and the stars).
+    Clouds,
+}
+
+impl SkyBackdrop {
+    /// Where this backdrop sits in the backdrop stack: ascending is the order the
+    /// reference draws them in, and therefore back to front.
+    const fn draw_order(self) -> u8 {
+        match self {
+            Self::HeavenlyBody => 0,
+            Self::Stars => 1,
+            Self::Clouds => 2,
+        }
+    }
+}
+
+/// The [`SkyBackdrop`] of every backdrop entity, keyed by its main-world entity —
+/// the render-world mirror `sort_transparent_by_water` looks each phase item up in.
+///
+/// Keyed by [`MainEntity`] rather than by the render-world entity because a
+/// [`Transparent3d`] item's render entity is still `Entity::PLACEHOLDER` when the
+/// phase is sorted (`queue_material_meshes` fills it in later, during batching); the
+/// main entity is the half that is valid this early.
+#[derive(Resource, Default, Debug)]
+pub(crate) struct SkyBackdrops(MainEntityHashMap<SkyBackdrop>);
+
+/// Mirror the main world's [`SkyBackdrop`] markers into the render world for
+/// `sort_transparent_by_water`. A handful of entities, rebuilt each frame so a
+/// despawned backdrop leaves nothing behind.
+fn extract_sky_backdrops(
+    mut backdrops: ResMut<SkyBackdrops>,
+    markers: Extract<Query<(Entity, &SkyBackdrop)>>,
+) {
+    backdrops.0.clear();
+    backdrops.0.extend(
+        markers
+            .iter()
+            .map(|(entity, backdrop)| (MainEntity::from(entity), *backdrop)),
+    );
+}
 
 /// How many items at the head of each view's [`Transparent3d`] phase are below the
 /// water — the split point between the reference's `POOL_ALPHA_PRE_WATER` and
@@ -112,38 +191,50 @@ const _: () = assert!(
 #[derive(Resource, Default, Debug)]
 pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, usize>);
 
-/// Re-sort each view's [`Transparent3d`] phase by `(water_bucket, distance)` so
-/// below-water translucency leads the phase and above-water translucency follows it,
-/// with each bucket kept in Bevy's back-to-front distance order, and record where the
-/// two meet in [`PreWaterSplit`].
+/// Re-sort each view's [`Transparent3d`] phase by `(bucket, backdrop order,
+/// distance)` so below-water translucency leads the phase, the sky backdrops follow
+/// it, and above-water translucency comes after them — with each bucket kept in
+/// Bevy's back-to-front distance order — and record where the first two meet in
+/// [`PreWaterSplit`].
 ///
 /// Runs in [`RenderSystems::PhaseSort`] after Bevy's
 /// [`sort_phase_system::<Transparent3d>`](sort_phase_system), which has already
 /// recomputed every item's `distance` this frame — so this pass reuses that distance
 /// for the within-bucket order and only overrides the *across*-water order. Applied
-/// to every view uniformly: a view with no water (the HUD camera) puts everything in
-/// one bucket, leaving its order unchanged.
+/// to every view uniformly: a view with no water and no sky (the HUD camera) puts
+/// everything in one bucket, leaving its order unchanged.
 fn sort_transparent_by_water(
     water_level: Option<Res<WaterLevel>>,
+    backdrops: Res<SkyBackdrops>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut split: ResMut<PreWaterSplit>,
 ) {
     let level = water_level.map_or(DEFAULT_WATER_HEIGHT, |water_level| water_level.0);
     split.0.clear();
     for (view, phase) in phases.iter_mut() {
-        // Decorate-sort: compute each item's `(bucket, distance)` key exactly once
-        // (`sort_by_cached_key` is stable, like the `sort_by` it replaces), instead
-        // of re-running the bucket lookup for both operands of every comparison.
+        // Decorate-sort: compute each item's `(bucket, backdrop order, distance)` key
+        // exactly once (`sort_by_cached_key` is stable, like the `sort_by` it
+        // replaces), instead of re-running the bucket lookup for both operands of
+        // every comparison.
         phase.items.sort_by_cached_key(|_key, item| {
-            (
-                classify_bucket(item.sorting_info, level),
-                FloatOrd(item.distance),
-            )
+            let (bucket, order) = classify_bucket(
+                item.sorting_info,
+                level,
+                backdrops.0.get(&item.entity.1).copied(),
+            );
+            (bucket, order, FloatOrd(item.distance))
         });
         let below = phase
             .items
             .values()
-            .take_while(|item| classify_bucket(item.sorting_info, level) == BELOW_WATER_BUCKET)
+            .take_while(|item| {
+                classify_bucket(
+                    item.sorting_info,
+                    level,
+                    backdrops.0.get(&item.entity.1).copied(),
+                )
+                .0 == BELOW_WATER_BUCKET
+            })
             .count();
         if below > 0 {
             split.0.insert(*view, below);
@@ -151,16 +242,30 @@ fn sort_transparent_by_water(
     }
 }
 
-/// The bucket decision: an always-on-top item is topmost, and a sorted item is above
-/// or below by whether its centre height reaches the water `level`.
-const fn classify_bucket(sorting_info: TransparentSortingInfo3d, level: f32) -> u8 {
+/// The bucket decision, and the within-bucket order for the backdrops: a sky
+/// backdrop is a backdrop wherever the camera happens to be, an always-on-top item is
+/// topmost, and any other sorted item is above or below by whether its centre height
+/// reaches the water `level`.
+///
+/// The backdrop test comes first because a backdrop's mesh centre is the *camera*:
+/// left to the water test, the cloud dome and the star field would drop into the
+/// below-water bucket — and so into the pre-water pass, to be refracted by the water
+/// — the moment the camera dipped under the surface.
+const fn classify_bucket(
+    sorting_info: TransparentSortingInfo3d,
+    level: f32,
+    backdrop: Option<SkyBackdrop>,
+) -> (u8, u8) {
+    if let Some(backdrop) = backdrop {
+        return (BACKDROP_BUCKET, backdrop.draw_order());
+    }
     match sorting_info {
-        TransparentSortingInfo3d::AlwaysOnTop => ALWAYS_ON_TOP_BUCKET,
+        TransparentSortingInfo3d::AlwaysOnTop => (ALWAYS_ON_TOP_BUCKET, 0),
         TransparentSortingInfo3d::Sorted { mesh_center, .. } => {
             if mesh_center.y >= level {
-                ABOVE_WATER_BUCKET
+                (ABOVE_WATER_BUCKET, 0)
             } else {
-                BELOW_WATER_BUCKET
+                (BELOW_WATER_BUCKET, 0)
             }
         }
     }
@@ -256,9 +361,10 @@ fn suppress_pre_water_items(
 }
 
 /// Wires the water-relative transparency ordering into the app: extract the
-/// `WaterLevel` into the render world, add the re-sort after Bevy's transparent
-/// sort, and add the pre-water pass and its suppression to the `Core3d` main pass.
-/// Add once, after `DefaultPlugins`, like the other viewer render plugins.
+/// `WaterLevel` and the `SkyBackdrop` markers into the render world, add the
+/// re-sort after Bevy's transparent sort, and add the pre-water pass and its
+/// suppression to the `Core3d` main pass. Add once, after `DefaultPlugins`, like the
+/// other viewer render plugins.
 #[derive(Debug, Default)]
 pub struct TransparencyOrderPlugin;
 
@@ -270,6 +376,8 @@ impl Plugin for TransparencyOrderPlugin {
         };
         render_app
             .init_resource::<PreWaterSplit>()
+            .init_resource::<SkyBackdrops>()
+            .add_systems(ExtractSchedule, extract_sky_backdrops)
             .add_systems(
                 Render,
                 sort_transparent_by_water
@@ -290,7 +398,10 @@ impl Plugin for TransparencyOrderPlugin {
 
 #[cfg(test)]
 mod tests {
-    use super::{ABOVE_WATER_BUCKET, ALWAYS_ON_TOP_BUCKET, BELOW_WATER_BUCKET, classify_bucket};
+    use super::{
+        ABOVE_WATER_BUCKET, ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, BELOW_WATER_BUCKET, SkyBackdrop,
+        classify_bucket,
+    };
     use bevy::core_pipeline::core_3d::TransparentSortingInfo3d;
     use bevy::math::Vec3;
     use pretty_assertions::assert_eq;
@@ -308,36 +419,95 @@ mod tests {
     /// on).
     #[test]
     fn content_buckets_above_or_below_the_level() {
-        assert_eq!(classify_bucket(sorted_at(25.0), 20.0), ABOVE_WATER_BUCKET);
-        assert_eq!(classify_bucket(sorted_at(15.0), 20.0), BELOW_WATER_BUCKET);
-        assert_eq!(classify_bucket(sorted_at(20.0), 20.0), ABOVE_WATER_BUCKET);
+        assert_eq!(
+            classify_bucket(sorted_at(25.0), 20.0, None),
+            (ABOVE_WATER_BUCKET, 0)
+        );
+        assert_eq!(
+            classify_bucket(sorted_at(15.0), 20.0, None),
+            (BELOW_WATER_BUCKET, 0)
+        );
+        assert_eq!(
+            classify_bucket(sorted_at(20.0), 20.0, None),
+            (ABOVE_WATER_BUCKET, 0)
+        );
     }
 
     /// An always-on-top item stays topmost, wherever it is relative to the water.
     #[test]
     fn always_on_top_stays_topmost() {
         assert_eq!(
-            classify_bucket(TransparentSortingInfo3d::AlwaysOnTop, 20.0),
-            ALWAYS_ON_TOP_BUCKET
+            classify_bucket(TransparentSortingInfo3d::AlwaysOnTop, 20.0, None),
+            (ALWAYS_ON_TOP_BUCKET, 0)
+        );
+    }
+
+    /// A sky backdrop is a backdrop wherever the camera is — including under the
+    /// water, where its camera-centred mesh centre would otherwise put it in the
+    /// below-water bucket and hand it to the pre-water pass to be refracted.
+    #[test]
+    fn a_backdrop_is_a_backdrop_under_water_too() {
+        for backdrop in [
+            SkyBackdrop::HeavenlyBody,
+            SkyBackdrop::Stars,
+            SkyBackdrop::Clouds,
+        ] {
+            for height in [25.0_f32, 15.0] {
+                assert_eq!(
+                    classify_bucket(sorted_at(height), 20.0, Some(backdrop)).0,
+                    BACKDROP_BUCKET,
+                    "{backdrop:?} at {height} m must stay a backdrop",
+                );
+            }
+        }
+    }
+
+    /// The backdrops draw in the reference's own order
+    /// (`LLDrawPoolWLSky::renderDeferred`): heavenly bodies, then stars, then clouds
+    /// — so the clouds pass in front of the sun rather than behind it.
+    #[test]
+    fn backdrops_draw_in_the_reference_order() {
+        let mut order = [
+            classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::Clouds)),
+            classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::HeavenlyBody)),
+            classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::Stars)),
+        ];
+        order.sort_unstable();
+        assert_eq!(
+            order,
+            [
+                classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::HeavenlyBody)),
+                classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::Stars)),
+                classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::Clouds)),
+            ],
         );
     }
 
     /// The below-water bucket must sort first, because the pre-water pass takes those
-    /// items to be a prefix of the phase and draws them by range. If a reordering of
-    /// the constants ever broke that, the pass would draw the wrong items — this is
-    /// the runtime companion to the compile-time assert on the constants.
+    /// items to be a prefix of the phase and draws them by range; the backdrops must
+    /// then precede the above-water content, which is the whole point of the bucket
+    /// (a name tag in front of a cloudy sky must not be painted over by the clouds).
+    /// If a reordering of the constants ever broke either, the pass would draw the
+    /// wrong items — this is the runtime companion to the compile-time assert on the
+    /// constants.
     #[test]
-    fn below_water_leads_the_order() {
+    fn below_water_leads_and_backdrops_precede_the_world() {
         let mut buckets = [
-            classify_bucket(TransparentSortingInfo3d::AlwaysOnTop, 20.0),
-            classify_bucket(sorted_at(25.0), 20.0),
-            classify_bucket(sorted_at(15.0), 20.0),
+            classify_bucket(TransparentSortingInfo3d::AlwaysOnTop, 20.0, None).0,
+            classify_bucket(sorted_at(25.0), 20.0, None).0,
+            classify_bucket(sorted_at(25.0), 20.0, Some(SkyBackdrop::Clouds)).0,
+            classify_bucket(sorted_at(15.0), 20.0, None).0,
         ];
         buckets.sort_unstable();
         assert_eq!(
             buckets,
-            [BELOW_WATER_BUCKET, ABOVE_WATER_BUCKET, ALWAYS_ON_TOP_BUCKET],
-            "sorting by bucket must put the below-water items at the head of the phase",
+            [
+                BELOW_WATER_BUCKET,
+                BACKDROP_BUCKET,
+                ABOVE_WATER_BUCKET,
+                ALWAYS_ON_TOP_BUCKET
+            ],
+            "sorting by bucket must run below-water → backdrops → above-water → on top",
         );
     }
 }
