@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 67 |
-| done | 911 |
+| bugs | 65 |
+| done | 913 |
 | deferred | 23 |
 | wont-do | 13 |
 | **total** | **1492** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (67)
+## bugs (65)
 
 ### viewer
 
@@ -1290,9 +1290,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-face-entity-respawn-churn`](bugs/viewer-object-face-entity-respawn-churn.md)
   — Object face entities are despawned + respawned same-frame (despawn-race
   churn)
-- [`viewer-ocean-covers-lower-region-water`](bugs/viewer-ocean-covers-lower-region-water.md)
-  — The endless ocean is drawn through every region, so a lower sea level is
-  hidden under it
 - [`viewer-own-avatar-broken-after-teleport`](bugs/viewer-own-avatar-broken-after-teleport.md)
   — Own avatar looks broken after a teleport
 - [`viewer-own-avatar-facing-drifts-idle`](bugs/viewer-own-avatar-facing-drifts-idle.md)
@@ -1318,11 +1315,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
-- [`viewer-water-wave-phase-jumps-far-from-origin`](bugs/viewer-water-wave-phase-jumps-far-from-origin.md)
-  — The sea's ripple phase jumps instead of scrolling, worse the further from
-  the origin
 
-## done (911)
+## done (913)
 
 ### protocol
 
@@ -2056,6 +2050,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-object-selection-core`](done/viewer-object-selection-core.md) —
   Object selection core (select set + protocol) (blocked by
   `viewer-ui-widget-scaffold` (done))
+- [`viewer-ocean-covers-lower-region-water`](done/viewer-ocean-covers-lower-region-water.md)
+  — The endless ocean is drawn through every region, so a lower sea level is
+  hidden under it
 - [`viewer-offline-im-drain`](done/viewer-offline-im-drain.md) — Drain stored
   offline instant messages at login
 - [`viewer-opensim-trash-folder-not-resolved`](done/viewer-opensim-trash-folder-not-resolved.md)
@@ -2679,6 +2676,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   reference
 - [`viewer-water-surface-fog-fallback-flat`](done/viewer-water-surface-fog-fallback-flat.md)
   — The water surface's deep-water colour is a flat tint, not the fogged one
+- [`viewer-water-wave-phase-jumps-far-from-origin`](done/viewer-water-wave-phase-jumps-far-from-origin.md)
+  — The sea's ripple phase jumps instead of scrolling, worse the further from
+  the origin
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-world-map-double-click-teleport`](done/viewer-world-map-double-click-teleport.md)

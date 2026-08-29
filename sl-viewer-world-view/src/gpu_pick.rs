@@ -61,7 +61,7 @@ use bevy::window::PrimaryWindow;
 use sl_client_bevy::{AgentKey, PrimFaceId, ScopedObjectId};
 
 use crate::objects::{PrimFaceEntity, SceneObject, WornPickTarget};
-use crate::water::{WaterOcean, WaterRegionPlane};
+use crate::water::WaterCell;
 use crate::world_api::{
     AvatarPickTarget, DragPickActive, DragPickHit, DragWorldPick, TerrainSurface, ViewerCamera,
     WorldPhase, on_hud_layer,
@@ -496,14 +496,7 @@ pub(crate) fn assign_terrain_pick_tags(
 )]
 pub(crate) fn assign_water_pick_tags(
     mut registry: ResMut<PickRegistry>,
-    untagged: Query<
-        Entity,
-        (
-            Or<(With<WaterOcean>, With<WaterRegionPlane>)>,
-            With<Mesh3d>,
-            Without<PickId>,
-        ),
-    >,
+    untagged: Query<Entity, (With<WaterCell>, With<Mesh3d>, Without<PickId>)>,
     mut commands: Commands,
 ) {
     let Some(tag) = encode_pick_tag(CLASS_WATER, 0) else {

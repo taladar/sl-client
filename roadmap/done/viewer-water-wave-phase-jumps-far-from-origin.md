@@ -2,7 +2,7 @@
 id: viewer-water-wave-phase-jumps-far-from-origin
 title: The sea's ripple phase jumps instead of scrolling, worse the further from the origin
 topic: viewer
-status: bugs
+status: done
 origin: reported while reviewing viewer-water-surface-alpha-not-refraction (2026-08-29)
 points: 2
 ---
@@ -57,3 +57,32 @@ pipeline, and it may have been most of this one.
 
 Verify by camming out a region or two over open water and watching the ripples,
 which is how it was found; a screenshot pair cannot show a phase jump.
+
+## Fixed (2026-08-29), by the geometry rather than the diagnosis above
+
+Gone once the sea became a grid of one 256 m square per region
+([viewer-ocean-covers-lower-region-water](viewer-ocean-covers-lower-region-water.md)),
+with no change to the shader at all. The reporter confirmed it against the live
+grid, which is the only instrument for this — a jump that depends on the camera
+moving does not show in a screenshot pair, and a parked camera measured a smooth
+scroll either way (consecutive frames differing by 14.0 to 14.5 grey levels, a
+3% spread).
+
+So the camera-relative texcoord rewrite proposed above was never needed, and the
+diagnosis it rested on was at most half the story. Worth keeping the
+distinction, because it is the sort of thing that gets rediscovered:
+
+- What this task blamed was the **texcoord** losing precision at large absolute
+  world coordinates. Real, and the grid reduced it — coordinates are now bounded
+  by the draw distance rather than by a 40 km plane's corners — but on its own
+  it was too small to see at the ranges people actually look at water.
+- What was actually dominating was one step earlier: the fragment's
+  **world position** itself, interpolated across a triangle whose `w` spanned
+  the whole 40 km plane. That error is large, it varies as the plane moves with
+  the camera, and a value that changes irregularly frame to frame is exactly a
+  phase jump. It is the same error that showed spatially as the seam along the
+  plane's diagonal.
+
+One cause, two symptoms, and both went when the triangles got small. If a jump
+is ever seen again, the shader can go region-local cheaply — each cell's model
+matrix is its own origin — but there is nothing to fix until then.

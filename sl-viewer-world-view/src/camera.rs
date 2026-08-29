@@ -60,7 +60,7 @@ use crate::avatars::{SeatChainQuery, seat_world_transform};
 use crate::coords::{bevy_to_sl_vec, sl_to_bevy_vec};
 use crate::input_action::{Action, InputMode};
 use crate::spacenav::{FlycamAxisSettings, SpacenavInput};
-use crate::water::{WaterOcean, WaterRegionPlane};
+use crate::water::WaterCell;
 use crate::world_api::AvatarState;
 use crate::world_api::InputContext;
 use crate::world_api::{
@@ -717,10 +717,9 @@ fn orbit_offset(offset: Vec3, azimuth: f32, elevation: f32) -> Vec3 {
     }
 }
 
-/// The water-surface entities (endless ocean + per-region planes) excluded from
-/// the alt-click focus pick.
-type WaterQuery<'world, 'state> =
-    Query<'world, 'state, Entity, Or<(With<WaterOcean>, With<WaterRegionPlane>)>>;
+/// The water-surface entities — every cell of the sea grid — excluded from the
+/// alt-click focus pick.
+type WaterQuery<'world, 'state> = Query<'world, 'state, Entity, With<WaterCell>>;
 
 /// Alt-click **focus-on-object** (`lltoolfocus`): with `Alt` held, a left click in
 /// third person focuses the camera on the picked world point, so orbit and zoom

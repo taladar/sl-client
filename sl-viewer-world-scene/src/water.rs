@@ -95,39 +95,21 @@ impl Plugin for WaterPlugin {
 /// A standard Second Life / OpenSim region edge length, in metres.
 const REGION_SIZE_METRES: f32 = 256.0;
 
-/// The half-extent of the endless-ocean plane, in metres. The camera far plane is
-/// 4096 m; a 20 km half-extent keeps the sea reaching past the horizon in every
-/// direction as the plane follows the camera, without the plane ever being frustum
-/// culled.
-const OCEAN_HALF_EXTENT: f32 = 20_000.0;
-
-/// How many times the endless-ocean plane is subdivided along each axis.
+/// How far the sea grid reaches from the camera, in **cells** of one region each.
 ///
-/// Not a detail: as **one** 40 km quad it shows a seam along its own triangle
-/// diagonal, with the wave pattern visibly offset from one side to the other. The
-/// fragment's world position is interpolated across a triangle whose `w` ranges over
-/// four orders of magnitude, and at a grazing angle — which is how the sea is nearly
-/// always seen — that interpolation loses enough precision for the two triangles to
-/// disagree about where a fragment is by something the wave texcoords turn into a
-/// visible step. Cutting the plane into cells collapses the range each triangle has
-/// to interpolate over. 64 gives ~625 m cells for a few thousand triangles, which is
-/// nothing next to a region of prims.
-const OCEAN_SUBDIVISIONS: u32 = 64;
+/// The camera far plane is 4096 m, and nothing is drawn past it, so 16 cells cover
+/// everything visible; one more absorbs the half-cell the camera sits inside and the
+/// frustum corners. 35x35 cells share one mesh and one material, so they batch into
+/// a single draw.
+const SEA_GRID_RADIUS_CELLS: u32 = 17;
 
 /// The default water height, in metres, used for the endless ocean until the agent
 /// region's handshake supplies the real one (the standard Second Life sea level;
 /// see `map.rs`).
 pub(crate) const DEFAULT_WATER_HEIGHT: f32 = 20.0;
 
-/// How far below the agent-region water height the endless ocean sits, in metres,
-/// so a same-height per-region plane (and the agent region's own sea) is never
-/// exactly coplanar with it — avoiding depth fighting between the two transparent
-/// surfaces. 2 cm is imperceptible.
-const OCEAN_DEPTH_BIAS: f32 = 0.02;
-
-/// Two water heights within this many metres are treated as equal, so a region at
-/// (effectively) the agent-region sea level is covered by the endless ocean rather
-/// than getting a redundant per-region plane.
+/// Two water heights within this many metres are treated as one level, when voting
+/// on what a void cell should inherit from the regions around it.
 const HEIGHT_EPSILON: f32 = 0.05;
 
 /// The reference viewer's built-in wave normal map (`DEFAULT_WATER_NORMAL`,
@@ -151,18 +133,24 @@ impl Default for WaterLevel {
     }
 }
 
-/// Marks the endless-ocean plane so `drive_water` can follow the camera with it.
+/// One 256 m square of sea, on the region grid: either a loaded region's own water
+/// or void water, carrying the grid cell it covers so `drive_water` can re-place it
+/// when the scene origin moves.
+///
+/// The whole sea is these and nothing else. That is the reference's rule — every
+/// square metre of sea belongs to exactly one surface, a region's own
+/// (`LLSurface::createObjects`) or a hole's (`LLWorld::updateWaterObjects`) — and it
+/// is what keeps two water surfaces from ever being drawn over the same ground,
+/// which is what used to hide a region whose sea sat lower than the agent's under an
+/// ocean plane spanning everything.
+///
+/// One region per square also keeps the numbers small: the wave texcoords are built
+/// from world coordinates, and a single 40 km plane loses enough precision across
+/// one triangle to show a seam and to make the scroll quantise.
 #[derive(Debug, Component)]
-pub struct WaterOcean;
-
-/// Marks a per-region water plane, carrying the region it belongs to and its water
-/// height so `drive_water` can (re)place it on the current scene origin.
-#[derive(Debug, Component)]
-pub struct WaterRegionPlane {
-    /// The region this plane renders the sea for.
-    region: RegionHandle,
-    /// The region's water height, in metres.
-    height: f32,
+pub struct WaterCell {
+    /// The cell this square covers, in region units relative to the agent region.
+    cell: IVec2,
 }
 
 /// The viewer's water-render state: the shared material, the per-region plane mesh
@@ -173,11 +161,10 @@ pub struct WaterState {
     /// The single water material, shared by the ocean and every per-region plane
     /// (the water look is region-wide), updated each frame by [`drive_water`].
     material: Handle<WaterMaterial>,
-    /// The shared 256 m plane mesh used for every per-region plane.
-    region_mesh: Handle<Mesh>,
-    /// The rendered entity for each region's plane (only regions whose height
-    /// differs from the agent region's get one).
-    region_planes: HashMap<RegionHandle, Entity>,
+    /// The shared 256 m plane mesh every cell of the sea grid is drawn with.
+    cell_mesh: Handle<Mesh>,
+    /// The rendered entity for each cell of the sea grid, by cell.
+    cells: HashMap<IVec2, Entity>,
     /// The water height learned for each region from its handshake.
     region_heights: HashMap<RegionHandle, f32>,
     /// The texture id currently requested for the wave normal map (the water
@@ -218,7 +205,7 @@ impl crate::world_api::world_scoped::WorldScoped for WaterState {
         _purge: crate::world_api::world_scoped::WorldPurge,
         commands: &mut Commands,
     ) {
-        for (_region, entity) in self.region_planes.drain() {
+        for (_cell, entity) in self.cells.drain() {
             commands.entity(entity).try_despawn();
         }
         self.region_heights.clear();
@@ -253,29 +240,9 @@ pub(crate) fn setup_water(
         exclusion_mask: images.add(white_mask_image()),
     });
 
-    // The endless ocean: a large plane (XZ, +Y normal), kept centred on the camera
-    // and placed at the agent-region water height by `drive_water`.
-    let ocean_mesh = meshes.add(
-        Plane3d::default()
-            .mesh()
-            .size(2.0 * OCEAN_HALF_EXTENT, 2.0 * OCEAN_HALF_EXTENT)
-            .subdivisions(OCEAN_SUBDIVISIONS)
-            .build(),
-    );
-    commands.spawn((
-        Mesh3d(ocean_mesh),
-        MeshMaterial3d(material.clone()),
-        Transform::from_xyz(0.0, DEFAULT_WATER_HEIGHT, 0.0),
-        // The water never casts shadows (P24 adds cascaded shadow maps for the sun).
-        NotShadowCaster,
-        // Marks this as a water surface for the transparency-ordering re-sort, which
-        // pins it to its own bucket between below- and above-water translucency.
-        // Environment content: also visible to reflection-probe captures.
-        environment_render_layers(),
-        WaterOcean,
-    ));
-
-    let region_mesh = meshes.add(
+    // No sea is spawned here: `drive_water` builds the grid on the first frame it
+    // has a camera and an agent region, and keeps it under the camera after that.
+    let cell_mesh = meshes.add(
         Plane3d::default()
             .mesh()
             .size(REGION_SIZE_METRES, REGION_SIZE_METRES)
@@ -283,8 +250,8 @@ pub(crate) fn setup_water(
     );
     commands.insert_resource(WaterState {
         material,
-        region_mesh,
-        region_planes: HashMap::new(),
+        cell_mesh,
+        cells: HashMap::new(),
         region_heights: HashMap::new(),
         normal_key: None,
     });
@@ -320,8 +287,7 @@ pub(crate) fn drive_water(
     mut level: ResMut<WaterLevel>,
     mut materials: ResMut<Assets<WaterMaterial>>,
     mut textures: ResMut<TextureManager>,
-    mut ocean: Query<&mut Transform, (With<WaterOcean>, Without<WaterRegionPlane>)>,
-    mut planes: Query<(&WaterRegionPlane, &mut Transform), Without<WaterOcean>>,
+    mut cells: Query<(&WaterCell, &mut Transform)>,
     mut commands: Commands,
 ) {
     let Ok(camera) = camera.single() else {
@@ -330,8 +296,8 @@ pub(crate) fn drive_water(
     let camera_pos = camera.translation();
 
     // The origin the terrain places its patches on: the agent's (root) region. Its
-    // water height is the endless-ocean level (the reference uses the agent
-    // region's height for all hole / edge water).
+    // water height is the level the sea falls back to where nothing better is
+    // known — a void cell with no loaded region anywhere to inherit from.
     let root = identity.region_handle;
     let root_height = root
         .and_then(|root| state.region_heights.get(&root).copied())
@@ -343,20 +309,17 @@ pub(crate) fn drive_water(
         level.0 = root_height;
     }
 
-    // Place the ocean under the camera, just below the agent-region sea level so a
-    // same-height region plane never z-fights it. Write-on-change: a parked
-    // camera re-propagates nothing.
-    if let Ok(mut transform) = ocean.single_mut() {
-        let translation = Vec3::new(camera_pos.x, root_height - OCEAN_DEPTH_BIAS, camera_pos.z);
-        if transform.translation != translation {
-            transform.translation = translation;
-        }
-    }
-
-    // Reconcile per-region planes: spawn one for each region whose height differs
-    // from the agent region's, despawn any whose height has converged, and replace
-    // the transform of the survivors on the current origin.
-    reconcile_region_planes(&mut state, root, root_height, &mut planes, &mut commands);
+    // Reconcile the sea grid: one 256 m square per region cell around the camera, at
+    // the loaded region's own water height or, for a cell with no region, at the
+    // level of the nearest ones.
+    reconcile_sea_grid(
+        &mut state,
+        root,
+        root_height,
+        camera_pos,
+        &mut cells,
+        &mut commands,
+    );
 
     // Fold the current environment water + sky into the shared material.
     let position = day_position(&environment.settings);
@@ -429,91 +392,203 @@ pub(crate) fn drive_water(
     }
 }
 
-/// Spawn / despawn / reposition the per-region water planes: a region whose water
-/// height differs from the agent region's gets its own plane at its own height (a
-/// neighbour with a different sea level); one that has converged to the agent
-/// region's height is dropped (the endless ocean covers it); the survivors are
-/// re-placed on the current scene origin every frame.
-fn reconcile_region_planes(
+/// Spawn / despawn / re-place the sea grid: one 256 m square per region cell within
+/// [`SEA_GRID_RADIUS_CELLS`] of the camera, each at the water height that cell
+/// should have.
+///
+/// The grid is anchored on the **region grid**, not on the camera: a cell covers one
+/// region's footprint exactly, so a loaded region's sea is that region's own square
+/// and nothing else is ever drawn over it. The camera only decides which cells
+/// exist.
+fn reconcile_sea_grid(
     state: &mut WaterState,
     root: Option<RegionHandle>,
     root_height: f32,
-    planes: &mut Query<(&WaterRegionPlane, &mut Transform), Without<WaterOcean>>,
+    camera_pos: Vec3,
+    cells: &mut Query<(&WaterCell, &mut Transform)>,
     commands: &mut Commands,
 ) {
-    let Some(root) = root else {
-        return;
-    };
-    let (root_x, root_y) = root.global_coordinates();
+    // Which cells the loaded regions occupy, in the same relative coordinates the
+    // grid is keyed by, so the height rule can work in cell space. Before the agent
+    // region's handshake there is no origin to measure against and so nothing is
+    // loaded — the grid is still built, at the default sea level, rather than
+    // leaving the world with no sea at all for the first few frames.
+    let loaded = root.map(|root| loaded_cells(&state.region_heights, root));
+    let loaded = loaded.unwrap_or_default();
 
-    // Snapshot the learned heights so the borrow of `state` is released before we
-    // spawn (which also borrows `state.region_planes`).
-    let heights: Vec<(RegionHandle, f32)> = state
-        .region_heights
-        .iter()
-        .map(|(&region, &height)| (region, height))
-        .collect();
+    // The camera's own cell, and the square of cells around it.
+    let camera_cell = cell_of(camera_pos);
+    let wanted = |cell: IVec2| cell_distance(cell, camera_cell) <= SEA_GRID_RADIUS_CELLS;
+    let radius = i32::try_from(SEA_GRID_RADIUS_CELLS).unwrap_or(0);
 
-    for (region, height) in heights {
-        let differs = (height - root_height).abs() > HEIGHT_EPSILON;
-        let existing = state.region_planes.get(&region).copied();
-        match (differs, existing) {
-            // Needs a plane and has one: reposition it on the current origin.
-            (true, Some(_entity)) => {}
-            // Needs a plane and has none: spawn it.
-            (true, None) => {
-                let translation = region_plane_translation(root_x, root_y, region, height);
-                let entity = commands
-                    .spawn((
-                        Mesh3d(state.region_mesh.clone()),
-                        MeshMaterial3d(state.material.clone()),
-                        Transform::from_translation(translation),
-                        NotShadowCaster,
-                        // See the ocean plane: pins this plane to the water bucket.
-                        // Environment content: also visible to probe captures.
-                        environment_render_layers(),
-                        WaterRegionPlane { region, height },
-                    ))
-                    .id();
-                state.region_planes.insert(region, entity);
+    // Drop the cells that have fallen out of range.
+    state.cells.retain(|&cell, entity| {
+        if wanted(cell) {
+            return true;
+        }
+        commands.entity(*entity).try_despawn();
+        false
+    });
+
+    // Spawn the ones that have come into range.
+    for x in camera_cell.x.saturating_sub(radius)..=camera_cell.x.saturating_add(radius) {
+        for y in camera_cell.y.saturating_sub(radius)..=camera_cell.y.saturating_add(radius) {
+            let cell = IVec2::new(x, y);
+            if state.cells.contains_key(&cell) {
+                continue;
             }
-            // No longer differs but still has a plane: despawn it.
-            (false, Some(entity)) => {
-                commands.entity(entity).despawn();
-                state.region_planes.remove(&region);
-            }
-            (false, None) => {}
+            let entity = commands
+                .spawn((
+                    Mesh3d(state.cell_mesh.clone()),
+                    MeshMaterial3d(state.material.clone()),
+                    Transform::from_translation(cell_translation(
+                        cell,
+                        cell_height(cell, &loaded, root_height),
+                    )),
+                    // The water never casts shadows (P24 adds cascaded shadow maps
+                    // for the sun).
+                    NotShadowCaster,
+                    // Environment content: also visible to probe captures.
+                    environment_render_layers(),
+                    WaterCell { cell },
+                ))
+                .id();
+            state.cells.insert(cell, entity);
         }
     }
 
-    // Re-place every surviving plane on the current origin (the origin follows the
-    // agent region, so a border crossing moves them all). Write-on-change: with a
-    // stable origin the placement is identical every frame.
-    for (plane, mut transform) in planes {
-        let translation = region_plane_translation(root_x, root_y, plane.region, plane.height);
+    // Re-place every surviving cell. Write-on-change: with a stable origin, stable
+    // heights and a parked camera this writes nothing and propagates nothing.
+    for (cell, mut transform) in cells {
+        let translation = cell_translation(cell.cell, cell_height(cell.cell, &loaded, root_height));
         if transform.translation != translation {
             transform.translation = translation;
         }
     }
 }
 
-/// The Bevy translation of a region's water plane: the region centre relative to
-/// the scene origin (the agent region), at the region's water height. Mirrors the
-/// terrain's region placement (`(x, y, z) -> (x, z, -y)` axis map) so the sea lines
-/// up with the ground.
-fn region_plane_translation(
-    origin_x: u32,
-    origin_y: u32,
-    region: RegionHandle,
-    height: f32,
-) -> Vec3 {
-    let (region_x, region_y) = region.global_coordinates();
-    // The region's south-west corner relative to the origin, plus a half-region to
-    // reach the plane's centre.
-    let sl_x = metres_to_f32(region_x) - metres_to_f32(origin_x) + REGION_SIZE_METRES / 2.0;
-    let sl_y = metres_to_f32(region_y) - metres_to_f32(origin_y) + REGION_SIZE_METRES / 2.0;
+/// The loaded regions as grid cells relative to `root`, with their water heights —
+/// the input the height rule votes over.
+fn loaded_cells(heights: &HashMap<RegionHandle, f32>, root: RegionHandle) -> HashMap<IVec2, f32> {
+    let (root_x, root_y) = root.global_coordinates();
+    heights
+        .iter()
+        .filter_map(|(&region, &height)| {
+            let (region_x, region_y) = region.global_coordinates();
+            let x = region_grid_delta(region_x, root_x)?;
+            let y = region_grid_delta(region_y, root_y)?;
+            Some((IVec2::new(x, y), height))
+        })
+        .collect()
+}
+
+/// A region-grid offset in cells: `(coordinate - origin) / 256`, in `i32`, or `None`
+/// for a region so far away the difference does not fit — which cannot be within
+/// draw distance, so it has nothing to say about the sea around the camera.
+fn region_grid_delta(coordinate: u32, origin: u32) -> Option<i32> {
+    let delta = i64::from(coordinate).checked_sub(i64::from(origin))?;
+    let cells = delta.checked_div(256)?;
+    i32::try_from(cells).ok()
+}
+
+/// The cell a world position falls in, in the same relative coordinates as
+/// [`loaded_cells`] (the scene origin is the agent region's south-west corner).
+fn cell_of(position: Vec3) -> IVec2 {
+    // Bevy (x, y-up, z) → Second Life (x, -z); a cell is one region across.
+    let x = (position.x / REGION_SIZE_METRES).floor();
+    let y = (-position.z / REGION_SIZE_METRES).floor();
+    // Clamped before the conversion: a camera position that has gone wild (or NaN)
+    // must not land the grid a hemisphere away, and must not turn the spawn loop
+    // below into an unbounded one.
+    Vec2::new(x, y)
+        .clamp(Vec2::splat(-CELL_LIMIT), Vec2::splat(CELL_LIMIT))
+        .as_ivec2()
+}
+
+/// How far from the scene origin, in cells, the grid is allowed to be anchored — far
+/// past any draw distance, and only there to bound [`cell_of`] against a nonsense
+/// camera position.
+const CELL_LIMIT: f32 = 100_000.0;
+
+/// A cell's Bevy translation: the centre of its square, at `height`.
+fn cell_translation(cell: IVec2, height: f32) -> Vec3 {
+    let cell = cell.as_vec2();
+    let half = REGION_SIZE_METRES / 2.0;
     // Second Life (x, y, z-up) → Bevy (x, z, -y).
+    let sl_x = cell.x * REGION_SIZE_METRES + half;
+    let sl_y = cell.y * REGION_SIZE_METRES + half;
     Vec3::new(sl_x, height, -sl_y)
+}
+
+/// The water height for one cell of the sea grid, in metres: the region's own if a
+/// region is loaded there, else the level of the **nearest** loaded regions.
+///
+/// The nearest-region rule is a deliberate improvement on the reference, which uses
+/// the agent region's height for every cell with no region
+/// (`LLWorld::updateWaterObjects`: *"Use the water height of the region we're on for
+/// areas where there is no region"*). Take an agent region ringed by eight regions
+/// whose sea is lower, with void beyond: the reference puts that void back at the
+/// agent's level, so the outer edge of the ring gets a step in the water that
+/// nothing standing there can explain. Inheriting from the nearest region instead
+/// puts void water at the level of whatever it actually adjoins, and the step is
+/// gone.
+///
+/// Looking only at a cell's immediate neighbours would not be enough: the second
+/// ring of void has no loaded neighbour at all and would fall back to the agent's
+/// height, which moves the step outward rather than removing it. Distance is
+/// **Chebyshev**, so a diagonal neighbour counts as adjacent — "surrounded by eight
+/// regions" is one ring, which is how it looks.
+///
+/// Ties (a cell equidistant from regions at different levels, one east and one west
+/// say) go to the majority, and then to the **lower** level: void water that is too
+/// high reads as a wall standing over the neighbouring sea, while too low only
+/// reveals a little more of the void it was covering.
+fn cell_height(cell: IVec2, loaded: &HashMap<IVec2, f32>, agent_height: f32) -> f32 {
+    if let Some(&height) = loaded.get(&cell) {
+        return height;
+    }
+    let mut nearest: Vec<f32> = Vec::new();
+    let mut best = u32::MAX;
+    for (&other, &height) in loaded {
+        let distance = cell_distance(other, cell);
+        if distance < best {
+            best = distance;
+            nearest.clear();
+        }
+        if distance == best {
+            nearest.push(height);
+        }
+    }
+    majority_height(&nearest).unwrap_or(agent_height)
+}
+
+/// The Chebyshev distance between two cells, in cells: the number of rings out one
+/// is from the other, so a diagonal neighbour is one ring like an edge neighbour.
+/// Saturating, because a cell index is only as sane as the camera position it came
+/// from.
+fn cell_distance(a: IVec2, b: IVec2) -> u32 {
+    let x = a.x.saturating_sub(b.x).unsigned_abs();
+    let y = a.y.saturating_sub(b.y).unsigned_abs();
+    x.max(y)
+}
+
+/// The most common height in `heights`, counting two within [`HEIGHT_EPSILON`] as
+/// the same level, with the lower winning a tie. `None` for an empty slice.
+fn majority_height(heights: &[f32]) -> Option<f32> {
+    let mut best: Option<(usize, f32)> = None;
+    for &height in heights {
+        let votes = heights
+            .iter()
+            .filter(|&&other| (other - height).abs() <= HEIGHT_EPSILON)
+            .count();
+        let better = best.is_none_or(|(best_votes, best_height)| {
+            votes > best_votes || (votes == best_votes && height < best_height)
+        });
+        if better {
+            best = Some((votes, height));
+        }
+    }
+    best.map(|(_votes, height)| height)
 }
 
 /// Swap the decoded wave normal map into the shared material when its id resolves.
@@ -609,20 +684,6 @@ const fn color_rgb(color: SlColor) -> Vec3 {
     Vec3::new(color.red(), color.green(), color.blue())
 }
 
-/// A `u32` metre count as an `f32`, saturating at the `f32` mantissa limit so a
-/// far-flung region coordinate does not silently wrap.
-const fn metres_to_f32(metres: u32) -> f32 {
-    // A global metre coordinate fits in 24 bits of mantissa well past any real
-    // grid, so the cast is exact in practice.
-    #[expect(
-        clippy::cast_precision_loss,
-        clippy::as_conversions,
-        reason = "a global metre coordinate is exactly representable as f32 across any real grid"
-    )]
-    let value = metres as f32;
-    value
-}
-
 /// Upload a decoded water normal map: **linear**, and tiling.
 ///
 /// Both halves are load-bearing and one of them was wrong. This used to be
@@ -705,7 +766,7 @@ pub(crate) fn flat_normal_image() -> Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{WaterRegionPlane, WaterState, default_reflection, water_params};
+    use super::{WaterCell, WaterState, cell_height, default_reflection, water_params};
     use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
@@ -718,24 +779,23 @@ mod tests {
         RegionHandle::from_global(x.saturating_mul(256), y.saturating_mul(256))
     }
 
-    /// A distant teleport must leave no learned height and no spawned plane
-    /// behind: the heights map is what `reconcile_region_planes` measures the
-    /// destination's sea level against, so a surviving entry from a grid we are
-    /// no longer connected to spawns a 256 m alpha plane out in the void.
+    /// A distant teleport must leave no learned height and no spawned sea behind:
+    /// the heights map is what the grid's void cells vote over, so a surviving entry
+    /// from a grid we are no longer connected to would pull the sea around the
+    /// destination to a level from the region we left.
     #[test]
-    fn a_world_reset_drops_every_region_plane_and_height() {
+    fn a_world_reset_drops_every_sea_cell_and_height() {
         let mut world = World::new();
         let far = world
-            .spawn(WaterRegionPlane {
-                region: region(1000, 1000),
-                height: 42.0,
+            .spawn(WaterCell {
+                cell: IVec2::new(3, -2),
             })
             .id();
 
         let mut state = WaterState {
             material: Handle::default(),
-            region_mesh: Handle::default(),
-            region_planes: HashMap::from([(region(1000, 1000), far)]),
+            cell_mesh: Handle::default(),
+            cells: HashMap::from([(IVec2::new(3, -2), far)]),
             region_heights: HashMap::from([(region(1000, 1000), 42.0), (region(1001, 1000), 20.0)]),
             normal_key: None,
         };
@@ -747,15 +807,79 @@ mod tests {
         }
         queue.apply(&mut world);
 
-        assert!(state.region_planes.is_empty());
+        assert!(state.cells.is_empty());
         assert!(state.region_heights.is_empty());
         assert!(
             world.get_entity(far).is_err(),
-            "the departed region's water plane must be despawned"
+            "the departed world's sea cells must be despawned"
         );
         // The region-independent water look survives — the destination's
         // environment refines it rather than rebuilding it.
         assert_eq!(state.normal_key, None);
+    }
+
+    /// A cell with a loaded region takes that region's own water height, whatever
+    /// the neighbours or the agent are at. This is the case the old model got wrong
+    /// in one direction: a region whose sea sat *below* the agent's was drawn over
+    /// by the ocean plane and vanished.
+    #[test]
+    fn a_loaded_region_keeps_its_own_level() {
+        let loaded = HashMap::from([(IVec2::new(0, 0), 20.0), (IVec2::new(1, 0), 5.0)]);
+        assert_height(cell_height(IVec2::new(1, 0), &loaded, 20.0), 5.0);
+        assert_height(cell_height(IVec2::new(0, 0), &loaded, 20.0), 20.0);
+    }
+
+    /// The reporter's case, and the reason this does not follow the reference: an
+    /// agent region ringed by eight regions whose sea is lower, void beyond. The
+    /// reference would put every void cell back at the agent's level, stepping the
+    /// water up again at the outer edge of the ring for no reason visible from
+    /// there. Inheriting from the nearest regions instead leaves the whole void at
+    /// the level it adjoins.
+    #[test]
+    fn void_beyond_a_ring_inherits_the_ring_not_the_agent() {
+        let mut loaded = HashMap::from([(IVec2::new(0, 0), 30.0)]);
+        for x in -1..=1 {
+            for y in -1..=1 {
+                if (x, y) != (0, 0) {
+                    loaded.insert(IVec2::new(x, y), 10.0);
+                }
+            }
+        }
+        // The first ring of void, just outside the loaded ring.
+        assert_height(cell_height(IVec2::new(2, 0), &loaded, 30.0), 10.0);
+        // And the second, which has no loaded neighbour at all — the case that
+        // makes "look at the neighbours" insufficient and "nearest region"
+        // necessary.
+        assert_height(cell_height(IVec2::new(3, 0), &loaded, 30.0), 10.0);
+        // Far out in every direction, still the ring's level rather than the
+        // agent's.
+        assert_height(cell_height(IVec2::new(-9, 7), &loaded, 30.0), 10.0);
+    }
+
+    /// A void cell equidistant from two levels goes to the majority, and to the
+    /// lower level when the vote is even: too high reads as a wall of water standing
+    /// over the neighbouring sea, too low only shows a little more void.
+    #[test]
+    fn a_tied_void_cell_takes_the_lower_level() {
+        // One region either side, at different levels: an even vote.
+        let split = HashMap::from([(IVec2::new(-1, 0), 25.0), (IVec2::new(1, 0), 15.0)]);
+        assert_height(cell_height(IVec2::new(0, 0), &split, 40.0), 15.0);
+        // Two against one at the same distance: the majority wins even though it is
+        // the higher level, so this is a vote and not simply a minimum.
+        let majority = HashMap::from([
+            (IVec2::new(-1, 0), 25.0),
+            (IVec2::new(1, 0), 15.0),
+            (IVec2::new(0, 1), 25.0),
+        ]);
+        assert_height(cell_height(IVec2::new(0, 0), &majority, 40.0), 25.0);
+    }
+
+    /// With nothing loaded there is nothing to inherit from, so the sea falls back
+    /// to the agent region's level — which is the reference's rule, kept for exactly
+    /// the case where it is the only answer available.
+    #[test]
+    fn with_no_regions_the_sea_is_the_agent_level() {
+        assert_height(cell_height(IVec2::new(4, 4), &HashMap::new(), 21.5), 21.5);
     }
 
     /// The surface shader's refraction displacement is the **eye-state** one, as the
@@ -784,6 +908,16 @@ mod tests {
         assert!(
             (above.ref_scale - below.ref_scale).abs() > 1e-3,
             "the default water frame no longer distinguishes the two eye states",
+        );
+    }
+
+    /// A height is the expected one, to within a tolerance far under the epsilon two
+    /// levels are considered the same within.
+    #[track_caller]
+    fn assert_height(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-3,
+            "expected a water height of {expected}, got {actual}",
         );
     }
 }
