@@ -3250,6 +3250,10 @@ fn water_surface(
             // pre-environment seed.
             Vec3::new(0.5, 0.6, 0.8),
             Vec3::from_array(resolved.diffuse),
+            // Not submerged: `WATER_CAMERA` sits above the plane, which is what the
+            // scene is for — the sea seen from above, where the fog fallback that
+            // density feeds is what colours it.
+            false,
         ),
         // Both slots share the map, as `apply_water_textures` does until a day
         // cycle drives a separate next frame and a blend between them.

@@ -40,6 +40,15 @@ struct UnderwaterFog {
 @group(0) @binding(2) var<uniform> fog: UnderwaterFog;
 @group(0) @binding(3) var depth_texture: texture_depth_multisampled_2d;
 
+// The reference `srgb_to_linear` (`class1/environment/srgbF.glsl`), as ported in
+// `sky.wgsl` / `clouds.wgsl` / `water.wgsl`. `getWaterFogViewNoClip` decodes the
+// authored (sRGB) water fog colour with it before mixing it into a linear frame.
+fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
+    let low = cs / 12.92;
+    let high = pow((cs + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(high, low, cs <= vec3<f32>(0.04045));
+}
+
 @fragment
 fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     let scene = textureSample(screen_texture, screen_sampler, in.uv);
@@ -104,10 +113,14 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
         t2 = 1.0e-3;
     }
     let t3 = pow(f, t2 * l) - 1.0;
-    let scatter = pow(min(t1 / t2 * t3, 1.0), 1.0 / 1.7);
+    // The reference clamps this only from above (`min(_, 1.0)`); clamped from below
+    // as well because `pow` of a negative base is not a real number, and a negative
+    // density can drive the product there even after `getModifiedWaterFogDensity`
+    // has rescued the density itself — a NaN pixel rather than a dark one.
+    let scatter = pow(clamp(t1 / t2 * t3, 0.0, 1.0), 1.0 / 1.7);
     let transmittance = pow(0.98, l * kd);
 
-    // applyWaterFogViewLinearNoClip: color = color * D + fogColor * L.
-    let fogged = scene.rgb * transmittance + fog.fog_color.rgb * scatter;
+    // applyWaterFogViewLinearNoClip: color = color * D + srgb_to_linear(fogColor) * L.
+    let fogged = scene.rgb * transmittance + srgb_to_linear(fog.fog_color.rgb) * scatter;
     return vec4<f32>(fogged, scene.a);
 }

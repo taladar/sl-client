@@ -51,9 +51,12 @@ struct WaterParams {
     // down.
     fresnel_offset: f32,
     // The water fog colour (`waterFogColor`) — the deep-water tint seen looking
-    // into the water.
+    // into the water. Authored in sRGB, as the reference's is: it is sampled
+    // through `srgb_to_linear`, never used raw.
     water_fog_color: vec3<f32>,
-    // The water fog density (`waterFogDensity`) — deepens the fog tint.
+    // The water fog density (`waterFogDensity`), already through the reference's
+    // `getModifiedWaterFogDensity` for the eye's current side of the surface — so
+    // it is the *submerged* density while the camera is under water.
     water_fog_density: f32,
     // The sky's sunlight colour, tinting the sun specular highlight.
     sunlight_color: vec3<f32>,
@@ -84,6 +87,83 @@ struct WaterParams {
 // `exclusionTex`, `class3/environment/waterF.glsl`).
 @group(#{MATERIAL_BIND_GROUP}) @binding(5) var exclusion_texture: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(6) var exclusion_sampler: sampler;
+
+// The reference `srgb_to_linear` (`class1/environment/srgbF.glsl`), as ported in
+// `sky.wgsl` / `clouds.wgsl`. The water fog colour is authored in sRGB and the
+// reference decodes it inside `getWaterFogViewNoClip` before mixing it into a
+// linear frame.
+fn srgb_to_linear(cs: vec3<f32>) -> vec3<f32> {
+    let low = cs / 12.92;
+    let high = pow((cs + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(high, low, cs <= vec3<f32>(0.04045));
+}
+
+// The reference's non-transparent-water refraction fallback:
+// `fb = applyWaterFogViewLinear(viewVec * 2048.0, vec4(1.0))`
+// (`class3/environment/waterF.glsl:285` through `getWaterFogViewNoClip`,
+// `class1/environment/waterFogF.glsl:39`) — white pushed 2048 m along the view ray
+// and fogged by the water it passes through, which is the colour the surface shows
+// where it is not reflecting.
+//
+// The reference has two branches here: with `TRANSPARENT_WATER` it samples the
+// refraction texture instead, and reaches this line only when that is off. We have
+// no refraction pass, so this branch is the only one we can reproduce, and the
+// surface's alpha stands in for the rest.
+//
+// Re-derived for a horizontal plane (Bevy +Y up) rather than the reference's
+// view-space plane equation. The modelview transform is rigid, so every quantity it
+// needs survives the change of frame: `waterPlane.w` is the eye's signed height
+// above the surface, `es = -dot(view, planeNormal)` is `-view.y`, and the
+// above-water test `dot(pos, n) + w > 0` is "is this point higher than the water".
+//
+// `water_height` is the fragment's own world height, since the surface being shaded
+// *is* the water plane.
+fn water_fog_fallback(eye: vec3<f32>, view: vec3<f32>, water_height: f32) -> vec3<f32> {
+    // The reference's `pos`: 2048 m along the view ray.
+    let far_point = eye + view * 2048.0;
+    // `applyWaterFogViewLinear`'s clip: a point above the surface is not fogged, so
+    // the colour passes through unchanged — and the colour here is white. This is
+    // the ray that leaves the water rather than descending into it: the underside
+    // of the surface seen by a submerged eye looking up.
+    if (far_point.y > water_height) {
+        return vec3<f32>(1.0);
+    }
+
+    let es = -view.y;
+    // The eye's depth below the surface — zero whenever it is above.
+    let e0 = max(water_height - eye.y, 0.0);
+    // The reference's `int_v`: where the ray enters the water. That is the eye
+    // itself when the eye is already under, and the surface crossing when it is not.
+    var entry = eye;
+    if (eye.y > water_height && abs(view.y) > 1.0e-5) {
+        entry = eye + view * ((water_height - eye.y) / view.y);
+    }
+    // The thickness of water the ray traverses, the reference's `l = max(depth, 0.1)`.
+    let l = max(length(far_point - entry), 0.1);
+
+    let kd = water.water_fog_density;
+    // `waterFogKS = 1 / max(lightDir.z, 0.3)` (`llsettingsvo.cpp:1123`, the clamp
+    // `LLSettingsVOWater::WATER_FOG_LIGHT_CLAMP`), on the active light — which is
+    // exactly what `light_dir` already carries, so it costs no uniform.
+    let ks = 1.0 / max(water.light_dir.y, 0.3);
+    let f = 0.98;
+    let t1 = -kd * pow(f, ks * e0);
+    // Two guards the reference does without, for the same reason `underwater_fog.wgsl`
+    // has them: it divides by `t2` unguarded, and a grazing ray can drive it to zero;
+    // and `pow` of a negative base is not a real number, which a negative density can
+    // produce here even after `getModifiedWaterFogDensity` has rescued the density
+    // itself. Both would reach the frame as a NaN pixel.
+    var t2 = kd + ks * es;
+    if (abs(t2) < 1.0e-3) {
+        t2 = 1.0e-3;
+    }
+    let t3 = pow(f, t2 * l) - 1.0;
+    let scatter = pow(clamp(t1 / t2 * t3, 0.0, 1.0), 1.0 / 1.7);
+    let transmittance = pow(0.98, l * kd);
+
+    // `applyWaterFogViewLinearNoClip(pos, vec4(1.0))`: white * D + fogColor * L.
+    return vec3<f32>(transmittance) + srgb_to_linear(water.water_fog_color) * scatter;
+}
 
 struct Vertex {
     @builtin(instance_index) instance_index: u32,
@@ -207,11 +287,19 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let reflect_amount = min(1.0, df3.x + df3.y + df3.z);
     let radiance_scale = max(0.0, -abs(dot(vv, wavef)) * water.fresnel_scale + water.fresnel_offset);
 
-    // `color = mix(fb, radiance, df2.x)` — the refracted frame buffer (`fb`, here the
-    // water-fog colour, which is exactly the reference's non-transparent-water
-    // fallback `applyWaterFogViewLinear(_, white)`) blended toward the reflected
-    // radiance (here the sky reflection tint) by the reflection amount.
-    let fb = water.water_fog_color;
+    // `color = mix(fb, radiance, df2.x)` — the refracted frame buffer blended toward
+    // the reflected radiance (here the sky reflection tint) by the reflection amount.
+    //
+    // `fb` is the reference's non-transparent-water fallback
+    // `applyWaterFogViewLinear(viewVec * 2048.0, vec4(1.0))`, so the deep-water
+    // colour answers to the region's fog *density* and to the viewing angle, not
+    // only to its authored fog colour. The surface being shaded is the water plane,
+    // so its own world height is the water height the fog measures against.
+    let fb = water_fog_fallback(
+        view_bindings::view.world_position,
+        vv,
+        in.world_position.y,
+    );
     // The reflected environment: sample the reflection-probe specular map in the
     // mirror direction (P33) so the water reflects the real surroundings rather than
     // a flat sky tint, falling back to that tint when no probe is bound.

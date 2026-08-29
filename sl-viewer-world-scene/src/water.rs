@@ -59,6 +59,7 @@ use crate::probe_layers::environment_render_layers;
 use crate::sky::day_position;
 use crate::textures::{TextureDecoded, TextureManager};
 use crate::transparency::WaterSurface;
+use crate::underwater_fog::modified_water_fog_density;
 use crate::world_api::world_scoped::WorldScopedAppExt as _;
 use crate::world_api::{DecodedTextures, SKY_BOOST_PRIORITY, ViewerCamera, WorldPhase};
 
@@ -229,7 +230,7 @@ pub(crate) fn setup_water(
         .settings
         .blended_water_settings(day_position(&environment.settings));
     let params = water.map_or_else(default_water_params, |water| {
-        water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE)
+        water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false)
     });
     let material = materials.add(WaterMaterial {
         params,
@@ -389,7 +390,12 @@ pub(crate) fn drive_water(
     // a live day cycle they are identical for a whole day-cycle sampling step
     // (`sky::DAY_POSITION_STEPS`), which is what makes this float-equality
     // compare hold at all off the screenshot harness.
-    let params = water_params(&water, light_dir, reflection, sunlight);
+    // The reference asks this of the eye, not of the fragment
+    // (`llsettingsvo.cpp:1128`, `eyedepth = camera.z - water_height; underwater =
+    // eyedepth <= 0`), and measures it against the *environment's* water height —
+    // here the agent region's, the same level `WaterLevel` publishes.
+    let submerged = camera_pos.y <= root_height;
+    let params = water_params(&water, light_dir, reflection, sunlight, submerged);
     if materials
         .get(&state.material)
         .is_some_and(|material| material.params != params)
@@ -531,11 +537,20 @@ pub(crate) fn apply_water_textures(
 /// direction, sky-reflection tint, and sunlight colour. (The wave-scroll clock
 /// and the camera position are read GPU-side — `globals.time` and the view's
 /// `world_position` — so they are not part of the uniform block.)
-pub(crate) const fn water_params(
+///
+/// `submerged` is whether the eye is under the surface, which the reference asks
+/// before binding this shader's fog density
+/// (`lldrawpoolwater.cpp:242 getModifiedWaterFogDensity(underwater)`): submerged, the
+/// density is raised to the frame's underwater fog modifier. It is the one input
+/// here that follows the camera rather than the environment, and it is a step
+/// function of it — it changes only when the eye crosses the waterline, so it does
+/// not turn the material's compare-then-`get_mut` into a per-frame re-prepare.
+pub(crate) fn water_params(
     water: &WaterSettings,
     light_dir: Vec3,
     reflection_color: Vec3,
     sunlight_color: Vec3,
+    submerged: bool,
 ) -> WaterParams {
     WaterParams {
         light_dir,
@@ -547,7 +562,11 @@ pub(crate) const fn water_params(
         ),
         fresnel_offset: water.fresnel_offset,
         water_fog_color: color_rgb(water.water_fog_color),
-        water_fog_density: water.water_fog_density,
+        water_fog_density: modified_water_fog_density(
+            water.water_fog_density,
+            water.underwater_fog_mod,
+            submerged,
+        ),
         sunlight_color,
         blur_multiplier: water.blur_multiplier,
         reflection_color,
@@ -559,9 +578,12 @@ pub(crate) const fn water_params(
 
 /// The water uniforms for the built-in legacy default water, used to seed the
 /// material before an environment is selected.
+///
+/// Seeded as seen from above: the agent is not in the water at login, and
+/// `drive_water` replaces this from the real camera on the first frame anyway.
 pub(crate) fn default_water_params() -> WaterParams {
     let water = WaterSettings::legacy_default("Default");
-    water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE)
+    water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false)
 }
 
 /// A neutral sky-reflection tint used before a sky frame is selected (a pale
@@ -671,7 +693,7 @@ pub(crate) fn flat_normal_image() -> Image {
 
 #[cfg(test)]
 mod tests {
-    use super::{WaterRegionPlane, WaterState};
+    use super::{WaterRegionPlane, WaterState, default_reflection, water_params};
     use crate::world_api::world_scoped::{WorldPurge, WorldScoped as _};
     use bevy::ecs::world::CommandQueue;
     use bevy::prelude::*;
@@ -722,5 +744,39 @@ mod tests {
         // The region-independent water look survives — the destination's
         // environment refines it rather than rebuilding it.
         assert_eq!(state.normal_key, None);
+    }
+
+    /// The surface shader's fog density is the **eye-state-modified** one, as the
+    /// reference binds it (`lldrawpoolwater.cpp:242`,
+    /// `getModifiedWaterFogDensity(underwater)`): submerged, the frame's density is
+    /// raised to its underwater fog modifier. The density is what the shader's
+    /// deep-water colour is computed from, so getting the wrong one gives the diver
+    /// the surface-dweller's sea.
+    #[test]
+    fn a_submerged_eye_gets_the_modified_fog_density() {
+        let water = sl_client_bevy::WaterSettings::legacy_default("Default");
+        let above = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false);
+        let below = water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, true);
+
+        let expected = water
+            .water_fog_density
+            .powf(water.underwater_fog_mod.clamp(0.0, 10.0));
+        assert!(
+            (above.water_fog_density - water.water_fog_density).abs() <= 1e-6,
+            "above water the frame's own density is bound, got {}",
+            above.water_fog_density,
+        );
+        assert!(
+            (below.water_fog_density - expected).abs() <= 1e-6,
+            "submerged, the density raised to the underwater fog modifier is bound: \
+             expected {expected}, got {}",
+            below.water_fog_density,
+        );
+        // The legacy default's modifier is not 1, so the two are genuinely different
+        // numbers — a fixture whose modifier drifted to 1 would make this vacuous.
+        assert!(
+            (above.water_fog_density - below.water_fog_density).abs() > 1e-3,
+            "the default water frame no longer distinguishes the two eye states",
+        );
     }
 }

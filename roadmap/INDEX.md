@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 66 |
-| done | 909 |
+| done | 910 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1489** |
+| **total** | **1490** |
 
 ## ideas (97)
 
@@ -1315,10 +1315,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
-- [`viewer-water-surface-fog-fallback-flat`](bugs/viewer-water-surface-fog-fallback-flat.md)
-  — The water surface's deep-water colour is a flat tint, not the fogged one
+- [`viewer-water-surface-alpha-not-refraction`](bugs/viewer-water-surface-alpha-not-refraction.md)
+  — The water surface fakes refraction with alpha, so the sea cannot match the
+  reference
 
-## done (909)
+## done (910)
 
 ### protocol
 
@@ -2670,6 +2671,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-audio-backend` (done))
 - [`viewer-water-exclusion`](done/viewer-water-exclusion.md) — Water-exclusion
   surfaces (invisiprim successor)
+- [`viewer-water-surface-fog-fallback-flat`](done/viewer-water-surface-fog-fallback-flat.md)
+  — The water surface's deep-water colour is a flat tint, not the fogged one
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
 - [`viewer-world-map-double-click-teleport`](done/viewer-world-map-double-click-teleport.md)

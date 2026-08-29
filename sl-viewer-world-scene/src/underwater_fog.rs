@@ -168,7 +168,11 @@ fn fog_disabled() -> bool {
 ///
 /// Integrality is tested on the *clamped* modifier, as in the reference — a modifier
 /// of `10.5` clamps to `10.0`, which is integral, and needs no rescue.
-fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: bool) -> f32 {
+///
+/// The water *surface* shader needs the same value ([`crate::water::water_params`]):
+/// the reference binds this one density to both (`lldrawpoolwater.cpp:242`,
+/// `llsettingsvo.cpp:1130`).
+pub(crate) fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: bool) -> f32 {
     if !(submerged && fog_mod > 0.0) {
         return density;
     }
