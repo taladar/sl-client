@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 65 |
-| done | 917 |
+| done | 918 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1497** |
+| **total** | **1498** |
 
 ## ideas (97)
 
@@ -1308,15 +1308,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
-- [`viewer-transparency-all-faces-skips-top`](bugs/viewer-transparency-all-faces-skips-top.md)
-  — Changing transparency with no face selected leaves a cube's top face alone
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
+- [`viewer-underwater-translucent-drawn-behind-surface`](bugs/viewer-underwater-translucent-drawn-behind-surface.md)
+  — A submerged camera sees translucent objects as if beyond the water surface
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (917)
+## done (918)
 
 ### protocol
 
@@ -2580,6 +2580,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-transform-gizmos`](done/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))
+- [`viewer-transparency-all-faces-skips-top`](done/viewer-transparency-all-faces-skips-top.md)
+  — Changing transparency with no face selected leaves a cube's top face alone
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom
   toolbar (button bar) (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-ui-color-picker`](done/viewer-ui-color-picker.md) — Color picker

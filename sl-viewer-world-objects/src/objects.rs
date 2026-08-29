@@ -88,6 +88,17 @@ use crate::textures::{
 };
 pub use crate::world_api::{ObjectCategory, ObjectDebugInfo, SceneObject};
 
+/// The tracing target of the per-face texture-edit diagnostics: the entry a
+/// commit builds from the rendered faces (`sl-viewer-edit`'s Texture tab) and
+/// the per-face `TextureFace` each rebuilt face is composed from (this crate's
+/// face spawn).
+///
+/// Off by default; turn it on with `RUST_LOG=info,sl_viewer::texture_edit=debug`
+/// to see, for one edit, which Linden faces the viewer found, what it put on the
+/// wire, and what it drew back — the three places a "the edit skipped one face"
+/// report can come apart.
+pub const TEXTURE_EDIT_LOG_TARGET: &str = "sl_viewer::texture_edit";
+
 /// A marker component tagging one child entity as a single tessellated
 /// [`PrimFace`](sl_client_bevy::PrimFace) of its parent prim, carrying the
 /// Linden face index its material is looked up by (`TextureEntry.faces[face_id]`).
@@ -2483,6 +2494,18 @@ fn spawn_face_entity(
         store,
         prim_textures,
         priority,
+    );
+    // The per-face half of the texture-edit diagnostics (off unless
+    // `TEXTURE_EDIT_LOG_TARGET` is enabled): what each face is actually drawn
+    // from, after an edit's echo re-tessellated the object.
+    debug!(
+        target: TEXTURE_EDIT_LOG_TARGET,
+        "built face {}: rgba{:?} tex={} glow={:.2} mat={} shared={shared}",
+        face_id.get(),
+        texture_face.color,
+        texture_face.texture_id.uuid().simple(),
+        texture_face.glow,
+        texture_face.material_id.is_some_and(|id| !id.is_nil()),
     );
     let mut face = commands.spawn((
         Mesh3d(mesh),

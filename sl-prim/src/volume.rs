@@ -1015,7 +1015,7 @@ fn floor_to_u32(value: f32) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::{lod_triangle_counts, tessellate};
+    use super::{f32_from_usize, lod_triangle_counts, tessellate};
     use crate::PrimLod;
     use crate::geometry::{PrimFace, PrimMesh};
     use crate::shape::PrimShape;
@@ -1080,6 +1080,46 @@ mod tests {
                 assert_face_integrity(face);
             }
         }
+    }
+
+    /// A box tessellates to six **non-empty** faces whose Linden ids run 0..=5
+    /// with the caps first: face 0 is the **top** (+Z, the `PATH_BEGIN` cap the
+    /// profile emits before the sides), faces 1..=4 the sides, face 5 the bottom
+    /// (−Z, the `PATH_END` cap `finish` appends).
+    ///
+    /// Pinned because the whole per-face editing path is indexed by these ids —
+    /// a viewer edit "to every face" expands to `0..face_count` over the
+    /// **rendered** faces, so a cap that tessellated empty (no face entity, no
+    /// slot) or an id shifted by a cap ordering change would silently drop a
+    /// face from every edit ([[viewer-transparency-all-faces-skips-top]]).
+    #[test]
+    fn box_face_ids_run_top_cap_sides_bottom_cap() {
+        let shape = PrimShape::from_params(&default_box_params());
+        let mesh = tessellate(&shape, PrimLod::High);
+        let ids: Vec<u16> = mesh.faces.iter().map(|face| face.face_id.get()).collect();
+        assert_eq!(ids, vec![0, 1, 2, 3, 4, 5], "ids are the slot order");
+        for face in &mesh.faces {
+            assert!(
+                !face.is_empty(),
+                "face {:?} carries geometry, so it renders and takes an edit",
+                face.face_id
+            );
+        }
+        // The mean Z of each face's normals names which way it faces.
+        let facing_z = |face: &PrimFace| -> f32 {
+            let count = f32_from_usize(face.normals.len()).max(1.0);
+            face.normals.iter().fold(0.0_f32, |acc, normal| {
+                acc + normal.get(2).copied().unwrap_or(0.0)
+            }) / count
+        };
+        assert!(
+            mesh.faces.first().is_some_and(|face| facing_z(face) > 0.99),
+            "face 0 is the top cap (+Z)"
+        );
+        assert!(
+            mesh.faces.get(5).is_some_and(|face| facing_z(face) < -0.99),
+            "face 5 is the bottom cap (-Z)"
+        );
     }
 
     #[test]

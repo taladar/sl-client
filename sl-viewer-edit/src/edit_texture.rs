@@ -50,7 +50,7 @@ use crate::edit_tool::{
 };
 use crate::face_material::FaceMaterial;
 use crate::i18n::{TransArgs, Translated, Translator};
-use crate::objects::{FaceTextureDebug, PrimFaceEntity};
+use crate::objects::{FaceTextureDebug, PrimFaceEntity, TEXTURE_EDIT_LOG_TARGET};
 use crate::ui::row;
 use crate::ui_color_picker::{ColorPicked, ColorSwatchValue, spawn_color_swatch};
 use crate::ui_combo::{ComboChanged, ComboSelection, ComboSpec, spawn_combo};
@@ -1810,16 +1810,53 @@ fn apply_to_selection(
         }
         let mut entry = TextureEntry { faces };
         let face_count = entry.faces.len();
-        let touched = apply_edit_to_faces(&mut entry, node_face_indices(node, face_count), &edit);
+        let indices = node_face_indices(node, face_count);
+        log_face_edit(scoped, &indices, &entry, "before");
+        let touched = apply_edit_to_faces(&mut entry, indices, &edit);
         if !touched {
             continue;
         }
+        log_face_edit(scoped, &[], &entry, "sent");
         commands.write(SlCommand(Command::SetObjectImage {
             local_id: scoped,
             media_url: objects.media_url_of(&scoped),
             texture_entry: entry,
         }));
     }
+}
+
+/// Log one commit's entry at [`TEXTURE_EDIT_LOG_TARGET`]: the faces the lookup
+/// found, the indices the edit hits (`stage = "before"`) and the per-face tint /
+/// texture the commit puts on the wire (`stage = "sent"`).
+fn log_face_edit(
+    scoped: ScopedObjectId,
+    indices: &[usize],
+    entry: &TextureEntry,
+    stage: &'static str,
+) {
+    if !bevy::log::tracing::enabled!(target: TEXTURE_EDIT_LOG_TARGET, bevy::log::Level::DEBUG) {
+        return;
+    }
+    let faces: Vec<String> = entry
+        .faces
+        .iter()
+        .enumerate()
+        .map(|(index, face)| {
+            format!(
+                "{index}:rgba{:?} tex={} glow={:.2} mat={}",
+                face.color,
+                face.texture_id.uuid().simple(),
+                face.glow,
+                face.material_id.is_some_and(|id| !id.is_nil()),
+            )
+        })
+        .collect();
+    debug!(
+        target: TEXTURE_EDIT_LOG_TARGET,
+        "{stage} object {scoped}: {} rendered faces, editing {indices:?} — {}",
+        entry.faces.len(),
+        faces.join(" | "),
+    );
 }
 
 /// The Linden face indices a selection node's edit hits: its chosen faces, or
@@ -2008,5 +2045,129 @@ mod tests {
         assert_eq!(round_to_byte(-5.0), 0);
         assert_eq!(round_to_byte(300.0), 255);
         assert_eq!(round_to_byte(127.6), 128);
+    }
+
+    /// The whole commit path for a whole-object edit, over a box's six rendered
+    /// faces: the per-face lookup, the face-index expansion, the edit, and the
+    /// wire round-trip.
+    ///
+    /// The guard is [[viewer-transparency-all-faces-skips-top]] — a report that a
+    /// Transparency edit with **no** individual face selected leaves a cube's
+    /// **top** face alone. A box's top cap is Linden face **0** (the profile
+    /// emits `add_cap(PATH_BEGIN)` first, `sl-prim/src/profile.rs`), which is
+    /// exactly the index a range-end off-by-one cannot miss but a
+    /// `saturating_sub` / "skip the first" slip can — so it is pinned here.
+    #[test]
+    fn a_whole_object_edit_reaches_every_face_including_the_top_cap() {
+        use bevy::app::App;
+        use bevy::ecs::message::Messages;
+        use bevy::prelude::{ChildOf, MessageWriter, Res, Update};
+        use sl_client_bevy::{
+            Command, PrimFaceId, SlCommand, TextureEntry, decode_texture_entry,
+            encode_texture_entry,
+        };
+
+        use crate::objects::{FaceTextureDebug, PrimFaceEntity};
+        use crate::world_api::{ObjectState, SelectionSet};
+
+        use super::{PrimFaceLookup, apply_to_selection};
+
+        /// A box's six faces: the top cap (0), the four sides (1..=4) and the
+        /// bottom cap (5) — all opaque, as a freshly rezzed prim's are.
+        const FACE_COUNT: u16 = 6;
+
+        /// The commit under test: the Transparency field's whole-object apply.
+        fn commit(
+            selection: Res<SelectionSet>,
+            objects: Res<ObjectState>,
+            prim_faces: PrimFaceLookup,
+            mut commands: MessageWriter<SlCommand>,
+        ) {
+            apply_to_selection(&selection, &objects, &prim_faces, &mut commands, |face| {
+                TexField::Transparency.apply(face, 50.0);
+            });
+        }
+
+        let mut app = App::new();
+        app.add_message::<SlCommand>()
+            .init_resource::<ObjectState>()
+            .add_systems(Update, commit);
+
+        // The scene shape the world layer builds: the object entity, its
+        // geometry holder child, and one face entity per rendered face.
+        let object = app.world_mut().spawn_empty().id();
+        let geometry = app.world_mut().spawn(ChildOf(object)).id();
+        for face_id in 0..FACE_COUNT {
+            let _face = app.world_mut().spawn((
+                PrimFaceEntity {
+                    face_id: PrimFaceId::new(face_id),
+                },
+                FaceTextureDebug(face()),
+                ChildOf(geometry),
+            ));
+        }
+        let mut selection = SelectionSet::default();
+        selection.insert(scoped(), full(), object);
+        assert!(
+            selection.primary().is_some_and(|node| node.faces.is_none()),
+            "an ordinary object selection means every face"
+        );
+        app.insert_resource(selection);
+
+        app.update();
+
+        let sent: Vec<TextureEntry> = {
+            let messages = app.world().resource::<Messages<SlCommand>>();
+            let mut cursor = messages.get_cursor();
+            cursor
+                .read(messages)
+                .filter_map(|command| match &command.0 {
+                    Command::SetObjectImage { texture_entry, .. } => Some(texture_entry.clone()),
+                    _other => None,
+                })
+                .collect()
+        };
+        assert_eq!(sent.len(), 1, "one ObjectImage for the one selected object");
+        for entry in &sent {
+            assert_eq!(
+                entry.faces.len(),
+                usize::from(FACE_COUNT),
+                "the entry covers every rendered face"
+            );
+            // 50 % transparent ⇒ alpha round(0.5 * 255) = 128, on every face —
+            // the top cap (0) and the bottom cap (5) as much as the sides.
+            for (index, face) in entry.faces.iter().enumerate() {
+                assert_eq!(
+                    face.color.get(3).copied(),
+                    Some(128),
+                    "face {index} took the transparency edit"
+                );
+            }
+            // …and survives the wire packing the simulator decodes: the
+            // run-length form writes the *last* face as the field default, so a
+            // face silently dropped from the packing would decode as opaque.
+            let decoded =
+                decode_texture_entry(&encode_texture_entry(entry), usize::from(FACE_COUNT));
+            for (index, face) in decoded.faces.iter().enumerate() {
+                assert_eq!(
+                    face.color.get(3).copied(),
+                    Some(128),
+                    "face {index} kept its transparency across the wire"
+                );
+            }
+        }
+    }
+
+    /// A scoped id for the selection tests.
+    fn scoped() -> sl_client_bevy::ScopedObjectId {
+        sl_client_bevy::ScopedObjectId {
+            circuit: sl_client_bevy::CircuitId::new(1),
+            id: sl_client_bevy::RegionLocalObjectId(1),
+        }
+    }
+
+    /// A full object key for the selection tests.
+    fn full() -> sl_client_bevy::ObjectKey {
+        sl_client_bevy::ObjectKey::from(Uuid::from_u128(1))
     }
 }
