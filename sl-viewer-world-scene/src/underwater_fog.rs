@@ -10,15 +10,13 @@
 //! pass over the composited image plus the depth buffer — fogging terrain, objects,
 //! avatars, and the water underside uniformly, exactly where they are underwater.
 //!
-//! Scope (R21): the pass fogs only when the **eye is submerged**. The reference
-//! fogs the deferred *opaque* geometry before the transparent water surface is
-//! composited, so the surface is never fogged by this pass; here the surface is
-//! already in the colour buffer, and fogging the underwater seafloor as seen from
-//! *above* water painted the sea into a flat dark slab (starkest over the void past
-//! a region edge with no neighbour). Above the surface the water-surface shader
-//! (`water.wgsl`) already gives the from-above look, so the fog shader passes the
-//! scene through untouched when the eye is above water and only fogs when submerged.
-//! `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces it off entirely (a debug A/B knob).
+//! The shader is compiled once per **eye state**, and each pipeline runs at its own
+//! point in the frame: submerged, the fog is the medium the whole picture is seen
+//! through, so it runs after everything; above water it runs *before* the water
+//! surface, because the surface refracts a copy of what it leaves behind — which is
+//! where the colour of deep water comes from, exactly as the reference's deferred
+//! haze pass precedes its water pool. `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces
+//! the whole thing off (a debug A/B knob).
 //!
 //! Bevy 0.19 replaced the render graph with a **system-based** renderer, so this is
 //! not a render-graph `ViewNode`: the pass is a system in the [`Core3d`] schedule
@@ -97,8 +95,13 @@ pub struct UnderwaterFog {
     pub(crate) fog_density: f32,
     /// The water fog `KS` term.
     pub(crate) fog_ks: f32,
-    /// std140 padding to a 16-byte boundary.
-    pub(crate) padding: f32,
+    /// The camera's far clip distance, in world metres — how far this frame draws
+    /// anything at all. A pixel the depth buffer left empty is one nothing reached
+    /// out to here, which is the distance the shader measures such a pixel's water
+    /// column to. Bevy's perspective is reverse-Z **infinite**, so the far plane is
+    /// not in the projection matrix and cannot be recovered from `world_from_clip`;
+    /// it has to be carried.
+    pub(crate) far_plane: f32,
 }
 
 impl Default for UnderwaterFog {
@@ -112,7 +115,9 @@ impl Default for UnderwaterFog {
             water_height: f32::MIN,
             fog_density: 0.0,
             fog_ks: 1.0,
-            padding: 0.0,
+            // Any positive distance does; the zero density above already makes the
+            // pass a no-op until `update_underwater_fog` fills real values.
+            far_plane: 1.0,
         }
     }
 }
@@ -264,7 +269,7 @@ pub(crate) fn update_underwater_fog(
             water_height,
             fog_density,
             fog_ks,
-            padding: 0.0,
+            far_plane: projection.far(),
         });
     }
 }
@@ -684,6 +689,53 @@ mod tests {
             near.distance(stale.translation) > 1.0,
             "…and nowhere near the frame-old GlobalTransform pose {:?}",
             stale.translation,
+        );
+        Ok(())
+    }
+
+    /// A pixel the depth buffer left empty is measured out to the camera's **far
+    /// clip**, so the uniform has to carry that distance — Bevy's perspective is
+    /// reverse-Z *infinite*, so the far plane is not in the projection matrix and
+    /// the shader cannot recover it from `world_from_clip`.
+    ///
+    /// It was a flat 2048 m before, far shorter than the 17 region cells of sea the
+    /// viewer draws, which is what drew a hard ring across the open water
+    /// (`viewer-sea-distance-band-hard-seam`): every ray that met the surface beyond
+    /// 2048 m sampled a point still in the air and came out unfogged. So this pins
+    /// that the frame's own far clip is what reaches the shader, whatever it is.
+    #[test]
+    fn carries_the_camera_far_clip() -> Result<(), Box<dyn core::error::Error>> {
+        let mut app = App::new();
+        app.init_resource::<EnvironmentState>()
+            .init_resource::<WaterLevel>()
+            .add_systems(Update, update_underwater_fog);
+
+        let far = 4096.0;
+        let camera = app
+            .world_mut()
+            .spawn((
+                ViewerCamera,
+                Transform::from_xyz(0.0, 60.0, 0.0),
+                GlobalTransform::default(),
+                Projection::Perspective(PerspectiveProjection { far, ..default() }),
+                UnderwaterFog::default(),
+            ))
+            .id();
+
+        app.update();
+
+        let fog = app
+            .world()
+            .entity(camera)
+            .get::<UnderwaterFog>()
+            .ok_or("the camera keeps its fog component")?;
+        // Carried verbatim, so this is exact equality — spelled as a difference
+        // because a float `==` is a lint, not because any rounding is expected.
+        assert!(
+            (fog.far_plane - far).abs() < f32::EPSILON,
+            "the fog measures an empty pixel out to this camera's far clip \
+             ({far}), got {}",
+            fog.far_plane,
         );
         Ok(())
     }

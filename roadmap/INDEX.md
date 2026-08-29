@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 67 |
-| done | 915 |
-| deferred | 23 |
+| bugs | 66 |
+| done | 916 |
+| deferred | 24 |
 | wont-do | 13 |
-| **total** | **1496** |
+| **total** | **1497** |
 
 ## ideas (97)
 
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (67)
+## bugs (66)
 
 ### viewer
 
@@ -1305,9 +1305,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
-- [`viewer-sea-distance-band-hard-seam`](bugs/viewer-sea-distance-band-hard-seam.md)
-  — The open sea has a hard ring at a fixed distance, light beyond it and dark
-  inside
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1321,7 +1318,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (915)
+## done (916)
 
 ### protocol
 
@@ -2507,6 +2504,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-script-permission-experience-card`](done/viewer-script-permission-experience-card.md)
   — Script permission-request experience card (ScriptQuestionExperience)
   (blocked by `viewer-experience-permission-dialog` (done))
+- [`viewer-sea-distance-band-hard-seam`](done/viewer-sea-distance-band-hard-seam.md)
+  — The open sea has a hard ring at a fixed distance, light beyond it and dark
+  inside
 - [`viewer-seamless-region-handover-objects`](done/viewer-seamless-region-handover-objects.md)
   — Seamless region handover for world objects (neighbour render + rebase, not
   purge)
@@ -3295,7 +3295,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`aditi-3`](done/aditi-3-unknown-caps-event-agentstateupdate.md) — Unknown
   CAPS event AgentStateUpdate
 
-## deferred (23)
+## deferred (24)
 
 ### viewer
 
@@ -3344,6 +3344,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   GPU compute particle simulation (+ raising the particle cap)
 - [`viewer-perf-media-upload-budget`](deferred/viewer-perf-media-upload-budget.md)
   — Per-frame byte budget for media-surface uploads
+- [`viewer-sea-grid-edge-visible-from-height`](deferred/viewer-sea-grid-edge-visible-from-height.md)
+  — The sea ends in a 256 m staircase when seen from high above the water
 - [`viewer-socks5-udp-proxy`](deferred/viewer-socks5-udp-proxy.md) — SOCKS5
   proxy for the UDP circuit
 - [`viewer-ui-text-ime-verification`](deferred/viewer-ui-text-ime-verification.md)

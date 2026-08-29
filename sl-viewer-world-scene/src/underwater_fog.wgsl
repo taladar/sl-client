@@ -4,17 +4,18 @@
 // underwater geometry (terrain, objects, avatars, the water underside) uniformly
 // — not just one material.
 //
-// The scene colour and the depth buffer are the inputs. The fog is treated as an
-// *underwater* effect (R21): when the eye is above the water surface the whole
-// scene passes through untouched (the water-surface shader `water.wgsl` provides
-// the from-above look), because fogging the underwater seafloor from above painted
-// the sea into a flat dark slab the reference does not show — most visibly over the
-// void past a region edge with no neighbour. When the eye is submerged, each pixel's
-// depth is reconstructed into a world position and the reference's per-fragment
-// water-plane clip is applied (a fragment above the surface passes through, so the
-// waterline splits cleanly); everything below runs the reference's
+// The scene colour and the depth buffer are the inputs. Each pixel's depth is
+// reconstructed into a world position, the reference's per-fragment water-plane
+// clip is applied (a fragment above the surface passes through, so the waterline
+// splits cleanly), and everything below runs the reference's
 // `getWaterFogViewNoClip` transmittance / in-scatter, re-derived for a horizontal
 // plane (Bevy +Y up).
+//
+// It is compiled twice, once per eye state (`WATER_HAZE_ABOVE`), because the two
+// run at different points in the frame — see the branch in `fragment` below. Above
+// water this is not a tint over an already-finished sea: it runs *before* the water
+// surface, and what it leaves behind is what the surface refracts, so it is where
+// the colour of deep water comes from.
 
 #import bevy_core_pipeline::fullscreen_vertex_shader::FullscreenVertexOutput
 
@@ -32,7 +33,11 @@ struct UnderwaterFog {
     fog_density: f32,
     // The water fog `KS` term (`1 / max(lightDir.z, 0.3)`).
     fog_ks: f32,
-    _pad: f32,
+    // The camera's far clip distance, in world metres: how far this frame draws
+    // anything at all, and so how far a pixel the depth buffer left empty is known
+    // to be clear. Carried rather than read out of `world_from_clip`, whose
+    // reverse-Z *infinite* perspective has no far plane in it.
+    far_plane: f32,
 };
 
 @group(0) @binding(0) var<uniform> fog: UnderwaterFog;
@@ -95,15 +100,26 @@ fn fragment(in: FullscreenVertexOutput) -> @location(0) vec4<f32> {
     // Where this pixel's geometry is, in the world. With no geometry at all — open
     // sky, or the void past a region edge — the reference's haze reads the far depth
     // and fogs it just the same, which is what gives open water its colour where
-    // there is no sea floor to fog. Reverse-Z's far plane is a point at infinity, so
-    // take a point far down this pixel's view ray instead: 2048 m, the distance the
-    // reference itself pushes white through the water for the same purpose
-    // (`waterF.glsl:285`). A ray that ends up *above* the surface is then rejected by
-    // the water-plane clip below, so this fogs the sea and not the sky.
+    // there is no sea floor to fog. Reverse-Z's *infinite* far plane is a point at
+    // infinity rather than a distance, so take the one the empty depth actually
+    // stands for: the camera's own far clip, the range this frame drew nothing
+    // within. A ray that is still *above* the surface at that range is then rejected
+    // by the water-plane clip below, so this fogs the sea and not the sky.
+    //
+    // The distance has to be that far clip and not some other stand-in. It used to be
+    // a flat 2048 m (after `waterF.glsl:285`'s `viewVec*2048.0`), which is far shorter
+    // than the sea the viewer draws — 17 region cells of it — so every ray shallow
+    // enough to meet the surface beyond 2048 m sampled a point still up in the air,
+    // failed the clip, and came out unfogged. That drew a hard ring on the open sea at
+    // the one distance where the sampled point crossed the surface: fogged sea inside
+    // it, raw sky showing through the sea outside it, and a step of a pixel or two
+    // between them (`viewer-sea-distance-band-hard-seam`). Measuring to the far clip
+    // instead puts that crossing at the edge of what is drawn at all, where the sea
+    // ends and the sky begins anyway.
     if (depth <= 0.0) {
         let mid = fog.world_from_clip * vec4<f32>(ndc_xy, 0.5, 1.0);
         let dir = normalize(mid.xyz / mid.w - fog.camera_pos.xyz);
-        world_pos = fog.camera_pos.xyz + dir * 2048.0;
+        world_pos = fog.camera_pos.xyz + dir * fog.far_plane;
     } else {
         let world_h = fog.world_from_clip * vec4<f32>(ndc_xy, depth, 1.0);
         world_pos = world_h.xyz / world_h.w;
