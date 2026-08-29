@@ -884,6 +884,44 @@ fn capture_object_menu_name(
     }
 }
 
+/// Open the Build Tools floater on `summary` — the body of the **Edit** slice,
+/// shared by the object pie and the attachment pies.
+///
+/// The reference's `Object.Edit` (`handle_object_edit` in `llviewermenu.cpp`)
+/// shows the `build` floater and switches to the basic toolset, acting on
+/// whatever the right-click already selected; the attachment path
+/// (`handle_attachment_edit`) first deselects and selects the worn object, which
+/// is what the selection rewrite below does for both callers.
+///
+/// `edit_linked` picks the reference's per-prim vs whole-linkset selection: with
+/// "Edit linked parts" on, the picked prim is selected, otherwise its root.
+pub(crate) fn edit_picked_object(
+    summary: &crate::world_api::ObjectPickSummary,
+    edit_linked: bool,
+    floaters: &Query<(Entity, &crate::floater::Floater)>,
+    panels: &mut Query<&mut crate::ui::UiPanelShown>,
+    selection: &mut crate::world_api::SelectionSet,
+    state: &ObjectState,
+) {
+    // Resolved by stable id, not the module resource: a lazily-built Build
+    // Tools floater has no `BuildToolsUi` until this very open.
+    if let Some(panel) =
+        crate::floater::floater_panel(floaters, crate::edit_tool::BUILD_TOOLS_FLOATER_ID)
+        && let Ok(mut shown) = panels.get_mut(panel)
+    {
+        shown.0 = true;
+    }
+    let (scoped, full) = if edit_linked {
+        (summary.picked_scoped, summary.picked_full)
+    } else {
+        (summary.root_scoped, summary.root_full)
+    };
+    if let Some(entity) = state.entity_by_scoped(&scoped) {
+        selection.clear();
+        selection.insert(scoped, full, entity);
+    }
+}
+
 /// Dispatch a picked object-menu slice to the command behind it.
 ///
 /// Only the wired actions are matched; every other slice is a disabled
@@ -932,23 +970,14 @@ fn handle_object_menu_actions(
         // Edit (the reference's pie Edit): open the Build Tools floater —
         // which *is* edit mode — and make the picked object the selection.
         if action.action == "edit" {
-            // Resolved by stable id, not the module resource: a lazily-built
-            // Build Tools floater has no `BuildToolsUi` until this very open.
-            if let Some(panel) =
-                crate::floater::floater_panel(&floaters, crate::edit_tool::BUILD_TOOLS_FLOATER_ID)
-                && let Ok(mut shown) = panels.get_mut(panel)
-            {
-                shown.0 = true;
-            }
-            let (scoped, full) = if tool.edit_linked {
-                (hit.summary.picked_scoped, hit.summary.picked_full)
-            } else {
-                (hit.summary.root_scoped, hit.summary.root_full)
-            };
-            if let Some(entity) = state.entity_by_scoped(&scoped) {
-                selection.clear();
-                selection.insert(scoped, full, entity);
-            }
+            edit_picked_object(
+                &hit.summary,
+                tool.edit_linked,
+                &floaters,
+                &mut panels,
+                &mut selection,
+                &state,
+            );
             continue;
         }
         // The derez destinations that need a folder: take (and take-copy) land

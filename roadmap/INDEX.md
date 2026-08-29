@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 66 |
-| done | 916 |
+| bugs | 65 |
+| done | 917 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1497** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (66)
+## bugs (65)
 
 ### viewer
 
@@ -1266,8 +1266,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
-- [`viewer-edit-action-disabled-though-editable`](bugs/viewer-edit-action-disabled-though-editable.md)
-  — The Edit action is greyed out on objects that build mode edits fine
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1318,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (916)
+## done (917)
 
 ### protocol
 
@@ -1737,6 +1735,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   In-world double-click teleport (blocked by `viewer-input-action-map` (done))
 - [`viewer-ecs-idiom-audit`](done/viewer-ecs-idiom-audit.md) — Audit the viewer
   for state modelled beside the ECS rather than in it
+- [`viewer-edit-action-disabled-though-editable`](done/viewer-edit-action-disabled-though-editable.md)
+  — The Edit action is greyed out on objects that build mode edits fine
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))

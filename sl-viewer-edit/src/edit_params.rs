@@ -2004,6 +2004,16 @@ struct SnapshotData {
     description: String,
     /// The `PrimFlags` bits.
     update_flags: u32,
+    /// The **agent-relative** `PrimFlags` bits — the object's own OR-ed with its
+    /// linkset root's, which is where the simulator puts the modify / copy /
+    /// transfer / move grants. What the "You can:" line reads, so a selected
+    /// child prim reports the linkset's permissions rather than nothing.
+    agent_flags: u32,
+    /// Whether this agent may modify the primary selection — the canonical
+    /// [`ObjectState::agent_can_modify`], which folds the object's own
+    /// agent-relative flags with its linkset **root's**. Part of the snapshot so
+    /// a root whose permission bits change re-gates a selected child prim.
+    can_modify: bool,
     /// The material byte.
     material: u8,
     /// The object class byte.
@@ -2174,6 +2184,10 @@ fn build_snapshot(
         name,
         description,
         update_flags: data.update_flags,
+        agent_flags: objects
+            .agent_flags(&primary.scoped)
+            .unwrap_or(data.update_flags),
+        can_modify: objects.agent_can_modify(&primary.scoped),
         material: data.material,
         pcode: data.pcode,
         shape: data.shape,
@@ -2333,9 +2347,13 @@ fn sync_param_widgets(
     // Every parameter edit (shape, flags, name / description, light, flexi, …)
     // is a **modify**, so the whole Object / Features tab greys when the agent
     // lacks modify permission on the primary — values still show, only editing
-    // is disabled. Read off the agent-relative `FLAGS_OBJECT_MODIFY`, folded
-    // into every widget gate below.
-    let has_modify = data.is_some_and(|data| data.update_flags & FLAGS_OBJECT_MODIFY != 0);
+    // is disabled. The predicate is the canonical `ObjectState::agent_can_modify`
+    // — the same one the gizmos, the transform fields, the Texture / Material
+    // tabs and prim contents use — so a child prim selected with "Edit linked
+    // parts" reads the modify bit that rides its linkset root, instead of its
+    // own (which the simulator does not set). Folded into every widget gate
+    // below.
+    let has_modify = data.is_some_and(|data| data.can_modify);
     let is_prim = data.is_some_and(|data| data.pcode == pcode::PRIMITIVE);
     let float_shape = data.map(|data| PrimShapeFloat::from_params(&data.shape));
     let prim_type = match (float_shape.as_ref(), data) {
@@ -2511,7 +2529,7 @@ fn sync_param_widgets(
                     (FLAGS_OBJECT_TRANSFER, "build-perm-transfer"),
                     (FLAGS_OBJECT_MOVE, "build-perm-move"),
                 ] {
-                    if d.update_flags & bit != 0 {
+                    if d.agent_flags & bit != 0 {
                         abilities.push(translator.get(key));
                     }
                 }

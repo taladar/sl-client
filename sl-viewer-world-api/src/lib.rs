@@ -5197,7 +5197,8 @@ impl ObjectState {
     /// agent (OpenSim's `GenerateClientFlags`), so they already fold in owner /
     /// group / everyone permissions and the object's "anyone can move" flag —
     /// the same signal the reference viewer's `permModify` / `permMove` read.
-    pub(crate) fn agent_flags(&self, scoped: &ScopedObjectId) -> Option<u32> {
+    #[must_use]
+    pub fn agent_flags(&self, scoped: &ScopedObjectId) -> Option<u32> {
         let picked = self.objects.get(scoped)?;
         let mut flags = picked.update_flags;
         let mut attachment = picked.attachment_point.is_some();

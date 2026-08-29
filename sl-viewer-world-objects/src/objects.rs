@@ -4719,6 +4719,73 @@ mod tests {
         assert!(tracked.non_motion_blocks_changed(&object, false, scoped, None));
     }
 
+    /// The agent-relative permission bits ride the **linkset root**, so a child
+    /// prim — the selection "Edit linked parts" makes — must read its root's
+    /// modify grant, not its own (empty) flags. This is what every build-tool
+    /// gate reads through `ObjectState::agent_can_modify`; a gate that read the
+    /// child's own `update_flags` instead greyed a perfectly editable prim.
+    #[test]
+    fn agent_flags_fold_in_the_linkset_root() {
+        use bevy::prelude::{Entity, World};
+
+        use crate::world_api::FLAGS_OBJECT_MODIFY;
+
+        let mut world = World::new();
+        let mut state = super::ObjectState::default();
+
+        // A two-prim linkset: the root carries the modify bit the simulator
+        // computed for this agent, the child carries none of its own.
+        let mut root_object = bare_object(pcode::PRIMITIVE);
+        root_object.update_flags = FLAGS_OBJECT_MODIFY;
+        let root_scoped = root_object.scoped_id();
+        let mut root = tracked_stub(
+            &root_object,
+            world.spawn_empty().id(),
+            world.spawn_empty().id(),
+        );
+        root.parent = root_scoped;
+        root.is_root = true;
+
+        let mut child_object = bare_object(pcode::PRIMITIVE);
+        child_object.local_id = RegionLocalObjectId(2);
+        child_object.parent_id = RegionLocalObjectId(1);
+        child_object.update_flags = 0;
+        let child_scoped = child_object.scoped_id();
+        let mut child = tracked_stub(
+            &child_object,
+            world.spawn_empty().id(),
+            world.spawn_empty().id(),
+        );
+        child.parent = root_scoped;
+        child.is_root = false;
+
+        state.objects.insert(root_scoped, root);
+        state.objects.insert(child_scoped, child);
+
+        assert_eq!(
+            state.agent_flags(&child_scoped),
+            Some(FLAGS_OBJECT_MODIFY),
+            "a child prim's agent flags OR in its root's"
+        );
+        assert!(
+            state.agent_can_modify(&child_scoped),
+            "a child prim of a modifiable linkset is modifiable"
+        );
+
+        // A no-modify linkset stays no-modify: the walk grants nothing on its own.
+        let mut locked_object = bare_object(pcode::PRIMITIVE);
+        locked_object.local_id = RegionLocalObjectId(3);
+        locked_object.update_flags = 0;
+        let locked_scoped = locked_object.scoped_id();
+        let mut locked = tracked_stub(&locked_object, Entity::PLACEHOLDER, Entity::PLACEHOLDER);
+        locked.parent = locked_scoped;
+        state.objects.insert(locked_scoped, locked);
+        assert!(
+            !state.agent_can_modify(&locked_scoped),
+            "a tracked object with no modify bit anywhere in its linkset is not modifiable"
+        );
+    }
+
     /// The stale-entity guard drops a tracked object whose entity Bevy's recursive
     /// despawn has already taken with its parent — the linkset-child / worn-attachment
     /// race behind the `bevy_ecs::error::handler` "Entity despawned" warning. The

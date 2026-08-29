@@ -38,6 +38,10 @@
 //!   attachment ray hit does; the CPU-skinned rigged pick carries no surface,
 //!   so a touch there goes without one), enabled via the shared
 //!   [`TARGET_TOUCHABLE`] flag gate.
+//! - **Edit** → the shared [`crate::object_menu::edit_picked_object`]: the
+//!   Build Tools floater opens on the worn object, the reference's
+//!   `Object.Edit`. Unconditional, like the in-world object pie's own Edit —
+//!   the reference's `EnableEdit` only wants a valid selection.
 //! - **Sit Here / Stand Up** → the reference's autohide chain
 //!   ([`PieContent::Chain`]) at one position, dispatching the avatar pie's own
 //!   ground-sit / stand actions (`Self.SitDown` in the reference is the ground
@@ -109,6 +113,7 @@ use crate::world_api::AvatarState;
 use crate::world_api::DerenderKind;
 use crate::world_api::FriendsModel;
 use crate::world_api::ObjectPickSummary;
+use crate::world_api::ObjectState;
 use crate::world_api::SelfGroundSit;
 
 /// The `element` both attachment pies attribute their [`UiAction`]s to.
@@ -361,7 +366,11 @@ pub(crate) static ATTACHMENT_SELF_PIE: PieMenuDef = PieMenuDef {
             content: PieContent::Action(PieAction {
                 label: "Edit",
                 action: "edit",
-                when: Some(UNIMPLEMENTED),
+                // Unconditional, like the in-world object pie: the reference's
+                // `EnableEdit` is satisfied by any valid selection, and a worn
+                // attachment always is one (its `enable_object_edit` even
+                // special-cases attachments as editable in a prelude sandbox).
+                when: None,
             }),
         },
     ],
@@ -813,14 +822,25 @@ const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
 /// Dispatch a picked attachment-menu slice to the command behind it.
 ///
-/// Only the attachment-specific actions are matched here — Detach, Drop, and
-/// Touch. The avatar-derived slices (IM / Mute / Add as Friend / the sit-stand
+/// Only the attachment-specific actions are matched here — Edit, Detach, Drop,
+/// and Touch. The avatar-derived slices (IM / Mute / Add as Friend / the sit-stand
 /// chain) carry the avatar pies' own action names and are dispatched by the
 /// shared handler in [`crate::avatar_menu`], which accepts this menu's element;
 /// every remaining slice is a disabled placeholder that never emits.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "a Bevy system's parameters are its injected resources / queries: the action \
+              stream, the pie target, the edit-tool / floater / panel / selection / object \
+              state the Edit slice drives, and the command / derender writers"
+)]
 fn handle_attachment_menu_actions(
     mut actions: MessageReader<UiAction>,
     target: Res<AttachmentMenuTarget>,
+    tool: Res<crate::world_api::EditToolState>,
+    floaters: Query<(Entity, &crate::floater::Floater)>,
+    mut panels: Query<&mut crate::ui::UiPanelShown>,
+    mut selection: ResMut<crate::world_api::SelectionSet>,
+    state: Res<ObjectState>,
     mut commands: MessageWriter<SlCommand>,
     mut derenders: MessageWriter<RequestDerender>,
 ) {
@@ -831,6 +851,20 @@ fn handle_attachment_menu_actions(
         let Some(summary) = target.summary else {
             continue;
         };
+        // Edit (the reference's `Object.Edit` on an attachment): open the Build
+        // Tools floater — which *is* edit mode — on the worn object, exactly as
+        // the in-world object pie does.
+        if action.action == "edit" {
+            crate::object_menu::edit_picked_object(
+                &summary,
+                tool.edit_linked,
+                &floaters,
+                &mut panels,
+                &mut selection,
+                &state,
+            );
+            continue;
+        }
         // Derender acts on the worn object as a whole (its root), not on the
         // wearer — the reference's `Object.Derender` on an attachment pick.
         // The avatar-derived slices of these pies go to the shared avatar
@@ -1058,6 +1092,25 @@ mod tests {
             !slot_at(&hud, Compass::NorthEast)?.enabled,
             "Drop must be disabled on a HUD attachment"
         );
+        Ok(())
+    }
+
+    /// Edit is live on an own attachment whatever the seated / droppable /
+    /// touchable state — the reference's `EnableEdit` only wants a valid
+    /// selection, and a worn object always is one. (It used to be pinned to the
+    /// never-supplied [`UNIMPLEMENTED`] sentinel, which greyed it forever even
+    /// though build mode edited the same attachment fine.)
+    #[test]
+    fn edit_is_live_on_an_own_attachment() -> Result<(), TestError> {
+        for conditions in [
+            PieConditions::new([SELF_STANDING, TARGET_DROPPABLE, TARGET_TOUCHABLE]),
+            PieConditions::new([SELF_SITTING]),
+        ] {
+            let slots = resolve_slots(&ATTACHMENT_SELF_PIE, &conditions);
+            let edit = slot_at(&slots, Compass::SouthEast)?;
+            assert_eq!(edit.outcome, SlotOutcome::Action("edit"));
+            assert!(edit.enabled, "Edit must be live on an own attachment");
+        }
         Ok(())
     }
 
