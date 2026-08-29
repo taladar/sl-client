@@ -38,13 +38,18 @@
 //! - `pre_water_transparent_pass_3d` runs in the `Core3d` main pass after the
 //!   opaque pass and before the transmissive one, and renders the below-water head
 //!   of each view's phase — the reference's `POOL_ALPHA_PRE_WATER`.
-//! - `suppress_pre_water_items` then empties those items' batch ranges, which is
-//!   what [`SortedRenderPhase::render_range`](bevy::render::render_phase::SortedRenderPhase::render_range)
+//! - `suppress_pre_water_items` then empties those items' batch ranges **for that
+//!   view**, which is what
+//!   [`SortedRenderPhase::render_range`](bevy::render::render_phase::SortedRenderPhase::render_range)
 //!   skips on, so Bevy's own transparent pass draws only the rest and nothing is
 //!   drawn twice. The ranges are rebuilt from scratch by the batching systems every
 //!   frame (`batch_and_prepare_sorted_render_phase`), so this needs no undoing —
 //!   and the items stay in the phase, which matters because they are *retained*
 //!   there: removing one would drop it until its entity became visible again.
+//!   Both systems are per view: Bevy runs the whole `Core3d` schedule once for each
+//!   view, and suppressing across *all* views let the first one to run empty the
+//!   ranges of views whose pass had not drawn yet, losing their below-water
+//!   translucency outright (`viewer-underwater-name-tags-not-drawn`).
 //!
 //! **What this does and does not fix.** Combined with the water's depth write it is
 //! per-pixel correct for the common cases: translucent content below the surface is
@@ -337,8 +342,9 @@ fn pre_water_transparent_pass_3d(
 }
 
 /// Empty the batch range of every item [`pre_water_transparent_pass_3d`] has just
-/// drawn, so Bevy's transparent pass skips them rather than drawing them a second
-/// time (translucent content drawn twice is blended twice, and reads as too dense).
+/// drawn **for this view**, so Bevy's transparent pass skips them rather than
+/// drawing them a second time (translucent content drawn twice is blended twice,
+/// and reads as too dense).
 ///
 /// `render_range` skips an item whose batch range is empty, which is the only seam
 /// Bevy offers here: the phase is drawn whole by one system we do not own, and the
@@ -346,17 +352,43 @@ fn pre_water_transparent_pass_3d(
 /// The batching systems assign every item a fresh range each frame
 /// (`batch_and_prepare_sorted_render_phase`), so emptying one is undone before it is
 /// ever read again.
+///
+/// **Per view, and that is load-bearing** (`viewer-underwater-name-tags-not-drawn`).
+/// Bevy 0.19 runs the `Core3d` schedule once for *each* view — that is what
+/// [`ViewQuery`] resolves against — and every view owns a separate phase with its own
+/// item list and its own batch ranges. Suppressing across all of them meant the first
+/// view to run zeroed the ranges of views whose pre-water pass had not run yet: their
+/// pass then drew nothing (`render_range` skips an empty range) *and* their
+/// transparent pass skipped the items too, so below-water translucency vanished
+/// outright. The viewer has several views — the main camera, the HUD camera, and the
+/// reflection-probe capture cameras, which cycle every frame — so which view lost its
+/// below-water content came down to schedule order. Name tags showed it first,
+/// because submerged is the only time a tag is bucketed below the water at all.
 fn suppress_pre_water_items(
+    view: ViewQuery<&ExtractedView>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     split: Res<PreWaterSplit>,
 ) {
-    for (view, phase) in phases.iter_mut() {
-        let Some(&below) = split.0.get(view) else {
-            continue;
-        };
-        for item in phase.items.values_mut().take(below) {
-            *item.batch_range_mut() = 0..0;
-        }
+    let retained_view_entity = view.into_inner().retained_view_entity;
+    suppress_view_pre_water_items(&mut phases, &retained_view_entity, &split);
+}
+
+/// Empty the batch ranges of one view's below-water prefix — the body of
+/// [`suppress_pre_water_items`], split out so a test can drive it for a chosen view
+/// without a render app.
+fn suppress_view_pre_water_items(
+    phases: &mut ViewSortedRenderPhases<Transparent3d>,
+    view: &RetainedViewEntity,
+    split: &PreWaterSplit,
+) {
+    let Some(&below) = split.0.get(view) else {
+        return;
+    };
+    let Some(phase) = phases.get_mut(view) else {
+        return;
+    };
+    for item in phase.items.values_mut().take(below) {
+        *item.batch_range_mut() = 0..0;
     }
 }
 
@@ -398,12 +430,28 @@ impl Plugin for TransparencyOrderPlugin {
 
 #[cfg(test)]
 mod tests {
+    #![expect(
+        clippy::expect_used,
+        reason = "a failed expectation is the intended failure signal in a unit test"
+    )]
+    #![expect(
+        clippy::arithmetic_side_effects,
+        reason = "small literal fixture indices, nowhere near an overflow"
+    )]
+
     use super::{
-        ABOVE_WATER_BUCKET, ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, BELOW_WATER_BUCKET, SkyBackdrop,
-        classify_bucket,
+        ABOVE_WATER_BUCKET, ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, BELOW_WATER_BUCKET,
+        PreWaterSplit, SkyBackdrop, classify_bucket, suppress_view_pre_water_items,
     };
-    use bevy::core_pipeline::core_3d::TransparentSortingInfo3d;
+    use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
+    use bevy::ecs::entity::Entity;
     use bevy::math::Vec3;
+    use bevy::render::render_phase::{
+        DrawFunctionId, PhaseItem as _, PhaseItemExtraIndex, ViewSortedRenderPhases,
+    };
+    use bevy::render::render_resource::CachedRenderPipelineId;
+    use bevy::render::sync_world::MainEntity;
+    use bevy::render::view::RetainedViewEntity;
     use pretty_assertions::assert_eq;
 
     /// A `Sorted` sorting info centred at height `y` (the field the bucket reads).
@@ -412,6 +460,99 @@ mod tests {
             mesh_center: Vec3::new(0.0, y, 0.0),
             depth_bias: 0.0,
         }
+    }
+
+    /// A distinct entity for a test fixture, by index.
+    fn entity(index: u32) -> Entity {
+        Entity::from_raw_u32(index).expect("a small index is a valid entity")
+    }
+
+    /// A view key for a test fixture, by index.
+    fn view(index: u32) -> RetainedViewEntity {
+        RetainedViewEntity::new(MainEntity::from(entity(index)), None, 0)
+    }
+
+    /// A minimal [`Transparent3d`] item with a **non-empty** batch range, so a test
+    /// can tell "suppressed" (emptied) from "left alone".
+    fn phase_item(index: u32) -> Transparent3d {
+        Transparent3d {
+            sorting_info: sorted_at(0.0),
+            distance: 0.0,
+            pipeline: CachedRenderPipelineId::INVALID,
+            entity: (entity(index), MainEntity::from(entity(index))),
+            draw_function: DrawFunctionId(0),
+            batch_range: 0..1,
+            extra_index: PhaseItemExtraIndex::None,
+            indexed: false,
+        }
+    }
+
+    /// Two views, each with `items` items and a below-water prefix of `below`.
+    fn two_view_phases(
+        items: u32,
+        below: usize,
+    ) -> (ViewSortedRenderPhases<Transparent3d>, PreWaterSplit) {
+        let mut phases = ViewSortedRenderPhases::<Transparent3d>::default();
+        let mut split = PreWaterSplit::default();
+        for which in 0..2 {
+            let key = view(which);
+            phases.prepare_for_new_frame(key);
+            let phase = phases.get_mut(&key).expect("the phase was just prepared");
+            for index in 0..items {
+                // Distinct entities per view, so the two phases do not share keys.
+                phase.add_retained(phase_item(which * items + index));
+            }
+            split.0.insert(key, below);
+        }
+        (phases, split)
+    }
+
+    /// The batch ranges of one view's items, in phase order.
+    fn ranges(
+        phases: &ViewSortedRenderPhases<Transparent3d>,
+        key: &RetainedViewEntity,
+    ) -> Vec<std::ops::Range<u32>> {
+        phases
+            .get(key)
+            .expect("the view has a phase")
+            .items
+            .values()
+            .map(|item| item.batch_range().clone())
+            .collect()
+    }
+
+    /// Suppressing one view's below-water prefix must leave **every other view's**
+    /// batch ranges alone (`viewer-underwater-name-tags-not-drawn`).
+    ///
+    /// Bevy runs the `Core3d` schedule once per view, so the pre-water pass and this
+    /// suppression run once per view too. Suppressing across all views meant the
+    /// first view to run emptied the ranges of views whose pass had not run yet —
+    /// and an item with an empty range is skipped by `render_range` *and* by Bevy's
+    /// transparent pass, so those views lost their below-water translucency
+    /// altogether. Submerged name tags were the visible symptom.
+    #[test]
+    fn suppression_touches_only_its_own_view() {
+        let (mut phases, split) = two_view_phases(3, 2);
+        suppress_view_pre_water_items(&mut phases, &view(0), &split);
+        assert_eq!(
+            ranges(&phases, &view(0)),
+            vec![0..0, 0..0, 0..1],
+            "the drawn below-water prefix of view 0 must be emptied",
+        );
+        assert_eq!(
+            ranges(&phases, &view(1)),
+            vec![0..1, 0..1, 0..1],
+            "view 1's pass has not run yet, so its items must still be drawable",
+        );
+    }
+
+    /// A view with no recorded split has nothing drawn early, so nothing is emptied.
+    #[test]
+    fn a_view_without_a_split_is_untouched() {
+        let (mut phases, mut split) = two_view_phases(2, 2);
+        split.0.remove(&view(0));
+        suppress_view_pre_water_items(&mut phases, &view(0), &split);
+        assert_eq!(ranges(&phases, &view(0)), vec![0..1, 0..1]);
     }
 
     /// Content buckets above or below by whether its centre reaches the water level;

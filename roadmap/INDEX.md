@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 66 |
-| done | 914 |
+| bugs | 67 |
+| done | 915 |
 | deferred | 23 |
 | wont-do | 13 |
-| **total** | **1494** |
+| **total** | **1496** |
 
 ## ideas (97)
 
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (66)
+## bugs (67)
 
 ### viewer
 
@@ -1266,6 +1266,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-crossing-movement-locks-up`](bugs/viewer-crossing-movement-locks-up.md)
   — Movement locks up after a region crossing (stand-up anim, esp. onto lower
   terrain)
+- [`viewer-edit-action-disabled-though-editable`](bugs/viewer-edit-action-disabled-though-editable.md)
+  — The Edit action is greyed out on objects that build mode edits fine
 - [`viewer-edit-outline-skinned-mesh`](bugs/viewer-edit-outline-skinned-mesh.md)
   — Edit-selection outline can't shell a skinned / animesh object
 - [`viewer-hover-tooltip-202ms-frame-spike`](bugs/viewer-hover-tooltip-202ms-frame-spike.md)
@@ -1311,15 +1313,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
+- [`viewer-transparency-all-faces-skips-top`](bugs/viewer-transparency-all-faces-skips-top.md)
+  — Changing transparency with no face selected leaves a cube's top face alone
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-underwater-name-tags-not-drawn`](bugs/viewer-underwater-name-tags-not-drawn.md)
-  — Name tags are not drawn at all while submerged
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (914)
+## done (915)
 
 ### protocol
 
@@ -2669,6 +2671,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-underwater-fog-background-flicker`](done/viewer-underwater-fog-background-flicker.md)
   — Background flickers behind the underwater fog while walking underwater
+- [`viewer-underwater-name-tags-not-drawn`](done/viewer-underwater-name-tags-not-drawn.md)
+  — Name tags are not drawn at all while submerged
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
