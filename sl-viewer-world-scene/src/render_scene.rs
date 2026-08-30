@@ -731,6 +731,19 @@ pub const SCENES: &[RenderScene] = &[
         spawn: translucency_matrix_over_backdrop,
     },
     RenderScene {
+        id: "water-translucent-cap-pair",
+        what: "two boxes straddling the waterline that differ only in alpha, seen from above: the \
+               control a photograph of the grid cannot give, since a lit face blended over dark \
+               water still tone-maps bright",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: CAP_PAIR_CAMERA,
+            look_at: Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL),
+        },
+        spawn: water_translucent_cap_pair,
+    },
+    RenderScene {
         id: "tree",
         what: "generated Linden tree geometry, from the species table rather than any asset. \
                NOTE: untextured — a species' bark/leaf texture is a grid asset UUID, so there is \
@@ -3517,6 +3530,114 @@ const MATRIX_PRIM: Color = Color::srgb(0.05, 0.9, 0.05);
 /// red, and the only red in them — so a pixel carrying **both** channels is the
 /// backdrop seen *through* a box, which is the whole question those scenes ask.
 const MATRIX_BACKDROP: Color = Color::srgb(0.9, 0.05, 0.05);
+
+/// Where the [`water_translucent_cap_pair`] scene's camera stands, in Second Life
+/// metres: above the surface and looking **down** at the two caps, which is the
+/// viewpoint the report is about.
+const CAP_PAIR_CAMERA: Vec3 = Vec3::new(0.0, -7.0, SCENE_WATER_LEVEL + 5.0);
+
+/// How far apart the two boxes in [`water_translucent_cap_pair`] stand.
+const CAP_PAIR_SPACING: f32 = 2.6;
+
+/// The X of the **half-transparent** box in the `water-translucent-cap-pair`
+/// scene, and of the opaque control beside it. Public: the readback tier samples each cap by
+/// projecting its centre, rather than assuming where on the frame it landed.
+pub const CAP_PAIR_TRANSLUCENT_X: f32 = -CAP_PAIR_SPACING;
+/// See [`CAP_PAIR_TRANSLUCENT_X`].
+pub const CAP_PAIR_OPAQUE_X: f32 = CAP_PAIR_SPACING;
+/// The height of both boxes' top caps in the `water-translucent-cap-pair` scene.
+pub const CAP_PAIR_TOP: f32 = SCENE_WATER_LEVEL + 1.0;
+
+/// The colour of the plate sealed inside each box in `water-translucent-cap-pair`,
+/// just under its cap: strongly red, and nothing else in that scene is.
+const CAP_PAIR_PLATE: Color = Color::srgb(0.9, 0.05, 0.05);
+
+/// How far below its cap each box's plate sits, in metres.
+const CAP_PAIR_PLATE_DROP: f32 = 0.3;
+
+/// [`SCENES`] `water-translucent-cap-pair`: two identical boxes straddling the
+/// waterline, **differing only in alpha** — one half transparent, one opaque —
+/// seen from above, where their top caps face the camera.
+///
+/// The control the live grid cannot offer. A translucent cap seen from above reads
+/// as solid there ([[viewer-translucent-top-face-reads-opaque]]), and a photograph
+/// cannot say whether it is drawing opaque or blending correctly over a background
+/// that happens to look like it: in an HDR scene a sunlit face blended half-and-half
+/// over dark water still tone-maps bright. Put the two side by side under one sky
+/// and the question becomes arithmetic — if the half-transparent cap is drawing
+/// opaque, its pixels are the opaque one's.
+///
+/// Each box has a **plate sealed inside it**, just under its cap: strongly red,
+/// emissive, and the only red in the scene. That is what the caps are asked about,
+/// rather than the sea. The sea is still here — the boxes straddle it, as the one
+/// on the grid does — but its waves animate from `globals.time`, so how much of it
+/// shows through a cap differs run to run, and a check resting on that is a check
+/// that fails under load and passes alone. The plate does not move, so the question
+/// becomes the same three-way one the matrix asks: red through the half-transparent
+/// cap, none through the opaque one.
+///
+/// Lit rather than emissive, unlike the matrix scenes: emissive light is added
+/// before coverage is applied, so an emissive face would answer a question about a
+/// lit one badly. (The plate *is* emissive — it is the thing being seen, not the
+/// thing under test.)
+fn water_translucent_cap_pair(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let _space = spawn_sea("water-translucent-cap-pair", root, commands, assets);
+    for (label, x, alpha, alpha_mode) in [
+        ("translucent", CAP_PAIR_TRANSLUCENT_X, 0.5, AlphaMode::Blend),
+        ("opaque", CAP_PAIR_OPAQUE_X, 1.0, AlphaMode::Opaque),
+    ] {
+        let object = commands
+            .spawn((
+                Transform::from_xyz(x, 0.0, SCENE_WATER_LEVEL)
+                    .with_scale(Vec3::splat(MATRIX_HALF_HEIGHT + MATRIX_HALF_HEIGHT)),
+                Visibility::default(),
+                Name::new(format!("water-translucent-cap-pair/{label}")),
+                ChildOf(root),
+            ))
+            .id();
+        let prim = tessellate(&base_shape(), cx.lod);
+        for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+            let face = spawn_geometry(
+                format!("water-translucent-cap-pair/{label}/face-{index}"),
+                mesh,
+                StandardMaterial {
+                    // A warm, plywood-ish tint, and nothing else in the scene is
+                    // warm — so a cap's own colour is separable from the sea's.
+                    base_color: Color::srgb(0.85, 0.7, 0.5).with_alpha(alpha),
+                    alpha_mode,
+                    perceptual_roughness: 0.9,
+                    ..default()
+                },
+                Transform::IDENTITY,
+                object,
+                commands,
+                assets,
+            );
+            commands.entity(face).insert(prim_face_tag(index));
+        }
+        // Sealed inside, under the cap: visible only through it.
+        let plate = assets
+            .meshes
+            .add(Cuboid::new(2.0, 2.0, 0.05).mesh().build());
+        let plate_material = assets.materials.add(inert_face_material(StandardMaterial {
+            base_color: CAP_PAIR_PLATE,
+            emissive: LinearRgba::rgb(3.0, 0.05, 0.05),
+            ..default()
+        }));
+        commands.spawn((
+            Mesh3d(plate),
+            MeshMaterial3d(plate_material),
+            Transform::from_xyz(x, 0.0, CAP_PAIR_TOP - CAP_PAIR_PLATE_DROP),
+            Name::new(format!("water-translucent-cap-pair/{label}-plate")),
+            ChildOf(root),
+        ));
+    }
+}
 
 /// The viewer's per-face tag for the fixture face at `index`, so a fixture prim is
 /// selected by the same systems a real one is (`crate::water_clip`).

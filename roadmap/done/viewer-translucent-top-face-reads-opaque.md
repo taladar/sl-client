@@ -2,7 +2,7 @@
 id: viewer-translucent-top-face-reads-opaque
 title: A translucent prim's top face reads as opaque from above
 topic: viewer
-status: bugs
+status: done
 origin: user report, split from viewer-transparency-all-faces-skips-top (2026-08-30)
 refs:
   [
@@ -20,7 +20,51 @@ A box set to 50 % transparency renders translucent on five faces, but its
 skipped the top face"; that turned out to be false — the edit reaches every face
 — so what is left is a rendering question, split out here.
 
-## What has been ruled out
+**Outcome (2026-08-30): not a rendering fault — the cap blends, and the eye
+cannot tell.** Measured on the grid, one camera pose and one pinned sky, the
+same cap at two alphas:
+
+| tint alpha | top cap |
+| --- | --- |
+| 128 (50 %) | `(248, 204, 153)` |
+| 255 (opaque) | `(255, 255, 190)` |
+
+They differ, so the half-transparent cap is compositing the water beneath it.
+
+It *looks* solid for a reason that is not a fault: alpha blending happens on
+**linear radiance** in the HDR buffer and the tone mapper compresses afterwards,
+so what reaches the screen is `T(a·L + (1 - a)·S)` and not
+`a·T(L) + (1 - a)·T(S)`. When the face is much brighter than what is behind it —
+this cap is the one face pointing at the sun, over dark water — half coverage
+keeps most of its opaque *appearance*. Coverage is geometric; appearance follows
+radiance through a curve. The dimly lit side faces of the same prim, where face
+and water are comparable, show their blend plainly, and that contrast is what
+made the cap look wrong beside them.
+
+The reference composites identically — alpha into a `GL_RGBA16F` screen buffer,
+tone-mapped afterwards in `renderFinalize` — so this behaviour is faithful. What
+is **not** established is whether a sunlit face should be that far over range in
+the first place, which is [[viewer-sunlit-face-clips-two-channels]].
+
+The A/B needed `sl-repl`'s `set_object_image` to be able to say a tint at all;
+it takes `color=r,g,b,a` now. The prim was restored to its original entry
+afterwards, verified byte-for-byte in the region database.
+
+Guarded offline by `a_half_transparent_cap_shows_what_is_sealed_under_it`, over
+the `water-translucent-cap-pair` scene: two boxes straddling the waterline that
+differ only in alpha, lit rather than emissive, their caps facing the camera,
+each with a red plate sealed inside just under its cap. The check is that the
+plate reaches the frame through the half-transparent cap and not through the
+opaque one.
+
+It asks about the **plate** rather than about the sea, and that is deliberate: a
+first version compared the two caps' pixels directly, which rested on how much
+of the *animated* sea showed through — the waves run from `globals.time`, so the
+difference measured 0.078 alone and 0.047 under the pre-commit hook's loaded
+parallel run, on either side of its threshold. A static thing to see through
+turns the question into the same three-way classification the matrix uses.
+
+## What was ruled out on the way
 
 Measured on the local grid against the North Region box (3.30 m, centre 0.49 m
 under the surface, plywood at 50 %):
@@ -72,7 +116,7 @@ keeping together with this:
   lit of the six — exactly the face where the contrast illusion would be
   strongest.
 
-## What the matrix says
+## What the matrix said
 
 [[viewer-water-transparency-scene-matrix]] now puts an opaque wall behind five
 translucent boxes and classifies every band of every one from three eye heights.
@@ -87,7 +131,7 @@ the sea, and through it the prim's own submerged faces refracted — plywood see
 through water) at a contrast a photograph cannot resolve. It is **not proof** of
 that, because the synthetic cap is backed by a wall rather than by the sea.
 
-## How to settle it
+## How it was settled
 
 The remaining question is narrow enough for one live A/B: capture the North
 Region box from a fixed pose at alpha 128, set it opaque, capture again from the

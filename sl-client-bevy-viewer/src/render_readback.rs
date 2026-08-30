@@ -62,8 +62,9 @@ use sl_client_bevy::{
 };
 
 use crate::render_scene::{
-    MATRIX_BOXES, MATRIX_DISTANCE, MATRIX_EYES, MATRIX_HALF_DEPTH, MATRIX_HALF_HEIGHT, RenderScene,
-    SCENE_WATER_LEVEL, STRADDLING_EMERGENT, SceneAssets, SceneCx, SceneRuntimePlugin, scene_root,
+    CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, MATRIX_BOXES, MATRIX_DISTANCE,
+    MATRIX_EYES, MATRIX_HALF_DEPTH, MATRIX_HALF_HEIGHT, RenderScene, SCENE_WATER_LEVEL,
+    STRADDLING_EMERGENT, SceneAssets, SceneCx, SceneRuntimePlugin, scene_root,
     scene_root_transform,
 };
 
@@ -457,9 +458,9 @@ pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Fra
 #[cfg(test)]
 mod tests {
     use super::{
-        FRAME, Frame, HALF_EMERGENT, MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL,
-        WARMUP_FRAMES, build_readback_app, capture, capture_over_time, i32_from_f32, matrix_cells,
-        row_to_f32,
+        CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, FRAME, Frame, HALF_EMERGENT,
+        MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL, WARMUP_FRAMES, build_readback_app,
+        capture, capture_over_time, i32_from_f32, matrix_cells, row_to_f32,
     };
     use crate::render_scene::{SCENES, SceneCx};
     use crate::render_test::TestError;
@@ -1057,6 +1058,54 @@ mod tests {
             report.push(line);
         }
         Ok(Some((report, wrong)))
+    }
+
+    /// **A half-transparent top cap is not drawn as an opaque one.**
+    ///
+    /// Seen from above, a translucent prim's top cap reads as solid on the grid
+    /// ([[viewer-translucent-top-face-reads-opaque]]), and a photograph cannot say
+    /// whether it is drawing opaque or blending: alpha blends **linear radiance**
+    /// and the tone mapper compresses afterwards, so a face much brighter than what
+    /// is behind it keeps most of its opaque *appearance* at half coverage.
+    ///
+    /// The scene supplies the control the grid cannot — two boxes identical but for
+    /// their alpha, each with a red plate sealed inside just under its cap. The
+    /// plate is the only red in the scene and it does not move, so the question is
+    /// the same three-way one the matrix asks and not a distance against the
+    /// animated sea: red through the half-transparent cap, none through the opaque
+    /// one.
+    #[test]
+    fn a_half_transparent_cap_shows_what_is_sealed_under_it() -> Result<(), TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "water-translucent-cap-pair")
+            .ok_or("the `water-translucent-cap-pair` scene is not registered")?;
+        let basis = crate::render_scene::scene_root_transform().rotation;
+        let caps = [CAP_PAIR_TRANSLUCENT_X, CAP_PAIR_OPAQUE_X]
+            .map(|x| basis.mul_vec3(Vec3::new(x, 0.0, CAP_PAIR_TOP)));
+        let Some((frame, projected)) = capture(scene, SceneCx::new(), &caps) else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (translucent, opaque) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("a cap did not project onto the frame — the camera is not looking at them")?;
+        // The same patch read the matrix uses, so one stray pixel decides nothing.
+        let through = |at| {
+            read_cell(&frame, Some(at)).is_some_and(|verdict| verdict == CellVerdict::Translucent)
+        };
+        assert!(
+            through(translucent),
+            "the plate sealed under the half-transparent cap did not reach the frame, so that \
+             cap is drawing solid rather than compositing what is behind it",
+        );
+        assert!(
+            !through(opaque),
+            "the plate reached the frame through the **opaque** cap — the scene is not framing \
+             what this test thinks it is, so its other half proves nothing",
+        );
+        Ok(())
     }
 
     /// **Every translucent face over open sea is drawn.**

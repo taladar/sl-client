@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 65 |
-| done | 921 |
+| done | 922 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1500** |
+| **total** | **1501** |
 
 ## ideas (96)
 
@@ -1301,20 +1301,20 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-sunlit-face-clips-two-channels`](bugs/viewer-sunlit-face-clips-two-channels.md)
+  — A sunlit opaque face pins red and green rather than showing its texture
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
-- [`viewer-translucent-top-face-reads-opaque`](bugs/viewer-translucent-top-face-reads-opaque.md)
-  — A translucent prim's top face reads as opaque from above
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (921)
+## done (922)
 
 ### protocol
 
@@ -2580,6 +2580,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-transform-gizmos`](done/viewer-transform-gizmos.md) — Position /
   rotation / scale gizmos (blocked by `viewer-object-selection-core` (done),
   `viewer-input-action-map` (done))
+- [`viewer-translucent-top-face-reads-opaque`](done/viewer-translucent-top-face-reads-opaque.md)
+  — A translucent prim's top face reads as opaque from above
 - [`viewer-transparency-all-faces-skips-top`](done/viewer-transparency-all-faces-skips-top.md)
   — Changing transparency with no face selected leaves a cube's top face alone
 - [`viewer-ui-bottom-toolbar`](done/viewer-ui-bottom-toolbar.md) — Bottom

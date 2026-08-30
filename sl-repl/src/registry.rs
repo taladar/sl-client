@@ -4352,17 +4352,23 @@ fn all_specs() -> Vec<CommandSpec> {
         },
         CommandSpec {
             name: "set_object_image",
-            usage: "<local_id> <texture_id> [media_url]",
+            usage: "<local_id> <texture_id> [media_url] [color=r,g,b,a]",
             build: |args, ctx| {
+                let mut face =
+                    TextureFace::new(TextureKey::from(args.req_uuid(ctx, "texture_id", 1)?));
+                // The face tint, `0..=255` per channel, alpha last — so a whole
+                // object can be made transparent (or opaque again) from here. The
+                // entry carries one face, which the wire's run-length packing makes
+                // the default for **every** face of the prim.
+                let color = args.vec_parse::<u8>(ctx, "color", 3, "u8")?;
+                if !color.is_empty() {
+                    for (channel, value) in face.color.iter_mut().zip(color.iter()) {
+                        *channel = *value;
+                    }
+                }
                 Ok(Command::SetObjectImage {
                     local_id: scoped_object(ctx, args.req_parse(ctx, "local_id", 0, "u32")?)?,
-                    texture_entry: TextureEntry {
-                        faces: vec![TextureFace::new(TextureKey::from(args.req_uuid(
-                            ctx,
-                            "texture_id",
-                            1,
-                        )?))],
-                    },
+                    texture_entry: TextureEntry { faces: vec![face] },
                     media_url: args.opt_str(ctx, "media_url", 2)?,
                 })
             },
