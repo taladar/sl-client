@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 96 |
-| ready | 298 |
+| ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
 | bugs | 66 |
-| done | 919 |
+| done | 920 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1500** |
@@ -223,7 +223,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (298)
+## ready (297)
 
 ### protocol
 
@@ -879,8 +879,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
-- [`viewer-water-transparency-scene-matrix`](ready/viewer-water-transparency-scene-matrix.md)
-  — Walk the translucent-vs-water combinations exhaustively in the readback tier
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
@@ -1318,7 +1316,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (919)
+## done (920)
 
 ### protocol
 
@@ -2691,6 +2689,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   reference
 - [`viewer-water-surface-fog-fallback-flat`](done/viewer-water-surface-fog-fallback-flat.md)
   — The water surface's deep-water colour is a flat tint, not the fogged one
+- [`viewer-water-transparency-scene-matrix`](done/viewer-water-transparency-scene-matrix.md)
+  — Walk the translucent-vs-water combinations exhaustively in the readback tier
 - [`viewer-water-wave-phase-jumps-far-from-origin`](done/viewer-water-wave-phase-jumps-far-from-origin.md)
   — The sea's ripple phase jumps instead of scrolling, worse the further from
   the origin

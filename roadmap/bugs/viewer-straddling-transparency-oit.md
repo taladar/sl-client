@@ -60,11 +60,34 @@ translucent phase twice against it.
 
 ## Reproduction status
 
-`SCENES`' `water-straddling-translucent-prim` (a half-transparent emissive box
-resting 0.5 m under the surface, seen from above against open sea) and the
-readback check `a_translucent_prim_standing_out_of_the_water_is_drawn` were
-added for this — and **the synthetic scene does not yet reproduce it**: the
-emergent band renders there. So the check is a true invariant that does not yet
-hit the failing configuration, and what separates the two setups is not yet
-known. Finding it is [[viewer-water-transparency-scene-matrix]], which walks the
-combinations exhaustively instead of guessing at one of them.
+**Not reproduced synthetically**, and the axes anyone would have guessed at are
+now ruled out. [[viewer-water-transparency-scene-matrix]] walks five boxes
+across the waterline (including `sunk`, which is exactly this case: a prim
+resting mostly submerged, its sides bucketed by a centre under the water while
+their upper halves stand above it) from three eye heights over both open sea and
+an opaque backdrop, classifying every band of every box. Every cell renders.
+
+So it is **not** the object's height, the face's height, the eye's side of the
+surface, or what stands behind — it is something the synthetic scene does not
+have. In rough order of suspicion:
+
+- the terrain under the sea, which the fixture has none of;
+- the underwater-fog / glow / tone-map passes, which the readback rig does not
+  run. (The glow pass is ruled out for the *top face* by a pinned-day-position
+  live A/B — see [[viewer-translucent-top-face-reads-opaque]] — but **not** for
+  the emergent side band, which that capture's viewpoint could not see.);
+- the sea drawn as many 256 m region cells rather than one plane;
+- what is left of the material difference: a decoded diffuse texture, and
+  lighting rather than the fixture's emissive (an emissive face reads as itself
+  from any sliver of coverage, a lit one may not), plus the cross-instance
+  interning a live face goes through.
+
+The **material type** is not among them, though a first draft of this said it
+was: the fixture's faces are `FaceMaterial`s — `spawn_geometry` wraps every
+fixture material in `inert_face_material` — and a plain live diffuse face is
+also an inert-extension `FaceMaterial`, since `compose_face_material` builds one
+and sets only `glow`.
+
+The next step is to close the gap rather than guess again: add terrain under the
+fixture's sea, then a lit rather than emissive face, and see which turns the
+cell red.

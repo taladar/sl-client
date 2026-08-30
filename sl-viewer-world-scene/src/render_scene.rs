@@ -683,6 +683,54 @@ pub const SCENES: &[RenderScene] = &[
         spawn: water_straddling_translucent_prim,
     },
     RenderScene {
+        id: "water-translucency-under-sea",
+        what: "translucent prims walked across the waterline, seen from under the surface, over open sea: whatever is drawn after a box can paint over it, so the question is whether the box is on screen at all",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: matrix_camera(MATRIX_EYE_UNDER),
+        spawn: translucency_matrix_under_sea,
+    },
+    RenderScene {
+        id: "water-translucency-under-backdrop",
+        what: "translucent prims walked across the waterline, seen from under the surface, over an opaque backdrop, whose colour can only reach the frame through a box — so the question is whether the box is see-through",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: matrix_camera(MATRIX_EYE_UNDER),
+        spawn: translucency_matrix_under_backdrop,
+    },
+    RenderScene {
+        id: "water-translucency-grazing-sea",
+        what: "translucent prims walked across the waterline, seen from just above the surface, over open sea: whatever is drawn after a box can paint over it, so the question is whether the box is on screen at all",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: matrix_camera(MATRIX_EYE_GRAZING),
+        spawn: translucency_matrix_grazing_sea,
+    },
+    RenderScene {
+        id: "water-translucency-grazing-backdrop",
+        what: "translucent prims walked across the waterline, seen from just above the surface, over an opaque backdrop, whose colour can only reach the frame through a box — so the question is whether the box is see-through",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: matrix_camera(MATRIX_EYE_GRAZING),
+        spawn: translucency_matrix_grazing_backdrop,
+    },
+    RenderScene {
+        id: "water-translucency-over-sea",
+        what: "translucent prims walked across the waterline, seen from well above the surface, over open sea: whatever is drawn after a box can paint over it, so the question is whether the box is on screen at all",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: matrix_camera(MATRIX_EYE_OVER),
+        spawn: translucency_matrix_over_sea,
+    },
+    RenderScene {
+        id: "water-translucency-over-backdrop",
+        what: "translucent prims walked across the waterline, seen from well above the surface, over an opaque backdrop, whose colour can only reach the frame through a box — so the question is whether the box is see-through",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: matrix_camera(MATRIX_EYE_OVER),
+        spawn: translucency_matrix_over_backdrop,
+    },
+    RenderScene {
         id: "tree",
         what: "generated Linden tree geometry, from the species table rather than any asset. \
                NOTE: untextured — a species' bark/leaf texture is a grid asset UUID, so there is \
@@ -3301,11 +3349,12 @@ const STRADDLING_LOOK_AT: Vec3 = Vec3::new(0.0, 0.0, DEFAULT_WATER_HEIGHT + 0.75
 /// (`render_readback` in the viewer crate).
 pub(crate) const STRADDLING_MARKER: Color = Color::srgb(0.05, 0.9, 0.05);
 
-/// The height of the water surface in the `water-straddling-translucent-prim`
-/// scene, in metres. Public because the readback tier locates the band it samples
-/// by projecting this height through the scene's camera, rather than assuming
-/// where on the frame the waterline landed.
-pub const STRADDLING_WATERLINE: f32 = DEFAULT_WATER_HEIGHT;
+/// The height of the water surface every water scene builds against, in metres.
+///
+/// Public because the readback tier locates the bands it samples by projecting
+/// this height through each scene's camera, rather than assuming where on the
+/// frame the waterline landed.
+pub const SCENE_WATER_LEVEL: f32 = DEFAULT_WATER_HEIGHT;
 
 /// Half the straddling prim's height, in metres: the tessellated box is the unit
 /// cube, so this is half its scale.
@@ -3325,7 +3374,7 @@ const STRADDLING_SINK: f32 = 0.5;
 
 /// How far the straddling prim's top stands above the water surface, in metres —
 /// the height of the band the readback tier samples. Public for the same reason as
-/// [`STRADDLING_WATERLINE`].
+/// [`SCENE_WATER_LEVEL`].
 pub const STRADDLING_EMERGENT: f32 = STRADDLING_HALF_HEIGHT - STRADDLING_SINK;
 
 /// [`SCENES`] `water-straddling-translucent-prim`: a **translucent** prim centred
@@ -3390,6 +3439,278 @@ fn water_straddling_translucent_prim(
             assets,
         );
     }
+}
+
+/// How far back the translucency matrix's camera stands, in metres — far enough
+/// that all five boxes fit the frame with margin. Public because the readback tier
+/// measures how steeply the eye looks at each band, which decides whether a band
+/// seen through the refracting surface is stable enough to assert on.
+pub const MATRIX_DISTANCE: f32 = 30.0;
+
+/// The three eye heights the translucency matrix is rendered from, as offsets
+/// from the water level: under the surface, grazing it, and well above it.
+///
+/// The **grazing** one is barely above rather than exactly on the surface. The
+/// classification boundary — an eye exactly at the level counts as submerged, the
+/// reference's `eyedepth <= 0` — is a question about a number, and
+/// `the_eye_counts_as_submerged_at_the_surface` asks it directly; what a *picture*
+/// adds at that height is a water plane exactly edge-on through the middle of the
+/// frame, which makes every band degenerate and answers nothing.
+const MATRIX_EYE_UNDER: f32 = -3.0;
+/// See [`MATRIX_EYE_UNDER`].
+const MATRIX_EYE_GRAZING: f32 = 0.05;
+/// See [`MATRIX_EYE_UNDER`].
+const MATRIX_EYE_OVER: f32 = 6.0;
+
+/// The eye heights the translucency matrix is rendered from, as offsets from the
+/// water level, with the name each scene id carries. Public so the readback tier
+/// walks exactly the scenes that exist, and knows how high the eye was.
+pub const MATRIX_EYES: [(&str, f32); 3] = [
+    ("under", MATRIX_EYE_UNDER),
+    ("grazing", MATRIX_EYE_GRAZING),
+    ("over", MATRIX_EYE_OVER),
+];
+
+/// Half the height of each box in the translucency matrix, in metres.
+pub const MATRIX_HALF_HEIGHT: f32 = 1.5;
+
+/// Half the depth of each box — how far its near face stands toward the camera,
+/// which is where the matrix samples it.
+pub const MATRIX_HALF_DEPTH: f32 = 1.5;
+
+/// The translucency matrix's boxes: a label, an X, and the height of the box's
+/// centre as an offset from the water level.
+///
+/// Five, because the axis that matters is not where the *object* is but where each
+/// **face** is: `classify_bucket` reads the world-space centre of each face mesh,
+/// and a box hands it three different answers at once — its top cap, its four
+/// sides (at the object's own centre) and its bottom cap. Walking the object
+/// across the surface in half-height steps therefore walks every face past it too,
+/// and the five together cover a face centred below the surface, on it, and above
+/// it, each both straddling and clear of it:
+///
+/// | box | spans | sides' centre | straddles |
+/// | --- | --- | --- | --- |
+/// | `under` | −3.75 … −0.75 | below | no |
+/// | `sunk` | −2.25 … +0.75 | below | **yes** |
+/// | `centred` | −1.5 … +1.5 | at | yes |
+/// | `risen` | −0.75 … +2.25 | above | yes |
+/// | `clear` | +0.75 … +3.75 | above | no |
+///
+/// `sunk` is the shape of the case reported from the grid
+/// ([[viewer-straddling-transparency-oit]]): a prim resting mostly submerged, so
+/// its sides are bucketed by a centre under the water while their upper halves
+/// stand above it.
+pub const MATRIX_BOXES: [(&str, f32, f32); 5] = [
+    ("under", -9.0, -2.25),
+    ("sunk", -4.5, -0.75),
+    ("centred", 0.0, 0.0),
+    ("risen", 4.5, 0.75),
+    ("clear", 9.0, 2.25),
+];
+
+/// The colour of the translucency matrix's boxes: strongly green, and the only
+/// green in those scenes.
+const MATRIX_PRIM: Color = Color::srgb(0.05, 0.9, 0.05);
+
+/// The colour of the opaque backdrop in the matrix's `-backdrop` scenes: strongly
+/// red, and the only red in them — so a pixel carrying **both** channels is the
+/// backdrop seen *through* a box, which is the whole question those scenes ask.
+const MATRIX_BACKDROP: Color = Color::srgb(0.9, 0.05, 0.05);
+
+/// The camera pose the translucency matrix is rendered from at eye height
+/// `eye` (an offset from the water level).
+const fn matrix_camera(eye: f32) -> SceneCamera {
+    SceneCamera {
+        position: Vec3::new(0.0, -MATRIX_DISTANCE, SCENE_WATER_LEVEL + eye),
+        look_at: Vec3::new(0.0, 0.0, SCENE_WATER_LEVEL),
+    }
+}
+
+/// Build one cell of the translucency matrix: the sea, five half-transparent
+/// boxes walked across the waterline ([`MATRIX_BOXES`]), and — when `backdrop` —
+/// an opaque wall standing behind them.
+///
+/// The two backgrounds ask different questions, and neither can ask the other's.
+/// Over **open sea**, whatever is drawn after a box can paint over it, so the
+/// question is whether the box is on screen at all. Over the **backdrop**, the
+/// wall is opaque and its colour can only reach the frame *through* the box, so
+/// the question is whether the box is see-through. A box against the **sky** —
+/// which the low eye heights give for free above the horizon — is the control:
+/// nothing is drawn after it there, so it must survive however it was bucketed.
+fn translucency_matrix(
+    scene: &str,
+    backdrop: bool,
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let _space = spawn_sea(scene, root, commands, assets);
+    if backdrop {
+        // Behind the boxes and tall enough to stand well clear of the water, so a
+        // box's emergent half always has it behind rather than the sky.
+        let wall = assets
+            .meshes
+            .add(Cuboid::new(30.0, 0.5, 14.0).mesh().build());
+        let material = assets.materials.add(inert_face_material(StandardMaterial {
+            base_color: MATRIX_BACKDROP,
+            // Bright enough that the scene's own lighting is not what decides
+            // whether it is visible.
+            emissive: LinearRgba::rgb(3.0, 0.05, 0.05),
+            ..default()
+        }));
+        commands.spawn((
+            Mesh3d(wall),
+            MeshMaterial3d(material),
+            Transform::from_xyz(0.0, 8.0, SCENE_WATER_LEVEL),
+            Name::new(format!("{scene}/backdrop")),
+            ChildOf(root),
+        ));
+    }
+    for (label, x, offset) in MATRIX_BOXES {
+        let object = commands
+            .spawn((
+                Transform::from_xyz(x, 0.0, SCENE_WATER_LEVEL + offset)
+                    .with_scale(Vec3::splat(MATRIX_HALF_HEIGHT + MATRIX_HALF_HEIGHT)),
+                Visibility::default(),
+                Name::new(format!("{scene}/{label}")),
+                ChildOf(root),
+            ))
+            .id();
+        let prim = tessellate(&base_shape(), cx.lod);
+        for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+            let _face = spawn_geometry(
+                format!("{scene}/{label}/face-{index}"),
+                mesh,
+                StandardMaterial {
+                    base_color: MATRIX_PRIM.with_alpha(0.5),
+                    emissive: LinearRgba::rgb(0.05, 2.0, 0.05),
+                    alpha_mode: AlphaMode::Blend,
+                    perceptual_roughness: 0.9,
+                    ..default()
+                },
+                Transform::IDENTITY,
+                object,
+                commands,
+                assets,
+            );
+        }
+    }
+}
+
+/// [`SCENES`] `water-translucency-under-sea`: the translucency matrix from an eye
+/// under the surface, over open sea.
+/// See [`translucency_matrix`].
+fn translucency_matrix_under_sea(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    translucency_matrix(
+        "water-translucency-under-sea",
+        false,
+        cx,
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// [`SCENES`] `water-translucency-under-backdrop`: the translucency matrix from an eye
+/// under the surface, over an opaque backdrop.
+/// See [`translucency_matrix`].
+fn translucency_matrix_under_backdrop(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    translucency_matrix(
+        "water-translucency-under-backdrop",
+        true,
+        cx,
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// [`SCENES`] `water-translucency-grazing-sea`: the translucency matrix from an eye
+/// grazing the surface, over open sea.
+/// See [`translucency_matrix`].
+fn translucency_matrix_grazing_sea(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    translucency_matrix(
+        "water-translucency-grazing-sea",
+        false,
+        cx,
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// [`SCENES`] `water-translucency-grazing-backdrop`: the translucency matrix from an eye
+/// grazing the surface, over an opaque backdrop.
+/// See [`translucency_matrix`].
+fn translucency_matrix_grazing_backdrop(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    translucency_matrix(
+        "water-translucency-grazing-backdrop",
+        true,
+        cx,
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// [`SCENES`] `water-translucency-over-sea`: the translucency matrix from an eye
+/// well above the surface, over open sea.
+/// See [`translucency_matrix`].
+fn translucency_matrix_over_sea(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    translucency_matrix(
+        "water-translucency-over-sea",
+        false,
+        cx,
+        root,
+        commands,
+        assets,
+    );
+}
+
+/// [`SCENES`] `water-translucency-over-backdrop`: the translucency matrix from an eye
+/// well above the surface, over an opaque backdrop.
+/// See [`translucency_matrix`].
+fn translucency_matrix_over_backdrop(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    translucency_matrix(
+        "water-translucency-over-backdrop",
+        true,
+        cx,
+        root,
+        commands,
+        assets,
+    );
 }
 
 /// Spawn the sea — the endless ocean plus a region plane a hair above it — under
