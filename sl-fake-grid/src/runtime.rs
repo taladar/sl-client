@@ -160,12 +160,70 @@ pub(crate) struct SessionIds {
 
 impl SessionIds {
     /// Mints a fresh identity for a login.
-    fn mint() -> Self {
+    fn mint(minter: &IdMinter) -> Self {
         Self {
-            session_id: Uuid::new_v4(),
-            secure_session_id: Uuid::new_v4(),
-            circuit_code: sl_wire::CircuitCode(rand_circuit_code()),
+            session_id: minter.uuid(),
+            secure_session_id: minter.uuid(),
+            circuit_code: sl_wire::CircuitCode(minter.circuit_code()),
         }
+    }
+}
+
+/// The grid's one source of minted identifiers — session ids, capability
+/// tokens, circuit codes, defaulted agent and region ids.
+///
+/// By default it is as random as [`Uuid::new_v4`] ever was. Seeded
+/// ([`FakeGridBuilder::deterministic`]), it is a xorshift stream instead, so
+/// two grids built from the same seed mint the same identifiers in the same
+/// order — which is what lets two runs of a scenario produce comparable
+/// records. The minted uuids still carry the v4 version and variant bits, so
+/// nothing downstream can tell them from random ones.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct IdMinter {
+    /// The xorshift state behind a lock, or `None` for OS randomness.
+    seeded: Option<std::sync::Arc<std::sync::Mutex<u64>>>,
+}
+
+impl IdMinter {
+    /// A deterministic minter: the same seed yields the same stream.
+    pub(crate) fn seeded(seed: u64) -> Self {
+        Self {
+            // Zero is xorshift's fixed point; nudge it off.
+            seeded: Some(std::sync::Arc::new(std::sync::Mutex::new(seed.max(1)))),
+        }
+    }
+
+    /// The next 64 raw bits of the stream.
+    fn next_bits(&self) -> Option<u64> {
+        let state = self.seeded.as_ref()?;
+        let mut guard = state.lock().ok()?;
+        // Marsaglia xorshift64.
+        let mut x = *guard;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        *guard = x;
+        drop(guard);
+        Some(x)
+    }
+
+    /// The next uuid: seeded stream bits shaped as a v4, or a real v4.
+    pub(crate) fn uuid(&self) -> Uuid {
+        match (self.next_bits(), self.next_bits()) {
+            (Some(high), Some(low)) => {
+                let raw = (u128::from(high) << 64) | u128::from(low);
+                let versioned =
+                    (raw & !(0xf000 << 48) & !(0xc0 << 56)) | (0x4000 << 48) | (0x80 << 56);
+                Uuid::from_u128(versioned)
+            }
+            _unseeded => Uuid::new_v4(),
+        }
+    }
+
+    /// A non-zero circuit code.
+    pub(crate) fn circuit_code(&self) -> u32 {
+        let low = self.uuid().as_u128() & u128::from(u32::MAX);
+        u32::try_from(low).unwrap_or(1).max(1)
     }
 }
 
@@ -210,6 +268,8 @@ pub(crate) struct GridCore {
     pub(crate) gates: LoginGates,
     /// Whether the login response is trimmed to the request's `options`.
     pub(crate) honor_options: bool,
+    /// The identifier source every login and capability grant draws from.
+    pub(crate) minter: IdMinter,
     /// How long an empty `EventQueueGet` poll is held before the 502.
     pub(crate) eq_hold: Duration,
     /// The bound HTTP port (fixed after `start`).
@@ -306,7 +366,7 @@ impl GridCore {
         account: &Account,
         region_index: usize,
     ) -> Result<(PreparedSession, Box<LoginSuccess>), Error> {
-        let ids = SessionIds::mint();
+        let ids = SessionIds::mint(&self.minter);
         let region = self.region(region_index).ok_or(Error::UnknownRegion {
             region: region_index.to_string(),
         })?;
@@ -371,7 +431,10 @@ impl GridCore {
 
         let base_url: url::Url =
             format!("http://127.0.0.1:{}/sim/{seq}", self.http_port).parse()?;
-        let caps = sl_proto::SimCaps::new(base_url, Uuid::new_v4(), Uuid::new_v4);
+        let caps = {
+            let minter = self.minter.clone();
+            sl_proto::SimCaps::new(base_url, self.minter.uuid(), move || minter.uuid())
+        };
         let seed_url = caps.seed_url();
 
         let state = SimState {
@@ -517,13 +580,6 @@ fn grid_info_of(identity: &GridIdentity, login_uri: &url::Url) -> GridInfo {
         .with(KEY_MESSAGE, identity.message.clone())
 }
 
-/// Mints a random non-zero circuit code.
-fn rand_circuit_code() -> u32 {
-    // Uuid::new_v4 is the crate's only randomness source; fold its low bits.
-    let low = Uuid::new_v4().as_u128() & u128::from(u32::MAX);
-    u32::try_from(low).unwrap_or(1).max(1)
-}
-
 /// Fills the optional login-response fields the fixtures can answer:
 /// names, region placement, and the inventory/library skeletons derived
 /// from the session's trees.
@@ -613,6 +669,8 @@ pub struct FakeGridBuilder {
     economy: EconomyConfig,
     /// Builder-registered map tiles.
     map_tiles: MapTileStore,
+    /// The identifier source (random unless seeded).
+    minter: IdMinter,
 }
 
 impl Default for FakeGridBuilder {
@@ -622,6 +680,16 @@ impl Default for FakeGridBuilder {
 }
 
 impl FakeGridBuilder {
+    /// Mint every identifier — session ids, capability tokens, circuit codes,
+    /// defaulted agent and region ids — from a seeded stream, so two grids
+    /// built from the same seed and content produce the same identifiers in
+    /// the same order.
+    #[must_use]
+    pub fn deterministic(mut self, seed: u64) -> Self {
+        self.minter = IdMinter::seeded(seed);
+        self
+    }
+
     /// A builder with no accounts, no regions, the stock scenario, no login
     /// gates, and a 30 s event-queue hold on an ephemeral port.
     #[must_use]
@@ -630,6 +698,7 @@ impl FakeGridBuilder {
             accounts: Vec::new(),
             regions: Vec::new(),
             scenario: Scenario::default(),
+            minter: IdMinter::default(),
             gates: LoginGates::default(),
             honor_options: false,
             eq_hold: Duration::from_secs(30),
@@ -728,6 +797,7 @@ impl FakeGridBuilder {
             return Err(Error::NoRegions);
         }
         check_duplicates(&self.accounts, &self.regions)?;
+        let minter = self.minter.clone();
         for account in &self.accounts {
             if let Some(region) = &account.start_region
                 && !self.regions.iter().any(|entry| entry.name == *region)
@@ -756,7 +826,7 @@ impl FakeGridBuilder {
             .regions
             .into_iter()
             .map(|config| {
-                let region_id = config.region_id.unwrap_or_else(Uuid::new_v4);
+                let region_id = config.region_id.unwrap_or_else(|| minter.uuid());
                 let scenario = config
                     .scenario
                     .clone()
@@ -769,10 +839,15 @@ impl FakeGridBuilder {
             })
             .collect();
         let core = Arc::new(GridCore {
-            accounts: self.accounts.into_iter().map(Account::register).collect(),
+            accounts: self
+                .accounts
+                .into_iter()
+                .map(|config| Account::register(config, &minter))
+                .collect(),
             regions,
             gates: self.gates,
             honor_options: self.honor_options,
+            minter: minter.clone(),
             eq_hold: self.eq_hold,
             http_port,
             login_uri,

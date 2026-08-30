@@ -55,10 +55,10 @@ pub(crate) struct Account {
 
 impl Account {
     /// Registers `config`, minting the agent id unless one was fixed.
-    pub(crate) fn register(config: AccountConfig) -> Self {
+    pub(crate) fn register(config: AccountConfig, minter: &crate::runtime::IdMinter) -> Self {
         let agent_id = config
             .agent_id
-            .unwrap_or_else(|| AgentKey::from(uuid::Uuid::new_v4()));
+            .unwrap_or_else(|| AgentKey::from(minter.uuid()));
         let credential = Credential {
             password_hash: password_hash(&config.password),
             mfa: config.mfa.clone(),
