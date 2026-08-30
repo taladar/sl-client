@@ -52,6 +52,7 @@
 //! [`viewer-text-node-padding-measure`]: ../../../roadmap/bugs/viewer-text-node-padding-measure.md
 
 pub mod baseline;
+pub mod interact;
 
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::{ComputedCameraValues, RenderTargetInfo, Viewport};
@@ -231,6 +232,12 @@ impl LayoutTest {
     /// This configuration's viewport in **physical** pixels — the logical window
     /// scaled by the display's scale factor, and what [`viewport_violations`]
     /// measures a tree against (`ComputedNode` is physical throughout).
+    #[must_use]
+    pub const fn scale_factor(self) -> f32 {
+        self.scale_factor
+    }
+
+    /// The physical viewport, in pixels.
     #[must_use]
     pub fn viewport(self) -> UVec2 {
         self.logical_viewport
@@ -1007,6 +1014,56 @@ pub fn navigate(app: &mut App, action: NavAction) -> Option<Entity> {
     }
     settle(app);
     next
+}
+
+/// Every message of type `M` seen since the last [`drain`], kept across frames.
+///
+/// A Bevy message lives two frames and [`settle`] runs two updates, so reading
+/// the queue directly races the swap; a copying system does not. The generic
+/// form of [`RecordedActions`], for the interaction tier's other outputs
+/// (floater commands, world commands, menu opens).
+#[derive(Resource)]
+pub struct Recorded<M: Message>(Vec<M>);
+
+impl<M: Message> core::fmt::Debug for Recorded<M> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        // `M` need not be `Debug`; the count is the useful part.
+        f.debug_struct("Recorded")
+            .field("len", &self.0.len())
+            .finish()
+    }
+}
+
+impl<M: Message> Default for Recorded<M> {
+    fn default() -> Self {
+        Self(Vec::new())
+    }
+}
+
+/// Start recording every `M`: registers the message (idempotent) and the
+/// copying system.
+pub fn record<M: Message + Clone>(app: &mut App) {
+    if app.world().get_resource::<Recorded<M>>().is_some() {
+        return;
+    }
+    app.add_message::<M>();
+    app.init_resource::<Recorded<M>>();
+    app.add_systems(Update, copy_recorded::<M>);
+}
+
+/// The copying system behind [`record`].
+fn copy_recorded<M: Message + Clone>(
+    mut messages: MessageReader<M>,
+    mut recorded: ResMut<Recorded<M>>,
+) {
+    for message in messages.read() {
+        recorded.0.push(message.clone());
+    }
+}
+
+/// Every `M` recorded since the last call, oldest first.
+pub fn drain<M: Message + Clone>(app: &mut App) -> Vec<M> {
+    core::mem::take(&mut app.world_mut().resource_mut::<Recorded<M>>().0)
 }
 
 /// Every [`UiAction`] emitted since the last [`drain_actions`], kept across
