@@ -59,6 +59,7 @@ use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 
 use crate::face_material::SlFaceMaterialPlugin;
+use crate::pixel_oracle::Frame;
 use crate::probes::{ProbeCaptureStats, ReflectionProbePlugin};
 use crate::render_test::{LogCapture, capture_logs};
 use crate::world_api::ViewerCamera;
@@ -137,17 +138,6 @@ pub(crate) fn matrix_cells() -> Vec<MatrixCell> {
         });
     }
     cells
-}
-
-/// A projected screen coordinate as a pixel index. Saturating, so a point that
-/// projected off the frame clamps rather than wrapping into it.
-#[expect(
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    reason = "a projected screen coordinate, saturating at the i32 bounds"
-)]
-fn i32_from_f32(value: f32) -> i32 {
-    value as i32
 }
 
 /// A frame row index as a float, to compare against a projected screen `y`.
@@ -414,38 +404,6 @@ fn check_logs(logs: &LogCapture, scene: &str) {
     );
 }
 
-/// The frame, read back from the GPU as linear RGBA.
-#[derive(Clone, Debug)]
-pub(crate) struct Frame {
-    /// Row-major `Rgba8` pixels, `FRAME * FRAME * 4` bytes.
-    pixels: Vec<u8>,
-}
-
-impl Frame {
-    /// The pixel at `(x, y)` as linear `(r, g, b, a)` in `0..=1`, or `None` if the
-    /// coordinate is outside the frame.
-    pub(crate) fn pixel(&self, x: u32, y: u32) -> Option<Vec4> {
-        if x >= FRAME || y >= FRAME {
-            return None;
-        }
-        let index = usize::try_from(y)
-            .ok()?
-            .checked_mul(usize::try_from(FRAME).ok()?)?
-            .checked_add(usize::try_from(x).ok()?)?
-            .checked_mul(4)?;
-        let texel = self.pixels.get(index..index.checked_add(4)?)?;
-        match texel {
-            [r, g, b, a] => Some(Vec4::new(
-                f32::from(*r) / 255.0,
-                f32::from(*g) / 255.0,
-                f32::from(*b) / 255.0,
-                f32::from(*a) / 255.0,
-            )),
-            _other => None,
-        }
-    }
-}
-
 /// Where a readback lands: filled by the `ReadbackComplete` observer, drained by
 /// [`capture`].
 ///
@@ -649,7 +607,7 @@ pub(crate) fn capture(
         .copied()
         .unwrap_or(0.0)
         .max(CAPTURE_AT_SECS);
-    let pixels = frame_at(&mut app, &captured, at)?;
+    let frame = Frame::from_rgba8(frame_at(&mut app, &captured, at)?, FRAME, FRAME)?;
     check_logs(&logs, scene.id);
 
     // Project through the very camera that drew the frame, rather than
@@ -668,7 +626,7 @@ pub(crate) fn capture(
             )
         })
         .unwrap_or_default();
-    Some((Frame { pixels }, projected))
+    Some((frame, projected))
 }
 
 /// Render `scene` at two different `globals.time` values and read both frames back,
@@ -699,91 +657,27 @@ pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Fra
         );
         return None;
     }
-    let early = frame_at(&mut app, &captured, EARLY_SECS)?;
-    let later = frame_at(&mut app, &captured, BETWEEN_SECS)?;
+    let early = Frame::from_rgba8(frame_at(&mut app, &captured, EARLY_SECS)?, FRAME, FRAME)?;
+    let later = Frame::from_rgba8(frame_at(&mut app, &captured, BETWEEN_SECS)?, FRAME, FRAME)?;
     check_logs(&logs, scene.id);
-    Some((Frame { pixels: early }, Frame { pixels: later }))
+    Some((early, later))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, CAPTURE_AT_SECS, FRAME, Frame,
+        CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, CAPTURE_AT_SECS, FRAME,
         HALF_EMERGENT, MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL, SettleError,
         build_readback_app, capture, capture_over_time, check_logs, frame_at, gpu_lock,
-        i32_from_f32, matrix_cells, row_to_f32, settle,
+        matrix_cells, row_to_f32, settle,
+    };
+    use crate::pixel_oracle::{
+        CellVerdict, Marker, Silhouette, centroid, differing_pixels, dominant, read_cell,
     };
     use crate::render_scene::{SCENES, SceneCx};
     use crate::render_test::{TestError, capture_logs};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
-
-    /// How saturated a pixel must be to count as "one of the coloured
-    /// neighbours" rather than the grey backdrop or a specular highlight.
-    ///
-    /// The neighbours are deliberately near-primary (0.9 in one channel, 0.1 in
-    /// the others), so a real reflection of one is unambiguous. The threshold only
-    /// has to exclude grey — it is nowhere near having to *discriminate* between
-    /// the four, which the dominant-channel test below does.
-    const SATURATION: f32 = 0.06;
-
-    /// Which channel dominates a pixel, if any does by [`SATURATION`].
-    ///
-    /// Returns the neighbour's name, so a failure says "the red one" rather than
-    /// quoting a float triple nobody can picture.
-    fn dominant(pixel: Vec4) -> Option<&'static str> {
-        let (r, g, b) = (pixel.x, pixel.y, pixel.z);
-        // Yellow is red+green, so it must be tested before either of them.
-        if r > b + SATURATION && g > b + SATURATION && (r - g).abs() < SATURATION {
-            return Some("yellow");
-        }
-        if r > g + SATURATION && r > b + SATURATION {
-            return Some("red");
-        }
-        if g > r + SATURATION && g > b + SATURATION {
-            return Some("green");
-        }
-        if b > r + SATURATION && b > g + SATURATION {
-            return Some("blue");
-        }
-        None
-    }
-
-    /// The centroid, in pixels, of the pixels **inside the mirror's disc** whose
-    /// dominant channel is `colour`.
-    ///
-    /// Restricted to the disc, and that restriction is the whole check. The
-    /// coloured prims are *directly visible* in the frame as well as reflected, and
-    /// a centroid over the whole frame is dominated by the prim itself — which does
-    /// not move when the probe is wrong. The first version of this test did exactly
-    /// that and passed happily with R22i reintroduced: it was measuring the cubes,
-    /// not the mirror.
-    fn centroid_in_disc(frame: &Frame, centre: Vec2, radius: f32, colour: &str) -> Option<Vec2> {
-        let (mut sum, mut count) = (Vec2::ZERO, 0.0_f32);
-        for y in 0..FRAME {
-            for x in 0..FRAME {
-                let point = Vec2::new(
-                    f32::from(u16::try_from(x).unwrap_or(0)),
-                    f32::from(u16::try_from(y).unwrap_or(0)),
-                );
-                let offset = Vec2::new(point.x - centre.x, point.y - centre.y);
-                if offset.length() > radius {
-                    continue;
-                }
-                let Some(pixel) = frame.pixel(x, y) else {
-                    continue;
-                };
-                if dominant(pixel) == Some(colour) {
-                    sum = Vec2::new(sum.x + point.x, sum.y + point.y);
-                    count += 1.0;
-                }
-            }
-        }
-        if count < 4.0 {
-            return None;
-        }
-        Some(Vec2::new(sum.x / count, sum.y / count))
-    }
 
     /// **Each neighbour's reflection lands on the mirror's own side of it.**
     ///
@@ -836,11 +730,10 @@ mod tests {
         // mirror sphere the world behind reflects into the **limb** — a
         // grazing-angle sliver a few pixels wide, which is a flake waiting to
         // happen rather than a check.
-        let found: Vec<(&str, Vec2)> = ["red", "green", "yellow"]
+        let disc = Silhouette { centre, radius };
+        let found: Vec<(Marker, Vec2)> = [Marker::Red, Marker::Green, Marker::Yellow]
             .into_iter()
-            .filter_map(|colour| {
-                centroid_in_disc(&frame, centre, radius, colour).map(|at| (colour, at))
-            })
+            .filter_map(|marker| centroid(&frame, disc, marker).map(|at| (marker, at)))
             .collect();
         assert_eq!(
             found.len(),
@@ -848,15 +741,18 @@ mod tests {
             "the red, green and yellow neighbours must each appear *in the mirror*; found {:?} \
              — if one is missing the mirror is not reflecting it at all, and every comparison \
              below would pass by looking at nothing",
-            found.iter().map(|(colour, _)| *colour).collect::<Vec<_>>()
-        );
-        let at = |colour: &str| -> Vec2 {
             found
                 .iter()
-                .find(|(name, _)| *name == colour)
+                .map(|(marker, _)| marker.name())
+                .collect::<Vec<_>>()
+        );
+        let at = |marker: Marker| -> Vec2 {
+            found
+                .iter()
+                .find(|(name, _)| *name == marker)
                 .map_or(Vec2::ZERO, |(_, at)| *at)
         };
-        let (red, green, yellow) = (at("red"), at("green"), at("yellow"));
+        let (red, green, yellow) = (at(Marker::Red), at(Marker::Green), at(Marker::Yellow));
 
         // Red (`-X`) and green (`+X`) must come back on opposite sides of the ball.
         let horizontal = (red.x - green.x).abs();
@@ -912,21 +808,16 @@ mod tests {
             return Ok(());
         };
         // Deterministic rendering: identical times render identical bytes, so any
-        // difference is the animation. Require a substantial change (thousands of
-        // bytes) so a stray texel could never pass it — a real cell change repaints a
+        // difference is the animation. Require a substantial change (hundreds of
+        // pixels) so a stray texel could never pass it — a real cell change repaints a
         // large part of the face.
-        let differing = early
-            .pixels
-            .iter()
-            .zip(&later.pixels)
-            .filter(|(before, after)| before != after)
-            .count();
+        let differing = differing_pixels(&early, &later, None);
         assert!(
-            differing > 1000,
+            differing > 250,
             "the flipbook rendered near-identically at two different times ({differing} of {} \
-             bytes differ) — its GPU texture animation did not change the frame, so the shader \
+             pixels differ) — its GPU texture animation did not change the frame, so the shader \
              is not animating what is on screen (or the prim did not render at all)",
-            early.pixels.len(),
+            early.size().element_product(),
         );
         Ok(())
     }
@@ -950,7 +841,7 @@ mod tests {
             return Ok(());
         };
         assert!(
-            !frame.pixels.is_empty(),
+            !frame.bytes().is_empty(),
             "the legacy specular scene produced an empty frame — the specular-map render path faulted"
         );
         Ok(())
@@ -1071,7 +962,7 @@ mod tests {
                 let Some(pixel) = frame.pixel(x, y) else {
                     continue;
                 };
-                if pixel.x > 0.25 && pixel.x > pixel.y * 2.0 && pixel.x > pixel.z * 2.0 {
+                if dominant(pixel) == Some(Marker::Red) {
                     red = red.saturating_add(1);
                 }
             }
@@ -1147,7 +1038,7 @@ mod tests {
                 let Some(pixel) = frame.pixel(x, y) else {
                     continue;
                 };
-                if pixel.y > 0.25 && pixel.y > pixel.x * 2.0 && pixel.y > pixel.z * 2.0 {
+                if dominant(pixel) == Some(Marker::Green) {
                     green = green.saturating_add(1);
                 }
             }
@@ -1160,63 +1051,6 @@ mod tests {
              and the reference instead clips the same faces per fragment into both alpha pools",
         );
         Ok(())
-    }
-
-    /// How many of a sampled patch's pixels must carry a channel for the patch to
-    /// count as carrying it. A majority, so one stray pixel on a band's edge — the
-    /// projected point can land a pixel off at a grazing angle — decides nothing.
-    const PATCH_MAJORITY: u32 = 5;
-
-    /// The half-width of a sampled patch, in pixels: a 3×3 patch around the
-    /// projected point, of which [`PATCH_MAJORITY`] must agree.
-    const PATCH_RADIUS: i32 = 1;
-
-    /// How bright a channel must be for a patch to count as carrying it. Both the
-    /// prim and the backdrop are emissive and near-primary, so this only has to
-    /// clear the sea and the sky, which are dark and neutral.
-    const CHANNEL_PRESENT: f32 = 0.20;
-
-    /// What one cell of the translucency matrix came back as.
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum CellVerdict {
-        /// The prim's colour is there and the backdrop's is too: drawn, and
-        /// see-through.
-        Translucent,
-        /// The prim's colour is there and nothing behind it is: drawn, but
-        /// nothing shows through.
-        Solid,
-        /// Only what is behind the prim: the prim is not on screen here.
-        Missing,
-        /// Neither colour — the sea, the sky, or a point that missed the box.
-        Background,
-    }
-
-    /// Read one cell: sample a patch around `point` (given in Second Life metres)
-    /// and say what is there.
-    fn read_cell(frame: &Frame, projected: Option<Vec2>) -> Option<CellVerdict> {
-        let at = projected?;
-        let (mut prim, mut backdrop) = (0_u32, 0_u32);
-        for dy in -PATCH_RADIUS..=PATCH_RADIUS {
-            for dx in -PATCH_RADIUS..=PATCH_RADIUS {
-                let x = u32::try_from(i32_from_f32(at.x).saturating_add(dx)).ok()?;
-                let y = u32::try_from(i32_from_f32(at.y).saturating_add(dy)).ok()?;
-                let Some(pixel) = frame.pixel(x, y) else {
-                    continue;
-                };
-                if pixel.y > CHANNEL_PRESENT {
-                    prim = prim.saturating_add(1);
-                }
-                if pixel.x > CHANNEL_PRESENT {
-                    backdrop = backdrop.saturating_add(1);
-                }
-            }
-        }
-        Some(match (prim >= PATCH_MAJORITY, backdrop >= PATCH_MAJORITY) {
-            (true, true) => CellVerdict::Translucent,
-            (true, false) => CellVerdict::Solid,
-            (false, true) => CellVerdict::Missing,
-            (false, false) => CellVerdict::Background,
-        })
     }
 
     /// How steep the view to a sample must be — rise over run — before the matrix
@@ -1269,7 +1103,7 @@ mod tests {
         let mut report = Vec::new();
         let mut wrong = Vec::new();
         for (index, cell) in cells.iter().enumerate() {
-            let verdict = read_cell(&frame, projected.get(index));
+            let verdict = read_cell(&frame, projected.get(index), Marker::Green, Marker::Red);
             let shown = verdict.map_or_else(
                 || "off-frame".to_owned(),
                 |verdict| format!("{verdict:?}").to_lowercase(),
@@ -1345,7 +1179,8 @@ mod tests {
             .ok_or("a cap did not project onto the frame — the camera is not looking at them")?;
         // The same patch read the matrix uses, so one stray pixel decides nothing.
         let through = |at| {
-            read_cell(&frame, Some(at)).is_some_and(|verdict| verdict == CellVerdict::Translucent)
+            read_cell(&frame, Some(at), Marker::Green, Marker::Red)
+                .is_some_and(|verdict| verdict == CellVerdict::Translucent)
         };
         assert!(
             through(translucent),

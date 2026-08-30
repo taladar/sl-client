@@ -250,6 +250,8 @@ pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
 pub(crate) use sl_viewer_world_objects::render_priority;
 #[cfg(test)]
+mod pixel_oracle;
+#[cfg(test)]
 mod render_readback;
 pub(crate) use sl_viewer_world_scene::render_scene;
 #[cfg(test)]
