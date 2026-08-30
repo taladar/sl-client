@@ -4,7 +4,13 @@ title: render_readback texture-animation test is flaky under load
 topic: viewer
 status: bugs
 origin: observed while testing viewer-preferences-general-tab (2026-08-04)
+refs: [viewer-render-gpu-serialisation]
 ---
+
+Fix planned as [[viewer-render-gpu-serialisation]] (2026-08-30): a `gpu`
+nextest test-group so GPU apps never run concurrently, pipelined rendering
+off, and a `settle()` that waits for compiled pipelines and holds the
+clock for the captured frame instead of a fixed warm-up.
 
 Context: [context/viewer.md](../context/viewer.md).
 

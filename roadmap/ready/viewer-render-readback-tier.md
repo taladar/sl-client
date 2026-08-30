@@ -5,10 +5,18 @@ topic: viewer
 status: ready
 origin: the viewer-render-test-harness work (2026-07); the second half of that task's "automatic assertions", deferred once the geometry tier proved out
 blocked_by: [viewer-render-test-harness]
-refs: [viewer-render-test-harness, viewer-render-scene-coverage, viewer-screenshot-wait-for-quiescence]
+refs: [viewer-render-test-harness, viewer-render-scene-coverage, viewer-screenshot-wait-for-quiescence, viewer-render-context-matrix, viewer-render-pixel-oracle, viewer-render-gpu-serialisation]
 ---
 
-Context: [context/viewer.md](../context/viewer.md).
+Context: [context/viewer.md](../context/viewer.md),
+[context/testing.md](../context/testing.md).
+
+Split (2026-08-30): the mechanism hygiene is
+[[viewer-render-gpu-serialisation]], the oracle vocabulary is
+[[viewer-render-pixel-oracle]], and "every other pixel question" is the
+context matrix — [[viewer-render-context-matrix]] and its axis tasks.
+What remains here is the coverage list below as the reference for what
+those must answer.
 
 [[viewer-render-test-harness]] built the geometry tier: real converters, real
 scenes, in `cargo test`, no GPU. It answers "is this geometry valid" and it does

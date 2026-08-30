@@ -4,10 +4,22 @@ title: Screenshot mode should wait for the scene to load, not for a fixed delay
 topic: viewer
 status: ready
 origin: found while live-testing viewer-p34-3 on aditi
-refs: [viewer-p34-3]
+points: 3
+refs: [viewer-p34-3, viewer-fake-grid-render-harness, viewer-render-gpu-serialisation]
 ---
 
-Context: [context/viewer.md](../context/viewer.md).
+Context: [context/viewer.md](../context/viewer.md),
+[context/testing.md](../context/testing.md).
+
+Scope widened (2026-08-30): the predicate is a shared foundation of the
+test harness. Build `scene_is_quiet(world)` in
+`sl-viewer-world-view/src/quiescence.rs` (texture, mesh, wearable and
+animation managers' in-flight/deferred counts, pending patch rebuilds, the
+mesh upload backlog; held for 30 consecutive frames); the screenshot mode
+polls it with the delay demoted to a timeout, and the full-stack harness's
+`wait_quiet()` is the same call. The readback rig's `settle()` (pipelines,
+probes, held clock) is the no-grid counterpart and lives with
+[[viewer-render-gpu-serialisation]].
 
 The offline screenshot harness (`SL_VIEWER_SCREENSHOT_DIR`, `screenshot.rs`)
 fires after a fixed `SL_VIEWER_SCREENSHOT_DELAY` (default 25 s). That makes two

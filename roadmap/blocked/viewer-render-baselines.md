@@ -4,7 +4,7 @@ title: Render regression baselines — recorded geometry that may not drift by a
 topic: viewer
 status: blocked
 origin: the viewer-render-test-harness work (2026-07); the third tier that task identified but did not build
-blocked_by: [viewer-render-test-harness, viewer-ui-baseline-regressions]
+blocked_by: [viewer-render-test-harness, viewer-test-baseline-format]
 refs: [viewer-ui-baseline-regressions, viewer-render-test-harness]
 ---
 

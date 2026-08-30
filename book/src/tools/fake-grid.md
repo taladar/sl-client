@@ -290,9 +290,15 @@ region's `SlParcel` child); the arrival content (greeting, stock prim,
 pushed with `with_sim` arriving as `ObjectAdded` and a `KillObject` as
 `ObjectRemoved`; a CAPS `ParcelProperties` through the real long-poll
 renaming the agent parcel; and a clean `LoggedOut`. A second test runs
-two apps against two grids in one process. The tier is deliberately a
-smoke test — behaviour belongs to the headless interaction/world tiers,
-which stand their world up from `SlEvent` fixtures instead.
+two apps against two grids in one process. This file is the *plumbing*
+smoke: it proves the socket, retransmission and CAPS paths the headless
+tiers bypass. It is not the whole full-stack tier — anything whose failure
+needs grid **sequencing** (arrival ordering, CAPS fetch paths, teleport
+and crossing hand-overs, `KillObject` timing, multi-region offsets,
+in-flight asset leaks, NPC appearance delivery) belongs in the viewer's
+full-stack harness against this grid, read back as pixels; reaction logic
+that a fixture world can stand up from `SlEvent`s belongs in the
+interaction tier. See the *viewer test harness* chapter.
 
 ## Voice signalling
 

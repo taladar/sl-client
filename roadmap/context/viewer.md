@@ -86,8 +86,11 @@ then tick the box here. Add sub-points as you discover them.
   clippy-clean under the workspace restriction lints, and its tests (pure
   crates) or live check (viewer phases) pass.
 - Pure-crate phases (`sl-prim`, `sl-sculpt`) verify with
-  `cargo test -p <crate>`; viewer phases verify with a live run against the
-  local **OpenSim** grid.
+  `cargo test -p <crate>`. Viewer phases verify in the **lowest test tier
+  that can produce their failure** — geometry, UI layout, interaction,
+  render matrix, full stack against the fake grid — see
+  [context/testing.md](testing.md) (2026-08-30). A live run against the
+  local **OpenSim** grid is the exception, for what no tier reaches yet.
 - First target grid is local OpenSim (terrain + prims + a provisioned mesh, no
   MFA). Aditi / real SL work through the same `credentials.toml` path later.
 

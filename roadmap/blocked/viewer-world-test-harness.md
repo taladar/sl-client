@@ -2,13 +2,23 @@
 id: viewer-world-test-harness
 title: A headless fixture world — SlEvent in, SlCommand out
 topic: viewer
-status: ready
+status: blocked
 origin: user request (2026-07) — test in-world reactions without a server
 points: 8
-refs: [viewer-render-test-harness, viewer-ui-test-harness]
+refs: [viewer-render-test-harness, viewer-ui-test-harness, viewer-cpu-pick-resolver]
+blocked_by: [viewer-plugin-groups]
 ---
 
-Context: [context/viewer.md](../context/viewer.md).
+Context: [context/viewer.md](../context/viewer.md),
+[context/testing.md](../context/testing.md).
+
+Blocked on [[viewer-plugin-groups]] (2026-08-30): the "one real unknown"
+below — carving a reusable plugin subset out of `run()` — is that task, so
+this one starts from its `ViewerWorldPlugins`. World picks are a GPU
+render, so target classification also needs [[viewer-cpu-pick-resolver]].
+The `WorldTest` builder, `Fixture` enum and helpers are specified in
+`context/testing.md`'s plan; the fake-grid tier is *not* a smoke tier any
+more — a test lives in the lowest tier that can produce its failure.
 
 The in-world counterpart of `ui_test.rs`, built on the seam the
 architecture already provides: everything downstream of the network

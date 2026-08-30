@@ -2,9 +2,9 @@
 id: viewer-ui-baseline-regressions
 title: UI regression baselines — recorded geometry that may not drift by accident
 topic: viewer
-status: ready
+status: blocked
 origin: the viewer-ui-test-harness work (2026-07); the third check tier that task identified but did not build
-blocked_by: [viewer-ui-test-harness]
+blocked_by: [viewer-ui-test-harness, viewer-test-baseline-format]
 refs: [viewer-ui-radial-menu, viewer-render-test-harness, viewer-ui-skin-tokens]
 ---
 

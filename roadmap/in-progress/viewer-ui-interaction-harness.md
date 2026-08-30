@@ -2,13 +2,25 @@
 id: viewer-ui-interaction-harness
 title: Headless synthetic-pointer input for the UI test harness
 topic: viewer
-status: ready
+status: in-progress
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 8
 refs: [viewer-ui-test-harness]
 ---
 
-Context: [context/viewer.md](../context/viewer.md).
+Context: [context/viewer.md](../context/viewer.md),
+[context/testing.md](../context/testing.md).
+
+In progress (2026-08-30). Resolved by reading the Bevy 0.19 sources: winit
+never writes `PointerInput` — `bevy_picking`'s `mouse_pick_events` derives
+it from `WindowEvent` in `First` — so the driver writes the raw typed
+messages *plus* their `WindowEvent` wrappers and lets the picking input
+plugin derive the rest (one source of truth). A hit uses the previous
+frame's layout, so every pointer step is its own `update()` and a click is
+three updates. Double-click counting is wall-clock, so `click()` zeroes
+`PickingSettings.multi_click_interval` around its frames. `Activate`
+synthesis needs `UiWidgetsPlugins` + `InputDispatchPlugin`; `ui_picking`
+needs `UiStack` and visibility propagation (`bevy::camera::CameraPlugin`).
 
 The harness in `ui_test.rs` drives behaviour by `trigger(Activate)`, which
 deliberately skips hit-testing: it cannot say whether the button is *where
