@@ -2,7 +2,7 @@
 id: viewer-underwater-translucent-drawn-behind-surface
 title: A submerged camera sees translucent objects as if beyond the water surface
 topic: viewer
-status: bugs
+status: done
 origin: user report while verifying viewer-transparency-all-faces-skips-top (2026-08-30)
 refs: [viewer-transparency-all-faces-skips-top, viewer-underwater-name-tags-not-drawn]
 ---
@@ -53,6 +53,27 @@ so `waterSign` / `WATER_WATERPLANE` make the pre-water pool draw whatever is on
 the **far side of the water plane from the camera**. `LLPipeline::updateCull`
 flips its cull plane the same way (`pipeline.cpp:2627`, *"camera is below water,
 cull above water"*).
+
+## Fixed (2026-08-30), live-verified
+
+`classify_bucket` now takes the eye's side of the surface and picks the
+pre-water bucket by *far side of the water plane from the eye*, inverting the
+test when submerged — the port of `water_sign *= -1`. The buckets are renamed
+`PRE_WATER_BUCKET` / `POST_WATER_BUCKET`, since below/above was only ever their
+above-water meaning, and `sort_transparent_by_water` resolves each view's eye
+height from its `ExtractedView` (the main camera can be submerged while a
+reflection probe's capture camera is not).
+
+Verified on the local grid: a submerged camera now draws the translucent cube in
+front of the sea instead of behind it. Guarded by
+`a_submerged_eye_swaps_the_sides`,
+`a_dry_eye_buckets_what_is_under_the_surface_pre_water` and
+`the_eye_counts_as_submerged_at_the_surface`.
+
+Also added, since it is what isolated this: `SL_VIEWER_DISABLE_PRE_WATER_PASS=1`
+records no pre-water split at all, so an artifact caused by the split can be
+told from one in the drawn item itself (the sibling of
+`SL_VIEWER_DISABLE_UNDERWATER_FOG`).
 
 ## The fix
 

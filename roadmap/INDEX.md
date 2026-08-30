@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 65 |
-| done | 918 |
+| bugs | 64 |
+| done | 919 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1498** |
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (65)
+## bugs (64)
 
 ### viewer
 
@@ -1311,12 +1311,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)
-- [`viewer-underwater-translucent-drawn-behind-surface`](bugs/viewer-underwater-translucent-drawn-behind-surface.md)
-  — A submerged camera sees translucent objects as if beyond the water surface
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (918)
+## done (919)
 
 ### protocol
 
@@ -2675,6 +2673,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Background flickers behind the underwater fog while walking underwater
 - [`viewer-underwater-name-tags-not-drawn`](done/viewer-underwater-name-tags-not-drawn.md)
   — Name tags are not drawn at all while submerged
+- [`viewer-underwater-translucent-drawn-behind-surface`](done/viewer-underwater-translucent-drawn-behind-surface.md)
+  — A submerged camera sees translucent objects as if beyond the water surface
 - [`viewer-url-linkification`](done/viewer-url-linkification.md) — URLs in chat
   & other text contexts (blocked by `viewer-ui-text-foundation` (done))
 - [`viewer-volume-panel`](done/viewer-volume-panel.md) — Volume panel (master +
