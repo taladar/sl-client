@@ -12,9 +12,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 295 |
+| ready | 294 |
 | blocked | 81 |
-| in-progress | 20 |
+| in-progress | 21 |
 | bugs | 64 |
 | done | 929 |
 | deferred | 24 |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (295)
+## ready (294)
 
 ### protocol
 
@@ -913,8 +913,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-determinism`](ready/test-fake-grid-determinism.md) — An
-  injectable clock and seeded ids for sl-fake-grid
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1168,7 +1166,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (20)
+## in-progress (21)
 
 ### viewer
 
@@ -1221,6 +1219,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
+
+### test
+
+- [`test-fake-grid-determinism`](in-progress/test-fake-grid-determinism.md) — An
+  injectable clock and seeded ids for sl-fake-grid
 
 ## bugs (64)
 

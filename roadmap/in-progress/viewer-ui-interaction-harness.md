@@ -20,7 +20,21 @@ frame's layout, so every pointer step is its own `update()` and a click is
 three updates. Double-click counting is wall-clock, so `click()` zeroes
 `PickingSettings.multi_click_interval` around its frames. `Activate`
 synthesis needs `UiWidgetsPlugins` + `InputDispatchPlugin`; `ui_picking`
-needs `UiStack` and visibility propagation (`bevy::camera::CameraPlugin`).
+needs `UiStack` and visibility propagation (`VisibilityPlugin` — see the
+landed note below; the earlier `CameraPlugin` guess was wrong).
+
+Landed (2026-08-31): `sl-viewer-testkit/src/interact.rs` — the pointer
+and keyboard driver (hover/click/double-click/drag/scroll/keys), the
+generic `Recorded<M>`/`record`/`drain` recorder, and four teeth tests;
+fork pins moved for `pub ui_stack_system`/`UiStack`. Corrections the
+build forced: visibility propagation is `bevy_camera`'s
+`VisibilityPlugin`, which also needs empty `Assets<Mesh>` and
+`Assets<SkinnedMeshInverseBindposes>` stores for its bounds systems (an
+absent resource fails system-param validation); the window must come
+from the real `WindowPlugin` — its message registrations (`Ime`, …) are
+read by the widget systems, and a hand-spawned window misses them.
+Remaining: the pie `commit_select` port as the reference consumer, the
+keyboard/focus teeth, and the blocked interaction-test consumers.
 
 The harness in `ui_test.rs` drives behaviour by `trigger(Activate)`, which
 deliberately skips hit-testing: it cannot say whether the button is *where
