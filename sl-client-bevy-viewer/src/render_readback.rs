@@ -62,8 +62,24 @@ use sl_client_bevy::{
 };
 
 use crate::render_scene::{
-    RenderScene, SceneAssets, SceneCx, SceneRuntimePlugin, scene_root, scene_root_transform,
+    RenderScene, STRADDLING_EMERGENT, STRADDLING_WATERLINE, SceneAssets, SceneCx,
+    SceneRuntimePlugin, scene_root, scene_root_transform,
 };
+
+/// Half the straddling prim's emergent height — the middle of the band the water
+/// scene's check samples. A constant rather than a division at the call site: the
+/// workspace's `arithmetic_side_effects` lint bans the operator there.
+const HALF_EMERGENT: f32 = STRADDLING_EMERGENT / 2.0;
+
+/// A frame row index as a float, to compare against a projected screen `y`.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_precision_loss,
+    reason = "the frame is FRAME (256) rows, so a row index converts to f32 exactly"
+)]
+const fn row_to_f32(row: u32) -> f32 {
+    row as f32
+}
 
 /// The rendered frame's size, in pixels.
 ///
@@ -200,6 +216,12 @@ fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
             StarMaterialPlugin,
             WaterMaterialPlugin,
         ))
+        // The viewer's water-relative transparency ordering, because a water scene
+        // renders a *different picture* without it: the sea is opaque and writes
+        // depth, so which translucent content is drawn before it and which after is
+        // decided here, not by Bevy's plain back-to-front order. Without this plugin
+        // the readback tier could not see a water-ordering bug at all.
+        .add_plugins(crate::transparency::TransparencyOrderPlugin)
         .add_plugins(SceneRuntimePlugin)
         .insert_resource(DirectionalLightShadowMap::default())
         // No flat ambient, stated rather than inherited from Bevy's default. Every
@@ -359,7 +381,10 @@ pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Fra
 
 #[cfg(test)]
 mod tests {
-    use super::{FRAME, Frame, WARMUP_FRAMES, build_readback_app, capture, capture_over_time};
+    use super::{
+        FRAME, Frame, HALF_EMERGENT, STRADDLING_WATERLINE, WARMUP_FRAMES, build_readback_app,
+        capture, capture_over_time, row_to_f32,
+    };
     use crate::render_scene::{SCENES, SceneCx};
     use crate::render_test::TestError;
     use bevy::prelude::*;
@@ -727,6 +752,83 @@ mod tests {
             "no part of the sea shows the red slab lying on the sea bed ({red} pixels \
              are red), so the water surface is not sampling the screen copy behind it \
              — an opaque sea with no refraction hides whatever is under it",
+        );
+        Ok(())
+    }
+
+    /// **A translucent prim that stands out of the water is still drawn.**
+    ///
+    /// `crate::transparency` sorts each translucent item into the pre-water bucket
+    /// or the post-water one by **its centre height**, and the sea is drawn between
+    /// them, opaque and writing depth. A prim centred *on* the waterline has
+    /// fragments on both sides but only one centre, so all of it goes in one bucket
+    /// — and when that is the pre-water one, the half standing above the surface is
+    /// drawn before the sea, writes no depth of its own (it is alpha-blended), and
+    /// the sea behind it then paints straight over it. It does not merely sort
+    /// wrong: it vanishes.
+    ///
+    /// The reference has no such case, because it draws the same faces in **both**
+    /// alpha pools, each clipped per fragment against the water plane
+    /// (`lldrawpoolalpha.cpp`'s `waterSign` / `WATER_WATERPLANE`).
+    ///
+    /// The scene's prim is the only green thing in it, so this asks whether any
+    /// pixel *above the waterline* is dominated by green — a question with a right
+    /// answer that no driver difference changes. The band is located by projecting
+    /// the prim's emergent half through the very camera that drew the frame, rather
+    /// than by assuming where it landed.
+    #[test]
+    fn a_translucent_prim_standing_out_of_the_water_is_drawn() -> Result<(), TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "water-straddling-translucent-prim")
+            .ok_or("the `water-straddling-translucent-prim` scene is not registered")?;
+        // The waterline at the prim, and the middle of its emergent half — in Bevy's
+        // frame (Y up), which is what `capture` projects.
+        let Some((frame, projected)) = capture(
+            scene,
+            SceneCx::new(),
+            &[
+                Vec3::new(0.0, STRADDLING_WATERLINE, 0.0),
+                Vec3::new(0.0, STRADDLING_WATERLINE + HALF_EMERGENT, 0.0),
+            ],
+        ) else {
+            warn!("skipping: no frame came back, so this machine has no usable GPU adapter");
+            return Ok(());
+        };
+        let (waterline, emergent) = projected
+            .get(0)
+            .zip(projected.get(1))
+            .ok_or("the prim did not project onto the frame — the camera is not looking at it")?;
+        // Screen `y` grows downward, so the emergent half is *above* the waterline
+        // on screen: everything between the two rows is the band under test.
+        assert!(
+            emergent.y < waterline.y,
+            "the emergent half projected below the waterline ({emergent:?} vs {waterline:?}) — \
+             the scene's camera is not above the surface",
+        );
+        let top = emergent.y.max(0.0);
+        let bottom = waterline.y.min(row_to_f32(FRAME));
+        let mut green = 0_u32;
+        for y in 0..FRAME {
+            let row = row_to_f32(y);
+            if row < top || row > bottom {
+                continue;
+            }
+            for x in 0..FRAME {
+                let Some(pixel) = frame.pixel(x, y) else {
+                    continue;
+                };
+                if pixel.y > 0.25 && pixel.y > pixel.x * 2.0 && pixel.y > pixel.z * 2.0 {
+                    green = green.saturating_add(1);
+                }
+            }
+        }
+        assert!(
+            green > 100,
+            "the half of the translucent prim that stands above the water is not on screen \
+             ({green} green pixels between rows {top} and {bottom}), so the depth-writing sea \
+             painted over it — a prim straddling the surface is bucketed whole by its centre, \
+             and the reference instead clips the same faces per fragment into both alpha pools",
         );
         Ok(())
     }

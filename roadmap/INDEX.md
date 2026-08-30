@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 97 |
-| ready | 297 |
+| ideas | 96 |
+| ready | 298 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 64 |
+| bugs | 66 |
 | done | 919 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1498** |
+| **total** | **1500** |
 
-## ideas (97)
+## ideas (96)
 
 ### viewer
 
@@ -164,8 +164,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Linearize the star field like the sky / clouds
 - [`viewer-status-bar-toggle-options`](ideas/viewer-status-bar-toggle-options.md)
   — Status/menu-bar display toggles
-- [`viewer-straddling-transparency-oit`](ideas/viewer-straddling-transparency-oit.md)
-  — Per-pixel ordering for translucent objects straddling the waterline
 - [`viewer-terrain-ambient-probe-classic-fidelity`](ideas/viewer-terrain-ambient-probe-classic-fidelity.md)
   — Terrain lighting — add the reference probe term + classic-mode blend
 - [`viewer-udp-connection-port`](ideas/viewer-udp-connection-port.md) — Fixed
@@ -225,7 +223,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (297)
+## ready (298)
 
 ### protocol
 
@@ -881,6 +879,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-voice-audio`](ready/viewer-voice-audio.md) — Voice audio transport
   (WebRTC — no Vivox) (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-audio-backend` (done))
+- [`viewer-water-transparency-scene-matrix`](ready/viewer-water-transparency-scene-matrix.md)
+  — Walk the translucent-vs-water combinations exhaustively in the readback tier
 - [`viewer-wearable-favorites`](ready/viewer-wearable-favorites.md) — Wearable
   favorites floater (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-ui-virtualized-list` (done))
@@ -1165,7 +1165,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (64)
+## bugs (66)
 
 ### viewer
 
@@ -1303,11 +1303,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
+- [`viewer-straddling-transparency-oit`](bugs/viewer-straddling-transparency-oit.md)
+  — A translucent prim straddling the waterline loses its emergent half
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
   — Upstream bug — padding/border on a bevy_ui Text node resolves the wrap width
   wrongly
+- [`viewer-translucent-top-face-reads-opaque`](bugs/viewer-translucent-top-face-reads-opaque.md)
+  — A translucent prim's top face reads as opaque from above
 - [`viewer-tree-species-all-rendered-as-trees`](bugs/viewer-tree-species-all-rendered-as-trees.md)
   — All SL trees render as one large evergreen — species read from `state`
   instead of the `Data` genome (fix landed, needs live verify)

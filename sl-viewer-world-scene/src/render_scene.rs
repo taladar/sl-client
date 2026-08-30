@@ -670,6 +670,19 @@ pub const SCENES: &[RenderScene] = &[
         spawn: water_surface,
     },
     RenderScene {
+        id: "water-straddling-translucent-prim",
+        what: "a translucent prim centred on the waterline: the case the per-object water bucket \
+               cannot express, where the half on the wrong side of the surface is painted over \
+               by the depth-writing sea instead of merely misordered",
+        timeline: Timeline::STATIC,
+        lighting: SceneLighting::Own,
+        camera: SceneCamera {
+            position: STRADDLING_CAMERA,
+            look_at: STRADDLING_LOOK_AT,
+        },
+        spawn: water_straddling_translucent_prim,
+    },
+    RenderScene {
         id: "tree",
         what: "generated Linden tree geometry, from the species table rather than any asset. \
                NOTE: untextured — a species' bark/leaf texture is a grid asset UUID, so there is \
@@ -3239,45 +3252,7 @@ fn water_surface(
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    // The real upload the fetched map goes through — linear, and repeating. See
-    // `water_wavelet_texture` for why the scene generates a map at all rather than
-    // wearing the viewer's flat placeholder.
-    let normal = assets
-        .images
-        .add(water_normal_image(&water_wavelet_texture()));
-    // Midday's sun, so the sea is lit from where the sky scenes put it.
-    let resolved = resolve_sky(&sky_settings_from(&MIDDAY));
-    let material = assets.water_materials.add(WaterMaterial {
-        params: water_params(
-            &WaterSettings::legacy_default("Default"),
-            resolved.light_dir,
-            // The sky's own horizon colour would need the atmosphere resolved per
-            // pixel; `drive_water` uses a sampled reflection tint, and this is its
-            // pre-environment seed.
-            Vec3::new(0.5, 0.6, 0.8),
-            Vec3::from_array(resolved.diffuse),
-            // Not submerged: `WATER_CAMERA` sits above the plane, which is what the
-            // scene is for — the sea seen from above, where the fog fallback that
-            // density feeds is what colours it.
-            false,
-        ),
-        // Both slots share the map, as `apply_water_textures` does until a day
-        // cycle drives a separate next frame and a blend between them.
-        normal_map: normal.clone(),
-        normal_map_next: normal,
-        // No water-exclusion mask in this offline scene: an all-white 1×1 placeholder
-        // means "water everywhere" (the live viewer wires the real mask via a camera).
-        exclusion_mask: assets.images.add(white_mask_image()),
-    });
-    // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
-    let space = commands
-        .spawn((
-            bevy_space(),
-            Visibility::default(),
-            Name::new("water-surface/sea"),
-            ChildOf(root),
-        ))
-        .id();
+    let space = spawn_sea("water-surface", root, commands, assets);
     // A brightly coloured slab on the sea bed, which is the only thing in the scene
     // that can prove the sea is **refracting** rather than merely tinted: the water
     // surface is opaque (`WaterMaterial::reads_view_transmission_texture`), so the
@@ -3303,6 +3278,172 @@ fn water_surface(
         Name::new("water-surface/sea-bed-marker"),
         ChildOf(space),
     ));
+}
+
+/// Where the [`water_straddling_translucent_prim`] scene's camera stands, in
+/// Second Life metres.
+///
+/// **Well above the surface, looking down**, and that is not a framing preference:
+/// the failure needs open sea *behind* the prim's emergent half. The horizon sits
+/// at eye level, so a camera level with the prim's top puts that half against the
+/// **sky** — where nothing is drawn after it and it survives however it was
+/// bucketed. Raising the eye lifts the horizon above the prim and fills the
+/// background with the sea that is drawn over it.
+const STRADDLING_CAMERA: Vec3 = Vec3::new(0.0, -11.0, DEFAULT_WATER_HEIGHT + 6.0);
+
+/// What the [`water_straddling_translucent_prim`] scene's camera aims at: the
+/// middle of the prim's emergent band, so the band fills the frame's centre.
+const STRADDLING_LOOK_AT: Vec3 = Vec3::new(0.0, 0.0, DEFAULT_WATER_HEIGHT + 0.75);
+
+/// The colour of the straddling prim in the `water-straddling-translucent-prim`
+/// scene: strongly green, and nothing else in that scene is — so a green pixel is
+/// that prim and cannot be the sea, the sky or the sun. Read by the readback tier
+/// (`render_readback` in the viewer crate).
+pub(crate) const STRADDLING_MARKER: Color = Color::srgb(0.05, 0.9, 0.05);
+
+/// The height of the water surface in the `water-straddling-translucent-prim`
+/// scene, in metres. Public because the readback tier locates the band it samples
+/// by projecting this height through the scene's camera, rather than assuming
+/// where on the frame the waterline landed.
+pub const STRADDLING_WATERLINE: f32 = DEFAULT_WATER_HEIGHT;
+
+/// Half the straddling prim's height, in metres: the tessellated box is the unit
+/// cube, so this is half its scale.
+const STRADDLING_HALF_HEIGHT: f32 = 2.0;
+
+/// How far the straddling prim's **centre** sits below the water surface, in
+/// metres.
+///
+/// Not zero, and that is the whole fixture. `classify_bucket` reads the centre of
+/// each *face*, and a box centred exactly on the waterline has its four side faces
+/// centred exactly on it too — which lands them on the eye's own side and has them
+/// drawn after the sea, so the scene would render correctly and prove nothing. A
+/// prim resting mostly submerged, as one afloat actually does, puts those centres
+/// below the surface and into the pre-water bucket while their upper halves still
+/// stand above it. That is the case in the wild (`viewer-straddling-transparency`).
+const STRADDLING_SINK: f32 = 0.5;
+
+/// How far the straddling prim's top stands above the water surface, in metres —
+/// the height of the band the readback tier samples. Public for the same reason as
+/// [`STRADDLING_WATERLINE`].
+pub const STRADDLING_EMERGENT: f32 = STRADDLING_HALF_HEIGHT - STRADDLING_SINK;
+
+/// [`SCENES`] `water-straddling-translucent-prim`: a **translucent** prim centred
+/// on the waterline, half of it submerged and half standing above the surface.
+///
+/// The case the per-object water bucket cannot express. `crate::transparency`
+/// sorts each translucent item into the pre-water bucket or the post-water one by
+/// **its centre height**, and the sea is drawn between them, opaque and writing
+/// depth. A prim that straddles the surface has fragments on both sides but only
+/// one centre, so the whole of it goes in one bucket — and the half that lands on
+/// the wrong side is not merely misordered. A translucent surface writes no depth,
+/// so an emergent half drawn in the *pre-water* bucket is painted over by the sea
+/// behind it and disappears outright.
+///
+/// The reference does not have that problem: it draws the same faces in both
+/// alpha pools, each clipped per fragment against the water plane
+/// (`lldrawpoolalpha.cpp`'s `waterSign` / `WATER_WATERPLANE`), so every fragment
+/// lands in the right pool whatever its object's centre is.
+///
+/// The prim is emissive so the scene's own lighting cannot be what decides whether
+/// it is visible, and green because nothing else here is.
+fn water_straddling_translucent_prim(
+    cx: SceneCx,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) {
+    let _space = spawn_sea("water-straddling-translucent-prim", root, commands, assets);
+    // Resting mostly submerged, as a prim afloat actually does: its centre — and so
+    // the centre of each of its four side faces — is below the surface, while their
+    // upper halves stand above it. See `STRADDLING_SINK`.
+    let object = commands
+        .spawn((
+            Transform::from_xyz(0.0, 0.0, DEFAULT_WATER_HEIGHT - STRADDLING_SINK)
+                .with_scale(Vec3::splat(STRADDLING_HALF_HEIGHT + STRADDLING_HALF_HEIGHT)),
+            Visibility::default(),
+            Name::new("water-straddling-translucent-prim/prim"),
+            ChildOf(root),
+        ))
+        .id();
+    let prim = tessellate(&base_shape(), cx.lod);
+    for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
+        let _face = spawn_geometry(
+            format!("water-straddling-translucent-prim/prim/face-{index}"),
+            mesh,
+            StandardMaterial {
+                // Half transparent, which is what puts it in the phase this scene
+                // is about at all.
+                base_color: STRADDLING_MARKER.with_alpha(0.5),
+                // Written out rather than scaled: the workspace's
+                // `arithmetic_side_effects` lint bans the multiply.
+                emissive: LinearRgba::rgb(0.05, 2.0, 0.05),
+                alpha_mode: AlphaMode::Blend,
+                perceptual_roughness: 0.9,
+                ..default()
+            },
+            // Identity: the placement lives on the object entity, as the viewer
+            // puts it there.
+            Transform::IDENTITY,
+            object,
+            commands,
+            assets,
+        );
+    }
+}
+
+/// Spawn the sea — the endless ocean plus a region plane a hair above it — under
+/// `root`, and return the Bevy-frame holder they hang from so a caller can add
+/// more to it.
+///
+/// Shared by every water scene, so a second one cannot drift from the first in the
+/// parameters the surface is lit by: the sea is not a backdrop in these scenes, it
+/// is the thing under test, and two scenes disagreeing about its fresnel or its
+/// wave normals would be two different seas wearing one name.
+fn spawn_sea(
+    scene: &str,
+    root: Entity,
+    commands: &mut Commands,
+    assets: &mut SceneAssets<'_>,
+) -> Entity {
+    // The real upload the fetched map goes through — linear, and repeating. See
+    // `water_wavelet_texture` for why the scene generates a map at all rather than
+    // wearing the viewer's flat placeholder.
+    let normal = assets
+        .images
+        .add(water_normal_image(&water_wavelet_texture()));
+    // Midday's sun, so the sea is lit from where the sky scenes put it.
+    let resolved = resolve_sky(&sky_settings_from(&MIDDAY));
+    let material = assets.water_materials.add(WaterMaterial {
+        params: water_params(
+            &WaterSettings::legacy_default("Default"),
+            resolved.light_dir,
+            // The sky's own horizon colour would need the atmosphere resolved per
+            // pixel; `drive_water` uses a sampled reflection tint, and this is its
+            // pre-environment seed.
+            Vec3::new(0.5, 0.6, 0.8),
+            Vec3::from_array(resolved.diffuse),
+            // Not submerged: both water scenes look at the sea from above it, where
+            // the fog fallback that density feeds is what colours it.
+            false,
+        ),
+        // Both slots share the map, as `apply_water_textures` does until a day
+        // cycle drives a separate next frame and a blend between them.
+        normal_map: normal.clone(),
+        normal_map_next: normal,
+        // No water-exclusion mask in this offline scene: an all-white 1×1 placeholder
+        // means "water everywhere" (the live viewer wires the real mask via a camera).
+        exclusion_mask: assets.images.add(white_mask_image()),
+    });
+    // See `bevy_space`: `crate::water` builds in Bevy's frame at the world root.
+    let space = commands
+        .spawn((
+            bevy_space(),
+            Visibility::default(),
+            Name::new(format!("{scene}/sea")),
+            ChildOf(root),
+        ))
+        .id();
     for (name, extent, height) in [
         ("ocean", 20_000.0_f32, DEFAULT_WATER_HEIGHT),
         // The region plane, a hair above the ocean — `crate::water`'s
@@ -3319,7 +3460,7 @@ fn water_surface(
             Mesh3d(mesh),
             MeshMaterial3d(material.clone()),
             Transform::from_xyz(0.0, height, 0.0),
-            Name::new(format!("water-surface/{name}")),
+            Name::new(format!("{scene}/{name}")),
             ChildOf(space),
             // The water never casts shadows, as the viewer has it.
             NotShadowCaster,
@@ -3330,4 +3471,5 @@ fn water_surface(
             },
         ));
     }
+    space
 }

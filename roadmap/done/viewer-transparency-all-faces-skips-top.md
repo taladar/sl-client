@@ -13,11 +13,13 @@ Editing **Transparency** on a cube with **no individual face selected** — whic
 means "apply to every face" — was reported to change the other faces but leave
 the **top** one unchanged.
 
-**Outcome (2026-08-30): does not reproduce; the whole chain is correct at every
-face, now pinned by tests.** A live run against the local OpenSim (rez a box,
-select it whole, Transparency = 50, Enter) turned *all six* faces translucent,
-and the per-face diagnostics show the edit intact at each of the three places it
-could have come apart:
+**Outcome (2026-08-30): the *edit* does not skip the top face — the whole chain
+is correct at every face, now pinned by tests.** What remains is how that face
+is **drawn**, which is a different question and is split out as
+[[viewer-translucent-top-face-reads-opaque]]. A live run against the local
+OpenSim (rez a box, select it whole, Transparency = 50, Enter) turned *all six*
+faces translucent, and the per-face diagnostics show the edit intact at each of
+the three places it could have come apart:
 
 - the commit found **6 rendered faces** and expanded "every face" to
   `[0, 1, 2, 3, 4, 5]` — face 0, the top cap, included;
