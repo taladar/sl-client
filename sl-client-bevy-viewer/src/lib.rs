@@ -252,6 +252,8 @@ pub(crate) use sl_viewer_world_objects::render_priority;
 #[cfg(test)]
 mod pixel_oracle;
 #[cfg(test)]
+mod render_matrix;
+#[cfg(test)]
 mod render_readback;
 mod viewer_plugins;
 pub(crate) use sl_viewer_world_scene::render_overrides;

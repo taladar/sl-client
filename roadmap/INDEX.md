@@ -11,17 +11,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 | Status | Tasks |
 | --- | --- |
-| ideas | 96 |
-| ready | 297 |
-| blocked | 67 |
-| in-progress | 17 |
-| bugs | 65 |
-| done | 922 |
+| ideas | 98 |
+| ready | 295 |
+| blocked | 81 |
+| in-progress | 20 |
+| bugs | 64 |
+| done | 929 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1501** |
+| **total** | **1524** |
 
-## ideas (96)
+## ideas (98)
 
 ### viewer
 
@@ -179,6 +179,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-window-attention-flash`](ideas/viewer-window-attention-flash.md) —
   Window urgency flash + in-UI unread-flash cues
 
+### test
+
+- [`test-firestorm-fake-grid-crosscheck`](ideas/test-firestorm-fake-grid-crosscheck.md)
+  — Point Firestorm at the fake grid to calibrate oracles (never to diff images)
+- [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
+  Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
+
 ### server
 
 - [`server-account-service`](ideas/server-account-service.md) — Accounts and
@@ -223,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (297)
+## ready (295)
 
 ### protocol
 
@@ -439,6 +446,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-conversation-pane-toolbar`](ready/viewer-conversation-pane-toolbar.md)
   — The conversation pane's toolbar, including the participant list
+- [`viewer-cpu-pick-resolver`](ready/viewer-cpu-pick-resolver.md) — A CPU pick
+  resolver — the ID-buffer render's headless double (blocked by
+  `viewer-plugin-groups` (done))
 - [`viewer-crowd-harness-copies-render-grey`](ready/viewer-crowd-harness-copies-render-grey.md)
   — Crowd harness copies render grey (snapshot the template before its bake)
 - [`viewer-debug-consoles`](ready/viewer-debug-consoles.md) — Debug consoles —
@@ -796,8 +806,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
-- [`viewer-screenshot-wait-for-quiescence`](ready/viewer-screenshot-wait-for-quiescence.md)
-  — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
   warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-script-limits`](ready/viewer-script-limits.md) — Script limits —
@@ -852,14 +860,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   VRAM budget & global discard bias
 - [`viewer-toolbar-customization`](ready/viewer-toolbar-customization.md) —
   Toolbar customization (toybox) (blocked by `viewer-ui-widget-scaffold` (done))
-- [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
-  UI regression baselines — recorded geometry that may not drift by accident
-  (blocked by `viewer-ui-test-harness` (done))
 - [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
   — Color picker — SV square, hue strip, palette & eyedropper (blocked by
   `viewer-ui-color-picker` (done))
-- [`viewer-ui-interaction-harness`](ready/viewer-ui-interaction-harness.md) —
-  Headless synthetic-pointer input for the UI test harness
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -889,7 +892,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
   `viewer-teleport-flow-progress` (done))
 - [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
-  fixture world — SlEvent in, SlCommand out
+  fixture world — SlEvent in, SlCommand out (blocked by `viewer-plugin-groups`
+  (done))
 
 ### idiomatic
 
@@ -907,10 +911,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
-- [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
-  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-fake-grid-determinism`](ready/test-fake-grid-determinism.md) — An
+  injectable clock and seeded ids for sl-fake-grid
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -920,7 +924,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (67)
+## blocked (81)
 
 ### viewer
 
@@ -930,6 +934,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
   — The build floater — reflect, edit, commit (blocked by
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
+- [`viewer-camera-input-interaction-tests`](blocked/viewer-camera-input-interaction-tests.md)
+  — Camera, movement, mouselook and HUD picking under a synthetic pointer
+  (blocked by `viewer-world-test-harness`, `viewer-cpu-pick-resolver`)
 - [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness`)
@@ -940,6 +947,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
   — My Environments library (blocked by `viewer-environment-fixed-editor`)
+- [`viewer-fake-grid-render-catalogue`](blocked/viewer-fake-grid-render-catalogue.md)
+  — The full-stack test catalogue — NPCs, attachments, teleport, crossing,
+  parcels, environment (blocked by `test-fake-grid-neighbours-crossing`)
+- [`viewer-fake-grid-render-harness`](blocked/viewer-fake-grid-render-harness.md)
+  — ViewerHarness — the real viewer against the fake grid, read back as pixels
+  (blocked by `test-fake-grid-terrain-layerdata`,
+  `test-fake-grid-render-fixtures`, `viewer-plugin-groups` (done),
+  `viewer-screenshot-wait-for-quiescence` (done), `viewer-render-pixel-oracle`
+  (done))
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness`, `viewer-floater-registry`)
@@ -1013,7 +1029,17 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-baselines`](blocked/viewer-render-baselines.md) — Render
   regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-render-test-harness` (done),
-  `viewer-ui-baseline-regressions`)
+  `viewer-test-baseline-format`)
+- [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
+  — HUD screen axis and the name-tag, particle and avatar actors (blocked by
+  `viewer-render-context-matrix`)
+- [`viewer-render-matrix-pairwise`](blocked/viewer-render-matrix-pairwise.md) —
+  The generated all-pairs sweep (opt-in) (blocked by
+  `viewer-render-toggle-axis`, `viewer-render-hud-and-actor-axes`)
+- [`viewer-render-toggle-axis`](blocked/viewer-render-toggle-axis.md) — The
+  toggle axis — every effect must differ where it should and nowhere else
+  (blocked by `viewer-render-context-matrix`, `viewer-render-overrides-resource`
+  (done))
 - [`viewer-rlv-debug-settings-commands`](blocked/viewer-rlv-debug-settings-commands.md)
   — RLV — @setdebug_*/@getdebug_* allowlist and @setrot (blocked by
   `viewer-rlv-restriction-state`)
@@ -1069,6 +1095,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-notecard-editor`, `viewer-lsl-editor-save-compile`)
 - [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
   — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
+- [`viewer-ui-baseline-regressions`](blocked/viewer-ui-baseline-regressions.md)
+  — UI regression baselines — recorded geometry that may not drift by accident
+  (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`)
 - [`viewer-ui-interaction-contracts`](blocked/viewer-ui-interaction-contracts.md)
   — An interaction contract per registered element, swept like the matrix
   (blocked by `viewer-ui-interaction-harness`)
@@ -1109,15 +1138,37 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-pie-menu-reactions`](blocked/viewer-world-pie-menu-reactions.md)
   — Right-click reactions per world target class (blocked by
   `viewer-world-test-harness`)
+- [`viewer-world-pie-target-tests`](blocked/viewer-world-pie-target-tests.md) —
+  Right-clicking each world target opens exactly its pie (blocked by
+  `viewer-world-test-harness`, `viewer-cpu-pick-resolver`)
 
 ### test
 
+- [`test-audit-fake-grid-conformance-grid`](blocked/test-audit-fake-grid-conformance-grid.md)
+  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline (blocked by
+  `test-fake-grid-determinism`)
+- [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
+  — Neighbour child agents and a scripted region crossing (blocked by
+  `test-fake-grid-npc-avatars`, `test-fake-grid-timeline`)
+- [`test-fake-grid-npc-avatars`](blocked/test-fake-grid-npc-avatars.md) — NPC
+  avatars with appearance, animations and attachments (blocked by
+  `test-fake-grid-render-fixtures`)
+- [`test-fake-grid-render-fixtures`](blocked/test-fake-grid-render-fixtures.md)
+  — Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles,
+  linksets (blocked by `test-fake-grid-terrain-layerdata`,
+  `test-shared-test-assets` (done))
+- [`test-fake-grid-terrain-layerdata`](blocked/test-fake-grid-terrain-layerdata.md)
+  — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
+  `test-fake-grid-determinism`)
+- [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
+  scenario timelines with markers (blocked by `test-fake-grid-determinism`,
+  `viewer-fake-grid-render-harness`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (17)
+## in-progress (20)
 
 ### viewer
 
@@ -1145,8 +1196,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-terrain`](in-progress/viewer-region-options-terrain.md)
   — Region / Estate floater — terrain tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-render-context-matrix`](in-progress/viewer-render-context-matrix.md)
+  — Render context matrix — subjects × eye, time of day, mirror, layering
+  (blocked by `viewer-render-pixel-oracle` (done), `viewer-plugin-groups`
+  (done), `viewer-render-gpu-serialisation` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
+- [`viewer-test-baseline-format`](in-progress/viewer-test-baseline-format.md) —
+  One baseline format for UI and render facts
+- [`viewer-ui-interaction-harness`](in-progress/viewer-ui-interaction-harness.md)
+  — Headless synthetic-pointer input for the UI test harness
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1163,7 +1222,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (65)
+## bugs (64)
 
 ### viewer
 
@@ -1296,8 +1355,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — A plain prim attachment reads "(worn)" in inventory but never appears on
 - [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
   — A second resident profile replaces the first instead of opening its own
-- [`viewer-render-readback-texture-anim-test-flaky`](bugs/viewer-render-readback-texture-anim-test-flaky.md)
-  — render_readback texture-animation test is flaky under load
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
@@ -1314,7 +1371,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (922)
+## done (929)
 
 ### protocol
 
@@ -2365,6 +2422,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Colliders for all prims — a shared avian spatial index
 - [`viewer-pillows-inside-out-geometry`](done/viewer-pillows-inside-out-geometry.md)
   — Pillows on the aditi test region render wrong — possibly inside out
+- [`viewer-plugin-groups`](done/viewer-plugin-groups.md) — One plugin-group
+  definition shared by the viewer, the readback rig and the headless harnesses
 - [`viewer-preferences-alerts-tab`](done/viewer-preferences-alerts-tab.md) —
   Preferences — alerts / popups tab (blocked by `viewer-preferences-floater`
   (done))
@@ -2488,6 +2547,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-region-options-debug` (done))
 - [`viewer-render-friends-only`](done/viewer-render-friends-only.md) — Show
   friends only (hide non-friend avatars)
+- [`viewer-render-gpu-serialisation`](done/viewer-render-gpu-serialisation.md) —
+  GPU tests stay in pre-commit — serialised, settled, deterministic
+- [`viewer-render-overrides-resource`](done/viewer-render-overrides-resource.md)
+  — Render A/B knobs become a per-app resource, not process-global env locks
+- [`viewer-render-pixel-oracle`](done/viewer-render-pixel-oracle.md) — A
+  pixel-oracle library — decidable verdicts over a captured frame
+- [`viewer-render-readback-texture-anim-test-flaky`](done/viewer-render-readback-texture-anim-test-flaky.md)
+  — render_readback texture-animation test is flaky under load
 - [`viewer-render-scene-coverage`](done/viewer-render-scene-coverage.md) —
   Render-scene coverage — a scene per render path the viewer already has
   (blocked by `viewer-render-test-harness` (done))
@@ -2496,6 +2563,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-screenshot-wait-for-quiescence`](done/viewer-screenshot-wait-for-quiescence.md)
+  — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-dialog-body-links`](done/viewer-script-dialog-body-links.md) —
   Script dialog body — clickable URLs / SLURLs (blocked by
   `viewer-url-linkification` (done))
@@ -3200,6 +3269,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — publish appearance (AgentSetAppearance) and query the baked-texture ca
 - [`test-setup-cost-appendix-open`](done/test-setup-cost-appendix-open-setup-cost-appendix-opensim.md)
   — Setup-cost appendix (OpenSim)
+- [`test-shared-test-assets`](done/test-shared-test-assets.md) — sl-test-assets
+  — one procedural asset source for every test tier
 - [`test-simsession-roundtrip`](done/test-simsession-roundtrip-drive-a-representative-set-of-messages-both-ways-through-sim.md)
   — drive a representative set of messages both ways through SimSession an
 - [`test-simulator-features`](done/test-simulator-features-request-simulator-features.md)

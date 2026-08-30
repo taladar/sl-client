@@ -2,7 +2,7 @@
 id: viewer-cpu-pick-resolver
 title: A CPU pick resolver — the ID-buffer render's headless double
 topic: viewer
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30) — found while specifying the fixture world
 points: 3
 refs: [viewer-world-test-harness]

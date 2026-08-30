@@ -376,6 +376,67 @@ pub(crate) fn differing_pixels(a: &Frame, b: &Frame, within: Option<Silhouette>)
     count
 }
 
+/// The mean of the frame's four corner pixels: what the *background* looks
+/// like, sampled rather than assumed, for [`coverage_not_background`]. The
+/// corners belong to the subject only if it fills the frame, which the caller's
+/// framing already forbids.
+pub(crate) fn corner_background(frame: &Frame) -> Vec4 {
+    let UVec2 {
+        x: width,
+        y: height,
+    } = frame.size();
+    let corners = [
+        (0, 0),
+        (width.saturating_sub(1), 0),
+        (0, height.saturating_sub(1)),
+        (width.saturating_sub(1), height.saturating_sub(1)),
+    ];
+    let mut sum = Vec4::ZERO;
+    let mut count = 0.0_f32;
+    for (x, y) in corners {
+        if let Some(pixel) = frame.pixel(x, y) {
+            sum = Vec4::new(
+                sum.x + pixel.x,
+                sum.y + pixel.y,
+                sum.z + pixel.z,
+                sum.w + pixel.w,
+            );
+            count += 1.0;
+        }
+    }
+    if count > 0.0 {
+        Vec4::new(sum.x / count, sum.y / count, sum.z / count, sum.w / count)
+    } else {
+        Vec4::ZERO
+    }
+}
+
+/// The fraction of the pixels inside `silhouette` that differ from `background`
+/// by more than [`DIFFER_STEP`] in some channel — how much of its own outline an
+/// object painted, without asking what colour it is. Zero for an empty disc.
+pub(crate) fn coverage_not_background(
+    frame: &Frame,
+    silhouette: Silhouette,
+    background: Vec4,
+) -> f32 {
+    let (mut hits, mut total) = (0_u32, 0_u32);
+    for (_point, pixel) in silhouette.pixels(frame) {
+        total = total.saturating_add(1);
+        let delta = [
+            pixel.x - background.x,
+            pixel.y - background.y,
+            pixel.z - background.z,
+        ];
+        if delta.iter().any(|channel| channel.abs() > DIFFER_STEP) {
+            hits = hits.saturating_add(1);
+        }
+    }
+    if total == 0 {
+        return 0.0;
+    }
+    f32_from_u32(hits) / f32_from_u32(total)
+}
+
 /// The two failures that actually happen to a whole frame, decided without a
 /// reference image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -417,6 +478,7 @@ mod tests {
         CellVerdict, Frame, FrameHealth, Marker, Silhouette, centroid, coverage, differing_pixels,
         dominant, health, read_cell,
     };
+
     use crate::render_test::TestError;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
@@ -609,6 +671,26 @@ mod tests {
         // Frames of different sizes cannot be compared and say so with zero.
         let tiny = frame(blank(2), 2)?;
         assert_eq!(differing_pixels(&before, &tiny, None), 0);
+        Ok(())
+    }
+
+    /// The background-aware coverage sees the disc against the sampled corner
+    /// colour, and an empty disc as nothing.
+    #[test]
+    fn coverage_not_background_measures_paint_and_not_the_backdrop() -> Result<(), TestError> {
+        let frame = disc_under_strip()?;
+        let background = super::corner_background(&frame);
+        // The corners are the grey backdrop.
+        assert!((background.x - f32::from(GREY[0]) / 255.0).abs() < 1e-3);
+        // The green disc is fully painted against it.
+        let painted = super::coverage_not_background(&frame, DISC, background);
+        assert!(painted > 0.95, "the disc paints {painted} of itself");
+        // An empty grey corner paints nothing.
+        let corner = Silhouette {
+            centre: Vec2::new(28.0, 28.0),
+            radius: 2.0,
+        };
+        assert!(super::coverage_not_background(&frame, corner, background) < 1e-6);
         Ok(())
     }
 

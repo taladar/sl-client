@@ -2,7 +2,7 @@
 id: viewer-render-gpu-serialisation
 title: GPU tests stay in pre-commit — serialised, settled, deterministic
 topic: viewer
-status: ready
+status: done
 origin: test-harness plan (2026-08-30); closes the readback flakiness bug
 points: 5
 refs: [viewer-render-readback-texture-anim-test-flaky, viewer-render-readback-tier]
@@ -39,3 +39,10 @@ serialisation, not exclusion.
 
 Acceptance: the existing readback tests pass ten times in a row under the
 hook while a `cargo build` runs concurrently.
+
+Done (2026-08-30): the `gpu` nextest test-group serialises the GPU
+apps, `gpu_lock()` covers plain `cargo test`, pipelined rendering is off
+in the rig, `settle()` replaces the fixed warm-up (quiet streak measured:
+passes at 1, held at 30 for the env-map filter) and the log capture now
+sees the render world. Ten consecutive full-suite runs passed under
+concurrent build load.

@@ -2,7 +2,7 @@
 id: viewer-render-overrides-resource
 title: Render A/B knobs become a per-app resource, not process-global env locks
 topic: viewer
-status: ready
+status: done
 origin: test-harness plan (2026-08-30)
 points: 3
 refs: [viewer-render-type-toggles]
@@ -26,3 +26,8 @@ render-side); the day-position pin moves onto `EnvironmentState` as
 
 Acceptance: a unit test builds two apps with opposite overrides in one
 process; the live viewer behaves identically under each env var.
+
+Done (2026-08-30): `RenderOverrides` in `sl-viewer-world-scene`, read
+from the environment once per app; the day-position pin travels on
+`EnvironmentState`; a unit test holds two apps disagreeing in one
+process, and a pinned midnight still renders a night on the local grid.

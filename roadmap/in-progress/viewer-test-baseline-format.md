@@ -2,7 +2,7 @@
 id: viewer-test-baseline-format
 title: One baseline format for UI and render facts
 topic: viewer
-status: ready
+status: in-progress
 origin: test-harness plan (2026-08-30) — the shared format both baseline tiers wait on
 points: 3
 refs: [viewer-ui-baseline-regressions, viewer-render-baselines]
@@ -28,3 +28,7 @@ canonical cell. A per-crate test fails on an orphan file. First facts:
 prim vertex/triangle counts per LOD for the tessellated scenes, the
 avatar's declared bounds, each scene's subject-centre framing pixel
 (CPU projection), pie option angles, floater default sizes.
+
+In progress (2026-08-30): the format, comparison, bless flow and tests
+are in `sl-viewer-testkit/src/baseline.rs`; the first recorded facts
+(prim vertex/triangle counts per LOD, pie angles) are still to land.

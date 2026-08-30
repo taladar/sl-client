@@ -2,7 +2,7 @@
 id: viewer-plugin-groups
 title: One plugin-group definition shared by the viewer, the readback rig and the headless harnesses
 topic: viewer
-status: ready
+status: done
 origin: test-harness plan (2026-08-30) — the "one real unknown" every harness task names
 points: 5
 refs: [viewer-world-test-harness, viewer-render-readback-tier, viewer-ui-interaction-harness]
@@ -51,3 +51,9 @@ both include once.
 Acceptance: the `lib.rs` diff is a pure move; a `--screenshot-dir` smoke
 run against the local grid and the settings golden are unchanged;
 `render_readback` builds on `ViewerRenderPlugins` and stays green.
+
+Done (2026-08-30): `viewer_plugins.rs` holds the four groups (Input,
+Render — `RenderStack::{Full, Bare}` —, World, Edit), the main camera is
+`viewer_camera_bundle` in `sl-viewer-world-scene`, the readback rig runs
+`ViewerRenderPlugins::bare()`, and a fixed-camera before/after screenshot
+of the local grid differs only in the animated sea and the clock.

@@ -2,7 +2,7 @@
 id: test-shared-test-assets
 title: sl-test-assets — one procedural asset source for every test tier
 topic: test
-status: ready
+status: done
 origin: test-harness plan (2026-08-30)
 points: 2
 refs: [viewer-render-scene-coverage]
@@ -25,3 +25,8 @@ must be shared. Add a small no-Bevy crate `sl-test-assets`:
 
 `SceneAssets` and `Scenario::assets` both consume it; a round-trip test
 decodes the JPEG2000 back through `sl-texture` and checks the checker.
+
+Done (2026-08-30): `sl-test-assets` with the marker palette, checkers,
+solids, gradients, JPEG2000 round-trip and the four terrain detail
+solids. The mesh-blob and avatar-bake helpers move to the fixture tasks
+that consume them.

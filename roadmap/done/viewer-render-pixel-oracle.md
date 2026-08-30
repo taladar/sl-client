@@ -2,7 +2,7 @@
 id: viewer-render-pixel-oracle
 title: A pixel-oracle library — decidable verdicts over a captured frame
 topic: viewer
-status: ready
+status: done
 origin: test-harness plan (2026-08-30)
 points: 3
 refs: [viewer-render-readback-tier]
@@ -37,3 +37,6 @@ The existing readback tests are rewritten on the library without changing
 what they assert; the teeth tests draw a green disc under a red strip and
 require `Translucent` at the overlap, `Solid` in the disc, `Missing` on the
 strip, `Background` elsewhere.
+
+Done (2026-08-30): `pixel_oracle.rs` with synthetic-frame teeth tests;
+the readback tests rewrote onto it without changing what they assert.

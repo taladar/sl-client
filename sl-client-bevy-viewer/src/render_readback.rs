@@ -202,7 +202,7 @@ const HOLD_FRAMES: u32 = 4;
 /// The scene time a static scene is captured at, in seconds. One second rather
 /// than zero, so a driver that needs time to have passed — a fountain that has
 /// emitted, a flexi that has come to rest — is captured doing what it does.
-const CAPTURE_AT_SECS: f32 = 1.0;
+pub(crate) const CAPTURE_AT_SECS: f32 = 1.0;
 
 /// A scene time in seconds as a whole number of [`STEP`] frames.
 #[expect(
@@ -558,9 +558,22 @@ pub(crate) fn capture(
     cx: SceneCx,
     points: &[Vec3],
 ) -> Option<(Frame, Projected)> {
+    capture_with(scene, cx, points, |_app| {})
+}
+
+/// [`capture`], with a `prepare` hook that may add systems or resources to the
+/// built app before it runs — how a test stages something *around* a scene (an
+/// occluder, a marker subject, a sea) without registering a scene for it.
+pub(crate) fn capture_with(
+    scene: &RenderScene,
+    cx: SceneCx,
+    points: &[Vec3],
+    prepare: impl FnOnce(&mut App),
+) -> Option<(Frame, Projected)> {
     let _gpu = gpu_lock();
     let (logs, _guard) = capture_logs();
     let (mut app, captured) = build_readback_app(scene, cx);
+    prepare(&mut app);
 
     // `App::finish`/`cleanup` build the render app; if there is no adapter this is
     // where it gives up, and a machine without a GPU should skip rather than fail.

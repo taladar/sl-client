@@ -2,7 +2,7 @@
 id: viewer-render-readback-texture-anim-test-flaky
 title: render_readback texture-animation test is flaky under load
 topic: viewer
-status: bugs
+status: done
 origin: observed while testing viewer-preferences-general-tab (2026-08-04)
 refs: [viewer-render-gpu-serialisation]
 ---
@@ -28,3 +28,8 @@ readback fence rather than a frame count, or assert over a longer window.
 
 Until fixed, a full-suite failure of only this test on a loaded machine is
 suspect — re-run it standalone before treating it as a regression.
+
+Fixed by [[viewer-render-gpu-serialisation]] (2026-08-30): the samples
+land at fixed scene times on a settled rig and the GPU apps no longer
+race; ten consecutive full-suite runs passed under concurrent build
+load.

@@ -2,7 +2,7 @@
 id: viewer-world-test-harness
 title: A headless fixture world — SlEvent in, SlCommand out
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — test in-world reactions without a server
 points: 8
 refs: [viewer-render-test-harness, viewer-ui-test-harness, viewer-cpu-pick-resolver]

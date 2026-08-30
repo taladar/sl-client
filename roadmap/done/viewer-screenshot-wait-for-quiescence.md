@@ -2,7 +2,7 @@
 id: viewer-screenshot-wait-for-quiescence
 title: Screenshot mode should wait for the scene to load, not for a fixed delay
 topic: viewer
-status: ready
+status: done
 origin: found while live-testing viewer-p34-3 on aditi
 points: 3
 refs: [viewer-p34-3, viewer-fake-grid-render-harness, viewer-render-gpu-serialisation]
@@ -42,3 +42,10 @@ in-flight count, so the condition is a cheap sum; the harness only needs a
 This makes every future rendering A/B (and the R-item screenshot debugging that
 the headless debug-camera flow relies on) reproducible by construction, rather
 than by picking a delay long enough and hoping.
+
+Done (2026-08-30): `SceneQuiescence` sums every store's in-flight,
+gate and deferred counts plus the pending queues; screenshot mode's
+first frame waits on it (region up + a quiet streak) with the old delay
+demoted to a capture-anyway timeout. Live-verified on the local grid:
+a 120 s timeout run captured on its own once the known-failing
+texture's retries gave up.

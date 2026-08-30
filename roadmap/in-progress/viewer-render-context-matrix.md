@@ -2,7 +2,7 @@
 id: viewer-render-context-matrix
 title: Render context matrix — subjects × eye, time of day, mirror, layering
 topic: viewer
-status: blocked
+status: in-progress
 origin: test-harness plan (2026-08-30); the coverage half of viewer-render-readback-tier
 points: 8
 refs: [viewer-render-readback-tier, viewer-water-transparency-scene-matrix, viewer-render-scene-coverage]
@@ -41,3 +41,11 @@ subject can be captured under *any* context without per-scene code.
 Once R1's `Eye` axis reproduces both `every_translucent_face_*` verdict
 sets, the six `water-translucency-*` scenes collapse into one
 `translucent-box-rack` subject.
+
+In progress (2026-08-30): the first slice is in
+`sl-client-bevy-viewer/src/render_matrix.rs` — the R0 sweep (every
+subject scene must paint its measured silhouette, exclusions listed with
+reasons and guarded), `capture_with`'s staging hook, the
+opaque-wall-hides-the-subject teeth pair and the first underwater-eye
+cell. The registry fields (`SubjectSignature`, `applies`), the stage
+builders and the R1 sweeps are still to grow.
