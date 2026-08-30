@@ -45,6 +45,7 @@ pub mod input_context;
 pub mod media_prim;
 pub mod movement;
 pub mod physics;
+pub mod quiescence;
 pub mod screenshot;
 pub mod session;
 pub mod sit_camera;

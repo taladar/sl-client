@@ -51,6 +51,8 @@
 //!
 //! [`viewer-text-node-padding-measure`]: ../../../roadmap/bugs/viewer-text-node-padding-measure.md
 
+pub mod baseline;
+
 use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
 use bevy::camera::{ComputedCameraValues, RenderTargetInfo, Viewport};
 use bevy::ecs::system::SystemState;

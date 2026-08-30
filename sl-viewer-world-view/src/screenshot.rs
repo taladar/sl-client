@@ -25,6 +25,7 @@ use bevy::render::view::screenshot::{Screenshot, ScreenshotCaptured};
 use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use sl_client_bevy::SlCommand;
 
+use crate::quiescence::SceneQuiescence;
 use crate::session::{ViewerSession, request_logout};
 
 /// The offline-inspection screenshot harness (R11): capture a numbered PNG
@@ -50,26 +51,43 @@ impl Plugin for ScreenshotPlugin {
 pub(crate) struct ScreenshotSchedule {
     /// Directory the PNG sequence is written to.
     dir: PathBuf,
-    /// Seconds to wait after startup before the first capture (login + asset
-    /// decode + bake + animation start all have to settle first).
+    /// The first capture's **timeout**, in seconds from startup: the capture
+    /// itself fires when the scene goes quiet (see [`SceneQuiescence`]), and
+    /// this is how long a permanently-busy scene is given before a frame is
+    /// taken anyway — captured either way, so a run always produces something.
     start_delay: f32,
     /// Seconds between successive captures.
     interval: f32,
     /// How many frames to capture before quitting.
     max_frames: usize,
-    /// The next capture time (elapsed seconds); `None` until the delay is armed.
+    /// The next capture time (elapsed seconds); `None` until the scene has
+    /// settled (or the timeout fired) and the first capture is armed.
     next_at: Option<f32>,
     /// The index of the next frame to write.
     index: usize,
+    /// When the region came up (elapsed seconds), once it has.
+    region_seen_at: Option<f32>,
+    /// Consecutive frames the scene has been quiet.
+    quiet_frames: u32,
 }
+
+/// How many consecutive quiet frames the first capture waits for: long enough
+/// that a lull between a decode finishing and the next fetch being issued does
+/// not read as settled.
+const QUIET_HOLD_FRAMES: u32 = 30;
+
+/// The least seconds after the region comes up before the first capture, so
+/// the burst of fetches a handshake sets off has begun (an instant of quiet
+/// right after arrival is not a loaded scene).
+const MIN_SETTLE_SECS: f32 = 5.0;
 
 impl ScreenshotSchedule {
     /// A schedule writing `SL_VIEWER_SCREENSHOT_FRAMES` frames (default 30) at
-    /// `SL_VIEWER_SCREENSHOT_INTERVAL` s (default 0.5) after a
-    /// `SL_VIEWER_SCREENSHOT_DELAY` s startup delay (default 25). The delay is
-    /// deliberately generous — and tunable without a rebuild — because a real
-    /// login to a live grid, plus fetching / decoding the worn wearables and
-    /// baking, can take many seconds before the animated body is fully on screen.
+    /// `SL_VIEWER_SCREENSHOT_INTERVAL` s (default 0.5), the first once the
+    /// scene has gone **quiet** — with `SL_VIEWER_SCREENSHOT_DELAY` s (default
+    /// 25) as the timeout after which a frame is captured anyway. Quiet makes
+    /// two runs comparable by construction; the timeout keeps a
+    /// permanently-busy scene from hanging the run.
     #[must_use]
     pub(crate) fn new(dir: PathBuf) -> Self {
         let env_f32 = |key: &str, default: f32| {
@@ -91,6 +109,8 @@ impl ScreenshotSchedule {
             max_frames: env_usize("SL_VIEWER_SCREENSHOT_FRAMES", 30),
             next_at: None,
             index: 0,
+            region_seen_at: None,
+            quiet_frames: 0,
         }
     }
 }
@@ -116,6 +136,7 @@ pub(crate) struct ScreenshotSaveTask(Task<Result<PathBuf, String>>);
 /// fallback), the same as the `Esc` / `Q` quit key.
 pub(crate) fn capture_screenshots(
     time: Res<Time>,
+    quiescence: SceneQuiescence,
     mut schedule: ResMut<ScreenshotSchedule>,
     mut commands: Commands,
     mut session: ResMut<ViewerSession>,
@@ -123,8 +144,36 @@ pub(crate) fn capture_screenshots(
     pending_saves: Query<(), With<ScreenshotSaveTask>>,
 ) {
     let now = time.elapsed_secs();
-    let start_delay = schedule.start_delay;
-    let next_at = *schedule.next_at.get_or_insert(start_delay);
+    if schedule.next_at.is_none() {
+        // The first capture waits for the scene to settle: region up for a
+        // while, and quiet for a run of frames. The configured delay is the
+        // timeout that lets a permanently-busy scene still produce a frame.
+        if quiescence.region_is_up() && schedule.region_seen_at.is_none() {
+            schedule.region_seen_at = Some(now);
+        }
+        schedule.quiet_frames = if quiescence.is_quiet() {
+            schedule.quiet_frames.saturating_add(1)
+        } else {
+            0
+        };
+        let settled = schedule
+            .region_seen_at
+            .is_some_and(|at| now - at >= MIN_SETTLE_SECS)
+            && schedule.quiet_frames >= QUIET_HOLD_FRAMES;
+        if !settled {
+            if now < schedule.start_delay {
+                return;
+            }
+            info!(
+                "screenshot: the scene did not go quiet within {:.0} s ({} fetch(es) \
+                 outstanding); capturing anyway",
+                schedule.start_delay,
+                quiescence.outstanding()
+            );
+        }
+        schedule.next_at = Some(now);
+    }
+    let next_at = schedule.next_at.unwrap_or(now);
     if now < next_at {
         return;
     }

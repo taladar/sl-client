@@ -18,7 +18,13 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest). `system_font_discovery` because
 # the harness shapes real text, exactly as the viewer does.
 bevy = { version = "0.19.0", features = ["system_font_discovery"] }
+fs-err = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
 sl-viewer-ui-core = { workspace = true }
+toml = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
 
 [lints]
 workspace = true

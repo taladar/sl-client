@@ -37,6 +37,7 @@ members = [
   "sl-settings",
   "sl-survey",
   "sl-terrain",
+  "sl-test-assets",
   "sl-texture",
   "sl-tree",
   "sl-viewer-asset-editors",

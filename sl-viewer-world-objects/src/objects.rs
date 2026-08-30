@@ -885,6 +885,18 @@ pub struct PendingObjectEvents {
 }
 
 impl PendingObjectEvents {
+    /// How many object events are queued and not yet folded into the scene.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Whether nothing is queued.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
     /// Buffer an upsert, coalescing it into the object's newest still-queued
     /// snapshot where ordering allows (see the type docs).
     fn push_upsert(&mut self, object: &Object) {
@@ -1004,6 +1016,20 @@ pub struct PendingDecodedMeshes {
     queued: HashSet<MeshKey>,
 }
 
+impl PendingDecodedMeshes {
+    /// How many decoded meshes still await their geometry build.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Whether nothing is queued.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+}
+
 /// Decoded texture keys awaiting the sculpt-build check by
 /// [`apply_object_sculpts`], deduped (see [`PendingDecodedMeshes`]). Most
 /// entries are ordinary face textures that no sculpt waits on; they drain as
@@ -1014,6 +1040,20 @@ pub struct PendingDecodedSculpts {
     queue: VecDeque<TextureKey>,
     /// The queued keys, for O(1) dedup.
     queued: HashSet<TextureKey>,
+}
+
+impl PendingDecodedSculpts {
+    /// How many decoded sculpt maps still await their check.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Whether nothing is queued.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
 }
 
 /// Process queued items front-to-back, calling `process` on each; `process` returns

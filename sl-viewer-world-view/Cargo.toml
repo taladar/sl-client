@@ -32,6 +32,7 @@ sl-client-bevy = { workspace = true, features = [
 sl-settings = { path = "../sl-settings", version = "0.1.0" }
 sl-viewer-kit = { workspace = true }
 sl-viewer-media = { workspace = true }
+sl-viewer-platform = { workspace = true }
 sl-viewer-settings = { workspace = true }
 sl-viewer-spacenav = { workspace = true }
 sl-viewer-world-api = { workspace = true }

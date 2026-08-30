@@ -261,6 +261,18 @@ pub struct PendingPatchRebuilds {
 }
 
 impl PendingPatchRebuilds {
+    /// How many patches still await a rebuild.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.queue.len()
+    }
+
+    /// Whether nothing is queued.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
+    }
+
     /// Queue a patch rebuild (a no-op if it is already queued).
     fn push(&mut self, key: PatchKey) {
         if self.queued.insert(key) {

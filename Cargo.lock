@@ -8945,6 +8945,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sl-test-assets"
+version = "0.1.0"
+dependencies = [
+ "bytes",
+ "pretty_assertions",
+ "sl-proto",
+ "sl-texture",
+ "uuid",
+]
+
+[[package]]
 name = "sl-texture"
 version = "0.1.0"
 dependencies = [
@@ -9339,7 +9350,11 @@ name = "sl-viewer-testkit"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "fs-err",
+ "pretty_assertions",
+ "serde",
  "sl-viewer-ui-core",
+ "toml",
 ]
 
 [[package]]
@@ -9487,6 +9502,7 @@ dependencies = [
  "sl-settings",
  "sl-viewer-kit",
  "sl-viewer-media",
+ "sl-viewer-platform",
  "sl-viewer-settings",
  "sl-viewer-spacenav",
  "sl-viewer-testkit",
