@@ -3518,6 +3518,14 @@ const MATRIX_PRIM: Color = Color::srgb(0.05, 0.9, 0.05);
 /// backdrop seen *through* a box, which is the whole question those scenes ask.
 const MATRIX_BACKDROP: Color = Color::srgb(0.9, 0.05, 0.05);
 
+/// The viewer's per-face tag for the fixture face at `index`, so a fixture prim is
+/// selected by the same systems a real one is (`crate::water_clip`).
+fn prim_face_tag(index: usize) -> PrimFaceEntity {
+    PrimFaceEntity {
+        face_id: PrimFaceId::new(u16::try_from(index).unwrap_or(u16::MAX)),
+    }
+}
+
 /// The camera pose the translucency matrix is rendered from at eye height
 /// `eye` (an offset from the water level).
 const fn matrix_camera(eye: f32) -> SceneCamera {
@@ -3568,6 +3576,9 @@ fn translucency_matrix(
             ChildOf(root),
         ));
     }
+    // Each face carries the viewer's own `PrimFaceEntity` tag, which is not
+    // decoration: it is what `crate::water_clip` selects the faces it may split by,
+    // so a fixture without it would render a prim the viewer never renders.
     for (label, x, offset) in MATRIX_BOXES {
         let object = commands
             .spawn((
@@ -3580,7 +3591,7 @@ fn translucency_matrix(
             .id();
         let prim = tessellate(&base_shape(), cx.lod);
         for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
-            let _face = spawn_geometry(
+            let face = spawn_geometry(
                 format!("{scene}/{label}/face-{index}"),
                 mesh,
                 StandardMaterial {
@@ -3595,6 +3606,7 @@ fn translucency_matrix(
                 commands,
                 assets,
             );
+            commands.entity(face).insert(prim_face_tag(index));
         }
     }
 }

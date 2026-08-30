@@ -62,4 +62,5 @@ pub mod tonemap;
 pub mod transparency;
 pub mod underwater_fog;
 pub mod water;
+pub mod water_clip;
 pub mod water_exclusion;

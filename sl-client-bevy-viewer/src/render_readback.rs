@@ -294,6 +294,9 @@ fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
         // decided here, not by Bevy's plain back-to-front order. Without this plugin
         // the readback tier could not see a water-ordering bug at all.
         .add_plugins(crate::transparency::TransparencyOrderPlugin)
+        // …and the straddling-face split, so a scene whose prim crosses the
+        // waterline is drawn the way the viewer draws it.
+        .add_plugins(crate::water_clip::WaterClipPlugin)
         .add_plugins(SceneRuntimePlugin)
         .insert_resource(DirectionalLightShadowMap::default())
         // No flat ambient, stated rather than inherited from Bevy's default. Every

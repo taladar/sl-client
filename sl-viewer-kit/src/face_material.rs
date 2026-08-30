@@ -128,6 +128,22 @@ pub struct SlFaceParams {
     /// this defaults to `0` (a non-glowing opaque face writes mask `0`) and a blend
     /// face — whose alpha is its coverage — is left alone regardless of this value.
     pub glow: f32,
+    /// The reference's `waterSign` (`prepare_alpha_shader`, `lldrawpoolalpha.cpp`):
+    /// which side of the water surface this draw keeps. `0` = no clip (the ordinary
+    /// case), `+1` = keep fragments **above** the surface, `-1` = keep those
+    /// **below**; the shader discards the rest, exactly as the reference's
+    /// `waterClip` does.
+    ///
+    /// It exists because a face that **straddles** the surface belongs to two
+    /// different passes at once — the half behind the sea has to be composited
+    /// before it, the half in front after it — and one draw cannot be in both. Such
+    /// a face is drawn twice with opposite signs, which is what the reference does
+    /// by rendering its alpha pool twice with this uniform flipped.
+    pub water_clip: f32,
+    /// The water surface height in world metres, the plane [`water_clip`](Self::water_clip)
+    /// cuts at. A height rather than the reference's `vec4` plane because this
+    /// viewer's sea is always horizontal, so the plane normal is always `+Y`.
+    pub water_level: f32,
 }
 
 impl SlFaceParams {
@@ -155,6 +171,9 @@ impl SlFaceParams {
             // No glow by default; the shader writes this to alpha only for an
             // opaque / mask face, so every non-glowing opaque face feeds mask `0`.
             glow: 0.0,
+            // No water clip: the ordinary face is drawn once, whole.
+            water_clip: 0.0,
+            water_level: 0.0,
         }
     }
 

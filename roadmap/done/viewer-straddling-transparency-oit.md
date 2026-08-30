@@ -2,7 +2,7 @@
 id: viewer-straddling-transparency-oit
 title: A translucent prim straddling the waterline loses its emergent half
 topic: viewer
-status: bugs
+status: done
 origin: follow-up from viewer-particle-water-ordering (2026-07-30)
 refs: [viewer-particle-water-ordering]
 ---
@@ -58,7 +58,45 @@ one to port: the sign it clips by is already computed per view by
 what is missing is the plane uniform on the shared face material and drawing the
 translucent phase twice against it.
 
-## Reproduction status
+## Fixed (2026-08-30), live-verified
+
+Ported the reference's own answer: the same face is drawn **twice**, each draw
+clipped per fragment to its own side of the water plane
+(`sl-viewer-world-scene/src/water_clip.rs`).
+
+- `SlFaceParams::water_clip` / `water_level` and a `waterClip` in
+  `face_material.wgsl` — `0` = no clip, `+1` keeps the fragments above the
+  surface, `-1` those below, the rest discarded. This is the reference's
+  `waterSign` uniform and its `waterClip` (`deferredUtil.glsl`).
+- The reference flips that uniform between its two **pool draws** of one list.
+  Bevy cannot: a phase item carries one pipeline and one material binding, and
+  the pass that draws it is not ours to parameterise. So the second draw is a
+  **twin entity** parented to the face, sharing its mesh and carrying a copy of
+  its material with the opposite sign. The face's material is copied first,
+  because it may be interned across every identical face in the scene.
+- `classify_bucket` buckets a clipped draw by **the side it keeps** rather than
+  by its centre — both halves share one centre, which is why the centre could
+  never decide this — and which side is the far one still flips with the eye.
+- Only faces that actually straddle are split, decided from the world-space
+  **extent** rather than the centre, and only alpha-blended ones (an opaque face
+  writes depth and is already ordered per pixel). A face that stops straddling
+  is made whole again.
+
+**Verified on the grid**, same camera pose before and after: the band above the
+waterline on the North Region box read as open sea (blue-dominant, `b≈147`)
+before, and reads as plywood blended half-and-half over the water
+(`≈(126,128,131)`) after. The emergent half is drawn, and it is see-through.
+
+Guarded by `water_clip`'s own tests (a straddling translucent face is split, one
+clear of the surface is not, an opaque one never is, one that leaves the water
+is made whole, and the straddle test is on the extent not the centre) and by
+`a_clipped_half_is_bucketed_by_the_side_it_keeps` in `transparency`. The
+readback matrix ([[viewer-water-transparency-scene-matrix]]) now renders through
+this path too, since its fixture faces carry the viewer's `PrimFaceEntity` tag.
+
+`RUST_LOG=info,sl_viewer::water_clip=debug` names each face as it is split.
+
+## Reproduction status (before the fix)
 
 **Not reproduced synthetically**, and the axes anyone would have guessed at are
 now ruled out. [[viewer-water-transparency-scene-matrix]] walks five boxes

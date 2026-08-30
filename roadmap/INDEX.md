@@ -15,8 +15,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 297 |
 | blocked | 67 |
 | in-progress | 17 |
-| bugs | 66 |
-| done | 920 |
+| bugs | 65 |
+| done | 921 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1500** |
@@ -1163,7 +1163,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (66)
+## bugs (65)
 
 ### viewer
 
@@ -1301,8 +1301,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
   — Worn rigged attachments (e.g. own shoes) don't render — wearer never
   resolved / too many rigged-pending objects
-- [`viewer-straddling-transparency-oit`](bugs/viewer-straddling-transparency-oit.md)
-  — A translucent prim straddling the waterline loses its emergent half
 - [`viewer-takeoff-hold-jumps-instead-of-flying`](bugs/viewer-takeoff-hold-jumps-instead-of-flying.md)
   — Holding the fly key jumps instead of taking off
 - [`viewer-text-node-padding-measure`](bugs/viewer-text-node-padding-measure.md)
@@ -1316,7 +1314,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (920)
+## done (921)
 
 ### protocol
 
@@ -2556,6 +2554,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-spacenav-ignore-when-window-unfocused`](done/viewer-spacenav-ignore-when-window-unfocused.md)
   — SpaceNavigator drives the viewer even when its window is not focused
+- [`viewer-straddling-transparency-oit`](done/viewer-straddling-transparency-oit.md)
+  — A translucent prim straddling the waterline loses its emergent half
 - [`viewer-stretch-global-axis-object`](done/viewer-stretch-global-axis-object.md)
   — World-frame stretch still grows the object along its local axis
 - [`viewer-sun-disc-grey-aditi-hdr-scale`](done/viewer-sun-disc-grey-aditi-hdr-scale.md)

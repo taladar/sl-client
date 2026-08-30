@@ -305,6 +305,7 @@ pub(crate) use sl_viewer_ui_widgets::ui_color_picker;
 pub(crate) use sl_viewer_ui_widgets::ui_combo;
 pub(crate) use sl_viewer_world_avatar::typing;
 pub(crate) use sl_viewer_world_scene::transparency;
+pub(crate) use sl_viewer_world_scene::water_clip;
 mod ui_elements;
 pub(crate) use sl_viewer_notices::ui_name_link;
 pub(crate) use sl_viewer_platform::ui_perf;
@@ -1657,6 +1658,9 @@ fn run_session(
     // depth-writing water surface — below-water draws through it, above-water over
     // it — rather than being painted out by the camera-following plane.
     .add_plugins(crate::transparency::TransparencyOrderPlugin)
+    // Splits a translucent face that crosses the waterline into its two halves, so
+    // each is ordered against the sea on its own side (the reference's `waterSign`).
+    .add_plugins(crate::water_clip::WaterClipPlugin)
     // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
     // fogs everything below the water surface (reference `getWaterFogView`).
     .add_plugins(UnderwaterFogPlugin)

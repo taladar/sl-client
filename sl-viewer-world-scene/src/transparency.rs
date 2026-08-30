@@ -87,6 +87,7 @@ use bevy::render::view::{ExtractedView, RetainedViewEntity, ViewDepthTexture, Vi
 use bevy::render::{Extract, Render, RenderApp, RenderSystems};
 
 use crate::water::{DEFAULT_WATER_HEIGHT, WaterLevel};
+use crate::water_clip::WaterClipSide;
 
 /// The system set the pre-water translucency pass runs in, so the above-water water
 /// haze ([`crate::underwater_fog`]) can order itself before it without reaching for
@@ -226,6 +227,7 @@ pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, usize>);
 fn sort_transparent_by_water(
     water_level: Option<Res<WaterLevel>>,
     backdrops: Res<SkyBackdrops>,
+    clips: Res<crate::water_clip::WaterClipSides>,
     views: Query<&ExtractedView>,
     mut phases: ResMut<ViewSortedRenderPhases<Transparent3d>>,
     mut split: ResMut<PreWaterSplit>,
@@ -254,6 +256,7 @@ fn sort_transparent_by_water(
                 level,
                 submerged,
                 backdrops.0.get(&item.entity.1).copied(),
+                clips.get(item.entity.1),
             );
             (bucket, order, FloatOrd(item.distance))
         });
@@ -271,6 +274,7 @@ fn sort_transparent_by_water(
                     level,
                     submerged,
                     backdrops.0.get(&item.entity.1).copied(),
+                    clips.get(item.entity.1),
                 )
                 .0 == PRE_WATER_BUCKET
             })
@@ -330,9 +334,26 @@ const fn classify_bucket(
     level: f32,
     submerged: bool,
     backdrop: Option<SkyBackdrop>,
+    clip: Option<WaterClipSide>,
 ) -> (u8, u8) {
     if let Some(backdrop) = backdrop {
         return (BACKDROP_BUCKET, backdrop.draw_order());
+    }
+    // A **clipped** draw — one half of a face that straddles the surface
+    // ([`crate::water_clip`]) — is bucketed by the side it keeps, not by where its
+    // centre is. Its centre says nothing useful: both halves of a straddling face
+    // share one, which is the whole reason it had to be split.
+    if let Some(clip) = clip {
+        let far_side = match clip {
+            // The above-water half is beyond the surface only from under it.
+            WaterClipSide::Above => submerged,
+            WaterClipSide::Below => !submerged,
+        };
+        return if far_side {
+            (PRE_WATER_BUCKET, 0)
+        } else {
+            (POST_WATER_BUCKET, 0)
+        };
     }
     match sorting_info {
         TransparentSortingInfo3d::AlwaysOnTop => (ALWAYS_ON_TOP_BUCKET, 0),
@@ -485,6 +506,11 @@ impl Plugin for TransparencyOrderPlugin {
         render_app
             .init_resource::<PreWaterSplit>()
             .init_resource::<SkyBackdrops>()
+            // The straddling-face split's mirror is read by the sort below, and
+            // `init_resource` is idempotent — so the sort works whether or not
+            // `crate::water_clip::WaterClipPlugin` is also added, and simply sees no
+            // clipped draws when it is not.
+            .init_resource::<crate::water_clip::WaterClipSides>()
             .add_systems(ExtractSchedule, extract_sky_backdrops)
             .add_systems(
                 Render,
@@ -517,7 +543,7 @@ mod tests {
 
     use super::{
         ALWAYS_ON_TOP_BUCKET, BACKDROP_BUCKET, POST_WATER_BUCKET, PRE_WATER_BUCKET, PreWaterSplit,
-        SkyBackdrop, classify_bucket, eye_submerged, suppress_view_pre_water_items,
+        SkyBackdrop, WaterClipSide, classify_bucket, eye_submerged, suppress_view_pre_water_items,
     };
     use bevy::core_pipeline::core_3d::{Transparent3d, TransparentSortingInfo3d};
     use bevy::ecs::entity::Entity;
@@ -529,6 +555,18 @@ mod tests {
     use bevy::render::sync_world::MainEntity;
     use bevy::render::view::RetainedViewEntity;
     use pretty_assertions::assert_eq;
+
+    /// [`classify_bucket`] for an **unclipped** item — the ordinary face, whose
+    /// bucket comes from its centre. A helper so each test reads as the question it
+    /// asks rather than carrying a `None` for the straddling split it is not about.
+    fn classify_bucket_4(
+        sorting_info: TransparentSortingInfo3d,
+        level: f32,
+        submerged: bool,
+        backdrop: Option<SkyBackdrop>,
+    ) -> (u8, u8) {
+        classify_bucket(sorting_info, level, submerged, backdrop, None)
+    }
 
     /// A `Sorted` sorting info centred at height `y` (the field the bucket reads).
     fn sorted_at(y: f32) -> TransparentSortingInfo3d {
@@ -637,15 +675,15 @@ mod tests {
     #[test]
     fn a_dry_eye_buckets_what_is_under_the_surface_pre_water() {
         assert_eq!(
-            classify_bucket(sorted_at(25.0), 20.0, false, None),
+            classify_bucket_4(sorted_at(25.0), 20.0, false, None),
             (POST_WATER_BUCKET, 0)
         );
         assert_eq!(
-            classify_bucket(sorted_at(15.0), 20.0, false, None),
+            classify_bucket_4(sorted_at(15.0), 20.0, false, None),
             (PRE_WATER_BUCKET, 0)
         );
         assert_eq!(
-            classify_bucket(sorted_at(20.0), 20.0, false, None),
+            classify_bucket_4(sorted_at(20.0), 20.0, false, None),
             (POST_WATER_BUCKET, 0)
         );
     }
@@ -660,17 +698,17 @@ mod tests {
     #[test]
     fn a_submerged_eye_swaps_the_sides() {
         assert_eq!(
-            classify_bucket(sorted_at(15.0), 20.0, true, None),
+            classify_bucket_4(sorted_at(15.0), 20.0, true, None),
             (POST_WATER_BUCKET, 0),
             "an object under the surface is between a submerged eye and it",
         );
         assert_eq!(
-            classify_bucket(sorted_at(25.0), 20.0, true, None),
+            classify_bucket_4(sorted_at(25.0), 20.0, true, None),
             (PRE_WATER_BUCKET, 0),
             "an object above the surface is what a submerged eye sees through it",
         );
         assert_eq!(
-            classify_bucket(sorted_at(20.0), 20.0, true, None),
+            classify_bucket_4(sorted_at(20.0), 20.0, true, None),
             (POST_WATER_BUCKET, 0),
             "an object on the surface stays on the eye's own side either way",
         );
@@ -687,13 +725,60 @@ mod tests {
         assert!(eye_submerged(19.9, 20.0));
     }
 
+    /// **A clipped half is bucketed by the side it keeps, not by its centre.**
+    ///
+    /// Both halves of a straddling face share one centre — that is exactly why the
+    /// face had to be split ([`crate::water_clip`]) — so the centre cannot decide
+    /// which pass either belongs in. The half beyond the surface goes pre-water to
+    /// be refracted, the half in front of it goes post-water, and which is which
+    /// flips with the eye, as the reference's `waterSign` does.
+    #[test]
+    fn a_clipped_half_is_bucketed_by_the_side_it_keeps() {
+        // A centre on the *wrong* side of the level for every case below, so a
+        // decision made from it would be visible as a failure here.
+        let centre = sorted_at(15.0);
+        for (submerged, above_bucket, below_bucket) in [
+            (false, POST_WATER_BUCKET, PRE_WATER_BUCKET),
+            (true, PRE_WATER_BUCKET, POST_WATER_BUCKET),
+        ] {
+            assert_eq!(
+                classify_bucket(centre, 20.0, submerged, None, Some(WaterClipSide::Above)).0,
+                above_bucket,
+                "the above-water half, eye submerged = {submerged}",
+            );
+            assert_eq!(
+                classify_bucket(centre, 20.0, submerged, None, Some(WaterClipSide::Below)).0,
+                below_bucket,
+                "the below-water half, eye submerged = {submerged}",
+            );
+        }
+    }
+
+    /// A sky backdrop stays a backdrop even if something clipped it — the backdrop
+    /// test comes first, and must, since a camera-anchored dome has no meaningful
+    /// side of the surface at all.
+    #[test]
+    fn a_backdrop_outranks_a_clip() {
+        assert_eq!(
+            classify_bucket(
+                sorted_at(15.0),
+                20.0,
+                false,
+                Some(SkyBackdrop::Clouds),
+                Some(WaterClipSide::Above),
+            )
+            .0,
+            BACKDROP_BUCKET,
+        );
+    }
+
     /// An always-on-top item stays topmost, wherever it and the eye are relative to
     /// the water.
     #[test]
     fn always_on_top_stays_topmost() {
         for submerged in [false, true] {
             assert_eq!(
-                classify_bucket(TransparentSortingInfo3d::AlwaysOnTop, 20.0, submerged, None),
+                classify_bucket_4(TransparentSortingInfo3d::AlwaysOnTop, 20.0, submerged, None),
                 (ALWAYS_ON_TOP_BUCKET, 0)
             );
         }
@@ -713,7 +798,7 @@ mod tests {
             for height in [25.0_f32, 15.0] {
                 for submerged in [false, true] {
                     assert_eq!(
-                        classify_bucket(sorted_at(height), 20.0, submerged, Some(backdrop)).0,
+                        classify_bucket_4(sorted_at(height), 20.0, submerged, Some(backdrop)).0,
                         BACKDROP_BUCKET,
                         "{backdrop:?} at {height} m must stay a backdrop",
                     );
@@ -728,27 +813,27 @@ mod tests {
     #[test]
     fn backdrops_draw_in_the_reference_order() {
         let mut order = [
-            classify_bucket(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)),
-            classify_bucket(
+            classify_bucket_4(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)),
+            classify_bucket_4(
                 sorted_at(25.0),
                 20.0,
                 false,
                 Some(SkyBackdrop::HeavenlyBody),
             ),
-            classify_bucket(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Stars)),
+            classify_bucket_4(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Stars)),
         ];
         order.sort_unstable();
         assert_eq!(
             order,
             [
-                classify_bucket(
+                classify_bucket_4(
                     sorted_at(25.0),
                     20.0,
                     false,
                     Some(SkyBackdrop::HeavenlyBody)
                 ),
-                classify_bucket(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Stars)),
-                classify_bucket(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)),
+                classify_bucket_4(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Stars)),
+                classify_bucket_4(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)),
             ],
         );
     }
@@ -763,10 +848,10 @@ mod tests {
     #[test]
     fn pre_water_leads_and_backdrops_precede_the_world() {
         let mut buckets = [
-            classify_bucket(TransparentSortingInfo3d::AlwaysOnTop, 20.0, false, None).0,
-            classify_bucket(sorted_at(25.0), 20.0, false, None).0,
-            classify_bucket(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)).0,
-            classify_bucket(sorted_at(15.0), 20.0, false, None).0,
+            classify_bucket_4(TransparentSortingInfo3d::AlwaysOnTop, 20.0, false, None).0,
+            classify_bucket_4(sorted_at(25.0), 20.0, false, None).0,
+            classify_bucket_4(sorted_at(25.0), 20.0, false, Some(SkyBackdrop::Clouds)).0,
+            classify_bucket_4(sorted_at(15.0), 20.0, false, None).0,
         ];
         buckets.sort_unstable();
         assert_eq!(

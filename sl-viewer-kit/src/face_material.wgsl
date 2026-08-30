@@ -52,6 +52,16 @@ struct SlFaceParams {
     // glow pass blooms it. The shader gates the write on the alpha mode, so a blend
     // face (whose alpha is its coverage) is left alone.
     glow: f32,
+    // The reference's `waterClip` (`class1/deferred/deferredUtil.glsl`): which side
+    // of the water plane this draw keeps. `0` = no clip (the ordinary case), `+1` =
+    // keep fragments **above** the surface, `-1` = keep those **below**. A face that
+    // straddles the surface is drawn twice, once with each sign, so each half lands
+    // in the pass that orders it correctly against the sea.
+    water_clip: f32,
+    // The water surface height in world metres, the plane `water_clip` cuts at.
+    // A height rather than the reference's `vec4` plane because this viewer's sea is
+    // always horizontal (`crate::water`), so the plane normal is always +Y.
+    water_level: f32,
 }
 
 // Must match the `MAP_FLAG_*` constants in face_material.rs.
@@ -364,6 +374,22 @@ fn fragment(
 #else   // BINDLESS
     let sl = sl_material;
 #endif  // BINDLESS
+
+    // The reference's `waterClip`, first thing and before any work is done for a
+    // fragment that is about to be thrown away: discard the half of this draw that
+    // belongs to the other side of the water surface.
+    //
+    // Why a face is drawn twice at all: the sea is opaque and writes depth, so
+    // translucency behind it must be composited *before* it (to be in the screen
+    // copy it refracts) and translucency in front of it *after* it. A face that
+    // straddles the surface has fragments in both, and no single draw can be in two
+    // passes — so `sl_viewer_world_scene::transparency` gives such a face a second
+    // draw with the opposite sign, exactly as the reference renders its alpha pool
+    // twice with `waterSign` flipped between them.
+    if (sl.water_clip != 0.0
+        && sl.water_clip * (in.world_position.y - sl.water_level) < 0.0) {
+        discard;
+    }
 
     // Legacy glossiness is modulated per-texel by the normal-map alpha (the
     // reference `getNormal`'s `glossiness *= vNt.a`); captured in the normal branch
