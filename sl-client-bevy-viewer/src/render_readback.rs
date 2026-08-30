@@ -47,7 +47,8 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bevy::app::ScheduleRunnerPlugin;
-use bevy::camera::{Exposure, Hdr, RenderTarget};
+use bevy::camera::RenderTarget;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -58,15 +59,12 @@ use bevy::render::{Render, RenderApp, RenderSystems};
 use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 
-use crate::face_material::SlFaceMaterialPlugin;
 use crate::pixel_oracle::Frame;
-use crate::probes::{ProbeCaptureStats, ReflectionProbePlugin};
+use crate::probes::ProbeCaptureStats;
 use crate::render_test::{LogCapture, capture_logs};
+use crate::viewer_camera::viewer_camera_bundle;
+use crate::viewer_plugins::ViewerRenderPlugins;
 use crate::world_api::ViewerCamera;
-use sl_client_bevy::{
-    CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
-    TerrainMaterialPlugin, WaterMaterialPlugin,
-};
 
 use crate::render_scene::{
     CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, MATRIX_BOXES, MATRIX_DISTANCE,
@@ -466,41 +464,17 @@ pub(crate) fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Capt
     .add_plugins(PipelineStatusPlugin)
     .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
 
-    // `scene_root()` propagates the reflection-probe render layers down the scene
-    // with `Propagate<RenderLayers>`, which needs this plugin (the full viewer adds
-    // it in `lib.rs`). Without it the probe capture cameras — which render the
-    // probe layers, not the main layer — would see an empty world and a mirror
-    // would reflect nothing.
-    app.add_plugins(bevy::app::HierarchyPropagatePlugin::<
-        bevy::camera::visibility::RenderLayers,
-    >::new(PostUpdate));
-
-    // The viewer's real reflection probes, as the gallery runs them — without
-    // these a mirror reflects nothing at all and the check is vacuous.
-    app.add_plugins(ReflectionProbePlugin)
-        // The viewer's real custom-material pipelines and its own drivers, as the
-        // gallery runs them: this is the **third** app that spawns a registered
-        // scene, so it is the third that renders nothing at all for a scene whose
-        // shader or driver it forgot. See `SceneRuntimePlugin` — the material
-        // plugins go first, and it fills in whatever they did not register.
-        .add_plugins((
-            SlFaceMaterialPlugin,
-            TerrainMaterialPlugin,
-            SkyMaterialPlugin,
-            SunDiscMaterialPlugin,
-            CloudMaterialPlugin,
-            StarMaterialPlugin,
-            WaterMaterialPlugin,
-        ))
-        // The viewer's water-relative transparency ordering, because a water scene
-        // renders a *different picture* without it: the sea is opaque and writes
-        // depth, so which translucent content is drawn before it and which after is
-        // decided here, not by Bevy's plain back-to-front order. Without this plugin
-        // the readback tier could not see a water-ordering bug at all.
-        .add_plugins(crate::transparency::TransparencyOrderPlugin)
-        // …and the straddling-face split, so a scene whose prim crosses the
-        // waterline is drawn the way the viewer draws it.
-        .add_plugins(crate::water_clip::WaterClipPlugin)
+    // The viewer's own render stack, in its bare form: the material pipelines
+    // every registered scene is drawn with, the reflection probes (without which a
+    // mirror reflects nothing and the check is vacuous), the water-relative
+    // transparency ordering (without which a water scene renders a *different
+    // picture* — the sea writes depth, so which translucent content is drawn before
+    // it is decided there), the waterline split and the probe render-layer
+    // propagation `scene_root()` relies on. Not the sky, the sea or the lights:
+    // the registered scenes stage their own, and two skies would be no scene at
+    // all. `SceneRuntimePlugin` then fills in the drivers the viewer registers
+    // elsewhere, so a scene renders here what it renders in the viewer.
+    app.add_plugins(ViewerRenderPlugins::bare())
         .add_plugins(SceneRuntimePlugin)
         .insert_resource(DirectionalLightShadowMap::default())
         // No flat ambient, stated rather than inherited from Bevy's default. Every
@@ -540,21 +514,25 @@ pub(crate) fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Capt
             let basis = scene_root_transform().rotation;
             let position = basis.mul_vec3(scene_camera.position);
             let look_at = basis.mul_vec3(scene_camera.look_at);
-            commands.spawn((
-                Camera3d::default(),
-                // In Bevy 0.19 the render target is its own component, not a
-                // `Camera` field — the same way `crate::probes` targets its
-                // capture faces.
-                RenderTarget::Image(readback_target.clone().into()),
-                Exposure::default(),
-                Hdr,
-                Transform::from_translation(position).looking_at(look_at, Vec3::Y),
-                // `install_global_probe` binds the default probe to the entity
-                // carrying this marker, and `drive_local_probes` poses its capture
-                // rigs from it.
-                ViewerCamera,
-                Name::new("readback-camera"),
-            ));
+            // The viewer's own camera bundle (its exposure, HDR target and the
+            // `ViewerCamera` marker `install_global_probe` binds the default probe
+            // to), aimed into the readback target — in Bevy 0.19 the render target
+            // is its own component, the same way `crate::probes` targets its
+            // capture faces.
+            commands
+                .spawn((
+                    viewer_camera_bundle(
+                        Transform::from_translation(position).looking_at(look_at, Vec3::Y),
+                    ),
+                    RenderTarget::Image(readback_target.clone().into()),
+                    Name::new("readback-camera"),
+                ))
+                // The bundle switches Bevy's tone mapper off because the viewer
+                // tone-maps in its own pass — which the bare stack does not run.
+                // Without any tone mapper the HDR frame lands in the 8-bit target
+                // raw and clipped, and a half-transparent face blended over a
+                // bright plate reads as opaque. Keep Bevy's, as the rig always had.
+                .insert(Tonemapping::default());
             commands.spawn(Readback::texture(readback_target.clone()));
         },
     );

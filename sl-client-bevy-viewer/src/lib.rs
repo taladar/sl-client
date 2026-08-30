@@ -253,6 +253,7 @@ pub(crate) use sl_viewer_world_objects::render_priority;
 mod pixel_oracle;
 #[cfg(test)]
 mod render_readback;
+mod viewer_plugins;
 pub(crate) use sl_viewer_world_scene::render_scene;
 #[cfg(test)]
 mod render_test;
@@ -327,6 +328,7 @@ pub(crate) use sl_viewer_ui_core::ui_text;
 pub(crate) use sl_viewer_ui_core::virtual_list;
 pub(crate) use sl_viewer_ui_widgets::ui_text_input;
 pub(crate) use sl_viewer_world_scene::underwater_fog;
+pub(crate) use sl_viewer_world_scene::viewer_camera;
 pub(crate) use sl_viewer_world_scene::water;
 pub(crate) use sl_viewer_world_scene::water_exclusion;
 mod web_floater;
@@ -336,23 +338,15 @@ pub(crate) use sl_viewer_map::world_map;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use bevy::app::{HierarchyPropagatePlugin, PropagateSet};
-use bevy::camera::visibility::{RenderLayers, VisibilitySystems};
-use bevy::camera::{Exposure, Hdr};
-use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::diagnostic::{EntityCountDiagnosticsPlugin, FrameTimeDiagnosticsPlugin};
-use bevy::light::DirectionalLightShadowMap;
-use bevy::light::cluster::{ClusterConfig, ClusterFarZMode, ClusterZConfig};
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-use bevy::render::render_resource::TextureUsages;
 use bevy::window::{CursorGrabMode, CursorOptions};
 use clap::Parser as _;
 use sl_client_bevy::{
-    AccountDirsConfig, AnimationKey, ChatLogConfig, ClientDirectories, CloudMaterialPlugin,
-    InventoryCacheConfig, LoggedChatType, LoginFailure, LoginParams, LoginRequest, MfaChallenge,
-    SkyMaterialPlugin, SlClientPlugin, SlLoginRejected, SlMfaChallenge, StarMaterialPlugin,
-    StartLocation, SunDiscMaterialPlugin, TerrainMaterialPlugin, Uuid, WaterMaterialPlugin,
+    AccountDirsConfig, AnimationKey, ChatLogConfig, ClientDirectories, InventoryCacheConfig,
+    LoggedChatType, LoginFailure, LoginParams, LoginRequest, MfaChallenge, SlClientPlugin,
+    SlLoginRejected, SlMfaChallenge, StartLocation, Uuid,
 };
 use sl_repl::{Avatar, Credentials};
 use tracing::{info, warn};
@@ -362,30 +356,13 @@ use crate::about_floater::AboutFloaterPlugin;
 use crate::about_land::AboutLandPlugin;
 use crate::about_landmark::AboutLandmarkPlugin;
 use crate::about_region::AboutRegionPlugin;
-use crate::animations::{AnimationManager, AnimationPlayback};
-use crate::animesh::ControlAvatarState;
-use crate::appearance::{ServerBakeState, drive_server_bake};
+use crate::animations::AnimationManager;
 use crate::asset_blacklist::AssetBlacklistPlugin;
-use crate::asset_budget::{MeshUploadBudget, reset_mesh_upload_budget};
-use crate::attachment_menu::AttachmentMenuPlugin;
 use crate::avatar_assets::AvatarAssetLibrary;
-use crate::avatar_menu::AvatarMenuPlugin;
 use crate::avatar_picker::AvatarPickerPlugin;
 use crate::avatar_profile::AvatarProfilePlugin;
-use crate::avatars::RefetchAvatarTextures;
-use crate::avatars::{
-    AppearanceApplyBudget, AvatarBakeMaterials, AvatarRuntimeMorphs, OwnLocalBake, VolumeMorphGain,
-    apply_avatar_names, fit_avatar_tag_heights, recenter_avatars, setup_avatar_body,
-    toggle_volume_morphs, update_avatar_objects, update_coarse_avatars,
-};
-use crate::bake_inputs::{
-    OwnBakeInputs, WearableAssetFetched, WearableAssetManager, assemble_own_bake,
-    drive_wearable_requests, poll_wearable_assets, update_asset_caps,
-};
-use crate::bake_publish::OwnBakePublish;
 use crate::blocked::BlockedPlugin;
-use crate::bump::{BumpManager, apply_bump_normals, register_bump_faces};
-use crate::camera::{CameraPlugin, CameraSpin, CameraStart, SpinAxis};
+use crate::camera::{CameraSpin, CameraStart, SpinAxis};
 use crate::chat::{
     ChatOverlay, position_chat_overlay, restyle_chat_overlay, setup_chat_overlay,
     tick_chat_overlay, update_chat_overlay,
@@ -393,68 +370,33 @@ use crate::chat::{
 use crate::chat_input::ChatInputPlugin;
 use crate::conversations::ConversationsPlugin;
 use crate::derender::DerenderPlugin;
-use crate::edit_selection::EditSelectionPlugin;
-use crate::edit_tool::EditToolPlugin;
 use crate::emoji_complete::ColonCompletePlugin;
 use crate::emoji_picker::EmojiPickerPlugin;
-use crate::environment::{EnvironmentState, ingest_environment, request_environment};
 use crate::experience_permission::ExperiencePermissionPlugin;
 use crate::experiences_floater::ExperiencesPlugin;
-use crate::exposure::{SlExposure, SlExposurePlugin};
-use crate::flexi::simulate_flexi;
 use crate::floater::FloaterPlugin;
 use crate::floater_persist::FloaterPersistPlugin;
-use crate::gizmos::EditGizmoPlugin;
-use crate::glow::{SlGlow, SlGlowPlugin};
 use crate::group_notice::GroupNoticePlugin;
 use crate::group_profile::GroupProfilePlugin;
 use crate::groups::GroupsPlugin;
-use crate::hud_pick::pick_and_touch;
 use crate::i18n::ViewerI18nPlugin;
-use crate::input_action::InputActionPlugin;
-use crate::input_context::{CursorGrabAllowed, InputContextPlugin, world_has_keyboard};
+use crate::input_context::{CursorGrabAllowed, world_has_keyboard};
 use crate::inventory::InventoryPlugin;
 use crate::inventory_actions::InventoryActionsPlugin;
 use crate::inventory_drag::InventoryDragPlugin;
 use crate::inventory_filters::InventoryFiltersPlugin;
 use crate::inventory_gallery::InventoryGalleryPlugin;
 use crate::inventory_properties::InventoryPropertiesPlugin;
-use crate::land_menu::LandMenuPlugin;
-use crate::legacy_materials::{
-    LegacyMaterialManager, apply_legacy_materials, apply_legacy_normal_maps,
-    apply_legacy_specular_maps, drive_legacy_material_requests, receive_legacy_materials,
-    register_legacy_materials,
-};
 use crate::load_url::LoadUrlPlugin;
 use crate::local_chat_input::LocalChatInputPlugin;
-use crate::materials::{
-    MaterialManager, apply_blinn_phong_hide, apply_material_overrides, apply_pbr_textures,
-    poll_materials, register_changed_render_materials, register_pbr_materials,
-    revert_removed_render_materials, update_material_caps,
-};
-use crate::meshes::{MeshDecoded, MeshManager, poll_meshes, update_mesh_caps};
 use crate::nearby_chat_bar::NearbyChatBarPlugin;
 use crate::notification_host::{
     NotificationHostPlugin, announce_command_failures, apply_diagnostics_setting,
     ingest_alert_messages, ingest_protocol_diagnostics, spawn_notification_demo,
 };
 use crate::notification_persist::NotificationPersistPlugin;
-use crate::object_menu::ObjectMenuPlugin;
-use crate::objects::{
-    PendingDecodedMeshes, PendingDecodedSculpts, PendingObjectEvents, PrimLodTargets,
-    TreeLodTargets, apply_object_meshes, apply_object_sculpts, apply_prim_lod, apply_tree_lod,
-    recenter_objects, update_objects,
-};
 use crate::offers_invites::OffersInvitesPlugin;
-use crate::particle_render::{ParticleRenderPlugin, setup_particle_quad};
 use crate::people::PeoplePlugin;
-use crate::physics::PhysicsPlugin;
-use crate::pie_menu::PieMenuPlugin;
-use crate::probes::ReflectionProbePlugin;
-use crate::render_priority::drive_render_priority;
-use crate::rigged_attachments::{
-    RiggedBindSkipLog, adopt_pending_attachments, apply_rigged_attachments,
-};
 use crate::script_dialog::ScriptDialogPlugin;
 use crate::script_permission::ScriptPermissionPlugin;
 use crate::session::{
@@ -464,20 +406,7 @@ use crate::session::{
 };
 use crate::settings::{AccountContext, ViewerSettings, load_account_settings};
 use crate::settings_binding::SettingsBindingPlugin;
-use crate::sit_camera::SitCameraPlugin;
-use crate::spacenav::SpacenavPlugin;
 use crate::stand_stop_button::StandStopButtonPlugin;
-use crate::terrain::{
-    PendingPatchRebuilds, TerrainTextures, drain_patch_rebuilds, recenter_terrain, update_terrain,
-};
-use crate::texture_anim::{drive_texture_animations, restore_stopped_animations};
-use crate::textures::{
-    DeferredFaceTextures, PrimTextures, TextureApplyBudget, TextureDecoded, TextureManager,
-    apply_prim_textures, drain_deferred_face_textures, drain_lod_reuploads, poll_textures,
-    reset_texture_apply_budget, serve_texture_boosts, sync_texture_blacklist, update_texture_caps,
-};
-use crate::tonemap::{SlTonemap, SlTonemapPlugin};
-use crate::typing::TypingState;
 use crate::ui::{UiScaffoldSystems, ViewerUiPlugin};
 use crate::ui_element::UiAction;
 use crate::ui_tab::TabWidgetPlugin;
@@ -489,17 +418,12 @@ use crate::ui_text_input::{
     TextInputDemoVisible, TextInputPlugin, apply_text_input_demo_visibility, setup_text_input_demo,
     toggle_text_input_demo, update_demo_value_readouts,
 };
-use crate::underwater_fog::{UnderwaterFog, UnderwaterFogPlugin};
+use crate::viewer_camera::viewer_camera_bundle;
+use crate::viewer_plugins::{
+    ViewerEditPlugins, ViewerInputPlugins, ViewerRenderPlugins, ViewerWorldPlugins,
+};
 use crate::virtual_list::VirtualListPlugin;
-use crate::world_api::AvatarControls;
-use crate::world_api::AvatarState;
-use crate::world_api::BoostTexture;
-use crate::world_api::DecodedTextures;
-use crate::world_api::HudState;
-use crate::world_api::ObjectState;
-use crate::world_api::TerrainState;
-use crate::world_api::world_scoped::{WorldResetSystems, WorldScopedAppExt as _};
-use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
+use crate::world_api::{CameraMode, CameraRig};
 
 /// The local OpenSim grid login URI used when none is otherwise resolved.
 const DEFAULT_LOGIN_URI: &str = "http://127.0.0.1:9000/";
@@ -789,94 +713,7 @@ fn setup_scene(
         // frame the avatar the moment one arrives.
         Transform::from_translation(Vec3::new(128.0, 30.0, -128.0))
     };
-    commands.spawn((
-        // The underwater-fog post-process (P23.1) samples the scene depth, so make
-        // the main-pass depth texture readable (`TEXTURE_BINDING`). MSAA is pinned
-        // to 4× (the default) so that depth texture is multisampled to match the
-        // fog pass's `texture_depth_2d_multisampled` binding.
-        Camera3d {
-            depth_texture_usages: (TextureUsages::RENDER_ATTACHMENT
-                | TextureUsages::TEXTURE_BINDING)
-                .into(),
-            ..default()
-        },
-        // A close near plane (2 cm) so the camera can push right up to fine detail
-        // — an avatar's face — without the surface clipping away, and a far plane
-        // well beyond a region's diagonal so distant objects do not vanish.
-        Projection::Perspective(PerspectiveProjection {
-            near: 0.02,
-            far: 4096.0,
-            ..default()
-        }),
-        camera_transform,
-        ViewerCamera,
-        rig,
-        // A clustered-forward Z config tuned for a viewer that pushes the camera
-        // right up to avatars wearing small local lights (facelights). Bevy's
-        // default `ClusterZConfig` keeps a **special first Z-slice** spanning
-        // `[near_plane, first_slice_depth=5 m]`, and its default
-        // `MaxClusterableObjectRange` far mode derives the grid's far plane from the
-        // visible lights' own reach. Together those drop a worn light out of a
-        // mid-distance band: the light and the surface it lights sit inside that 5 m
-        // special slice, whose light handling fails, so a facelight only reaches the
-        // face when the camera is inside the light sphere (a separate special case)
-        // and goes dark across the rest of the near field. Shrinking the special
-        // slice to `0.5 m` puts the whole avatar-viewing range into ordinary
-        // well-conditioned logarithmic slices (which light correctly), and pinning
-        // the far plane to a constant stops a lone small light from collapsing the
-        // grid's depth range. The XY/Z counts stay at Bevy's defaults.
-        ClusterConfig::FixedZ {
-            total: 4096,
-            z_slices: 24,
-            z_config: ClusterZConfig {
-                first_slice_depth: 0.5,
-                far_z_mode: ClusterFarZMode::Constant(512.0),
-            },
-            dynamic_resizing: true,
-        },
-        Msaa::Sample4,
-        // P33.3: render the scene into a floating-point target and tonemap it once,
-        // at the end, with the reference viewer's own tone mapper (`tonemap`).
-        //
-        // Without `Hdr` the view target is 8-bit, which Bevy takes as the cue to
-        // tonemap `StandardMaterial` inside the mesh shader — leaving the viewer's
-        // custom sky / terrain / water materials (which never call Bevy's tonemapper)
-        // merely *clipped* at 1.0 instead, two different transfers in one frame. The
-        // reflection probes capture the scene linear and un-tonemapped, so that split
-        // also made a probe's cubemap disagree with what the eye saw of the very same
-        // surroundings — the miscalibration P33.3 exists to fix. One HDR target plus
-        // one tone mapper at the end puts every material in the one linear space the
-        // probes capture.
-        Hdr,
-        // Bevy's tonemapping is switched off: `SlTonemap` (the pass and its settings,
-        // mirroring the reference's `RenderTonemapType` / `RenderTonemapMix` /
-        // `RenderExposure`) is this viewer's tone mapper, and two would double up.
-        Tonemapping::None,
-        SlTonemap::default(),
-        // The reference's dynamic exposure inputs (the `exp_min`/`exp_max` range is
-        // filled per frame from the active sky by `refresh_exposure`). Only on the
-        // main camera — the reflection-probe capture cameras stay linear.
-        SlExposure::default(),
-        // The reference's glow pass inputs (disabled by default; see `glow.rs`).
-        // Only on the main camera.
-        SlGlow::default(),
-        // Bevy's *photometric* exposure: what turns the sun's illuminance (lux) and a
-        // prim light's lumens into the linear radiance the frame is composed in. It is
-        // a distinct thing from the reference's `RenderExposure` (a plain scale on the
-        // finished linear frame, carried by `SlTonemap`), and it is spelled out rather
-        // than left implicit because the reflection probes read it: their intensity is
-        // derived from it (`probes::probe_intensity`), so a probe reproduces the
-        // radiance it captured instead of re-scaling it.
-        Exposure::default(),
-        // The Second Life / Firestorm glow pass (`RenderGlow*`) is [`SlGlow`] above
-        // (the faithful alpha-mask separable-Gaussian glow, `glow.rs`), which runs
-        // after the tone mapper as the reference does — it replaced the Bevy
-        // screen-space `Bloom` this camera used to carry.
-        //
-        // The `UnderwaterFog` component both carries the per-frame fog parameters
-        // and selects this camera for the fog pass.
-        UnderwaterFog::default(),
-    ));
+    commands.spawn((viewer_camera_bundle(camera_transform), rig));
 }
 
 /// Capture a login-stopping outcome (MFA challenge or retryable rejection) into
@@ -1156,32 +993,14 @@ fn run_session(
     // `control_name=` idiom — a checkbox / slider names the setting it edits and
     // the store and widget are kept in sync both ways. Also owns the `F7` demo.
     .add_plugins(SettingsBindingPlugin)
-    // Input focus / modal context (viewer-input-focus-contexts): derives who owns
-    // the keyboard and the cursor from `bevy_input_focus`. Gates every world key
-    // binding below via `world_has_keyboard`, so typing into a focused text field
-    // no longer also walks the avatar.
-    .add_plugins(InputContextPlugin)
-    // The input action map (viewer-input-action-map): named actions + per-mode
-    // binding profiles that replace the hardcoded keys in `movement` / `camera`.
-    // Camera + movement read `ButtonInput<Action>`, gated once here on focus.
-    .add_plugins(InputActionPlugin)
-    // The camera system (viewer-camera-*): one `ViewerCamera` entity driven by a
-    // `CameraMode` state machine (mouselook / third-person / flycam), replacing the
-    // debug fly-camera. Every `WorldPhase::CameraPositioned` consumer reads its pose.
-    .add_plugins(CameraPlugin)
-    // Walking / turning / flying the own avatar from the movement actions, and the
-    // screen-space HUD screen with its viewport-anchored attachment points.
-    .add_plugins((
-        crate::movement::AvatarMovementPlugin,
-        crate::hud::HudScreenPlugin,
-    ))
-    // Scripted sit camera + forced mouselook a seat imposes on sit
-    // (viewer-sit-target-and-stand-button): tracked here, applied by
-    // `position_camera`.
-    .add_plugins(SitCameraPlugin)
-    // SpaceNavigator / 6-DOF device input (viewer-input-spacenav-*): publishes the
-    // device state (Linux, behind the `spacenav` feature) for the flycam to consume.
-    .add_plugins(SpacenavPlugin)
+    // The four plugin groups the headless harnesses share with the viewer
+    // (`crate::viewer_plugins`): input, then the render stack (whose
+    // `SlFaceMaterialPlugin` the editor plugins' `FromWorld` resources build
+    // against), the world fold, and the build tools.
+    .add_plugins(ViewerInputPlugins)
+    .add_plugins(ViewerRenderPlugins::default())
+    .add_plugins(ViewerWorldPlugins)
+    .add_plugins(ViewerEditPlugins)
     // The Stand Up / Stop flycam state button in the bottom toolbar's reserved
     // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
     // while in flycam.
@@ -1191,30 +1010,6 @@ fn run_session(
     .add_plugins(crate::crowd_debug_button::CrowdDebugButtonPlugin)
     .add_plugins(crate::teleport_progress::TeleportProgressPlugin)
     .add_plugins(crate::double_click_teleport::DoubleClickTeleportPlugin)
-    // The radial (pie) menu widget (viewer-ui-radial-menu): the mechanism only —
-    // which entries a given pie holds is per-domain and belongs with the domain.
-    .add_plugins(PieMenuPlugin)
-    // The avatar context / pie menu (viewer-avatar-context-menu): the self / other
-    // entry trees and their dispatch, opened by right-clicking an avatar's name
-    // tag or body.
-    .add_plugins(AvatarMenuPlugin)
-    // The in-world object context / pie menu (viewer-object-context-menu): the
-    // reference object entry tree and its dispatch, opened by right-clicking an
-    // in-world object (the shared resolver lives with the avatar menu).
-    .add_plugins(ObjectMenuPlugin)
-    // The worn-attachment context / pie menus (viewer-attachment-context-menu,
-    // viewer-hud-context-menu): the self / other entry trees and their dispatch,
-    // opened by right-clicking a worn attachment — in world or on a HUD point.
-    .add_plugins(AttachmentMenuPlugin)
-    // The land / terrain context / pie menu (viewer-land-context-menu): the
-    // reference land entry set and its dispatch, opened by right-clicking bare
-    // terrain (the shared resolver lives with the avatar menu).
-    .add_plugins(LandMenuPlugin)
-    // The custom material every prim/mesh/rigged/avatar/media face renders
-    // through (per-map UV transforms + legacy Blinn-Phong specular; inert where
-    // unused). Registered once here — and *before* the editor plugins below,
-    // whose `FromWorld` resources (the selection highlight / face-cursor overlay
-    // materials) build against `Assets<FaceMaterial>` at plugin-build time.
     .add_plugins(crate::audio::AudioPlugin)
     // The shared sound-asset fetch/decode/cache (viewer-in-world-sounds,
     // viewer-ui-sound-effects) and the in-world spatial-sound producer that
@@ -1225,63 +1020,6 @@ fn run_session(
     // (viewer-ui-sound-effects): the typing chirp, money up/down, teleport,
     // snapshot shutter — raised as PlayUiSound messages by their surfaces.
     .add_plugins(crate::ui_sounds::UiSoundsPlugin)
-    // Amortise the sun's shadow-caster visibility cull over several frames
-    // (viewer-perf-pbr-shadow-cluster-rez): replace Bevy's per-frame
-    // check_dir_light_mesh_visibility with a round-robin one.
-    .add_plugins(crate::shadow_visibility::ShadowVisibilityPlugin)
-    .add_plugins(crate::face_material::SlFaceMaterialPlugin)
-    // The build tool (viewer-object-edit-floater-shell): the Build Tools
-    // floater, the edit-mode switch, and the numeric transform fields.
-    .add_plugins(EditToolPlugin)
-    // The parameter tabs (viewer-prim-parameter-editing): the Object-tab
-    // name / description / flag / shape editors and the Features-tab
-    // material / flexi / light editors.
-    .add_plugins(crate::edit_params::EditParamsPlugin)
-    // The Texture tab (viewer-prim-texture-editing) + Select Face tool
-    // (viewer-edit-face-selection): per-face colour / transparency / glow /
-    // bump / shiny / mapping and texture repeats / offset / rotation.
-    .add_plugins(crate::edit_texture::EditTexturePlugin)
-    // The Blinn-Phong normal / specular maps + PBR (GLTF) material channels of
-    // the Texture tab (viewer-face-materials-pbr).
-    .add_plugins(crate::edit_material::EditMaterialPlugin)
-    // The Content tab + standalone Object Contents floater
-    // (viewer-prim-inventory-editing): the prim task-inventory list, its
-    // per-object cache, and the add / remove / rename / copy-out actions.
-    .add_plugins(crate::edit_contents::EditContentsPlugin)
-    // The notecard viewer & editor floater (viewer-notecard-editor): open a
-    // notecard from inventory, read it, edit its text when the item is
-    // modifiable, and save it back to agent inventory. Embedded items are
-    // listed (inline clickable rendering waits on the rich-text widget).
-    .add_plugins(crate::edit_notecard::EditNotecardPlugin)
-    .add_plugins(crate::notecard_render::NotecardRenderPlugin)
-    .add_plugins(crate::edit_wearable::EditWearablePlugin)
-    .add_plugins(crate::edit_material_asset::EditMaterialAssetPlugin)
-    // The LSL script editor floater (viewer-lsl-editor-save-compile): open a
-    // script from agent or task inventory, read it, edit its source when
-    // modifiable, and save it back — which the simulator compiles, its result
-    // surfaced as a status line and a diagnostics list (syntax highlighting
-    // waits on the rich-text widget).
-    .add_plugins(crate::edit_script::EditScriptPlugin)
-    // Offscreen material-on-a-sphere previews for the PBR render-material swatch
-    // and the material picker's preview pane (viewer-material-swatch-sphere-preview).
-    .add_plugins(crate::material_preview::MaterialPreviewPlugin)
-    // The Create tool (viewer-prim-creation): the create panel's base-type
-    // picker and the click-to-rez placer for prims / trees / grass.
-    .add_plugins(crate::edit_create::EditCreatePlugin)
-    // The object selection core (viewer-object-selection-core): click /
-    // rubber-band selection, the selection set + highlight, and the
-    // ObjectSelect / ObjectDeselect / ObjectProperties wire sync.
-    .add_plugins(EditSelectionPlugin)
-    // The transform gizmos (viewer-transform-gizmos): move / rotate / stretch
-    // manipulators over the selection, sending MultipleObjectUpdate edits.
-    .add_plugins(EditGizmoPlugin)
-    // Prim linking / unlinking (viewer-prim-linking): Ctrl+L / Ctrl+Shift+L
-    // and the Build menu, sending ObjectLink / ObjectDelink with the
-    // last-selected object as the linkset root.
-    .add_plugins(crate::edit_link::EditLinkPlugin)
-    // Object-edit undo / redo (viewer-build-undo-redo): Ctrl+Z / Ctrl+Y and
-    // the Build menu, sending the server-side Undo / Redo for the selection.
-    .add_plugins(crate::edit_undo::EditUndoPlugin)
     // The line-based menu widget (viewer-ui-context-menu) + reusable menu bar
     // (viewer-ui-menu-bar): drop-down / context menus and the strip of buttons
     // that open them, built on `bevy_ui_widgets`' headless menu machinery. The
@@ -1595,152 +1333,15 @@ fn run_session(
     // each floater's position, size, minimized / docked state and open / closed
     // state across sessions, in the per-avatar account settings.
     .add_plugins(FloaterPersistPlugin)
-    .add_plugins(ParticleRenderPlugin)
-    .add_plugins(TerrainMaterialPlugin)
-    // In-world parcel borders / property lines (viewer-parcel-borders-render):
-    // colour-coded vertical bands draped along parcel boundaries, driven by the
-    // `parcel_borders` module's system below.
-    .add_plugins(crate::parcel_borders::ParcelBordersPlugin)
-    // The in-world tracking beacon (viewer-beacons-beam-render): the vertical
-    // beam + label + off-screen arrow drawn at the tracked position from the
-    // shared `MapTracking` resource.
-    .add_plugins(crate::beacons::BeaconPlugin)
-    // The world-space avatar name-tag billboards (viewer-name-tags-billboard-
-    // render): the embedded billboard shader + material pipeline; the tag
-    // systems themselves register with the avatar systems below.
-    .add_plugins(crate::name_tag_billboard::NameTagBillboardPlugin)
-    // The object layer's own stacks: the avatar appearance / bake pipeline, and
-    // the two `PostUpdate` pose passes that write animated joint globals after
-    // transform propagation.
-    .add_plugins((
-        crate::avatars::AvatarAppearancePlugin,
-        crate::animations::AvatarAnimationPlugin,
-        crate::animations::AvatarPosePlugin,
-        crate::animesh::AnimeshPosePlugin,
-        crate::objects::ObjectDiagnosticsPlugin,
-    ))
-    // Object floating text (`llSetText`) reuses the name-tag billboard renderer
-    // with its own fade registry + lifetime map (viewer-hover-text).
-    .add_plugins(crate::hover_text::HoverTextPlugin)
     // In-world hover tooltips over objects / avatars / land (viewer-hover-tooltips).
     .add_plugins(crate::hover_tooltip::HoverTooltipPlugin)
-    // Shared object land-impact model (GetObjectCost), read by the hover tooltip
-    // and the build floater.
-    .add_plugins(crate::object_cost::ObjectCostPlugin)
-    // The atmospheric sky dome material (P22.2), driven from the region's EEP
-    // environment by `SkyPlugin`.
-    .add_plugins(SkyMaterialPlugin)
-    // The sun / moon disc billboard material (P22.3), driven alongside the sky.
-    .add_plugins(SunDiscMaterialPlugin)
-    // The scrolling cloud-layer material (P22.4), driven alongside the sky.
-    .add_plugins(CloudMaterialPlugin)
-    // The night-time star-field material (P22.5), driven alongside the sky.
-    .add_plugins(StarMaterialPlugin)
-    // The water-surface material (P23.1), driven from the region's EEP water
-    // settings by `WaterPlugin`.
-    .add_plugins(WaterMaterialPlugin)
-    // The scene layer's own stacks, each scheduling itself against the world
-    // phases rather than being wired system-by-system here: the sky dome with
-    // its discs, clouds and stars; the endless ocean; the water-exclusion mask;
-    // the CPU particle simulation; the local-light budget; and the `F3`
-    // pipeline-status overlay.
+    // The `F3` pipeline-status overlay and the asset-store statistics it and the
+    // Tracy plots read.
     .add_plugins((
-        crate::sky::SkyPlugin,
-        crate::water::WaterPlugin,
-        crate::water_exclusion::WaterExclusionPlugin,
-        crate::particles::ParticlesPlugin,
-        crate::lights::LocalLightsPlugin,
         crate::diagnostics::PipelineOverlayPlugin,
         crate::asset_stats::AssetStatsPlugin,
         crate::avatar_asset_stats::AvatarAssetStatsPlugin,
     ))
-    // Water-relative transparency ordering (viewer-particle-water-ordering): a
-    // render-world re-sort of the transparent phase so translucent content (a
-    // fountain's spray, translucent prims) orders correctly against the
-    // depth-writing water surface — below-water draws through it, above-water over
-    // it — rather than being painted out by the camera-following plane.
-    .add_plugins(crate::transparency::TransparencyOrderPlugin)
-    // Splits a translucent face that crosses the waterline into its two halves, so
-    // each is ordered against the sea on its own side (the reference's `waterSign`).
-    .add_plugins(crate::water_clip::WaterClipPlugin)
-    // The underwater-fog post-process (P23.1): a fullscreen depth-based pass that
-    // fogs everything below the water surface (reference `getWaterFogView`).
-    .add_plugins(UnderwaterFogPlugin)
-    // The reference viewer's dynamic exposure (`generateExposure` / `exposureF`):
-    // a fullscreen pass that reduces the composited scene's average luminance to a
-    // 1×1 exposure map the tone mapper multiplies in, and the `sky_hdr_scale`
-    // counterweight that keeps an EEP sky from washing out. Runs after the fog /
-    // glow, before the tone mapper.
-    .add_plugins(SlExposurePlugin)
-    // The reference viewer's tone mapper (P33.3): the one transfer from the linear
-    // HDR scene to displayable colour, over the whole composited frame (reference
-    // `postDeferredTonemap` — ACES / Khronos Neutral, blended by `RenderTonemapMix`).
-    // Runs after the fog, which the reference likewise applies in linear space.
-    .add_plugins(SlTonemapPlugin)
-    // The reference viewer's glow (`generateGlow` / `combineGlow`): the faithful
-    // alpha-mask separable-Gaussian glow, replacing Bevy `Bloom`. Runs after the
-    // tone mapper, as the reference does. Disabled by default until the materials
-    // write the glow mask into their alpha (see `glow.rs`); the Bevy `Bloom` above
-    // stays active meanwhile.
-    .add_plugins(SlGlowPlugin)
-    // The GPU-avatar keystone spike (context/gpu-avatars.md §2.4 / §9.1 risk 1):
-    // flag-gated by SL_VIEWER_GPU_AVATAR_SPIKE (`identity` | `marker`), read once
-    // here. Unset (the default), this is a no-op plugin and the viewer is
-    // byte-for-byte the normal path. Set, a compute pass overwrites one skinned
-    // mesh's palette range inside Bevy's SkinUniforms buffer every frame — the
-    // de-risking experiment for writing GPU-posed palettes into Bevy's own skin
-    // path. Not a feature; delete or graft into Phase 1.
-    .add_plugins(crate::gpu_avatar_spike::GpuAvatarSpikePlugin::from_env())
-    // The GPU-avatar pose pipeline (context/gpu-avatars.md §1/§2, Phases
-    // 1a+1b): a compute pipeline re-runs the SL skeletal recurrence on the
-    // GPU and writes the skin palettes into Bevy's SkinUniforms buffer. The
-    // in-place path is the DEFAULT on a capable device (compute + storage
-    // buffers, checked once at startup with an automatic legacy-CPU
-    // fallback); SL_VIEWER_GPU_AVATARS overrides: `cpu`/`off` forces the
-    // legacy CPU pose path, `ghost` the Phase 1a side-by-side comparison
-    // harness (CPU in place + GPU-FK ghost 2 m aside). Env read once here.
-    .add_plugins(crate::gpu_avatars::GpuAvatarsPlugin::from_env())
-    // GPU ID-buffer picking (Phase 3): the cursor pick is a render, not a
-    // ray cast — pixel-perfect against exactly what is drawn, GPU-posed
-    // avatars included.
-    .add_plugins(crate::gpu_pick::GpuPickPlugin)
-    // The client-side physics foundation (P31.1): server-authoritative prim /
-    // avatar dead-reckoning and collision-geometry building (no physics engine —
-    // the viewer simulates nothing). Feeds the custom raycast index below.
-    .add_plugins(PhysicsPlugin)
-    // The custom off-thread static raycast index (viewer-perf-custom-static-raycast-index):
-    // a parry BVH over the prim colliders, maintained on a background task and
-    // queried lock-free for camera collision — the replacement for avian's
-    // per-fixed-step `SpatialQuery` maintenance.
-    .add_plugins(crate::raycast_index::RaycastIndexPlugin)
-    // The reflection-probe pipeline (P33): captures a scene environment cubemap and
-    // binds it as image-based lighting — a default (global) probe on the main view,
-    // the scene-render half Bevy's env-map filter / consumer expect but never
-    // produce.
-    .add_plugins(ReflectionProbePlugin)
-    // The HUD layer (P35.1): the HUD screen puts its whole subtree — the routed
-    // attachments and their faces — on `HUD_RENDER_LAYER` by propagating a single
-    // `RenderLayers` down the hierarchy, so the world camera (default layer) never
-    // draws a HUD. Propagation runs before Bevy decides what each camera sees, so a
-    // just-routed attachment is layered in the very frame it is parented.
-    .add_plugins(HierarchyPropagatePlugin::<RenderLayers>::new(PostUpdate))
-    // A distant teleport replaced the world: every store that declared itself
-    // `WorldScoped` empties itself in `WorldResetSystems::Purge`, and that has to
-    // happen before the re-centring pass. Each purge drops its subsystem's origin
-    // anchor, so re-centring afterwards simply anchors on the destination instead
-    // of shifting the (already purged) scene by a delta from the region we left.
-    // A crossing or a neighbour teleport keeps the world and never purges at all.
-    .configure_sets(
-        Update,
-        WorldResetSystems::Purge
-            .before(recenter_terrain)
-            .before(recenter_objects)
-            .before(recenter_avatars),
-    )
-    .configure_sets(
-        PostUpdate,
-        PropagateSet::<RenderLayers>::default().before(VisibilitySystems::CheckVisibility),
-    )
     // Gate bevy_ui's unconditional full-tree stack rebuild and layout walk
     // behind "did any of that system's inputs actually change (visibly)"
     // (viewer-perf-ui-layout-per-frame-relayout); each gated system is its
@@ -1792,7 +1393,6 @@ fn run_session(
         // P24.1: a larger sun/moon shadow map than the 2048 default, so the four
         // region-scale cascades (see `sky::shadow_cascades`) keep enough texels per
         // world unit to shadow an avatar crisply across a whole region.
-        .insert_resource(DirectionalLightShadowMap { size: 4096 })
         .init_resource::<ViewerSession>()
         // The per-avatar account identity (grid + name + accounts root), used by
         // `load_account_settings` to locate the account-scope settings once the
@@ -1816,78 +1416,24 @@ fn run_session(
         .insert_resource(camera_start)
         .insert_resource(camera_spin)
         .init_resource::<LoginOutcome>()
-        .init_resource::<EnvironmentState>()
         // The live A/B state of the shape's collision-volume displacement (P34.3), seeded
         // from `SL_VIEWER_VOLUME_MORPH_GAIN` and toggled by the `V` key.
-        .init_resource::<VolumeMorphGain>()
-        .init_world_scoped::<TerrainState>()
-        .init_world_scoped::<TerrainTextures>()
-        .init_resource::<PendingPatchRebuilds>()
         // One shared per-frame mesh-upload lane spent by object spawn / geometry /
         // LOD / terrain apply (replaces their old independent budgets).
-        .init_resource::<MeshUploadBudget>()
-        .init_resource::<crate::terrain::CurrentTerrainLighting>()
-        .init_world_scoped::<ObjectState>()
         // The deferred geometry builds of the objects `ObjectState` tracks, kept
         // beside it rather than inside a tracked object: an in-flight asset fetch
         // or a retained LOD rebuild is machinery, not world state.
-        .init_world_scoped::<PendingObjectEvents>()
-        .init_world_scoped::<RiggedBindSkipLog>()
-        .init_resource::<PendingDecodedMeshes>()
-        .init_resource::<PendingDecodedSculpts>()
         // The screen-space HUD hierarchy (P35.1), spawned by `setup_hud_screen`.
-        .init_resource::<HudState>()
         // The water-render bookkeeping (P23.1) is created by `setup_water` at
         // startup, so no `init_resource` is needed here; the surface level the
         // underwater-fog pass reads is a small resource published by `drive_water`.
-        .init_resource::<PrimLodTargets>()
-        .init_resource::<TreeLodTargets>()
         // The cross-instance geometry cache: shared mesh handles for identical
         // prim / sculpt / mesh geometry (`viewer-perf-prim-tessellation-cache`).
-        .init_resource::<geometry_cache::GeometryCache>()
         // The cross-instance material cache: shared face-material handles for
         // identical face content, so matched copies batch into instanced draws
         // (`viewer-perf-material-intern`).
-        .init_resource::<material_cache::MaterialCache>()
-        .init_world_scoped::<AvatarState>()
-        .init_resource::<avatars::AvatarPlaceholderAssets>()
-        .init_resource::<AppearanceApplyBudget>()
-        .init_resource::<world_api::MuteModel>()
-        .add_message::<world_api::RequestBlock>()
-        .init_resource::<name_tag_content::NameTagStatuses>()
-        .init_resource::<AvatarRuntimeMorphs>()
-        .init_resource::<look_at::LookAtTargets>()
-        .init_resource::<look_at::LookAtMotion>()
-        .init_resource::<reach::PointAtTargets>()
-        .init_resource::<reach::PointAtSelection>()
-        .init_resource::<reach::ReachMotion>()
-        .init_resource::<body_physics::BodyPhysicsMotion>()
-        .init_resource::<hand_pose::HandPoseMotion>()
-        .init_resource::<locomotion_ik::LocomotionAdjust>()
-        .init_resource::<ground::AvatarGround>()
-        .init_resource::<AvatarControls>()
-        .init_resource::<movement::MovementTuning>()
-        .init_resource::<TypingState>()
-        .init_resource::<ControlAvatarState>()
         .init_resource::<ChatOverlay>()
-        .init_resource::<TextureManager>()
-        .init_resource::<DecodedTextures>()
-        .init_resource::<PrimTextures>()
-        .init_resource::<TextureApplyBudget>()
-        .init_resource::<DeferredFaceTextures>()
-        .insert_resource(MaterialManager::new())
-        .init_resource::<LegacyMaterialManager>()
-        .init_resource::<BumpManager>()
-        .init_resource::<AvatarBakeMaterials>()
-        .init_resource::<OwnLocalBake>()
-        .init_resource::<ServerBakeState>()
-        .init_resource::<MeshManager>()
-        .init_resource::<OwnBakeInputs>()
-        .init_resource::<OwnBakePublish>()
-        .init_resource::<WearableAssetManager>()
         .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
-        .init_resource::<AnimationPlayback>()
-        .init_resource::<environment_assets::EnvironmentAssetManager>()
         // The UI text & font foundation demo (viewer-ui-text-foundation): a
         // toggleable `EditableText` panel, seeded shown/hidden from
         // `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it.
@@ -1904,12 +1450,6 @@ fn run_session(
                 .collect(),
             repeat: repeat_animation,
         })
-        .add_message::<TextureDecoded>()
-        .add_message::<BoostTexture>()
-        .add_message::<MeshDecoded>()
-        .add_message::<WearableAssetFetched>()
-        .add_message::<RefetchAvatarTextures>()
-        .add_message::<crate::world_api::LocalChatNotice>()
         // Menu ▸ Quit writes this; `handle_quit_requests` turns it (and a window
         // close) into a graceful logout.
         .add_message::<crate::session::QuitRequested>()
@@ -1932,10 +1472,6 @@ fn run_session(
                 // The reusable text-input widget demo panel (viewer-ui-text-input-widget),
                 // likewise parented to the scaffold's `UiRoot`.
                 setup_text_input_demo.after(UiScaffoldSystems::SpawnRoot),
-                setup_avatar_body,
-                // GPU particles (viewer-perf-gpu-particles): upload the one shared
-                // unit-quad mesh every cloud instances.
-                setup_particle_quad,
             ),
         )
         // The material cache's copy-on-write detach net: give any interned
@@ -1944,7 +1480,6 @@ fn run_session(
         // fullbright, the edit floaters' live previews — can write into the
         // shared asset. Scheduled in `PreUpdate` so the swap's commands are
         // applied at the schedule boundary, ahead of every mutator.
-        .add_systems(PreUpdate, material_cache::detach_shared_face_materials)
         // Refill the shared per-frame asset-upload budgets in `PreUpdate`, ahead of
         // every `Update` apply system that spends from them — the image lane
         // (`TextureApplyBudget`, drawn by the texture / PBR-map / bump / legacy / bake
@@ -1953,10 +1488,6 @@ fn run_session(
         // Update tuples guarantees the refill precedes all consumers regardless of
         // their relative order.
         .add_systems(
-            PreUpdate,
-            (reset_texture_apply_budget, reset_mesh_upload_budget),
-        )
-        .add_systems(
             Update,
             (
                 capture_login_outcome,
@@ -1964,215 +1495,6 @@ fn run_session(
                 // Announce the (user-tunable) draw distance on handshake and
                 // whenever the quick-preferences slider moves it.
                 apply_draw_distance,
-                // Request the region environment (EEP) on handshake, then fold the
-                // grid's reply into `EnvironmentState` (P22.1); the sky / water /
-                // shadow phases render from it. Nested into one tuple to stay within
-                // Bevy's per-tuple system limit.
-                (
-                    request_environment,
-                    ingest_environment,
-                    // Fetch + swap in a pinned Modern (`KNOWN_SKY_*`) sky once its
-                    // asset decodes; after `ingest_environment` so the shared
-                    // environment (the Modern placeholder) is current.
-                    crate::environment::resolve_modern_environment,
-                ),
-                // Trigger our own avatar's server-side bake so P14 has bakes to fetch.
-                drive_server_bake,
-                // Keep the texture store's `GetTexture` cap current, then poll
-                // finished fetches before the consumers that apply them. The
-                // blacklist mirror rides along, so a blacklisted texture asset
-                // (viewer-derender-blacklist) is refused before any fetch.
-                // Nested into one tuple to stay within Bevy's per-tuple system
-                // limit. `serve_texture_boosts` drains the fetch requests raised
-                // by the crates that only show textures and cannot reach the
-                // manager directly.
-                (
-                    update_texture_caps,
-                    sync_texture_blacklist,
-                    poll_textures,
-                    serve_texture_boosts,
-                ),
-                // The same for the mesh store's `GetMesh2` / `GetMesh` cap, plus the
-                // client-side bake inputs (P15.2): keep the wearable-asset store's
-                // `ViewerAsset` cap current, request our own outfit and fetch its
-                // wearable assets, then assemble each bake region's layer list.
-                // Nested into one tuple to stay within Bevy's per-tuple system limit.
-                (
-                    update_mesh_caps,
-                    poll_meshes,
-                    update_asset_caps,
-                    drive_wearable_requests,
-                    poll_wearable_assets,
-                    assemble_own_bake,
-                ),
-                // Scene re-base on a region change, then fold terrain + object
-                // events. (The purge half of a *distant* teleport is each store's
-                // own `WorldScoped` impl, ordered ahead of this by the
-                // `WorldResetSystems::Purge` set above.) Nested into one tuple to
-                // stay within Bevy's per-tuple system limit.
-                (
-                    // Recenter (origin follows the root region) before folding
-                    // terrain events, so patches are placed on the current origin;
-                    // then drain a few of the queued seam / whole-region patch
-                    // rebuilds (`PendingPatchRebuilds`).
-                    //
-                    // Terrain **wins** the shared per-frame `MeshUploadBudget`:
-                    // ordered before the object mesh/sculpt spenders (`update_objects`
-                    // inline warm-cache builds, `apply_object_meshes` and its chained
-                    // `apply_object_sculpts` / `apply_rigged_attachments`) so a region
-                    // hand-off builds the ground first — a missing ground plane is far
-                    // more visible than a few deferred prims, and terrain is a small,
-                    // bursty set (a region's 16×16 patches) that at most defers objects
-                    // for a few frames per region connect.
-                    (recenter_terrain, update_terrain, drain_patch_rebuilds)
-                        .chain()
-                        .before(update_objects)
-                        .before(apply_object_meshes),
-                    // Re-base world-root objects onto the new origin (a crossing or
-                    // a teleport to an already-connected region) before folding
-                    // object events, so a static object stays put and a new object
-                    // is placed against the current origin. Chained after the
-                    // terrain recenter so it re-bases to the same authoritative root.
-                    (recenter_objects, update_objects)
-                        .chain()
-                        .in_set(world_api::WorldPhase::ObjectsUpdated),
-                ),
-                // Build the geometry of any mesh object whose asset just decoded, and
-                // of any sculpted prim whose sculpt map just decoded — both spend from
-                // the shared `MeshUploadBudget` (refilled in `PreUpdate`) so a decode
-                // burst's builds spread across frames; `apply_rigged_attachments`
-                // spends from the same pool via its `.after(apply_object_meshes)` edge.
-                (apply_object_meshes, apply_object_sculpts).chain(),
-                // Apply decoded diffuse textures to parked faces, then the PBR (GLTF)
-                // render-material pipeline (P27.1): keep the material store's
-                // `ViewerAsset` cap current, register each newly-spawned face's
-                // material, fold finished material fetches into the face materials, and
-                // drop each decoded texture map into its slot. Nested into one tuple to
-                // stay within Bevy's per-tuple system limit; runs after the
-                // face-spawning systems so a face's PBR material is seen.
-                (
-                    // Amortise face-material re-preps across frames: refill the
-                    // per-frame budget, drape freshly decoded textures (deferring the
-                    // overflow past a decode burst), patch faces parked on an
-                    // already-decoded texture (a build-tool live-preview pre-fetch, then
-                    // a commit re-tessellation) that the decode-event-driven
-                    // `apply_prim_textures` alone would strand, then drain the deferred
-                    // backlog (face drapes, then the lower-priority LOD re-uploads) with
-                    // whatever budget is left. Chained so each drain sees the budget the
-                    // earlier steps spent (see `TextureApplyBudget`).
-                    (
-                        apply_prim_textures,
-                        crate::textures::patch_parked_decoded_textures,
-                        drain_deferred_face_textures,
-                        drain_lod_reuploads,
-                    )
-                        .chain(),
-                    update_material_caps,
-                    register_pbr_materials,
-                    // A render material assigned to an existing prim (build tool /
-                    // in-world retexture) refreshes its holder without re-tessellating
-                    // its faces, so register the change here — `register_pbr_materials`
-                    // only sees freshly-spawned faces.
-                    register_changed_render_materials,
-                    // Phase 3: a render material cleared in-world removes the holder,
-                    // so revert each of its faces to Blinn-Phong / diffuse (and bring
-                    // back their legacy specular / normal, no longer superseded).
-                    revert_removed_render_materials,
-                    poll_materials,
-                    apply_material_overrides,
-                    crate::materials::drive_local_overrides,
-                    apply_pbr_textures,
-                    // FIRE-35138: while the build tool's Texture tab is on the
-                    // Blinn-Phong mode, render each selected linkset's PBR faces as
-                    // Blinn-Phong so they can be judged as edited; restore PBR on
-                    // deselect / PBR tab / leaving build mode.
-                    apply_blinn_phong_hide,
-                    // The legacy (normal/specular) render-material pipeline (P27.3):
-                    // register each face carrying a `TextureEntry` material id, batch
-                    // the `RenderMaterials` cap requests, fold in the replies, and
-                    // apply the materials + their normal maps to the faces.
-                    register_legacy_materials,
-                    drive_legacy_material_requests,
-                    receive_legacy_materials,
-                    apply_legacy_materials,
-                    apply_legacy_normal_maps,
-                    apply_legacy_specular_maps,
-                    // The legacy per-face bump / shiny / glow / fullbright flags
-                    // (P27.4): register each newly-spawned bumped face and, once its
-                    // diffuse texture decodes, generate and assign its normal map
-                    // (fullbright / glow / shiny are folded in at material-build time
-                    // by `face_material`). Runs after the legacy material path so a
-                    // face's real `LLMaterial` normal map takes precedence over bump.
-                    register_bump_faces,
-                    apply_bump_normals,
-                ),
-                // Avatar placeholder spheres: full-object avatars first, then the
-                // coarse-only ones (which dedupe against the full-object set); then
-                // fold resolved names in and float each name tag over its sphere.
-                (
-                    (
-                        // Re-base avatars onto the new origin before folding avatar
-                        // updates, so a stationary neighbour avatar stays put and a
-                        // freshly-streamed one is placed against the current origin.
-                        recenter_avatars,
-                        update_avatar_objects,
-                        update_coarse_avatars,
-                        // One batched legacy + display-name request per frame,
-                        // however many avatars just appeared.
-                        avatars::flush_name_requests,
-                    )
-                        .chain()
-                        .in_set(world_api::WorldPhase::AvatarsUpdated),
-                    // The mute list (name-tag colouring + the block-list UI):
-                    // request once at session-up, ingest the Xfer'd list, turn
-                    // each guarded block request into an entry, and mirror
-                    // locally-issued mutes. `apply_block_requests` runs before
-                    // `note_local_mutes` so a just-guarded block is mirrored in
-                    // the same frame it is sent.
-                    (
-                        mutes::request_mute_list,
-                        mutes::ingest_mute_list,
-                        mutes::apply_block_requests,
-                        mutes::note_local_mutes,
-                    )
-                        .chain(),
-                    // Nearby-chat typing signals for the tag's Typing line,
-                    // then the content composer that assembles every tag's
-                    // lines from names / title / statuses / colours /
-                    // own-avatar distance (change-guarded; the PostUpdate
-                    // renderer chain reacts to `Changed<TagContent>`).
-                    (
-                        name_tag_content::ingest_tag_statuses,
-                        name_tag_content::compose_name_tags
-                            .after(update_avatar_objects)
-                            .after(update_coarse_avatars)
-                            .after(apply_avatar_names)
-                            .after(world_api::WorldPhase::AvatarSkeletonsDriven)
-                            .after(crate::groups::ingest_group_events),
-                    )
-                        .chain(),
-                    // Float each avatar's name tag above its skeleton's head
-                    // top, after the bodies (and their skeleton instances)
-                    // exist.
-                    fit_avatar_tag_heights.after(update_avatar_objects),
-                ),
-                // Parent each worn attachment to its avatar's skeleton joint (P16.1),
-                // after the avatars (and their skeleton instances) have been spawned.
-                // Parent each rigid attachment to its avatar's skeleton joint (P16), and
-                // bind each worn rigged mesh to its wearer's skeleton instance as a
-                // `SkinnedMesh` (P17.2). Both run after the avatars (and their skeletons)
-                // are spawned; the rigged bind also waits on the mesh decode
-                // (`apply_object_meshes` set its pending skinned build). Nested into one
-                // tuple to stay within Bevy's per-tuple system limit.
-                (
-                    adopt_pending_attachments
-                        .after(update_avatar_objects)
-                        .after(update_objects),
-                    apply_rigged_attachments
-                        .after(apply_object_meshes)
-                        .after(update_avatar_objects),
-                ),
-                apply_avatar_names,
                 // Append newly received local chat to the on-screen overlay, age each
                 // line so it fades and despawns once chat goes quiet
                 // (viewer-chat-overlay-fade), and keep the overlay pinned just above the
@@ -2205,55 +1527,10 @@ fn run_session(
                 ),
             ),
         )
-        // The crosshair pick tool (press `P`) to identify the object under the
-        // centre of the screen. Separate calls to stay clear of Bevy's per-tuple
-        // system limit. (The SL_VIEWER_LOG_OBJECTS diagnostic is registered
-        // conditionally with the other env-gated debug systems below.)
+        // UI text & font foundation and the text-input widget demo panels.
         .add_systems(
             Update,
             (
-                // HUD picking & clicking (P35.3): a left click touches the HUD (or,
-                // failing that, world) object under the pointer through an orthographic
-                // HUD-camera pick, HUD before world. The cursor is free to click with
-                // in every camera mode except mouselook (which grabs it), so no
-                // free-cursor toggle is needed any more — the reference's model, where
-                // third-person clicks the world directly. While the build tool is
-                // active the left click belongs to selection (viewer-object-
-                // selection-core), so the touch pick stands down.
-                pick_and_touch.run_if(crate::edit_tool::edit_tool_inactive),
-                // The world half of the touch resolves on the GPU pick's
-                // readback, 1–2 frames after the press.
-                crate::hud_pick::resolve_touch_pick.run_if(crate::edit_tool::edit_tool_inactive),
-                // On-screen render priority (P20.2): re-rank the queued texture / mesh
-                // fetches by the pixel area each object covers, so what the camera
-                // looks at loads first. Throttled internally. It also picks each plain
-                // prim's tessellation level of detail (P21.3); `apply_prim_lod` then
-                // re-tessellates any prim whose level changed, so it runs after.
-                drive_render_priority,
-                // Nested into one tuple to stay within Bevy's per-tuple system
-                // limit: the LOD appliers rebuild geometry after the driver has
-                // picked the levels, and the geometry-cache prune periodically
-                // drops cache entries whose shared meshes all died (every face
-                // entity despawned) — the cache holds only weak asset ids, so
-                // that is bookkeeping, not asset freeing.
-                (
-                    // Budget the LOD re-tessellations across frames: `apply_prim_lod`
-                    // and (P26.2) `apply_tree_lod` — which regenerates any tree whose
-                    // branching / billboard tier the driver changed — each spend from
-                    // the shared `MeshUploadBudget` (refilled in `PreUpdate`), so a
-                    // tick's whole batch spreads over frames instead of a single
-                    // command-flush spike. Chained so tree sees the budget prim spent;
-                    // all after the driver has picked levels.
-                    (apply_prim_lod, apply_tree_lod)
-                        .chain()
-                        .after(drive_render_priority),
-                    geometry_cache::prune_geometry_cache.run_if(
-                        bevy::time::common_conditions::on_timer(geometry_cache::PRUNE_INTERVAL),
-                    ),
-                    material_cache::prune_material_cache.run_if(
-                        bevy::time::common_conditions::on_timer(material_cache::PRUNE_INTERVAL),
-                    ),
-                ),
                 // UI text & font foundation (viewer-ui-text-foundation): toggle /
                 // apply the demo panel's visibility (the F4 key). Nested into one
                 // tuple to stay within Bevy's per-tuple system limit.
@@ -2273,18 +1550,6 @@ fn run_session(
                         .after(toggle_text_input_demo),
                     update_demo_value_readouts.run_if(crate::ui_text_input::text_input_demo_active),
                 ),
-                // Flexi prims (P32.2): step each flexible prim's CPU chain simulation
-                // and rewrite its deformed geometry in place, after `update_objects` so
-                // this frame's spawns / rebuilds have seeded their chain state.
-                simulate_flexi.after(update_objects),
-                // Debug (`V`): toggle the shape's collision-volume displacement live, so
-                // the effect can be A/B'd on one avatar in one session (P34.3).
-                toggle_volume_morphs.run_if(world_has_keyboard),
-                // Animated textures (P28.2): advance every prim's `llSetTextureAnim`
-                // and fold the current frame's UV / flipbook placement into its faces,
-                // then reset a face to its static placement when the animation stops.
-                drive_texture_animations,
-                restore_stopped_animations,
             ),
         )
         // Terrain lighting (viewer-clouds-sun-occlusion): drive each region's ground
@@ -2292,10 +1557,6 @@ fn run_session(
         // legacy terrain, after the camera so it reads the current altitude's sky
         // frame. The sky, water, water-exclusion and underwater-fog stacks schedule
         // themselves — see `SkyPlugin` and its siblings.
-        .add_systems(
-            Update,
-            crate::terrain::drive_terrain_lighting.after(world_api::WorldPhase::CameraPositioned),
-        )
         // The EEP settings-asset fetch cap for the World ▸ Environment Modern
         // presets, and the session's camera-interest / viewport reports. The avatar
         // animation pipeline that used to share this call schedules itself — see
@@ -2303,8 +1564,6 @@ fn run_session(
         .add_systems(
             Update,
             (
-                environment_assets::update_environment_asset_caps,
-                environment_assets::poll_environment_assets,
                 // The interest camera is the viewpoint the simulator builds the
                 // agent's object stream around, so it must be *this* frame's pose:
                 // after the camera, or every report describes where the camera was a

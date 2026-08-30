@@ -61,6 +61,7 @@ pub mod terrain;
 pub mod tonemap;
 pub mod transparency;
 pub mod underwater_fog;
+pub mod viewer_camera;
 pub mod water;
 pub mod water_clip;
 pub mod water_exclusion;

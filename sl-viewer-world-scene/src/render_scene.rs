@@ -382,7 +382,12 @@ impl Plugin for SceneRuntimePlugin {
         // (`sl-client-viewer-fetch-defer-until-cap`).
         app.init_resource::<TextureManager>()
             .init_resource::<DecodedTextures>()
-            .add_systems(
+            .add_systems(Update, (simulate_flexi, drive_texture_animations));
+        // The particle drivers, unless the viewer's own `ParticlesPlugin` (and the
+        // GPU renderer beside it) is already in the app — a rig that runs the
+        // full render stack must not step every cloud twice a frame.
+        if !app.is_plugin_added::<crate::particles::ParticlesPlugin>() {
+            app.add_systems(
                 Startup,
                 (
                     crate::particles::setup_particles,
@@ -394,10 +399,9 @@ impl Plugin for SceneRuntimePlugin {
                 (
                     drive_particles,
                     retire_orphaned_clouds.after(drive_particles),
-                    simulate_flexi,
-                    drive_texture_animations,
                 ),
             );
+        }
     }
 }
 

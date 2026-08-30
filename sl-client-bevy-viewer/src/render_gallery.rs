@@ -56,7 +56,6 @@
 //! edge-on and cut off at the knee), and half of judging geometry is walking
 //! around it — a hole is invisible from the front.
 
-use bevy::camera::{Exposure, Hdr};
 use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -76,7 +75,6 @@ use crate::render_scene::{
     SceneRuntimePlugin, SymmetricAbout, UvsInUnitSquare, WorldScaleGeometry, scene_root,
     scene_root_transform,
 };
-use crate::world_api::ViewerCamera;
 
 /// The command-line options for the render gallery.
 ///
@@ -455,23 +453,13 @@ pub fn run() {
 /// to do with either. One key light, one fill, one ambient — so a difference on
 /// screen is a difference in the thing.
 fn setup_stage(mut commands: Commands) {
+    // The viewer's own camera bundle — its exposure (which `install_global_probe`
+    // reads to calibrate the probe's intensity against this view), its HDR target
+    // (so a material reads here the way it reads in-world, not tonemapped a second
+    // way inside the mesh shader) and the `ViewerCamera` marker `drive_particles`
+    // billboards at and the default probe hangs on.
     commands.spawn((
-        Camera3d::default(),
-        // The viewer's own exposure, so a material reads here the way it reads
-        // in-world rather than a stop brighter. `install_global_probe` also reads
-        // it, to calibrate the probe's intensity against this view.
-        Exposure::default(),
-        // As the viewer does: render into a floating-point target. Without `Hdr`,
-        // Bevy takes an 8-bit target as the cue to tonemap `StandardMaterial`
-        // inside the mesh shader, which is a different transfer from the one the
-        // viewer applies — so a material would read differently here than
-        // in-world, which is the one thing this gallery must not do.
-        Hdr,
-        Transform::default(),
-        // `drive_particles` billboards each particle at the fly camera and reads
-        // its pose to do it; without the marker no cloud is ever built. It is also
-        // what `install_global_probe` hangs the default reflection probe on.
-        ViewerCamera,
+        crate::viewer_camera::viewer_camera_bundle(Transform::default()),
         GalleryCamera,
         Name::new("gallery-camera"),
     ));
