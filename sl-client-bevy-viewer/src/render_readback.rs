@@ -42,7 +42,9 @@
 //! so the two are kept strictly apart and this one **skips** (loudly) when no
 //! adapter is available rather than failing.
 
-use std::sync::{Arc, Mutex};
+use core::time::Duration;
+use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use bevy::app::ScheduleRunnerPlugin;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
@@ -50,11 +52,15 @@ use bevy::light::DirectionalLightShadowMap;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 use bevy::render::gpu_readback::{Readback, ReadbackComplete};
-use bevy::render::render_resource::{TextureFormat, TextureUsages};
+use bevy::render::pipelined_rendering::PipelinedRenderingPlugin;
+use bevy::render::render_resource::{PipelineCache, TextureFormat, TextureUsages};
+use bevy::render::{Render, RenderApp, RenderSystems};
+use bevy::time::TimeUpdateStrategy;
 use bevy::winit::WinitPlugin;
 
 use crate::face_material::SlFaceMaterialPlugin;
-use crate::probes::ReflectionProbePlugin;
+use crate::probes::{ProbeCaptureStats, ReflectionProbePlugin};
+use crate::render_test::{LogCapture, capture_logs};
 use crate::world_api::ViewerCamera;
 use sl_client_bevy::{
     CloudMaterialPlugin, SkyMaterialPlugin, StarMaterialPlugin, SunDiscMaterialPlugin,
@@ -162,20 +168,251 @@ const fn row_to_f32(row: u32) -> f32 {
 /// paid over and over.
 const FRAME: u32 = 256;
 
-/// How many frames to run before reading back.
+/// The manual per-frame timestep while the clock runs: `globals.time` — what the
+/// water, flipbook and particle shaders read — advances by exactly this per
+/// `update`, never by the wall clock, so what a frame shows depends on how many
+/// frames were stepped and not on how fast the machine stepped them.
+const STEP: f32 = 1.0 / 30.0;
+
+/// The one-frame timestep as a `Duration`, for `TimeUpdateStrategy`.
+const STEP_DURATION: Duration = Duration::from_nanos(33_333_333);
+
+/// How many consecutive **quiet** frames — no pipeline queued or compiling, every
+/// live reflection probe captured at least once — [`settle`] insists on before it
+/// trusts the rig.
 ///
-/// Large, and it has to be. `crate::probes` amortizes its capture at **one cube
-/// face per frame, in six-frame bursts**, and then Bevy filters the assembled cube
-/// into the diffuse / radiance maps the PBR shader samples — so a probe's
-/// environment is not merely incomplete but *empty* for a long while after the
-/// scene spawns.
+/// The old rig waited a fixed 400 frames, measured against the mirror: at 90 it
+/// read pure **black** (a metallic surface takes all its colour from the
+/// environment map, and `crate::probes` captures one cube face per frame in
+/// six-frame bursts, after which Bevy filters the cube into the maps the shader
+/// samples), at 400 it reflected correctly. That number was a proxy for two
+/// things the rig can now observe directly — the pipeline queue and the probe
+/// bursts — plus one it cannot: the environment-map filter, which runs in the
+/// render world with nothing to poll. The streak covers that last one.
 ///
-/// Measured, not guessed: at 90 frames the mirror reads pure **black** (a metallic
-/// surface takes all its colour from the environment map, so an empty cube is no
-/// colour at all) and the check fails for entirely the wrong reason. At 400 it
-/// reflects correctly. This is the one genuinely expensive check in the suite —
-/// roughly 20 s — and it is the price of asking a question about pixels.
-const WARMUP_FRAMES: usize = 400;
+/// Measured (2026-08-30, RADV): with a streak of **1** the mirror settles on
+/// frame 7 after its first probe burst and the check already passes — the
+/// observable conditions carry it, and the filter finishes within the frames
+/// [`frame_at`] steps afterwards. Thirty is margin for the filter, at a cost of
+/// a fifth of a second of scene time per settle.
+const QUIET_STREAK: u32 = 30;
+
+/// The most frames [`settle`] steps before it gives up. Generous: a settle that
+/// runs out is a real failure with a report, not a flake.
+const MAX_SETTLE_FRAMES: u32 = 1500;
+
+/// How many frames the rig steps without any frame coming back before it
+/// concludes there is no GPU adapter. A working adapter returns its first frame
+/// within a handful of updates even while every pipeline is still compiling.
+const NO_ADAPTER_FRAMES: u32 = 90;
+
+/// Frames stepped with the clock **held** before a frame is read. A readback
+/// completes a frame or more after its render, so the slot must be given time to
+/// hold a frame that was rendered under the held clock rather than the one before.
+const HOLD_FRAMES: u32 = 4;
+
+/// The scene time a static scene is captured at, in seconds. One second rather
+/// than zero, so a driver that needs time to have passed — a fountain that has
+/// emitted, a flexi that has come to rest — is captured doing what it does.
+const CAPTURE_AT_SECS: f32 = 1.0;
+
+/// A scene time in seconds as a whole number of [`STEP`] frames.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "a small positive frame count computed from a scene time in seconds"
+)]
+fn frames_for(seconds: f32) -> u32 {
+    (seconds / STEP).round().max(0.0) as u32
+}
+
+/// Serialise the GPU tests within one process.
+///
+/// `cargo nextest` runs each test in its own process, and there the `gpu`
+/// test-group in `.config/nextest.toml` is what runs the readback tests one at a
+/// time. Plain `cargo test` runs them as threads of one process, and two headless
+/// render apps racing for the adapter under a concurrent build is exactly the
+/// load pattern the tier used to flake under. Poisoning is ignored: a test that
+/// failed must not fail the ones after it.
+pub(crate) fn gpu_lock() -> MutexGuard<'static, ()> {
+    static GPU: Mutex<()> = Mutex::new(());
+    GPU.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// How many pipelines the render world still has queued or compiling, mirrored
+/// into the main world every frame.
+///
+/// Shared through an atomic rather than extracted, because extraction copies
+/// main → render and this travels the other way. A frame rendered while a
+/// pipeline is still compiling simply omits whatever that pipeline draws — the
+/// "pre-render black" the old fixed warm-up was papering over.
+#[derive(Resource, Clone, Default)]
+pub(crate) struct PipelineStatus(Arc<AtomicU32>);
+
+impl PipelineStatus {
+    /// Pipelines queued or compiling as of the last render.
+    pub(crate) fn waiting(&self) -> u32 {
+        self.0.load(Ordering::Relaxed)
+    }
+}
+
+/// Publishes [`PipelineStatus`]: the same cell in both worlds, written from the
+/// render world's cleanup set each frame.
+struct PipelineStatusPlugin;
+
+impl Plugin for PipelineStatusPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PipelineStatus>();
+    }
+
+    fn finish(&self, app: &mut App) {
+        let status = app.world().resource::<PipelineStatus>().clone();
+        // No render app means no adapter; `settle` reports that by outcome.
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.insert_resource(status).add_systems(
+                Render,
+                publish_pipeline_status.in_set(RenderSystems::Cleanup),
+            );
+        }
+    }
+}
+
+/// Render-world system: count the pipelines not yet ready into [`PipelineStatus`].
+fn publish_pipeline_status(cache: Res<PipelineCache>, status: Res<PipelineStatus>) {
+    let waiting = u32::try_from(cache.waiting_pipelines().count()).unwrap_or(u32::MAX);
+    status.0.store(waiting, Ordering::Relaxed);
+}
+
+/// Why [`settle`] did not settle.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum SettleError {
+    /// No frame ever came back: this machine has no usable GPU adapter, and the
+    /// tier skips rather than fails.
+    NoAdapter,
+    /// Frames came back but the quiet streak never held.
+    NeverSettled {
+        /// Frames stepped before giving up.
+        frames: u32,
+        /// Pipelines still queued or compiling on the last frame.
+        waiting_pipelines: u32,
+        /// Whether every live probe had captured by the last frame.
+        probes_captured: bool,
+    },
+}
+
+impl core::fmt::Display for SettleError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::NoAdapter => {
+                f.write_str("no frame came back, so this machine has no usable GPU adapter")
+            }
+            Self::NeverSettled {
+                frames,
+                waiting_pipelines,
+                probes_captured,
+            } => write!(
+                f,
+                "after {frames} frames {waiting_pipelines} pipeline(s) were still queued or \
+                 compiling and every live reflection probe had{} captured",
+                if *probes_captured { "" } else { " not" }
+            ),
+        }
+    }
+}
+
+impl core::error::Error for SettleError {}
+
+/// Step the rig until it is **quiet**: a frame has come back, no pipeline is queued
+/// or compiling, and every live reflection probe has completed a burst — and has
+/// stayed that way for [`QUIET_STREAK`] consecutive frames.
+///
+/// The clock is whatever the caller left it at (held at zero on a fresh rig, so a
+/// scene settles at a known time), and nothing is read: the caller decides what
+/// time to capture at and calls [`frame_at`].
+pub(crate) fn settle(app: &mut App, captured: &Captured) -> Result<(), SettleError> {
+    let mut quiet = 0_u32;
+    let mut frames = 0_u32;
+    let mut waiting = 0_u32;
+    let mut probes = false;
+    while frames < MAX_SETTLE_FRAMES {
+        app.update();
+        frames = frames.saturating_add(1);
+        // Detected by **outcome**, not by inspecting the app: a frame either came
+        // back off the GPU or it did not. `get_sub_app(RenderApp)` looks like the
+        // obvious test and used to report `false` on a machine that rendered
+        // perfectly well, which would have skipped this tier everywhere, silently.
+        let frame_back = captured.0.lock().is_ok_and(|slot| slot.is_some());
+        if !frame_back {
+            if frames >= NO_ADAPTER_FRAMES {
+                return Err(SettleError::NoAdapter);
+            }
+            continue;
+        }
+        waiting = app.world().resource::<PipelineStatus>().waiting();
+        // A rig without the probe plugin has no probes to wait for.
+        probes = app
+            .world()
+            .get_resource::<ProbeCaptureStats>()
+            .is_none_or(ProbeCaptureStats::every_live_rig_captured);
+        quiet = if waiting == 0 && probes {
+            quiet.saturating_add(1)
+        } else {
+            0
+        };
+        if quiet >= QUIET_STREAK {
+            return Ok(());
+        }
+    }
+    Err(SettleError::NeverSettled {
+        frames,
+        waiting_pipelines: waiting,
+        probes_captured: probes,
+    })
+}
+
+/// Advance the scene clock by `seconds` (one [`STEP`] per frame), hold it, settle
+/// again — something that first appears once time has passed, a particle burst or
+/// a flexi at rest, may queue a pipeline of its own — and read the frame rendered
+/// under the held clock.
+///
+/// Every frame this returns was rendered at a scene time that is a function of
+/// the calls made, never of how long the machine took to compile or capture.
+/// Returns `None` only when no frame came back; a rig that stops settling
+/// panics with the report, because that is a failure and not a skip.
+pub(crate) fn frame_at(app: &mut App, captured: &Captured, seconds: f32) -> Option<Vec<u8>> {
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(STEP_DURATION));
+    for _frame in 0..frames_for(seconds) {
+        app.update();
+    }
+    app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+    if let Err(error) = settle(app, captured) {
+        assert!(
+            matches!(error, SettleError::NoAdapter),
+            "the rig stopped settling after the clock advanced: {error}"
+        );
+        return None;
+    }
+    for _frame in 0..HOLD_FRAMES {
+        app.update();
+    }
+    captured.0.lock().ok()?.take()
+}
+
+/// Fail loudly on anything the rig logged at `WARN` or above while it rendered.
+///
+/// This is where the harness's log universal finally bites for the render world:
+/// R26 was logged by Bevy's mesh allocator, which lives in the render app, and
+/// with pipelined rendering off that app runs on this thread, under this
+/// capture.
+fn check_logs(logs: &LogCapture, scene: &str) {
+    let events = logs.events();
+    assert!(
+        events.is_empty(),
+        "rendering `{scene}` logged a warning or an error:\n  {}",
+        events.join("\n  ")
+    );
+}
 
 /// The frame, read back from the GPU as linear RGBA.
 #[derive(Clone, Debug)]
@@ -216,7 +453,7 @@ impl Frame {
 /// render world a frame or more after it is asked for, and the test needs to poll
 /// for it rather than be handed it inside a system.
 #[derive(Resource, Clone, Default)]
-struct Captured(Arc<Mutex<Option<Vec<u8>>>>);
+pub(crate) struct Captured(Arc<Mutex<Option<Vec<u8>>>>);
 
 /// Where a set of world points landed on the frame, in pixels.
 ///
@@ -240,9 +477,11 @@ impl Projected {
 /// pipelines and scene runtime, a render-to-texture camera at the scene's declared
 /// pose, and a `Readback` that drains each rendered frame into the returned
 /// [`Captured`] cell. The caller drives the `update`s and reads the cell —
-/// [`capture`] reads one frame after a long warm-up, [`capture_over_time`] reads
-/// two at different `globals.time` values.
-fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
+/// [`settle`] until the rig is quiet, then [`frame_at`] a chosen scene time.
+///
+/// The clock starts **held at zero** and only moves when a caller advances it,
+/// so a scene settles at a known time and is captured at a known time.
+pub(crate) fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins
@@ -257,11 +496,17 @@ fn build_readback_app(scene: &RenderScene, cx: SceneCx) -> (App, Captured) {
             // No event loop: the test drives `update` itself, so the frames are
             // counted rather than raced.
             .disable::<WinitPlugin>()
+            // No render thread either: with the render app run inline, one
+            // `update` is exactly one rendered frame, and everything the render
+            // world logs lands on this thread's log capture.
+            .disable::<PipelinedRenderingPlugin>()
             // The test harness owns the subscriber (`crate::render_test`'s
             // `capture_logs` may be installed); two would clash.
             .disable::<LogPlugin>(),
     )
-    .add_plugins(ScheduleRunnerPlugin::run_loop(core::time::Duration::ZERO));
+    .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::ZERO))
+    .add_plugins(PipelineStatusPlugin)
+    .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
 
     // `scene_root()` propagates the reflection-probe render layers down the scene
     // with `Propagate<RenderLayers>`, which needs this plugin (the full viewer adds
@@ -377,22 +622,35 @@ pub(crate) fn capture(
     cx: SceneCx,
     points: &[Vec3],
 ) -> Option<(Frame, Projected)> {
+    let _gpu = gpu_lock();
+    let (logs, _guard) = capture_logs();
     let (mut app, captured) = build_readback_app(scene, cx);
 
     // `App::finish`/`cleanup` build the render app; if there is no adapter this is
     // where it gives up, and a machine without a GPU should skip rather than fail.
     app.finish();
     app.cleanup();
-    for _frame in 0..WARMUP_FRAMES {
-        app.update();
+    if let Err(error) = settle(&mut app, &captured) {
+        assert!(
+            matches!(error, SettleError::NoAdapter),
+            "the `{}` scene never settled: {error}",
+            scene.id
+        );
+        return None;
     }
 
-    // Detected by **outcome**, not by inspecting the app: a frame either came back
-    // off the GPU or it did not. Asking `get_sub_app(RenderApp)` looks like the
-    // obvious test and is wrong — it reports `false` on a machine that renders
-    // perfectly well (the sub-app is taken for the duration of the render
-    // schedule), which would skip this tier everywhere and silently.
-    let pixels = captured.0.lock().ok()?.take()?;
+    // A scene with a timeline is captured at its last sample — the moment its
+    // own declaration says it has done what it does — and a static one at
+    // `CAPTURE_AT_SECS`.
+    let at = scene
+        .timeline
+        .samples
+        .last()
+        .copied()
+        .unwrap_or(0.0)
+        .max(CAPTURE_AT_SECS);
+    let pixels = frame_at(&mut app, &captured, at)?;
+    check_logs(&logs, scene.id);
 
     // Project through the very camera that drew the frame, rather than
     // re-deriving its projection by hand.
@@ -417,53 +675,46 @@ pub(crate) fn capture(
 /// for verifying **GPU-time-driven** animation. A texture animation now runs
 /// entirely in the shader (`face_material.wgsl`'s `sl_animated_uv` from
 /// `globals.time`), so it is invisible to any CPU-state digest — the only honest
-/// check is that the rendered **pixels** actually differ over time. A fixed manual
-/// timestep makes the two samples land at deterministic clock values regardless of
-/// machine speed.
+/// check is that the rendered **pixels** actually differ over time. Both samples
+/// land at fixed scene times, so identical times render identical bytes and any
+/// difference is the animation.
 ///
 /// Returns `None` on a machine with no GPU adapter (like [`capture`]).
 pub(crate) fn capture_over_time(scene: &RenderScene, cx: SceneCx) -> Option<(Frame, Frame)> {
-    /// The manual per-update timestep: `globals.time` advances by exactly this each
-    /// frame, so the two samples below are reproducible.
-    const STEP: f32 = 1.0 / 30.0;
-    /// Frames before the first read — enough for the scene to spawn, the animation
-    /// driver to publish its params, and a readback to complete (an early cell).
-    /// 400, matching `WARMUP_FRAMES`: on Mesa/RADV the async pipeline compile is
-    /// slow, so a short warm-up makes the first sample read pre-render black and the
-    /// two frames come back identical — a flaky failure under parallel GPU load.
-    const WARMUP: usize = 400;
-    /// Frames between the two reads: ~1.8 s of clock, many flipbook cells later.
-    const BETWEEN: usize = 54;
+    /// The first sample's scene time: past the start, a few flipbook cells in.
+    const EARLY_SECS: f32 = 0.5;
+    /// Scene time between the two samples: many flipbook cells later.
+    const BETWEEN_SECS: f32 = 1.8;
 
+    let _gpu = gpu_lock();
+    let (logs, _guard) = capture_logs();
     let (mut app, captured) = build_readback_app(scene, cx);
-    // Deterministic time: each `update` advances the clock by exactly `STEP`
-    // regardless of wall-clock, so `globals.time` (what the animation shader reads)
-    // is reproducible frame-for-frame.
-    app.insert_resource(bevy::time::TimeUpdateStrategy::ManualDuration(
-        core::time::Duration::from_secs_f32(STEP),
-    ));
     app.finish();
     app.cleanup();
-    for _frame in 0..WARMUP {
-        app.update();
+    if let Err(error) = settle(&mut app, &captured) {
+        assert!(
+            matches!(error, SettleError::NoAdapter),
+            "the `{}` scene never settled: {error}",
+            scene.id
+        );
+        return None;
     }
-    let early = captured.0.lock().ok()?.take()?;
-    for _frame in 0..BETWEEN {
-        app.update();
-    }
-    let later = captured.0.lock().ok()?.take()?;
+    let early = frame_at(&mut app, &captured, EARLY_SECS)?;
+    let later = frame_at(&mut app, &captured, BETWEEN_SECS)?;
+    check_logs(&logs, scene.id);
     Some((Frame { pixels: early }, Frame { pixels: later }))
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, FRAME, Frame, HALF_EMERGENT,
-        MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL, WARMUP_FRAMES, build_readback_app,
-        capture, capture_over_time, i32_from_f32, matrix_cells, row_to_f32,
+        CAP_PAIR_OPAQUE_X, CAP_PAIR_TOP, CAP_PAIR_TRANSLUCENT_X, CAPTURE_AT_SECS, FRAME, Frame,
+        HALF_EMERGENT, MATRIX_DISTANCE, MATRIX_EYES, SCENE_WATER_LEVEL, SettleError,
+        build_readback_app, capture, capture_over_time, check_logs, frame_at, gpu_lock,
+        i32_from_f32, matrix_cells, row_to_f32, settle,
     };
     use crate::render_scene::{SCENES, SceneCx};
-    use crate::render_test::TestError;
+    use crate::render_test::{TestError, capture_logs};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
@@ -725,20 +976,18 @@ mod tests {
             .iter()
             .find(|scene| scene.id == "legacy-material-face")
             .ok_or("the legacy-material-face scene is not registered")?;
+        let _gpu = gpu_lock();
+        let (logs, _guard) = capture_logs();
         let (mut app, captured) = build_readback_app(scene, SceneCx::new());
         app.finish();
         app.cleanup();
-        for _frame in 0..WARMUP_FRAMES {
-            app.update();
+        match settle(&mut app, &captured) {
+            Ok(()) => {}
+            // No GPU adapter (no frame came back): skip, like the rest of this tier.
+            Err(SettleError::NoAdapter) => return Ok(()),
+            Err(error) => return Err(format!("the legacy scene never settled: {error}").into()),
         }
-        // No GPU adapter (no frame came back): skip, like the rest of this tier.
-        if captured
-            .0
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.take())
-            .is_none()
-        {
+        if frame_at(&mut app, &captured, CAPTURE_AT_SECS).is_none() {
             return Ok(());
         }
 
@@ -777,10 +1026,13 @@ mod tests {
                 }
             }
         }
-        for _frame in 0..3 {
-            app.update();
+        // A frame after the re-prepare, rendered settled: reaching here without an
+        // abort means the runtime re-prepare survived, and the log check catches a
+        // fault that was reported rather than fatal.
+        if frame_at(&mut app, &captured, 0.0).is_none() {
+            return Err("no frame came back after the specular map was re-added".into());
         }
-        // Reaching here without an abort means the runtime re-prepare survived.
+        check_logs(&logs, "legacy-material-face (runtime specular map)");
         Ok(())
     }
 

@@ -122,6 +122,7 @@ use bevy::camera::primitives::CUBE_MAP_FACES;
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{Exposure, Hdr, RenderTarget};
 use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::render_asset::RenderAssets;
@@ -446,6 +447,33 @@ struct CaptureSchedule {
     urgent: VecDeque<usize>,
 }
 
+/// What the capture schedule has done so far: which rigs are live, and how many
+/// six-face bursts each has completed.
+///
+/// Published for the headless render harness, whose "the scene has settled"
+/// predicate needs every live probe to have captured its surroundings at least
+/// once — a metallic surface takes all its colour from the environment map, so a
+/// mirror reads pure black until its probe's first burst lands, and a check taken
+/// before that fails for entirely the wrong reason.
+#[derive(Resource, Debug, Default, Clone, PartialEq, Eq)]
+pub struct ProbeCaptureStats {
+    /// The rigs worth capturing as of the last schedule tick: the default probe
+    /// and every bound local probe.
+    pub live: Vec<usize>,
+    /// Completed bursts per rig, indexed by rig; a rig past the end has none.
+    pub bursts: Vec<u32>,
+}
+
+impl ProbeCaptureStats {
+    /// Whether every live rig has completed at least one burst.
+    #[must_use]
+    pub fn every_live_rig_captured(&self) -> bool {
+        self.live
+            .iter()
+            .all(|rig| self.bursts.get(*rig).is_some_and(|count| *count > 0))
+    }
+}
+
 /// One probe's face-target → cube-layer copy mapping, snapshotted for the render
 /// world: the cube image and its six per-face source images, by asset id.
 #[derive(Clone)]
@@ -504,6 +532,7 @@ impl Plugin for ReflectionProbePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<ProbeCubeCopies>()
             .init_resource::<CaptureSchedule>()
+            .init_resource::<ProbeCaptureStats>()
             .init_resource::<ProbeTestSphere>()
             .init_resource::<ProbeDynamicContent>()
             .init_resource::<MirrorSettings>()
@@ -1175,6 +1204,16 @@ fn rig_capture_pose(
     }
 }
 
+/// The capture schedule and the stats it publishes, bundled so the driver's
+/// parameter list stays within clippy's reach.
+#[derive(SystemParam)]
+struct ProbeScheduling<'w> {
+    /// The rig mid-burst and each rig's last capture time.
+    schedule: ResMut<'w, CaptureSchedule>,
+    /// The live-rig set and per-rig burst counts the harness polls.
+    stats: ResMut<'w, ProbeCaptureStats>,
+}
+
 /// Drive the tiered, amortized environment capture across every live rig.
 ///
 /// At most **one** cube face in the whole scene is re-rendered per frame: a rig's six
@@ -1189,7 +1228,7 @@ fn rig_capture_pose(
 /// this replaced — viewer-perf-pipeline-specialization-stalls).
 fn drive_probe_captures(
     rigs: Res<ProbeRigs>,
-    mut schedule: ResMut<CaptureSchedule>,
+    mut scheduling: ProbeScheduling,
     mut copies: ResMut<ProbeCubeCopies>,
     time: Res<Time>,
     camera: Query<&GlobalTransform, With<ViewerCamera>>,
@@ -1206,6 +1245,7 @@ fn drive_probe_captures(
     };
     let eye = view.translation();
     let now = time.elapsed_secs();
+    let ProbeScheduling { schedule, stats } = &mut scheduling;
 
     // Seed / grow the per-rig capture timestamps to the current rig count.
     if schedule.last_captured.len() < rigs.rigs.len() {
@@ -1224,6 +1264,10 @@ fn drive_probe_captures(
                     .is_some_and(|binding| binding.is_some())
         })
         .collect();
+    // Published only on change, so the idle frames cost no change-detection churn.
+    if stats.live != live {
+        stats.live.clone_from(&live);
+    }
 
     // Pick the frame's work: continue the running burst, or start the next rig's
     // burst — a freshly bound (urgent) rig first, else the oldest-first pick.
@@ -1240,7 +1284,7 @@ fn drive_probe_captures(
                 }
             };
             let next =
-                urgent.or_else(|| select_next_rig(&schedule, &live, &rigs, eye, now, &probes));
+                urgent.or_else(|| select_next_rig(schedule, &live, &rigs, eye, now, &probes));
             // Stamp the burst's start time so the priority does not re-pick it while
             // it is mid-burst and the default probe waits out its full period.
             if let Some(rig) = next
@@ -1292,6 +1336,15 @@ fn drive_probe_captures(
     schedule.active = match burst {
         Some((rig, face)) => {
             let next = face.saturating_add(1);
+            if next >= FACE_COUNT {
+                // The sixth face rendered this frame: the burst is complete.
+                if stats.bursts.len() <= rig {
+                    stats.bursts.resize(rig.saturating_add(1), 0);
+                }
+                if let Some(count) = stats.bursts.get_mut(rig) {
+                    *count = count.saturating_add(1);
+                }
+            }
             (next < FACE_COUNT).then_some((rig, next))
         }
         None => None,

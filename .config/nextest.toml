@@ -1,0 +1,20 @@
+# Workspace nextest configuration.
+#
+# The GPU test tiers of `sl-client-bevy-viewer` (the render readback matrix,
+# the headless world rig's pixel checks and the full-stack harness against the
+# fake grid) each stand up a headless Bevy render app on the real adapter. Two
+# of those racing for the GPU under a concurrent build is the load pattern
+# that made the tier flake, so they run in one serial test-group. They stay
+# in the default run — and therefore in the pre-commit hook — on purpose:
+# determinism and serialisation, not exclusion, is the fix.
+
+[test-groups.gpu]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = "test(/^render_readback::/) | test(/^render_matrix::/) | test(/^full_stack_test::/) | test(/^world_test::gpu_/)"
+test-group = "gpu"
+# A capture settles by observation rather than by a fixed frame count, but the
+# first pipeline compile on a cold shader cache is slow; give it room before
+# nextest calls a test hung.
+slow-timeout = { period = "120s", terminate-after = 3 }
