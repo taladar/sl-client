@@ -43,8 +43,6 @@
 //! gave the camera an HDR target and a tone mapper of its own, the viewer's main pass
 //! wrote an already-tonemapped, clipped 8-bit image, and this pass fogged that.)
 
-use std::sync::OnceLock;
-
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
@@ -52,6 +50,8 @@ use bevy::core_pipeline::schedule::Core3d;
 use bevy::ecs::query::QueryItem;
 use bevy::ecs::system::lifetimeless::Read;
 use bevy::prelude::*;
+
+use crate::render_overrides::RenderOverrides;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::extract_component::{
     ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
@@ -136,20 +136,6 @@ impl ExtractComponent for UnderwaterFog {
     }
 }
 
-/// A debug affordance: `SL_VIEWER_DISABLE_UNDERWATER_FOG=1` forces the fog off
-/// (zero density is a shader no-op) so a capture can A/B the underwater-fog pass
-/// against the plain water-surface shading (used to localise the R21 dark slab).
-///
-/// Resolved once per process: the environment is fixed at launch, and this gates a
-/// per-frame system.
-fn fog_disabled() -> bool {
-    static DISABLED: OnceLock<bool> = OnceLock::new();
-    *DISABLED.get_or_init(|| {
-        std::env::var("SL_VIEWER_DISABLE_UNDERWATER_FOG")
-            .is_ok_and(|value| value != "0" && !value.is_empty())
-    })
-}
-
 /// The water fog density the shader should use, given the water frame's density and
 /// underwater fog modifier and whether the eye is submerged — the reference
 /// `LLSettingsWater::getModifiedWaterFogDensity` (`llsettingswater.cpp:377`).
@@ -199,12 +185,13 @@ pub(crate) fn modified_water_fog_density(density: f32, fog_mod: f32, submerged: 
 pub(crate) fn update_underwater_fog(
     environment: Res<EnvironmentState>,
     level: Res<WaterLevel>,
+    overrides: Res<RenderOverrides>,
     mut cameras: Query<(&Transform, &Projection, &mut UnderwaterFog), With<ViewerCamera>>,
 ) {
-    let disabled = fog_disabled();
+    let disabled = overrides.underwater_fog_disabled;
     for (camera_transform, projection, mut fog) in &mut cameras {
         let camera_pos = camera_transform.translation;
-        let position = day_position(&environment.settings);
+        let position = day_position(&environment);
         let water = environment.settings.blended_water_settings(position);
         let sky = environment
             .settings
@@ -288,6 +275,7 @@ pub struct UnderwaterFogPlugin;
 
 impl Plugin for UnderwaterFogPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<RenderOverrides>();
         load_internal_asset!(
             app,
             FOG_SHADER_HANDLE,
@@ -619,6 +607,7 @@ mod tests {
 
     use super::{UnderwaterFog, modified_water_fog_density, update_underwater_fog};
     use crate::environment::EnvironmentState;
+    use crate::render_overrides::RenderOverrides;
     use crate::water::WaterLevel;
     use crate::world_api::ViewerCamera;
 
@@ -646,6 +635,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<EnvironmentState>()
             .init_resource::<WaterLevel>()
+            .init_resource::<RenderOverrides>()
             .add_systems(Update, update_underwater_fog);
 
         // This frame's pose, as `position_camera` just wrote it.
@@ -708,6 +698,7 @@ mod tests {
         let mut app = App::new();
         app.init_resource::<EnvironmentState>()
             .init_resource::<WaterLevel>()
+            .init_resource::<RenderOverrides>()
             .add_systems(Update, update_underwater_fog);
 
         let far = 4096.0;
@@ -801,6 +792,7 @@ mod tests {
         );
         app.insert_resource(environment)
             .init_resource::<WaterLevel>()
+            .init_resource::<RenderOverrides>()
             .add_systems(Update, update_underwater_fog);
 
         // Below the default water level: the eye is submerged, so the modifier

@@ -95,6 +95,11 @@ pub struct EnvironmentState {
     /// single preset frame while a fixed environment is selected
     /// ([`set_fixed`](Self::set_fixed)).
     pub settings: EnvironmentSettings,
+    /// A day position (`0.0..=1.0`) pinned instead of the clock — the
+    /// `SL_VIEWER_SKY_DAY_POSITION` override, carried here because every sky,
+    /// water, terrain and fog driver asks `crate::sky::day_position` of this
+    /// state and none of them should have to know where the pin came from.
+    pub pinned_day_position: Option<f32>,
     /// The provenance of [`Self::settings`].
     pub(crate) source: EnvironmentSource,
     /// The last **shared** (grid) environment: what [`Self::settings`] shows
@@ -129,6 +134,7 @@ impl Default for EnvironmentState {
     fn default() -> Self {
         Self {
             settings: EnvironmentSettings::legacy_windlight_default(),
+            pinned_day_position: None,
             source: EnvironmentSource::Default,
             shared: EnvironmentSettings::legacy_windlight_default(),
             shared_source: EnvironmentSource::Default,
@@ -142,6 +148,15 @@ impl Default for EnvironmentState {
 }
 
 impl EnvironmentState {
+    /// The default state with the day position the overrides pin, if any.
+    #[must_use]
+    pub fn from_overrides(overrides: &crate::render_overrides::RenderOverrides) -> Self {
+        Self {
+            pinned_day_position: overrides.day_position,
+            ..Self::default()
+        }
+    }
+
     /// The environment currently pinned by the World ▸ Environment menu, if any
     /// (drives the menu's check marks).
     #[must_use]
@@ -234,7 +249,7 @@ impl EnvironmentState {
             }
         }
 
-        // Debug affordance: when `SL_VIEWER_SKY_DAY_POSITION` pins a day position
+        // Debug affordance: when a pinned day position (`SL_VIEWER_SKY_DAY_POSITION`)
         // (used by the screenshot harness and headless checks), install a full
         // day cycle synthesised from the four legacy presets so the pinned
         // position actually moves the sun — the local OpenSim grid ships a
@@ -247,7 +262,7 @@ impl EnvironmentState {
         // present, so the synthesised cycle is installed exactly when the pin will
         // actually drive it (`crate::sky::day_position`); a malformed value falls
         // back to the clock, which the region's own environment already follows.
-        if self.fixed.is_none() && crate::sky::pinned_day_position().is_some() {
+        if self.fixed.is_none() && self.pinned_day_position.is_some() {
             crate::sky_presets::install_preset_day_cycle(&mut self.settings);
         }
     }

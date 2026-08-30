@@ -382,6 +382,7 @@ impl Plugin for SceneRuntimePlugin {
         // (`sl-client-viewer-fetch-defer-until-cap`).
         app.init_resource::<TextureManager>()
             .init_resource::<DecodedTextures>()
+            .init_resource::<crate::render_overrides::RenderOverrides>()
             .add_systems(Update, (simulate_flexi, drive_texture_animations));
         // The particle drivers, unless the viewer's own `ParticlesPlugin` (and the
         // GPU renderer beside it) is already in the app — a rig that runs the

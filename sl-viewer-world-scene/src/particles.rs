@@ -93,6 +93,8 @@ use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::image::{ImageAddressMode, ImageSampler, ImageSamplerDescriptor};
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+
+use crate::render_overrides::RenderOverrides;
 use bevy::render::batching::NoAutomaticBatching;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{DecodedTexture, ParticleSystem, particle_pattern, to_bevy_image};
@@ -119,6 +121,7 @@ pub struct ParticlesPlugin;
 
 impl Plugin for ParticlesPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<RenderOverrides>();
         app.add_systems(Startup, setup_particles).add_systems(
             Update,
             (
@@ -947,11 +950,10 @@ pub(crate) fn drive_particles(
     // A throttle so the live-count diagnostic logs periodically, not every frame.
     mut log_timer: Local<f32>,
     // `SL_VIEWER_DISABLE_HUD_PARTICLES` (P35.4): the reference's `RenderHUDParticles`
-    // flag, mirrored — read once and cached. Defaulted on (HUD particles emit).
-    mut hud_disabled: Local<Option<bool>>,
+    // flag, mirrored. Defaulted on (HUD particles emit).
+    overrides: Res<RenderOverrides>,
 ) {
-    let hud_disabled = *hud_disabled
-        .get_or_insert_with(|| std::env::var_os("SL_VIEWER_DISABLE_HUD_PARTICLES").is_some());
+    let hud_disabled = overrides.hud_particles_disabled;
     let dt = time.delta_secs();
     let max_particles = particle_cap(settings.as_deref());
 

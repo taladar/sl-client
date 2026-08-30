@@ -226,7 +226,7 @@ pub(crate) fn setup_water(
     // position; `drive_water` refines it every frame.
     let water = environment
         .settings
-        .blended_water_settings(day_position(&environment.settings));
+        .blended_water_settings(day_position(&environment));
     let params = water.map_or_else(default_water_params, |water| {
         water_params(&water, Vec3::Y, default_reflection(), Vec3::ONE, false)
     });
@@ -322,7 +322,7 @@ pub(crate) fn drive_water(
     );
 
     // Fold the current environment water + sky into the shared material.
-    let position = day_position(&environment.settings);
+    let position = day_position(&environment);
     let Some(water) = environment.settings.blended_water_settings(position) else {
         return;
     };

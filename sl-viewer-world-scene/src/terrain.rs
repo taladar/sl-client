@@ -94,7 +94,7 @@ pub fn drive_terrain_lighting(
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
-    let position = crate::sky::day_position(&environment.settings);
+    let position = crate::sky::day_position(&environment);
     let Some(sky) = environment
         .settings
         .blended_sky_settings(altitude, position)

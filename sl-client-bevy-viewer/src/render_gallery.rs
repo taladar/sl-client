@@ -370,7 +370,14 @@ pub fn run() {
         "starting the render gallery: no login, no world; N/P steps scenes, L cycles LOD, \
          R restarts, Space pauses"
     );
+    // The same render knobs the viewer honours (`SL_VIEWER_SKY_DAY_POSITION` and
+    // friends), read once here, before the task pools spawn.
+    let render_overrides = crate::render_overrides::RenderOverrides::from_env();
     App::new()
+        .insert_resource(crate::environment::EnvironmentState::from_overrides(
+            &render_overrides,
+        ))
+        .insert_resource(render_overrides)
         .add_plugins(
             DefaultPlugins
                 .set(WindowPlugin {

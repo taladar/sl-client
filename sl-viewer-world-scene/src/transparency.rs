@@ -76,6 +76,8 @@ use bevy::core_pipeline::schedule::{Core3d, Core3dSystems};
 use bevy::math::FloatOrd;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+
+use crate::render_overrides::RenderOverrides;
 use bevy::render::camera::ExtractedCamera;
 use bevy::render::diagnostic::RecordDiagnostics as _;
 use bevy::render::extract_resource::ExtractResourcePlugin;
@@ -225,6 +227,7 @@ pub(crate) struct PreWaterSplit(HashMap<RetainedViewEntity, usize>);
 /// probe's capture camera is not. A view whose `ExtractedView` this cannot resolve
 /// falls back to an eye above the water, the state every view is in most of the time.
 fn sort_transparent_by_water(
+    overrides: Res<RenderOverrides>,
     water_level: Option<Res<WaterLevel>>,
     backdrops: Res<SkyBackdrops>,
     clips: Res<crate::water_clip::WaterClipSides>,
@@ -260,7 +263,7 @@ fn sort_transparent_by_water(
             );
             (bucket, order, FloatOrd(item.distance))
         });
-        if pre_water_pass_disabled() {
+        if overrides.pre_water_pass_disabled {
             // The A/B knob: leave the whole phase to Bevy's transparent pass, so a
             // suspected pre-water artifact can be told from one in the item itself.
             continue;
@@ -283,16 +286,6 @@ fn sort_transparent_by_water(
             split.0.insert(*view, pre_water);
         }
     }
-}
-
-/// Whether `SL_VIEWER_DISABLE_PRE_WATER_PASS` is set: record no pre-water split at
-/// all, so nothing is drawn early or suppressed and Bevy's own transparent pass
-/// draws the whole phase. A debug A/B knob (the sibling of
-/// `SL_VIEWER_DISABLE_UNDERWATER_FOG`) for telling an artifact caused by the
-/// pre-water split from one in the drawn item itself. Below-surface translucency
-/// then sits behind the depth-writing sea, so this is a diagnostic, not a mode.
-fn pre_water_pass_disabled() -> bool {
-    std::env::var_os("SL_VIEWER_DISABLE_PRE_WATER_PASS").is_some()
 }
 
 /// Whether an eye at height `eye` is under the water surface at `level` — the
@@ -499,7 +492,10 @@ pub struct TransparencyOrderPlugin;
 
 impl Plugin for TransparencyOrderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(ExtractResourcePlugin::<WaterLevel>::default());
+        app.init_resource::<RenderOverrides>().add_plugins((
+            ExtractResourcePlugin::<WaterLevel>::default(),
+            ExtractResourcePlugin::<RenderOverrides>::default(),
+        ));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };

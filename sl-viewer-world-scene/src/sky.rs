@@ -618,7 +618,7 @@ pub(crate) fn setup_sky(
     // current day position; `drive_sky` refines it every frame.
     let sky = environment
         .settings
-        .blended_sky_settings(0.0, day_position(&environment.settings));
+        .blended_sky_settings(0.0, day_position(&environment));
     let params = sky.map_or_else(default_sky_params, |sky| {
         sky_params(&sky, Vec3::Y, 1.0, 1.0)
     });
@@ -784,7 +784,7 @@ pub(crate) fn drive_sky(
     mut exposure_range: ResMut<crate::exposure::ExposureRange>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
-    let position = day_position(&environment.settings);
+    let position = day_position(&environment);
     let Some(sky) = environment
         .settings
         .blended_sky_settings(altitude, position)
@@ -1023,7 +1023,7 @@ pub(crate) fn drive_sun_moon_discs(
         return;
     };
     let camera_pos = camera.translation();
-    let position = day_position(&environment.settings);
+    let position = day_position(&environment);
     let Some(sky) = environment
         .settings
         .blended_sky_settings(camera_pos.y, position)
@@ -1271,7 +1271,7 @@ pub(crate) fn drive_clouds(
     mut textures: ResMut<TextureManager>,
 ) {
     let altitude = camera.single().map_or(0.0, |camera| camera.translation().y);
-    let position = day_position(&environment.settings);
+    let position = day_position(&environment);
     let Some(sky) = environment
         .settings
         .blended_sky_settings(altitude, position)
@@ -1506,7 +1506,7 @@ pub(crate) fn drive_stars(
         return;
     };
     let camera_pos = camera.translation();
-    let position = day_position(&environment.settings);
+    let position = day_position(&environment);
     let Some(sky) = environment
         .settings
         .blended_sky_settings(camera_pos.y, position)
@@ -2112,33 +2112,23 @@ const DAY_POSITION_STEPS: f64 = 32768.0;
 /// [`DAY_POSITION_STEPS`] steps per day so the sampled environment settles
 /// between steps.
 ///
-/// The debug override `SL_VIEWER_SKY_DAY_POSITION` (a `0.0..=1.0` float) pins the
-/// position instead, so the offline screenshot harness can inspect any point in
-/// the day (e.g. midday) regardless of the wall clock. A pinned position is
-/// already stable, so it is honoured exactly rather than rounded to the grid.
-pub(crate) fn day_position(settings: &sl_client_bevy::EnvironmentSettings) -> f32 {
-    if let Some(position) = pinned_day_position() {
+/// A pinned position ([`EnvironmentState::pinned_day_position`], from the
+/// `SL_VIEWER_SKY_DAY_POSITION` override in `RenderOverrides`) wins instead, so
+/// the offline screenshot harness can inspect any point in the day (e.g. midday)
+/// regardless of the wall clock. A pinned position is already stable, so it is
+/// honoured exactly rather than rounded to the grid.
+pub(crate) fn day_position(environment: &EnvironmentState) -> f32 {
+    if let Some(position) = environment.pinned_day_position {
         return position;
     }
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0.0, |elapsed| elapsed.as_secs_f64());
-    quantised_day_position(now, settings.day_length, settings.day_offset)
-}
-
-/// The `SL_VIEWER_SKY_DAY_POSITION` override (clamped to `0.0..=1.0`), or `None`
-/// when unset or unparsable — see [`day_position`]. Resolved once per process (the
-/// environment is fixed at launch), because [`day_position`] is called from seven
-/// per-frame sites: the sky, cloud, star, and disc drives plus terrain, water, and
-/// the underwater fog.
-pub(crate) fn pinned_day_position() -> Option<f32> {
-    static PINNED: OnceLock<Option<f32>> = OnceLock::new();
-    *PINNED.get_or_init(|| {
-        std::env::var("SL_VIEWER_SKY_DAY_POSITION")
-            .ok()
-            .and_then(|value| value.parse::<f32>().ok())
-            .map(|position| position.clamp(0.0, 1.0))
-    })
+    quantised_day_position(
+        now,
+        environment.settings.day_length,
+        environment.settings.day_offset,
+    )
 }
 
 /// [`day_position`] without the clock and the debug override: the normalised

@@ -254,6 +254,7 @@ mod pixel_oracle;
 #[cfg(test)]
 mod render_readback;
 mod viewer_plugins;
+pub(crate) use sl_viewer_world_scene::render_overrides;
 pub(crate) use sl_viewer_world_scene::render_scene;
 #[cfg(test)]
 mod render_test;
@@ -854,6 +855,15 @@ fn run_session(
 
     let mut app = App::new();
     app.insert_resource(local_time_zone);
+    // The render debug knobs (`SL_VIEWER_DISABLE_GLOW`, `SL_VIEWER_SKY_DAY_POSITION`,
+    // …), read from the environment exactly once and only here — while the process
+    // is still single-threaded — and the environment state their day-position pin
+    // seeds. Every consumer reads the resource; a headless rig inserts its own.
+    let render_overrides = crate::render_overrides::RenderOverrides::from_env();
+    app.insert_resource(crate::environment::EnvironmentState::from_overrides(
+        &render_overrides,
+    ));
+    app.insert_resource(render_overrides);
     // The About floater's login-derived facts (grid, login URI, reported
     // channel/version) — captured here where they are all still at hand.
     app.insert_resource(crate::about_floater::AboutSessionInfo {

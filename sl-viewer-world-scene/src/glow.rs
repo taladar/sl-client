@@ -29,8 +29,6 @@
 //! `SL_VIEWER_DISABLE_GLOW=1` forces it off (an A/B knob); `SL_VIEWER_GLOW_STRENGTH`
 //! / `_WIDTH` and the `RenderGlow*` settings tune it.
 
-use std::sync::OnceLock;
-
 use bevy::asset::{load_internal_asset, uuid_handle};
 use bevy::core_pipeline::Core3dSystems;
 use bevy::core_pipeline::FullscreenShader;
@@ -38,6 +36,8 @@ use bevy::core_pipeline::schedule::Core3d;
 use bevy::ecs::query::QueryItem;
 use bevy::ecs::system::lifetimeless::Read;
 use bevy::prelude::*;
+
+use crate::render_overrides::RenderOverrides;
 use bevy::render::extract_component::{ExtractComponent, ExtractComponentPlugin};
 use bevy::render::render_resource::binding_types::{sampler, texture_2d, uniform_buffer};
 use bevy::render::render_resource::{
@@ -74,42 +74,12 @@ const GLOW_FORMAT: TextureFormat = TextureFormat::Rgba16Float;
 const GLOW_RESOLUTION: u32 = 512;
 
 /// The reference `RenderGlowStrength` default, applied every blur pass.
-const DEFAULT_STRENGTH: f32 = 0.325;
+pub(crate) const DEFAULT_STRENGTH: f32 = 0.325;
 /// The reference `RenderGlowWidth` default; `delta = width / GLOW_RESOLUTION`.
-const DEFAULT_WIDTH: f32 = 1.3;
+pub(crate) const DEFAULT_WIDTH: f32 = 1.3;
 /// The reference `RenderGlowIterations` default; the blur runs `iterations · 2`
 /// passes (alternating horizontal / vertical).
 const DEFAULT_ITERATIONS: u32 = 2;
-
-/// The env var that force-**disables** the glow pass (an A/B knob; the glow is on
-/// by default now the alpha mask is fed on every surface).
-const ENV_DISABLE: &str = "SL_VIEWER_DISABLE_GLOW";
-/// The env var overriding the glow strength (`RenderGlowStrength`).
-const ENV_STRENGTH: &str = "SL_VIEWER_GLOW_STRENGTH";
-/// The env var overriding the glow width (`RenderGlowWidth`).
-const ENV_WIDTH: &str = "SL_VIEWER_GLOW_WIDTH";
-
-/// Whether the three glow overrides are set, resolved once per process (the
-/// environment is fixed at launch): [`refresh_glow`] runs every frame and would
-/// otherwise take the process env lock once up front plus twice per camera.
-struct GlowOverrides {
-    /// Whether [`ENV_DISABLE`] is set.
-    disable: bool,
-    /// Whether [`ENV_STRENGTH`] is set (its value is read by [`env_f32`]).
-    strength: bool,
-    /// Whether [`ENV_WIDTH`] is set (its value is read by [`env_f32`]).
-    width: bool,
-}
-
-/// The process's [`GlowOverrides`], read from the environment on first use.
-fn glow_overrides() -> &'static GlowOverrides {
-    static OVERRIDES: OnceLock<GlowOverrides> = OnceLock::new();
-    OVERRIDES.get_or_init(|| GlowOverrides {
-        disable: std::env::var_os(ENV_DISABLE).is_some(),
-        strength: std::env::var_os(ENV_STRENGTH).is_some(),
-        width: std::env::var_os(ENV_WIDTH).is_some(),
-    })
-}
 
 /// The persisted-file section the glow settings are grouped under (`[render.glow]`),
 /// matching the reference's `RenderGlow*` naming.
@@ -158,38 +128,33 @@ pub fn register_settings(settings: &mut ViewerSettings) {
 /// reads), so a `RenderGlow*` changed in the (future) preferences UI takes effect at
 /// once. An environment override (`SL_VIEWER_DISABLE_GLOW` / `SL_VIEWER_GLOW_*`),
 /// used by the screenshot harness, **wins** over the stored value.
-pub(crate) fn refresh_glow(store: Res<ViewerSettings>, mut cameras: Query<&mut SlGlow>) {
+pub(crate) fn refresh_glow(
+    store: Res<ViewerSettings>,
+    overrides: Res<RenderOverrides>,
+    mut cameras: Query<&mut SlGlow>,
+) {
     let store = store.store();
-    let overrides = glow_overrides();
+    let overrides = &overrides.glow;
     for mut glow in &mut cameras {
-        glow.enabled = if overrides.disable {
+        glow.enabled = if overrides.disabled {
             false
         } else {
             store.get_bool(SETTING_ENABLED).unwrap_or(true)
         };
-        if !overrides.strength
-            && let Ok(value) = store.get_f32(SETTING_STRENGTH)
-        {
+        if let Some(strength) = overrides.strength {
+            glow.strength = strength;
+        } else if let Ok(value) = store.get_f32(SETTING_STRENGTH) {
             glow.strength = value;
         }
-        if !overrides.width
-            && let Ok(value) = store.get_f32(SETTING_WIDTH)
-        {
+        if let Some(width) = overrides.width {
+            glow.delta = width / GLOW_RESOLUTION_F32;
+        } else if let Ok(value) = store.get_f32(SETTING_WIDTH) {
             glow.delta = value / GLOW_RESOLUTION_F32;
         }
         if let Ok(value) = store.get_u32(SETTING_ITERATIONS) {
             glow.iterations = value;
         }
     }
-}
-
-/// Read an `f32` knob from the environment, falling back to `default` when unset or
-/// unparsable.
-fn env_f32(key: &str, default: f32) -> f32 {
-    std::env::var(key)
-        .ok()
-        .and_then(|value| value.parse().ok())
-        .unwrap_or(default)
 }
 
 /// The per-frame glow inputs carried on the main camera (which both carries them to
@@ -208,13 +173,13 @@ pub struct SlGlow {
 }
 
 impl Default for SlGlow {
-    /// The reference `RenderGlow*` defaults, each overridable by an environment
-    /// variable so a capture can sweep the glow without a rebuild.
+    /// The reference `RenderGlow*` defaults; `refresh_glow` folds in the store and
+    /// the [`RenderOverrides`] every frame.
     fn default() -> Self {
         Self {
-            enabled: !glow_overrides().disable,
-            strength: env_f32(ENV_STRENGTH, DEFAULT_STRENGTH),
-            delta: env_f32(ENV_WIDTH, DEFAULT_WIDTH) / GLOW_RESOLUTION_F32,
+            enabled: true,
+            strength: DEFAULT_STRENGTH,
+            delta: DEFAULT_WIDTH / GLOW_RESOLUTION_F32,
             iterations: DEFAULT_ITERATIONS,
         }
     }
@@ -255,6 +220,7 @@ pub struct SlGlowPlugin;
 
 impl Plugin for SlGlowPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<RenderOverrides>();
         load_internal_asset!(
             app,
             EXTRACT_SHADER_HANDLE,
