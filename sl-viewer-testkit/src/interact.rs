@@ -82,21 +82,37 @@ impl InteractionTest {
         app.init_resource::<Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>>();
         app.add_plugins(bevy::camera::visibility::VisibilityPlugin);
 
-        // The UI stack and its writer: `ui_picking` reads the back-to-front
-        // node list `UiPlugin` fills, so the harness fills it the same way.
-        app.init_resource::<UiStack>();
-        app.configure_sets(PostUpdate, UiSystems::Stack.after(UiSystems::Layout));
-        app.add_systems(PostUpdate, ui_stack_system.in_set(UiSystems::Stack));
-        // The UI picking backend itself, and the `Interaction` component drive
-        // (hover / pressed parity with the live viewer).
-        app.add_plugins(UiPickingPlugin);
-        app.add_systems(PreUpdate, ui_focus_system.in_set(UiSystems::Focus));
-        // The headless widget interaction systems: press and click become
-        // `Activate` on the widgets that carry them.
-        app.add_plugins(bevy::ui_widgets::UiWidgetsPlugins);
+        install_ui_interaction(&mut app);
         record::<UiAction>(&mut app);
         app
     }
+}
+
+/// The UI half of the interaction stack — what turns a pointer that has
+/// already reached the app into a widget interaction — on its own, for a host
+/// that brought its own window and picking core (a fixture world composing the
+/// UI on top of the world fold).
+///
+/// Requires the input stack ([`install_input_stack`]), the layout stack
+/// ([`crate::LayoutTest::install`]) and visibility propagation to be present
+/// already: this adds only the pieces `bevy_ui`'s own `UiPlugin` would.
+pub fn install_ui_interaction(app: &mut App) {
+    // The UI stack and its writer: `ui_picking` reads the back-to-front
+    // node list `UiPlugin` fills, so the harness fills it the same way.
+    app.init_resource::<UiStack>();
+    app.configure_sets(PostUpdate, UiSystems::Stack.after(UiSystems::Layout));
+    app.add_systems(PostUpdate, ui_stack_system.in_set(UiSystems::Stack));
+    // The UI picking backend itself, and the `Interaction` component drive
+    // (hover / pressed parity with the live viewer).
+    app.add_plugins(UiPickingPlugin);
+    app.add_systems(PreUpdate, ui_focus_system.in_set(UiSystems::Focus));
+    // The headless widget interaction systems: press and click become
+    // `Activate` on the widgets that carry them.
+    app.add_plugins(bevy::ui_widgets::UiWidgetsPlugins);
+    // The keyboard half of focus, which `ViewerUiPlugin` adds live: without it
+    // the `Tab` key is inert — the observer that reads it is installed on the
+    // primary window at `Startup` by this plugin, and by nothing else.
+    app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
 }
 
 /// Add the input half on its own — the window, time, input plugins, picking
@@ -401,6 +417,10 @@ fn write_key(
 
 #[cfg(test)]
 mod tests {
+    use bevy::input::ButtonState;
+    use bevy::input::keyboard::{Key, KeyboardInput};
+    use bevy::input_focus::tab_navigation::{TabGroup, TabIndex};
+    use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
 
@@ -541,6 +561,118 @@ mod tests {
         assert!(
             counts.contains(&2),
             "a deliberate double click must reach the widgets as one (counts {counts:?})"
+        );
+    }
+
+    /// Which node saw which key press, in order.
+    #[derive(Resource, Default)]
+    struct Keys(Vec<(String, KeyCode)>);
+
+    /// Record every focused key *press* that reaches the observed node.
+    fn observe_keys(app: &mut App, entity: Entity, name: &str) {
+        let name = name.to_owned();
+        app.world_mut().entity_mut(entity).observe(
+            move |key: On<bevy::input_focus::FocusedInput<KeyboardInput>>,
+                  mut keys: ResMut<Keys>| {
+                if key.input.state == ButtonState::Pressed {
+                    keys.0.push((name.clone(), key.input.key_code));
+                }
+            },
+        );
+    }
+
+    /// **A key reaches the focused node, and nothing else.**
+    ///
+    /// The keyboard's half of the coverage `trigger(Activate)` never had: an
+    /// activation triggered on an entity is delivered there by construction,
+    /// so it cannot say whether a *typed* key would have gone to that widget.
+    /// Here the key is written as winit writes it and routed by
+    /// `InputDispatchPlugin` to whatever [`InputFocus`] names — which is what
+    /// decides, in the running viewer, whether typing walks the avatar or
+    /// lands in the chat bar.
+    #[test]
+    fn a_key_reaches_only_the_focused_node() {
+        let mut app = interactive_app();
+        app.init_resource::<Keys>();
+        let first = app
+            .world_mut()
+            .spawn((solid_node(10.0, 10.0, 100.0, 40.0), TabIndex(0)))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((solid_node(10.0, 60.0, 100.0, 40.0), TabIndex(1)))
+            .id();
+        observe_keys(&mut app, first, "first");
+        observe_keys(&mut app, second, "second");
+        settle(&mut app);
+
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(first, FocusCause::Navigated);
+        super::tap(&mut app, KeyCode::KeyA, Key::Character("a".into()));
+        assert_eq!(
+            app.world().resource::<Keys>().0,
+            vec![("first".to_owned(), KeyCode::KeyA)],
+            "the focused node takes the key, and the unfocused one hears nothing"
+        );
+
+        app.world_mut()
+            .resource_mut::<InputFocus>()
+            .set(second, FocusCause::Navigated);
+        super::tap(&mut app, KeyCode::KeyB, Key::Character("b".into()));
+        assert_eq!(
+            app.world().resource::<Keys>().0,
+            vec![
+                ("first".to_owned(), KeyCode::KeyA),
+                ("second".to_owned(), KeyCode::KeyB)
+            ],
+            "moving the focus moves where the keys land"
+        );
+    }
+
+    /// **The `Tab` key itself moves focus** — not `TabNavigation` called by
+    /// hand, which is what [`crate::navigate`] does.
+    ///
+    /// Worth the distinction: the observer that reads `Tab` is installed on the
+    /// primary window at `Startup` by `TabNavigationPlugin`, so a harness that
+    /// forgot the plugin (or the window) would navigate perfectly through
+    /// [`crate::navigate`] while the key did nothing at all — which is exactly
+    /// the shape of the bug a keyboard test is for.
+    #[test]
+    fn the_tab_key_moves_focus() {
+        let mut app = interactive_app();
+        let first = app
+            .world_mut()
+            .spawn((solid_node(10.0, 10.0, 100.0, 40.0), TabIndex(0)))
+            .id();
+        let second = app
+            .world_mut()
+            .spawn((solid_node(10.0, 60.0, 100.0, 40.0), TabIndex(1)))
+            .id();
+        app.world_mut()
+            .spawn((solid_node(0.0, 0.0, 200.0, 200.0), TabGroup::new(0)))
+            .add_children(&[first, second]);
+        settle(&mut app);
+        // `set_initial_focus` parks the focus on the primary window until
+        // something takes it — so "unfocused" here means "no widget has it",
+        // not `None`.
+        let focused = app.world().resource::<InputFocus>().get();
+        assert!(
+            focused != Some(first) && focused != Some(second),
+            "no tab stop may hold focus before the first Tab (it is on {focused:?})"
+        );
+
+        super::tap(&mut app, KeyCode::Tab, Key::Tab);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(first),
+            "the first Tab focuses the first stop in the group"
+        );
+        super::tap(&mut app, KeyCode::Tab, Key::Tab);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(second),
+            "the next Tab moves one stop on"
         );
     }
 

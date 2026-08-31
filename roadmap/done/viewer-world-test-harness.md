@@ -2,7 +2,7 @@
 id: viewer-world-test-harness
 title: A headless fixture world — SlEvent in, SlCommand out
 topic: viewer
-status: in-progress
+status: done
 origin: user request (2026-07) — test in-world reactions without a server
 points: 8
 refs: [viewer-render-test-harness, viewer-ui-test-harness, viewer-cpu-pick-resolver]
@@ -12,7 +12,7 @@ blocked_by: [viewer-plugin-groups]
 Context: [context/viewer.md](../context/viewer.md),
 [context/testing.md](../context/testing.md).
 
-In progress (2026-08-31): `world_test.rs` landed — `world_app()` (the
+Done (2026-08-31): `world_test.rs` landed — `world_app()` (the
 testkit input stack + visibility propagation + the world fold with the
 CPU resolver + every resource / message the group's systems validate
 against), `world_app_with_edit()` adding `EditGizmoPlugin`, the
@@ -32,9 +32,29 @@ character assets: `world_app_with_hud()` loads the real
 `AvatarAssetLibrary` from `viewer-assets/character/`, adds the
 render-layer propagation the HUD pick paths filter by, and
 `install_hud_camera_projection` hand-fills the orthographic HUD
-camera's computed values. Remaining: `with_ui` composition with the UI
-stack, and the helper surface (`entity_of`, `drain_commands`,
-`select_by_click`).
+camera's computed values.
+
+The `with_ui` composition and the helper surface followed the same day:
+`world_app_with_ui()` stands the layout stack and the UI half of the
+interaction stack over `world_app_with_hud()` — over the HUD one
+because that camera carries `IsDefaultUiCamera`, which is what decides
+where the UI root reads its size from, and a UI composed onto a world
+with no such marker would target whichever camera won a `max_by_key`.
+`entity_of`, `drain_commands` and `select_by_click` landed with it,
+`select_by_click` driving the real `EditSelectionPlugin` gesture (whose
+one absent resource is the combo widget's `UiPointerClaim`). The
+consumer test is the whole loop in one: an `ObjectAdded` streams in, a
+right-click opens the real object pie, a click on the `Touch` label the
+user sees sends one `TouchObject` on the wire.
+
+One correction the selection click forced, worth carrying: the fixture
+world had no camera **frustum**, because `bevy_camera`'s `CameraPlugin`
+owns `update_frusta` and lives in the group the world tier leaves out.
+Without one `check_visibility` culls everything, `ViewVisibility` never
+becomes true, and every ray cast left at the default
+`RayCastVisibility::VisibleInView` — `ObjectPicker::pick`, so the whole
+left-click path — silently hits nothing, while the pick resolver's own
+`Visible` cast goes on working. `world_app` runs `update_frusta` now.
 
 Blocked on [[viewer-plugin-groups]] (2026-08-30): the "one real unknown"
 below — carving a reusable plugin subset out of `run()` — is that task, so

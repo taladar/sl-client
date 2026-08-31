@@ -2,7 +2,7 @@
 id: viewer-spacenav-input-tests
 title: 6-DOF input reactions via the SpacenavInput seam
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — test space navigator reactions
 points: 3
 refs: [viewer-input-spacenav-crossplatform]

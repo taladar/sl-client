@@ -267,8 +267,23 @@ impl LayoutTest {
             // to exist even though the viewer's faces are registered into
             // parley's `FontCx` rather than loaded as Bevy assets.
             AssetPlugin::default(),
-        ))
-        .init_asset::<Font>();
+        ));
+        self.install(&mut app, UiHost::Bare);
+        app
+    }
+
+    /// Add the same UI layer to an app that already exists — a fixture world
+    /// standing the viewer's world fold up, which needs the UI on top of it to
+    /// drive a menu or a floater ([[viewer-world-test-harness]]).
+    ///
+    /// Everything [`Self::build`] does bar creating the app and adding the task
+    /// pool and asset plugins, which any host has already. `host` says what the
+    /// host brings of its own, because the two pieces that would otherwise be
+    /// installed twice — transform propagation and the UI's target camera — are
+    /// not detectable at build time: a world app's cameras are spawned by its
+    /// own `Startup` systems, long after this runs.
+    pub fn install(self, app: &mut App, host: UiHost) {
+        app.init_asset::<Font>();
 
         // The two hierarchy propagations `UiPlugin` would install: which camera a
         // node targets, and that target's size / scale factor. Layout reads the
@@ -331,18 +346,27 @@ impl LayoutTest {
                 propagate_ui_target_cameras.in_set(UiSystems::Prepare),
                 measure_text_system.in_set(UiSystems::Content),
                 ui_layout_system.in_set(UiSystems::Layout),
+                // Computes each node's `CalculatedClip`, without which
+                // `clipping_violations` has nothing to read.
+                update_clipping_system.in_set(UiSystems::PostLayout),
+            ),
+        );
+        // Transform propagation. `TransformPlugin`'s own copies run in
+        // `PostUpdate` too, so a host that has it must not get a second set:
+        // they would race the first over the very components they write.
+        if host == UiHost::Bare {
+            app.add_systems(
+                PostUpdate,
                 (
                     mark_dirty_trees,
                     sync_simple_transforms,
                     propagate_parent_transforms,
-                    // Computes each node's `CalculatedClip`, without which
-                    // `clipping_violations` has nothing to read.
-                    update_clipping_system,
                 )
                     .chain()
-                    .in_set(UiSystems::PostLayout),
-            ),
-        );
+                    .in_set(UiSystems::PostLayout)
+                    .before(update_clipping_system),
+            );
+        }
 
         // The scaffold's own half, in the order `ViewerUiPlugin` gives it.
         app.add_systems(
@@ -370,30 +394,54 @@ impl LayoutTest {
         // next frame's placement exactly as it does live; hence [`settle`] taking
         // two frames matters here too.
         for register in self.widget_layout {
-            register(&mut app);
+            register(app);
         }
 
         // The camera and its dummy render target: no window and no renderer, so
         // the target info a real `Camera` would compute is supplied directly.
-        app.world_mut().spawn((
-            Camera2d,
-            Camera {
-                computed: ComputedCameraValues {
-                    target_info: Some(RenderTargetInfo {
+        //
+        // A host brings its own, and a second one here would be worse than
+        // redundant: `DefaultUiCamera` picks the highest-order camera on the
+        // primary window, so which one the UI landed on would depend on entity
+        // order. The viewer answers this by marking one `IsDefaultUiCamera`
+        // (the HUD camera, the topmost), and a hosted UI targets that one.
+        if host == UiHost::Bare {
+            app.world_mut().spawn((
+                Camera2d,
+                Camera {
+                    computed: ComputedCameraValues {
+                        target_info: Some(RenderTargetInfo {
+                            physical_size: self.viewport(),
+                            scale_factor: self.scale_factor,
+                        }),
+                        ..default()
+                    },
+                    viewport: Some(Viewport {
                         physical_size: self.viewport(),
-                        scale_factor: self.scale_factor,
+                        ..default()
                     }),
                     ..default()
                 },
-                viewport: Some(Viewport {
-                    physical_size: self.viewport(),
-                    ..default()
-                }),
-                ..default()
-            },
-        ));
-        app
+            ));
+        }
     }
+}
+
+/// What the app a [`LayoutTest`] is [installed](LayoutTest::install) into
+/// already provides.
+///
+/// Only two pieces are in question, and both are ones the harness cannot
+/// detect at build time because a host spawns them from its own `Startup`
+/// systems: transform propagation and the camera the UI targets.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiHost {
+    /// Nothing — the harness owns the app, as under [`LayoutTest::build`]. It
+    /// installs transform propagation and a dummy UI camera of its own.
+    Bare,
+    /// A world app: `TransformPlugin` already propagates, and the viewer's own
+    /// cameras — the world one, and the `IsDefaultUiCamera` HUD one above it —
+    /// are what the UI targets, exactly as in the running viewer.
+    Hosted,
 }
 
 /// Run the app until layout has settled.

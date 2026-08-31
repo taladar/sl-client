@@ -2,7 +2,7 @@
 id: viewer-ui-interaction-harness
 title: Headless synthetic-pointer input for the UI test harness
 topic: viewer
-status: in-progress
+status: done
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 8
 refs: [viewer-ui-test-harness]
@@ -11,7 +11,7 @@ refs: [viewer-ui-test-harness]
 Context: [context/viewer.md](../context/viewer.md),
 [context/testing.md](../context/testing.md).
 
-In progress (2026-08-30). Resolved by reading the Bevy 0.19 sources: winit
+Planned (2026-08-30). Resolved by reading the Bevy 0.19 sources: winit
 never writes `PointerInput` — `bevy_picking`'s `mouse_pick_events` derives
 it from `WindowEvent` in `First` — so the driver writes the raw typed
 messages *plus* their `WindowEvent` wrappers and lets the picking input
@@ -33,8 +33,26 @@ build forced: visibility propagation is `bevy_camera`'s
 absent resource fails system-param validation); the window must come
 from the real `WindowPlugin` — its message registrations (`Ime`, …) are
 read by the widget systems, and a hand-spawned window misses them.
-Remaining: the pie `commit_select` port as the reference consumer, the
-keyboard/focus teeth, and the blocked interaction-test consumers.
+
+Landed (2026-08-31, the reference consumers): the pie's `commit_select`
+port — `pointer_pie_app` in `pie_menu.rs` stands the whole
+`PieMenuPlugin` over `InteractionTest`, opens a live pie with a real
+`OpenPieMenu` and clicks the label the user would aim at, so the
+picture and the angle maths must agree (three tests: every enabled
+slice, the dead zone's flick→pin→dismiss pair, and a two-level sub-pie
+address). The UI stack also composes onto a fixture world now:
+`LayoutTest::install(&mut app, UiHost::Hosted)` and
+`interact::install_ui_interaction` are the split-out halves
+[[viewer-world-test-harness]]'s `world_app_with_ui` uses. `UiHost` says
+what the host already brings, because neither piece it guards —
+transform propagation and the UI's target camera — is detectable at
+build time (a world app's cameras come from its own `Startup`). The
+keyboard teeth landed with them: a key reaches the focused node and no
+other, and the **`Tab` key itself** moves focus — distinct from
+`navigate`, which calls `TabNavigation` by hand and would keep passing
+if the harness had forgotten `TabNavigationPlugin` (whose observer is
+installed on the primary window at `Startup`, by nothing else). Done:
+the tier's own consumers are separate tasks now.
 
 The harness in `ui_test.rs` drives behaviour by `trigger(Activate)`, which
 deliberately skips hit-testing: it cannot say whether the button is *where

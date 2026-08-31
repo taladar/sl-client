@@ -2,7 +2,7 @@
 id: viewer-world-pie-menu-reactions
 title: Right-click reactions per world target class
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — right-click avatar must show the pie menu
 points: 5
 blocked_by: [viewer-world-test-harness]

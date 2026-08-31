@@ -2,7 +2,7 @@
 id: viewer-world-pie-target-tests
 title: Right-clicking each world target opens exactly its pie
 topic: viewer
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-ui-radial-menu, viewer-ui-interaction-harness]

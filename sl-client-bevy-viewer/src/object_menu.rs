@@ -151,7 +151,7 @@ const FLAGS_OBJECT_COPY: u32 = 1 << 3;
 const FLAGS_OBJECT_YOU_OWNER: u32 = 1 << 5;
 
 /// The `FLAGS_HANDLE_TOUCH` bit: the object's linkset has a touch handler.
-const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
+pub(crate) const FLAGS_HANDLE_TOUCH: u32 = 1 << 7;
 
 // ---------------------------------------------------------------------------
 // The take sub-pie (the reference's "Take Submenu", chained after Buy at the

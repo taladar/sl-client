@@ -59,6 +59,20 @@ pub(crate) fn world_app() -> App {
     // resolver (and `MeshRayCast` in general) reads; its bounds systems also
     // compute each mesh's `Aabb`, which the ray cast's culling needs.
     app.add_plugins(VisibilityPlugin);
+    // The camera frusta `check_visibility` culls against. `bevy_camera`'s own
+    // `CameraPlugin` owns this system and the fixture world has no reason to
+    // add the rest of it — but without a computed frustum every entity is
+    // culled, `ViewVisibility` never becomes true, and every ray cast left at
+    // the default `RayCastVisibility::VisibleInView` quietly hits nothing.
+    // That is the left-click's `ObjectPicker::pick` (and so the selection
+    // gesture), while the pick resolver's own `Visible` cast goes on working —
+    // a difference that would read as "selection is broken", not as "the
+    // harness never computed a frustum".
+    app.add_systems(
+        PostUpdate,
+        bevy::camera::visibility::update_frusta
+            .in_set(bevy::camera::visibility::VisibilitySystems::UpdateFrusta),
+    );
     // The login-parameter resources the world group expects `run_session` to
     // have inserted.
     app.insert_resource(crate::settings::ViewerSettings::declared_for_test(
@@ -205,11 +219,18 @@ pub(crate) fn install_camera(app: &mut App, eye: Vec3, target: Vec3) {
     }
 }
 
-/// The fixture world with the transform gizmos on top. A separate builder
-/// because plugins must be added before the app's first update.
+/// The fixture world with the build tools on top — the selection gesture and
+/// the transform gizmos. A separate builder because plugins must be added
+/// before the app's first update.
 pub(crate) fn world_app_with_edit() -> App {
     let mut app = world_app();
-    app.add_plugins(crate::gizmos::EditGizmoPlugin);
+    app.add_plugins((
+        crate::gizmos::EditGizmoPlugin,
+        crate::edit_selection::EditSelectionPlugin,
+    ));
+    // The per-frame "a widget took this press" flag the selection gesture
+    // consults; its owner is the combo widget, over in the UI scaffold.
+    app.init_resource::<sl_viewer_ui_core::ui::UiPointerClaim>();
     app
 }
 
@@ -232,6 +253,41 @@ pub(crate) fn world_app_with_hud() -> Result<App, Box<dyn core::error::Error>> {
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../viewer-assets/character");
     let library = crate::avatar_assets::AvatarAssetLibrary::load(&vendored)?;
     app.insert_resource(library);
+    Ok(app)
+}
+
+/// The fixture world with **the UI on top of it**: the layout stack, the
+/// scaffold's `UiRoot`, and the UI half of the interaction stack, composed onto
+/// the world fold the way the running viewer composes them.
+///
+/// Built over [`world_app_with_hud`] rather than [`world_app`] because that is
+/// where the viewer's UI camera comes from: `setup_hud_screen` spawns the HUD
+/// camera carrying `IsDefaultUiCamera`, and `DefaultUiCamera` is what decides
+/// which camera the UI root's size and scale factor are read from. A UI
+/// composed onto a world with no such marker would target whichever camera won
+/// a `max_by_key` — a different answer from the viewer's, arrived at by entity
+/// order.
+///
+/// The returned app has already run **one** update: the two `Startup` halves
+/// (the HUD screen and its camera, the UI root) have to stand up before the HUD
+/// camera's computed values can be filled in, and the UI cannot lay out until
+/// they are.
+///
+/// # Errors
+///
+/// Returns the load error when the vendored character directory is missing, and
+/// a message when no HUD camera stood up.
+pub(crate) fn world_app_with_ui() -> Result<App, Box<dyn core::error::Error>> {
+    let mut app = world_app_with_hud()?;
+    // The layout half: `Hosted`, because the world app already propagates
+    // transforms and brings the cameras.
+    sl_viewer_testkit::LayoutTest::new().install(&mut app, sl_viewer_testkit::UiHost::Hosted);
+    // The interaction half: the UI stack, the UI picking backend and the widget
+    // systems. The input stack underneath it is already in `world_app`.
+    interact::install_ui_interaction(&mut app);
+    app.update();
+    install_hud_camera_projection(&mut app)
+        .ok_or("no HUD camera spawned — did the vendored character assets load?")?;
     Ok(app)
 }
 
@@ -279,6 +335,16 @@ pub(crate) fn install_hud_camera_projection(app: &mut App) -> Option<()> {
 /// seed, placed at `position` (SL region-local metres), streamed to the
 /// viewer as the grid would — one `ObjectAdded`. Returns its scoped id.
 pub(crate) fn seed_prim(app: &mut App, position: sl_client_bevy::Vector) -> ScopedObjectId {
+    seed_prim_with_flags(app, position, 0)
+}
+
+/// [`seed_prim`] with `extra_flags` set on top of the ordinary editable mask —
+/// the update-flag bits a menu's conditions read (a touch handler, say).
+pub(crate) fn seed_prim_with_flags(
+    app: &mut App,
+    position: sl_client_bevy::Vector,
+    extra_flags: u32,
+) -> ScopedObjectId {
     let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
     object.motion.position = position;
     // An ordinary editable prim: the edit gates read these agent flags, and a
@@ -286,11 +352,9 @@ pub(crate) fn seed_prim(app: &mut App, position: sl_client_bevy::Vector) -> Scop
     object.update_flags = crate::world_api::FLAGS_OBJECT_MODIFY
         | crate::world_api::FLAGS_OBJECT_MOVE
         | crate::world_api::FLAGS_OBJECT_COPY
-        | crate::world_api::FLAGS_OBJECT_YOU_OWNER;
-    let scoped = ScopedObjectId::new(object.circuit, object.local_id);
-    app.world_mut()
-        .write_message(SlEvent(SessionEvent::ObjectAdded(Box::new(object))));
-    scoped
+        | crate::world_api::FLAGS_OBJECT_YOU_OWNER
+        | extra_flags;
+    seed_object(app, object)
 }
 
 /// Stream one already-shaped [`Object`] to the viewer as an `ObjectAdded`.
@@ -402,6 +466,44 @@ pub(crate) fn world_to_viewport(app: &mut App, position: Vec3) -> Option<Vec2> {
     camera.world_to_viewport(transform, position).ok()
 }
 
+/// The scene entity a fixture's scoped id folded into — what a test needs to
+/// read the prim's motion, select it, or parent something to it.
+pub(crate) fn entity_of(app: &mut App, scoped: ScopedObjectId) -> Option<Entity> {
+    let mut objects = app
+        .world_mut()
+        .query::<(Entity, &crate::world_api::SceneObject)>();
+    objects
+        .iter(app.world())
+        .find(|(_entity, scene)| scene.scoped_id == scoped)
+        .map(|(entity, _scene)| entity)
+}
+
+/// Select whatever is under `at` (logical viewport pixels) the way a user
+/// does: the real selection tool's click gesture, press and release within its
+/// slop, resolved by the real world pick.
+///
+/// The build tool has to be active first — `handle_select_pointer` bails on an
+/// inactive tool before it looks at the pointer at all — and a click on empty
+/// world clears the selection rather than leaving it alone, which is what makes
+/// this worth driving instead of writing [`crate::world_api::SelectionSet`] by
+/// hand: a badly aimed camera *deselects* rather than quietly selecting
+/// nothing.
+pub(crate) fn select_by_click(app: &mut App, at: Vec2) {
+    interact::hover(app, at);
+    interact::press(app, MouseButton::Left);
+    interact::release(app, MouseButton::Left);
+    settle(app, 2);
+}
+
+/// Every [`sl_client_bevy::Command`] the viewer has sent since the last drain —
+/// the outbound half of the fixture world's seam, unwrapped from its message.
+pub(crate) fn drain_commands(app: &mut App) -> Vec<sl_client_bevy::Command> {
+    sl_viewer_testkit::drain::<SlCommand>(app)
+        .into_iter()
+        .map(|SlCommand(command)| command)
+        .collect()
+}
+
 /// Step `frames` updates — fixture events fold in, meshes build, tags assign.
 pub(crate) fn settle(app: &mut App, frames: u32) {
     for _frame in 0..frames {
@@ -426,7 +528,7 @@ mod tests {
     use bevy::prelude::*;
 
     use sl_client_bevy::Vector;
-    use sl_viewer_testkit::{drain, interact, record};
+    use sl_viewer_testkit::{drain, find_by_name, interact, record};
 
     use super::{
         first_tagged_face_position, install_camera, seed_prim, settle, world_app, world_to_viewport,
@@ -509,25 +611,21 @@ mod tests {
             first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
         install_camera(&mut app, target + Vec3::new(0.0, 2.0, 10.0), target);
 
-        // Select the prim and enter build mode: the rig spawns and mounts on
-        // the selection pivot.
-        let entity = {
-            let mut objects = app
-                .world_mut()
-                .query::<(Entity, &crate::world_api::SceneObject)>();
-            objects
-                .iter(app.world())
-                .find(|(_entity, scene)| scene.scoped_id == scoped)
-                .map(|(entity, _scene)| entity)
-                .ok_or("the fixture prim has no scene entity")?
-        };
-        let full = sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(1));
-        app.world_mut()
-            .resource_mut::<crate::world_api::SelectionSet>()
-            .select_only(scoped, full, entity);
+        // Enter build mode and select the prim by clicking it: the camera looks
+        // straight at the fixture, so the viewport centre is on it. The rig
+        // spawns and mounts on the selection pivot.
         app.world_mut()
             .resource_mut::<crate::world_api::EditToolState>()
             .active = true;
+        settle(&mut app, 2);
+        super::select_by_click(&mut app, Vec2::new(400.0, 300.0));
+        let entity = super::entity_of(&mut app, scoped).ok_or("the fixture prim has no entity")?;
+        assert!(
+            app.world()
+                .resource::<crate::world_api::SelectionSet>()
+                .is_selected(scoped),
+            "a click on the prim must select it — the gizmo has nothing to mount on otherwise"
+        );
         settle(&mut app, 3);
 
         // The +X arrow cone: of the three handles named `translate-x` (the
@@ -764,6 +862,80 @@ mod tests {
             opened.len() == 1,
             "one right-click on bare land must ask for exactly one land pie, got {}",
             opened.len()
+        );
+        Ok(())
+    }
+
+    /// **The whole loop, through the UI** — the `with_ui` composition
+    /// ([[viewer-world-test-harness]]) and the second consumer of the
+    /// synthetic pointer ([[viewer-ui-interaction-harness]]).
+    ///
+    /// Every other pie-target test above stops at the *request*: it asserts
+    /// that a right-click asked for a pie. This one runs the request through
+    /// the real widget — the pie spawns under the scaffold's root, measures
+    /// its labels, sizes its ring and places itself at the cursor — and then
+    /// clicks the label a user would aim at. What comes out the far end is a
+    /// `TouchObject` on the wire, so the whole path is under test at once:
+    /// `SlEvent` in, pick, pie, layout, pointer, dispatch, `SlCommand` out.
+    #[test]
+    fn a_pie_slice_clicked_in_world_sends_its_command() -> Result<(), TestError> {
+        let mut app = super::world_app_with_ui()?;
+        // Touch is the object pie's north slice, and it is enabled only for an
+        // object whose linkset handles touch.
+        let scoped = super::seed_prim_with_flags(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+            crate::object_menu::FLAGS_HANDLE_TOUCH,
+        );
+        settle(&mut app, 5);
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+        settle(&mut app, 2);
+
+        // The right-click that opens the pie, at the viewport centre.
+        let centre = Vec2::new(400.0, 300.0);
+        interact::hover(&mut app, centre);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        // The pick resolves, the pie spawns hidden, its labels are measured and
+        // the ring fitted around them, and `place_pie_menu` waits for two
+        // agreeing frames before revealing it and starting the flick.
+        settle(&mut app, 8);
+        // Opening the pie also asks for the object's properties (for the Mute
+        // entry's name); that is not what this test is about.
+        let _opening = super::drain_commands(&mut app);
+
+        // Where the user sees `Touch`, not where the maths says north is.
+        let touch_at = interact::centre_of(&mut app, "pie-label:north")
+            .ok_or("the object pie drew no north label — is the prim touchable?")?;
+        interact::hover(&mut app, touch_at);
+        interact::press(&mut app, MouseButton::Left);
+        interact::release(&mut app, MouseButton::Left);
+        settle(&mut app, 2);
+
+        let touches: Vec<_> = super::drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                sl_client_bevy::Command::TouchObject {
+                    local_id,
+                    surface: _surface,
+                } => Some(local_id),
+                _other => None,
+            })
+            .collect();
+        assert!(
+            touches.len() == 1 && touches.first() == Some(&scoped),
+            "clicking the pie's Touch label must send exactly one TouchObject for the \
+             right-clicked prim, got {touches:?}"
+        );
+        assert!(
+            find_by_name(&mut app, "pie-menu").is_none(),
+            "committing a slice closes the menu"
         );
         Ok(())
     }

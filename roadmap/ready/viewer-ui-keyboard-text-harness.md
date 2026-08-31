@@ -2,7 +2,7 @@
 id: viewer-ui-keyboard-text-harness
 title: Keyboard focus, bindings and text entry, headless
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 5
 blocked_by: [viewer-ui-interaction-harness]

@@ -2165,7 +2165,10 @@ mod tests {
         PieGeometry, PieMenu, PieMenuDef, PiePlacement, SlotOutcome, addresses, clamp_centre,
         pack_slot_states, pick, register_pie_layout, resolve_slots, ui_offset,
     };
-    use crate::ui_test::{LayoutTest, drain_actions, find_by_name, layout_violations, settle};
+    use crate::ui_test::interact::{self, InteractionTest};
+    use crate::ui_test::{
+        LayoutTest, drain_actions, enable_action_recording, find_by_name, layout_violations, settle,
+    };
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use pretty_assertions::assert_eq;
@@ -2946,6 +2949,181 @@ mod tests {
         assert!(
             find_by_name(&mut app, "pie-menu").is_none(),
             "a click on an empty slice must dismiss the menu"
+        );
+        Ok(())
+    }
+
+    // -----------------------------------------------------------------------
+    // The same commits, driven by a real cursor
+    // ([[viewer-ui-interaction-harness]]).
+    //
+    // [`commit_select`] above writes the highlight itself, which is honest
+    // about what it tests — the commit — and silent about everything between
+    // the pointer and it. These drive `interact`'s synthetic pointer instead:
+    // the window's cursor moves to where a label was actually *laid out*, and
+    // `drive_pie_cursor` derives the highlight from the angle. So the picture
+    // and the maths have to agree, which is the one claim the pie exists to
+    // make and the one claim highlight injection cannot check.
+    // -----------------------------------------------------------------------
+
+    /// Where the pointer-driven fixture pie is asked to open, in logical
+    /// pixels — far enough from every edge that the clamp never moves it.
+    const POINTER_PIE_AT: Vec2 = Vec2::new(700.0, 500.0);
+
+    /// A **live pie opened the way the viewer opens one**, over the pointer
+    /// harness: the whole [`super::PieMenuPlugin`] (so the open, the fit, the
+    /// placement and the cursor drive are all the shipped systems), an
+    /// `OpenPieMenu` request, and enough frames for the placement to settle
+    /// into the flick the reveal starts.
+    fn pointer_pie_app() -> Result<App, TestError> {
+        let mut app = InteractionTest::new().build();
+        enable_action_recording(&mut app);
+        // The plugin's `build` writes its shader with `load_internal_asset!`,
+        // which needs the store a CPU-only app has no renderer to create.
+        app.init_asset::<Shader>();
+        app.add_plugins(super::PieMenuPlugin);
+        settle(&mut app);
+        app.world_mut().write_message(OpenPieMenu {
+            menu: &FIXTURE_PIE,
+            at: POINTER_PIE_AT,
+            element: "radial-menu",
+            conditions: Vec::new(),
+        });
+        // Spawn, measure, fit, then the two agreeing placement frames
+        // `place_pie_menu` waits for before it reveals the menu.
+        for _frame in 0..6 {
+            app.update();
+        }
+        let pie = find_by_name(&mut app, "pie-menu").ok_or("the pie did not open")?;
+        let placed = app
+            .world()
+            .get::<PiePlacement>(pie)
+            .ok_or("the opened pie carries no placement, so it is not live")?
+            .placed;
+        if !placed {
+            return Err("the pie never settled into place, so no gesture can reach it".into());
+        }
+        Ok(app)
+    }
+
+    /// Click `at` with the real pointer: the cursor moves there, the button
+    /// goes down and comes back up, and one further frame lets the recorder
+    /// copy what the release emitted.
+    fn pointer_click(app: &mut App, at: Vec2) {
+        interact::hover(app, at);
+        interact::press(app, MouseButton::Left);
+        interact::release(app, MouseButton::Left);
+        app.update();
+    }
+
+    /// The laid-out centre of a compass point's label, in logical pixels.
+    fn label_centre(app: &mut App, point: Compass) -> Result<Vec2, TestError> {
+        let name = format!("pie-label:{}", point.name());
+        interact::centre_of(app, &name)
+            .ok_or_else(|| format!("no laid-out node named `{name}`").into())
+    }
+
+    /// **The reference consumer of the synthetic pointer**: a real click on
+    /// the label a user is looking at commits the slice that label is drawn
+    /// on.
+    ///
+    /// The pointer never learns which slice it is over — it is given a
+    /// *position*, the position a label was laid out at, and the widget
+    /// resolves it back to a compass point through the same angle maths the
+    /// running viewer uses. A label placed at the wrong corner would sail
+    /// through [`the_compass_does_not_mirror_under_rtl`]'s coarse
+    /// west-of-the-ring checks and through every `commit_select` test, and
+    /// fail here.
+    #[test]
+    fn a_pointer_click_on_a_label_commits_that_slice() -> Result<(), TestError> {
+        // The fixture's three enabled actions and where they are drawn: Touch
+        // at north, the chain's Sit Here at east, Open at north-west.
+        for (point, action) in [
+            (Compass::North, "touch"),
+            (Compass::East, "sit"),
+            (Compass::NorthWest, "open"),
+        ] {
+            let mut app = pointer_pie_app()?;
+            let at = label_centre(&mut app, point)?;
+            pointer_click(&mut app, at);
+            assert_eq!(
+                drain_actions(&mut app),
+                vec![UiAction {
+                    element: "radial-menu",
+                    action,
+                }],
+                "a real click on the {} label must commit the slice that label is drawn on",
+                point.name()
+            );
+        }
+        Ok(())
+    }
+
+    /// **The dead zone, through the real pointer** — and the flick-to-pin
+    /// transition, which highlight injection cannot produce because it sets
+    /// the mode by hand.
+    ///
+    /// A release at the ring's own centre picks nothing: mid-flick that means
+    /// "opened it and let go without choosing", which pins the menu open to be
+    /// read. The *second* click in the same place, now that it is pinned,
+    /// dismisses it.
+    #[test]
+    fn a_pointer_release_in_the_dead_zone_pins_and_then_dismisses() -> Result<(), TestError> {
+        let mut app = pointer_pie_app()?;
+        let centre = interact::centre_of(&mut app, "pie-ring").ok_or("the ring never laid out")?;
+
+        pointer_click(&mut app, centre);
+        assert_eq!(
+            drain_actions(&mut app),
+            vec![],
+            "the dead zone picks nothing, so nothing may be emitted"
+        );
+        let pie = find_by_name(&mut app, "pie-menu")
+            .ok_or("a dead-zone release mid-flick must pin the menu open, not dismiss it")?;
+        assert_eq!(
+            app.world().get::<PieMenu>(pie).map(|menu| menu.interaction),
+            Some(super::PieInteraction::Pinned),
+            "the flick ended without a pick, so the menu is now a pinned one to read"
+        );
+
+        pointer_click(&mut app, centre);
+        assert!(
+            find_by_name(&mut app, "pie-menu").is_none(),
+            "a click in a pinned pie's dead zone dismisses it"
+        );
+        Ok(())
+    }
+
+    /// **A two-level address, walked by the pointer**: click the label that
+    /// opens the sub-pie, then click a label in the sub-pie, and the sub-pie's
+    /// own action comes out.
+    ///
+    /// The descent is where the two coordinate systems could most easily drift
+    /// apart — the labels are rebuilt for a different menu while the pointer
+    /// has not moved — so it is worth walking with a real cursor rather than
+    /// by writing `path` and a highlight.
+    #[test]
+    fn a_pointer_walks_a_sub_pie_address() -> Result<(), TestError> {
+        let mut app = pointer_pie_app()?;
+        // South opens the `Manage` sub-pie.
+        let south = label_centre(&mut app, Compass::South)?;
+        pointer_click(&mut app, south);
+        assert_eq!(
+            drain_actions(&mut app),
+            vec![],
+            "opening a sub-pie is navigation, not an action"
+        );
+        // The labels are rebuilt and re-placed for the sub-pie.
+        settle(&mut app);
+        let take_copy = label_centre(&mut app, Compass::West)?;
+        pointer_click(&mut app, take_copy);
+        assert_eq!(
+            drain_actions(&mut app),
+            vec![UiAction {
+                element: "radial-menu",
+                action: "take-copy",
+            }],
+            "the sub-pie's west label must commit the sub-pie's west action"
         );
         Ok(())
     }

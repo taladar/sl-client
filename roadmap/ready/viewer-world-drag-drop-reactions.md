@@ -2,7 +2,7 @@
 id: viewer-world-drag-drop-reactions
 title: Inventory drag&drop onto the world
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — drag onto avatar must give the item
 points: 5
 blocked_by: [viewer-ui-interaction-harness, viewer-world-test-harness]

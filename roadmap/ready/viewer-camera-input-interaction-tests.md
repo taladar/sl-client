@@ -2,7 +2,7 @@
 id: viewer-camera-input-interaction-tests
 title: Camera, movement, mouselook and HUD picking under a synthetic pointer
 topic: viewer
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-ui-interaction-harness]

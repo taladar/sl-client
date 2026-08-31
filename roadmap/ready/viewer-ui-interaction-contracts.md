@@ -2,7 +2,7 @@
 id: viewer-ui-interaction-contracts
 title: An interaction contract per registered element, swept like the matrix
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 8
 refs: [viewer-ui-test-harness]

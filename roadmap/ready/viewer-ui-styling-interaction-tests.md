@@ -2,7 +2,7 @@
 id: viewer-ui-styling-interaction-tests
 title: bevy_flair state styling under synthetic hover and focus
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 5
 blocked_by: [viewer-ui-interaction-harness]

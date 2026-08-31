@@ -2,7 +2,7 @@
 id: viewer-edit-gizmo-interaction-tests
 title: Gizmo handle drags — press, constrain, stream, release
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — build floater / gizmos named the priority
 points: 8
 refs: [viewer-build-undo-redo]

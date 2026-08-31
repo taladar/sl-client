@@ -2,7 +2,7 @@
 id: viewer-edit-selection-interaction-tests
 title: Selecting for edit — click, shift-click, rubber band, faces
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — build floater / gizmos named the priority
 points: 5
 blocked_by: [viewer-world-test-harness]

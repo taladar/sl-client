@@ -2,7 +2,7 @@
 id: viewer-movement-camera-input-tests
 title: Movement keys and camera modes, headless
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — test in-world input reactions
 points: 5
 blocked_by: [viewer-world-test-harness]
