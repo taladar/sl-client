@@ -34,3 +34,19 @@ scripts/third-party-licenses.hbs skipchecks=handlebars;;;whitespace-significant[
 # exempt the generated file from git's whitespace checking (diff-index --check,
 # the common:::whitespace hook) via the native whitespace attribute.
 sl-client-bevy-viewer/assets/licenses/third-party-licenses.txt -whitespace
+
+# The vendored Linden Lab character assets (see viewer-assets/README.md):
+# binary meshes and textures, plus upstream XML kept verbatim — so the
+# repo-wide text checks do not police upstream content.
+viewer-assets/character/*.llm binary
+viewer-assets/character/*.tga binary
+# Verbatim upstream files keep their whitespace exactly as shipped: disable
+# git's own whitespace checking (`git diff-index --check`, which the
+# pre-commit whitespace check runs) for them via the native attribute.
+viewer-assets/character/* -whitespace
+viewer-assets/LGPL-license.txt -whitespace
+# The upstream XML is not reformatted either (`xml` silences the whole
+# xmllint check group for it). The repo-wide typos and whitespace checks are
+# handled by _typos.toml and the `-whitespace` attribute above — per-file
+# skipchecks cannot reach repo-wide checks.
+viewer-assets/character/*.xml skipchecks=xml;;;vendored[[space]]upstream[[space]]content
