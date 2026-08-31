@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 303 |
-| blocked | 63 |
+| blocked | 62 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 943 |
+| done | 944 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -940,9 +940,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-terrain-layerdata`](ready/test-fake-grid-terrain-layerdata.md)
-  — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
-  `test-fake-grid-determinism` (done))
+- [`test-fake-grid-render-fixtures`](ready/test-fake-grid-render-fixtures.md) —
+  Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
+  (blocked by `test-fake-grid-terrain-layerdata` (done),
+  `test-shared-test-assets` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -952,7 +953,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (63)
+## blocked (62)
 
 ### viewer
 
@@ -968,7 +969,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   parcels, environment (blocked by `test-fake-grid-neighbours-crossing`)
 - [`viewer-fake-grid-render-harness`](blocked/viewer-fake-grid-render-harness.md)
   — ViewerHarness — the real viewer against the fake grid, read back as pixels
-  (blocked by `test-fake-grid-terrain-layerdata`,
+  (blocked by `test-fake-grid-terrain-layerdata` (done),
   `test-fake-grid-render-fixtures`, `viewer-plugin-groups` (done),
   `viewer-screenshot-wait-for-quiescence` (done), `viewer-render-pixel-oracle`
   (done))
@@ -1128,10 +1129,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-npc-avatars`](blocked/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures`)
-- [`test-fake-grid-render-fixtures`](blocked/test-fake-grid-render-fixtures.md)
-  — Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles,
-  linksets (blocked by `test-fake-grid-terrain-layerdata`,
-  `test-shared-test-assets` (done))
 - [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness`)
@@ -1341,7 +1338,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (943)
+## done (944)
 
 ### protocol
 
@@ -3126,6 +3123,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
+- [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
+  — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
+  `test-fake-grid-determinism` (done))
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)

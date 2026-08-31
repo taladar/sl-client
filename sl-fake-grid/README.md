@@ -10,8 +10,9 @@ content fixtures — including the legacy UDP asset paths (named `Xfer`
 files, task inventories, `TransferRequest` sources, the estate terrain RAW
 heightmap) and the world burst a simulator pushes on region entry (the
 agent's own avatar, the parcel overlay, the agent's parcel, the region's
-objects), replayed on request. No world authority, no persistence: content
-is whatever the scenario scripts.
+ground as `LayerData` terrain/wind/cloud patches, the region's objects),
+replayed on request. No world authority, no persistence: content is
+whatever the scenario scripts.
 
 Two consumers by design:
 

@@ -192,12 +192,15 @@ else:
   *replaced* by a completed upload (`request_xfer_upload` → `XferReceived`),
   so a download after an upload round-trips the uploaded bytes. A "bake"
   request is acknowledged as an event only: the fake grid keeps no revert
-  baseline. `flat_terrain_raw(height_m)` builds a flat 256 × 256 RAW32
-  file for fixtures.
+  baseline. Left `None` (the stock scenario does), the session serves the
+  region's own ground — `RegionConfig::terrain.to_raw()`, so the download
+  matches what the viewer is standing on. `flat_terrain_raw(height_m)`
+  builds a flat 256 × 256 RAW32 file for a fixture that deliberately
+  differs.
 
 The stock scenario ships `motd.txt`, one scripted object
 (`STOCK_SCRIPTED_OBJECT_LOCAL_ID`) whose task inventory holds a script with
-a body, a covenant, and a flat 25 m heightmap. Behaviour the fixtures do
+a body, and a covenant. Behaviour the fixtures do
 not cover goes in `Scenario::on_event`, a hook that sees every drained
 `ServerEvent` with the live `SimSession` (after the stock behaviour ran).
 `client_end_to_end.rs` drives each of these flows through the real
@@ -220,7 +223,14 @@ does the same on `AgentArrived`, right after `AgentMovementComplete`:
    parcel-edge bits, the way OpenSim's `SendParcelOverlay` builds it);
 3. the **`ParcelProperties`** of the parcel under the arrival point
    (sequence id `0`, OpenSim's unsolicited-push convention);
-4. one full **`ObjectUpdate`** carrying every fixture object.
+4. the region's **ground** — the 256 LAND patches as `LayerData` messages,
+   then the WIND and CLOUD layers (see below);
+5. one full **`ObjectUpdate`** carrying every fixture object.
+
+The avatar goes first for a protocol reason: a `LayerData` message carries
+no region handle, and the client labels each patch with the handle it
+learned from that circuit's **first object update** — patches that arrive
+before it are stamped with handle zero.
 
 Afterwards the same fixtures answer the client's `ParcelPropertiesRequest`
 (by rectangle — answered from the rectangle's centre, echoing the sequence
@@ -249,6 +259,43 @@ The first version of the driver sent it on `AgentArrived` and the tokio
 end-to-end test never noticed — it only waited for
 `RegionHandshakeComplete`, which the movement-complete path also raises;
 the Bevy smoke tier's `SlRegionIdentity` assertion is what caught it.
+
+## The ground: terrain, wind and clouds
+
+A region's ground is not scenario content but region content, so it lives
+on `RegionConfig::terrain` (a `TerrainFixture`) rather than on `Scenario`.
+It is the one source three different paths read:
+
+- **`to_patches(handle)`** — the 256 LAND patches (16 × 16 metre cells
+  each) the arrival burst streams. `SimSession::send_terrain` walks them
+  in OpenSim's spiral order (`SendLayerTopRight` / `SendLayerBottomLeft`:
+  the outer ring from the south-west corner, then the next ring in) and
+  packs at most `TERRAIN_PATCHES_PER_MESSAGE` into each `LayerData`
+  message, so the region fills from its edges inwards.
+- **`wind_patches` / `cloud_patches`** — the wind field as the *two*
+  patches OpenSim's `SendWindData` packs into one message (the east then
+  the north velocity component of one whole-region 16 × 16 field, both at
+  patch position `(0, 0)`), and the cloud field as one. Both go out
+  through `SimSession::send_layer_data`, which sends exactly one message:
+  `send_terrain` addresses patches by grid position and would collapse the
+  wind layer's two.
+- **`to_raw()`** — the same heights as the estate RAW32 download, so
+  "download terrain" and the rendered ground agree. The height multiplier
+  is the finest one whose range still covers the field.
+
+`Heightfield` is the shape: `Flat`, `Slope` (west to east), `Ridge` (a
+crest along the region's centre line) or `Steps` (flat terraces, so every
+height is exact — what a ground-snapping or foot-IK check wants).
+`composition` carries the four detail texture ids and their per-corner
+blend heights, and is what the region's `RegionHandshake` announces; the
+stock scenario registers a JPEG2000 solid for each of the four default
+Linden ids (`scenario::default_assets`, from `sl-test-assets`) so the
+ground shades against real textures instead of four failed fetches.
+
+`RegionConfig::environment` is the region's other environmental half: an
+`EnvironmentSettings` (day cycle, day length, sky-track altitudes) served
+by the `ExtEnvironment` capability. Left `None`, the session's stock
+four-hour day answers.
 
 ## Teleporting between regions
 

@@ -15,6 +15,7 @@ use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 use crate::runtime::SessionIds;
 use crate::scenario::{SimEventHook, SimHook};
+use crate::terrain::TerrainFixture;
 use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world};
@@ -39,6 +40,8 @@ pub(crate) struct SimState {
     /// This session's copy of the legacy UDP asset fixtures (a terrain
     /// upload replaces only this session's heightmap).
     pub(crate) udp_assets: UdpAssetFixtures,
+    /// The region's ground, streamed as `LayerData` in the arrival burst.
+    pub(crate) terrain: TerrainFixture,
     /// The region's parcels and objects (pushed on arrival, replayed on
     /// request).
     pub(crate) world: SceneFixtures,
@@ -155,9 +158,16 @@ impl SharedSim {
                         });
                 }
                 // The world burst a simulator sends on region entry: the
-                // agent's own avatar, the parcel overlay, its parcel, and
-                // every object in view — before the scenario's own hook.
-                push_arrival_world(&state.world, &state.avatar, &mut state.sim, now);
+                // agent's own avatar, the parcel overlay, its parcel, the
+                // ground, and every object in view — before the scenario's
+                // own hook.
+                push_arrival_world(
+                    &state.world,
+                    &state.terrain,
+                    &state.avatar,
+                    &mut state.sim,
+                    now,
+                );
                 if let Some(hook) = &state.on_agent_arrived {
                     hook(&mut state.sim, now);
                 }

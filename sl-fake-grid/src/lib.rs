@@ -13,6 +13,7 @@ mod map_tiles;
 pub mod runtime;
 pub mod scenario;
 mod teleport;
+pub mod terrain;
 pub mod time;
 pub mod udp_assets;
 pub mod world;
@@ -26,6 +27,7 @@ pub use runtime::{
 };
 pub use scenario::{Scenario, SimEventHook, SimHook};
 pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
+pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
 pub use udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
 pub use world::{SceneFixtures, box_prim, region_wide_parcel};

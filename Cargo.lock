@@ -8614,6 +8614,7 @@ dependencies = [
  "reqwest 0.12.28",
  "sl-client-tokio",
  "sl-proto",
+ "sl-test-assets",
  "sl-types",
  "sl-wire",
  "thiserror 2.0.19",

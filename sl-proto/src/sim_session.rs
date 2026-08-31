@@ -177,8 +177,8 @@ use crate::types::{
     RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
     ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
     StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
-    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
+    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -207,7 +207,8 @@ use sl_wire::messages::{
     TeleportProgressInfoBlock, TeleportStart, TeleportStartInfoBlock,
 };
 use sl_wire::messages::{
-    KillObject, KillObjectObjectDataBlock, ObjectUpdate, ObjectUpdateCompressed,
+    KillObject, KillObjectObjectDataBlock, LayerData, LayerDataLayerDataBlock,
+    LayerDataLayerIDBlock, ObjectUpdate, ObjectUpdateCompressed,
     ObjectUpdateCompressedObjectDataBlock, ObjectUpdateCompressedRegionDataBlock,
     ObjectUpdateRegionDataBlock, ParcelOverlay, ParcelOverlayParcelDataBlock,
 };
@@ -734,6 +735,48 @@ pub enum TransferRequestSource {
 /// The size of one `ParcelOverlay` chunk: a simulator splits the region's
 /// per-4 m-cell ownership map into 1024-byte pieces (four for a 256 m region).
 pub const PARCEL_OVERLAY_CHUNK_BYTES: usize = 1024;
+
+/// The largest number of terrain patches
+/// [`send_terrain`](SimSession::send_terrain) packs into one `LayerData`
+/// message. A compressed 16×16 patch is a few hundred bytes at worst, so four
+/// of them stay under the ~1 kB a simulator keeps a `LayerData` datagram to.
+pub const TERRAIN_PATCHES_PER_MESSAGE: usize = 4;
+
+/// The patch positions of a `(0, 0)..=(max_x, max_y)` grid in the spiral order
+/// OpenSim sends a region's ground in (`LLClientView.SendLayerTopRight` /
+/// `SendLayerBottomLeft`): the outer ring first, starting at the south-west
+/// corner — east along the south edge, north up the east edge, west back along
+/// the north edge, south down the west edge — then the next ring in, until the
+/// centre is reached. Every position appears exactly once.
+fn spiral_patch_order(max_x: u32, max_y: u32) -> Vec<(u32, u32)> {
+    let mut order = Vec::new();
+    let (mut west, mut south, mut east, mut north) = (0_u32, 0_u32, max_x, max_y);
+    loop {
+        for x in west..=east {
+            order.push((x, south));
+        }
+        for y in south.saturating_add(1)..=north {
+            order.push((east, y));
+        }
+        if east <= west || north <= south {
+            break;
+        }
+        south = south.saturating_add(1);
+        east = east.saturating_sub(1);
+        for x in (west..=east).rev() {
+            order.push((x, north));
+        }
+        for y in (south..north).rev() {
+            order.push((west, y));
+        }
+        if east <= west || north <= south {
+            break;
+        }
+        west = west.saturating_add(1);
+        north = north.saturating_sub(1);
+    }
+    order
+}
 
 /// The decoded camera/control state carried by a client `AgentUpdate`, surfaced
 /// as [`ServerEvent::AgentUpdate`]. The simulator uses this to move the agent
@@ -3493,6 +3536,14 @@ impl SimSession {
         self.region_id
     }
 
+    /// This region's handle — the grid position the session was constructed
+    /// with, and what a caller stamps the region's own content (terrain
+    /// patches, objects) with.
+    #[must_use]
+    pub const fn region_handle(&self) -> RegionHandle {
+        self.region_handle
+    }
+
     /// Adds a parcel-cover rectangle to the `RemoteParcelRequest` lookup
     /// store. Rectangles are checked in insertion order; the first containing
     /// one wins.
@@ -5612,6 +5663,92 @@ impl SimSession {
                     value: i64::try_from(index).unwrap_or(i64::MAX),
                 })?;
             self.send_parcel_overlay_chunk(sequence_id, chunk, now)?;
+        }
+        Ok(())
+    }
+
+    /// Sends one `LayerData` message carrying `patches` of `layer` — the
+    /// patched-DCT ground heights (`Land`), wind field (`Wind`) or cloud
+    /// densities (`Cloud`) a simulator streams at a viewer, and the inverse of
+    /// the client's [`Event::TerrainPatch`](crate::Event::TerrainPatch) decode.
+    /// The message carries no region handle; the client labels each patch with
+    /// the handle it learned from that circuit's first `ObjectUpdate`, so a
+    /// region's own avatar must be rezzed before its ground is sent.
+    ///
+    /// Every patch goes into this one message, so the caller keeps the group
+    /// small enough for a datagram — see
+    /// [`send_terrain`](Self::send_terrain), which does that for a whole
+    /// region's ground. An empty `patches` sends nothing. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if the message fails to encode.
+    pub fn send_layer_data(
+        &mut self,
+        layer: TerrainLayerType,
+        patches: &[TerrainPatch],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        if patches.is_empty() {
+            return Ok(());
+        }
+        let message = AnyMessage::LayerData(LayerData {
+            layer_id: LayerDataLayerIDBlock {
+                r#type: layer.code(),
+            },
+            layer_data: LayerDataLayerDataBlock {
+                data: crate::terrain::encode_layer(layer, patches),
+            },
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends a whole region's ground as the sequence of `LayerData` messages a
+    /// simulator emits on region entry: at most
+    /// [`TERRAIN_PATCHES_PER_MESSAGE`] patches per message, walked in
+    /// OpenSim's spiral order (`LLClientView.SendLayerTopRight` /
+    /// `SendLayerBottomLeft`) — the outer ring of the patch grid from its
+    /// south-west corner (east along the south edge, north up the east edge,
+    /// west back along the north edge, south down the west edge), then the
+    /// next ring in, so the region fills from its edges inwards as the patches
+    /// arrive.
+    ///
+    /// The layer is the first patch's; patches of any other layer are skipped,
+    /// since one message carries a single layer. Patches are addressed by their
+    /// `(patch_x, patch_y)` grid position, so a coordinate given twice keeps
+    /// only the first — the wind layer, whose two patches share position
+    /// `(0, 0)`, goes through [`send_layer_data`](Self::send_layer_data)
+    /// instead.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error
+    /// if a message fails to encode.
+    pub fn send_terrain(&mut self, patches: &[TerrainPatch], now: Instant) -> Result<(), Error> {
+        let Some(first) = patches.first() else {
+            return Ok(());
+        };
+        let layer = first.layer;
+        let mut by_position: BTreeMap<(u32, u32), &TerrainPatch> = BTreeMap::new();
+        for patch in patches.iter().filter(|patch| patch.layer == layer) {
+            by_position
+                .entry((patch.patch_x, patch.patch_y))
+                .or_insert(patch);
+        }
+        let (max_x, max_y) = by_position.keys().fold((0, 0), |(max_x, max_y), &(x, y)| {
+            (max_x.max(x), max_y.max(y))
+        });
+        let ordered: Vec<TerrainPatch> = spiral_patch_order(max_x, max_y)
+            .into_iter()
+            .filter_map(|position| by_position.get(&position).map(|patch| (*patch).clone()))
+            .collect();
+        for group in ordered.chunks(TERRAIN_PATCHES_PER_MESSAGE) {
+            self.send_layer_data(layer, group, now)?;
         }
         Ok(())
     }

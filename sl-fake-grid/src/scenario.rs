@@ -26,7 +26,7 @@ use sl_proto::{
 };
 use sl_types::key::{AgentKey, InventoryFolderKey, InventoryKey, ObjectKey, OwnerKey, ParcelKey};
 
-use crate::udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
+use crate::udp_assets::{TaskInventoryFixture, UdpAssetFixtures};
 use crate::world::{SceneFixtures, box_prim, region_wide_parcel};
 
 /// A hook run under the session lock against the machine (fixture setup,
@@ -90,20 +90,38 @@ impl Scenario {
 
 impl Default for Scenario {
     /// The stock scenario: a small standard inventory and library, one
-    /// region-wide parcel, a chat greeting on arrival, the stock UDP asset
-    /// fixtures ([`default_udp_assets`]), and the stock world
-    /// ([`default_world`]: the region-wide parcel's record and the scripted
-    /// object as a visible box).
+    /// region-wide parcel, a chat greeting on arrival, the stock assets
+    /// ([`default_assets`]), the stock UDP asset fixtures
+    /// ([`default_udp_assets`]), and the stock world ([`default_world`]: the
+    /// region-wide parcel's record and the scripted object as a visible box).
     fn default() -> Self {
         Self {
             setup: Arc::new(default_setup),
             on_agent_arrived: Some(Arc::new(default_arrival)),
             on_event: None,
-            assets: sl_proto::InMemoryAssetSource::new(),
+            assets: default_assets(),
             udp_assets: default_udp_assets(),
             world: default_world(),
         }
     }
+}
+
+/// The stock asset store: one JPEG2000 solid per default Linden terrain
+/// detail texture, so the ground a region streams shades against four real
+/// textures instead of four failed fetches. A colour that cannot be encoded
+/// is simply not registered (the encoder cannot fail on a solid).
+#[must_use]
+pub fn default_assets() -> sl_proto::InMemoryAssetSource {
+    let mut assets = sl_proto::InMemoryAssetSource::new();
+    match sl_test_assets::terrain_detail_solids() {
+        Ok(solids) => {
+            for (id, j2c) in solids {
+                let _previous = assets.insert(AssetKey::from(id), j2c);
+            }
+        }
+        Err(error) => tracing::warn!("encoding the terrain detail textures failed: {error}"),
+    }
+    assets
 }
 
 /// The stock agent inventory root folder id.
@@ -182,8 +200,16 @@ pub fn stock_script_item() -> TaskInventoryItem {
 
 /// The stock UDP asset fixtures: the `motd.txt` `Xfer` file, one scripted
 /// object ([`STOCK_SCRIPTED_OBJECT_LOCAL_ID`]) whose task inventory holds
-/// [`stock_script_item`] with [`STOCK_SCRIPT_BODY`] as its asset, the
-/// covenant notecard, and a flat terrain RAW heightmap.
+/// [`stock_script_item`] with [`STOCK_SCRIPT_BODY`] as its asset, and the
+/// covenant notecard.
+///
+/// No terrain RAW heightmap: a session whose scenario names none serves the
+/// region's own ground
+/// ([`RegionConfig::terrain`](crate::RegionConfig::terrain)), so the estate
+/// download matches what the viewer is standing on. Name one
+/// ([`UdpAssetFixtures::with_terrain_raw`], e.g. from
+/// [`flat_terrain_raw`](crate::flat_terrain_raw)) to serve a heightmap that
+/// deliberately differs.
 #[must_use]
 pub fn default_udp_assets() -> UdpAssetFixtures {
     let script = stock_script_item();
@@ -199,7 +225,6 @@ pub fn default_udp_assets() -> UdpAssetFixtures {
             },
         )
         .with_estate_covenant(STOCK_COVENANT_BODY)
-        .with_terrain_raw(flat_terrain_raw(STOCK_TERRAIN_HEIGHT_M))
 }
 
 /// The stock parcel's name.
@@ -349,5 +374,31 @@ fn default_arrival(sim: &mut SimSession, now: Instant) {
         now,
     ) {
         tracing::warn!("arrival greeting failed: {error}");
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn the_stock_assets_hold_every_default_detail_texture() {
+        let assets = default_assets();
+        for id in sl_proto::DEFAULT_TERRAIN_DETAIL_TEXTURES {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for detail texture {id}"
+            );
+        }
+        assert_eq!(assets.len(), 4);
+    }
+
+    #[test]
+    fn the_stock_udp_fixtures_name_no_heightmap() {
+        // The region's own ground fills this in per session, so the estate
+        // download matches what the viewer stands on.
+        assert_eq!(default_udp_assets().terrain_raw, None);
     }
 }

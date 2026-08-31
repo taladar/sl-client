@@ -344,6 +344,135 @@ mod test {
         Ok(())
     }
 
+    /// The region's ground arrives as the full spiral of land patches, every
+    /// one stamped with the region handle, carrying the heights the fixture
+    /// declares — plus the wind layer's two patches.
+    #[tokio::test]
+    async fn arrival_streams_the_regions_ground() -> Result<(), TestError> {
+        let terrain = sl_fake_grid::TerrainFixture {
+            wind: Some([1.5, -2.5]),
+            ..sl_fake_grid::TerrainFixture::default()
+        }
+        .with_heights(sl_fake_grid::Heightfield::Slope {
+            low: 21.0,
+            high: 41.0,
+        });
+        let region = RegionConfig {
+            terrain: terrain.clone(),
+            ..RegionConfig::default()
+        };
+        let expected_handle = sl_proto::RegionHandle::from_grid(region.grid_x, region.grid_y);
+        let mut running = start_in(vec![region]).await?;
+
+        let mut land: Vec<sl_proto::TerrainPatch> = Vec::new();
+        let mut wind: Vec<sl_proto::TerrainPatch> = Vec::new();
+        while land.len() < 256 || wind.len() < 2 {
+            running
+                .wait_for(|event| {
+                    if let Event::TerrainPatch(patch) = event {
+                        match patch.layer {
+                            sl_proto::TerrainLayerType::Land => land.push((**patch).clone()),
+                            sl_proto::TerrainLayerType::Wind => wind.push((**patch).clone()),
+                            _other => {}
+                        }
+                    }
+                    Some(())
+                })
+                .await?;
+        }
+
+        assert_eq!(land.len(), 256, "one patch per 16 m cell of the region");
+        // Every patch position exactly once, all under the region's handle.
+        let mut positions: Vec<(u32, u32)> = land.iter().map(|p| (p.patch_x, p.patch_y)).collect();
+        positions.sort_unstable();
+        positions.dedup();
+        assert_eq!(positions.len(), 256);
+        assert!(
+            land.iter()
+                .all(|patch| patch.region_handle == expected_handle && patch.size == 16),
+            "every patch carries the region handle at the standard patch size"
+        );
+        // The spiral starts at the south-west corner and runs east.
+        let opening: Vec<(u32, u32)> = land
+            .iter()
+            .take(4)
+            .map(|patch| (patch.patch_x, patch.patch_y))
+            .collect();
+        assert_eq!(opening, vec![(0, 0), (1, 0), (2, 0), (3, 0)]);
+
+        // The decoded heights are the fixture's, to within the encoder's
+        // quantization of the patch's range.
+        for patch in &land {
+            let x = f32::from(u16::try_from(patch.patch_x * 16 + 5)?);
+            let y = f32::from(u16::try_from(patch.patch_y * 16 + 9)?);
+            let height = patch.value(5, 9).ok_or("a patch with no cell (5, 9)")?;
+            let expected = terrain.height_at(x, y);
+            assert!(
+                (height - expected).abs() < 0.2,
+                "patch ({}, {}) cell (5, 9) decoded to {height}, not {expected}",
+                patch.patch_x,
+                patch.patch_y
+            );
+        }
+
+        // Wind: two whole-region patches, the east then the north component.
+        assert_eq!(wind.len(), 2);
+        let components: Vec<f32> = wind.iter().filter_map(|patch| patch.value(0, 0)).collect();
+        let expected = [1.5_f32, -2.5];
+        for (got, want) in components.iter().zip(expected) {
+            assert!((got - want).abs() < 0.05, "wind {got}, wanted {want}");
+        }
+        assert_eq!(components.len(), 2);
+        Ok(())
+    }
+
+    /// A region's own environment settings are what the `ExtEnvironment`
+    /// capability answers with, stamped with the region's id.
+    #[tokio::test]
+    async fn a_regions_environment_reaches_the_client() -> Result<(), TestError> {
+        let environment = sl_proto::EnvironmentSettings {
+            parcel_id: -1,
+            region_id: uuid::Uuid::nil(),
+            day_length: 3600,
+            day_offset: 1800,
+            flags: 0,
+            env_version: 7,
+            track_altitudes: [500.0, 1500.0, 2500.0],
+            day_cycle: sl_proto::DayCycle {
+                name: "Short Day".to_owned(),
+                water_track: Vec::new(),
+                sky_tracks: Vec::new(),
+                sky_frames: std::collections::BTreeMap::new(),
+                water_frames: std::collections::BTreeMap::new(),
+            },
+        };
+        let mut running = start_in(vec![RegionConfig {
+            environment: Some(environment.clone()),
+            ..RegionConfig::default()
+        }])
+        .await?;
+        let region_id = running.agent.with_sim(|sim| sim.region_id()).await;
+
+        running
+            .commands
+            .send(Command::RequestEnvironment { parcel_id: None })
+            .await?;
+        let served = running
+            .wait_for(|event| match event {
+                Event::Environment(settings) => Some((**settings).clone()),
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            served,
+            sl_proto::EnvironmentSettings {
+                region_id,
+                ..environment
+            }
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn named_xfer_file_downloads_and_re_arms() -> Result<(), TestError> {
         let mut running = start().await?;
@@ -487,10 +616,9 @@ mod test {
                 _ => None,
             })
             .await?;
-        assert_eq!(
-            data,
-            sl_fake_grid::flat_terrain_raw(sl_fake_grid::scenario::STOCK_TERRAIN_HEIGHT_M)
-        );
+        // The stock scenario names no RAW file, so the download is the
+        // region's own ground — the same heights the LAND patches carried.
+        assert_eq!(data, sl_fake_grid::TerrainFixture::default().to_raw());
 
         // Upload a different heightmap; the grid pulls it and keeps it.
         let uploaded = sl_fake_grid::flat_terrain_raw(42);

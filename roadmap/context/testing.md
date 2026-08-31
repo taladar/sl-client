@@ -136,10 +136,15 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   pinned by the per-menu compass-address tables and, end to end, by
   `a_pie_slice_clicked_in_world_sends_its_command`. `pie_dispatch_tests`
   in `world_test.rs` is the worked example.
-- **a fake-grid fixture**: a `PrimFixture`/`NpcFixture`/`TerrainFixture`
-  in `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
+- **a fake-grid fixture**: a `PrimFixture`/`NpcFixture` in
+  `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
   harness, the conformance `Grid::Fake` branch and the Firestorm
-  cross-check binary all see the same region.
+  cross-check binary all see the same region. The ground is not scenario
+  content but region content: `RegionConfig::terrain` carries a
+  `TerrainFixture` (`sl-fake-grid/src/terrain.rs`) whose `Heightfield`
+  answers both the LAND patches of the arrival burst and the estate RAW
+  download, so "the ground is at 25 m" means the same thing on both
+  paths.
 - **a full-stack test**: `ViewerHarness::start(fixture).login()`, wait on a
   timeline `Marker` and `wait_quiet()`, `capture()` and read it with the
   pixel oracles; return `Ok` with a log line when no adapter is present.

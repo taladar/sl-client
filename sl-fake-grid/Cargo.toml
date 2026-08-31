@@ -25,6 +25,7 @@ http-body-util = "0.1.4"
 hyper = { version = "1.10.1", features = ["http1", "server"] }
 hyper-util = { version = "0.1.20", features = ["tokio"] }
 sl-proto = { workspace = true }
+sl-test-assets = { workspace = true }
 sl-types = { workspace = true }
 sl-wire = { workspace = true }
 thiserror = { workspace = true }

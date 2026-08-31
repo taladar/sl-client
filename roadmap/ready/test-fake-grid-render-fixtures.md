@@ -2,7 +2,7 @@
 id: test-fake-grid-render-fixtures
 title: Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
 topic: test
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-fake-grid-login-smoke]
@@ -10,6 +10,10 @@ blocked_by: [test-fake-grid-terrain-layerdata, test-shared-test-assets]
 ---
 
 Context: [context/testing.md](../context/testing.md).
+
+Both blockers cleared (2026-08-31): [[test-shared-test-assets]] shipped the
+procedural pixels and [[test-fake-grid-terrain-layerdata]] the region's
+ground, `RegionConfig::terrain` and the detail-texture assets.
 
 `full_update_block` emits only the raw byte fields of an `Object`, so a
 fixture must encode `texture_entry`, `extra_params`, `particle_system` and

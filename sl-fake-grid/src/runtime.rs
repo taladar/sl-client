@@ -9,9 +9,8 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use sl_proto::{
-    ArrivalPlacement, DEFAULT_TERRAIN_DETAIL_TEXTURES, Maturity, OpenSimExtras, ProductType,
-    RegionHandle, RegionIdentity, RegionTerrainComposition, SimSession, SimulatorFeatures, Uuid,
-    VoiceConfig, region_name_from_wire,
+    ArrivalPlacement, EnvironmentSettings, Maturity, OpenSimExtras, ProductType, RegionHandle,
+    RegionIdentity, SimSession, SimulatorFeatures, Uuid, VoiceConfig, region_name_from_wire,
 };
 use sl_types::key::AgentKey;
 use sl_types::lsl::Vector;
@@ -29,6 +28,7 @@ use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::map_tiles::MapTileStore;
 use crate::scenario::Scenario;
+use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
 
 /// How the grid describes itself in `get_grid_info` and the login message.
@@ -73,13 +73,24 @@ pub struct RegionConfig {
     pub maturity: Maturity,
     /// The region's water height, in metres.
     pub water_height: f32,
+    /// The region's ground: the heights streamed as `LayerData` on arrival
+    /// and served as the estate RAW download, the wind and cloud fields, and
+    /// the detail-texture composition the `RegionHandshake` carries.
+    pub terrain: TerrainFixture,
+    /// Environment settings (day cycle, day length, sky-track altitudes) the
+    /// `ExtEnvironment` capability serves for the region, or `None` for the
+    /// session's stock four-hour day. The `parcel_id` says what they apply to
+    /// (`-1` = the whole region).
+    pub environment: Option<EnvironmentSettings>,
     /// A scenario overriding the grid-wide one for this region.
     pub scenario: Option<Scenario>,
 }
 
 impl Default for RegionConfig {
     /// A general-rated 256 m region called "Fake Region" at grid
-    /// `(1000, 1000)` with the stock water height.
+    /// `(1000, 1000)` with the stock water height and the stock ground
+    /// ([`TerrainFixture::default`]: flat at
+    /// [`STOCK_TERRAIN_HEIGHT_M`](crate::scenario::STOCK_TERRAIN_HEIGHT_M)).
     fn default() -> Self {
         Self {
             name: "Fake Region".to_owned(),
@@ -88,6 +99,8 @@ impl Default for RegionConfig {
             region_id: None,
             maturity: Maturity::Pg,
             water_height: 20.0,
+            terrain: TerrainFixture::default(),
+            environment: None,
             scenario: None,
         }
     }
@@ -136,11 +149,7 @@ impl RegionEntry {
             is_estate_manager: false,
             water_height: self.config.water_height,
             billable_factor: 1.0,
-            terrain: RegionTerrainComposition {
-                detail_textures: DEFAULT_TERRAIN_DETAIL_TEXTURES,
-                start_heights: [10.0; 4],
-                height_ranges: [60.0; 4],
-            },
+            terrain: self.config.terrain.composition,
         }
     }
 }
@@ -421,6 +430,17 @@ impl GridCore {
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
         }
+        if let Some(environment) = region.config.environment.clone() {
+            let stamped = EnvironmentSettings {
+                region_id: if environment.region_id.is_nil() {
+                    region.region_id
+                } else {
+                    environment.region_id
+                },
+                ..environment
+            };
+            sim.set_environment(stamped);
+        }
         (region.scenario.setup)(&mut sim, now);
         region.scenario.udp_assets.register_xfer_files(&mut sim);
         if *sim.simulator_features() == SimulatorFeatures::default() {
@@ -441,6 +461,13 @@ impl GridCore {
         };
         let seed_url = caps.seed_url();
 
+        // A scenario that names no RAW heightmap serves the region's own
+        // ground, so the estate download matches what the viewer stands on.
+        let mut udp_assets = region.scenario.udp_assets.clone();
+        if udp_assets.terrain_raw.is_none() {
+            udp_assets.terrain_raw = Some(region.config.terrain.to_raw());
+        }
+
         let state = SimState {
             sim,
             caps,
@@ -448,7 +475,8 @@ impl GridCore {
             identity: region.identity(),
             on_agent_arrived: region.scenario.on_agent_arrived.clone(),
             on_event: region.scenario.on_event.clone(),
-            udp_assets: region.scenario.udp_assets.clone(),
+            udp_assets,
+            terrain: region.config.terrain.clone(),
             world: region.scenario.world.clone(),
             avatar: crate::world::AvatarIdentity {
                 agent_id: account.agent_id,

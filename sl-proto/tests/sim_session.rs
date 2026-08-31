@@ -38,11 +38,11 @@ mod test {
         ScriptControl, ScriptControlAction, ScriptPermissionRequest, ScriptPermissionStatus,
         ScriptPermissions, ServerError, ServerEvent, Session, SetDisplayNameReply, SimSession,
         SimStatId, SimWideDeleteFlags, SimulatorTime, SitTransform, StartLocationSlot,
-        TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea,
-        TextureEntry, TextureFace, TextureKey, Throttle, TransactionId, TransferId,
-        TransferRequestSource, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo,
-        ViewerEffect, ViewerEffectData, ViewerEffectType, XferId, enable_simulator_to_caps_llsd,
-        parse_event_queue_response,
+        TERRAIN_PATCHES_PER_MESSAGE, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply,
+        TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, TextureFace,
+        TextureKey, Throttle, TransactionId, TransferId, TransferRequestSource, TransferStatus,
+        Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData,
+        ViewerEffectType, XferId, enable_simulator_to_caps_llsd, parse_event_queue_response,
     };
     use sl_proto::{
         AgentPresence, FlowMirrorStatus, SESSION_FLOW_COVERAGE, SimChatSessionKind, UserRightsEntry,
@@ -7346,6 +7346,196 @@ mod test {
             .collect();
         assert_eq!(chunks.len(), 4);
         assert_eq!(chunks, expected);
+        Ok(())
+    }
+
+    /// The edge, in cells, of a standard region's terrain patch.
+    const PATCH_CELLS: u32 = 16;
+
+    /// A flat land patch at grid (`patch_x`, `patch_y`), every cell `height`
+    /// metres.
+    fn land_patch(patch_x: u32, patch_y: u32, height: f32) -> TerrainPatch {
+        TerrainPatch {
+            region_handle: RegionHandle(0),
+            layer: TerrainLayerType::Land,
+            patch_x,
+            patch_y,
+            size: PATCH_CELLS,
+            values: vec![height; 256],
+        }
+    }
+
+    /// The height a test patch at (`patch_x`, `patch_y`) is flat at — distinct
+    /// per patch, so a patch that arrives under the wrong coordinates shows up.
+    fn patch_height(patch_x: u32, patch_y: u32) -> f32 {
+        let x = u16::try_from(patch_x).unwrap_or(0);
+        let y = u16::try_from(patch_y).unwrap_or(0);
+        f32::from(y).mul_add(7.0, f32::from(x).mul_add(3.0, 20.0))
+    }
+
+    #[test]
+    fn server_terrain_reaches_the_client_in_spiral_order() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // A `LayerData` message carries no region handle: the client labels
+        // each patch with the handle it learned from the circuit's first
+        // object update, so one has to precede the ground.
+        let prim = box_prim(
+            0x20,
+            0x2020,
+            sl_proto::Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        );
+        sim.send_object_update(std::slice::from_ref(&prim), 0xFFFF, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+
+        // A 4×4 patch grid, each patch flat at its own height.
+        let side = 4_u32;
+        let patches: Vec<TerrainPatch> = (0..side)
+            .flat_map(|y| (0..side).map(move |x| land_patch(x, y, patch_height(x, y))))
+            .collect();
+        sim.send_terrain(&patches, now)?;
+
+        // Count the `LayerData` messages on the way to the client.
+        let mut messages = 0_usize;
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::LayerData(_)) {
+                messages = messages.saturating_add(1);
+            }
+            client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+        }
+        assert_eq!(
+            messages, 4,
+            "16 patches, {TERRAIN_PATCHES_PER_MESSAGE} to a message"
+        );
+
+        let received: Vec<TerrainPatch> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::TerrainPatch(patch) => Some(*patch),
+                _ => None,
+            })
+            .collect();
+        // The outer ring from the south-west corner (east, north, west,
+        // south), then the inner ring the same way.
+        let expected_order = vec![
+            (0, 0),
+            (1, 0),
+            (2, 0),
+            (3, 0),
+            (3, 1),
+            (3, 2),
+            (3, 3),
+            (2, 3),
+            (1, 3),
+            (0, 3),
+            (0, 2),
+            (0, 1),
+            (1, 1),
+            (2, 1),
+            (2, 2),
+            (1, 2),
+        ];
+        let order: Vec<(u32, u32)> = received
+            .iter()
+            .map(|patch| (patch.patch_x, patch.patch_y))
+            .collect();
+        assert_eq!(order, expected_order);
+        for patch in &received {
+            assert_eq!(patch.region_handle, RegionHandle(REGION_HANDLE));
+            assert_eq!(patch.layer, TerrainLayerType::Land);
+            assert_eq!(patch.size, PATCH_CELLS);
+            let expected = patch_height(patch.patch_x, patch.patch_y);
+            let corner = patch.value(0, 0).ok_or("a patch with no cells")?;
+            let centre = patch.value(8, 8).ok_or("a patch with no centre")?;
+            // The encoder quantizes to 2^10 levels across the patch's range.
+            assert!(
+                (corner - expected).abs() < 0.1 && (centre - expected).abs() < 0.1,
+                "patch ({}, {}) decoded to {corner}/{centre}, not {expected}",
+                patch.patch_x,
+                patch.patch_y
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn server_wind_and_cloud_layers_reach_the_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_server(&mut sim);
+        drain_client(&mut client);
+
+        // The wind layer is two patches — the X then the Y velocity component
+        // of the same 16×16 field — in ONE message, both at position (0, 0),
+        // which is why it goes out through `send_layer_data`.
+        let mut east = land_patch(0, 0, 0.0);
+        east.layer = TerrainLayerType::Wind;
+        east.values = vec![1.5; 256];
+        let mut north = east.clone();
+        north.values = vec![-2.5; 256];
+        sim.send_layer_data(TerrainLayerType::Wind, &[east, north], now)?;
+
+        let mut clouds = land_patch(0, 0, 0.0);
+        clouds.layer = TerrainLayerType::Cloud;
+        clouds.values = vec![0.25; 256];
+        sim.send_layer_data(TerrainLayerType::Cloud, std::slice::from_ref(&clouds), now)?;
+
+        let mut messages = 0_usize;
+        while let Some(transmit) = sim.poll_transmit() {
+            if matches!(decode(&transmit)?, AnyMessage::LayerData(_)) {
+                messages = messages.saturating_add(1);
+            }
+            client.handle_datagram(sim_addr(), &transmit.payload, now)?;
+        }
+        assert_eq!(messages, 2, "one message per layer");
+
+        let received: Vec<TerrainPatch> = drain_client(&mut client)
+            .into_iter()
+            .filter_map(|e| match e {
+                Event::TerrainPatch(patch) => Some(*patch),
+                _ => None,
+            })
+            .collect();
+        let layers: Vec<TerrainLayerType> = received.iter().map(|patch| patch.layer).collect();
+        assert_eq!(
+            layers,
+            vec![
+                TerrainLayerType::Wind,
+                TerrainLayerType::Wind,
+                TerrainLayerType::Cloud
+            ]
+        );
+        let values: Vec<f32> = received
+            .iter()
+            .filter_map(|patch| patch.value(3, 5))
+            .collect();
+        let expected = [1.5_f32, -2.5, 0.25];
+        for (got, want) in values.iter().zip(expected) {
+            assert!((got - want).abs() < 0.05, "got {got}, wanted {want}");
+        }
+        assert_eq!(values.len(), 3);
+        Ok(())
+    }
+
+    #[test]
+    fn terrain_without_a_circuit_is_refused() -> Result<(), TestError> {
+        let now = Instant::now();
+        let mut sim = SimSession::new(RegionHandle(REGION_HANDLE), now);
+        let patch = land_patch(0, 0, 21.0);
+        assert!(matches!(
+            sim.send_layer_data(TerrainLayerType::Land, std::slice::from_ref(&patch), now),
+            Err(sl_proto::Error::NoCircuit)
+        ));
+        // Nothing to send is not an error, with or without a circuit.
+        sim.send_terrain(&[], now)?;
         Ok(())
     }
 

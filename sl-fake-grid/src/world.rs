@@ -16,10 +16,11 @@
 
 use std::time::Instant;
 
+use crate::terrain::TerrainFixture;
 use sl_proto::{
     Object, ObjectExtraParams, ObjectMotion, ParcelCategory, ParcelInfo, ParcelRequestResult,
     ParcelStatus, PrimShapeParams, RegionLocalObjectId, RegionLocalParcelId, ServerEvent,
-    SimSession, pcode,
+    SimSession, TerrainLayerType, pcode,
 };
 use sl_types::key::{AgentKey, ObjectKey, OwnerKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -359,11 +360,17 @@ pub(crate) fn avatar_object(
     object
 }
 
-/// Pushes the arrival burst at the agent: its own avatar object, the parcel
-/// overlay, the parcel it stands on, and every fixture object. Send
+/// Pushes the arrival burst at the agent, in the order a simulator sends it:
+/// its own avatar object, the parcel overlay, the parcel it stands on, the
+/// ground (LAND, then WIND and CLOUD), and every fixture object. Send
 /// failures are logged, never fatal.
+///
+/// The avatar goes first because it is what teaches the client this
+/// circuit's region handle — a `LayerData` message carries none, so a patch
+/// that arrives before the first object update is stamped with handle zero.
 pub(crate) fn push_arrival_world(
     world: &SceneFixtures,
+    terrain: &TerrainFixture,
     identity: &AvatarIdentity,
     sim: &mut SimSession,
     now: Instant,
@@ -383,10 +390,33 @@ pub(crate) fn push_arrival_world(
             tracing::warn!("pushing the agent's parcel failed: {error}");
         }
     }
+    push_terrain(terrain, sim, now);
     if !world.objects.is_empty()
         && let Err(error) = sim.send_object_update(&world.objects, REAL_TIME_DILATION, now)
     {
         tracing::warn!("rezzing the fixture objects failed: {error}");
+    }
+}
+
+/// Streams the region's ground: the LAND layer as the spiral of patches a
+/// simulator sends on region entry, then the WIND and CLOUD layers the
+/// fixture carries (each one message). Send failures are logged.
+fn push_terrain(terrain: &TerrainFixture, sim: &mut SimSession, now: Instant) {
+    let handle = sim.region_handle();
+    if let Err(error) = sim.send_terrain(&terrain.to_patches(handle), now) {
+        tracing::warn!("streaming the region's ground failed: {error}");
+    }
+    let wind = terrain.wind_patches(handle);
+    if !wind.is_empty()
+        && let Err(error) = sim.send_layer_data(TerrainLayerType::Wind, &wind, now)
+    {
+        tracing::warn!("sending the wind layer failed: {error}");
+    }
+    let clouds = terrain.cloud_patches(handle);
+    if !clouds.is_empty()
+        && let Err(error) = sim.send_layer_data(TerrainLayerType::Cloud, &clouds, now)
+    {
+        tracing::warn!("sending the cloud layer failed: {error}");
     }
 }
 
