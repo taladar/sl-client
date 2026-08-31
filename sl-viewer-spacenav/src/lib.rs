@@ -442,11 +442,32 @@ pub fn refresh_avatar_settings(
     }
 }
 
+/// Whether [`SpacenavPlugin`] opens and polls a real 6-DOF device, or only
+/// publishes the state its consumers read.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum DeviceRead {
+    /// Open the device and poll it every frame: the viewer.
+    #[default]
+    Device,
+    /// Publish [`SpacenavInput`] and read nothing.
+    ///
+    /// A headless harness takes this half. The device is enumerated straight
+    /// off `evdev` — it is not routed through the window like a key or a mouse
+    /// — so a fixture world that took the device read would be steered by
+    /// whatever 6-DOF puck happens to be plugged into the machine running the
+    /// tests: an idle nudge would fly the camera, and the first button would
+    /// drop the camera into flycam mid-assertion.
+    None,
+}
+
 /// The SpaceNavigator plugin: publishes [`SpacenavInput`] / [`FlycamAxisSettings`]
-/// always, and (with the `spacenav` feature on Linux) the device read that fills
-/// the input.
+/// always, and (with the `spacenav` feature on Linux, and unless the device read
+/// is switched off) the device read that fills the input.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct SpacenavPlugin;
+pub struct SpacenavPlugin {
+    /// Which half of the support to install.
+    pub read: DeviceRead,
+}
 
 impl Plugin for SpacenavPlugin {
     fn build(&self, app: &mut App) {
@@ -456,7 +477,7 @@ impl Plugin for SpacenavPlugin {
             .init_resource::<AvatarNavSmoothing>()
             .add_systems(Update, (refresh_flycam_settings, refresh_avatar_settings));
         #[cfg(all(feature = "spacenav", target_os = "linux"))]
-        {
+        if self.read == DeviceRead::Device {
             app.add_systems(Startup, device::open_device)
                 .add_systems(Update, device::poll_device);
         }

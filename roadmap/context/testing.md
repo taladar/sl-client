@@ -104,7 +104,12 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
 - **an interaction test**: `InteractionTest` (UI) or `WorldTest` (world)
   from the testkit / viewer crate; drive the pointer with
   `hover`/`click`/`drag`/`type_str`; assert effects via `Recorded<M>`
-  drains and entity queries, never via widget internals.
+  drains and entity queries, never via widget internals. The fixture
+  world comes in folds — `world_app` (world group only),
+  `…_with_edit`, `…_with_hud`, `…_with_input` (the camera / action /
+  movement group), `…_with_ui`, `…_with_ui_and_edit`,
+  `…_with_ui_and_input` — and a test takes the smallest one that can
+  produce its failure.
 - **a fake-grid fixture**: a `PrimFixture`/`NpcFixture`/`TerrainFixture`
   in `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
   harness, the conformance `Grid::Fake` branch and the Firestorm

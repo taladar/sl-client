@@ -88,7 +88,7 @@ use crate::rigged_attachments::{
     RiggedBindSkipLog, adopt_pending_attachments, apply_rigged_attachments,
 };
 use crate::sit_camera::SitCameraPlugin;
-use crate::spacenav::SpacenavPlugin;
+use crate::spacenav::{DeviceRead, SpacenavPlugin};
 use crate::terrain::{
     PendingPatchRebuilds, TerrainTextures, drain_patch_rebuilds, recenter_terrain, update_terrain,
 };
@@ -113,7 +113,23 @@ use crate::world_api::world_scoped::{WorldResetSystems, WorldScopedAppExt as _};
 /// Input focus and actions, the camera, avatar movement, the sit camera and the
 /// SpaceNavigator: what turns keys, mouse and devices into world intent.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct ViewerInputPlugins;
+pub(crate) struct ViewerInputPlugins {
+    /// Whether the 6-DOF device is actually read — see [`DeviceRead`].
+    pub(crate) spacenav: DeviceRead,
+}
+
+impl ViewerInputPlugins {
+    /// The input fold with the 6-DOF **device read** left out — the headless
+    /// fixture world's configuration. Every other input seam is driven through
+    /// a window message the harness writes; the SpaceNavigator alone is read
+    /// straight off the machine, so a fixture world keeps only the ECS half.
+    #[cfg(test)]
+    pub(crate) const fn without_devices() -> Self {
+        Self {
+            spacenav: DeviceRead::None,
+        }
+    }
+}
 
 impl Plugin for ViewerInputPlugins {
     fn build(&self, app: &mut App) {
@@ -138,7 +154,9 @@ impl Plugin for ViewerInputPlugins {
         app.add_plugins(SitCameraPlugin);
         // SpaceNavigator / 6-DOF device input (viewer-input-spacenav-*): publishes the
         // device state (Linux, behind the `spacenav` feature) for the flycam to consume.
-        app.add_plugins(SpacenavPlugin);
+        app.add_plugins(SpacenavPlugin {
+            read: self.spacenav,
+        });
     }
 }
 

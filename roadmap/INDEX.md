@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 305 |
+| ready | 304 |
 | blocked | 65 |
 | in-progress | 19 |
 | bugs | 65 |
-| done | 938 |
+| done | 939 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (304)
 
 ### protocol
 
@@ -404,10 +404,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-flycam-floater`](ready/viewer-camera-flycam-floater.md) —
   Flycam control floater (blocked by `viewer-camera-flycam` (done),
   `viewer-ui-floater-basic` (done))
-- [`viewer-camera-input-interaction-tests`](ready/viewer-camera-input-interaction-tests.md)
-  — Camera, movement, mouselook and HUD picking under a synthetic pointer
-  (blocked by `viewer-world-test-harness` (done), `viewer-cpu-pick-resolver`
-  (done))
 - [`viewer-camera-keyboard-controls`](ready/viewer-camera-keyboard-controls.md)
   — Keyboard camera controls — orbit / pan / zoom / roll actions
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
@@ -1359,7 +1355,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (938)
+## done (939)
 
 ### protocol
 
@@ -1703,6 +1699,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done))
 - [`viewer-camera-focus-on-object`](done/viewer-camera-focus-on-object.md) —
   Focus / alt-zoom on object (blocked by `viewer-camera-third-person-orbit`
+  (done))
+- [`viewer-camera-input-interaction-tests`](done/viewer-camera-input-interaction-tests.md)
+  — Camera, movement, mouselook and HUD picking under a synthetic pointer
+  (blocked by `viewer-world-test-harness` (done), `viewer-cpu-pick-resolver`
   (done))
 - [`viewer-camera-mouselook`](done/viewer-camera-mouselook.md) — Mouselook
   (first-person) camera (blocked by `viewer-camera-third-person-orbit` (done),

@@ -66,10 +66,10 @@ use crate::world_api::DecodedTextures;
 use crate::world_api::world_has_keyboard;
 use crate::world_api::world_scoped::{WorldPurge, WorldScoped};
 use crate::world_api::{
-    AVATAR_BOOST_PRIORITY, INITIAL_TREE_TIER, MAX_PARENT_WALK, ObjectLight, ObjectParticleSystem,
-    ObjectPickSummary, ObjectReflectionProbe, ObjectState, PhysicalObject, ShapeFingerprint,
-    TrackedObject, TreeTier, ViewerCamera, despawn_prim_faces, is_hud_point, light_from_object,
-    particles_from_object, reflection_probe_from_object, surface_info_from_hit,
+    AVATAR_BOOST_PRIORITY, FLAGS_USE_PHYSICS, INITIAL_TREE_TIER, MAX_PARENT_WALK, ObjectLight,
+    ObjectParticleSystem, ObjectPickSummary, ObjectReflectionProbe, ObjectState, PhysicalObject,
+    ShapeFingerprint, TrackedObject, TreeTier, ViewerCamera, despawn_prim_faces, is_hud_point,
+    light_from_object, particles_from_object, reflection_probe_from_object, surface_info_from_hit,
 };
 use bevy::app::Propagate;
 
@@ -2895,11 +2895,6 @@ fn apply_floating_text(entity: Entity, object: &Object, is_hud: bool, commands: 
         });
     }
 }
-
-/// The `FLAGS_USE_PHYSICS` bit of an object's update flags (`object_flags.h`):
-/// the object is simulated by the server's physics engine. This is the "physical
-/// object" flag the reference viewer reads (`LLViewerObject::flagUsePhysics`).
-const FLAGS_USE_PHYSICS: u32 = 1 << 0;
 
 /// Whether `object` is a server-flagged **physical root prim** the viewer drives
 /// kinematically: it carries `FLAGS_USE_PHYSICS`, is a linkset root (its

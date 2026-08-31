@@ -2960,6 +2960,11 @@ impl DerenderList {
 // to enable an entry, the world to decide whether to simulate -- so the bits
 // live here rather than in the module that happens to parse the word.
 
+/// The `FLAGS_USE_PHYSICS` bit of an object's update flags (`object_flags.h`):
+/// the object is simulated by the server's physics engine. This is the "physical
+/// object" flag the reference viewer reads (`LLViewerObject::flagUsePhysics`).
+pub const FLAGS_USE_PHYSICS: u32 = 1 << 0;
+
 /// The agent-relative `FLAGS_OBJECT_MODIFY` bit of `PrimFlags` (`object_flags.h`):
 /// this agent may modify the object. The simulator sets it per-agent, folding in
 /// the object's owner / group / everyone modify permission.

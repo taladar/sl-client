@@ -219,6 +219,26 @@ pub(crate) fn install_camera(app: &mut App, eye: Vec3, target: Vec3) {
     }
 }
 
+/// [`install_camera`] plus the [`CameraRig`] the camera *drivers* steer — the
+/// orbit / aim state every mode reads and writes. Returns the camera entity.
+///
+/// The plain [`install_camera`] gives the pick paths a projection to cast
+/// through and nothing else; a camera with no rig is invisible to
+/// `orbit_third_person`, `aim_look` and `position_camera` alike, since each of
+/// them queries `&mut CameraRig`. The running viewer spawns the two together
+/// (`lib.rs::setup_scene`), so a camera test does too.
+pub(crate) fn install_camera_rig(app: &mut App, eye: Vec3, target: Vec3) -> Option<Entity> {
+    install_camera(app, eye, target);
+    let mut cameras = app
+        .world_mut()
+        .query_filtered::<Entity, With<ViewerCamera>>();
+    let entity = cameras.single(app.world()).ok()?;
+    app.world_mut()
+        .entity_mut(entity)
+        .insert(crate::world_api::CameraRig::default());
+    Some(entity)
+}
+
 /// The fixture world with the build tools on top — the selection gesture and
 /// the transform gizmos. A separate builder because plugins must be added
 /// before the app's first update.
@@ -240,6 +260,55 @@ fn add_edit_plugins(app: &mut App) {
     // The per-frame "a widget took this press" flag the selection gesture
     // consults; its owner is the combo widget, over in the UI scaffold.
     app.init_resource::<sl_viewer_ui_core::ui::UiPointerClaim>();
+}
+
+/// The fixture world with the **input group** on top
+/// ([[viewer-camera-input-interaction-tests]]): input focus and the action map,
+/// the camera-mode machine with its three per-mode drivers, avatar movement,
+/// the sit camera and the SpaceNavigator seam.
+///
+/// A separate builder rather than part of [`world_app`] because the two groups
+/// answer different questions: the world fold turns a grid's stream into a
+/// scene, while this turns a *pointer and a keyboard* into camera and avatar
+/// intent. A world test that never touches the camera should not have its
+/// fixtures moved under it by a follow that starts running.
+pub(crate) fn world_app_with_input() -> App {
+    let mut app = world_app();
+    add_input_plugins(&mut app);
+    app
+}
+
+/// The input half of [`world_app_with_input`], on its own, so a fixture world
+/// still being composed (the UI fold) can take the input group too.
+fn add_input_plugins(app: &mut App) {
+    // The login-parameter resources `run_session` inserts beside the group —
+    // the same role `world_app`'s `ViewerSettings` / `CameraStart` play for the
+    // world fold. The grab is *allowed* (the viewer forbids it only for an
+    // unattended screenshot run), because whether mouselook takes the pointer
+    // is exactly what a test here asks.
+    app.insert_resource(crate::input_context::CursorGrabAllowed(true));
+    app.init_resource::<crate::camera::CameraSpin>();
+    // The cursor state `drive_cursor_grab` writes. The testkit's window is
+    // spawned with `primary_cursor_options: None` — no UI tier has ever needed
+    // one — so without this the grab system's query is empty and every
+    // assertion about the pointer being captured would read as "not grabbed",
+    // whatever the camera did.
+    let window = {
+        let mut windows = app
+            .world_mut()
+            .query_filtered::<Entity, With<bevy::window::PrimaryWindow>>();
+        windows.single(app.world()).ok()
+    };
+    if let Some(window) = window {
+        app.world_mut()
+            .entity_mut(window)
+            .insert(bevy::window::CursorOptions::default());
+    }
+    // Without the 6-DOF **device read**: every other input seam here is driven
+    // by a message the harness writes, but the SpaceNavigator is enumerated
+    // straight off `evdev`, so a fixture world that took it would be steered by
+    // whatever puck is plugged into the machine running the tests.
+    app.add_plugins(crate::viewer_plugins::ViewerInputPlugins::without_devices());
 }
 
 /// The fixture world with the real avatar-asset library: the vendored
@@ -301,6 +370,21 @@ pub(crate) fn world_app_with_ui() -> Result<App, Box<dyn core::error::Error>> {
 pub(crate) fn world_app_with_ui_and_edit() -> Result<App, Box<dyn core::error::Error>> {
     let mut app = world_app_with_hud()?;
     add_edit_plugins(&mut app);
+    compose_ui_over(app)
+}
+
+/// [`world_app_with_ui`] **with the input group underneath it** — the fixture
+/// world a camera test needs when a gesture has to meet a real UI panel (the
+/// wheel a floater's scrolling list eats) or a real focused field (the text
+/// entry that hands the pointer back). As with the edit tools, the plugins go
+/// on before the UI's first update.
+///
+/// # Errors
+///
+/// As [`world_app_with_ui`].
+pub(crate) fn world_app_with_ui_and_input() -> Result<App, Box<dyn core::error::Error>> {
+    let mut app = world_app_with_hud()?;
+    add_input_plugins(&mut app);
     compose_ui_over(app)
 }
 
@@ -466,7 +550,33 @@ pub(crate) fn seed_attachment(
     point: u8,
     position: sl_client_bevy::Vector,
 ) -> ScopedObjectId {
+    seed_attachment_scaled(
+        app,
+        wearer_local,
+        local_id,
+        point,
+        position,
+        crate::objects::fixture_object(pcode::PRIMITIVE).scale,
+    )
+}
+
+/// [`seed_attachment`] at an explicit `scale` — what a **HUD** fixture needs.
+///
+/// The HUD camera's orthographic projection shows exactly one world unit
+/// vertically, so the shared fixture seed's 2 × 3 × 4 m box covers the whole
+/// screen several times over. That is fine for a test that only ever clicks the
+/// centre, and useless for one that has to click *beside* the HUD; such a test
+/// wears a small cube, as the live test avatar does.
+pub(crate) fn seed_attachment_scaled(
+    app: &mut App,
+    wearer_local: u32,
+    local_id: u32,
+    point: u8,
+    position: sl_client_bevy::Vector,
+    scale: sl_client_bevy::Vector,
+) -> ScopedObjectId {
     let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
+    object.scale = scale;
     object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
     object.full_id =
         sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(u128::from(local_id)));
@@ -2623,6 +2733,881 @@ mod tests {
         assert!(
             violations.is_empty(),
             "the pie the world opened must lay out clean: {violations:#?}"
+        );
+        Ok(())
+    }
+}
+
+/// The **camera and input tier** ([[viewer-camera-input-interaction-tests]]):
+/// the mouse gestures, the mode machine and the pointer grab, driven through
+/// the synthetic pointer and keyboard over the fixture world with the input
+/// group on top.
+///
+/// `camera.rs`'s own tests own the *geometry* — the rear-view offset, the orbit
+/// maths, the smoothing — by calling pure functions and poking resources. These
+/// own the **gestures**: which modifier arms which of the three things a
+/// left-drag can mean, what the wheel does over a panel, and whether the raw
+/// motion mouselook aims from ever reaches the third-person orbit. None of that
+/// is visible to a test that never moves the mouse.
+#[cfg(test)]
+mod camera_tests {
+    use bevy::input::keyboard::Key;
+    use bevy::prelude::*;
+    use bevy::window::CursorGrabMode;
+
+    use sl_viewer_testkit::interact;
+
+    use super::{install_camera_rig, settle, world_app_with_input};
+    use crate::world_api::{CameraMode, CameraRig, ViewerCamera};
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The viewport centre, where every gesture below starts.
+    const CENTRE: Vec2 = Vec2::new(400.0, 300.0);
+
+    /// A fixture world with the input group, an empty scene and a rigged camera
+    /// looking north from head height — the third-person starting state every
+    /// mouse-gesture test drags from.
+    ///
+    /// The scene is deliberately **empty**: an `Alt`-held left press is also the
+    /// focus-on-object gesture (`lltoolfocus`), so a prim under the cursor would
+    /// move the focus off the avatar and orbit a fixed world point instead —
+    /// a different code path from the one under test, silently.
+    fn orbit_app() -> Result<App, TestError> {
+        let mut app = world_app_with_input();
+        install_camera_rig(&mut app, Vec3::new(0.0, 1.5, 3.0), Vec3::new(0.0, 1.5, 0.0))
+            .ok_or("no camera stood up")?;
+        settle(&mut app, 2);
+        Ok(app)
+    }
+
+    /// The camera's current rig state.
+    fn rig(app: &mut App) -> Option<CameraRig> {
+        let mut cameras = app
+            .world_mut()
+            .query_filtered::<&CameraRig, With<ViewerCamera>>();
+        cameras.single(app.world()).ok().cloned()
+    }
+
+    /// Drag from [`CENTRE`] by `(dx, dy)` logical pixels with `modifiers` held
+    /// down for the whole gesture — the shape of every camera drag.
+    fn drag_with(app: &mut App, modifiers: &[(KeyCode, Key)], (dx, dy): (f32, f32)) {
+        for (key_code, logical) in modifiers {
+            interact::key_down(app, *key_code, logical.clone(), None);
+        }
+        // Component-wise plain `f32`, per the workspace convention: the
+        // `arithmetic_side_effects` lint fires on `glam`'s operators.
+        let to = Vec2::new(CENTRE.x + dx, CENTRE.y + dy);
+        interact::drag(app, CENTRE, to, 5, MouseButton::Left);
+        for (key_code, logical) in modifiers {
+            interact::key_up(app, *key_code, logical.clone());
+        }
+    }
+
+    /// The `Alt` modifier, as a keyboard would deliver it.
+    fn alt() -> (KeyCode, Key) {
+        (KeyCode::AltLeft, Key::Alt)
+    }
+
+    /// The `Ctrl` modifier, as a keyboard would deliver it.
+    fn ctrl() -> (KeyCode, Key) {
+        (KeyCode::ControlLeft, Key::Control)
+    }
+
+    /// **Alt arms the orbit, and nothing else does**: an `Alt`-held horizontal
+    /// left-drag swings the third-person azimuth by the reference's radians per
+    /// pixel, and the very same drag with no modifier — the *touch* gesture —
+    /// leaves the whole rig alone.
+    ///
+    /// The negative is the load-bearing half. A plain left-drag across the world
+    /// is how you touch and how you rubber-band; a camera that orbited on it
+    /// would swing the view every time a user dragged anything.
+    #[test]
+    fn alt_arms_the_orbit_and_a_plain_drag_does_not() -> Result<(), TestError> {
+        let mut app = orbit_app()?;
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+
+        drag_with(&mut app, &[alt()], (100.0, 0.0));
+        let orbited = rig(&mut app).ok_or("the camera has no rig")?;
+        // 100 px at the reference's 0.003 rad/px.
+        let expected = before.azimuth + 0.3;
+        assert!(
+            (orbited.azimuth - expected).abs() < 1.0e-3,
+            "an alt-drag 100 px right must swing the azimuth by 0.3 rad \
+             (was {}, expected {expected}, got {})",
+            before.azimuth,
+            orbited.azimuth
+        );
+        assert!(
+            (orbited.distance - before.distance).abs() < 1.0e-3
+                && (orbited.elevation - before.elevation).abs() < 1.0e-3,
+            "a horizontal orbit must not zoom or tilt (before {before:?}, after {orbited:?})"
+        );
+
+        // The negative: the same pixels, no modifier.
+        let before = orbited;
+        drag_with(&mut app, &[], (100.0, 0.0));
+        let after = rig(&mut app).ok_or("the camera has no rig")?;
+        assert!(
+            (after.azimuth - before.azimuth).abs() < 1.0e-6
+                && (after.distance - before.distance).abs() < 1.0e-6
+                && (after.elevation - before.elevation).abs() < 1.0e-6,
+            "a plain left-drag is the touch gesture and must leave the camera alone \
+             (before {before:?}, after {after:?})"
+        );
+        Ok(())
+    }
+
+    /// **Ctrl decides what the vertical half of an alt-drag means**: `Alt` alone
+    /// zooms on vertical motion (the reference's brisk drag-zoom), `Ctrl+Alt`
+    /// tilts the elevation instead — and neither touches the other's field.
+    ///
+    /// Two gestures over the same pixels with the same button, told apart by one
+    /// key. Asserting both directions of the swap is what makes this a test
+    /// rather than two half-tests.
+    #[test]
+    fn ctrl_swaps_the_vertical_drag_from_zoom_to_elevation() -> Result<(), TestError> {
+        let mut app = orbit_app()?;
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+
+        // Alt alone, dragging *down* the screen: zoom out.
+        drag_with(&mut app, &[alt()], (0.0, 100.0));
+        let zoomed = rig(&mut app).ok_or("the camera has no rig")?;
+        // 100 px at 0.05 notches/px is 5 notches out: distance × 0.9⁻⁵.
+        let expected = before.distance * 0.9_f32.powf(-5.0);
+        assert!(
+            (zoomed.distance - expected).abs() < 1.0e-2,
+            "an alt-drag down must zoom out geometrically \
+             (was {}, expected {expected}, got {})",
+            before.distance,
+            zoomed.distance
+        );
+        assert!(
+            (zoomed.elevation - before.elevation).abs() < 1.0e-6,
+            "…and must not tilt (before {before:?}, after {zoomed:?})"
+        );
+
+        // The same drag with Ctrl held: elevation, and the distance stands.
+        let before = zoomed;
+        drag_with(&mut app, &[alt(), ctrl()], (0.0, 100.0));
+        let tilted = rig(&mut app).ok_or("the camera has no rig")?;
+        let expected = before.elevation + 0.3;
+        assert!(
+            (tilted.elevation - expected).abs() < 1.0e-3,
+            "a ctrl+alt-drag down must tilt the elevation by 0.3 rad \
+             (was {}, expected {expected}, got {})",
+            before.elevation,
+            tilted.elevation
+        );
+        assert!(
+            (tilted.distance - before.distance).abs() < 1.0e-3,
+            "…and must not zoom (before {before:?}, after {tilted:?})"
+        );
+        Ok(())
+    }
+
+    /// **The wheel zooms, and zooming in far enough is how you enter
+    /// mouselook**: a scroll away from the user pushes the camera out, and a
+    /// scroll in that would cross `MOUSELOOK_CROSS_DISTANCE` steps into
+    /// first person instead of clamping there.
+    ///
+    /// The zoom-through is the seamless transition the mode machine exists for,
+    /// and it has no key of its own — this gesture *is* the only way a user
+    /// reaches it by mouse.
+    #[test]
+    fn the_wheel_zooms_and_zooming_in_crosses_into_mouselook() -> Result<(), TestError> {
+        let mut app = orbit_app()?;
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+
+        interact::scroll(&mut app, CENTRE, Vec2::new(0.0, -3.0));
+        settle(&mut app, 1);
+        let out = rig(&mut app).ok_or("the camera has no rig")?;
+        let expected = before.distance * 0.9_f32.powf(-3.0);
+        assert!(
+            (out.distance - expected).abs() < 1.0e-2,
+            "three notches away from the user must zoom out \
+             (was {}, expected {expected}, got {})",
+            before.distance,
+            out.distance
+        );
+        assert!(
+            *app.world().resource::<CameraMode>() == CameraMode::ThirdPerson,
+            "zooming out stays in third person"
+        );
+
+        // Enough notches in to take the distance under the crossing threshold.
+        interact::scroll(&mut app, CENTRE, Vec2::new(0.0, 30.0));
+        settle(&mut app, 1);
+        assert!(
+            *app.world().resource::<CameraMode>() == CameraMode::Mouselook,
+            "a zoom-in past the minimum distance enters mouselook, got {:?}",
+            *app.world().resource::<CameraMode>()
+        );
+        Ok(())
+    }
+
+    /// **Mouselook aims from raw motion, and third person never does**: with the
+    /// pointer captured there is no `CursorMoved` at all, so the first-person
+    /// aim reads `MouseMotion` directly — and that same raw motion, delivered in
+    /// third person, must move nothing, because there the camera only orbits
+    /// under a modifier-held drag.
+    ///
+    /// One gesture, two modes, opposite verdicts: the pair is what shows the
+    /// mode gate is real rather than the motion simply being ignored everywhere.
+    #[test]
+    fn mouselook_aims_from_raw_motion_and_third_person_does_not() -> Result<(), TestError> {
+        let mut app = orbit_app()?;
+
+        // Third person first: raw motion with no button and no modifier.
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+        interact::hold_mouse_motion(&mut app, Vec2::new(50.0, 20.0));
+        let after = rig(&mut app).ok_or("the camera has no rig")?;
+        assert!(
+            (after.yaw - before.yaw).abs() < 1.0e-6
+                && (after.pitch - before.pitch).abs() < 1.0e-6
+                && (after.azimuth - before.azimuth).abs() < 1.0e-6,
+            "raw motion must not steer the third-person camera \
+             (before {before:?}, after {after:?})"
+        );
+
+        // `M` is the mouselook toggle in the avatar profile — a real key, not a
+        // poked mode.
+        interact::tap(&mut app, KeyCode::KeyM, Key::Character("m".into()));
+        settle(&mut app, 1);
+        assert!(
+            *app.world().resource::<CameraMode>() == CameraMode::Mouselook,
+            "the M key enters mouselook"
+        );
+
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+        interact::hold_mouse_motion(&mut app, Vec2::new(50.0, 20.0));
+        let after = rig(&mut app).ok_or("the camera has no rig")?;
+        // Mouse right yaws right (negative yaw), mouse down looks down, both at
+        // the reference's 0.003 rad/px.
+        assert!(
+            (after.yaw - (before.yaw - 0.15)).abs() < 1.0e-3,
+            "50 px right must yaw by −0.15 rad (was {}, got {})",
+            before.yaw,
+            after.yaw
+        );
+        assert!(
+            (after.pitch - (before.pitch - 0.06)).abs() < 1.0e-3,
+            "20 px down must pitch by −0.06 rad (was {}, got {})",
+            before.pitch,
+            after.pitch
+        );
+        Ok(())
+    }
+
+    /// **Mouselook takes the pointer and third person hands it back**: the
+    /// reference captures the cursor in mouselook and nowhere else, so a mode
+    /// round-trip is a grab round-trip.
+    ///
+    /// Driven through the real `M` toggle both ways, because the grab is derived
+    /// from the mode rather than set by whatever changed it.
+    #[test]
+    fn mouselook_grabs_the_cursor_and_leaving_it_frees_it() -> Result<(), TestError> {
+        let mut app = orbit_app()?;
+        assert!(
+            cursor_grab(&mut app) == Some(CursorGrabMode::None),
+            "third person leaves the pointer free"
+        );
+
+        interact::tap(&mut app, KeyCode::KeyM, Key::Character("m".into()));
+        settle(&mut app, 2);
+        assert!(
+            cursor_grab(&mut app) == Some(CursorGrabMode::Locked),
+            "mouselook captures the pointer, got {:?}",
+            cursor_grab(&mut app)
+        );
+        assert!(
+            cursor_visible(&mut app) == Some(false),
+            "…and hides it, so the aim is not bounded by the screen edge"
+        );
+
+        interact::tap(&mut app, KeyCode::KeyM, Key::Character("m".into()));
+        settle(&mut app, 2);
+        assert!(
+            cursor_grab(&mut app) == Some(CursorGrabMode::None)
+                && cursor_visible(&mut app) == Some(true),
+            "leaving mouselook hands the pointer back"
+        );
+        Ok(())
+    }
+
+    /// The primary window's current grab mode.
+    fn cursor_grab(app: &mut App) -> Option<CursorGrabMode> {
+        let mut windows = app.world_mut().query::<&bevy::window::CursorOptions>();
+        windows
+            .iter(app.world())
+            .next()
+            .map(|options| options.grab_mode)
+    }
+
+    /// Whether the primary window's pointer is currently shown.
+    fn cursor_visible(app: &mut App) -> Option<bool> {
+        let mut windows = app.world_mut().query::<&bevy::window::CursorOptions>();
+        windows
+            .iter(app.world())
+            .next()
+            .map(|options| options.visible)
+    }
+
+    /// **A focused field frees the pointer, even in mouselook**: the grab is
+    /// `allowed && world && mouselook`, and a text entry takes the world half
+    /// away — so a user who clicks into the chat bar while in first person gets
+    /// their mouse back rather than typing blind behind a captured cursor.
+    ///
+    /// Needs the UI fold, because the thing that takes the keyboard is a real
+    /// focused `EditableText` node, not a poked context.
+    #[test]
+    fn a_focused_field_frees_the_mouselook_pointer() -> Result<(), TestError> {
+        let mut app = super::world_app_with_ui_and_input()?;
+        install_camera_rig(&mut app, Vec3::new(0.0, 1.5, 3.0), Vec3::new(0.0, 1.5, 0.0))
+            .ok_or("no camera stood up")?;
+        settle(&mut app, 2);
+
+        interact::tap(&mut app, KeyCode::KeyM, Key::Character("m".into()));
+        settle(&mut app, 2);
+        assert!(
+            cursor_grab(&mut app) == Some(CursorGrabMode::Locked),
+            "mouselook has the pointer before the field takes focus"
+        );
+
+        let field = {
+            let mut editor = bevy::text::EditableText::new("");
+            editor.allow_newlines = false;
+            editor.visible_lines = Some(1.0);
+            editor.visible_width = Some(16.0);
+            app.world_mut()
+                .spawn((
+                    editor,
+                    Node {
+                        position_type: PositionType::Absolute,
+                        left: Val::Px(20.0),
+                        top: Val::Px(20.0),
+                        ..Node::default()
+                    },
+                    bevy::input_focus::tab_navigation::TabIndex(0),
+                    Name::new("mouselook-field"),
+                ))
+                .id()
+        };
+        settle(&mut app, 2);
+        interact::focus(&mut app, field);
+        settle(&mut app, 2);
+        assert!(
+            cursor_grab(&mut app) == Some(CursorGrabMode::None)
+                && cursor_visible(&mut app) == Some(true),
+            "a focused text entry hands the pointer back, got {:?}",
+            cursor_grab(&mut app)
+        );
+        assert!(
+            *app.world().resource::<CameraMode>() == CameraMode::Mouselook,
+            "…without leaving mouselook: the grab follows focus, the view does not"
+        );
+
+        interact::blur(&mut app);
+        settle(&mut app, 2);
+        assert!(
+            cursor_grab(&mut app) == Some(CursorGrabMode::Locked),
+            "and dropping focus gives it back to mouselook"
+        );
+        Ok(())
+    }
+
+    /// **A wheel over a floater scrolls the floater, not the world**: the input
+    /// context is focus-based, so merely *hovering* a panel keeps the world
+    /// context — without the hover-map guard the same notch would scroll the
+    /// panel's list and dolly the camera at once.
+    ///
+    /// The control runs second, with the panel despawned, so "the camera did not
+    /// move" cannot be the wheel never having arrived.
+    #[test]
+    fn a_wheel_over_a_blocking_panel_leaves_the_camera_alone() -> Result<(), TestError> {
+        let mut app = super::world_app_with_ui_and_input()?;
+        install_camera_rig(&mut app, Vec3::new(0.0, 1.5, 3.0), Vec3::new(0.0, 1.5, 0.0))
+            .ok_or("no camera stood up")?;
+        settle(&mut app, 2);
+
+        let panel = app
+            .world_mut()
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..Node::default()
+                },
+                Name::new("scrolling-panel"),
+            ))
+            .id();
+        settle(&mut app, 3);
+
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+        interact::scroll(&mut app, CENTRE, Vec2::new(0.0, -3.0));
+        settle(&mut app, 1);
+        let after = rig(&mut app).ok_or("the camera has no rig")?;
+        assert!(
+            (after.distance - before.distance).abs() < 1.0e-6,
+            "a wheel notch over a blocking panel must not zoom the camera \
+             (before {}, after {})",
+            before.distance,
+            after.distance
+        );
+
+        // The control: the same notch at the same pixel, panel gone.
+        app.world_mut().entity_mut(panel).despawn();
+        settle(&mut app, 3);
+        let before = rig(&mut app).ok_or("the camera has no rig")?;
+        interact::scroll(&mut app, CENTRE, Vec2::new(0.0, -3.0));
+        settle(&mut app, 1);
+        let after = rig(&mut app).ok_or("the camera has no rig")?;
+        assert!(
+            after.distance > before.distance + 0.1,
+            "with the panel gone the same notch must zoom — otherwise the blocked \
+             case above proves nothing (before {}, after {})",
+            before.distance,
+            after.distance
+        );
+        Ok(())
+    }
+
+    /// **The flycam flies from the movement actions and aims on a right-drag**:
+    /// `W` translates along the camera's own forward at the reference's speed,
+    /// and a right-held drag turns it — while the same motion with no button
+    /// down leaves the aim exactly where it was.
+    ///
+    /// The mode is set directly rather than toggled: `Action::ToggleFlycam` has
+    /// no key in any binding profile, and its only real source is the 6-DOF
+    /// device's first button — the one input this fixture world deliberately
+    /// does not read.
+    #[test]
+    fn the_flycam_flies_on_the_movement_keys_and_aims_on_a_right_drag() -> Result<(), TestError> {
+        let mut app = world_app_with_input();
+        let camera = install_camera_rig(
+            &mut app,
+            Vec3::new(0.0, 20.0, 0.0),
+            Vec3::new(0.0, 20.0, -1.0),
+        )
+        .ok_or("no camera stood up")?;
+        *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Flycam;
+        settle(&mut app, 2);
+
+        let pose =
+            |app: &App| -> Option<Transform> { app.world().get::<Transform>(camera).copied() };
+        let before = pose(&app).ok_or("the camera has no transform")?;
+        let forward = before.forward().as_vec3();
+
+        // Six frames of `W` at 16 ms each: the reference's 10 m/s flycam.
+        interact::key_down(&mut app, KeyCode::KeyW, Key::Character("w".into()), None);
+        settle(&mut app, 6);
+        interact::key_up(&mut app, KeyCode::KeyW, Key::Character("w".into()));
+        let flown = pose(&app).ok_or("the camera has no transform")?;
+        // Component-wise plain `f32`, per the workspace convention.
+        let travel = Vec3::new(
+            flown.translation.x - before.translation.x,
+            flown.translation.y - before.translation.y,
+            flown.translation.z - before.translation.z,
+        );
+        assert!(
+            travel.length() > 0.5,
+            "six frames of the forward key must fly the camera, moved {:?}",
+            travel.length()
+        );
+        assert!(
+            travel.normalize_or_zero().dot(forward) > 0.99,
+            "…along its own forward (forward {forward:?}, travelled {travel:?})"
+        );
+
+        // A right-held drag aims it; the same motion with no button does not.
+        let before = pose(&app).ok_or("the camera has no transform")?;
+        interact::hold_mouse_motion(&mut app, Vec2::new(80.0, 0.0));
+        settle(&mut app, 1);
+        let idle = pose(&app).ok_or("the camera has no transform")?;
+        assert!(
+            idle.rotation.angle_between(before.rotation) < 1.0e-3,
+            "raw motion with no button must not aim the flycam"
+        );
+
+        interact::press(&mut app, MouseButton::Right);
+        interact::hold_mouse_motion(&mut app, Vec2::new(80.0, 0.0));
+        interact::release(&mut app, MouseButton::Right);
+        let aimed = pose(&app).ok_or("the camera has no transform")?;
+        assert!(
+            aimed.rotation.angle_between(idle.rotation) > 0.1,
+            "a right-drag 80 px across must turn the flycam, turned {} rad",
+            aimed.rotation.angle_between(idle.rotation)
+        );
+        // Mouse right yaws right: the new forward is turned toward the old right.
+        assert!(
+            aimed.forward().as_vec3().dot(idle.right().as_vec3()) > 0.0,
+            "…toward the side the mouse went"
+        );
+        Ok(())
+    }
+
+    /// **The camera stops short of a wall**: an obstruction between the avatar's
+    /// head and the third-person eye pulls the eye in to just short of it, and
+    /// one *behind* the eye — outside the head→eye segment the cast is bounded
+    /// to — leaves the view at its full distance.
+    ///
+    /// The negative is what makes this about occlusion rather than about a prim
+    /// existing: the same prim, the same collider, the same frame count, moved
+    /// out of the line of sight.
+    #[test]
+    fn the_camera_pulls_in_for_a_wall_and_not_for_one_behind_it() -> Result<(), TestError> {
+        let mut app = world_app_with_input();
+        let own = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xC));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        install_camera_rig(
+            &mut app,
+            Vec3::new(128.0, 31.0, -128.0),
+            Vec3::new(128.0, 31.0, -120.0),
+        )
+        .ok_or("no camera stood up")?;
+        // The follow settles: the smoothing's ~0.1 s half-life at 16 ms a frame.
+        settle(&mut app, 40);
+
+        let clear = rig(&mut app).ok_or("the camera has no rig")?;
+        let sight = Vec3::new(
+            clear.smoothed_eye.x - clear.smoothed_focus.x,
+            clear.smoothed_eye.y - clear.smoothed_focus.y,
+            clear.smoothed_eye.z - clear.smoothed_focus.z,
+        );
+        let free = sight.length();
+        assert!(
+            (free - clear.distance).abs() < 0.05,
+            "with nothing in the way the eye sits at the rig's full distance \
+             ({} vs {})",
+            free,
+            clear.distance
+        );
+
+        // The negative first: a physical prim *past* the eye, outside the
+        // head→eye segment the collision cast is bounded to.
+        let beyond = Vec3::new(
+            clear.smoothed_focus.x + sight.x * 2.0,
+            clear.smoothed_focus.y + sight.y * 2.0,
+            clear.smoothed_focus.z + sight.z * 2.0,
+        );
+        super::seed_object(
+            &mut app,
+            physical_prim(3, crate::coords::bevy_to_sl_vec(beyond)),
+        );
+        settle(&mut app, 40);
+        let unblocked = rig(&mut app).ok_or("the camera has no rig")?;
+        let still_free = Vec3::new(
+            unblocked.smoothed_eye.x - unblocked.smoothed_focus.x,
+            unblocked.smoothed_eye.y - unblocked.smoothed_focus.y,
+            unblocked.smoothed_eye.z - unblocked.smoothed_focus.z,
+        )
+        .length();
+        assert!(
+            (still_free - free).abs() < 0.05,
+            "a prim behind the camera must not pull it in ({still_free} vs {free})"
+        );
+
+        // …and the same prim in the way does.
+        let between = Vec3::new(
+            clear.smoothed_focus.x + sight.x * 0.85,
+            clear.smoothed_focus.y + sight.y * 0.85,
+            clear.smoothed_focus.z + sight.z * 0.85,
+        );
+        super::seed_object(
+            &mut app,
+            physical_prim(4, crate::coords::bevy_to_sl_vec(between)),
+        );
+        settle(&mut app, 40);
+        let blocked = rig(&mut app).ok_or("the camera has no rig")?;
+        let pulled = Vec3::new(
+            blocked.smoothed_eye.x - blocked.smoothed_focus.x,
+            blocked.smoothed_eye.y - blocked.smoothed_focus.y,
+            blocked.smoothed_eye.z - blocked.smoothed_focus.z,
+        )
+        .length();
+        assert!(
+            pulled < free - 0.5,
+            "a wall between the head and the eye must pull the camera in \
+             (free {free}, blocked {pulled})"
+        );
+        assert!(
+            pulled > 0.0,
+            "…without slamming it into the head (blocked {pulled})"
+        );
+        assert!(
+            (blocked.distance - clear.distance).abs() < 1.0e-3,
+            "the pull is the *pose*, not the zoom: the rig's own distance stands, \
+             so backing away from the wall restores the view"
+        );
+        Ok(())
+    }
+
+    /// A **physical** fixture prim under `local_id` at `position`: the shared
+    /// editable seed plus `FLAGS_USE_PHYSICS`, which is what makes the object a
+    /// physical root — and so gives it a collider in the per-frame moving set
+    /// the camera casts against, without waiting on the off-thread static BVH.
+    fn physical_prim(local_id: u32, position: sl_client_bevy::Vector) -> sl_client_bevy::Object {
+        let mut object: sl_client_bevy::Object =
+            crate::objects::fixture_object(sl_client_bevy::pcode::PRIMITIVE);
+        object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
+        object.full_id =
+            sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(u128::from(local_id)));
+        object.motion.position = position;
+        object.update_flags = crate::world_api::FLAGS_USE_PHYSICS;
+        object
+    }
+}
+
+/// The **HUD click tier** ([[viewer-camera-input-interaction-tests]]): the
+/// reference's HUD-before-world pick order, driven through the synthetic
+/// pointer over the fixture world with the vendored character assets.
+///
+/// The pie tier already showed that a right-click on a HUD attachment opens the
+/// HUD pie. What is untested is the order itself — that a HUD *in front of*
+/// something takes the click, that a click beside it does not, and that a left
+/// click on a HUD is a touch rather than a world pick.
+#[cfg(test)]
+mod hud_click_tests {
+    use bevy::prelude::*;
+
+    use sl_client_bevy::{AgentKey, Command, ScopedObjectId, Uuid, Vector};
+    use sl_viewer_testkit::{drain, interact, record};
+
+    use super::{
+        drain_commands, install_camera, install_hud_camera_projection, scene_position_of,
+        seed_attachment_scaled, seed_avatar, seed_prim_numbered, settle, world_app_with_hud,
+        world_to_viewport,
+    };
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The own agent every HUD fixture below is worn by.
+    const OWN: u128 = 0xD;
+
+    /// The own avatar's region-local id, and so the wearer a HUD attachment
+    /// parents to.
+    const WEARER: u32 = 2;
+
+    /// The SL attachment-point code for **HUD Center** — the point node that
+    /// sits at the middle of the screen.
+    const HUD_CENTER: u8 = 35;
+
+    /// A 10 cm HUD cube: a tenth of the HUD camera's one-unit vertical view, so
+    /// it covers roughly `±30` px of the 600 px fixture viewport around the
+    /// centre and there is screen left over to click *beside*.
+    const SMALL_HUD: Vector = Vector {
+        x: 0.1,
+        y: 0.1,
+        z: 0.1,
+    };
+
+    /// The viewport centre, where the HUD point node projects.
+    const CENTRE: Vec2 = Vec2::new(400.0, 300.0);
+
+    /// The zero offset: a HUD attachment sitting on its point node.
+    const ON_THE_POINT: Vector = Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+
+    /// A fixture world with the own avatar arrived and — when `hud` — a small
+    /// HUD cube worn on HUD Center, plus a fat prim at `prim_at` in the world
+    /// behind it. Returns the app and the prim's scoped id.
+    fn hud_world(hud: bool, prim_at: &Vector) -> Result<(App, ScopedObjectId), TestError> {
+        let mut app = world_app_with_hud()?;
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        seed_avatar(
+            &mut app,
+            own,
+            WEARER,
+            Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 3);
+        if hud {
+            seed_attachment_scaled(&mut app, WEARER, 3, HUD_CENTER, ON_THE_POINT, SMALL_HUD);
+        }
+        let prim = seed_prim_numbered(&mut app, 4, prim_at.clone());
+        settle(&mut app, 5);
+        install_hud_camera_projection(&mut app)
+            .ok_or("no HUD camera spawned — did the vendored character assets load?")?;
+        settle(&mut app, 2);
+        Ok((app, prim))
+    }
+
+    /// The scoped id of the HUD cube seeded by [`hud_world`].
+    fn hud_id() -> ScopedObjectId {
+        ScopedObjectId::new(
+            sl_client_bevy::CircuitId::new(1),
+            sl_client_bevy::RegionLocalObjectId(3),
+        )
+    }
+
+    /// Every `TouchObject` the viewer has sent since the last drain.
+    fn drain_touches(app: &mut App) -> Vec<ScopedObjectId> {
+        drain_commands(app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::TouchObject { local_id, .. } => Some(local_id),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// **A left click on a HUD face touches the HUD, and a click beside it
+    /// reaches the world**: the reference's HUD-first order, both halves.
+    ///
+    /// The two clicks differ only in *where* they land, and they resolve through
+    /// two different pipelines — the HUD's orthographic ray answers in the same
+    /// frame, the world's pick queue a frame or two later — so a viewer that had
+    /// the order backwards, or that let a HUD hit fall through as well, is
+    /// caught by the pair rather than by either alone.
+    #[test]
+    fn a_left_click_touches_the_hud_and_a_click_beside_it_reaches_the_world()
+    -> Result<(), TestError> {
+        let prim_at = Vector {
+            x: 128.0,
+            y: 128.0,
+            z: 30.0,
+        };
+        let (mut app, prim) = hud_world(true, &prim_at)?;
+
+        // Aim past the prim, so it projects clear of the HUD cube at the centre.
+        let target = scene_position_of(&mut app, prim).ok_or("the fixture prim has no entity")?;
+        install_camera(
+            &mut app,
+            target + Vec3::new(0.0, 0.0, 10.0),
+            Vec3::new(target.x + 3.0, target.y, target.z),
+        );
+        // Past the prim's re-tessellation frame, where its faces are despawned
+        // and respawned and the world is briefly unpickable
+        // ([[viewer-prim-rebuild-drops-a-click]]).
+        settle(&mut app, 12);
+        let beside = world_to_viewport(&mut app, target).ok_or("the prim projects nowhere")?;
+        assert!(
+            (beside.x - CENTRE.x).abs() > 60.0,
+            "the prim must project clear of the HUD cube for this test to mean anything, \
+             got {beside:?}"
+        );
+
+        // On the HUD: answered in the same frame, and nothing after it.
+        let _stale = drain_touches(&mut app);
+        interact::click(&mut app, CENTRE, MouseButton::Left);
+        let immediate = drain_touches(&mut app);
+        assert!(
+            immediate == vec![hud_id()],
+            "a left click on a HUD face touches that HUD attachment, got {immediate:?}"
+        );
+        settle(&mut app, 5);
+        let later = drain_touches(&mut app);
+        assert!(
+            later.is_empty(),
+            "…and never also asks the world, got {later:?}"
+        );
+
+        // Beside it: the world pick answers a frame or two later.
+        interact::click(&mut app, beside, MouseButton::Left);
+        settle(&mut app, 5);
+        let world = drain_touches(&mut app);
+        assert!(
+            world == vec![prim],
+            "a left click beside the HUD falls through to the prim under it, got {world:?}"
+        );
+        Ok(())
+    }
+
+    /// **A HUD occludes the right-click of what is behind it**: with the cube
+    /// over the very pixel the prim projects at, the pie that opens is the HUD's
+    /// and the object pie never opens at all — and the same pixel in a world
+    /// with no HUD opens the object pie.
+    ///
+    /// The control is a second world rather than the same one with the HUD
+    /// removed: an open pie draws its own blocking ring over the cursor, so a
+    /// second right-click in the same app would be answering the first pie
+    /// rather than the scene.
+    #[test]
+    fn a_hud_occludes_the_right_click_of_the_prim_behind_it() -> Result<(), TestError> {
+        use crate::attachment_menu::OpenAttachmentMenu;
+        use crate::object_menu::OpenObjectMenu;
+
+        /// Aim the world camera straight down the fixture prim's face, so it
+        /// projects at the viewport centre — where the HUD point node is.
+        fn aim_at_the_prim(app: &mut App, prim: ScopedObjectId) -> Result<(), TestError> {
+            let target = scene_position_of(app, prim).ok_or("the fixture prim has no entity")?;
+            install_camera(app, target + Vec3::new(0.0, 0.0, 10.0), target);
+            // Past the prim's re-tessellation frame
+            // ([[viewer-prim-rebuild-drops-a-click]]).
+            settle(app, 12);
+            Ok(())
+        }
+
+        let prim_at = Vector {
+            x: 128.0,
+            y: 128.0,
+            z: 30.0,
+        };
+
+        // The control: no HUD, and the prim right-clicks as it should.
+        let (mut app, prim) = hud_world(false, &prim_at)?;
+        record::<OpenObjectMenu>(&mut app);
+        aim_at_the_prim(&mut app, prim)?;
+        interact::hover(&mut app, CENTRE);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 3);
+        assert!(
+            drain::<OpenObjectMenu>(&mut app).len() == 1,
+            "this prim IS right-clickable at the centre, or the occlusion below \
+             proves nothing"
+        );
+
+        // The same scene with the cube in front of it.
+        let (mut app, prim) = hud_world(true, &prim_at)?;
+        record::<OpenObjectMenu>(&mut app);
+        record::<OpenAttachmentMenu>(&mut app);
+        aim_at_the_prim(&mut app, prim)?;
+        interact::hover(&mut app, CENTRE);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 3);
+
+        let object = drain::<OpenObjectMenu>(&mut app);
+        assert!(
+            object.is_empty(),
+            "a HUD attachment under the cursor must swallow the right-click of the \
+             world behind it, got {} object pie(s)",
+            object.len()
+        );
+        let attachment = drain::<OpenAttachmentMenu>(&mut app);
+        assert!(
+            attachment.len() == 1 && attachment.first().is_some_and(|request| request.hud),
+            "…and open the HUD pie instead, got {attachment:?}"
         );
         Ok(())
     }

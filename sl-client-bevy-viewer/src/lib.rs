@@ -1025,7 +1025,7 @@ fn run_session(
     // (`crate::viewer_plugins`): input, then the render stack (whose
     // `SlFaceMaterialPlugin` the editor plugins' `FromWorld` resources build
     // against), the world fold, and the build tools.
-    .add_plugins(ViewerInputPlugins)
+    .add_plugins(ViewerInputPlugins::default())
     .add_plugins(ViewerRenderPlugins::default())
     .add_plugins(ViewerWorldPlugins::default())
     .add_plugins(ViewerEditPlugins)
