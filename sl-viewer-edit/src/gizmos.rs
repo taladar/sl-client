@@ -124,6 +124,15 @@ impl GizmoAxis {
     /// All three, in order.
     const ALL: [Self; 3] = [Self::X, Self::Y, Self::Z];
 
+    /// The axis' lower-case letter for a handle's test address.
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::X => "x",
+            Self::Y => "y",
+            Self::Z => "z",
+        }
+    }
+
     /// The axis' unit vector in the (Second Life space) grid frame.
     const fn unit(self) -> Vec3 {
         match self {
@@ -195,6 +204,27 @@ enum GizmoPart {
     ScaleFace(GizmoAxis, bool),
     /// A stretch corner handle; each `bool` is that axis' sign.
     ScaleCorner([bool; 3]),
+}
+
+impl GizmoPart {
+    /// The part's stable test address suffix: every rig handle is named
+    /// `edit-gizmo:<slug>`, so a headless interaction test can find a handle
+    /// by [`Name`] without reaching into this module's private types.
+    fn slug(self) -> String {
+        match self {
+            Self::TranslateAxis(axis) => format!("translate-{}", axis.slug()),
+            Self::TranslatePlane(axis) => format!("translate-plane-{}", axis.slug()),
+            Self::RotateRing(axis) => format!("rotate-{}", axis.slug()),
+            Self::ScaleFace(axis, positive) => {
+                let side = if positive { "pos" } else { "neg" };
+                format!("scale-face-{}-{side}", axis.slug())
+            }
+            Self::ScaleCorner([x, y, z]) => {
+                let sign = |positive: bool| if positive { 'p' } else { 'n' };
+                format!("scale-corner-{}{}{}", sign(x), sign(y), sign(z))
+            }
+        }
+    }
 }
 
 /// Marks a handle entity with its part.
@@ -1290,6 +1320,10 @@ fn spawn_rig(commands: &mut Commands, assets: &GizmoAssets, tool: EditTool) -> E
                   commands: &mut Commands| {
         commands.spawn((
             GizmoHandle { part },
+            // The handle's test address (`edit-gizmo:translate-x`, …): the
+            // headless interaction tests find handles by name, because the
+            // part component is module-private.
+            Name::new(format!("edit-gizmo:{}", part.slug())),
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material.clone()),
             transform,

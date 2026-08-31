@@ -580,8 +580,10 @@ pub struct SlLoginRejected(pub LoginFailure);
 
 /// A command to a running session, sent as a Bevy event. Wraps the shared
 /// [`Command`] vocabulary (defined in `sl-proto`) so it can be read as a Bevy
-/// event; match on its `.0` to dispatch.
-#[derive(Message, Debug)]
+/// event; match on its `.0` to dispatch. `Clone` so a test recorder can keep
+/// a copy of what went over the wire ([`Command`] itself is `Clone` for the
+/// same forward-an-owned-copy reason).
+#[derive(Message, Debug, Clone)]
 pub struct SlCommand(pub Command);
 
 /// The plugin configuration resource.

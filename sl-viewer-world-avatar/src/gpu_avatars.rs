@@ -115,6 +115,22 @@ impl GpuAvatarsPlugin {
     }
 }
 
+/// Register the pose-pipeline resources the main-world avatar systems
+/// validate against (`GpuAvatarsMode`, the pose feed) **without** the render
+/// half — in the inactive mode, so every consumer gates itself off. The
+/// headless fixture world's seam: it takes the world fold but not
+/// [`GpuAvatarsPlugin`], and an absent resource fails system-parameter
+/// validation with a panic.
+#[doc(hidden)]
+pub fn init_headless_pose_resources(app: &mut App) {
+    app.insert_resource(GpuAvatarsMode {
+        active: false,
+        readback: false,
+        live: false,
+    });
+    app.init_resource::<GpuAvatarPoseFeed>();
+}
+
 /// Whether the device can run the pose pipeline: compute shaders, Bevy's
 /// storage-buffer skinning path (the palette write-in binds
 /// `SkinUniforms.current_buffer` as a storage buffer — impossible when Bevy

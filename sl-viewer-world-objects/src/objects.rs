@@ -4185,6 +4185,78 @@ impl ObjectPicker<'_, '_> {
     }
 }
 
+/// A minimal decoded [`sl_client_bevy::Object`] with the given `pcode`, at a
+/// root position, no sculpt — the shared seed every test fixture mutates into
+/// shape (the crate's own unit tests and the viewer's fixture world both
+/// build on it, so "a bare object" means the same thing in every tier).
+#[doc(hidden)]
+#[must_use]
+pub fn fixture_object(pcode: u8) -> sl_client_bevy::Object {
+    /// The zero vector (`Vector` does not derive `Default`).
+    const ZERO: sl_client_bevy::Vector = sl_client_bevy::Vector {
+        x: 0.0,
+        y: 0.0,
+        z: 0.0,
+    };
+    sl_client_bevy::Object {
+        region_handle: sl_client_bevy::RegionHandle(0),
+        local_id: sl_client_bevy::RegionLocalObjectId(1),
+        circuit: sl_client_bevy::CircuitId::new(1),
+        full_id: sl_client_bevy::Uuid::from_u128(1).into(),
+        parent_id: sl_client_bevy::RegionLocalObjectId(0),
+        pcode,
+        state: 0,
+        crc: 0,
+        material: 0,
+        click_action: 0,
+        update_flags: 0,
+        scale: sl_client_bevy::Vector {
+            x: 2.0,
+            y: 3.0,
+            z: 4.0,
+        },
+        motion: sl_client_bevy::ObjectMotion {
+            position: sl_client_bevy::Vector {
+                x: 10.0,
+                y: 20.0,
+                z: 30.0,
+            },
+            velocity: ZERO,
+            acceleration: ZERO,
+            rotation: sl_client_bevy::Rotation {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+                s: 1.0,
+            },
+            angular_velocity: ZERO,
+            collision_plane: None,
+        },
+        owner_id: sl_client_bevy::Uuid::from_u128(0),
+        sound: sl_client_bevy::Uuid::from_u128(0),
+        gain: 0.0,
+        sound_flags: 0,
+        sound_radius: 0.0,
+        text: String::new(),
+        text_color: [0; 4],
+        name_value: String::new(),
+        media_url: None,
+        texture_entry: Vec::new(),
+        texture_anim: Vec::new(),
+        texture_animation: None,
+        shape: sl_client_bevy::PrimShapeParams::default(),
+        particle_system: Vec::new(),
+        particles: None,
+        data: Vec::new(),
+        extra_params: Vec::new(),
+        extra: sl_client_bevy::ObjectExtraParams::default(),
+        properties: None,
+        joint_type: 0,
+        joint_pivot: ZERO,
+        joint_axis_or_anchor: ZERO,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -4194,8 +4266,8 @@ mod tests {
     use bevy::math::Vec3;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::{
-        AgentKey, CircuitId, MeshKey, Object, ObjectMotion, RegionHandle, RegionLocalObjectId,
-        Rotation, SculptData, SculptOrMeshKey, TextureKey, Uuid, Vector, pcode,
+        AgentKey, MeshKey, Object, RegionHandle, RegionLocalObjectId, SculptData, SculptOrMeshKey,
+        TextureKey, Uuid, Vector, pcode,
     };
     use std::collections::{HashMap, VecDeque};
 
@@ -4208,65 +4280,11 @@ mod tests {
         }
     }
 
-    /// A minimal object with the given `pcode`, at a root position, no sculpt.
+    /// A minimal object with the given `pcode`, at a root position, no sculpt
+    /// — the module-level [`fixture_object`](super::fixture_object), which the
+    /// viewer's fixture world shares.
     fn bare_object(pcode: u8) -> Object {
-        Object {
-            region_handle: RegionHandle(0),
-            local_id: RegionLocalObjectId(1),
-            circuit: CircuitId::new(1),
-            full_id: Uuid::from_u128(1).into(),
-            parent_id: RegionLocalObjectId(0),
-            pcode,
-            state: 0,
-            crc: 0,
-            material: 0,
-            click_action: 0,
-            update_flags: 0,
-            scale: Vector {
-                x: 2.0,
-                y: 3.0,
-                z: 4.0,
-            },
-            motion: ObjectMotion {
-                position: Vector {
-                    x: 10.0,
-                    y: 20.0,
-                    z: 30.0,
-                },
-                velocity: zero(),
-                acceleration: zero(),
-                rotation: Rotation {
-                    x: 0.0,
-                    y: 0.0,
-                    z: 0.0,
-                    s: 1.0,
-                },
-                angular_velocity: zero(),
-                collision_plane: None,
-            },
-            owner_id: Uuid::from_u128(0),
-            sound: Uuid::from_u128(0),
-            gain: 0.0,
-            sound_flags: 0,
-            sound_radius: 0.0,
-            text: String::new(),
-            text_color: [0; 4],
-            name_value: String::new(),
-            media_url: None,
-            texture_entry: Vec::new(),
-            texture_anim: Vec::new(),
-            texture_animation: None,
-            shape: sl_client_bevy::PrimShapeParams::default(),
-            particle_system: Vec::new(),
-            particles: None,
-            data: Vec::new(),
-            extra_params: Vec::new(),
-            extra: sl_client_bevy::ObjectExtraParams::default(),
-            properties: None,
-            joint_type: 0,
-            joint_pivot: zero(),
-            joint_axis_or_anchor: zero(),
-        }
+        super::fixture_object(pcode)
     }
 
     /// An avatar object classifies as [`ObjectCategory::Avatar`].

@@ -256,6 +256,8 @@ mod render_matrix;
 #[cfg(test)]
 mod render_readback;
 mod viewer_plugins;
+#[cfg(test)]
+mod world_test;
 pub(crate) use sl_viewer_world_scene::render_overrides;
 pub(crate) use sl_viewer_world_scene::render_scene;
 #[cfg(test)]
