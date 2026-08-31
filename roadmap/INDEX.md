@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 292 |
+| ready | 293 |
 | blocked | 81 |
 | in-progress | 22 |
 | bugs | 64 |
 | done | 930 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1524** |
+| **total** | **1525** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (292)
+## ready (293)
 
 ### protocol
 
@@ -787,6 +787,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
   — CPU-skinning cross-check — make the R13 debug affordance a standing test
   (blocked by `viewer-render-test-harness` (done))
+- [`viewer-render-fixtures-vendored-assets`](ready/viewer-render-fixtures-vendored-assets.md)
+  — Render-tier avatar fixtures default to the vendored character assets
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
