@@ -368,6 +368,15 @@ impl PickRegistry {
             _unknown => None,
         }
     }
+
+    /// Resolve what a tagged entity names — the CPU resolver's path, which has
+    /// the hit entity in hand instead of a read-back tag.
+    pub(crate) fn resolve_entity(&self, entity: Entity) -> Option<PickResolution> {
+        self.entity_tags
+            .get(&entity)
+            .copied()
+            .and_then(|tag| self.resolve(tag))
+    }
 }
 
 /// The encoded pick tag on a pickable mesh entity — the assignment systems'
@@ -661,6 +670,13 @@ impl GpuPicker {
     /// cursor).
     pub fn request(&mut self, cursor: Vec2, purpose: PickPurpose) {
         self.requests.push((cursor, purpose));
+    }
+
+    /// Take this frame's queued requests — the resolver's side of
+    /// [`request`](Self::request), shared by the GPU submission and the CPU
+    /// resolver so exactly one of them answers a frame's queue.
+    pub(crate) fn take_requests(&mut self) -> Vec<(Vec2, PickPurpose)> {
+        std::mem::take(&mut self.requests)
     }
 }
 
@@ -1075,8 +1091,44 @@ fn ingest_drag_world_picks(
     }
 }
 
-/// The GPU-picking plugin: the registry + tag assignment, the queue and
-/// submission, the readback resolve, and the render-world pass.
+/// The ECS half of picking, shared by the GPU rasteriser and the CPU
+/// resolver: the registry with its tag assignment / freeing, the request
+/// queue, the [`GpuPickResolved`] channel, and the drag-pick consumers.
+/// [`GpuPickPlugin`] and [`CpuPickResolverPlugin`] both add it (guarded), so
+/// a headless world takes this half without the shader, the ID target or the
+/// render pass.
+#[derive(Debug, Default)]
+pub struct PickRegistryPlugin;
+
+impl Plugin for PickRegistryPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<PickRegistry>()
+            .init_resource::<GpuPicker>()
+            .init_resource::<DragPickActive>()
+            .init_resource::<DragWorldPick>()
+            .add_message::<GpuPickResolved>()
+            .add_systems(
+                Update,
+                (
+                    assign_avatar_pick_tags,
+                    assign_object_face_pick_tags,
+                    assign_terrain_pick_tags,
+                    assign_water_pick_tags,
+                    free_pick_tags,
+                ),
+            )
+            .add_systems(
+                Update,
+                (drive_drag_world_picks, ingest_drag_world_picks)
+                    .chain()
+                    .in_set(WorldPhase::DragPickResolved),
+            );
+    }
+}
+
+/// The GPU-picking plugin: [`PickRegistryPlugin`] plus the rasteriser — the
+/// pick shader, the ID target and its readback resolve, the per-frame
+/// submission, the pipeline pre-warm, and the render-world pass.
 #[derive(Debug, Default)]
 pub struct GpuPickPlugin;
 
@@ -1088,36 +1140,18 @@ impl Plugin for GpuPickPlugin {
             "gpu_pick/pick.wgsl",
             Shader::from_wgsl
         );
-        app.init_resource::<PickRegistry>()
-            .init_resource::<GpuPicker>()
-            .init_resource::<GpuPickSubmission>()
+        if !app.is_plugin_added::<PickRegistryPlugin>() {
+            app.add_plugins(PickRegistryPlugin);
+        }
+        app.init_resource::<GpuPickSubmission>()
             .init_resource::<GpuPickWarmSet>()
-            .init_resource::<DragPickActive>()
-            .init_resource::<DragWorldPick>()
-            .add_message::<GpuPickResolved>()
             .add_plugins((
                 ExtractResourcePlugin::<GpuPickSubmission>::default(),
                 ExtractResourcePlugin::<GpuPickWarmSet>::default(),
                 ExtractResourcePlugin::<GpuPickTargets>::default(),
             ))
             .add_systems(Startup, setup_gpu_pick_targets)
-            .add_systems(
-                Update,
-                (
-                    assign_avatar_pick_tags,
-                    assign_object_face_pick_tags,
-                    assign_terrain_pick_tags,
-                    assign_water_pick_tags,
-                    free_pick_tags,
-                    collect_pick_warm_set,
-                ),
-            )
-            .add_systems(
-                Update,
-                (drive_drag_world_picks, ingest_drag_world_picks)
-                    .chain()
-                    .in_set(WorldPhase::DragPickResolved),
-            )
+            .add_systems(Update, collect_pick_warm_set)
             .add_systems(
                 PostUpdate,
                 // After visibility, so `ViewVisibility` is this frame's; the
@@ -1128,6 +1162,81 @@ impl Plugin for GpuPickPlugin {
             return;
         };
         render::build_render_app(render_app);
+    }
+}
+
+/// The ID-buffer render's headless double ([[viewer-cpu-pick-resolver]]):
+/// [`PickRegistryPlugin`] plus a `MeshRayCast` in place of the rasteriser —
+/// the same registry, the same request queue, the same [`GpuPickResolved`]
+/// channel, so a fixture world without a renderer still classifies a pick
+/// target through the real registry code. Never add it beside
+/// [`GpuPickPlugin`]: whichever resolver runs first would drain the queue.
+#[derive(Debug, Default)]
+pub struct CpuPickResolverPlugin;
+
+impl Plugin for CpuPickResolverPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<PickRegistryPlugin>() {
+            app.add_plugins(PickRegistryPlugin);
+        }
+        app.add_systems(
+            PostUpdate,
+            // Where `submit_gpu_picks` sits, so consumers see the same one-frame
+            // latency whichever resolver is installed.
+            resolve_cpu_picks.after(VisibilitySystems::CheckVisibility),
+        );
+    }
+}
+
+/// The CPU double of `submit_gpu_picks` + `on_pick_readback` in one step:
+/// drain this frame's requests, cast the cursor ray against the pick-tagged,
+/// non-HUD world (inherited visibility — a headless world has no view to be
+/// visible in), resolve the nearest hit through the registry, and deliver a
+/// [`GpuPickResolved`] per purpose. A missing camera drops the requests
+/// unanswered, exactly as the GPU submission does.
+fn resolve_cpu_picks(
+    mut picker: ResMut<GpuPicker>,
+    camera: Query<(&Camera, &GlobalTransform), With<ViewerCamera>>,
+    tagged: Query<&PickId>,
+    layers: Query<&RenderLayers>,
+    mut ray_cast: MeshRayCast,
+    registry: Res<PickRegistry>,
+    mut resolved: MessageWriter<GpuPickResolved>,
+) {
+    let requests = picker.take_requests();
+    let Some((cursor, _last_purpose)) = requests.last().copied() else {
+        return;
+    };
+    let Ok((camera, camera_transform)) = camera.single() else {
+        return;
+    };
+    let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
+        return;
+    };
+    // The rasteriser's candidate set, as a filter: pick-tagged, and not on the
+    // HUD layer (HUD attachments keep the orthographic `hud_pick` test).
+    let filter = |entity: Entity| tagged.contains(entity) && !on_hud_layer(layers.get(entity).ok());
+    let settings = MeshRayCastSettings::default()
+        .with_visibility(bevy::picking::mesh_picking::ray_cast::RayCastVisibility::Visible)
+        .with_filter(&filter);
+    let hit = ray_cast
+        .cast_ray(ray, &settings)
+        .first()
+        .and_then(|(entity, hit)| {
+            let resolution = registry.resolve_entity(*entity)?;
+            Some(GpuPickHit {
+                resolution,
+                world_point: hit.point,
+                distance: hit.distance,
+            })
+        });
+    for (_at, purpose) in requests {
+        resolved.write(GpuPickResolved {
+            purpose,
+            cursor,
+            ray,
+            hit,
+        });
     }
 }
 
@@ -1144,6 +1253,7 @@ pub(crate) fn id_target_view<'a>(
 
 #[cfg(test)]
 mod tests {
+    use bevy::camera::primitives::MeshAabb as _;
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
     use sl_client_bevy::{
@@ -1226,6 +1336,189 @@ mod tests {
     /// A convenience scoped id for the registry tests.
     fn scoped(id: u32) -> ScopedObjectId {
         ScopedObjectId::new(CircuitId::new(1), RegionLocalObjectId::new(id))
+    }
+
+    /// A headless app carrying the CPU pick resolver: transforms, a manual
+    /// clock (the drag driver reads `Time`), a mesh store for the ray cast,
+    /// and the resolver plugin itself.
+    fn pick_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((bevy::transform::TransformPlugin, bevy::time::TimePlugin));
+        app.init_resource::<Assets<Mesh>>();
+        app.add_plugins(super::CpuPickResolverPlugin);
+        app
+    }
+
+    /// A hand-filled [`ViewerCamera`] at `z = +10` looking at the origin: a
+    /// 90° square projection over a 200²-pixel target, so the cursor centre
+    /// `(100, 100)` rays straight down `-Z`.
+    fn spawn_pick_camera(app: &mut App) {
+        app.world_mut().spawn((
+            Camera {
+                computed: bevy::camera::ComputedCameraValues {
+                    clip_from_view: Mat4::perspective_infinite_reverse_rh(
+                        core::f32::consts::FRAC_PI_2,
+                        1.0,
+                        0.1,
+                    ),
+                    target_info: Some(bevy::camera::RenderTargetInfo {
+                        physical_size: UVec2::new(200, 200),
+                        scale_factor: 1.0,
+                    }),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+            GlobalTransform::from(
+                Transform::from_xyz(0.0, 0.0, 10.0).looking_at(Vec3::ZERO, Vec3::Y),
+            ),
+            crate::world_api::ViewerCamera,
+        ));
+    }
+
+    /// Spawn a 2 m cube at `at` with everything the ray cast's culling query
+    /// requires (visibility marked visible by hand — no visibility plugin in
+    /// the fixture app), returning its entity.
+    fn spawn_cuboid(app: &mut App, at: Vec3) -> Result<Entity, TestError> {
+        let mesh = Mesh::from(Cuboid::new(2.0, 2.0, 2.0));
+        let aabb = mesh.compute_aabb().ok_or("cuboid aabb")?;
+        let handle = app.world_mut().resource_mut::<Assets<Mesh>>().add(mesh);
+        Ok(app
+            .world_mut()
+            .spawn((
+                Mesh3d(handle),
+                Transform::from_translation(at),
+                GlobalTransform::from(Transform::from_translation(at)),
+                bevy::camera::visibility::InheritedVisibility::VISIBLE,
+                bevy::camera::visibility::ViewVisibility::default(),
+                aabb,
+            ))
+            .id())
+    }
+
+    /// Tag `entity` as face 0 of `scoped(id)` through the real registry.
+    fn tag_object_face(app: &mut App, entity: Entity, id: u32) -> Result<(), TestError> {
+        let tag = app
+            .world_mut()
+            .resource_mut::<PickRegistry>()
+            .alloc_object_face(entity, scoped(id), PrimFaceId::new(0))
+            .ok_or("slot space")?;
+        app.world_mut().entity_mut(entity).insert(PickId(tag));
+        Ok(())
+    }
+
+    /// Queue one Touch pick at `cursor`, run a frame, and drain the answers.
+    fn pick_at(app: &mut App, cursor: Vec2) -> Vec<super::GpuPickResolved> {
+        app.world_mut()
+            .resource_mut::<super::GpuPicker>()
+            .request(cursor, super::PickPurpose::Touch);
+        app.update();
+        app.world_mut()
+            .resource_mut::<Messages<super::GpuPickResolved>>()
+            .drain()
+            .collect()
+    }
+
+    /// **The CPU resolver's teeth** ([[viewer-cpu-pick-resolver]]): a pick on
+    /// the fat prim resolves to its face with a world point on its near
+    /// surface; a pick beside every fixture is delivered as a miss, not
+    /// swallowed.
+    #[test]
+    fn cpu_pick_hits_the_tagged_face_and_misses_beside_it() -> Result<(), TestError> {
+        let mut app = pick_app();
+        spawn_pick_camera(&mut app);
+        let cube = spawn_cuboid(&mut app, Vec3::ZERO)?;
+        tag_object_face(&mut app, cube, 7)?;
+        app.update();
+
+        let answers = pick_at(&mut app, Vec2::new(100.0, 100.0));
+        let hit = answers
+            .first()
+            .and_then(|answer| answer.hit.as_ref())
+            .ok_or("the centre pick must hit")?;
+        assert_eq!(
+            hit.resolution,
+            PickResolution::ObjectFace {
+                entity: cube,
+                scoped: scoped(7),
+                face: PrimFaceId::new(0),
+            }
+        );
+        assert!(
+            (hit.world_point.z - 1.0).abs() < 1e-3,
+            "the hit must land on the cube's near surface (z = +1), got {}",
+            hit.world_point
+        );
+        assert!(
+            (hit.distance - 8.9).abs() < 1e-3,
+            "the ray starts on the near plane (0.1 in front of the camera at \
+             z = 10), the face sits at z = 1: distance 8.9, got {}",
+            hit.distance
+        );
+
+        // Beside the cube: a delivered miss (hit `None`), not silence.
+        let answers = pick_at(&mut app, Vec2::new(5.0, 5.0));
+        let beside = answers.first().ok_or("a miss must still be delivered")?;
+        assert!(
+            beside.hit.is_none(),
+            "nothing sits under (5, 5), so the pick must miss"
+        );
+        Ok(())
+    }
+
+    /// **Untagged parity with the ID buffer**: the rasteriser never draws an
+    /// untagged mesh, so an untagged occluder in front must not swallow the
+    /// pick — the tagged cube behind it is still the answer.
+    #[test]
+    fn an_untagged_occluder_does_not_swallow_the_pick() -> Result<(), TestError> {
+        let mut app = pick_app();
+        spawn_pick_camera(&mut app);
+        let cube = spawn_cuboid(&mut app, Vec3::ZERO)?;
+        tag_object_face(&mut app, cube, 7)?;
+        // In front of the tagged cube, never tagged.
+        let _occluder = spawn_cuboid(&mut app, Vec3::new(0.0, 0.0, 5.0))?;
+        app.update();
+
+        let answers = pick_at(&mut app, Vec2::new(100.0, 100.0));
+        let hit = answers
+            .first()
+            .and_then(|answer| answer.hit.as_ref())
+            .ok_or("the pick must reach the tagged cube")?;
+        assert!(
+            matches!(
+                hit.resolution,
+                PickResolution::ObjectFace { entity, .. } if entity == cube
+            ),
+            "the untagged occluder must be invisible to the pick, got {:?}",
+            hit.resolution
+        );
+        Ok(())
+    }
+
+    /// **HUD exclusion**: a pick-tagged entity on the HUD render layer is not
+    /// a world pick target (HUD attachments keep the orthographic `hud_pick`
+    /// test), so with only a HUD entity under the cursor the pick misses.
+    #[test]
+    fn a_hud_layer_entity_is_not_a_world_pick() -> Result<(), TestError> {
+        let mut app = pick_app();
+        spawn_pick_camera(&mut app);
+        let hud = spawn_cuboid(&mut app, Vec3::ZERO)?;
+        tag_object_face(&mut app, hud, 7)?;
+        app.world_mut()
+            .entity_mut(hud)
+            .insert(bevy::camera::visibility::RenderLayers::layer(
+                crate::world_api::HUD_RENDER_LAYER,
+            ));
+        app.update();
+
+        let answers = pick_at(&mut app, Vec2::new(100.0, 100.0));
+        let answer = answers.first().ok_or("a miss must still be delivered")?;
+        assert!(
+            answer.hit.is_none(),
+            "a HUD-layer entity must not resolve as a world pick"
+        );
+        Ok(())
     }
 
     /// Distinct fresh entities for registry tests (real ids, no live world

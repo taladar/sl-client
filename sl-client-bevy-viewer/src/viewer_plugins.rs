@@ -322,7 +322,33 @@ impl Plugin for ViewerRenderPlugins {
 /// UI scaffold (for the menus) and `ViewerSettings`, `AnimationManager` and
 /// `CameraStart`, which the viewer inserts from its login parameters.
 #[derive(Debug, Default, Clone, Copy)]
-pub(crate) struct ViewerWorldPlugins;
+pub(crate) struct ViewerWorldPlugins {
+    /// Which pick resolver answers the cursor-pick queue.
+    pub(crate) pick: PickStack,
+}
+
+/// Which resolver [`ViewerWorldPlugins`] installs for the cursor-pick queue —
+/// exactly one, because whichever runs first drains it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum PickStack {
+    /// The GPU ID-buffer rasteriser: the viewer.
+    #[default]
+    Gpu,
+    /// The `MeshRayCast` double: the headless fixture world.
+    #[cfg(test)]
+    Cpu,
+}
+
+impl ViewerWorldPlugins {
+    /// The world fold with the CPU pick resolver — the headless fixture
+    /// world's configuration.
+    #[cfg(test)]
+    pub(crate) const fn cpu_pick() -> Self {
+        Self {
+            pick: PickStack::Cpu,
+        }
+    }
+}
 
 impl Plugin for ViewerWorldPlugins {
     fn build(&self, app: &mut App) {
@@ -362,8 +388,14 @@ impl Plugin for ViewerWorldPlugins {
         app.add_plugins(crate::object_cost::ObjectCostPlugin);
         // GPU ID-buffer picking (Phase 3): the cursor pick is a render, not a
         // ray cast — pixel-perfect against exactly what is drawn, GPU-posed
-        // avatars included.
-        app.add_plugins(crate::gpu_pick::GpuPickPlugin);
+        // avatars included. The headless fixture world swaps in the CPU
+        // resolver — same registry, same channel, a `MeshRayCast` instead of
+        // the rasteriser ([[viewer-cpu-pick-resolver]]).
+        match self.pick {
+            PickStack::Gpu => app.add_plugins(crate::gpu_pick::GpuPickPlugin),
+            #[cfg(test)]
+            PickStack::Cpu => app.add_plugins(crate::gpu_pick::CpuPickResolverPlugin),
+        };
         // The client-side physics foundation (P31.1): server-authoritative prim /
         // avatar dead-reckoning and collision-geometry building (no physics engine —
         // the viewer simulates nothing). Feeds the custom raycast index below.

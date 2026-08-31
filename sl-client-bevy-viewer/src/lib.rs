@@ -1011,7 +1011,7 @@ fn run_session(
     // against), the world fold, and the build tools.
     .add_plugins(ViewerInputPlugins)
     .add_plugins(ViewerRenderPlugins::default())
-    .add_plugins(ViewerWorldPlugins)
+    .add_plugins(ViewerWorldPlugins::default())
     .add_plugins(ViewerEditPlugins)
     // The Stand Up / Stop flycam state button in the bottom toolbar's reserved
     // slot (viewer-sit-target-and-stand-button): Stand while seated, Stop flycam
