@@ -22,10 +22,16 @@ consumer tests (pie target, gizmo drag). The missing-resource inventory
 in `world_app` documents which resources / messages each absent plugin
 group owns — grown empirically via `RUST_BACKTRACE=full`, whose
 monomorphised `run_unsafe` frame names a failing system's full parameter
-list without needing the `bevy/debug` feature. Remaining: fixtures for
-the other target classes (own avatar, other avatar, attachment, terrain,
-HUD), `with_ui` composition with the UI stack, and the helper surface
-(`entity_of`, `drain_commands`, `select_by_click`).
+list without needing the `bevy/debug` feature. The fixture classes
+landed 2026-08-31: `seed_avatar` (placeholder sphere; own avatar via
+`SlIdentity.agent_id`), `seed_attachment` (nibble-swapped point in the
+state byte), `seed_terrain` (one flat land patch), plus the aim helpers
+(`scene_position_of`, `avatar_position_of`, `terrain_centre`).
+Remaining: the **HUD** fixture — `setup_hud_screen` bails without an
+`AvatarAssetLibrary` (`load(dir)` is its only constructor), so HUD
+routing needs the sl-test-assets mini avatar library first; `with_ui`
+composition with the UI stack; and the helper surface (`entity_of`,
+`drain_commands`, `select_by_click`).
 
 Blocked on [[viewer-plugin-groups]] (2026-08-30): the "one real unknown"
 below — carving a reusable plugin subset out of `run()` — is that task, so

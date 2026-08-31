@@ -11,12 +11,16 @@ blocked_by: [viewer-world-test-harness]
 
 Context: [context/testing.md](../context/testing.md).
 
-First slice landed (2026-08-31): the prim target —
-`a_right_click_on_a_prim_asks_for_the_object_pie` drives a real right
-click through the synthetic pointer and the CPU resolver and drains
-exactly one `OpenObjectMenu` (and none over empty sky). The remaining
-targets wait on the harness's avatar / attachment / terrain / HUD
-fixtures; [[viewer-cpu-pick-resolver]] itself is done.
+Five of six targets landed (2026-08-31): prim → `OpenObjectMenu` (and
+none over empty sky), another avatar and the own avatar →
+`OpenAvatarMenu` naming the right agent, a worn attachment →
+`OpenAttachmentMenu` with `hud: false`, bare land → `OpenLandMenu` —
+each a real right click through the synthetic pointer and the CPU
+resolver ([[viewer-cpu-pick-resolver]], done). Remaining: the HUD
+attachment target (waits on the harness's `AvatarAssetLibrary` fixture),
+the through-a-floater and after-a-right-drag negatives, the seated
+stand-up condition, and the `OpenPieMenu`-level assertions (expected
+element at the cursor, layout, compass click → action).
 
 The four live pie address tables are pinned; what nobody tests is
 *target classification under a real right click*. In the fixture world
