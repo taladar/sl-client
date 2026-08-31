@@ -213,6 +213,68 @@ pub(crate) fn world_app_with_edit() -> App {
     app
 }
 
+/// The fixture world with the real avatar-asset library: the vendored
+/// `viewer-assets/character/` satisfies `setup_hud_screen` (so the HUD screen,
+/// its point nodes and the HUD camera spawn), and the render-layer
+/// propagation — pure ECS, normally registered by the render group —
+/// materialises the `RenderLayers` the HUD pick paths filter by.
+///
+/// # Errors
+///
+/// Returns the load error when the vendored character directory is missing
+/// or unparsable — a broken checkout, not a scene condition.
+pub(crate) fn world_app_with_hud() -> Result<App, Box<dyn core::error::Error>> {
+    let mut app = world_app();
+    app.add_plugins(bevy::app::HierarchyPropagatePlugin::<
+        bevy::camera::visibility::RenderLayers,
+    >::new(PostUpdate));
+    let vendored =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../viewer-assets/character");
+    let library = crate::avatar_assets::AvatarAssetLibrary::load(&vendored)?;
+    app.insert_resource(library);
+    Ok(app)
+}
+
+/// Hand-fill the HUD camera's computed projection (no renderer computes one):
+/// the same fixed-vertical orthographic projection `setup_hud_screen` gives
+/// it, updated for the fixture viewport, so the HUD right-click path's
+/// `viewport_to_world` works. `None` when no HUD camera spawned.
+pub(crate) fn install_hud_camera_projection(app: &mut App) -> Option<()> {
+    use bevy::camera::CameraProjection as _;
+    let mut projection = OrthographicProjection {
+        scaling_mode: bevy::camera::ScalingMode::FixedVertical {
+            viewport_height: 1.0,
+        },
+        near: 0.0,
+        far: 128.0,
+        ..OrthographicProjection::default_3d()
+    };
+    // Through `u16` so the widening to `f32` is a lossless `From` (the
+    // workspace bans `as` casts); the fixture viewport is far below either
+    // limit.
+    projection.update(
+        f32::from(u16::try_from(VIEWPORT.x).unwrap_or(u16::MAX)),
+        f32::from(u16::try_from(VIEWPORT.y).unwrap_or(u16::MAX)),
+    );
+    let camera = Camera {
+        computed: bevy::camera::ComputedCameraValues {
+            clip_from_view: projection.get_clip_from_view(),
+            target_info: Some(bevy::camera::RenderTargetInfo {
+                physical_size: VIEWPORT,
+                scale_factor: 1.0,
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut cameras = app
+        .world_mut()
+        .query_filtered::<Entity, With<crate::hud::HudCamera>>();
+    let entity = cameras.single(app.world()).ok()?;
+    app.world_mut().entity_mut(entity).insert(camera);
+    Some(())
+}
+
 /// A fat, unmissable prim: the shared [`crate::objects::fixture_object`]
 /// seed, placed at `position` (SL region-local metres), streamed to the
 /// viewer as the grid would — one `ObjectAdded`. Returns its scoped id.
@@ -702,6 +764,68 @@ mod tests {
             opened.len() == 1,
             "one right-click on bare land must ask for exactly one land pie, got {}",
             opened.len()
+        );
+        Ok(())
+    }
+
+    /// **A HUD attachment opens the HUD attachment pie** — the sixth and last
+    /// pie target, unblocked by the vendored character assets: the own
+    /// avatar's HUD-Center prim routes onto the HUD screen, and a right-click
+    /// over it resolves through the orthographic HUD pick to exactly one
+    /// `OpenAttachmentMenu` with `hud: true` — synchronously, occluding the
+    /// world behind it.
+    #[test]
+    fn a_right_click_on_a_hud_attachment_asks_for_the_hud_pie() -> Result<(), TestError> {
+        let mut app = super::world_app_with_hud()?;
+        record::<crate::attachment_menu::OpenAttachmentMenu>(&mut app);
+        let own = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xD));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 3);
+        // Worn on HUD Center (35), sitting on the point node itself — the
+        // screen centre.
+        super::seed_attachment(
+            &mut app,
+            2,
+            3,
+            35,
+            sl_client_bevy::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        settle(&mut app, 5);
+        super::install_hud_camera_projection(&mut app)
+            .ok_or("no HUD camera spawned — did the asset library load?")?;
+        settle(&mut app, 2);
+
+        interact::hover(&mut app, Vec2::new(400.0, 300.0));
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 3);
+
+        let opened = drain::<crate::attachment_menu::OpenAttachmentMenu>(&mut app);
+        assert!(
+            opened.len() == 1,
+            "one right-click on a HUD attachment must ask for exactly one attachment pie, \
+             got {}",
+            opened.len()
+        );
+        assert!(
+            opened.first().is_some_and(|request| request.hud),
+            "a HUD attachment's pie is the HUD one"
         );
         Ok(())
     }
