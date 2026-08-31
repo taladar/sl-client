@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 304 |
+| ready | 303 |
 | blocked | 63 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 942 |
+| done | 943 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (303)
 
 ### protocol
 
@@ -914,9 +914,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-virtualized-list` (done))
 - [`viewer-window-title-unread-count`](ready/viewer-window-title-unread-count.md)
   — Unread IM/chat count in the window title
-- [`viewer-world-drag-drop-reactions`](ready/viewer-world-drag-drop-reactions.md)
-  — Inventory drag&drop onto the world (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-world-map-tracking-teleport`](ready/viewer-world-map-tracking-teleport.md)
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
@@ -1344,7 +1341,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (942)
+## done (943)
 
 ### protocol
 
@@ -2765,6 +2762,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   the origin
 - [`viewer-web-openid-auth`](done/viewer-web-openid-auth.md) — Second Life
   website auto-login (OpenID cookie) in the in-viewer browser
+- [`viewer-world-drag-drop-reactions`](done/viewer-world-drag-drop-reactions.md)
+  — Inventory drag&drop onto the world (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-world-map-double-click-teleport`](done/viewer-world-map-double-click-teleport.md)
   — World-map double-click teleport + tracking marker
 - [`viewer-world-map-floater`](done/viewer-world-map-floater.md) — World-map

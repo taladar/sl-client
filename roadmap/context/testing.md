@@ -115,11 +115,20 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   world comes in folds — `world_app` (world group only),
   `…_with_edit`, `…_with_hud`, `…_with_input` (the camera / action /
   movement group), `…_with_ui`, `…_with_ui_and_edit`,
-  `…_with_ui_and_input` — and a test takes the smallest one that can
-  produce its failure. A `Recorded<M>` drain lags the write by a frame —
-  the copying system is an unordered `Update` system — so step one update
-  past the input that produced the message, or an effect that did happen
-  reads as "the key did nothing".
+  `…_with_ui_and_input`, `…_with_ui_and_inventory` (the real inventory
+  window, for the drag-and-drop flow) — and a test takes the smallest one
+  that can produce its failure. A `Recorded<M>` drain lags the write by a
+  frame — the copying system is an unordered `Update` system — so step one
+  update past the input that produced the message, or an effect that did
+  happen reads as "the key did nothing".
+- **a drag-and-drop test**: `drag_drop_tests` in `world_test.rs`. The drop
+  target is whatever the **world tier's own drag pick** last resolved
+  (`DragPickActive` / `DragWorldPick`), not a ray cast from the drop
+  observer, and that pick runs at ~15 Hz off the 16 ms fixture clock and
+  answers a frame later — so a drag rests on its target for a couple of
+  dozen frames before it releases or is read. That rest also carries it
+  past the frame a prim re-tessellates with no faces at all
+  ([[viewer-prim-rebuild-drops-a-click]]), where a pick answers `None`.
 - **a context-menu dispatch test**: open the pie with a **real
   right-click** (`world_test::right_click_at`), so the stashed target is
   the one the classifier resolved, then write the `UiAction` the slice

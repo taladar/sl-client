@@ -388,6 +388,69 @@ pub(crate) fn world_app_with_ui_and_input() -> Result<App, Box<dyn core::error::
     compose_ui_over(app)
 }
 
+/// [`world_app_with_ui`] **with the inventory window in it** — the fold the
+/// drag-and-drop flow needs ([[viewer-world-drag-drop-reactions]]), because that
+/// one gesture spans both harnesses: it starts on a pooled inventory row (the UI
+/// interaction tier) and resolves against an avatar, a prim or the ground (the
+/// world tier).
+///
+/// The window and the three widgets underneath it are the real ones — the
+/// floater manager that builds the deferred content, the virtualized list that
+/// pools the rows, and the line-menu widget the gear / add buttons hang off —
+/// so a test here drives the same row observers the running viewer installs.
+/// As with the other folds the plugins go on before the UI's first update.
+///
+/// # Errors
+///
+/// As [`world_app_with_ui`].
+pub(crate) fn world_app_with_ui_and_inventory() -> Result<App, Box<dyn core::error::Error>> {
+    let mut app = world_app_with_hud()?;
+    app.add_plugins((
+        crate::virtual_list::VirtualListPlugin,
+        crate::menu::MenuWidgetPlugin,
+        crate::floater::FloaterPlugin,
+        crate::inventory::InventoryPlugin,
+        crate::inventory_actions::InventoryActionsPlugin,
+        crate::inventory_drag::InventoryDragPlugin,
+        crate::inventory_filters::InventoryFiltersPlugin,
+        crate::inventory_properties::InventoryPropertiesPlugin,
+    ));
+    // The world tier's own drag-hover output: the outline `edit_selection`
+    // renders while a drag is over a droppable object. Its owner is the edit
+    // group, which this fold leaves out.
+    app.init_resource::<crate::world_api::DragHoverHighlight>();
+    // The item-carrying open requests the inventory's actions raise; their
+    // answering surfaces (the asset editors, the landmark panel) are whole
+    // floaters this fold has no reason to stand up.
+    app.add_message::<crate::inventory::OpenWearableEditor>();
+    app.add_message::<crate::inventory::OpenMaterialEditor>();
+    app.add_message::<crate::inventory::OpenAboutLandmark>();
+    // The drop-into-a-notecard branch's output; the editor that answers it is
+    // another floater this fold leaves out.
+    app.add_message::<crate::inventory::AddEmbeddedItem>();
+    compose_ui_over(app)
+}
+
+/// Show the inventory window and let its deferred content build — what the menu
+/// bar's *toggle-inventory* entry does (`toggle_floater`), reduced to the one
+/// flip, because the fold above stands up the window and not the whole menu bar.
+///
+/// The window's content is lazily built on first open, so nothing inside it —
+/// the viewport, its row pool, the drag observers on the rows — exists until
+/// this has run.
+pub(crate) fn open_inventory_window(app: &mut App) {
+    let mut floaters = app.world_mut().query::<(
+        &crate::floater::Floater,
+        &mut sl_viewer_ui_core::ui::UiPanelShown,
+    )>();
+    for (floater, mut shown) in floaters.iter_mut(app.world_mut()) {
+        if floater.id == crate::inventory::INVENTORY_FLOATER_ID {
+            shown.0 = true;
+        }
+    }
+    settle(app, 4);
+}
+
 /// Compose the UI fold onto an already-built (never-updated) fixture world:
 /// the layout stack, the interaction and text halves, the first update the two
 /// `Startup` halves need, and the HUD camera's hand-filled projection.
@@ -5061,5 +5124,625 @@ mod pie_dispatch_tests {
             "the land pie's About Land is the editable view"
         );
         Ok(())
+    }
+}
+
+/// The **drag-and-drop tier** ([[viewer-world-drag-drop-reactions]]): the one
+/// gesture that spans both harnesses. It starts on a pooled inventory row — the
+/// UI interaction tier — and resolves against an avatar, an object or the ground
+/// — the world tier — so neither harness can test it alone.
+///
+/// The classification arithmetic (`classify_folder_drop`, `give_command`,
+/// `rez_object_command`) is already unit-tested next to itself in
+/// `sl-viewer-inventory`. What is untested is the **wiring**: that a real
+/// pointer starting on a real row reaches those functions with the target the
+/// user aimed at, and that the command comes out the far end. So every case
+/// here drags a row the panel actually drew and reads the outbound
+/// [`sl_client_bevy::Command`] stream — never the drag state.
+#[cfg(test)]
+mod drag_drop_tests {
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use sl_client_bevy::{
+        AgentKey, AssetType, Command, FolderInfo, FolderState, FolderType, InventoryFolder,
+        InventoryFolderKey, InventoryKey, InventoryType, ItemInfo, ObjectKey, OwnerKey,
+        Permissions, Permissions5, ScopedObjectId, SlEvent, SlIdentity,
+        SlSessionEvent as SessionEvent, Uuid, Vector,
+    };
+    use sl_viewer_testkit::{drain, interact, record};
+
+    use super::{
+        avatar_position_of, drain_commands, entity_of, install_camera, open_inventory_window,
+        scene_position_of, seed_avatar, seed_prim_numbered, seed_terrain, settle, terrain_centre,
+        world_app_with_ui_and_inventory,
+    };
+    use crate::virtual_list::VirtualRow;
+    use crate::world_api::ObjectState;
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The agent this fixture world is logged in as. It has to be set: a drop
+    /// onto *yourself* wears the item instead of offering it, so without an
+    /// identity the give branch could not be told from the wear branch.
+    const OWN: u128 = 0xD;
+
+    /// The other avatar standing in the world, the one a give is offered to.
+    const OTHER: u128 = 0xE;
+
+    /// The other avatar's region-local id.
+    const OTHER_LOCAL: u32 = 2;
+
+    /// The fixture prim's region-local id — the object a contents drop targets.
+    const PRIM_LOCAL: u32 = 3;
+
+    /// The agent's own inventory root, "My Inventory".
+    const ROOT: u128 = 0xF0;
+
+    /// A second own folder, the destination of an in-list move.
+    const SHELF: u128 = 0xF1;
+
+    /// The read-only Library root.
+    const LIBRARY: u128 = 0xE0;
+
+    /// A copyable object item in the agent's root — the drag-rez subject.
+    const BOX_ITEM: u128 = 0x10;
+
+    /// A **no-copy** object item — the one a rez must move rather than copy.
+    const NOCOPY_ITEM: u128 = 0x11;
+
+    /// A notecard in the agent's root: not an object, so it never rezzes and
+    /// always drops into an object's contents.
+    const NOTE_ITEM: u128 = 0x12;
+
+    /// An object item sitting in the read-only Library.
+    const LIB_ITEM: u128 = 0x13;
+
+    /// The label of each fixture row, so a test names the row a user would
+    /// point at rather than an index into a rebuilt view.
+    const BOX_LABEL: &str = "Fixture Box";
+    /// As [`BOX_LABEL`], for the no-copy object.
+    const NOCOPY_LABEL: &str = "Bound Box";
+    /// As [`BOX_LABEL`], for the notecard.
+    const NOTE_LABEL: &str = "Fixture Note";
+    /// As [`BOX_LABEL`], for the Library object.
+    const LIB_LABEL: &str = "Library Box";
+    /// As [`BOX_LABEL`], for the destination folder of an in-list move.
+    const SHELF_LABEL: &str = "Shelf";
+
+    /// Where the camera is aimed, and so where every world drop lands: the
+    /// fixture viewport's centre, clear of the inventory floater (which sits at
+    /// x 20..360 of an 800 × 600 window).
+    const AIM: Vec2 = Vec2::new(400.0, 300.0);
+
+    /// How long a drag rests on its target before anything is read off it, in
+    /// frames. Not padding — two things have to settle first.
+    ///
+    /// The world tier keeps a drag's pick alive at ~15 Hz off the fixture's
+    /// 16 ms clock and the CPU resolver answers a frame later still, so a drop
+    /// released the instant the pointer arrives resolves against wherever the
+    /// pointer *was*. And a prim re-tessellates about ten frames after the
+    /// camera lands, spending one frame with no face entities at all
+    /// ([[viewer-prim-rebuild-drops-a-click]]); a pick that lands on that frame
+    /// answers `None`, which here reads as "the drag is over nothing". Resting
+    /// past both is what the pie negatives do, for the same reason.
+    const REST_FRAMES: u32 = 24;
+
+    /// The fixture world for this tier: the inventory window standing over a
+    /// world holding the other avatar, a fat prim and a patch of ground, with
+    /// the agent's folders and the Library merged into the model and the window
+    /// open on them.
+    ///
+    /// Returns the app and the prim's scoped id.
+    fn drag_world() -> Result<(App, ScopedObjectId), TestError> {
+        let mut app = world_app_with_ui_and_inventory()?;
+        app.world_mut().resource_mut::<SlIdentity>().agent_id =
+            Some(AgentKey::from(Uuid::from_u128(OWN)));
+        record::<crate::world_api::ContentsMutated>(&mut app);
+
+        // The world half: ground under the south-west corner, and the two
+        // targets far enough apart that aiming at one never puts the other in
+        // front of it.
+        seed_terrain(&mut app, 20.0);
+        seed_avatar(
+            &mut app,
+            AgentKey::from(Uuid::from_u128(OTHER)),
+            OTHER_LOCAL,
+            Vector {
+                x: 100.0,
+                y: 100.0,
+                z: 30.0,
+            },
+        );
+        let prim = seed_prim_numbered(
+            &mut app,
+            PRIM_LOCAL,
+            Vector {
+                x: 60.0,
+                y: 60.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+
+        // The inventory half, as a grid answers a login and a folder query.
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::InventoryFolders(
+                vec![
+                    folder(ROOT, None, "My Inventory", FolderType::RootInventory),
+                    folder(SHELF, Some(ROOT), SHELF_LABEL, FolderType::None),
+                ]
+                .into(),
+            )));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::LibraryInventory(vec![
+                InventoryFolder {
+                    folder_id: InventoryFolderKey::from(Uuid::from_u128(LIBRARY)),
+                    parent_id: None,
+                    name: "Library".to_owned(),
+                    folder_type: -1,
+                    version: 1,
+                },
+            ])));
+        settle(&mut app, 3);
+        open_inventory_window(&mut app);
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::InventoryFolderPage {
+                folder: InventoryFolderKey::from(Uuid::from_u128(ROOT)),
+                folders: Vec::new().into(),
+                items: vec![
+                    object_item(BOX_ITEM, ROOT, BOX_LABEL, Permissions::ALL),
+                    object_item(
+                        NOCOPY_ITEM,
+                        ROOT,
+                        NOCOPY_LABEL,
+                        Permissions::ALL.difference(Permissions::COPY),
+                    ),
+                    notecard_item(NOTE_ITEM, ROOT, NOTE_LABEL),
+                ]
+                .into(),
+                prev: None,
+            }));
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::InventoryFolderPage {
+                folder: InventoryFolderKey::from(Uuid::from_u128(LIBRARY)),
+                folders: Vec::new().into(),
+                items: vec![object_item(LIB_ITEM, LIBRARY, LIB_LABEL, Permissions::ALL)].into(),
+                prev: None,
+            }));
+        settle(&mut app, 4);
+        Ok((app, prim))
+    }
+
+    /// One folder of the fixture skeleton.
+    fn folder(id: u128, parent: Option<u128>, name: &str, folder_type: FolderType) -> FolderInfo {
+        FolderInfo {
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(id)),
+            parent_id: parent.map(|key| InventoryFolderKey::from(Uuid::from_u128(key))),
+            name: name.to_owned(),
+            folder_type,
+            version: 1,
+            state: FolderState::Unknown,
+        }
+    }
+
+    /// A fixture **object** item with the given owner permission mask — an item
+    /// a drop on the ground rezzes.
+    fn object_item(id: u128, folder: u128, name: &str, owner: Permissions) -> ItemInfo {
+        let mut info = notecard_item(id, folder, name);
+        info.asset_type = AssetType::Object;
+        info.inv_type = InventoryType::Object;
+        info.permissions.base = owner;
+        info.permissions.owner = owner;
+        info
+    }
+
+    /// A fixture **notecard** item: not an object, so a drop on an object always
+    /// means its contents and never a rez.
+    fn notecard_item(id: u128, folder: u128, name: &str) -> ItemInfo {
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        ItemInfo {
+            item_id: InventoryKey::from(Uuid::from_u128(id)),
+            folder_id: InventoryFolderKey::from(Uuid::from_u128(folder)),
+            name: name.to_owned(),
+            description: String::new(),
+            asset_id: Uuid::from_u128(id.wrapping_add(0x1000)),
+            asset_type: AssetType::Notecard,
+            inv_type: InventoryType::Notecard,
+            flags: 0,
+            sale: None,
+            creation_date: 0,
+            owner: OwnerKey::Agent(own),
+            last_owner_id: Uuid::nil(),
+            creator_id: own,
+            group: None,
+            permissions: Permissions5 {
+                base: Permissions::ALL,
+                owner: Permissions::ALL,
+                group: Permissions::empty(),
+                everyone: Permissions::empty(),
+                next_owner: Permissions::empty(),
+            },
+        }
+    }
+
+    /// Aim the [`crate::world_api::ViewerCamera`] at `at` from a few metres
+    /// back, so that world point projects to [`AIM`] — the shared setup of
+    /// every world-target case.
+    fn aim_at(app: &mut App, at: Vec3) {
+        // Component-wise plain `f32`: the lint fires on `glam` operators.
+        install_camera(app, Vec3::new(at.x, at.y + 1.0, at.z + 8.0), at);
+        settle(app, 3);
+    }
+
+    /// The logical-pixel centre of a laid-out node.
+    fn node_centre(app: &App, entity: Entity) -> Option<Vec2> {
+        let node = app.world().get::<ComputedNode>(entity)?;
+        let transform = app.world().get::<UiGlobalTransform>(entity)?;
+        let scale = node.inverse_scale_factor();
+        let centre = transform.translation;
+        // Component-wise `f32`, per the `arithmetic_side_effects` convention on
+        // `glam` operators.
+        Some(Vec2::new(centre.x * scale, centre.y * scale))
+    }
+
+    /// Every string a node's subtree draws — how a row is recognised by the
+    /// name the user reads on it rather than by an index into a rebuilt view.
+    fn texts_under(app: &App, entity: Entity) -> Vec<String> {
+        let mut out = Vec::new();
+        if let Some(text) = app.world().get::<Text>(entity) {
+            out.push(text.0.clone());
+        }
+        if let Some(children) = app.world().get::<Children>(entity) {
+            for child in children {
+                out.extend(texts_under(app, *child));
+            }
+        }
+        out
+    }
+
+    /// The logical-pixel centre of the pooled inventory row currently showing
+    /// `label`, or `None` when no row does.
+    fn row_centre(app: &mut App, label: &str) -> Option<Vec2> {
+        let mut rows = app.world_mut().query_filtered::<Entity, With<VirtualRow>>();
+        let candidates: Vec<Entity> = rows.iter(app.world()).collect();
+        candidates.into_iter().find_map(|row| {
+            texts_under(app, row)
+                .iter()
+                .any(|text| text == label)
+                .then(|| node_centre(app, row))
+                .flatten()
+        })
+    }
+
+    /// Press on the row showing `label` and drag the pointer to `to` (logical
+    /// viewport pixels), leaving the button **down** — the half of the gesture a
+    /// cancel test needs, and what [`drag_row_to`] releases.
+    fn press_and_drag_row(app: &mut App, label: &str, to: Vec2) -> Result<(), TestError> {
+        let from = row_centre(app, label).ok_or_else(|| format!("no row labelled {label:?}"))?;
+        interact::hover(app, from);
+        interact::press(app, MouseButton::Left);
+        for step in 1..=4_u16 {
+            let t = f32::from(step) / 4.0;
+            interact::hover(app, from.lerp(to, t));
+        }
+        settle(app, REST_FRAMES);
+        Ok(())
+    }
+
+    /// [`press_and_drag_row`] and let go: the whole gesture, the way a hand
+    /// performs it.
+    fn drag_row_to(app: &mut App, label: &str, to: Vec2) -> Result<(), TestError> {
+        press_and_drag_row(app, label, to)?;
+        interact::release(app, MouseButton::Left);
+        settle(app, 3);
+        Ok(())
+    }
+
+    /// The name of every command the viewer has sent since the last drain — the
+    /// coarse assertion, so a case that expects nothing says so exactly.
+    fn command_names(app: &mut App) -> Vec<&'static str> {
+        drain_commands(app)
+            .iter()
+            .map(sl_client_bevy::Command::name)
+            .collect()
+    }
+
+    /// **A drag onto another avatar offers the item to them**, and the same drag
+    /// from a Library row offers nothing: the give branch and its one refusal.
+    ///
+    /// The Library half is the teeth. Both drags start on a real row, cross the
+    /// same pixels and land on the same avatar; the only difference is which
+    /// tree the row came from, which is precisely what `give_command` refuses on.
+    #[test]
+    fn a_drag_onto_an_avatar_gives_the_item_and_a_library_row_gives_nothing()
+    -> Result<(), TestError> {
+        let (mut app, _prim) = drag_world()?;
+        let other = AgentKey::from(Uuid::from_u128(OTHER));
+        let at = avatar_position_of(&mut app, other).ok_or("the other avatar never rendered")?;
+        aim_at(&mut app, at);
+        let _setup = drain_commands(&mut app);
+
+        drag_row_to(&mut app, BOX_LABEL, AIM)?;
+        let given: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::GiveInventory {
+                    to_agent_id,
+                    item_id,
+                    item_name,
+                    ..
+                } => Some((to_agent_id, item_id, item_name)),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            given,
+            vec![(
+                other,
+                InventoryKey::from(Uuid::from_u128(BOX_ITEM)),
+                BOX_LABEL.to_owned()
+            )],
+            "a row dropped on an avatar offers that item to that agent"
+        );
+
+        // Expand the Library so its item has a row to be dragged from — the
+        // double-click a user makes on the folder (a single click anywhere but
+        // the expand arrow only selects).
+        let library = row_centre(&mut app, "Library").ok_or("the Library root has no row")?;
+        interact::double_click(&mut app, library, MouseButton::Left);
+        settle(&mut app, 4);
+        let _expand = drain_commands(&mut app);
+
+        drag_row_to(&mut app, LIB_LABEL, AIM)?;
+        assert!(
+            !command_names(&mut app).contains(&"GiveInventory"),
+            "a Library row is not ours to give away"
+        );
+        Ok(())
+    }
+
+    /// **A drag onto an object's contents surface moves the item into that
+    /// object**: the `ContentsDropTarget` branch, driven through a real UI node
+    /// carrying the component the Build window's Content tab stamps.
+    #[test]
+    fn a_drag_onto_a_contents_surface_adds_the_item_to_the_object() -> Result<(), TestError> {
+        let (mut app, prim) = drag_world()?;
+        let full = app
+            .world()
+            .resource::<ObjectState>()
+            .full_key(&prim)
+            .ok_or("the fixture prim is not tracked")?;
+        let surface = spawn_contents_surface(&mut app, Some((prim, full)));
+        settle(&mut app, 3);
+        let at = node_centre(&app, surface).ok_or("the contents surface never laid out")?;
+        let _setup = drain_commands(&mut app);
+
+        drag_row_to(&mut app, NOTE_LABEL, at)?;
+        let added: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::UpdateTaskInventory { target, item, .. } => {
+                    Some((target, item.item_id, item.name.clone()))
+                }
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            added,
+            vec![(
+                prim,
+                InventoryKey::from(Uuid::from_u128(NOTE_ITEM)),
+                NOTE_LABEL.to_owned()
+            )],
+            "a row dropped on a contents surface is added to that object"
+        );
+        let mutations = drain::<crate::world_api::ContentsMutated>(&mut app);
+        assert_eq!(
+            mutations
+                .iter()
+                .map(|mutation| mutation.scoped)
+                .collect::<Vec<_>>(),
+            vec![prim],
+            "the panel reconciles the object whose contents just grew"
+        );
+        Ok(())
+    }
+
+    /// **A drag onto the ground rezzes the object there**, along the ray the
+    /// camera actually looked down — and a **no-copy** item is *moved* out of
+    /// inventory rather than copied, the reference's rule.
+    #[test]
+    fn a_drag_onto_the_ground_rezzes_along_the_camera_ray() -> Result<(), TestError> {
+        let (mut app, _prim) = drag_world()?;
+        let at = terrain_centre(&mut app).ok_or("the fixture terrain never meshed")?;
+        aim_at(&mut app, at);
+        let _setup = drain_commands(&mut app);
+
+        drag_row_to(&mut app, BOX_LABEL, AIM)?;
+        let rezzed: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::RezObjectFromInventory { params } => Some(params),
+                _other => None,
+            })
+            .collect();
+        let params = rezzed
+            .first()
+            .ok_or("a copyable object dropped on the ground must rez")?;
+        assert_eq!(
+            rezzed.len(),
+            1,
+            "one dropped row rezzes once, got {} commands",
+            rezzed.len()
+        );
+        let expected = crate::coords::bevy_to_sl_vec(at);
+        assert!(
+            (params.ray_end.x - expected.x).abs() < 1.0
+                && (params.ray_end.y - expected.y).abs() < 1.0,
+            "the rez ray must end where the pointer struck the ground \
+             (expected {expected:?}, got {:?})",
+            params.ray_end
+        );
+        assert!(
+            !params.remove_item,
+            "a copyable item leaves its inventory copy behind"
+        );
+
+        drag_row_to(&mut app, NOCOPY_LABEL, AIM)?;
+        let no_copy: Vec<bool> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::RezObjectFromInventory { params } => Some(params.remove_item),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            no_copy,
+            vec![true],
+            "a no-copy item rezzed to the world is moved out of inventory"
+        );
+        Ok(())
+    }
+
+    /// **Escape cancels a drag mid-flight**: the ghost goes, and the release
+    /// that follows sends nothing — the same pointer path that rezzes without
+    /// the key.
+    #[test]
+    fn escape_cancels_a_drag_before_it_can_drop() -> Result<(), TestError> {
+        let (mut app, _prim) = drag_world()?;
+        let at = terrain_centre(&mut app).ok_or("the fixture terrain never meshed")?;
+        aim_at(&mut app, at);
+        let _setup = drain_commands(&mut app);
+
+        press_and_drag_row(&mut app, BOX_LABEL, AIM)?;
+        assert!(
+            sl_viewer_testkit::find_by_name(&mut app, "inventory-drag-ghost").is_some(),
+            "the drag must be in flight for the cancel to mean anything"
+        );
+        interact::tap(
+            &mut app,
+            KeyCode::Escape,
+            bevy::input::keyboard::Key::Escape,
+        );
+        settle(&mut app, 2);
+        assert!(
+            sl_viewer_testkit::find_by_name(&mut app, "inventory-drag-ghost").is_none(),
+            "Escape takes the ghost with it"
+        );
+        interact::release(&mut app, MouseButton::Left);
+        settle(&mut app, 3);
+        assert_eq!(
+            command_names(&mut app),
+            Vec::<&str>::new(),
+            "a cancelled drag sends nothing when the button is finally released"
+        );
+        Ok(())
+    }
+
+    /// **The drop highlight tracks what the drag is over**: dragging a notecard
+    /// across the fixture prim marks it as the (own, so not foreign) drop
+    /// target, and moving off it clears the mark.
+    #[test]
+    fn the_drag_hover_highlight_follows_the_object_under_the_pointer() -> Result<(), TestError> {
+        let (mut app, prim) = drag_world()?;
+        let at = scene_position_of(&mut app, prim).ok_or("the fixture prim never rendered")?;
+        aim_at(&mut app, at);
+        let entity = entity_of(&mut app, prim).ok_or("the fixture prim has no entity")?;
+
+        press_and_drag_row(&mut app, NOTE_LABEL, AIM)?;
+        let hover = app
+            .world()
+            .resource::<crate::world_api::DragHoverHighlight>()
+            .hover;
+        assert_eq!(
+            hover.map(|hover| (hover.root, hover.foreign)),
+            Some((entity, false)),
+            "a drag resting over an own object marks it as the drop target"
+        );
+
+        // Off the object: an empty patch of sky above it, still clear of the
+        // floater.
+        interact::hover(&mut app, Vec2::new(AIM.x, 20.0));
+        settle(&mut app, REST_FRAMES);
+        assert!(
+            app.world()
+                .resource::<crate::world_api::DragHoverHighlight>()
+                .hover
+                .is_none(),
+            "the highlight clears when the pointer leaves every droppable object"
+        );
+        interact::release(&mut app, MouseButton::Left);
+        settle(&mut app, 3);
+        Ok(())
+    }
+
+    /// **A drop that lands back on the list moves the item, and rezzes
+    /// nothing**: the first branch of the reference's occlusion order, and the
+    /// teeth for every world case above — the pointer never leaves the window,
+    /// so nothing in the world may hear about it.
+    #[test]
+    fn a_drop_on_a_folder_row_moves_the_item_and_rezzes_nothing() -> Result<(), TestError> {
+        let (mut app, _prim) = drag_world()?;
+        let at = terrain_centre(&mut app).ok_or("the fixture terrain never meshed")?;
+        aim_at(&mut app, at);
+        let _setup = drain_commands(&mut app);
+
+        let shelf = row_centre(&mut app, SHELF_LABEL).ok_or("no shelf row")?;
+        drag_row_to(&mut app, BOX_LABEL, shelf)?;
+        let commands = drain_commands(&mut app);
+        let moved: Vec<_> = commands
+            .iter()
+            .filter_map(|command| match command {
+                Command::MoveInventoryItem {
+                    item_id, folder_id, ..
+                } => Some((*item_id, *folder_id)),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            moved,
+            vec![(
+                InventoryKey::from(Uuid::from_u128(BOX_ITEM)),
+                InventoryFolderKey::from(Uuid::from_u128(SHELF))
+            )],
+            "a row dropped on a folder row moves into that folder"
+        );
+        assert!(
+            !commands
+                .iter()
+                .any(|command| matches!(command, Command::RezObjectFromInventory { .. })),
+            "a drop that never left the window must not rez into the world"
+        );
+        Ok(())
+    }
+
+    /// A UI node standing in for the Build window's Content tab: a plain
+    /// absolutely-positioned box clear of the inventory floater, carrying the
+    /// [`crate::inventory_drag::ContentsDropTarget`] that `edit_contents`
+    /// stamps on the real surface.
+    fn spawn_contents_surface(
+        app: &mut App,
+        target: Option<(ScopedObjectId, ObjectKey)>,
+    ) -> Entity {
+        let root = app.world().resource::<sl_viewer_ui_core::ui::UiRoot>().0;
+        app.world_mut()
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(500.0),
+                    top: Val::Px(200.0),
+                    width: Val::Px(200.0),
+                    height: Val::Px(160.0),
+                    ..Default::default()
+                },
+                Pickable::default(),
+                crate::inventory_drag::ContentsDropTarget { target },
+                Name::new("fixture-contents-surface"),
+                ChildOf(root),
+            ))
+            .id()
     }
 }
