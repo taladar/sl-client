@@ -42,12 +42,29 @@ const CORNER_UNIFORMITY: f32 = 0.05;
 
 /// Per-scene minimum coverage below [`MIN_COVERAGE`], for subjects that are
 /// honestly sparse inside their own bounds — with the reason. A thin ribbon
-/// waving through its swept volume paints little of the box that holds it.
-const SPARSE: &[(&str, f32, &str)] = &[(
-    "flexi-streamer",
-    0.02,
-    "a thin ribbon inside the box swept by its own waving",
-)];
+/// waving through its swept volume paints little of the box that holds it, and
+/// so does a body standing in the T-pose its meshes are authored in.
+///
+/// Each floor is set from a measurement with headroom, not from the number the
+/// scene happens to print: the point is still to catch "drew nothing" and
+/// "drew half the subject", so a floor that sits just under today's reading
+/// would be a flake and one at zero would be decoration.
+const SPARSE: &[(&str, f32, &str)] = &[
+    (
+        "flexi-streamer",
+        0.02,
+        "a thin ribbon inside the box swept by its own waving",
+    ),
+    (
+        "avatar-base-part",
+        // Measured 0.125 against the vendored Linden body.
+        0.08,
+        "the rest body stands in the T-pose its `.llm` meshes are authored in, so its \
+         1.7 m arm span boxes a thin cross of geometry and most of the disc that span \
+         defines is air — `avatar-morphed-body` reads higher only because the shaped \
+         appearance flares its skirt out to fill some of that box",
+    ),
+];
 
 /// The scenes R0 does not sweep, each with its reason. A scene is either swept
 /// or in this list; the registry guard below holds the two to that.

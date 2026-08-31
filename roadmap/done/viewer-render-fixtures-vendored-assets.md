@@ -2,7 +2,7 @@
 id: viewer-render-fixtures-vendored-assets
 title: Render-tier avatar fixtures default to the vendored character assets
 topic: viewer
-status: ready
+status: done
 origin: user request (2026-08-31) — vendoring the assets raised the question
 points: 2
 refs: [viewer-render-context-matrix, viewer-render-animation-coverage]
@@ -42,3 +42,23 @@ were vendored for — and CI needs no environment.
 Acceptance: the full GPU suite passes with no `SL_VIEWER_ASSETS` in the
 environment, and the avatar scenes demonstrably render the real body
 (the morphed-vs-base comparison bites).
+
+Done (2026-08-31). `render_scene.rs` gained `vendored_character_dir`
+(off `CARGO_MANIFEST_DIR`, the idiom the viewer binary and
+`world_test.rs` already use) and `pub fn avatar_assets_dir`: an explicit
+`SL_VIEWER_ASSETS` path wins, `SL_VIEWER_ASSETS=mini` is the bisecting
+escape hatch back to the 4-vertex fixture, and unset means the vendored
+directory. Both avatar spawners and `render_test.rs`'s morphed-vs-base
+comparison go through it, so that comparison now bites on every run
+rather than returning early.
+
+Re-measured against the real body, R0's one adjustment was
+`avatar-base-part`: it paints **0.125** of its own silhouette, under the
+0.15 floor, and honestly so — the `.llm` meshes are authored in the
+T-pose, so a 1.7 m arm span boxes a thin cross of geometry and most of
+the disc is air. It joins `SPARSE` at 0.08 (still catching "drew
+nothing" and "lost half the body") with that reason. `avatar-morphed-body`
+needed nothing at 0.226, and only because `shaped_appearance` flares its
+skirt from 0.3 m to 1.3 m wide — the same T-pose underneath. No other
+subject moved; the whole 151-test viewer suite is green with no
+environment set, and green again under `SL_VIEWER_ASSETS=mini`.

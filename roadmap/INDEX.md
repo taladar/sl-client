@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 293 |
+| ready | 292 |
 | blocked | 81 |
 | in-progress | 22 |
 | bugs | 64 |
-| done | 930 |
+| done | 931 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1525** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (293)
+## ready (292)
 
 ### protocol
 
@@ -787,8 +787,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-cpu-skinning-crosscheck`](ready/viewer-render-cpu-skinning-crosscheck.md)
   — CPU-skinning cross-check — make the R13 debug affordance a standing test
   (blocked by `viewer-render-test-harness` (done))
-- [`viewer-render-fixtures-vendored-assets`](ready/viewer-render-fixtures-vendored-assets.md)
-  — Render-tier avatar fixtures default to the vendored character assets
 - [`viewer-render-metadata-overlays`](ready/viewer-render-metadata-overlays.md)
   — Render-metadata debug overlays
 - [`viewer-render-readback-tier`](ready/viewer-render-readback-tier.md) — Render
@@ -1373,7 +1371,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (930)
+## done (931)
 
 ### protocol
 
@@ -2550,6 +2548,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-options-general`](done/viewer-region-options-general.md) —
   Region / Estate floater — region (general) tab (blocked by
   `viewer-region-options-debug` (done))
+- [`viewer-render-fixtures-vendored-assets`](done/viewer-render-fixtures-vendored-assets.md)
+  — Render-tier avatar fixtures default to the vendored character assets
 - [`viewer-render-friends-only`](done/viewer-render-friends-only.md) — Show
   friends only (hide non-friend avatars)
 - [`viewer-render-gpu-serialisation`](done/viewer-render-gpu-serialisation.md) —

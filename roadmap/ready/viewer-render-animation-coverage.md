@@ -40,10 +40,11 @@ is a refactor per subsystem rather than a fixture:
   them — the skeleton, the ground, and the agent's motion, which is where the
   near-singular leg of `sl-client-foot-ik-near-singular-leg` actually lives.
 
-All three additionally need `SL_VIEWER_ASSETS` (there is no skeleton without the
-Linden `character/` directory), which `avatar-morphed-body` shows is a payable
-cost — but paying it on top of an event-transport fake would be two compromises
-for one scene.
+All three additionally need a Linden `character/` directory (there is no
+skeleton without one) — no longer a cost since 2026-08-31: the assets are
+vendored and `avatar_assets_dir` hands them to the avatar scenes with no
+environment set ([[viewer-render-fixtures-vendored-assets]]). What remains is
+the event-transport fake, which is the real compromise here.
 
 ## What a scene here would be worth
 
@@ -66,7 +67,7 @@ cleanest:
    over. The `.anim` assets the animesh scene needs are decodable from bytes
    (`sl-anim` is sans-I/O) — but see the note in `context/viewer.md`: stock
    Firestorm ships **no** `.anim` files, so a procedural fixture or the OpenSim
-   `AnimationsAssetSet` is the source, not `SL_VIEWER_ASSETS`.
+   `AnimationsAssetSet` is the source, not the vendored `character/` directory.
 
 ## What to watch for
 

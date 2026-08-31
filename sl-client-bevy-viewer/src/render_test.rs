@@ -1157,7 +1157,7 @@ mod tests {
         Geometry, TestError, advance_to, capture_logs, geometry_violations, scene_geometry,
         scene_violations, spawn_scene,
     };
-    use crate::render_scene::{SCENES, SceneCx, rigged_strip};
+    use crate::render_scene::{SCENES, SceneCx, avatar_assets_dir, rigged_strip};
     use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::PrimLod;
@@ -1487,12 +1487,12 @@ mod tests {
     /// where those vertices are.
     #[test]
     fn the_morphed_avatar_fixture_actually_shapes_the_body() -> Result<(), TestError> {
-        // Without the Linden assets there is no visual-param table, so
-        // `avatar-morphed-body` *is* `avatar-base-part` (it falls back), and the
-        // comparison below could not fail. Returning is the honest thing — see
-        // `crate::render_scene`'s `avatar_base_part` for why that trade is made for
-        // this one renderable and nothing else.
-        if std::env::var_os("SL_VIEWER_ASSETS").is_none() {
+        // The vendored character assets make this the ordinary path, so this
+        // comparison now bites on every run with no environment set. The one
+        // remaining escape is `SL_VIEWER_ASSETS=mini`: with no visual-param table
+        // `avatar-morphed-body` *is* `avatar-base-part` (it falls back), so the
+        // comparison could not fail and asserting it would be a false alarm.
+        if avatar_assets_dir().is_none() {
             return Ok(());
         }
         let base = SCENES

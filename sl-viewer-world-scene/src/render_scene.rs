@@ -113,7 +113,7 @@ use sl_client_bevy::{
 };
 use sl_terrain::TerrainComposition;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::bump::{apply_surface_flags, generate_normal_map};
@@ -141,7 +141,57 @@ use crate::world_api::{DecodedTextures, ObjectParticleSystem, TerrainSurface};
 /// one the viewer itself reads** (`--viewer-assets` / `SL_VIEWER_ASSETS`), so a
 /// shell already set up to run the viewer runs the gallery against the real body
 /// with no extra ceremony.
+///
+/// Since the assets are vendored it is an *override*, not a switch: unset, the
+/// avatar scenes load [`vendored_character_dir`]. See [`avatar_assets_dir`].
 const VIEWER_ASSETS_ENV: &str = "SL_VIEWER_ASSETS";
+
+/// The one [`VIEWER_ASSETS_ENV`] value that is not a path: the escape hatch
+/// back to the committed mini fixture.
+///
+/// It exists for one job, bisecting. When an avatar scene's verdict changes,
+/// the cause is either the render path or the asset content, and those are
+/// different investigations; `SL_VIEWER_ASSETS=mini` holds the asset content
+/// still (a 4-vertex scrap that has never changed) so the render path can be
+/// varied alone. A path is never spelled `mini`, so nothing is shadowed.
+const VIEWER_ASSETS_MINI: &str = "mini";
+
+/// The vendored Linden `character/` directory at the workspace root (see
+/// `viewer-assets/README.md` for its provenance), when this build still sits
+/// beside its sources.
+///
+/// Resolved off `CARGO_MANIFEST_DIR` — the same way `sl-client-bevy-viewer`'s
+/// `default_viewer_assets` and `world_test.rs` reach it — so the render tier
+/// and the viewer binary agree on which body they mean without either one
+/// needing an environment.
+fn vendored_character_dir() -> Option<PathBuf> {
+    let vendored = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("viewer-assets/character");
+    vendored.is_dir().then_some(vendored)
+}
+
+/// The Linden `character/` directory the avatar scenes load: an explicit
+/// `SL_VIEWER_ASSETS` path wins, the value `mini` forces the committed
+/// fixture, and otherwise the vendored `viewer-assets/character/`.
+///
+/// Spelled out rather than linked: the constants behind those two names are
+/// private, and a caller reading this signature wants the strings it would
+/// actually put in an environment.
+///
+/// `None` means "there is no body" — the mini-fixture fallback the avatar
+/// scenes document. Since 2026-08-31 that is the deliberate escape hatch or a
+/// broken checkout, not the ordinary case: the real skeleton, LAD morphs and
+/// base meshes are what the avatar scenes are *for*, so CI gets them with no
+/// environment set.
+#[must_use]
+pub fn avatar_assets_dir() -> Option<PathBuf> {
+    match std::env::var_os(VIEWER_ASSETS_ENV) {
+        Some(value) if value == VIEWER_ASSETS_MINI => None,
+        Some(value) => Some(PathBuf::from(value)),
+        None => vendored_character_dir(),
+    }
+}
 
 /// The mini base-body part from `sl-avatar`'s own test fixtures — the **only**
 /// committed asset this registry uses, for the one decode whose output cannot be
@@ -515,10 +565,10 @@ pub const SCENES: &[RenderScene] = &[
     },
     RenderScene {
         id: "avatar-base-part",
-        what: "a decoded base-body part on a real skeleton. NOTE: the committed fixture is \
-               sl-avatar's 4-vertex mini mesh, so it looks like a flat scrap, not a body — it \
-               exercises the skin path, not the shape. A real body needs SL_VIEWER_ASSETS \
-               (viewer-render-scene-coverage)",
+        what: "a decoded base-body part on a real skeleton: the real Linden body from the \
+               vendored character assets. NOTE: SL_VIEWER_ASSETS=mini swaps in sl-avatar's \
+               4-vertex fixture, which looks like a flat scrap rather than a body — it \
+               exercises the skin path, not the shape",
         timeline: Timeline::STATIC,
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_front_at(3.4, 0.95),
@@ -529,7 +579,7 @@ pub const SCENES: &[RenderScene] = &[
         what: "the whole system body, shaped by a resolved appearance: the morph bake, the \
                deformed skeleton and the collision volumes together — the R11 / R12 / R13 / R22 \
                cluster, none of which lives in the skin path `avatar-base-part` covers. Falls \
-               back to the mini fixture without SL_VIEWER_ASSETS",
+               back to the unshaped mini fixture under SL_VIEWER_ASSETS=mini",
         timeline: Timeline::STATIC,
         lighting: SceneLighting::Stage,
         camera: SceneCamera::framing_front_at(3.4, 0.95),
@@ -1744,24 +1794,25 @@ fn spawn_base_part(
 
 /// [`SCENES`] `avatar-base-part`: the system avatar's body on its skeleton.
 ///
-/// **The real Linden body when `SL_VIEWER_ASSETS` is set**, and a 4-vertex
-/// fixture when it is not. That split is deliberate and is the only one in this
-/// registry, so it is worth defending.
+/// **The real Linden body**, from [`avatar_assets_dir`] — the vendored
+/// `viewer-assets/character/` unless an environment overrides it — and a
+/// 4-vertex fixture only when that directory is missing or unreadable. That
+/// split is the only one in this registry, so it is worth defending.
 ///
 /// The avatar is the one renderable whose input cannot be synthesized: [`BaseMesh`]'s
 /// fields are private, so `from_bytes` is the only constructor, and the body's
-/// real shape lives in Linden's `avatar_*.llm` — megabytes of asset that have no
-/// business in this repository. So:
+/// real shape lives in Linden's `avatar_*.llm`. Those assets are vendored (they
+/// are LGPL, and the viewer is useless without them), so:
 ///
-/// - **With the env var** (the same one the viewer itself reads, pointing at a
-///   Firestorm `character/` dir) the scene loads the real body through the real
-///   [`AvatarAssetLibrary`] — the same loader a live login uses. That is what a
-///   human wants to look at, and it is where R1 / R13 / R22 actually live.
-/// - **Without it** the scene falls back to `sl-avatar`'s committed mini fixture,
-///   so `cargo test` still exercises the skin path — the weights, the render
-///   list, the pipeline agreement — on every machine, with no assets and no
-///   skipping. It looks like a flat scrap, because it is one; it is a floor, not
-///   a body.
+/// - **Ordinarily** the scene loads the real body through the real
+///   [`AvatarAssetLibrary`] — the same loader a live login uses — on every run,
+///   with no environment set. That is what a human wants to look at, and it is
+///   where R1 / R13 / R22 actually live.
+/// - **Without a directory** (`SL_VIEWER_ASSETS=mini`, or a checkout missing the
+///   vendored tree) the scene falls back to `sl-avatar`'s committed mini
+///   fixture, so the sweep still exercises the skin path — the weights, the
+///   render list, the pipeline agreement — with no assets and no skipping. It
+///   looks like a flat scrap, because it is one; it is a floor, not a body.
 ///
 /// A scene that simply skipped without the assets would be a check that protects
 /// nothing on CI, which is the failure this whole harness is built to avoid.
@@ -1771,8 +1822,8 @@ fn avatar_base_part(
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    if let Some(dir) = std::env::var_os(VIEWER_ASSETS_ENV)
-        && let Ok(library) = AvatarAssetLibrary::load(Path::new(&dir))
+    if let Some(dir) = avatar_assets_dir()
+        && let Ok(library) = AvatarAssetLibrary::load(&dir)
     {
         let skeleton = library.skeleton();
         let joints = spawn_skeleton("avatar-base-part", skeleton, root, commands);
@@ -1864,9 +1915,10 @@ fn shaped_appearance() -> Vec<u8> {
 /// A morph that shortens the legs against a skeleton that did not is exactly the
 /// class of bug a login shows as "slightly wrong" and nothing catches.
 ///
-/// **Needs `SL_VIEWER_ASSETS`**, and falls back rather than skipping — see
-/// `avatar_base_part`, which makes the same trade for the same reason. Without
-/// the Linden `character/` directory there is no `avatar_lad.xml`, so there is no
+/// **Needs a Linden `character/` directory** — [`avatar_assets_dir`], which the
+/// vendored assets satisfy by default — and falls back rather than skipping when
+/// there is none, see `avatar_base_part`, which makes the same trade for the same
+/// reason. Without that directory there is no `avatar_lad.xml`, so there is no
 /// visual-param table, no morph targets and nothing to resolve; the fallback is the
 /// unshaped mini fixture, so `cargo test` still sweeps the scene everywhere.
 fn avatar_morphed_body(
@@ -1875,11 +1927,11 @@ fn avatar_morphed_body(
     commands: &mut Commands,
     assets: &mut SceneAssets<'_>,
 ) {
-    let Some(dir) = std::env::var_os(VIEWER_ASSETS_ENV) else {
+    let Some(dir) = avatar_assets_dir() else {
         avatar_base_part(_cx, root, commands, assets);
         return;
     };
-    let Ok(library) = AvatarAssetLibrary::load(Path::new(&dir)) else {
+    let Ok(library) = AvatarAssetLibrary::load(&dir) else {
         avatar_base_part(_cx, root, commands, assets);
         return;
     };
