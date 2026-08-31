@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 306 |
-| blocked | 66 |
+| blocked | 65 |
 | in-progress | 19 |
 | bugs | 64 |
-| done | 936 |
+| done | 937 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1526** |
@@ -471,9 +471,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-attachment-behavior`](ready/viewer-edit-attachment-behavior.md)
   — Edit tools & widgets on worn attachments (blocked by
   `viewer-object-selection-core` (done), `viewer-transform-gizmos` (done))
-- [`viewer-edit-gizmo-interaction-tests`](ready/viewer-edit-gizmo-interaction-tests.md)
-  — Gizmo handle drags — press, constrain, stream, release (blocked by
-  `viewer-world-test-harness` (done))
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
@@ -509,6 +506,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Card from the avatar menus
 - [`viewer-god-tools`](ready/viewer-god-tools.md) — God tools floater (blocked
   by `viewer-ui-widget-scaffold` (done))
+- [`viewer-gpu-interaction-readback`](ready/viewer-gpu-interaction-readback.md)
+  — Pixel-level reaction spot checks (GPU, serial) (blocked by
+  `viewer-edit-gizmo-interaction-tests` (done),
+  `viewer-edit-selection-interaction-tests` (done))
 - [`viewer-graphics-presets`](ready/viewer-graphics-presets.md) — Graphics
   presets — save / load / pulldown (blocked by `viewer-preferences-graphics-tab`
   (done))
@@ -961,7 +962,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (66)
+## blocked (65)
 
 ### viewer
 
@@ -990,10 +991,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gesture-management-ui`](blocked/viewer-gesture-management-ui.md) —
   Gesture management & editor UI (blocked by `viewer-ui-widget-scaffold` (done),
   `viewer-gesture-runtime`)
-- [`viewer-gpu-interaction-readback`](blocked/viewer-gpu-interaction-readback.md)
-  — Pixel-level reaction spot checks (GPU, serial) (blocked by
-  `viewer-edit-gizmo-interaction-tests`,
-  `viewer-edit-selection-interaction-tests` (done))
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -1363,7 +1360,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (936)
+## done (937)
 
 ### protocol
 
@@ -1790,6 +1787,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))
+- [`viewer-edit-gizmo-interaction-tests`](done/viewer-edit-gizmo-interaction-tests.md)
+  — Gizmo handle drags — press, constrain, stream, release (blocked by
+  `viewer-world-test-harness` (done))
 - [`viewer-edit-selection-interaction-tests`](done/viewer-edit-selection-interaction-tests.md)
   — Selecting for edit — click, shift-click, rubber band, faces (blocked by
   `viewer-world-test-harness` (done))

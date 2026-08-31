@@ -2,7 +2,7 @@
 id: viewer-gpu-interaction-readback
 title: Pixel-level reaction spot checks (GPU, serial)
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 3
 blocked_by: [viewer-edit-gizmo-interaction-tests,

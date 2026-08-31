@@ -224,6 +224,15 @@ pub(crate) fn install_camera(app: &mut App, eye: Vec3, target: Vec3) {
 /// before the app's first update.
 pub(crate) fn world_app_with_edit() -> App {
     let mut app = world_app();
+    add_edit_plugins(&mut app);
+    app
+}
+
+/// The build-tool half of [`world_app_with_edit`], on its own — the selection
+/// gesture and the transform gizmos — so a fixture world that is still being
+/// composed (the UI fold, which must add its plugins before the app's first
+/// update) can take the edit tools too.
+fn add_edit_plugins(app: &mut App) {
     app.add_plugins((
         crate::gizmos::EditGizmoPlugin,
         crate::edit_selection::EditSelectionPlugin,
@@ -231,7 +240,6 @@ pub(crate) fn world_app_with_edit() -> App {
     // The per-frame "a widget took this press" flag the selection gesture
     // consults; its owner is the combo widget, over in the UI scaffold.
     app.init_resource::<sl_viewer_ui_core::ui::UiPointerClaim>();
-    app
 }
 
 /// The fixture world with the real avatar-asset library: the vendored
@@ -278,7 +286,32 @@ pub(crate) fn world_app_with_hud() -> Result<App, Box<dyn core::error::Error>> {
 /// Returns the load error when the vendored character directory is missing, and
 /// a message when no HUD camera stood up.
 pub(crate) fn world_app_with_ui() -> Result<App, Box<dyn core::error::Error>> {
+    compose_ui_over(world_app_with_hud()?)
+}
+
+/// [`world_app_with_ui`] **with the build tools underneath it** — the fixture
+/// world a test needs when a manipulator drag has to meet a real UI panel (the
+/// gizmos' blocking-UI guard). The edit plugins go on before the UI's first
+/// update, which is why this cannot be `world_app_with_ui()` plus a later
+/// `add_plugins`.
+///
+/// # Errors
+///
+/// As [`world_app_with_ui`].
+pub(crate) fn world_app_with_ui_and_edit() -> Result<App, Box<dyn core::error::Error>> {
     let mut app = world_app_with_hud()?;
+    add_edit_plugins(&mut app);
+    compose_ui_over(app)
+}
+
+/// Compose the UI fold onto an already-built (never-updated) fixture world:
+/// the layout stack, the interaction and text halves, the first update the two
+/// `Startup` halves need, and the HUD camera's hand-filled projection.
+///
+/// # Errors
+///
+/// Returns a message when no HUD camera stood up.
+fn compose_ui_over(mut app: App) -> Result<App, Box<dyn core::error::Error>> {
     // The layout half: `Hosted`, because the world app already propagates
     // transforms and brings the cameras.
     sl_viewer_testkit::LayoutTest::new().install(&mut app, sl_viewer_testkit::UiHost::Hosted);
@@ -748,15 +781,806 @@ mod tests {
     /// farthest from `pivot` on the positive side — a point the cursor cannot
     /// miss, and one that sits **off** the selected prim, out over empty world.
     fn translate_x_cone(app: &mut App, pivot: Vec3) -> Option<Vec3> {
+        handle_toward(app, "edit-gizmo:translate-x", pivot, Vec3::X)
+    }
+
+    /// The rig part named `edit-gizmo:<slug>` reaching **furthest from `pivot`
+    /// along `direction`** (Bevy world space), by its world position.
+    ///
+    /// A handle's test address is its *part*, and a part can be several
+    /// entities: a translate arrow is a shaft and a cone at each end, all three
+    /// named `edit-gizmo:translate-x`. Picking by distance alone leaves the two
+    /// cones tied and the winner decided by spawn order, so a test that means
+    /// "the **+X** cone" says which way it means.
+    fn handle_toward(app: &mut App, slug: &str, pivot: Vec3, direction: Vec3) -> Option<Vec3> {
         let mut handles = app.world_mut().query::<(&Name, &GlobalTransform)>();
         handles
             .iter(app.world())
-            .filter(|(name, _global)| name.as_str() == "edit-gizmo:translate-x")
+            .filter(|(name, _global)| name.as_str() == slug)
             .map(|(_name, global)| global.translation())
             .max_by(|a, b| {
-                a.distance_squared(pivot)
-                    .total_cmp(&b.distance_squared(pivot))
+                let reach = |point: &Vec3| {
+                    Vec3::new(point.x - pivot.x, point.y - pivot.y, point.z - pivot.z)
+                        .dot(direction)
+                };
+                reach(a).total_cmp(&reach(b))
             })
+    }
+
+    /// A point on the **rotate ring** named `edit-gizmo:rotate-<axis>`, at
+    /// `angle` radians around it and `radius` in rig units (the drawn torus'
+    /// major radius is `1.0`, so `1.0` is a point on the ring the cursor can
+    /// press and anything larger is out where the detents engage).
+    ///
+    /// Read through the ring's own [`GlobalTransform`], so the rig's live
+    /// constant-screen-size scale and the grid frame's rotation are already in
+    /// it — and, because the returned point lies in the ring's plane (which is
+    /// the drag plane, through the pivot), the ray through its projection hits
+    /// exactly it. A drag between two such points turns by exactly the angle
+    /// between them.
+    fn ring_point(app: &mut App, slug: &str, angle: f32, radius: f32) -> Option<Vec3> {
+        let mut handles = app.world_mut().query::<(&Name, &GlobalTransform)>();
+        let global = handles
+            .iter(app.world())
+            .find(|(name, _global)| name.as_str() == slug)
+            .map(|(_name, global)| *global)?;
+        // The torus is authored about its own local Y: (cos, 0, sin) traces its
+        // circle, and `transform_point` carries the rig's scale and pose.
+        Some(global.transform_point(Vec3::new(angle.cos() * radius, 0.0, angle.sin() * radius)))
+    }
+
+    /// Drag a handle at `handle` (world) outward from `pivot`: `along` logical
+    /// pixels further along the pivot→handle screen direction, and `across`
+    /// pixels perpendicular to it — the off-axis excursion that decides whether
+    /// a drag stays free or crosses into the reference's **snap regime**.
+    fn drag_handle(
+        app: &mut App,
+        pivot: Vec3,
+        handle: Vec3,
+        (along, across): (f32, f32),
+        steps: u32,
+    ) -> Result<(), TestError> {
+        let from = world_to_viewport(app, handle).ok_or("the handle projects off screen")?;
+        let pivot_at = world_to_viewport(app, pivot).ok_or("the pivot projects off screen")?;
+        // Component-wise plain `f32`, per the workspace convention.
+        let direction = Vec2::new(from.x - pivot_at.x, from.y - pivot_at.y);
+        let length = direction.length().max(1e-3);
+        let unit = Vec2::new(direction.x / length, direction.y / length);
+        let to = Vec2::new(
+            from.x + unit.x * along - unit.y * across,
+            from.y + unit.y * along + unit.x * across,
+        );
+        interact::drag(app, from, to, steps, MouseButton::Left);
+        settle(app, 2);
+        Ok(())
+    }
+
+    /// The prim's live wire-frame motion — the position, rotation and scale the
+    /// simulator would next be told about.
+    fn motion_of(app: &App, entity: Entity) -> Option<crate::objects::ObjectSlMotion> {
+        app.world()
+            .get::<crate::objects::ObjectSlMotion>(entity)
+            .cloned()
+    }
+
+    /// Every `UpdateObject` sent since the last drain, as `(id, transform)` —
+    /// the edit half of the wire, the reaction a simulator would see.
+    fn drain_updates(app: &mut App) -> Vec<(ScopedObjectId, sl_client_bevy::ObjectTransform)> {
+        super::drain_commands(app)
+            .into_iter()
+            .filter_map(|command| match command {
+                sl_client_bevy::Command::UpdateObject {
+                    local_id,
+                    transform,
+                } => Some((local_id, transform)),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// Every `DuplicateObjects` sent since the last drain, as `(ids, offset)` —
+    /// the wire form of the copy a Shift-drag leaves behind.
+    fn drain_duplicates(app: &mut App) -> Vec<(Vec<ScopedObjectId>, Vector)> {
+        super::drain_commands(app)
+            .into_iter()
+            .filter_map(|command| match command {
+                sl_client_bevy::Command::DuplicateObjects {
+                    local_ids,
+                    offset,
+                    group_id: _group_id,
+                } => Some((local_ids, offset)),
+                _other => None,
+            })
+            .collect()
+    }
+
+    /// Stand a **selected fixture prim** up under `tool`: seed a fat prim,
+    /// frame it head-on from ten metres, enter build mode with that
+    /// manipulator, and select it with a real click, so the rig spawns and
+    /// mounts on it. Returns the prim's scoped id and its scene entity — the
+    /// opening move of every gizmo-drag test.
+    fn selected_fixture(
+        app: &mut App,
+        tool: crate::world_api::EditTool,
+    ) -> Result<(ScopedObjectId, Entity), TestError> {
+        selected_fixture_object(app, tool, super::fixture_prim(1, FIXTURE_AT, 0))
+    }
+
+    /// [`selected_fixture`] over an already-shaped object — what a test that
+    /// needs a *rotated* prim (the local grid frame) seeds.
+    fn selected_fixture_object(
+        app: &mut App,
+        tool: crate::world_api::EditTool,
+        object: sl_client_bevy::Object,
+    ) -> Result<(ScopedObjectId, Entity), TestError> {
+        let scoped = super::seed_object(app, object);
+        settle(app, 5);
+        let target =
+            first_tagged_face_position(app).ok_or("the fixture prim never built a face")?;
+        // Component-wise plain `f32`, per the workspace convention: the
+        // `arithmetic_side_effects` lint fires on `glam`'s operators.
+        let eye = Vec3::new(target.x, target.y + 2.0, target.z + 10.0);
+        install_camera(app, eye, target);
+        {
+            let mut state = app
+                .world_mut()
+                .resource_mut::<crate::world_api::EditToolState>();
+            state.active = true;
+            state.tool = tool;
+        }
+        settle(app, 2);
+        super::select_by_click(app, Vec2::new(400.0, 300.0));
+        settle(app, 3);
+        assert!(
+            is_selected(app, scoped),
+            "a click on the prim must select it — the gizmo has nothing to mount on otherwise"
+        );
+        let entity = super::entity_of(app, scoped).ok_or("the fixture prim has no entity")?;
+        Ok((scoped, entity))
+    }
+
+    /// Where every gizmo test's fixture prim stands (SL region-local metres) —
+    /// on the half-metre grid, so a snapped drag that lands back on it is the
+    /// grid's doing and not the start position's.
+    const FIXTURE_AT: Vector = Vector {
+        x: 128.0,
+        y: 128.0,
+        z: 30.0,
+    };
+
+    /// The selected prim's pivot — where the rig mounts, and the point every
+    /// handle direction is measured from.
+    fn pivot_of(app: &App, entity: Entity) -> Option<Vec3> {
+        app.world()
+            .get::<GlobalTransform>(entity)
+            .map(GlobalTransform::translation)
+    }
+
+    /// Whether `value` sits on a multiple of `grid`, within a millimetre.
+    fn on_grid(value: f32, grid: f32) -> bool {
+        ((value / grid).round() * grid - value).abs() < 1e-3
+    }
+
+    /// The prim's rotation as an angle about the Second Life Z axis, in
+    /// degrees, with the off-axis components alongside it for the "and nothing
+    /// else turned" half of a rotate assertion.
+    fn twist_about_z(rotation: &sl_client_bevy::Rotation) -> (f32, f32) {
+        let angle = rotation.z.atan2(rotation.s).to_degrees() * 2.0;
+        let off_axis = rotation.x.abs().max(rotation.y.abs());
+        (angle, off_axis)
+    }
+
+    /// **Snapping is what lands the drag on the grid**: the *same* cursor path
+    /// — out along the +X arrow and far enough off its axis to cross the white
+    /// snap-guide ruler — leaves the prim on a grid multiple with
+    /// `EditToolState::snap` on and off it with snapping off.
+    ///
+    /// The pair is the point: one run alone could not tell a snapped landing
+    /// from a lucky one.
+    #[test]
+    fn snapping_lands_a_translate_drag_on_the_grid() -> Result<(), TestError> {
+        /// The drag both runs make: out along the arrow, and well past the snap
+        /// ruler (which sits at `0.45` rig units, about fifty pixels).
+        const PATH: (f32, f32) = (55.0, 140.0);
+
+        let mut snapped_x = None;
+        let mut free_x = None;
+        for snap in [true, false] {
+            let mut app = super::world_app_with_edit();
+            let (_scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Move)?;
+            {
+                let mut state = app
+                    .world_mut()
+                    .resource_mut::<crate::world_api::EditToolState>();
+                state.snap = snap;
+                state.grid_unit = 0.5;
+            }
+            settle(&mut app, 1);
+            let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+            let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+            drag_handle(&mut app, pivot, cone, PATH, 8)?;
+            let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+            if snap {
+                snapped_x = Some(after.position.x);
+            } else {
+                free_x = Some(after.position.x);
+            }
+        }
+        let snapped = snapped_x.ok_or("the snapped run never ran")?;
+        let free = free_x.ok_or("the free run never ran")?;
+        assert!(
+            (snapped - FIXTURE_AT.x).abs() > 0.1,
+            "the drag must have moved the prim at all (from {} to {snapped})",
+            FIXTURE_AT.x
+        );
+        assert!(
+            on_grid(snapped, 0.5),
+            "a drag past the snap ruler must land the prim on the half-metre grid, got {snapped}"
+        );
+        assert!(
+            !on_grid(free, 0.5),
+            "the same drag with snapping off must NOT land on the grid, got {free} — \
+             pick a drag distance whose free landing is off-grid, or the pair proves nothing"
+        );
+        Ok(())
+    }
+
+    /// **The grid frame decides which way a handle points**: the same
+    /// translate-X arrow moves the prim along the *world* X in
+    /// `GridFrame::World` and along the prim's *own* X — here world Z, the
+    /// prim standing on its side — in `GridFrame::Local`.
+    #[test]
+    fn the_grid_frame_decides_the_translate_axis() -> Result<(), TestError> {
+        for frame in [
+            crate::world_api::GridFrame::World,
+            crate::world_api::GridFrame::Local,
+        ] {
+            let mut app = super::world_app_with_edit();
+            // A quarter turn about the Second Life Y axis: the prim's own X
+            // now points along world -Z (down), well clear of the world X the
+            // world frame would use.
+            let mut object = super::fixture_prim(1, FIXTURE_AT, 0);
+            let half = core::f32::consts::FRAC_PI_4;
+            object.motion.rotation = sl_client_bevy::Rotation {
+                x: 0.0,
+                y: half.sin(),
+                z: 0.0,
+                s: half.cos(),
+            };
+            let (_scoped, entity) =
+                selected_fixture_object(&mut app, crate::world_api::EditTool::Move, object)?;
+            {
+                let mut state = app
+                    .world_mut()
+                    .resource_mut::<crate::world_api::EditToolState>();
+                state.frame = frame;
+                // Free dragging: the snap regime is the snapping pair's
+                // subject, not this one's.
+                state.snap = false;
+            }
+            settle(&mut app, 2);
+            let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+            // The frame's +X in Bevy space: world X, or (rotated) straight down.
+            let bevy_axis = match frame {
+                crate::world_api::GridFrame::Local => Vec3::NEG_Y,
+                _world => Vec3::X,
+            };
+            let cone = handle_toward(&mut app, "edit-gizmo:translate-x", pivot, bevy_axis)
+                .ok_or("no translate-x handle spawned")?;
+            let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+            drag_handle(&mut app, pivot, cone, (60.0, 0.0), 8)?;
+            let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+            let moved = Vec3::new(
+                after.position.x - before.position.x,
+                after.position.y - before.position.y,
+                after.position.z - before.position.z,
+            );
+            // Which Second Life axis the frame's X is: world X, or the turned
+            // prim's own X, which is world -Z.
+            let (wanted, others) = match frame {
+                crate::world_api::GridFrame::Local => (moved.z, moved.x.abs().max(moved.y.abs())),
+                _world => (moved.x, moved.y.abs().max(moved.z.abs())),
+            };
+            assert!(
+                wanted.abs() > 0.2,
+                "in {frame:?} the translate-X arrow must move the prim along that frame's X \
+                 (moved {moved:?})"
+            );
+            assert!(
+                others < 1e-3,
+                "in {frame:?} the translate-X arrow must move the prim along nothing else \
+                 (moved {moved:?})"
+            );
+        }
+        Ok(())
+    }
+
+    /// **A rotate ring turns the prim about its own axis, and only that**: a
+    /// drag along the Z ring's circle — inside the detent circle, so free —
+    /// turns the prim by exactly the angle swept, leaves its position alone,
+    /// and sends one update carrying a rotation but no scale.
+    #[test]
+    fn a_rotate_ring_drag_turns_the_prim_about_that_axis_alone() -> Result<(), TestError> {
+        /// How far around the ring the cursor travels, radians.
+        const SWEEP: f32 = 0.4;
+
+        let mut app = super::world_app_with_edit();
+        let (scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Rotate)?;
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .snap = false;
+        settle(&mut app, 2);
+
+        let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        let from = ring_point(&mut app, "edit-gizmo:rotate-z", 0.0, 1.0)
+            .ok_or("no rotate-z ring spawned")?;
+        let to = ring_point(&mut app, "edit-gizmo:rotate-z", SWEEP, 1.0)
+            .ok_or("no rotate-z ring spawned")?;
+        let from_at = world_to_viewport(&mut app, from).ok_or("the ring projects off screen")?;
+        let to_at = world_to_viewport(&mut app, to).ok_or("the ring projects off screen")?;
+        let _opening = drain_updates(&mut app);
+        interact::drag(&mut app, from_at, to_at, 8, MouseButton::Left);
+        settle(&mut app, 2);
+
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        let (angle, off_axis) = twist_about_z(&after.rotation);
+        assert!(
+            (angle.abs() - SWEEP.to_degrees()).abs() < 1.0,
+            "a ring drag turns by the angle the cursor swept ({}\u{b0} wanted, {angle}\u{b0} got)",
+            SWEEP.to_degrees()
+        );
+        assert!(
+            off_axis < 1e-3,
+            "the Z ring must not tilt the prim about X or Y (rotation {:?})",
+            after.rotation
+        );
+        assert!(
+            (after.position.x - before.position.x).abs() < 1e-3
+                && (after.position.y - before.position.y).abs() < 1e-3
+                && (after.position.z - before.position.z).abs() < 1e-3,
+            "turning a lone prim about its own centre must not move it \
+             (before {:?}, after {:?})",
+            before.position,
+            after.position
+        );
+
+        let updates = drain_updates(&mut app);
+        assert!(
+            updates.len() == 1,
+            "one ring drag sends exactly one update on release, got {}",
+            updates.len()
+        );
+        let (local_id, transform) = updates.first().ok_or("just asserted one")?;
+        assert!(
+            *local_id == scoped,
+            "the update must target the turned prim"
+        );
+        assert!(
+            transform.rotation.is_some()
+                && transform.position.is_some()
+                && transform.scale.is_none(),
+            "a rotate drag carries a rotation (and the pivot-relative position), never a scale \
+             (got {transform:?})"
+        );
+        Ok(())
+    }
+
+    /// **Outside the detent circle a rotation snaps**: the same ring drag,
+    /// pulled out past the tick circle, lands the prim on a multiple of the
+    /// reference's `5.625°` detent rather than on the angle swept.
+    #[test]
+    fn a_rotate_drag_past_the_detents_lands_on_one() -> Result<(), TestError> {
+        /// The angle the cursor sweeps: `22.9°`, whose nearest detent is the
+        /// fourth (`22.5°`) — far enough from it to tell the two apart.
+        const SWEEP: f32 = 0.4;
+        /// The reference's rotation detent, degrees.
+        const DETENT_DEG: f32 = 5.625;
+
+        let mut app = super::world_app_with_edit();
+        let (_scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Rotate)?;
+        {
+            let mut state = app
+                .world_mut()
+                .resource_mut::<crate::world_api::EditToolState>();
+            state.snap = true;
+        }
+        settle(&mut app, 2);
+
+        // Press ON the ring (the mesh is the pick target), release well
+        // outside the detent tick circle at `1.35` rig units.
+        let from = ring_point(&mut app, "edit-gizmo:rotate-z", 0.0, 1.0)
+            .ok_or("no rotate-z ring spawned")?;
+        let to = ring_point(&mut app, "edit-gizmo:rotate-z", SWEEP, 1.8)
+            .ok_or("no rotate-z ring spawned")?;
+        let from_at = world_to_viewport(&mut app, from).ok_or("the ring projects off screen")?;
+        let to_at = world_to_viewport(&mut app, to).ok_or("the ring projects off screen")?;
+        interact::drag(&mut app, from_at, to_at, 8, MouseButton::Left);
+        settle(&mut app, 2);
+
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        let (angle, _off_axis) = twist_about_z(&after.rotation);
+        assert!(
+            on_grid(angle, DETENT_DEG),
+            "a rotation dragged past the tick circle must land on a {DETENT_DEG}\u{b0} detent, \
+             got {angle}\u{b0}"
+        );
+        assert!(
+            (angle.abs() - SWEEP.to_degrees()).abs() > 0.1,
+            "…and the detent must be what decided it, not the swept angle ({}\u{b0} swept, \
+             {angle}\u{b0} landed)",
+            SWEEP.to_degrees()
+        );
+        Ok(())
+    }
+
+    /// **A stretch streams while it drags**: a long face drag sends the
+    /// reference's ~10 Hz `MultipleObjectUpdate`s along the way *and* a final
+    /// one on release, while a drag over in two frames sends only the release.
+    #[test]
+    fn a_stretch_drag_streams_updates_and_a_short_one_does_not() -> Result<(), TestError> {
+        let mut app = super::world_app_with_edit();
+        let (_scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Stretch)?;
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .snap = false;
+        settle(&mut app, 2);
+
+        // A drag that is over inside one stream interval: the release alone.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let handle = handle_toward(&mut app, "edit-gizmo:scale-face-x-pos", pivot, Vec3::X)
+            .ok_or("no +X stretch face handle spawned")?;
+        let _opening = drain_updates(&mut app);
+        drag_handle(&mut app, pivot, handle, (30.0, 0.0), 2)?;
+        let short = drain_updates(&mut app);
+        assert!(
+            short.len() == 1,
+            "a stretch that is over within one stream interval sends only its release update, \
+             got {}",
+            short.len()
+        );
+
+        // A long one: the fixture clock steps 16 ms a frame, so thirty frames
+        // span four of the reference's 100 ms intervals.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let handle = handle_toward(&mut app, "edit-gizmo:scale-face-x-pos", pivot, Vec3::X)
+            .ok_or("no +X stretch face handle spawned")?;
+        let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        drag_handle(&mut app, pivot, handle, (60.0, 0.0), 30)?;
+        let streamed = drain_updates(&mut app);
+        assert!(
+            streamed.len() >= 3,
+            "a thirty-frame stretch must stream updates as it goes, got {}",
+            streamed.len()
+        );
+        assert!(
+            streamed
+                .iter()
+                .all(|(_id, transform)| transform.scale.is_some() && transform.rotation.is_none()),
+            "every streamed stretch update carries the scale and no rotation (got {streamed:?})"
+        );
+        assert!(
+            streamed.iter().all(|(_id, transform)| !transform.uniform),
+            "a FACE stretch never sets the uniform bit — the simulator could take it as licence \
+             to scale every axis (got {streamed:?})"
+        );
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        assert!(
+            after.scale.x - before.scale.x > 0.1,
+            "the stretch must have grown the prim on X (before {:?}, after {:?})",
+            before.scale,
+            after.scale
+        );
+        assert!(
+            streamed.last().is_some_and(|(_id, transform)| transform
+                .scale
+                .as_ref()
+                .is_some_and(|scale| { (scale.x - after.scale.x).abs() < 1e-4 })),
+            "the release update carries the size the prim ended at"
+        );
+        Ok(())
+    }
+
+    /// **A corner stretch scales every axis by one factor**: the diagonal
+    /// handle grows the prim's three sizes in the same proportion — the
+    /// reference's shared factor, which is what keeps a selection's shape — and
+    /// with stretch-both-sides on the update carries the `UNIFORM` bit that a
+    /// face drag never sets.
+    #[test]
+    fn a_corner_stretch_scales_every_axis_by_one_factor() -> Result<(), TestError> {
+        let mut app = super::world_app_with_edit();
+        let (_scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Stretch)?;
+        {
+            let mut state = app
+                .world_mut()
+                .resource_mut::<crate::world_api::EditToolState>();
+            state.snap = false;
+            state.stretch_both = true;
+        }
+        settle(&mut app, 2);
+
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        // The +X+Y+Z corner cube: the one part of the rig with that address.
+        let handle = handle_toward(&mut app, "edit-gizmo:scale-corner-ppp", pivot, Vec3::ONE)
+            .ok_or("no +++ stretch corner handle spawned")?;
+        let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        let _opening = drain_updates(&mut app);
+        drag_handle(&mut app, pivot, handle, (40.0, 0.0), 8)?;
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+
+        let factor = after.scale.x / before.scale.x;
+        assert!(
+            factor > 1.05,
+            "dragging the corner outward must grow the prim (before {:?}, after {:?})",
+            before.scale,
+            after.scale
+        );
+        for (grown, started) in [
+            (after.scale.y, before.scale.y),
+            (after.scale.z, before.scale.z),
+        ] {
+            assert!(
+                (grown / started - factor).abs() < 1e-3,
+                "every axis grows by the SAME factor ({factor} on X, {} here — before {:?}, \
+                 after {:?})",
+                grown / started,
+                before.scale,
+                after.scale
+            );
+        }
+        let updates = drain_updates(&mut app);
+        assert!(
+            updates
+                .iter()
+                .all(|(_id, transform)| transform.scale.is_some() && transform.uniform),
+            "a corner stretch with stretch-both-sides on is the one drag that sets the uniform \
+             bit (got {updates:?})"
+        );
+        Ok(())
+    }
+
+    /// **Stretch both sides doubles the size change and holds the centre**: the
+    /// same face drag grows the prim twice as much with
+    /// `EditToolState::stretch_both` on, and leaves its position alone
+    /// instead of shifting it half the growth (the opposite face stays put
+    /// otherwise).
+    #[test]
+    fn stretch_both_sides_doubles_the_size_and_holds_the_centre() -> Result<(), TestError> {
+        let mut grown = Vec::new();
+        let mut shifted = Vec::new();
+        for stretch_both in [false, true] {
+            let mut app = super::world_app_with_edit();
+            let (_scoped, entity) =
+                selected_fixture(&mut app, crate::world_api::EditTool::Stretch)?;
+            {
+                let mut state = app
+                    .world_mut()
+                    .resource_mut::<crate::world_api::EditToolState>();
+                state.snap = false;
+                state.stretch_both = stretch_both;
+            }
+            settle(&mut app, 2);
+            let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+            let handle = handle_toward(&mut app, "edit-gizmo:scale-face-x-pos", pivot, Vec3::X)
+                .ok_or("no +X stretch face handle spawned")?;
+            let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+            drag_handle(&mut app, pivot, handle, (60.0, 0.0), 8)?;
+            let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+            grown.push(after.scale.x - before.scale.x);
+            shifted.push((after.position.x - before.position.x).abs());
+        }
+        let (single, both) = (
+            *grown.first().ok_or("the one-sided run never ran")?,
+            *grown.get(1).ok_or("the both-sides run never ran")?,
+        );
+        assert!(
+            single > 0.1,
+            "the one-sided stretch must have grown the prim at all, got {single}"
+        );
+        assert!(
+            (both - single * 2.0).abs() < single * 0.05,
+            "stretch-both-sides moves both faces, so the same cursor travel changes the size \
+             twice as much (one-sided {single}, both {both})"
+        );
+        let (single_shift, both_shift) = (
+            *shifted.first().ok_or("the one-sided run never ran")?,
+            *shifted.get(1).ok_or("the both-sides run never ran")?,
+        );
+        assert!(
+            (single_shift - single * 0.5).abs() < 1e-3,
+            "a one-sided stretch pins the opposite face: the centre shifts half the growth \
+             (grew {single}, shifted {single_shift})"
+        );
+        assert!(
+            both_shift < 1e-3,
+            "stretching both sides leaves the centre where it was, got a shift of {both_shift}"
+        );
+        Ok(())
+    }
+
+    /// **A Shift-drag leaves exactly one copy behind**: the reference's
+    /// `MASK_COPY` translate branch — one `ObjectDuplicate` at zero offset, on
+    /// the drag's first movement and never again, while the original follows
+    /// the cursor. The same drag without `Shift` copies nothing.
+    #[test]
+    fn a_shift_drag_leaves_exactly_one_copy_behind() -> Result<(), TestError> {
+        use bevy::input::keyboard::Key;
+
+        let mut app = super::world_app_with_edit();
+        let (scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Move)?;
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .snap = false;
+        settle(&mut app, 2);
+
+        // A plain drag first: it copies nothing.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+        drag_handle(&mut app, pivot, cone, (50.0, 0.0), 8)?;
+        let plain = drain_duplicates(&mut app);
+        assert!(
+            plain.is_empty(),
+            "a drag with no modifier must leave no copy behind, got {plain:?}"
+        );
+
+        // …and the same drag with `Shift` held.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+        let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        let mut dragged = Ok(());
+        interact::with_modifier(&mut app, KeyCode::ShiftLeft, Key::Shift, |app| {
+            dragged = drag_handle(app, pivot, cone, (50.0, 0.0), 8);
+        });
+        dragged?;
+        settle(&mut app, 2);
+
+        let copies = drain_duplicates(&mut app);
+        assert!(
+            copies.len() == 1,
+            "a Shift-drag leaves exactly one copy behind, got {copies:?}"
+        );
+        let (local_ids, offset) = copies.first().ok_or("just asserted one")?;
+        assert!(
+            local_ids == &vec![scoped],
+            "the copy is of the dragged linkset root (got {local_ids:?})"
+        );
+        assert!(
+            offset.x.abs() < 1e-6 && offset.y.abs() < 1e-6 && offset.z.abs() < 1e-6,
+            "the copy is dropped in place — the original is what moved (offset {offset:?})"
+        );
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        assert!(
+            (after.position.x - before.position.x).abs() > 0.1,
+            "the original still follows the cursor (before {:?}, after {:?})",
+            before.position,
+            after.position
+        );
+        Ok(())
+    }
+
+    /// **`Alt` yields the pointer to the camera**: with `Alt` held the gizmo
+    /// never even hovers, so a press on a handle starts no drag — the prim
+    /// stands still and nothing reaches the wire.
+    ///
+    /// The plain drag first is the control: without it, a fixture whose
+    /// manipulator was never grabbable at all would pass this silently.
+    #[test]
+    fn alt_held_yields_the_pointer_to_the_camera() -> Result<(), TestError> {
+        use bevy::input::keyboard::Key;
+
+        let mut app = super::world_app_with_edit();
+        let (_scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Move)?;
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .snap = false;
+        settle(&mut app, 2);
+
+        // The control: the same drag, no modifier, does move the prim.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+        let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        drag_handle(&mut app, pivot, cone, (60.0, 0.0), 8)?;
+        let control = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        assert!(
+            (control.position.x - before.position.x).abs() > 0.1,
+            "this handle IS grabbable without a modifier — otherwise the Alt case below \
+             proves nothing (before {:?}, after {:?})",
+            before.position,
+            control.position
+        );
+        let _control_updates = drain_updates(&mut app);
+
+        // …and with `Alt` held it is the camera's.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+        let mut dragged = Ok(());
+        interact::with_modifier(&mut app, KeyCode::AltLeft, Key::Alt, |app| {
+            dragged = drag_handle(app, pivot, cone, (60.0, 0.0), 8);
+        });
+        dragged?;
+        settle(&mut app, 2);
+
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        assert!(
+            (after.position.x - control.position.x).abs() < 1e-4,
+            "an Alt-drag belongs to the camera: the prim must not move \
+             (before {:?}, after {:?})",
+            control.position,
+            after.position
+        );
+        let updates = drain_updates(&mut app);
+        assert!(
+            updates.is_empty(),
+            "an Alt-drag on a handle sends no object update, got {updates:?}"
+        );
+        Ok(())
+    }
+
+    /// **A press over blocking UI never begins a drag**: with a real panel
+    /// under the cursor the manipulator does not hover, so the same press that
+    /// would have grabbed the +X arrow does nothing to the prim — the guard
+    /// that keeps a click on a floater over the gizmo from dragging the world
+    /// behind it.
+    ///
+    /// The bare-world drag first is the control: in a fixture world carrying a
+    /// whole UI, "the prim did not move" is exactly what a broken pick would
+    /// also say.
+    #[test]
+    fn a_press_over_blocking_ui_never_begins_a_drag() -> Result<(), TestError> {
+        let mut app = super::world_app_with_ui_and_edit()?;
+        let (_scoped, entity) = selected_fixture(&mut app, crate::world_api::EditTool::Move)?;
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .snap = false;
+        settle(&mut app, 2);
+
+        // The control: with nothing over it, the handle drags.
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+        let opening = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        drag_handle(&mut app, pivot, cone, (60.0, 0.0), 8)?;
+        let before = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        assert!(
+            (before.position.x - opening.position.x).abs() > 0.1,
+            "this handle IS grabbable with the UI standing but nothing over the cursor — \
+             otherwise the blocked case below proves nothing (before {:?}, after {:?})",
+            opening.position,
+            before.position
+        );
+        let _control_updates = drain_updates(&mut app);
+        let pivot = pivot_of(&app, entity).ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+
+        // A panel over the whole viewport — a floater the user has parked over
+        // the manipulator. Spawned after the selection, which had to reach the
+        // world to put a rig on screen at all.
+        app.world_mut().spawn((
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(0.0),
+                top: Val::Px(0.0),
+                width: Val::Percent(100.0),
+                height: Val::Percent(100.0),
+                ..Default::default()
+            },
+            Name::new("blocking-panel"),
+        ));
+        settle(&mut app, 3);
+
+        drag_handle(&mut app, pivot, cone, (60.0, 0.0), 8)?;
+        let after = motion_of(&app, entity).ok_or("the prim has no motion")?;
+        assert!(
+            (after.position.x - before.position.x).abs() < 1e-4,
+            "a press that landed on a UI panel must not drag the prim behind it \
+             (before {:?}, after {:?})",
+            before.position,
+            after.position
+        );
+        let updates = drain_updates(&mut app);
+        assert!(
+            updates.is_empty(),
+            "a press over blocking UI sends no object update, got {updates:?}"
+        );
+        Ok(())
     }
 
     /// Enter build mode: the selection gesture bails on an inactive tool before
