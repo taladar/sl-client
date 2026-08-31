@@ -2165,6 +2165,7 @@ mod tests {
         PieGeometry, PieMenu, PieMenuDef, PiePlacement, SlotOutcome, addresses, clamp_centre,
         pack_slot_states, pick, register_pie_layout, resolve_slots, ui_offset,
     };
+    use crate::ui_test::baseline::{self, Facts};
     use crate::ui_test::interact::{self, InteractionTest};
     use crate::ui_test::{
         LayoutTest, drain_actions, enable_action_recording, find_by_name, layout_violations, settle,
@@ -3619,5 +3620,109 @@ mod tests {
         assert_eq!(nibble(Compass::South), Some(3), "Manage is a sub-pie");
         assert_eq!(nibble(Compass::West), Some(2), "Edit has no condition held");
         assert_eq!(nibble(Compass::NorthEast), Some(0), "north-east is empty");
+    }
+
+    // -----------------------------------------------------------------------
+    // The baseline tier: the angle a hand has learned, as the layout actually
+    // produced it.
+    // -----------------------------------------------------------------------
+
+    /// The crate a pie baseline is filed under.
+    const BASELINE_CRATE: &str = "sl-viewer-ui-pie-menu";
+
+    /// The tier a pie baseline is filed under.
+    const BASELINE_TIER: &str = "ui";
+
+    /// Every baselined subject in this crate's `ui` tier — the orphan sweep's
+    /// known-list.
+    const BASELINED: &[&str] = &[FIXTURE_PIE_SUBJECT];
+
+    /// The fixture pie's baseline subject.
+    const FIXTURE_PIE_SUBJECT: &str = "fixture-pie";
+
+    /// How far a recorded angle may move, in degrees.
+    ///
+    /// A label is *placed* exactly on its compass direction, but it is measured
+    /// back through a laid-out box whose edges `bevy_ui` rounds to whole pixels —
+    /// and the box's size is its measured text, so how the rounding falls depends
+    /// on the machine's fonts. Half a pixel on each axis at the **smallest** label
+    /// ring (66 px, and it only ever grows) is 0.62°, so a degree admits the
+    /// rounding and nothing else: it is a fortieth of a slice, far under anything
+    /// a hand could feel and far over anything a font can move.
+    const DEGREE_TOLERANCE: f64 = 1.0;
+
+    /// How far a recorded radius may move, in logical pixels.
+    const PIXEL_TOLERANCE: f64 = 0.5;
+
+    /// **The measured angles, pinned.**
+    ///
+    /// [`every_action_keeps_its_declared_address`] pins *which* compass point an
+    /// action sits at — the declaration. This pins where the compass point
+    /// itself came out **after real layout**: the angle from the pie's centre to
+    /// the label a user is looking at. The two failures are different. An action
+    /// that moves from north to east is a changed declaration; a north label that
+    /// lands at 87° is a changed *placement*, with every declaration intact — a
+    /// flipped y, a mirrored direction, a re-derived `screen_direction`. The
+    /// existing placement checks only ask for the sign ("north is above the
+    /// ring"), which the whole ring being rotated a slice would satisfy.
+    ///
+    /// The radii are deliberately **not** recorded: the ring grows to fit the
+    /// measured labels, so a radius is a fact about the machine's fonts and would
+    /// make this file a font-version detector. The dead zone is a constant, so it
+    /// is recorded.
+    #[test]
+    fn the_fixture_pie_keeps_its_measured_angles() -> Result<(), TestError> {
+        let mut app = pointer_pie_app()?;
+        // The **root's** centre, not the ring node's: a label is placed relative
+        // to the root's own square (`fit_pie_layout` offsets by `geometry.outer`
+        // on both axes), so measuring from anything else folds that node's own
+        // sub-pixel inset into the angle — which is a fact about a font's
+        // measured extents, not about the compass.
+        let centre = centre_of(&mut app, "pie-menu")?;
+        let mut facts = Facts::new();
+        let mut occupied: Vec<&'static str> = Vec::new();
+        for point in Compass::ALL {
+            let name = format!("pie-label:{}", point.name());
+            let Some(label) = find_by_name(&mut app, &name) else {
+                continue;
+            };
+            let at = app
+                .world()
+                .get::<UiGlobalTransform>(label)
+                .ok_or("a spawned label has not been laid out")?
+                .translation;
+            occupied.push(point.name());
+            // Into the y-up frame the compass is stated in, so the recorded
+            // number is the angle the widget's own maths uses rather than a
+            // screen-space one a reader has to flip in their head.
+            let offset = ui_offset(Vec2::new(at.x - centre.x, at.y - centre.y));
+            let degrees = offset.to_angle().to_degrees().rem_euclid(360.0);
+            facts.float(
+                &format!("label.{}.angle-deg", point.name()),
+                degrees,
+                DEGREE_TOLERANCE,
+            );
+        }
+        facts.text("slots.occupied", occupied.join(" "));
+        let pie = find_by_name(&mut app, "pie-menu").ok_or("the pie did not open")?;
+        let geometry = app
+            .world()
+            .get::<PieGeometry>(pie)
+            .ok_or("the pie lost its geometry")?;
+        facts.float("geometry.dead-zone-px", geometry.dead_zone, PIXEL_TOLERANCE);
+        baseline::check_subject(BASELINE_CRATE, BASELINE_TIER, FIXTURE_PIE_SUBJECT, facts)?;
+        Ok(())
+    }
+
+    /// No baseline file outlives its subject.
+    #[test]
+    fn no_pie_baseline_is_an_orphan() -> Result<(), TestError> {
+        assert_eq!(
+            baseline::orphans(BASELINE_CRATE, BASELINE_TIER, BASELINED)?,
+            Vec::<String>::new(),
+            "a committed baseline names a subject nothing baselines any more — delete the file, \
+             or put the subject back in `BASELINED`"
+        );
+        Ok(())
     }
 }

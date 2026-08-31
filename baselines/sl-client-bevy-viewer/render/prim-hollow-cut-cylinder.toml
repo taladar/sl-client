@@ -1,0 +1,31 @@
+schema = 1
+blessed_describe = "6e76be10-dirty"
+blessed_at_unix = 1788176663
+
+[facts]
+"lod.high.triangles" = 876
+"lod.high.vertices" = 676
+"lod.low.triangles" = 60
+"lod.low.vertices" = 72
+"lod.lowest.triangles" = 44
+"lod.lowest.vertices" = 56
+"lod.medium.triangles" = 296
+"lod.medium.vertices" = 262
+renderables = 6
+
+[facts."bounds.max"]
+x = 0.5
+y = 0.5
+z = 0.5
+tolerance = 0.001
+
+[facts."bounds.min"]
+x = -0.5
+y = -0.5
+z = -0.5
+tolerance = 0.001
+
+[facts."framing.centre-pixel"]
+x = 128.0
+y = 127.999985
+tolerance = 0.5

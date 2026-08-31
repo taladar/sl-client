@@ -53,7 +53,12 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   held). A capture taken before the scene settles is a flake, not a test.
 - `sl-viewer-testkit/src/baseline.rs` — the one baseline format for UI
   and render facts (`baselines/<crate>/<tier>/<id>.toml`, bless with
-  `SL_VIEWER_BLESS_BASELINES=1`).
+  `SL_VIEWER_BLESS_BASELINES=1`). A tier keeps its own opt-in list of
+  baselined subjects, each with a reason, and asserts
+  `baseline::orphans(krate, tier, &known)` is empty so a recording cannot
+  outlive its subject. Record only what does not depend on the machine: a
+  pie label's angle is the widget's maths, its radius is the font's
+  metrics.
 
 ## Rules every check follows
 

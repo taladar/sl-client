@@ -1,0 +1,17 @@
+schema = 1
+blessed_describe = "6e76be10-dirty"
+blessed_at_unix = 1788175143
+
+[facts]
+count = 24
+name = "box"
+
+[facts.angle]
+value = 45.0
+tolerance = 0.5
+
+[facts.extent]
+x = 1.0
+y = 2.0
+z = 3.0
+tolerance = 0.01

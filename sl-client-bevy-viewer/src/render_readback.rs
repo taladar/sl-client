@@ -156,6 +156,13 @@ const fn row_to_f32(row: u32) -> f32 {
 /// paid over and over.
 const FRAME: u32 = 256;
 
+/// The same frame side as a `u16`, which is the width a pixel coordinate
+/// converts from **losslessly** — the form [`crate::render_test::framing_pixel`]
+/// projects into. `u32::from` is not a `const` call yet, so this is a second
+/// literal rather than a conversion, and
+/// `tests::the_two_spellings_of_the_frame_size_agree` holds the two together.
+pub(crate) const FRAME_SIDE: u16 = 256;
+
 /// The manual per-frame timestep while the clock runs: `globals.time` — what the
 /// water, flipbook and particle shaders read — advances by exactly this per
 /// `update`, never by the wall clock, so what a frame shows depends on how many
@@ -669,6 +676,66 @@ mod tests {
     use crate::render_test::{TestError, capture_logs};
     use bevy::prelude::*;
     use pretty_assertions::assert_eq;
+
+    /// The frame's two spellings are the same number.
+    #[test]
+    fn the_two_spellings_of_the_frame_size_agree() {
+        assert_eq!(
+            u32::from(super::FRAME_SIDE),
+            FRAME,
+            "the CPU projection would map onto a different frame from the one the rig renders"
+        );
+    }
+
+    /// **The CPU framing projection is the camera that actually drew the frame.**
+    ///
+    /// [`crate::render_test::framing_pixel`] reproduces this rig's camera without
+    /// a renderer, so the render tier can *record* where a subject's centre lands
+    /// in the picture — a baseline fact that costs no GPU. That is only worth
+    /// anything while the reproduction is faithful, and it is a reproduction:
+    /// a changed basis, pose or projection here would leave the recorded pixels
+    /// looking perfectly stable while the picture moved.
+    ///
+    /// So the two are held to each other on any machine that can render, at points
+    /// spread across the frame rather than at the centre alone — a centre-only
+    /// check passes under a wrong field of view.
+    ///
+    /// Skips when no frame came back (no GPU adapter).
+    #[test]
+    fn the_cpu_framing_projection_agrees_with_the_rendered_camera() -> Result<(), TestError> {
+        let scene = SCENES
+            .iter()
+            .find(|scene| scene.id == "prim-box")
+            .ok_or("the `prim-box` scene is not registered")?;
+        // Bevy world space, spread over the frame: the origin the camera aims at,
+        // and four points off it on each axis.
+        let points = [
+            Vec3::ZERO,
+            Vec3::new(0.4, 0.0, 0.0),
+            Vec3::new(-0.4, 0.0, 0.0),
+            Vec3::new(0.0, 0.4, 0.0),
+            Vec3::new(0.0, 0.0, 0.4),
+        ];
+        let Some((_frame, projected)) = capture(scene, SceneCx::new(), &points) else {
+            return Ok(());
+        };
+        for (index, point) in points.iter().enumerate() {
+            let rendered = projected
+                .get(index)
+                .ok_or("the rig's own camera put a test point off the frame")?;
+            let cpu = crate::render_test::framing_pixel(scene.camera, *point)
+                .ok_or("the CPU projection put a test point off the frame")?;
+            let dx = (rendered.x - cpu.x).abs();
+            let dy = (rendered.y - cpu.y).abs();
+            assert!(
+                dx < 0.5 && dy < 0.5,
+                "the CPU projection of {point:?} lands at {cpu} where the camera that drew the \
+                 frame puts it at {rendered} — the reproduction has drifted from the rig, so \
+                 every recorded framing pixel is measuring something else"
+            );
+        }
+        Ok(())
+    }
 
     /// **Each neighbour's reflection lands on the mirror's own side of it.**
     ///

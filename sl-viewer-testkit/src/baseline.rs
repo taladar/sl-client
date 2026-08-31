@@ -19,8 +19,9 @@
 //! reading.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use bevy::math::{Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 
 /// The environment variable that rewrites every checked baseline instead of
@@ -29,6 +30,139 @@ pub const BLESS_ENV: &str = "SL_VIEWER_BLESS_BASELINES";
 
 /// The file format's version, for a future migration to name.
 const SCHEMA: u32 = 1;
+
+/// The directory every baseline lives in, under the workspace root.
+const BASELINE_DIR: &str = "baselines";
+
+/// The workspace root, resolved at compile time from this crate's own manifest
+/// directory.
+///
+/// This crate is a **direct member** of the workspace root, so its parent is the
+/// root — and a baseline path has to be absolute, because a test's working
+/// directory is the crate the test lives in, not the workspace. The assumption
+/// is held to the tree by a test of its own rather than left as a comment; see
+/// `the_resolved_workspace_root_is_the_workspace_root`.
+const WORKSPACE_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/..");
+
+/// Where the baseline for one subject lives: `baselines/<crate>/<tier>/<id>.toml`
+/// under the workspace root.
+///
+/// One file per subject rather than one file per tier, so two subjects moving in
+/// two commits never conflict, and so a review diff names the subject in the file
+/// path.
+#[must_use]
+pub fn subject_path(krate: &str, tier: &str, id: &str) -> PathBuf {
+    PathBuf::from(WORKSPACE_ROOT)
+        .join(BASELINE_DIR)
+        .join(krate)
+        .join(tier)
+        .join(format!("{id}.toml"))
+}
+
+/// The facts one run measured, keyed by name.
+///
+/// A builder rather than a bare map because a subject records a dozen facts and
+/// each one is a `(name, Fact)` pair the caller would otherwise spell out in
+/// full; the recording code should read as the list of facts it is, not as map
+/// insertions.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Facts {
+    /// The facts so far, sorted by name — the order they are written in.
+    facts: BTreeMap<String, Fact>,
+}
+
+/// How many decimals a recorded number keeps.
+///
+/// The file is a *reviewed record* compared within a tolerance, not a bit-exact
+/// dump: widening a measured `f32` to `f64` writes `0.42309999465942383` where
+/// the measurement was `0.4231`, and a reviewer reading a diff of those learns
+/// nothing the sixth decimal did not already say. Six decimals is a micrometre
+/// on a metre and a micro-degree on an angle — far under every tolerance any
+/// fact here is compared at.
+const ROUNDING: f64 = 1.0e6;
+
+/// A measured number, rounded to [`ROUNDING`].
+fn rounded(value: f32) -> f64 {
+    (f64::from(value) * ROUNDING).round() / ROUNDING
+}
+
+impl Facts {
+    /// An empty set.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a count, an index or an ordinal.
+    pub fn int(&mut self, key: &str, value: i64) -> &mut Self {
+        self.facts.insert(key.to_owned(), Fact::Int(value));
+        self
+    }
+
+    /// Record a name, an order or a symbolic state.
+    pub fn text(&mut self, key: &str, value: impl Into<String>) -> &mut Self {
+        self.facts.insert(key.to_owned(), Fact::Text(value.into()));
+        self
+    }
+
+    /// Record a measurement, compared within `tolerance`.
+    pub fn float(&mut self, key: &str, value: f32, tolerance: f64) -> &mut Self {
+        self.facts.insert(
+            key.to_owned(),
+            Fact::Float {
+                value: rounded(value),
+                tolerance,
+            },
+        );
+        self
+    }
+
+    /// Record a two-dimensional point or extent, compared per component.
+    pub fn vec2(&mut self, key: &str, value: Vec2, tolerance: f64) -> &mut Self {
+        self.facts.insert(
+            key.to_owned(),
+            Fact::Vec2 {
+                x: rounded(value.x),
+                y: rounded(value.y),
+                tolerance,
+            },
+        );
+        self
+    }
+
+    /// Record a three-dimensional point or extent, compared per component.
+    pub fn vec3(&mut self, key: &str, value: Vec3, tolerance: f64) -> &mut Self {
+        self.facts.insert(
+            key.to_owned(),
+            Fact::Vec3 {
+                x: rounded(value.x),
+                y: rounded(value.y),
+                z: rounded(value.z),
+                tolerance,
+            },
+        );
+        self
+    }
+
+    /// How many facts have been recorded.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.facts.len()
+    }
+
+    /// Whether nothing has been recorded — a subject that measured nothing is a
+    /// baseline that would compare nothing.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.facts.is_empty()
+    }
+
+    /// The recorded facts, by name.
+    #[must_use]
+    pub fn into_map(self) -> BTreeMap<String, Fact> {
+        self.facts
+    }
+}
 
 /// One recorded fact. Floats carry the tolerance they are compared at, so the
 /// file says how exact each number is meant to be.
@@ -258,7 +392,8 @@ impl core::error::Error for BaselineError {}
 /// A missing file is an error naming the bless command (never an implicit
 /// bless), an unreadable file is an error, and any drift is an error listing
 /// every moved fact.
-pub fn check(path: &Path, current: BTreeMap<String, Fact>) -> Result<(), BaselineError> {
+pub fn check(path: &Path, current: Facts) -> Result<(), BaselineError> {
+    let current = current.into_map();
     if std::env::var_os(BLESS_ENV).is_some() {
         return bless(path, current);
     }
@@ -288,6 +423,79 @@ pub fn check(path: &Path, current: BTreeMap<String, Fact>) -> Result<(), Baselin
             drifts,
         })
     }
+}
+
+/// Compare one subject's facts against [`subject_path`], or — with [`BLESS_ENV`]
+/// set — rewrite it.
+///
+/// The call every baselined subject makes: it names the crate, the tier and the
+/// subject rather than a path, so no caller spells the layout out and the layout
+/// stays changeable in one place.
+///
+/// # Errors
+///
+/// As [`check`].
+pub fn check_subject(
+    krate: &str,
+    tier: &str,
+    id: &str,
+    current: Facts,
+) -> Result<(), BaselineError> {
+    check(&subject_path(krate, tier, id), current)
+}
+
+/// The baseline files in `baselines/<crate>/<tier>/` whose subject is not in
+/// `known` — a recording for something that no longer exists.
+///
+/// The failure this catches is quiet and one-directional: a subject that is
+/// *renamed or removed* leaves its file behind, no check reads it any more, and
+/// the tree accumulates recordings of things that are gone — while every check
+/// stays green. A missing directory is no orphans (nothing is baselined yet), so
+/// a tier can adopt baselines without its orphan test having to know first.
+///
+/// Ids come back sorted, so a failure message is stable.
+///
+/// # Errors
+///
+/// If the directory exists but cannot be read.
+pub fn orphans(krate: &str, tier: &str, known: &[&str]) -> Result<Vec<String>, BaselineError> {
+    let dir = PathBuf::from(WORKSPACE_ROOT)
+        .join(BASELINE_DIR)
+        .join(krate)
+        .join(tier);
+    let entries = match fs_err::read_dir(&dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => {
+            return Err(BaselineError::Unreadable {
+                path: dir.display().to_string(),
+                reason: error.to_string(),
+            });
+        }
+    };
+    let mut orphans = Vec::new();
+    for entry in entries {
+        let path = entry
+            .map_err(|error| BaselineError::Unreadable {
+                path: dir.display().to_string(),
+                reason: error.to_string(),
+            })?
+            .path();
+        if path.extension().is_none_or(|extension| extension != "toml") {
+            continue;
+        }
+        let Some(id) = path
+            .file_stem()
+            .map(|stem| stem.to_string_lossy().to_string())
+        else {
+            continue;
+        };
+        if !known.contains(&id.as_str()) {
+            orphans.push(id);
+        }
+    }
+    orphans.sort();
+    Ok(orphans)
 }
 
 /// Write `current` to `path` as a fresh baseline, stamped with the tree's
@@ -339,7 +547,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
 
-    use super::{Baseline, BaselineError, Fact, compare};
+    use super::{Baseline, BaselineError, Fact, Facts, compare};
 
     type TestError = Box<dyn core::error::Error>;
 
@@ -430,14 +638,147 @@ mod tests {
 
     #[test]
     fn a_missing_file_names_the_bless_command() -> Result<(), TestError> {
+        if std::env::var_os(super::BLESS_ENV).is_some() {
+            // Blessing writes rather than compares, and this path is deliberately
+            // unwritable, so under a bless run there is no missing-file error to
+            // assert — only a failed write.
+            return Ok(());
+        }
         let path = PathBuf::from("/nonexistent/sl-viewer-testkit/baseline.toml");
-        let Err(error @ BaselineError::Missing { .. }) =
-            super::check(&path, facts(&[("count", Fact::Int(1))]))
-        else {
+        let mut current = Facts::new();
+        current.int("count", 1);
+        let Err(error @ BaselineError::Missing { .. }) = super::check(&path, current) else {
             return Err("expected a missing-baseline error".into());
         };
         let message = error.to_string();
         assert!(message.contains(super::BLESS_ENV), "{message}");
+        Ok(())
+    }
+
+    /// The builder writes exactly the facts it was handed, sorted.
+    #[test]
+    fn the_builder_records_every_kind() {
+        let mut built = Facts::new();
+        built
+            .int("count", 24)
+            .text("name", "box")
+            .float("angle", 45.0, 0.5)
+            .vec2("at", bevy::math::Vec2::new(1.0, 2.0), 0.1)
+            .vec3("extent", bevy::math::Vec3::new(1.0, 2.0, 3.0), 0.1);
+        let keys: Vec<String> = built.clone().into_map().into_keys().collect();
+        assert_eq!(keys, vec!["angle", "at", "count", "extent", "name"]);
+        assert_eq!(built.len(), 5);
+        assert!(!built.is_empty());
+    }
+
+    /// The compile-time workspace root really is the workspace root.
+    ///
+    /// [`super::WORKSPACE_ROOT`] is this crate's manifest directory with a `..`
+    /// on the end, which holds only while this crate is a **direct member** of
+    /// the workspace. Move it into a subdirectory and every baseline path
+    /// silently points somewhere else, which would read as "every baseline is
+    /// missing" — so the assumption is a test, not a comment.
+    #[test]
+    fn the_resolved_workspace_root_is_the_workspace_root() -> Result<(), TestError> {
+        let manifest = PathBuf::from(super::WORKSPACE_ROOT).join("Cargo.toml");
+        let text = fs_err::read_to_string(&manifest)?;
+        assert!(
+            text.contains("[workspace]"),
+            "{} is not the workspace manifest",
+            manifest.display()
+        );
+        Ok(())
+    }
+
+    /// A subject's path is `baselines/<crate>/<tier>/<id>.toml`.
+    #[test]
+    fn a_subject_path_is_crate_then_tier_then_id() {
+        let path = super::subject_path("sl-client-bevy-viewer", "render", "prim-box");
+        let tail: PathBuf = path
+            .components()
+            .rev()
+            .take(4)
+            .collect::<Vec<_>>()
+            .into_iter()
+            .rev()
+            .collect();
+        assert_eq!(
+            tail,
+            PathBuf::from("baselines/sl-client-bevy-viewer/render/prim-box.toml")
+        );
+    }
+
+    /// The crate, the tier and the id the committed self-test fixture is
+    /// recorded under.
+    const SELF_TEST: (&str, &str, &str) = ("sl-viewer-testkit", "self-test", "known-subject");
+
+    /// The facts the committed self-test fixture records.
+    ///
+    /// Constants rather than a measurement, because the subject under test here
+    /// is the *mechanism* — path, read, compare — and a fixture that measured
+    /// something real would fail for the measurement's reasons instead.
+    fn self_test_facts() -> Facts {
+        let mut facts = Facts::new();
+        facts
+            .int("count", 24)
+            .text("name", "box")
+            .float("angle", 45.0, 0.5)
+            .vec3("extent", bevy::math::Vec3::new(1.0, 2.0, 3.0), 0.01);
+        facts
+    }
+
+    /// **The whole chain, against a committed file.** The layout resolves, the
+    /// file parses, and the facts match.
+    #[test]
+    fn the_committed_self_test_fixture_still_matches() -> Result<(), TestError> {
+        let (krate, tier, id) = SELF_TEST;
+        super::check_subject(krate, tier, id, self_test_facts())?;
+        Ok(())
+    }
+
+    /// A drifted fact against the committed file is reported, and the message
+    /// names the bless command.
+    #[test]
+    fn a_drift_against_the_committed_fixture_is_reported() -> Result<(), TestError> {
+        if std::env::var_os(super::BLESS_ENV).is_some() {
+            // Blessing rewrites rather than compares, so there is nothing to
+            // report — and rewriting the fixture with the *drifted* facts would
+            // corrupt it for every other test.
+            return Ok(());
+        }
+        let (krate, tier, id) = SELF_TEST;
+        let mut drifted = self_test_facts();
+        drifted.int("count", 25);
+        let Err(error @ BaselineError::Drifted { .. }) =
+            super::check_subject(krate, tier, id, drifted)
+        else {
+            return Err("a moved count must be reported as drift".into());
+        };
+        let message = error.to_string();
+        assert!(message.contains("count"), "{message}");
+        assert!(message.contains(super::BLESS_ENV), "{message}");
+        Ok(())
+    }
+
+    /// A file whose subject is gone is reported, and a known one is not.
+    #[test]
+    fn a_recording_for_a_vanished_subject_is_an_orphan() -> Result<(), TestError> {
+        let (krate, tier, id) = SELF_TEST;
+        assert_eq!(
+            super::orphans(krate, tier, &[])?,
+            vec![id.to_owned()],
+            "a committed file for a subject nobody claims is an orphan"
+        );
+        assert_eq!(
+            super::orphans(krate, tier, &[id])?,
+            Vec::<String>::new(),
+            "the subject is claimed, so its file is not an orphan"
+        );
+        assert_eq!(
+            super::orphans(krate, "no-such-tier", &[])?,
+            Vec::<String>::new(),
+            "a tier that has never recorded anything has no orphans"
+        );
         Ok(())
     }
 }

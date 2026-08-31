@@ -21,6 +21,25 @@ use crate::tonemap::SlTonemap;
 use crate::underwater_fog::UnderwaterFog;
 use sl_viewer_world_api::ViewerCamera;
 
+/// The viewer's perspective projection: a close near plane (2 cm) so the camera
+/// can push right up to fine detail — an avatar's face — without the surface
+/// clipping away, and a far plane well beyond a region's diagonal so distant
+/// objects do not vanish. Everything else is Bevy's default (a 45° vertical field
+/// of view, aspect from the view's target).
+///
+/// A function rather than a literal inside [`viewer_camera_bundle`] so that code
+/// which has to *reproduce* this framing without a camera — the render tier's
+/// CPU projection of a subject's centre onto the readback frame — projects
+/// through the very same numbers rather than a copy that can drift.
+#[must_use]
+pub fn viewer_projection() -> PerspectiveProjection {
+    PerspectiveProjection {
+        near: 0.02,
+        far: 4096.0,
+        ..default()
+    }
+}
+
 /// The viewer's main camera at `transform`: the 3D camera with a readable,
 /// multisampled depth texture, the region-scale projection, the clustered
 /// lighting configuration, the HDR target and the selectors of every full-frame
@@ -39,14 +58,8 @@ pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
                 .into(),
             ..default()
         },
-        // A close near plane (2 cm) so the camera can push right up to fine detail
-        // — an avatar's face — without the surface clipping away, and a far plane
-        // well beyond a region's diagonal so distant objects do not vanish.
-        Projection::Perspective(PerspectiveProjection {
-            near: 0.02,
-            far: 4096.0,
-            ..default()
-        }),
+        // See `viewer_projection`.
+        Projection::Perspective(viewer_projection()),
         transform,
         ViewerCamera,
         // A clustered-forward Z config tuned for a viewer that pushes the camera

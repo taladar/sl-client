@@ -2,10 +2,10 @@
 id: viewer-ui-baseline-regressions
 title: UI regression baselines — recorded geometry that may not drift by accident
 topic: viewer
-status: blocked
+status: ready
 origin: the viewer-ui-test-harness work (2026-07); the third check tier that task identified but did not build
-blocked_by: [viewer-ui-test-harness, viewer-test-baseline-format]
 refs: [viewer-ui-radial-menu, viewer-render-test-harness, viewer-ui-skin-tokens]
+blocked_by: [viewer-ui-test-harness, viewer-test-baseline-format]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -76,3 +76,17 @@ should not be reinvented.
 
 [[viewer-render-test-harness]] needs the same tier for 3D and should share this
 one's format rather than growing a second.
+
+## What landed with the shared format, and what is left
+
+[[viewer-test-baseline-format]] built the format and recorded this
+tier's first subject (2026-08-31):
+`baselines/sl-viewer-ui-pie-menu/ui/fixture-pie.toml` holds the fixture
+pie's measured compass angles — the angle from the pie's centre to each
+laid-out label, which is the muscle-memory fact, as distinct from the
+in-code address tables that pin *which* action sits at each point.
+
+What remains is the rest of this task's list: floater default sizes
+(waiting on [[viewer-ui-shell-plugin-groups]], the UI plugin group that
+would let a headless app stand the floaters up), toolbar button order,
+chiclet positions, and the real viewer pies' geometry.

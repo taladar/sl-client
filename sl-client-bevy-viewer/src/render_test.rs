@@ -69,6 +69,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use bevy::camera::CameraProjection as _;
 use bevy::image::{ImageAddressMode, ImageSampler};
 use bevy::math::Affine2;
 use bevy::mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes};
@@ -83,11 +84,14 @@ use tracing_subscriber::registry;
 
 use crate::face_material::FaceMaterial;
 use crate::particle_render::ParticleInstances;
+use crate::render_readback::FRAME_SIDE;
 use crate::render_scene::{
-    DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCx, SceneRuntimePlugin,
-    SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry, scene_root,
+    DeclaredBounds, RenderScene, SamplerMayClamp, SceneAssets, SceneCamera, SceneCx,
+    SceneRuntimePlugin, SymmetricAbout, SymmetryAxis, UvsInUnitSquare, WorldScaleGeometry,
+    scene_root, scene_root_transform,
 };
 use crate::world_api::ViewerCamera;
+use sl_viewer_world_scene::viewer_camera::viewer_projection;
 
 /// A boxed error, so a test can use `?` rather than the workspace-denied
 /// `unwrap` / `expect`.
@@ -711,6 +715,47 @@ fn bounds_of(positions: &[Vec3]) -> Option<(Vec3, Vec3)> {
     Some((min, max))
 }
 
+/// Where a **Bevy world-space** point lands in the readback rig's frame, in
+/// pixels, computed on the CPU — or `None` if it is behind the camera or outside
+/// the view frustum.
+///
+/// The framing of a scene is a fact about the scene, not about a renderer: a
+/// camera pose and a projection decide where the subject sits in the picture, and
+/// both are plain arithmetic. So the resting framing can be *recorded* in the
+/// cheap tier — "the box's centre lands at the middle of the frame; the tree's
+/// canopy lands a third of the way down" — and a distance, a look-at or a field
+/// of view that moves by accident is caught without a GPU.
+///
+/// It reproduces [`crate::render_readback`]'s camera exactly: the scene's declared
+/// pose through the same basis change, and the viewer's own projection
+/// ([`viewer_projection`]) at the rig's square frame — which
+/// `crate::render_readback`'s
+/// `the_cpu_framing_projection_agrees_with_the_rendered_camera` holds it to on a
+/// machine that has an adapter.
+pub(crate) fn framing_pixel(camera: SceneCamera, world_point: Vec3) -> Option<Vec2> {
+    let basis = scene_root_transform().rotation;
+    let eye = basis.mul_vec3(camera.position);
+    let target = basis.mul_vec3(camera.look_at);
+    let view = Transform::from_translation(eye)
+        .looking_at(target, Vec3::Y)
+        .to_matrix();
+    // The rig renders into a square target, so the projection's aspect ratio is
+    // its default 1.0 and needs no override.
+    let clip_from_world = viewer_projection()
+        .get_clip_from_view()
+        .mul_mat4(&view.inverse());
+    let ndc = clip_from_world.project_point3(world_point);
+    if !ndc.is_finite() || ndc.x.abs() > 1.0 || ndc.y.abs() > 1.0 || ndc.z < 0.0 || ndc.z > 1.0 {
+        return None;
+    }
+    let frame = f32::from(FRAME_SIDE);
+    // NDC is y-**up** and centred; a frame is y-down from its top-left corner.
+    Some(Vec2::new(
+        f32::midpoint(ndc.x, 1.0) * frame,
+        f32::midpoint(-ndc.y, 1.0) * frame,
+    ))
+}
+
 // ---------------------------------------------------------------------------
 // The universal tier.
 // ---------------------------------------------------------------------------
@@ -1153,6 +1198,7 @@ pub(crate) fn scene_violations(geometry: &[Geometry]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
+    use super::RenderScene;
     use super::{
         Geometry, TestError, advance_to, capture_logs, geometry_violations, scene_geometry,
         scene_violations, spawn_scene,
@@ -1161,6 +1207,7 @@ mod tests {
     use bevy::prelude::*;
     use pretty_assertions::{assert_eq, assert_ne};
     use sl_client_bevy::PrimLod;
+    use sl_viewer_testkit::baseline::{self, Facts};
 
     // -----------------------------------------------------------------------
     // The harness has to have teeth. These tests are about the *checks*, not
@@ -1728,6 +1775,228 @@ mod tests {
             .collect();
         lines.sort();
         lines
+    }
+
+    // -----------------------------------------------------------------------
+    // The baseline tier: what must not move by accident.
+    // -----------------------------------------------------------------------
+
+    /// The crate a render baseline is filed under.
+    const BASELINE_CRATE: &str = "sl-client-bevy-viewer";
+
+    /// The tier a render baseline is filed under.
+    const BASELINE_TIER: &str = "render";
+
+    /// How far a recorded metre may move before it counts: a millimetre, the
+    /// same grid [`super::vertex_key`] snaps onto.
+    const METRE_TOLERANCE: f64 = 1.0e-3;
+
+    /// How far a recorded frame pixel may move before it counts.
+    ///
+    /// Half a pixel of a 256-pixel frame: tight enough that a moved camera
+    /// distance or field of view is caught immediately, loose enough that the
+    /// last bit of an `f32` matrix product never is.
+    const PIXEL_TOLERANCE: f64 = 0.5;
+
+    /// **The scenes with a committed baseline, and why each one has one.**
+    ///
+    /// Opt-in, deliberately. Baselining all 35 scenes at all four LODs would make
+    /// every intended tessellation change a hundred-line diff, and a noisy check
+    /// is one that gets skimmed, then re-blessed unread, then deleted. A scene
+    /// earns a baseline by having a number that is *load-bearing* and cheap to
+    /// move by accident — and the reason is recorded here so the next person can
+    /// judge whether a new scene qualifies.
+    ///
+    /// The dynamic scenes (particles, flexi, the water matrix) are deliberately
+    /// absent: their geometry is rebuilt every frame from a simulation, so a count
+    /// is a property of the sample time rather than of the scene, and the timeline
+    /// tier already asserts that they move.
+    const BASELINED: &[(&str, &str)] = &[
+        (
+            "prim-box",
+            "the simplest client-tessellated prim — the count every other prim scene is a \
+             deviation from",
+        ),
+        (
+            "prim-hollow-cut-cylinder",
+            "hollow plus a profile cut: the two shape features that add faces, so its counts are \
+             where a dropped inner wall or cut edge shows first",
+        ),
+        (
+            "prim-twisted-torus",
+            "a curved path whose step count follows the LOD — the scene the LOD axis actually \
+             moves, and so the one a changed LOD table shows in",
+        ),
+        (
+            "sculpt-sphere",
+            "a sculpt's stitch resolution per LOD: the texture is the mesh, so the count is the \
+             stitcher's own resolution ladder — and recording it is what showed the fixture had \
+             been pinned to the finest level, walking the LOD sweep four times over one mesh",
+        ),
+        (
+            "mesh-cube",
+            "an uploaded mesh: its counts come from the asset, not from a tessellator, so they \
+             must NOT follow the LOD — recorded to say so",
+        ),
+        (
+            "rigged-mesh",
+            "the skinned conversion: a renormalize or a joint-remap that changed the vertex count \
+             would mean the skin was rebuilt, not adjusted",
+        ),
+        (
+            "avatar-base-part",
+            "the vendored Linden body at rest: its vertex count and its measured extents are the \
+             body every appearance is a morph of",
+        ),
+        (
+            "avatar-morphed-body",
+            "the same body shaped: the morph moves vertices without adding any, and its extents \
+             are how much the shape actually changed",
+        ),
+        (
+            "terrain-patch",
+            "a terrain patch's fixed grid: a changed stride would quietly re-cost every region",
+        ),
+        (
+            "tree",
+            "a Linden tree's generated geometry and its ~36 m reach — the scene whose framing was \
+             wrong once already",
+        ),
+    ];
+
+    /// Whether this scene's fixture needs the vendored Linden character assets.
+    ///
+    /// With `SL_VIEWER_ASSETS=mini` there is no visual-param table and no real
+    /// body, so both avatar scenes build something else entirely and their
+    /// recorded counts cannot hold. Everything else is procedural.
+    fn needs_avatar_assets(id: &str) -> bool {
+        id.starts_with("avatar-")
+    }
+
+    /// Measure one scene's baselined facts: the per-LOD counts, the resting
+    /// extents, and where its centre lands in the readback rig's frame.
+    fn scene_facts(scene: &RenderScene) -> Facts {
+        let mut facts = Facts::new();
+        for lod in PrimLod::ALL {
+            let mut app = spawn_scene(SceneCx { lod }, scene);
+            if let Some(&last) = scene.timeline.samples.last() {
+                advance_to(&mut app, last);
+            }
+            let geometry = scene_geometry(&mut app);
+            let vertices: usize = geometry.iter().map(|object| object.positions.len()).sum();
+            let indices: usize = geometry.iter().map(|object| object.indices.len()).sum();
+            let level = format!("{lod:?}").to_lowercase();
+            facts.int(
+                &format!("lod.{level}.vertices"),
+                i64::try_from(vertices).unwrap_or(-1),
+            );
+            facts.int(
+                &format!("lod.{level}.triangles"),
+                i64::try_from(indices / 3).unwrap_or(-1),
+            );
+            if lod == SceneCx::new().lod {
+                facts.int("renderables", i64::try_from(geometry.len()).unwrap_or(-1));
+                // The **world**-space box, because that is what the camera sees:
+                // a fixture that moved its geometry without changing a single
+                // local vertex has changed the picture, and a local-space box
+                // would report nothing. World here is *Bevy* world — the scene
+                // root carries the basis change — so the box is Y-up, not Second
+                // Life's Z-up: an avatar's height is its `y`.
+                let world: Vec<Vec3> = geometry
+                    .iter()
+                    .flat_map(|object| {
+                        let matrix = object.world;
+                        object
+                            .positions
+                            .iter()
+                            .map(move |position| matrix.transform_point3(*position))
+                    })
+                    .collect();
+                if let Some((min, max)) = super::bounds_of(&world) {
+                    facts.vec3("bounds.min", min, METRE_TOLERANCE);
+                    facts.vec3("bounds.max", max, METRE_TOLERANCE);
+                    let centre = Vec3::new(
+                        f32::midpoint(min.x, max.x),
+                        f32::midpoint(min.y, max.y),
+                        f32::midpoint(min.z, max.z),
+                    );
+                    match super::framing_pixel(scene.camera, centre) {
+                        Some(pixel) => {
+                            facts.vec2("framing.centre-pixel", pixel, PIXEL_TOLERANCE);
+                        }
+                        // Recorded as a fact of its own rather than omitted: a
+                        // subject that leaves the frame is a framing regression,
+                        // and a *missing* fact reads as drift on the next run
+                        // rather than as this scene's normal state.
+                        None => {
+                            facts.text("framing.centre-pixel", "off-frame");
+                        }
+                    }
+                }
+            }
+        }
+        facts
+    }
+
+    /// **Every baselined scene still measures what was recorded.**
+    ///
+    /// The counts a tessellator produces are not wrong at any particular value —
+    /// a box at 26 vertices instead of 24 breaks no invariant — and a refactor
+    /// moves them for free. This is the review moment: the diff that changes a
+    /// count and the diff that blesses the change are the same commit, and
+    /// somebody gets to object.
+    #[test]
+    fn every_baselined_scene_still_matches_its_recording() -> Result<(), TestError> {
+        let mut failures = Vec::new();
+        for (id, _why) in BASELINED {
+            if needs_avatar_assets(id) && avatar_assets_dir().is_none() {
+                continue;
+            }
+            let scene = SCENES
+                .iter()
+                .find(|scene| scene.id == *id)
+                .ok_or_else(|| format!("the baselined scene `{id}` is not registered"))?;
+            if let Err(error) =
+                baseline::check_subject(BASELINE_CRATE, BASELINE_TIER, id, scene_facts(scene))
+            {
+                failures.push(error.to_string());
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+        Ok(())
+    }
+
+    /// **No baseline file outlives its subject.**
+    ///
+    /// A renamed or removed scene leaves its recording behind, nothing reads it
+    /// again, and the tree accumulates records of things that are gone while
+    /// every check stays green.
+    #[test]
+    fn no_render_baseline_is_an_orphan() -> Result<(), TestError> {
+        let known: Vec<&str> = BASELINED.iter().map(|(id, _why)| *id).collect();
+        assert_eq!(
+            baseline::orphans(BASELINE_CRATE, BASELINE_TIER, &known)?,
+            Vec::<String>::new(),
+            "a committed baseline names a scene nothing baselines any more — delete the file, or \
+             put the scene back in `BASELINED`"
+        );
+        Ok(())
+    }
+
+    /// Every baselined scene is registered, and says why it is baselined.
+    #[test]
+    fn the_baseline_list_names_real_scenes_with_reasons() {
+        for (id, why) in BASELINED {
+            assert!(
+                SCENES.iter().any(|scene| scene.id == *id),
+                "`{id}` is baselined but not registered"
+            );
+            assert!(
+                !why.is_empty(),
+                "`{id}` is baselined without saying why, which is how a baseline stops being \
+                 read"
+            );
+        }
     }
 
     /// The registry is actually being swept.

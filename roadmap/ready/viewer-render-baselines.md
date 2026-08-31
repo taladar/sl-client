@@ -2,10 +2,10 @@
 id: viewer-render-baselines
 title: Render regression baselines — recorded geometry that may not drift by accident
 topic: viewer
-status: blocked
+status: ready
 origin: the viewer-render-test-harness work (2026-07); the third tier that task identified but did not build
-blocked_by: [viewer-render-test-harness, viewer-test-baseline-format]
 refs: [viewer-ui-baseline-regressions, viewer-render-test-harness]
+blocked_by: [viewer-render-test-harness, viewer-test-baseline-format]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -54,3 +54,19 @@ deliberately) and should not be reinvented either.
   tier cover the rest.
 - **The value is the review moment.** "This diff changed the box's vertex count"
   is a sentence somebody can object to. That is the entire point.
+
+## What landed with the shared format, and what is left
+
+[[viewer-test-baseline-format]] built the format and, to prove it,
+recorded this tier's first ten subjects (2026-08-31):
+`baselines/sl-client-bevy-viewer/render/*.toml` hold each opt-in scene's
+per-LOD vertex and triangle counts, its renderable count, its Bevy
+world-space extents and the CPU-projected pixel its centre lands on in
+the readback frame. The opt-in list, with a reason per scene, is
+`BASELINED` in `sl-client-bevy-viewer/src/render_test.rs`.
+
+So the mechanism, the bless flow and the orphan sweep are done here. What
+remains is the rest of the fact list this task names and the scenes the
+first ten leave out: an attachment point's offset, a joint's rest pose,
+the camera's default framing as a pose rather than as a projected pixel,
+and whichever further scenes earn a baseline (each with its reason).

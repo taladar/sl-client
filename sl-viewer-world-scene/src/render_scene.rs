@@ -1411,16 +1411,17 @@ fn sculpt_sphere_map() -> DecodedTexture {
 }
 
 /// [`SCENES`] `sculpt-sphere`: a sculpted prim stitched from `sculpt_sphere_map`.
-fn sculpt_sphere(
-    _cx: SceneCx,
-    root: Entity,
-    commands: &mut Commands,
-    assets: &mut SceneAssets<'_>,
-) {
+fn sculpt_sphere(cx: SceneCx, root: Entity, commands: &mut Commands, assets: &mut SceneAssets<'_>) {
     let map = sculpt_sphere_map();
     // Sculpt type 1 = the sphere stitch (`LL_SCULPT_TYPE_SPHERE`): the map's
     // top/bottom rows collapse to poles and its left/right edges join.
-    let prim = tessellate_sculpt(&map, 1, PrimLod::FINEST);
+    //
+    // At the cell's LOD, like every other client-tessellated fixture. It was
+    // pinned to `FINEST` until the baseline tier recorded the counts and showed
+    // all four levels agreeing — which meant the LOD sweep had been walking a
+    // sculpt four times and building the same mesh, while `objects.rs` stitches a
+    // real sculpt at the level its screen size picks.
+    let prim = tessellate_sculpt(&map, 1, cx.lod);
     for (index, mesh) in to_bevy_prim_meshes(&prim).into_iter().enumerate() {
         let face = spawn_geometry(
             format!("sculpt-sphere/face-{index}"),

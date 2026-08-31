@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 304 |
-| blocked | 68 |
-| in-progress | 20 |
+| ready | 307 |
+| blocked | 66 |
+| in-progress | 19 |
 | bugs | 64 |
-| done | 934 |
+| done | 935 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1525** |
+| **total** | **1526** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (307)
 
 ### protocol
 
@@ -797,6 +797,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-render-animation-coverage`](ready/viewer-render-animation-coverage.md)
   — Render-scene coverage — the animated avatar paths, which need their decode
   split from their transport (blocked by `viewer-render-scene-coverage` (done))
+- [`viewer-render-baselines`](ready/viewer-render-baselines.md) — Render
+  regression baselines — recorded geometry that may not drift by accident
+  (blocked by `viewer-render-test-harness` (done), `viewer-test-baseline-format`
+  (done))
 - [`viewer-render-closedness-check`](ready/viewer-render-closedness-check.md) —
   Closedness check — an object's faces must enclose a volume (blocked by
   `viewer-render-test-harness` (done))
@@ -876,6 +880,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   VRAM budget & global discard bias
 - [`viewer-toolbar-customization`](ready/viewer-toolbar-customization.md) —
   Toolbar customization (toybox) (blocked by `viewer-ui-widget-scaffold` (done))
+- [`viewer-ui-baseline-regressions`](ready/viewer-ui-baseline-regressions.md) —
+  UI regression baselines — recorded geometry that may not drift by accident
+  (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`
+  (done))
 - [`viewer-ui-color-picker-advanced`](ready/viewer-ui-color-picker-advanced.md)
   — Color picker — SV square, hue strip, palette & eyedropper (blocked by
   `viewer-ui-color-picker` (done))
@@ -888,6 +896,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-settings-binding-text`](ready/viewer-ui-settings-binding-text.md)
   — Text-field↔settings two-way binding (blocked by
   `viewer-ui-text-input-widget` (done), `viewer-ui-settings-binding` (done))
+- [`viewer-ui-shell-plugin-groups`](ready/viewer-ui-shell-plugin-groups.md) —
+  The two plugin groups the group carve-up left behind — UI and shell
 - [`viewer-ui-skin-l10n-functions`](ready/viewer-ui-skin-l10n-functions.md) —
   Skin CSS l10n/i18n functions (theme-authored labels & numbers) (blocked by
   `viewer-ui-skin-tokens` (done))
@@ -954,7 +964,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (68)
+## blocked (66)
 
 ### viewer
 
@@ -1041,10 +1051,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-region-environment-panel`](blocked/viewer-region-environment-panel.md)
   — Region / parcel environment settings panel (blocked by
   `viewer-region-options-general` (done), `viewer-environment-my-environments`)
-- [`viewer-render-baselines`](blocked/viewer-render-baselines.md) — Render
-  regression baselines — recorded geometry that may not drift by accident
-  (blocked by `viewer-render-test-harness` (done),
-  `viewer-test-baseline-format`)
 - [`viewer-render-hud-and-actor-axes`](blocked/viewer-render-hud-and-actor-axes.md)
   — HUD screen axis and the name-tag, particle and avatar actors (blocked by
   `viewer-render-context-matrix`)
@@ -1107,9 +1113,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-notecard-editor`, `viewer-lsl-editor-save-compile`)
 - [`viewer-terrain-edit-bake-revert`](blocked/viewer-terrain-edit-bake-revert.md)
   — Terrain editing — bake / revert (blocked by `viewer-terrain-edit-brushes`)
-- [`viewer-ui-baseline-regressions`](blocked/viewer-ui-baseline-regressions.md)
-  — UI regression baselines — recorded geometry that may not drift by accident
-  (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`)
 - [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
@@ -1159,7 +1162,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (20)
+## in-progress (19)
 
 ### viewer
 
@@ -1193,8 +1196,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-render-gpu-serialisation` (done))
 - [`viewer-streaming-audio`](in-progress/viewer-streaming-audio.md) — Parcel
   streaming-audio / media-audio player
-- [`viewer-test-baseline-format`](in-progress/viewer-test-baseline-format.md) —
-  One baseline format for UI and render facts
 - [`viewer-ui-text-caret-grapheme-motion`](in-progress/viewer-ui-text-caret-grapheme-motion.md)
   — Upstream issue — parley caret motion steps one codepoint, not one grapheme
 - [`viewer-ui-text-parley-pr-backdelete`](in-progress/viewer-ui-text-parley-pr-backdelete.md)
@@ -1365,7 +1366,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (934)
+## done (935)
 
 ### protocol
 
@@ -2635,6 +2636,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-notification-host` (done))
 - [`viewer-terrain-region-edge-seam-slope`](done/viewer-terrain-region-edge-seam-slope.md)
   — Terrain seam / misalignment at region edges on slopes
+- [`viewer-test-baseline-format`](done/viewer-test-baseline-format.md) — One
+  baseline format for UI and render facts
 - [`viewer-texture-picker-inventory-tree`](done/viewer-texture-picker-inventory-tree.md)
   — Texture picker — inventory folder tree navigation (blocked by
   `viewer-ui-texture-picker` (done))

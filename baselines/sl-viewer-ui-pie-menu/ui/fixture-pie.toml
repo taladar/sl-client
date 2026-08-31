@@ -1,0 +1,30 @@
+schema = 1
+blessed_describe = "6e76be10-dirty"
+blessed_at_unix = 1788176093
+
+[facts]
+"slots.occupied" = "east north north-west west south"
+
+[facts."geometry.dead-zone-px"]
+value = 20.0
+tolerance = 0.5
+
+[facts."label.east.angle-deg"]
+value = 0.28937
+tolerance = 1.0
+
+[facts."label.north-west.angle-deg"]
+value = 134.796112
+tolerance = 1.0
+
+[facts."label.north.angle-deg"]
+value = 90.29084
+tolerance = 1.0
+
+[facts."label.south.angle-deg"]
+value = 269.709167
+tolerance = 1.0
+
+[facts."label.west.angle-deg"]
+value = 179.710632
+tolerance = 1.0

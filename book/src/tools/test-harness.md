@@ -38,3 +38,45 @@ extend the harness and fills in as the tiers land.
 - Expected verdicts are rules (opaque in front → hidden; translucent in
   front → see-through), not per-cell tables.
 - A capture is taken only once the scene has settled.
+
+## Baselines
+
+The tiers above catch what is **wrong**. A baseline catches what merely
+**moved**: the vertex count a box tessellates to, the angle a pie option
+sits at, where a subject's centre lands in the frame. None of those is
+incorrect at any particular value, a refactor moves them for free, and a
+user who has opened the same menu ten thousand times notices.
+
+One format serves every tier, in `sl-viewer-testkit::baseline`:
+
+- A subject's facts live in `baselines/<crate>/<tier>/<id>.toml` — one
+  file per subject, so two subjects moving in two commits never
+  conflict.
+- A fact is an `Int`, a `Text`, or a `Float` / `Vec2` / `Vec3` that
+  carries the tolerance it is compared at, so the file itself says how
+  exact each number is meant to be.
+- A run builds `Facts` and calls `baseline::check_subject(krate, tier,
+  id, facts)`. A drift fails with every moved fact named; a missing file
+  fails naming the bless command, never blessing itself.
+- `SL_VIEWER_BLESS_BASELINES=1 cargo test …` rewrites the files it
+  checks. The diff that moves a fact and the diff that blesses the move
+  belong in the **same commit** — the review moment is the entire point.
+- Each tier keeps a list of its baselined subjects and asserts
+  `baseline::orphans(krate, tier, &known)` is empty, so a recording
+  cannot outlive the subject it describes.
+
+What is baselined is **opt-in** and says why. Recording everything makes
+every intended change a noisy diff, and a noisy check gets skimmed, then
+re-blessed unread, then deleted. Record *derived intent* — counts,
+extents, angles — never raw dumps: a vertex-position dump changes
+whenever a float does and teaches everyone to re-bless without reading.
+Record the resting cell, not the whole matrix; the tiers above cover the
+rest. And record only what does not depend on the machine: a pie label's
+*angle* is the widget's own maths, while its *radius* grows with the
+measured text and would make the file a font-version detector.
+
+Landed so far: ten render scenes (per-LOD vertex and triangle counts,
+world extents, and the CPU-projected framing pixel of the subject's
+centre — held to the readback rig's own camera by
+`the_cpu_framing_projection_agrees_with_the_rendered_camera`), and the
+pie menu's measured compass angles.
