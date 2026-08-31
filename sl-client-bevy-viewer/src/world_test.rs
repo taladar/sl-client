@@ -231,6 +231,105 @@ pub(crate) fn seed_prim(app: &mut App, position: sl_client_bevy::Vector) -> Scop
     scoped
 }
 
+/// Stream one already-shaped [`Object`] to the viewer as an `ObjectAdded`.
+pub(crate) fn seed_object(app: &mut App, object: Object) -> ScopedObjectId {
+    let scoped = ScopedObjectId::new(object.circuit, object.local_id);
+    app.world_mut()
+        .write_message(SlEvent(SessionEvent::ObjectAdded(Box::new(object))));
+    scoped
+}
+
+/// A (placeholder-sphere) avatar for `agent` at `position`, streamed as the
+/// grid would — an avatar-pcode object whose full id **is** the agent id.
+pub(crate) fn seed_avatar(
+    app: &mut App,
+    agent: sl_client_bevy::AgentKey,
+    local_id: u32,
+    position: sl_client_bevy::Vector,
+) -> ScopedObjectId {
+    let mut object: Object = crate::objects::fixture_object(pcode::AVATAR);
+    object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
+    object.full_id = sl_client_bevy::ObjectKey::from(agent.uuid());
+    object.motion.position = position;
+    seed_object(app, object)
+}
+
+/// A fat prim worn on `wearer_local`'s avatar at attachment point `point`
+/// (SL codes — `1` is the chest; the wire packs the point nibble-swapped
+/// into the state byte). Its position is joint-relative.
+pub(crate) fn seed_attachment(
+    app: &mut App,
+    wearer_local: u32,
+    local_id: u32,
+    point: u8,
+    position: sl_client_bevy::Vector,
+) -> ScopedObjectId {
+    let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
+    object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
+    object.full_id =
+        sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(u128::from(local_id)));
+    object.parent_id = sl_client_bevy::RegionLocalObjectId(wearer_local);
+    // The wire's nibble-swapped attachment-point encoding
+    // (`attachment_point_from_state` inverts this).
+    object.state = (point & 0x0f).wrapping_shl(4) | (point & 0xf0).wrapping_shr(4);
+    object.motion.position = position;
+    object.update_flags = crate::world_api::FLAGS_OBJECT_MODIFY
+        | crate::world_api::FLAGS_OBJECT_MOVE
+        | crate::world_api::FLAGS_OBJECT_COPY;
+    seed_object(app, object)
+}
+
+/// One flat 16×16 land patch at the region's south-west corner, `height`
+/// metres up — enough ground for a land pick.
+pub(crate) fn seed_terrain(app: &mut App, height: f32) {
+    let patch = sl_client_bevy::TerrainPatch {
+        region_handle: sl_client_bevy::RegionHandle(0),
+        layer: sl_client_bevy::TerrainLayerType::Land,
+        patch_x: 0,
+        patch_y: 0,
+        size: 16,
+        values: vec![height; 256],
+    };
+    app.world_mut()
+        .write_message(SlEvent(SessionEvent::TerrainPatch(Box::new(patch))));
+}
+
+/// The world position of `scoped`'s scene-object entity — where a camera
+/// must look for the cursor centre to strike that fixture.
+pub(crate) fn scene_position_of(app: &mut App, scoped: ScopedObjectId) -> Option<Vec3> {
+    let mut objects = app
+        .world_mut()
+        .query::<(&crate::world_api::SceneObject, &GlobalTransform)>();
+    objects
+        .iter(app.world())
+        .find(|(scene, _global)| scene.scoped_id == scoped)
+        .map(|(_scene, global)| global.translation())
+}
+
+/// The world position of `agent`'s avatar anchor (its placeholder sphere).
+pub(crate) fn avatar_position_of(app: &mut App, agent: sl_client_bevy::AgentKey) -> Option<Vec3> {
+    let mut anchors = app
+        .world_mut()
+        .query_filtered::<(&crate::world_api::AvatarPickTarget, &GlobalTransform), With<Mesh3d>>();
+    anchors
+        .iter(app.world())
+        .find(|(target, _global)| target.agent() == agent)
+        .map(|(_target, global)| global.translation())
+}
+
+/// The world centre of the first terrain patch's bounds — a ground point the
+/// cursor cannot miss, without assuming the mesh's origin convention.
+pub(crate) fn terrain_centre(app: &mut App) -> Option<Vec3> {
+    let mut patches = app.world_mut().query_filtered::<(
+        &bevy::camera::primitives::Aabb,
+        &GlobalTransform,
+    ), With<crate::world_api::TerrainSurface>>();
+    patches
+        .iter(app.world())
+        .next()
+        .map(|(aabb, global)| global.transform_point(Vec3::from(aabb.center)))
+}
+
 /// Project a world position through the [`ViewerCamera`] to logical viewport
 /// pixels. `None` when the point is behind the camera or no camera stands.
 pub(crate) fn world_to_viewport(app: &mut App, position: Vec3) -> Option<Vec2> {
@@ -450,6 +549,159 @@ mod tests {
                 && transform.rotation.is_none()
                 && transform.scale.is_none(),
             "a translate drag carries a position and nothing else (got {transform:?})"
+        );
+        Ok(())
+    }
+
+    /// Right-click `at` (a world position): aim the camera at it, click the
+    /// viewport centre, settle — the shared shape of every pie-target test.
+    fn right_click_at(app: &mut App, at: Vec3) {
+        // Component-wise plain `f32`: the lint fires on `glam` operators.
+        let eye = Vec3::new(at.x, at.y + 1.0, at.z + 8.0);
+        super::install_camera(app, eye, at);
+        settle(app, 2);
+        let centre = Vec2::new(400.0, 300.0);
+        interact::hover(app, centre);
+        interact::press(app, MouseButton::Right);
+        interact::release(app, MouseButton::Right);
+        settle(app, 3);
+    }
+
+    /// **Another avatar's body opens the avatar pie**: a right-click on the
+    /// placeholder sphere resolves through the class-1 avatar tag to exactly
+    /// one `OpenAvatarMenu` naming that agent.
+    #[test]
+    fn a_right_click_on_another_avatar_asks_for_the_avatar_pie() -> Result<(), TestError> {
+        let mut app = super::world_app();
+        record::<crate::avatar_menu::OpenAvatarMenu>(&mut app);
+        let other = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xB));
+        super::seed_avatar(
+            &mut app,
+            other,
+            2,
+            sl_client_bevy::Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let at = super::avatar_position_of(&mut app, other)
+            .ok_or("the avatar sphere never spawned or dressed")?;
+        right_click_at(&mut app, at);
+        let opened = drain::<crate::avatar_menu::OpenAvatarMenu>(&mut app);
+        assert!(
+            opened.len() == 1,
+            "one right-click on an avatar must ask for exactly one avatar pie, got {}",
+            opened.len()
+        );
+        let request = opened.first().ok_or("just asserted one")?;
+        assert!(
+            request.agent == other,
+            "the pie must name the clicked avatar"
+        );
+        Ok(())
+    }
+
+    /// **The own avatar's body opens the avatar pie too** (the self pie is
+    /// picked at open time from the same request): with `SlIdentity` naming
+    /// the agent, the click still resolves to that agent's request.
+    #[test]
+    fn a_right_click_on_the_own_avatar_asks_for_the_avatar_pie() -> Result<(), TestError> {
+        let mut app = super::world_app();
+        record::<crate::avatar_menu::OpenAvatarMenu>(&mut app);
+        let own = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xA));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let at = super::avatar_position_of(&mut app, own)
+            .ok_or("the own avatar sphere never spawned or dressed")?;
+        right_click_at(&mut app, at);
+        let opened = drain::<crate::avatar_menu::OpenAvatarMenu>(&mut app);
+        assert!(
+            opened.len() == 1 && opened.first().is_some_and(|request| request.agent == own),
+            "a right-click on the own body must ask for the own avatar's pie (got {})",
+            opened.len()
+        );
+        Ok(())
+    }
+
+    /// **A worn attachment opens the attachment pie**: the prim hangs off the
+    /// avatar (nibble-swapped point in the state byte), and the object-face
+    /// hit routes to `OpenAttachmentMenu` — a world attachment, not a HUD one.
+    #[test]
+    fn a_right_click_on_a_worn_attachment_asks_for_the_attachment_pie() -> Result<(), TestError> {
+        let mut app = super::world_app();
+        record::<crate::attachment_menu::OpenAttachmentMenu>(&mut app);
+        let wearer = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xC));
+        super::seed_avatar(
+            &mut app,
+            wearer,
+            2,
+            sl_client_bevy::Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 3);
+        // Chest (point 1), held out to the side so the ray meets the prim
+        // and not the sphere.
+        let attachment = super::seed_attachment(
+            &mut app,
+            2,
+            3,
+            1,
+            sl_client_bevy::Vector {
+                x: 4.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        settle(&mut app, 5);
+        let at =
+            super::scene_position_of(&mut app, attachment).ok_or("the attachment never spawned")?;
+        right_click_at(&mut app, at);
+        let opened = drain::<crate::attachment_menu::OpenAttachmentMenu>(&mut app);
+        assert!(
+            opened.len() == 1,
+            "one right-click on a worn attachment must ask for exactly one attachment pie, \
+             got {}",
+            opened.len()
+        );
+        assert!(
+            opened.first().is_some_and(|request| !request.hud),
+            "a world attachment is not a HUD attachment"
+        );
+        Ok(())
+    }
+
+    /// **Bare land opens the land pie**: the flat fixture patch resolves
+    /// through the class-3 terrain tag to exactly one `OpenLandMenu`.
+    #[test]
+    fn a_right_click_on_bare_land_asks_for_the_land_pie() -> Result<(), TestError> {
+        let mut app = super::world_app();
+        record::<crate::land_menu::OpenLandMenu>(&mut app);
+        super::seed_terrain(&mut app, 25.0);
+        settle(&mut app, 5);
+        let at = super::terrain_centre(&mut app).ok_or("the land patch never built")?;
+        right_click_at(&mut app, at);
+        let opened = drain::<crate::land_menu::OpenLandMenu>(&mut app);
+        assert!(
+            opened.len() == 1,
+            "one right-click on bare land must ask for exactly one land pie, got {}",
+            opened.len()
         );
         Ok(())
     }
