@@ -16,6 +16,7 @@
 //! stock fixtures do not cover.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use sl_proto::{
     AssetKey, AssetType, ChatSource, ChatType, InventoryFolder, InventoryItem, InventoryType,
@@ -29,12 +30,15 @@ use crate::udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw
 use crate::world::{SceneFixtures, box_prim, region_wide_parcel};
 
 /// A hook run under the session lock against the machine (fixture setup,
-/// on-arrival content pushes).
-pub type SimHook = Arc<dyn Fn(&mut SimSession) + Send + Sync>;
+/// on-arrival content pushes), stamped with the grid's clock
+/// ([`crate::time::Now`]) so a hook that sends never has to reach for
+/// [`Instant::now`] itself.
+pub type SimHook = Arc<dyn Fn(&mut SimSession, Instant) + Send + Sync>;
 
 /// A hook run under the session lock for every drained [`ServerEvent`],
-/// after the stock fixture behaviour answered it.
-pub type SimEventHook = Arc<dyn Fn(&mut SimSession, &ServerEvent) + Send + Sync>;
+/// after the stock fixture behaviour answered it, with the same stamp the
+/// stock behaviour used.
+pub type SimEventHook = Arc<dyn Fn(&mut SimSession, &ServerEvent, Instant) + Send + Sync>;
 
 /// The scripted content for one region.
 #[derive(Clone)]
@@ -74,7 +78,7 @@ impl Scenario {
     #[must_use]
     pub fn empty() -> Self {
         Self {
-            setup: Arc::new(|_| {}),
+            setup: Arc::new(|_, _| {}),
             on_agent_arrived: None,
             on_event: None,
             assets: sl_proto::InMemoryAssetSource::new(),
@@ -276,7 +280,7 @@ pub const STOCK_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1);
 /// runtime advertises the backend from this (`SimulatorFeatures
 /// .VoiceServerType`, the login `voice-config`, the arrival
 /// `RequiredVoiceVersion` push).
-fn default_setup(sim: &mut SimSession) {
+fn default_setup(sim: &mut SimSession, _now: Instant) {
     sim.agent_inventory_mut().insert_folder(InventoryFolder {
         folder_id: folder_key(AGENT_ROOT),
         parent_id: None,
@@ -328,7 +332,7 @@ fn default_setup(sim: &mut SimSession) {
 }
 
 /// Greets the arriving avatar with a system chat line.
-fn default_arrival(sim: &mut SimSession) {
+fn default_arrival(sim: &mut SimSession, now: Instant) {
     let position = sl_types::lsl::Vector {
         x: 128.0,
         y: 128.0,
@@ -342,7 +346,7 @@ fn default_arrival(sim: &mut SimSession) {
         1,
         position,
         "Welcome to the fake grid.",
-        std::time::Instant::now(),
+        now,
     ) {
         tracing::warn!("arrival greeting failed: {error}");
     }

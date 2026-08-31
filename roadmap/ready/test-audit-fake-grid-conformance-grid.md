@@ -2,16 +2,17 @@
 id: test-audit-fake-grid-conformance-grid
 title: Teach sl-conformance about sl-fake-grid so ~16 cases run offline
 topic: test
-status: blocked
+status: ready
 origin: static code audit (2026-08-26)
 points: 8
 refs: [build-audit-ci-pipeline, test-fake-grid-render-fixtures]
 blocked_by: [test-fake-grid-determinism]
 ---
 
-Blocked on [[test-fake-grid-determinism]] (2026-08-30): committed records
-of an offline grid should be reproducible run to run, and the `Grid::Fake`
-branch should start its region from the shared fixture catalogue of
+[[test-fake-grid-determinism]] cleared the blocker (2026-08-31): a
+`deterministic(seed)` grid on an injected `clock(now)` makes committed
+records of an offline grid reproducible run to run. The `Grid::Fake`
+branch should still start its region from the shared fixture catalogue of
 [[test-fake-grid-render-fixtures]] so conformance and the viewer harness
 agree on what a region contains.
 

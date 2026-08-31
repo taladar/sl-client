@@ -17,7 +17,7 @@
 
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use sl_proto::{
     ArrivalPlacement, AssetSource as _, ServerEvent, SimSession, TeleportFinishInfo,
@@ -101,7 +101,7 @@ pub(crate) async fn teleport_session(
     if source_region == request.region {
         source
             .with_sim(|sim| {
-                let now = Instant::now();
+                let now = source.now();
                 sim.send_teleport_start(request.flags, now)?;
                 sim.send_teleport_local(
                     request.arrival.position,
@@ -117,7 +117,7 @@ pub(crate) async fn teleport_session(
     // The black screen goes up, and the viewer learns what is happening.
     source
         .with_sim(|sim| {
-            let now = Instant::now();
+            let now = source.now();
             sim.send_teleport_start(request.flags, now)?;
             sim.send_teleport_progress(teleport_strings::RESOLVING, request.flags, now)?;
             sim.send_teleport_progress(request.progress, request.flags, now)
@@ -150,7 +150,7 @@ pub(crate) async fn teleport_session(
     };
     source
         .with_sim(|sim| {
-            let now = Instant::now();
+            let now = source.now();
             sim.enqueue_enable_simulator(dest_handle, prepared.udp_addr);
             sim.enqueue_establish_agent_communication(
                 prepared.udp_addr,
@@ -171,9 +171,7 @@ pub(crate) async fn teleport_session(
         core.remove_session(prepared.seq).await;
         dest.with_sim(SimSession::abandon).await;
         if let Err(error) = source
-            .with_sim(|sim| {
-                sim.send_teleport_failed(teleport_strings::TIMEOUT_TPORT, Instant::now())
-            })
+            .with_sim(|sim| sim.send_teleport_failed(teleport_strings::TIMEOUT_TPORT, source.now()))
             .await
         {
             tracing::warn!("reporting the teleport timeout failed: {error}");
@@ -184,7 +182,7 @@ pub(crate) async fn teleport_session(
     // The avatar is in the destination: retire the source, which the
     // client now holds as a child circuit.
     if let Err(error) = source
-        .with_sim(|sim| sim.retire_circuit(Instant::now()))
+        .with_sim(|sim| sim.retire_circuit(source.now()))
         .await
     {
         tracing::warn!("retiring the source circuit failed: {error}");
@@ -451,7 +449,7 @@ pub(crate) fn run_teleport_responder(
 async fn report_failure(shared: &SharedSim, reason: &'static str) {
     let result = shared
         .with_sim(|sim| {
-            let now = Instant::now();
+            let now = shared.now();
             sim.send_teleport_start(0, now)?;
             sim.send_teleport_failed(reason, now)
         })

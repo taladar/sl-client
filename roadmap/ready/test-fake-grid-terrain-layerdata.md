@@ -2,7 +2,7 @@
 id: test-fake-grid-terrain-layerdata
 title: The fake grid sends terrain — LayerData patches, wind, clouds
 topic: test
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 3
 refs: [viewer-fake-grid-login-smoke]

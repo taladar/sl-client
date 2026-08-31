@@ -2,7 +2,7 @@
 //! [`SimCaps`] / the asset caps, including the `EventQueueGet` long-poll
 //! hold the sans-I/O core deliberately leaves to its runtime.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use sl_proto::{CapsDispatch, CapsRequest, CapsResponse};
 
@@ -28,7 +28,7 @@ pub(crate) async fn dispatch_caps(
     body: &[u8],
 ) -> CapsResponse {
     // The hold deadline covers the whole poll, not each re-dispatch.
-    let deadline = Instant::now().checked_add(eq_hold);
+    let deadline = shared.now().checked_add(eq_hold);
     let mut shutdown_rx = shared.shutdown_rx.clone();
     loop {
         let request = CapsRequest {

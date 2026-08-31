@@ -15,6 +15,7 @@ use tokio::sync::{Mutex, Notify, broadcast, watch};
 
 use crate::runtime::SessionIds;
 use crate::scenario::{SimEventHook, SimHook};
+use crate::time::Now;
 use crate::udp_assets::{UdpAssetFixtures, answer_from_fixtures};
 use crate::world::{AvatarIdentity, SceneFixtures, answer_world_request, push_arrival_world};
 
@@ -78,6 +79,8 @@ pub(crate) struct SharedSim {
     /// (logout, inactivity, retirement, abandonment), so a pump blocked in
     /// `recv_from` or a timer with no deadline still exits.
     pub(crate) closed_tx: watch::Sender<bool>,
+    /// The grid's clock: every instant this session stamps its machine with.
+    pub(crate) clock: Now,
 }
 
 /// What a locked flush gathered; applied after the state lock is released so
@@ -95,6 +98,12 @@ pub(crate) struct FlushOutcome {
 const EVENTS_CHANNEL_CAPACITY: usize = 256;
 
 impl SharedSim {
+    /// The grid's current instant — what every `send_*` / `handle_*` call on
+    /// this session is stamped with.
+    pub(crate) fn now(&self) -> Instant {
+        (self.clock)()
+    }
+
     /// Runs `f` against the session machine, then flushes transmits, events,
     /// the timer deadline and the event-queue wakeup — the only sanctioned
     /// way for library users and tests to call `send_*` / `set_*` /
@@ -119,7 +128,7 @@ impl SharedSim {
     /// machine is quiet.
     pub(crate) fn flush_locked(&self, state: &mut SimState) -> FlushOutcome {
         while let Some(event) = state.sim.poll_event() {
-            let now = Instant::now();
+            let now = self.now();
             // The greeting goes out as soon as the circuit is open, as a real
             // simulator does on `UseCircuitCode`: the viewer waits for the
             // `RegionHandshake` before it sends `CompleteAgentMovement`, and
@@ -150,7 +159,7 @@ impl SharedSim {
                 // every object in view — before the scenario's own hook.
                 push_arrival_world(&state.world, &state.avatar, &mut state.sim, now);
                 if let Some(hook) = &state.on_agent_arrived {
-                    hook(&mut state.sim);
+                    hook(&mut state.sim, now);
                 }
             }
             answer_from_fixtures(
@@ -162,7 +171,7 @@ impl SharedSim {
             );
             answer_world_request(&state.world, &mut state.sim, &event, now);
             if let Some(hook) = &state.on_event {
-                hook(&mut state.sim, &event);
+                hook(&mut state.sim, &event, now);
             }
             // Only lagging subscribers error; the driver never stalls on them.
             drop(self.events_tx.send(event));
@@ -220,6 +229,7 @@ pub(crate) fn new_shared_sim(
     state: SimState,
     socket: Arc<UdpSocket>,
     shutdown_rx: watch::Receiver<bool>,
+    clock: Now,
 ) -> SharedSim {
     let (events_tx, _) = broadcast::channel(EVENTS_CHANNEL_CAPACITY);
     let (timeout_tx, _) = watch::channel(state.sim.poll_timeout());
@@ -232,6 +242,7 @@ pub(crate) fn new_shared_sim(
         events_tx,
         shutdown_rx,
         closed_tx,
+        clock,
     }
 }
 
@@ -279,7 +290,7 @@ pub(crate) async fn run_udp_pump(shared: SharedSim) {
                 let datagram = buffer.get(..length).unwrap_or_default();
                 let closed = {
                     let mut guard = shared.state.lock().await;
-                    if let Err(error) = guard.sim.handle_datagram(from, datagram, Instant::now()) {
+                    if let Err(error) = guard.sim.handle_datagram(from, datagram, shared.now()) {
                         tracing::debug!("datagram from {from} rejected: {error}");
                     }
                     let outcome = shared.flush_locked(&mut guard);
@@ -330,7 +341,7 @@ pub(crate) async fn run_timer(shared: SharedSim) {
             () = sleep_until_opt(deadline) => {
                 let closed = {
                     let mut guard = shared.state.lock().await;
-                    guard.sim.handle_timeout(Instant::now());
+                    guard.sim.handle_timeout(shared.now());
                     let outcome = shared.flush_locked(&mut guard);
                     let closed = guard.sim.is_closed();
                     drop(guard);

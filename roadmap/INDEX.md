@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 302 |
-| blocked | 65 |
-| in-progress | 19 |
+| ready | 304 |
+| blocked | 63 |
+| in-progress | 18 |
 | bugs | 65 |
-| done | 941 |
+| done | 942 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (302)
+## ready (304)
 
 ### protocol
 
@@ -938,8 +938,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
+- [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
+  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline (blocked by
+  `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
+- [`test-fake-grid-terrain-layerdata`](ready/test-fake-grid-terrain-layerdata.md)
+  — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
+  `test-fake-grid-determinism` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -949,7 +955,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (65)
+## blocked (63)
 
 ### viewer
 
@@ -1119,9 +1125,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-audit-fake-grid-conformance-grid`](blocked/test-audit-fake-grid-conformance-grid.md)
-  — Teach sl-conformance about sl-fake-grid so ~16 cases run offline (blocked by
-  `test-fake-grid-determinism`)
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars`, `test-fake-grid-timeline`)
@@ -1132,18 +1135,15 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles,
   linksets (blocked by `test-fake-grid-terrain-layerdata`,
   `test-shared-test-assets` (done))
-- [`test-fake-grid-terrain-layerdata`](blocked/test-fake-grid-terrain-layerdata.md)
-  — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
-  `test-fake-grid-determinism`)
 - [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
-  scenario timelines with markers (blocked by `test-fake-grid-determinism`,
-  `viewer-fake-grid-render-harness`)
+  scenario timelines with markers (blocked by `test-fake-grid-determinism`
+  (done), `viewer-fake-grid-render-harness`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (19)
+## in-progress (18)
 
 ### viewer
 
@@ -1192,11 +1192,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
-
-### test
-
-- [`test-fake-grid-determinism`](in-progress/test-fake-grid-determinism.md) — An
-  injectable clock and seeded ids for sl-fake-grid
 
 ## bugs (65)
 
@@ -1349,7 +1344,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (941)
+## done (942)
 
 ### protocol
 
@@ -3129,6 +3124,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   info / find by name
 - [`test-experience-permissions`](done/test-experience-permissions-request-set-experience-permission.md)
   — request / set experience permission
+- [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
+  injectable clock and seeded ids for sl-fake-grid
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)

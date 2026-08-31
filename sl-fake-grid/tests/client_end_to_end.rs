@@ -849,7 +849,7 @@ mod test {
                 1,
                 sl_proto::Camera::region_center().center,
                 "welcome east",
-                std::time::Instant::now(),
+                dest.now(),
             )
         })
         .await?;
@@ -898,7 +898,7 @@ mod test {
                     1,
                     sl_proto::Camera::region_center().center,
                     "still here",
-                    std::time::Instant::now(),
+                    running.agent.now(),
                 )
             })
             .await?;

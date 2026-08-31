@@ -51,6 +51,13 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   managers' in-flight counts) and the readback rig's `settle()`
   (pipelines compiled, probe bursts complete, timeline reached, clock
   held). A capture taken before the scene settles is a flake, not a test.
+- `sl-fake-grid` is reproducible on demand:
+  `FakeGridBuilder::deterministic(seed)` seeds every minted identifier (session,
+  secure session, circuit code, capability tokens, agent and region ids) and
+  `FakeGridBuilder::clock(now)` replaces every grid-side stamp — nothing in the
+  crate reaches for `Instant::now()` on its own, and
+  `sl_fake_grid::tokio_clock()` is what a paused-timer test passes. Tier F
+  records the grid produces are therefore comparable run to run.
 - `sl-viewer-testkit/src/baseline.rs` — the one baseline format for UI
   and render facts (`baselines/<crate>/<tier>/<id>.toml`, bless with
   `SL_VIEWER_BLESS_BASELINES=1`). A tier keeps its own opt-in list of

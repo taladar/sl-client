@@ -29,6 +29,7 @@ use crate::economy_policy::{EconomyConfig, EconomyEvent};
 use crate::error::Error;
 use crate::map_tiles::MapTileStore;
 use crate::scenario::Scenario;
+use crate::time::{Now, system_clock};
 
 /// How the grid describes itself in `get_grid_info` and the login message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -270,6 +271,8 @@ pub(crate) struct GridCore {
     pub(crate) honor_options: bool,
     /// The identifier source every login and capability grant draws from.
     pub(crate) minter: IdMinter,
+    /// The clock every session machine is stamped from.
+    pub(crate) clock: Now,
     /// How long an empty `EventQueueGet` poll is held before the 502.
     pub(crate) eq_hold: Duration,
     /// The bound HTTP port (fixed after `start`).
@@ -411,13 +414,14 @@ impl GridCore {
         let udp_addr = socket.local_addr()?;
         let seq = self.next_session.fetch_add(1, Ordering::Relaxed);
 
-        let mut sim = SimSession::new(region.handle(), Instant::now());
+        let now = (self.clock)();
+        let mut sim = SimSession::new(region.handle(), now);
         sim.set_secure_session_id(ids.secure_session_id);
         sim.set_region_id(region.region_id);
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
         }
-        (region.scenario.setup)(&mut sim);
+        (region.scenario.setup)(&mut sim, now);
         region.scenario.udp_assets.register_xfer_files(&mut sim);
         if *sim.simulator_features() == SimulatorFeatures::default() {
             // The scenario left the feature document untouched: advertise
@@ -455,7 +459,12 @@ impl GridCore {
             region: region_index,
             ids,
         };
-        let shared = new_shared_sim(state, socket, self.shutdown_tx.subscribe());
+        let shared = new_shared_sim(
+            state,
+            socket,
+            self.shutdown_tx.subscribe(),
+            Arc::clone(&self.clock),
+        );
         Ok(PreparedSession {
             seq,
             shared,
@@ -647,7 +656,6 @@ fn skeleton_of(
 }
 
 /// Configures and starts a [`FakeGrid`].
-#[derive(Debug)]
 pub struct FakeGridBuilder {
     /// The accounts allowed to log in.
     accounts: Vec<AccountConfig>,
@@ -671,6 +679,28 @@ pub struct FakeGridBuilder {
     map_tiles: MapTileStore,
     /// The identifier source (random unless seeded).
     minter: IdMinter,
+    /// The clock every session machine is stamped from (the system clock
+    /// unless [`FakeGridBuilder::clock`] replaced it).
+    clock: Now,
+}
+
+impl std::fmt::Debug for FakeGridBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FakeGridBuilder")
+            .field("accounts", &self.accounts)
+            .field("regions", &self.regions)
+            .field("scenario", &self.scenario)
+            .field("gates", &self.gates)
+            .field("honor_options", &self.honor_options)
+            .field("eq_hold", &self.eq_hold)
+            .field("http_port", &self.http_port)
+            .field("identity", &self.identity)
+            .field("economy", &self.economy)
+            .field("map_tiles", &self.map_tiles)
+            .field("minter", &self.minter)
+            .field("clock", &"<closure>")
+            .finish()
+    }
 }
 
 impl Default for FakeGridBuilder {
@@ -690,6 +720,17 @@ impl FakeGridBuilder {
         self
     }
 
+    /// Draws every grid-side instant from `clock` instead of the system one.
+    ///
+    /// A test that pauses tokio's timer passes
+    /// [`crate::time::tokio_clock`], so the session machines stamp their
+    /// deadlines on the same clock the timer tasks sleep on.
+    #[must_use]
+    pub fn clock(mut self, clock: Now) -> Self {
+        self.clock = clock;
+        self
+    }
+
     /// A builder with no accounts, no regions, the stock scenario, no login
     /// gates, and a 30 s event-queue hold on an ephemeral port.
     #[must_use]
@@ -699,6 +740,7 @@ impl FakeGridBuilder {
             regions: Vec::new(),
             scenario: Scenario::default(),
             minter: IdMinter::default(),
+            clock: system_clock(),
             gates: LoginGates::default(),
             honor_options: false,
             eq_hold: Duration::from_secs(30),
@@ -848,6 +890,7 @@ impl FakeGridBuilder {
             gates: self.gates,
             honor_options: self.honor_options,
             minter: minter.clone(),
+            clock: self.clock,
             eq_hold: self.eq_hold,
             http_port,
             login_uri,
@@ -1086,6 +1129,14 @@ impl FakeAgent {
         self.agent_id
     }
 
+    /// The grid's current instant — what a `send_*` call driven from a test
+    /// must stamp its message with, so a paused-clock grid is not handed a
+    /// real-time deadline.
+    #[must_use]
+    pub fn now(&self) -> Instant {
+        self.shared.now()
+    }
+
     /// Runs `f` against the live session machine, then flushes transmits,
     /// events, and wakeups — the only sanctioned way to call `send_*` /
     /// `set_*` / `enqueue_*` on it.
@@ -1165,7 +1216,7 @@ mod test {
         for (sequence, message) in [(1, open), (2, complete)] {
             let datagram = client_datagram(&message, sequence)?;
             shared
-                .with_sim(|sim| sim.handle_datagram(from, &datagram, Instant::now()))
+                .with_sim(|sim| sim.handle_datagram(from, &datagram, shared.now()))
                 .await?;
         }
         Ok(())

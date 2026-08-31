@@ -66,6 +66,38 @@ within a second. Connections are bounded (256 at once, each of which
 must send its request head within 15 s), so neither a wedged peer nor a
 flood of them can pin tasks and file descriptors.
 
+## Determinism: the seed and the clock
+
+Two things would otherwise make one run of a scenario incomparable with
+the next: the identifiers the grid mints and the instants it stamps its
+machines with. Both are injectable.
+
+`FakeGridBuilder::deterministic(seed)` replaces the identifier source
+with a seeded xorshift stream, so session ids, secure session ids,
+circuit codes, capability tokens, and defaulted agent and region ids all
+come out the same, in the same order, for the same seed and the same
+content. The minted uuids still carry the v4 version and variant bits, so
+nothing downstream can tell them from random ones. `determinism.rs`
+pins the property end to end: two scripted login-to-chat runs against
+`deterministic(1)` mint the same identifiers — down to the tokens inside
+the granted capability URLs — and decode the same grid-side event
+sequence.
+
+`FakeGridBuilder::clock(now)` replaces the clock. Every grid-side instant
+— the `now` each `SimSession` entry point takes, the instant a session
+machine is created at, the `EventQueueGet` hold deadline, the stamp a
+scenario hook is handed — is drawn from one `Now`
+(`Arc<dyn Fn() -> Instant + Send + Sync>`) held by the grid core and by
+every live session; nothing in the crate calls `Instant::now()` behind
+the builder's back. The default is `system_clock()`; a test that pauses
+tokio's timer passes `tokio_clock()`, so the machines and the timer tasks
+that fire their deadlines agree on what time it is. A test driving the
+grid side stamps its own sends with `FakeAgent::now()` for the same
+reason.
+
+Both `SimHook` and `SimEventHook` take that instant as a parameter — a
+hook that sends never has to reach for a clock of its own.
+
 ## As a library
 
 ```rust,ignore
