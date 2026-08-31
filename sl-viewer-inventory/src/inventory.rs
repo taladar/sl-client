@@ -442,7 +442,12 @@ impl InventoryModel {
     /// events — coexist, and lets a fetched page fill in a Library subtree the
     /// login skeleton did not carry. `library` tags the batch as read-only shared
     /// Library folders. Also locates the Current Outfit Folder.
-    fn merge_folders(&mut self, infos: &[FolderInfo], library: bool) {
+    ///
+    /// Public because the model outlives its floater: a headless fixture world
+    /// carries this resource without the inventory window's plugin (which is
+    /// what folds the skeleton events in), and the folder resolution the object
+    /// pie's Take / Delete depend on has to be seedable there.
+    pub fn merge_folders(&mut self, infos: &[FolderInfo], library: bool) {
         for info in infos {
             self.folders.insert(info.folder_id, info.clone());
             if library {

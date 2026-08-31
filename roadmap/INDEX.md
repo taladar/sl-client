@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 303 |
+| ready | 302 |
 | blocked | 65 |
 | in-progress | 19 |
 | bugs | 65 |
-| done | 940 |
+| done | 941 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (302)
 
 ### protocol
 
@@ -921,9 +921,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
   `viewer-teleport-flow-progress` (done))
-- [`viewer-world-pie-menu-reactions`](ready/viewer-world-pie-menu-reactions.md)
-  — Right-click reactions per world target class (blocked by
-  `viewer-world-test-harness` (done))
 
 ### idiomatic
 
@@ -1352,7 +1349,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (940)
+## done (941)
 
 ### protocol
 
@@ -2782,6 +2779,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater — MapItem marker layers (blocked by `viewer-world-map-floater` (done))
 - [`viewer-world-map-search`](done/viewer-world-map-search.md) — World-map
   floater — region-name search (blocked by `viewer-world-map-floater` (done))
+- [`viewer-world-pie-menu-reactions`](done/viewer-world-pie-menu-reactions.md) —
+  Right-click reactions per world target class (blocked by
+  `viewer-world-test-harness` (done))
 - [`viewer-world-pie-target-tests`](done/viewer-world-pie-target-tests.md) —
   Right-clicking each world target opens exactly its pie (blocked by
   `viewer-world-test-harness` (done))

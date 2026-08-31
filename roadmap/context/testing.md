@@ -113,6 +113,13 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   the copying system is an unordered `Update` system — so step one update
   past the input that produced the message, or an effect that did happen
   reads as "the key did nothing".
+- **a context-menu dispatch test**: open the pie with a **real
+  right-click** (`world_test::right_click_at`), so the stashed target is
+  the one the classifier resolved, then write the `UiAction` the slice
+  emits rather than clicking its label — the label→action half is already
+  pinned by the per-menu compass-address tables and, end to end, by
+  `a_pie_slice_clicked_in_world_sends_its_command`. `pie_dispatch_tests`
+  in `world_test.rs` is the worked example.
 - **a fake-grid fixture**: a `PrimFixture`/`NpcFixture`/`TerrainFixture`
   in `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
   harness, the conformance `Grid::Fake` branch and the Firestorm

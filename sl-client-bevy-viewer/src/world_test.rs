@@ -681,6 +681,21 @@ pub(crate) fn select_by_click(app: &mut App, at: Vec2) {
     settle(app, 2);
 }
 
+/// Right-click `at` (a world position): aim the camera at it, click the
+/// viewport centre, settle — the shared shape of every pie test, target and
+/// dispatch alike.
+pub(crate) fn right_click_at(app: &mut App, at: Vec3) {
+    // Component-wise plain `f32`: the lint fires on `glam` operators.
+    let eye = Vec3::new(at.x, at.y + 1.0, at.z + 8.0);
+    install_camera(app, eye, at);
+    settle(app, 2);
+    let centre = Vec2::new(400.0, 300.0);
+    interact::hover(app, centre);
+    interact::press(app, MouseButton::Right);
+    interact::release(app, MouseButton::Right);
+    settle(app, 3);
+}
+
 /// Every [`sl_client_bevy::Command`] the viewer has sent since the last drain —
 /// the outbound half of the fixture world's seam, unwrapped from its message.
 pub(crate) fn drain_commands(app: &mut App) -> Vec<sl_client_bevy::Command> {
@@ -717,7 +732,8 @@ mod tests {
     use sl_viewer_testkit::{drain, find_by_name, interact, record};
 
     use super::{
-        first_tagged_face_position, install_camera, seed_prim, settle, world_app, world_to_viewport,
+        first_tagged_face_position, install_camera, right_click_at, seed_prim, settle, world_app,
+        world_to_viewport,
     };
     use crate::object_menu::OpenObjectMenu;
 
@@ -2123,20 +2139,6 @@ mod tests {
              (selected {selected:?}, deselected {deselected:?})"
         );
         Ok(())
-    }
-
-    /// Right-click `at` (a world position): aim the camera at it, click the
-    /// viewport centre, settle — the shared shape of every pie-target test.
-    fn right_click_at(app: &mut App, at: Vec3) {
-        // Component-wise plain `f32`: the lint fires on `glam` operators.
-        let eye = Vec3::new(at.x, at.y + 1.0, at.z + 8.0);
-        super::install_camera(app, eye, at);
-        settle(app, 2);
-        let centre = Vec2::new(400.0, 300.0);
-        interact::hover(app, centre);
-        interact::press(app, MouseButton::Right);
-        interact::release(app, MouseButton::Right);
-        settle(app, 3);
     }
 
     /// **Another avatar's body opens the avatar pie**: a right-click on the
@@ -4173,5 +4175,891 @@ mod movement_tests {
             vec![ControlFlags::empty(), ControlFlags::AWAY],
             "a standing avatar that goes away advertises the away bit alone"
         );
+    }
+}
+
+/// The **pie dispatch tier** ([[viewer-world-pie-menu-reactions]]): what a
+/// committed slice actually *does*.
+///
+/// The pie-target tier asks which pie a right-click opens; the four per-menu
+/// address tables ask where each action sits inside it. Neither asks what
+/// happens when the slice is picked — that is `handle_*_menu_actions`, four
+/// systems that read the target the click stashed and turn one `&'static str`
+/// into a `SlCommand`, a guarded request or a floater open.
+///
+/// Every test here opens its pie with a **real right-click** in the fixture
+/// world, so the target the action acts on is the one the real classifier
+/// resolved rather than a resource poked by hand, and then writes the
+/// [`UiAction`] the widget emits when the slice is clicked. The widget half —
+/// that the label at a given compass point carries that action string — is
+/// pinned by the per-menu address tables and, end to end through a real label
+/// click, by `a_pie_slice_clicked_in_world_sends_its_command`; re-clicking a
+/// label per action would re-test the ring, not the dispatch.
+#[cfg(test)]
+mod pie_dispatch_tests {
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use sl_client_bevy::{
+        AgentKey, AvatarName, Command, DeRezDestination, FolderInfo, FolderState, FolderType,
+        InventoryFolderKey, MuteType, ObjectKey, ScopedObjectId, SlAgentParcel, SlEvent,
+        SlIdentity, SlSessionEvent as SessionEvent, Uuid, Vector,
+    };
+
+    use super::{
+        avatar_position_of, drain_commands, right_click_at, scene_position_of, seed_attachment,
+        seed_avatar, seed_child_prim, seed_prim_with_flags, seed_terrain, settle, terrain_centre,
+        world_app,
+    };
+    use crate::about_land::{AboutLandSubject, OpenAboutLand};
+    use crate::attachment_menu::ATTACHMENT_MENU_ELEMENT;
+    use crate::avatar_complexity::RenderOverride;
+    use crate::avatar_menu::AVATAR_MENU_ELEMENT;
+    use crate::avatar_render_settings::RequestRenderException;
+    use crate::avatars::RefetchAvatarTextures;
+    use crate::contact_sets_panel::OpenSetPseudonym;
+    use crate::derender::RequestDerender;
+    use crate::edit_contents::OpenObjectContents;
+    use crate::inventory::InventoryModel;
+    use crate::land_menu::LAND_MENU_ELEMENT;
+    use crate::object_menu::{FLAGS_HANDLE_TOUCH, OBJECT_MENU_ELEMENT};
+    use crate::ui_element::UiAction;
+    use crate::world_api::{
+        ConversationKey, DerenderKind, EditToolState, OpenAddToContactSet, OpenAvatarProfile,
+        OpenConversation, RequestBlock, SelectionSet, SelfGroundSit,
+    };
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// Where every in-world fixture below stands (SL region-local metres).
+    const FIXTURE_AT: Vector = Vector {
+        x: 128.0,
+        y: 128.0,
+        z: 30.0,
+    };
+
+    /// The fixture avatar's resolved legacy name — what a mute entry and a
+    /// render exception carry on behalf of the pie. Deliberately *not*
+    /// `"… Resident"`, which [`AvatarName::legacy_name`] collapses to the first
+    /// name alone.
+    const FIXTURE_NAME: &str = "Fixture Avatar";
+
+    /// Commit `action` on `element` — the [`UiAction`] an open pie's slice
+    /// writes when it is clicked — and let the dispatch run.
+    ///
+    /// Three frames, not one: the handler reads the action in the first, and
+    /// the `Recorded<M>` copiers behind every effect channel are unordered
+    /// `Update` systems, so a drain a frame too early reads an effect that did
+    /// happen as "the slice did nothing".
+    fn commit(app: &mut App, element: &'static str, action: &'static str) {
+        app.world_mut().write_message(UiAction { element, action });
+        settle(app, 3);
+    }
+
+    /// The names of every [`Command`] the viewer has sent since the last drain,
+    /// in order — the "and nothing else went out" half of a dispatch
+    /// assertion, and the only equality available (`Command` is neither `Clone`
+    /// nor `PartialEq`).
+    fn command_names(app: &mut App) -> Vec<&'static str> {
+        drain_commands(app).iter().map(Command::name).collect()
+    }
+
+    /// Start recording every channel the four dispatchers write into, so a test
+    /// can drain whichever one its slice was supposed to reach — and assert the
+    /// others stayed empty.
+    fn record_effects(app: &mut App) {
+        sl_viewer_testkit::record::<RequestBlock>(app);
+        sl_viewer_testkit::record::<RequestDerender>(app);
+        sl_viewer_testkit::record::<RequestRenderException>(app);
+        sl_viewer_testkit::record::<RefetchAvatarTextures>(app);
+        sl_viewer_testkit::record::<OpenConversation>(app);
+        sl_viewer_testkit::record::<OpenAvatarProfile>(app);
+        sl_viewer_testkit::record::<OpenAddToContactSet>(app);
+        sl_viewer_testkit::record::<OpenSetPseudonym>(app);
+        sl_viewer_testkit::record::<OpenObjectContents>(app);
+        sl_viewer_testkit::record::<OpenAboutLand>(app);
+    }
+
+    /// A fixture world holding one **touchable** prim, right-clicked so the
+    /// object pie's target is the hit the real classifier resolved. Returns the
+    /// app and the prim's scoped id, with the properties request the open sends
+    /// already drained.
+    fn object_world() -> Result<(App, ScopedObjectId), TestError> {
+        let mut app = world_app();
+        record_effects(&mut app);
+        let scoped = seed_prim_with_flags(&mut app, FIXTURE_AT, FLAGS_HANDLE_TOUCH);
+        settle(&mut app, 5);
+        let at = scene_position_of(&mut app, scoped).ok_or("the fixture prim never spawned")?;
+        right_click_at(&mut app, at);
+        object_target_scoped(&app).ok_or("the right-click resolved no object target")?;
+        let _opening = drain_commands(&mut app);
+        Ok((app, scoped))
+    }
+
+    /// A fixture world holding a two-prim linkset whose **child** was
+    /// right-clicked — the shape that tells the picked prim from its linkset
+    /// root apart. Returns the app, the root's scoped id and the child's.
+    fn linkset_world() -> Result<(App, ScopedObjectId, ScopedObjectId), TestError> {
+        let mut app = world_app();
+        record_effects(&mut app);
+        let root = seed_prim_with_flags(&mut app, FIXTURE_AT, FLAGS_HANDLE_TOUCH);
+        settle(&mut app, 5);
+        // Held well out to the side, so the ray that strikes the child cannot
+        // also graze the root's box.
+        let child = seed_child_prim(
+            &mut app,
+            1,
+            2,
+            Vector {
+                x: 6.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        settle(&mut app, 6);
+        let at = scene_position_of(&mut app, child).ok_or("the child prim never spawned")?;
+        right_click_at(&mut app, at);
+        let picked =
+            object_target_scoped(&app).ok_or("the right-click resolved no object target")?;
+        assert_eq!(picked, child, "the right-click must land on the child prim");
+        let _opening = drain_commands(&mut app);
+        Ok((app, root, child))
+    }
+
+    /// The scoped id the object pie's stashed hit names, or `None` when no
+    /// right-click has resolved to an object.
+    fn object_target_scoped(app: &App) -> Option<ScopedObjectId> {
+        app.world()
+            .resource::<crate::object_menu::ObjectMenuTarget>()
+            .hit
+            .as_ref()
+            .map(|hit| hit.summary.picked_scoped)
+    }
+
+    /// A fixture world holding **another** avatar with its name resolved,
+    /// right-clicked so the avatar pie's target is that agent.
+    fn other_avatar_world() -> Result<(App, AgentKey), TestError> {
+        let other = AgentKey::from(Uuid::from_u128(0xB));
+        let app = avatar_world(other, None)?;
+        Ok((app, other))
+    }
+
+    /// A fixture world holding one avatar (`agent`), named as the grid would
+    /// name it and right-clicked. With `own` set, that agent is also the
+    /// logged-in identity, so the click opens the **self** pie.
+    fn avatar_world(agent: AgentKey, own: Option<AgentKey>) -> Result<App, TestError> {
+        let mut app = world_app();
+        record_effects(&mut app);
+        if let Some(own) = own {
+            app.world_mut().resource_mut::<SlIdentity>().agent_id = Some(own);
+        }
+        seed_avatar(&mut app, agent, 2, FIXTURE_AT);
+        name_avatar(&mut app, agent);
+        settle(&mut app, 5);
+        let at = avatar_position_of(&mut app, agent).ok_or("the avatar sphere never spawned")?;
+        right_click_at(&mut app, at);
+        let _opening = drain_commands(&mut app);
+        Ok(app)
+    }
+
+    /// Resolve `agent`'s legacy name the way the grid does — a `UUIDNameReply`
+    /// folded in by the real ingest, not a poked cache.
+    fn name_avatar(app: &mut App, agent: AgentKey) {
+        app.world_mut()
+            .write_message(SlEvent(SessionEvent::AvatarNames(vec![AvatarName {
+                id: agent,
+                first_name: "Fixture".to_owned(),
+                last_name: "Avatar".to_owned(),
+            }])));
+    }
+
+    /// A fixture world holding a worn attachment on another avatar, with the
+    /// attachment right-clicked. Returns the app, the wearer and the worn
+    /// object's scoped id.
+    fn attachment_world() -> Result<(App, AgentKey, ScopedObjectId), TestError> {
+        let mut app = world_app();
+        record_effects(&mut app);
+        let wearer = AgentKey::from(Uuid::from_u128(0xC));
+        seed_avatar(&mut app, wearer, 2, FIXTURE_AT);
+        name_avatar(&mut app, wearer);
+        settle(&mut app, 3);
+        // Chest (point 1), held out to the side so the ray meets the prim and
+        // not the wearer's sphere.
+        let worn = seed_attachment(
+            &mut app,
+            2,
+            3,
+            1,
+            Vector {
+                x: 4.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        settle(&mut app, 5);
+        let at = scene_position_of(&mut app, worn).ok_or("the attachment never spawned")?;
+        right_click_at(&mut app, at);
+        let _opening = drain_commands(&mut app);
+        Ok((app, wearer, worn))
+    }
+
+    /// A fixture world standing on flat land, right-clicked at the patch's
+    /// centre. Returns the app and the ground point that was clicked.
+    fn land_world() -> Result<(App, Vec3), TestError> {
+        let mut app = world_app();
+        record_effects(&mut app);
+        seed_terrain(&mut app, 25.0);
+        settle(&mut app, 5);
+        let at = terrain_centre(&mut app).ok_or("the land patch never built")?;
+        right_click_at(&mut app, at);
+        let _opening = drain_commands(&mut app);
+        Ok((app, at))
+    }
+
+    /// The one `Sit` that went out, as `(target, offset)`.
+    fn sit_target(app: &mut App) -> Option<(ObjectKey, Vector)> {
+        drain_commands(app)
+            .into_iter()
+            .find_map(|command| match command {
+                Command::Sit { target, offset } => Some((target, offset)),
+                _other => None,
+            })
+    }
+
+    /// Whether `scoped` is in the build tools' selection right now.
+    fn is_selected(app: &App, scoped: ScopedObjectId) -> bool {
+        app.world().resource::<SelectionSet>().is_selected(scoped)
+    }
+
+    /// Whether the viewer believes the avatar is sitting on the ground.
+    fn ground_sitting(app: &App) -> bool {
+        app.world().resource::<SelfGroundSit>().sitting
+    }
+
+    // -- The object pie ------------------------------------------------------
+
+    /// **Touch names the prim that was picked, not its linkset root**: the
+    /// reference's `llDetectedLinkNumber` depends on it, and so does every
+    /// script that answers a touch on one face of a build.
+    ///
+    /// The `Some` surface is the other half: a `TouchObject` with no surface is
+    /// what a script sees when `llDetectedTouchST` comes back empty.
+    #[test]
+    fn touch_names_the_picked_prim_and_carries_its_surface() -> Result<(), TestError> {
+        let (mut app, _root, child) = linkset_world()?;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "touch");
+        let touches: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::TouchObject { local_id, surface } => Some((local_id, surface.is_some())),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            touches,
+            vec![(child, true)],
+            "Touch must send one TouchObject for the picked child prim, carrying the ray's surface"
+        );
+        Ok(())
+    }
+
+    /// **Open shows the whole linkset's contents**: the reference's
+    /// `LLFloaterOpenObject` opens on the root object however deep in the
+    /// linkset the click landed, so a click on a child must not open that
+    /// child's own inventory.
+    #[test]
+    fn open_asks_for_the_linkset_roots_contents() -> Result<(), TestError> {
+        let (mut app, root, _child) = linkset_world()?;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "open");
+        let opened = sl_viewer_testkit::drain::<OpenObjectContents>(&mut app);
+        assert_eq!(
+            opened
+                .iter()
+                .map(|request| request.scoped)
+                .collect::<Vec<_>>(),
+            vec![root],
+            "Open must ask for the linkset root's contents, not the picked child's"
+        );
+        assert_eq!(
+            command_names(&mut app),
+            Vec::<&str>::new(),
+            "Open is a floater, not a wire message"
+        );
+        Ok(())
+    }
+
+    /// **Edit selects the linkset, and Edit Linked Parts selects the part**:
+    /// the pie's Edit slice enters the build tools on what was clicked, and
+    /// which of the two that is, is the standing `EditToolState::edit_linked`
+    /// mode — the same rule a selection *click* follows.
+    #[test]
+    fn edit_selects_the_root_and_edit_linked_selects_the_part() -> Result<(), TestError> {
+        let (mut app, root, child) = linkset_world()?;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "edit");
+        assert!(
+            is_selected(&app, root) && !is_selected(&app, child),
+            "a whole-linkset Edit selects the linkset root"
+        );
+
+        app.world_mut().resource_mut::<EditToolState>().edit_linked = true;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "edit");
+        assert!(
+            is_selected(&app, child) && !is_selected(&app, root),
+            "with Edit Linked Parts on, Edit selects the picked part"
+        );
+        Ok(())
+    }
+
+    /// **Sit Here sits on the picked prim; Stand Up stands and forgets the
+    /// ground sit**: the two ends of the object pie's north-west slot, which
+    /// the pie itself swaps by the seated condition.
+    #[test]
+    fn sit_here_sits_on_the_prim_and_stand_clears_the_ground_sit() -> Result<(), TestError> {
+        let (mut app, _scoped) = object_world()?;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "sit-here");
+        let (target, _offset) = sit_target(&mut app).ok_or("Sit Here sent no Sit")?;
+        assert_eq!(
+            target,
+            ObjectKey::from(Uuid::from_u128(1)),
+            "Sit Here must name the picked prim as the seat"
+        );
+
+        // A ground sit the pie itself started, which Stand Up must end.
+        app.world_mut().resource_mut::<SelfGroundSit>().sitting = true;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "stand");
+        assert_eq!(
+            command_names(&mut app),
+            vec!["Stand"],
+            "Stand Up sends exactly one Stand"
+        );
+        assert!(
+            !ground_sitting(&app),
+            "Stand Up must clear the tracked ground sit, or Sit Down stays greyed out"
+        );
+        Ok(())
+    }
+
+    /// **A derez waits for the folder it needs, and Return needs none**: Take,
+    /// Take Copy and Delete each name an inventory folder the skeleton has not
+    /// delivered in this fixture world, and the handler drops them rather than
+    /// derezzing an object into nowhere; Return, which carries no folder, goes
+    /// out.
+    ///
+    /// The pair is the point: "no command" alone could equally be a pie whose
+    /// action strings had all been renamed.
+    #[test]
+    fn a_derez_without_its_folder_is_dropped_and_return_still_goes_out() -> Result<(), TestError> {
+        let (mut app, scoped) = object_world()?;
+        for action in ["take", "take-copy", "delete"] {
+            commit(&mut app, OBJECT_MENU_ELEMENT, action);
+            assert_eq!(
+                command_names(&mut app),
+                Vec::<&str>::new(),
+                "{action} must not derez while its destination folder is unknown"
+            );
+        }
+        commit(&mut app, OBJECT_MENU_ELEMENT, "return");
+        let returns: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::DerezObjects {
+                    local_ids,
+                    destination,
+                    ..
+                } => Some((local_ids, destination)),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            returns,
+            vec![(vec![scoped], DeRezDestination::ReturnToOwner)],
+            "Return must derez the picked linkset to its owner"
+        );
+        Ok(())
+    }
+
+    /// **Each derez lands in the folder the reference chose for it**: Take and
+    /// Take Copy in the system Objects folder — differing only in whether a
+    /// copy is left in world — and Delete in the Trash. The destination
+    /// carries the folder id, so a slice that resolved the wrong one would
+    /// scatter takes into the Trash without any of them failing.
+    ///
+    /// The folder-less run above is the other half: without it, three
+    /// destinations that all resolved to `None` would read the same as three
+    /// slices that were never wired.
+    #[test]
+    fn a_derez_lands_in_the_folder_its_slice_names() -> Result<(), TestError> {
+        let (mut app, scoped) = object_world()?;
+        let (objects, trash) = seed_derez_folders(&mut app);
+        for (action, expected) in [
+            ("take", DeRezDestination::TakeIntoAgentInventory(objects)),
+            (
+                "take-copy",
+                DeRezDestination::AcquireToAgentInventory(objects),
+            ),
+            ("delete", DeRezDestination::Trash(trash)),
+        ] {
+            commit(&mut app, OBJECT_MENU_ELEMENT, action);
+            let derezzed: Vec<_> = drain_commands(&mut app)
+                .into_iter()
+                .filter_map(|command| match command {
+                    Command::DerezObjects {
+                        local_ids,
+                        destination,
+                        ..
+                    } => Some((local_ids, destination)),
+                    _other => None,
+                })
+                .collect();
+            assert_eq!(
+                derezzed,
+                vec![(vec![scoped], expected)],
+                "{action} must derez the picked linkset into its own destination"
+            );
+        }
+        Ok(())
+    }
+
+    /// Merge the two system folders a derez resolves — Objects and Trash —
+    /// into the inventory model, as the login skeleton would. Returns their
+    /// ids.
+    ///
+    /// Seeded on the model rather than fed as an `InventoryFolders` event: the
+    /// system that folds that event in belongs to the inventory *window*, which
+    /// the fixture world does not stand up, and the skeleton ingest has its own
+    /// tests in `sl-viewer-inventory`.
+    fn seed_derez_folders(app: &mut App) -> (InventoryFolderKey, InventoryFolderKey) {
+        let objects = InventoryFolderKey::from(Uuid::from_u128(0x0B_1EC7));
+        let trash = InventoryFolderKey::from(Uuid::from_u128(0x77_A54));
+        app.world_mut()
+            .resource_mut::<InventoryModel>()
+            .merge_folders(
+                &[
+                    system_folder(objects, FolderType::Object, "Objects"),
+                    system_folder(trash, FolderType::Trash, "Trash"),
+                ],
+                false,
+            );
+        (objects, trash)
+    }
+
+    /// One agent-tree system folder, as the login skeleton delivers it.
+    fn system_folder(
+        folder_id: InventoryFolderKey,
+        folder_type: FolderType,
+        name: &str,
+    ) -> FolderInfo {
+        FolderInfo {
+            folder_id,
+            parent_id: None,
+            name: name.to_owned(),
+            folder_type,
+            version: 1,
+            state: FolderState::Unknown,
+        }
+    }
+
+    /// **Block and Derender take their guarded channels**: neither slice
+    /// writes to the wire itself. Block raises a `RequestBlock`, and it is the
+    /// guard behind it (`mutes::apply_block_requests`, which refuses a Linden,
+    /// the agent itself and a full list) that turns an accepted one into the
+    /// single `Mute` seen here; Derender writes only a local request, because a
+    /// derendered object is one the simulator goes on streaming.
+    #[test]
+    fn object_block_and_derender_take_the_guarded_channels() -> Result<(), TestError> {
+        let (mut app, _scoped) = object_world()?;
+        commit(&mut app, OBJECT_MENU_ELEMENT, "mute");
+        let blocks = sl_viewer_testkit::drain::<RequestBlock>(&mut app);
+        assert_eq!(
+            blocks
+                .iter()
+                .map(|block| (block.id, block.mute_type))
+                .collect::<Vec<_>>(),
+            vec![(Uuid::from_u128(1), MuteType::Object)],
+            "Block must ask for one object block on the picked linkset's root"
+        );
+        assert_eq!(
+            command_names(&mut app),
+            vec!["Mute"],
+            "the guard, not the pie, is what puts an accepted block on the wire"
+        );
+
+        for (action, permanent) in [("derender", false), ("derender-blacklist", true)] {
+            commit(&mut app, OBJECT_MENU_ELEMENT, action);
+            assert_eq!(
+                sl_viewer_testkit::drain::<RequestDerender>(&mut app),
+                vec![RequestDerender::new(
+                    Uuid::from_u128(1),
+                    String::new(),
+                    DerenderKind::Object,
+                    permanent,
+                )],
+                "{action} must ask to derender the object itself"
+            );
+            assert_eq!(
+                command_names(&mut app),
+                Vec::<&str>::new(),
+                "{action} suppresses the object locally; the simulator keeps streaming it"
+            );
+        }
+        Ok(())
+    }
+
+    // -- The avatar pie ------------------------------------------------------
+
+    /// **The avatar slices open on the agent that was clicked**: IM, Profile
+    /// and Refresh Textures each carry the picked agent, and none of them puts
+    /// anything on the wire from the pie itself.
+    #[test]
+    fn the_avatar_pie_opens_its_floaters_on_the_clicked_agent() -> Result<(), TestError> {
+        let (mut app, other) = other_avatar_world()?;
+        commit(&mut app, AVATAR_MENU_ELEMENT, "im");
+        assert_eq!(
+            sl_viewer_testkit::drain::<OpenConversation>(&mut app)
+                .iter()
+                .map(|request| request.key)
+                .collect::<Vec<_>>(),
+            vec![ConversationKey::Direct(other)],
+            "IM must open the one-to-one conversation with the clicked agent"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "profile");
+        assert_eq!(
+            sl_viewer_testkit::drain::<OpenAvatarProfile>(&mut app)
+                .iter()
+                .map(|request| request.agent)
+                .collect::<Vec<_>>(),
+            vec![other],
+            "Profile must open on the clicked agent"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "tex-refresh");
+        assert_eq!(
+            sl_viewer_testkit::drain::<RefetchAvatarTextures>(&mut app)
+                .iter()
+                .map(|request| request.agent)
+                .collect::<Vec<_>>(),
+            vec![other],
+            "Refresh Textures must re-fetch the clicked agent's bakes"
+        );
+        Ok(())
+    }
+
+    /// **Add as Friend goes on the wire, and Block goes through the guard
+    /// under the name the grid resolved**: the two avatar slices that name a
+    /// person to something outside the viewer.
+    #[test]
+    fn add_friend_offers_and_block_carries_the_resolved_name() -> Result<(), TestError> {
+        let (mut app, other) = other_avatar_world()?;
+        commit(&mut app, AVATAR_MENU_ELEMENT, "add-friend");
+        let offers: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::OfferFriendship {
+                    to_agent_id,
+                    message,
+                } => Some((to_agent_id, message)),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            offers,
+            vec![(other, String::new())],
+            "Add as Friend must offer to the clicked agent, with the pie's empty message"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "mute");
+        assert_eq!(
+            sl_viewer_testkit::drain::<RequestBlock>(&mut app)
+                .iter()
+                .map(|block| (block.id, block.name.clone(), block.mute_type))
+                .collect::<Vec<_>>(),
+            vec![(other.uuid(), FIXTURE_NAME.to_owned(), MuteType::Agent)],
+            "Block must record the agent under the name the grid resolved"
+        );
+        Ok(())
+    }
+
+    /// **Sit Down and Stand Up drive the tracked ground sit**: the self pie's
+    /// two fixed slices are gated on a flag nothing on the wire reports, so the
+    /// dispatch has to maintain it — a Sit Down that did not set it would leave
+    /// Stand Up greyed out afterwards.
+    #[test]
+    fn the_self_pie_sits_on_the_ground_and_stands_back_up() -> Result<(), TestError> {
+        let own = AgentKey::from(Uuid::from_u128(0xA));
+        let mut app = avatar_world(own, Some(own))?;
+        commit(&mut app, AVATAR_MENU_ELEMENT, "sit-ground");
+        assert_eq!(
+            command_names(&mut app),
+            vec!["SitOnGround"],
+            "Sit Down sends exactly one SitOnGround"
+        );
+        assert!(
+            ground_sitting(&app),
+            "Sit Down must record the ground sit the wire never reports back"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "stand");
+        assert_eq!(
+            command_names(&mut app),
+            vec!["Stand"],
+            "Stand Up sends exactly one Stand"
+        );
+        assert!(!ground_sitting(&app), "Stand Up must end the ground sit");
+        Ok(())
+    }
+
+    /// **The avatar-only slices refuse the attachment pies**: Derender, the
+    /// three render overrides, Add to Set and Set Alias carry the same action
+    /// names in an attachment pie, where they address the worn object or
+    /// nothing at all — so the shared handler dispatches them for the avatar
+    /// element alone.
+    ///
+    /// The positive first, then the same six actions under the attachment
+    /// element in the same world: without the pair, a handler that had stopped
+    /// dispatching them altogether would pass the negative.
+    #[test]
+    fn the_avatar_only_slices_are_dispatched_for_the_avatar_pie_alone() -> Result<(), TestError> {
+        let (mut app, other) = other_avatar_world()?;
+        commit(&mut app, AVATAR_MENU_ELEMENT, "derender");
+        assert_eq!(
+            sl_viewer_testkit::drain::<RequestDerender>(&mut app),
+            vec![RequestDerender::new(
+                other.uuid(),
+                FIXTURE_NAME,
+                DerenderKind::Resident,
+                false,
+            )],
+            "the avatar pie's Derender must suppress the resident"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "render-never");
+        assert_eq!(
+            sl_viewer_testkit::drain::<RequestRenderException>(&mut app)
+                .iter()
+                .map(|request| (request.agent, request.setting))
+                .collect::<Vec<_>>(),
+            vec![(other, RenderOverride::Never)],
+            "Never render must ask for a standing render exception on that agent"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "add-to-set");
+        assert_eq!(
+            sl_viewer_testkit::drain::<OpenAddToContactSet>(&mut app)
+                .iter()
+                .map(|request| request.agents.clone())
+                .collect::<Vec<_>>(),
+            vec![vec![(other, FIXTURE_NAME.to_owned())]],
+            "Add to Set must offer to file the clicked agent"
+        );
+
+        commit(&mut app, AVATAR_MENU_ELEMENT, "set-alias");
+        assert_eq!(
+            sl_viewer_testkit::drain::<OpenSetPseudonym>(&mut app)
+                .iter()
+                .map(|request| (request.agent, request.name.clone()))
+                .collect::<Vec<_>>(),
+            vec![(other, FIXTURE_NAME.to_owned())],
+            "Set Alias must prompt for the clicked agent"
+        );
+
+        // The negative: the same names under the attachment element, in a world
+        // whose attachment pie was never opened, reach nothing at all.
+        for action in [
+            "derender",
+            "derender-blacklist",
+            "render-never",
+            "render-fully",
+            "add-to-set",
+            "set-alias",
+        ] {
+            commit(&mut app, ATTACHMENT_MENU_ELEMENT, action);
+            assert!(
+                sl_viewer_testkit::drain::<RequestDerender>(&mut app).is_empty()
+                    && sl_viewer_testkit::drain::<RequestRenderException>(&mut app).is_empty()
+                    && sl_viewer_testkit::drain::<OpenAddToContactSet>(&mut app).is_empty()
+                    && sl_viewer_testkit::drain::<OpenSetPseudonym>(&mut app).is_empty(),
+                "{action} on an attachment pie must not act on the wearer"
+            );
+        }
+        Ok(())
+    }
+
+    // -- The attachment pies -------------------------------------------------
+
+    /// **Detach and Drop name the worn object, and Touch its picked prim**: the
+    /// three attachment-specific slices, each on the object the pie opened on.
+    #[test]
+    fn detach_drop_and_touch_act_on_the_worn_object() -> Result<(), TestError> {
+        let (mut app, _wearer, worn) = attachment_world()?;
+        commit(&mut app, ATTACHMENT_MENU_ELEMENT, "detach");
+        let detached: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::DetachObjects { local_ids } => Some(local_ids),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            detached,
+            vec![vec![worn]],
+            "Detach must take the worn object back to inventory"
+        );
+
+        commit(&mut app, ATTACHMENT_MENU_ELEMENT, "drop");
+        let dropped: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::DropAttachments { local_ids } => Some(local_ids),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            dropped,
+            vec![vec![worn]],
+            "Drop must drop the worn object into the world"
+        );
+
+        commit(&mut app, ATTACHMENT_MENU_ELEMENT, "touch");
+        let touched: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::TouchObject { local_id, .. } => Some(local_id),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            touched,
+            vec![worn],
+            "Touch must touch the worn object that was clicked"
+        );
+        Ok(())
+    }
+
+    /// **An attachment's Derender hides the attachment, not its wearer**: both
+    /// dispatchers see this action name — the shared avatar handler accepts the
+    /// attachment element for the wearer-derived slices — and exactly one of
+    /// them must answer it.
+    ///
+    /// Getting this wrong is not a missing feature but a surprise: a user who
+    /// derenders someone's hat would lose the person.
+    #[test]
+    fn an_attachment_derender_hides_the_object_not_its_wearer() -> Result<(), TestError> {
+        let (mut app, wearer, worn) = attachment_world()?;
+        commit(&mut app, ATTACHMENT_MENU_ELEMENT, "derender");
+        let requests = sl_viewer_testkit::drain::<RequestDerender>(&mut app);
+        assert_eq!(
+            requests,
+            vec![RequestDerender::new(
+                Uuid::from_u128(3),
+                String::new(),
+                DerenderKind::Object,
+                false,
+            )],
+            "an attachment pie's Derender suppresses the worn object alone (worn {worn:?}, \
+             wearer {wearer:?})"
+        );
+        Ok(())
+    }
+
+    /// **The wearer-derived slices reach the wearer**: an attachment pie's IM
+    /// and Add as Friend carry the avatar pies' own action names and are
+    /// dispatched by the shared avatar handler, against the wearer the open
+    /// stashed — which is the only reason right-clicking someone's hat can
+    /// start a conversation with them.
+    #[test]
+    fn an_attachment_pie_ims_and_befriends_its_wearer() -> Result<(), TestError> {
+        let (mut app, wearer, _worn) = attachment_world()?;
+        commit(&mut app, ATTACHMENT_MENU_ELEMENT, "im");
+        assert_eq!(
+            sl_viewer_testkit::drain::<OpenConversation>(&mut app)
+                .iter()
+                .map(|request| request.key)
+                .collect::<Vec<_>>(),
+            vec![ConversationKey::Direct(wearer)],
+            "an attachment pie's IM must open the conversation with the wearer"
+        );
+
+        commit(&mut app, ATTACHMENT_MENU_ELEMENT, "add-friend");
+        let offers: Vec<_> = drain_commands(&mut app)
+            .into_iter()
+            .filter_map(|command| match command {
+                Command::OfferFriendship { to_agent_id, .. } => Some(to_agent_id),
+                _other => None,
+            })
+            .collect();
+        assert_eq!(
+            offers,
+            vec![wearer],
+            "an attachment pie's Add as Friend must offer to the wearer"
+        );
+        Ok(())
+    }
+
+    // -- The land pie --------------------------------------------------------
+
+    /// **Sit Here on land stands an already-seated avatar up first**: the
+    /// reference's `LLLandSit`, whose order matters — an object-seated avatar
+    /// ignores the ground-sit control bit, so a Sit Down that skipped the Stand
+    /// would silently do nothing.
+    ///
+    /// The unseated run is the control: it proves the Stand is the seat's
+    /// doing and not something Sit Here always sends.
+    #[test]
+    fn land_sit_here_stands_a_seated_avatar_first() -> Result<(), TestError> {
+        let (mut app, _at) = land_world()?;
+        commit(&mut app, LAND_MENU_ELEMENT, "sit-here");
+        assert_eq!(
+            command_names(&mut app),
+            vec!["SitOnGround"],
+            "a standing avatar's Sit Here sends the ground sit alone"
+        );
+        assert!(ground_sitting(&app), "Sit Here records the ground sit");
+
+        app.world_mut().resource_mut::<SlAgentParcel>().seated_on =
+            Some(ObjectKey::from(Uuid::from_u128(0x5)));
+        commit(&mut app, LAND_MENU_ELEMENT, "sit-here");
+        assert_eq!(
+            command_names(&mut app),
+            vec!["Stand", "SitOnGround"],
+            "a seated avatar must be stood up before the ground sit, in that order"
+        );
+        Ok(())
+    }
+
+    /// **About Land opens on the ground point that was clicked**, not on the
+    /// agent's own parcel: the simulator resolves which parcel contains it, so
+    /// a right-click on a neighbour's land opens *their* parcel.
+    #[test]
+    fn about_land_opens_on_the_clicked_ground_point() -> Result<(), TestError> {
+        let (mut app, at) = land_world()?;
+        commit(&mut app, LAND_MENU_ELEMENT, "about-land");
+        let opened = sl_viewer_testkit::drain::<OpenAboutLand>(&mut app);
+        let expected = crate::coords::bevy_to_sl_vec(at);
+        let subjects: Vec<_> = opened
+            .iter()
+            .map(|request| match request.subject {
+                AboutLandSubject::AtPoint { x, y } => {
+                    ((x - expected.x).abs() < 0.5, (y - expected.y).abs() < 0.5)
+                }
+                AboutLandSubject::CurrentParcel(_id) => (false, false),
+            })
+            .collect();
+        assert_eq!(
+            subjects,
+            vec![(true, true)],
+            "About Land must open on the clicked point ({expected:?}), got {:?}",
+            opened
+                .iter()
+                .map(|request| request.subject)
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            !opened.iter().any(|request| request.read_only),
+            "the land pie's About Land is the editable view"
+        );
+        Ok(())
     }
 }

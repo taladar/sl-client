@@ -140,7 +140,7 @@ pub(crate) const SETTING_FRIENDS_ONLY_PERSISTS_TP: &str = "RenderFriendsOnlyPers
 /// A request to derender something — the single **guarded** entry point every
 /// Derender affordance writes (the object / avatar / attachment pies, the
 /// radar's row menu), rather than editing the list itself.
-#[derive(Message, Debug, Clone)]
+#[derive(Message, Debug, Clone, PartialEq, Eq)]
 pub struct RequestDerender {
     /// The target's persistent id (an object's full id, an avatar's agent id).
     pub(crate) id: Uuid,
