@@ -25,10 +25,15 @@
 use bevy::input::keyboard::{Key, KeyboardInput};
 use bevy::input::mouse::{MouseButtonInput, MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::input::{ButtonState, InputPlugin};
-use bevy::input_focus::{InputDispatchPlugin, InputFocusPlugin};
+use bevy::input_focus::{FocusCause, InputDispatchPlugin, InputFocus, InputFocusPlugin};
 use bevy::picking::PickingSettings;
 use bevy::prelude::*;
+use bevy::text::{EditableText, EditableTextSystems};
 use bevy::time::TimeUpdateStrategy;
+use bevy::ui::widget::{
+    scroll_editable_text, update_editable_text_content_size, update_editable_text_layout,
+    update_editable_text_styles,
+};
 use bevy::ui::{UiStack, UiSystems, ui_focus_system, ui_stack_system};
 use bevy::window::{PrimaryWindow, WindowEvent, WindowResolution};
 
@@ -83,6 +88,7 @@ impl InteractionTest {
         app.add_plugins(bevy::camera::visibility::VisibilityPlugin);
 
         install_ui_interaction(&mut app);
+        install_text_editing(&mut app);
         record::<UiAction>(&mut app);
         app
     }
@@ -113,6 +119,71 @@ pub fn install_ui_interaction(app: &mut App) {
     // the `Tab` key is inert — the observer that reads it is installed on the
     // primary window at `Startup` by this plugin, and by nothing else.
     app.add_plugins(bevy::input_focus::tab_navigation::TabNavigationPlugin);
+}
+
+/// Stand the **editable-text** path up: what turns a keystroke that has already
+/// reached a focused `EditableText` into a changed buffer, and what gives that
+/// field a size to be clicked at.
+///
+/// Requires the layout stack ([`crate::LayoutTest::install`]), the widget
+/// systems ([`install_ui_interaction`] — `EditableTextInputPlugin` is what
+/// queues an edit from a key) and a clock (`Time<Real>`, from
+/// [`install_input_stack`]).
+///
+/// # Which plugin owns the edits, and what it costs
+///
+/// The tier's one real unknown, resolved by reading Bevy 0.19: **`bevy_text`'s
+/// `TextPlugin`** owns `EditableTextSystems` and the single system in it,
+/// `apply_text_edits` — the one that drains `EditableText::pending_edits` into
+/// the parley editor. It drags in **no renderer**: a `Font` asset store, a
+/// `ClipboardPlugin` (an in-process buffer unless the `system_clipboard`
+/// feature is on) and parley's contexts, which this harness already has.
+///
+/// The *UI* half of editing is not in that plugin at all. It lives in
+/// `bevy_ui`'s `build_text_interop`, a private function of `UiPlugin`, which
+/// puts `update_editable_text_content_size` / `update_editable_text_styles`
+/// before the set and `update_editable_text_layout` / `scroll_editable_text`
+/// after layout. All four are `pub`, so the harness picks them the way it picks
+/// [`bevy::ui::ui_layout_system`] — no fork, no upstream PR. The last of them
+/// shapes glyphs into a `FontAtlasSet` backed by `Assets<Image>`: CPU images in
+/// an asset store, not a GPU dependency.
+///
+/// Content size matters as much as the edits do here. A field's box is its
+/// **editor's** intrinsic size (`visible_width` in `"0"` advances,
+/// `visible_lines` in lines), not a measured `Text` node's, so without
+/// `update_editable_text_content_size` every field lays out at zero and the
+/// pointer that this whole module exists to make honest would have nothing to
+/// hit.
+pub fn install_text_editing(app: &mut App) {
+    // `TextPlugin` also brings `ClipboardPlugin` (unless one is already added)
+    // and re-inits the `Font` store the layout half created — an empty store
+    // either way, and `register_ui_fonts` fills the default slot at `Startup`,
+    // long after this.
+    app.add_plugins(bevy::text::TextPlugin);
+    // The glyph atlas `update_editable_text_layout` rasterises into. A UI-only
+    // harness has no `ImagePlugin`, so the store is created here.
+    if !app.world().contains_resource::<Assets<Image>>() {
+        app.init_asset::<Image>();
+    }
+    // `bevy_ui` places the edit set inside its content phase (it cannot say so
+    // in `bevy_text` without a dependency cycle). Ours must agree, or the edits
+    // would apply after the layout that is supposed to read them.
+    app.configure_sets(PostUpdate, EditableTextSystems.in_set(UiSystems::Content));
+    app.add_systems(
+        PostUpdate,
+        (
+            (
+                update_editable_text_content_size,
+                update_editable_text_styles,
+            )
+                .chain()
+                .in_set(UiSystems::Content)
+                .before(EditableTextSystems),
+            (update_editable_text_layout, scroll_editable_text)
+                .chain()
+                .in_set(UiSystems::PostLayout),
+        ),
+    );
 }
 
 /// Add the input half on its own — the window, time, input plugins, picking
@@ -378,18 +449,158 @@ pub fn tap(app: &mut App, key_code: KeyCode, logical: Key) {
 }
 
 /// Type `text`, one character key per frame pair, as an IME-less keyboard
-/// delivers it.
+/// delivers it: the logical key and its text (what a text field inserts) over
+/// the **physical** key that carries the character on a US layout (what
+/// `ButtonInput<KeyCode>` — and so every world key binding — reads).
+///
+/// Both halves matter and they are read by different code. A driver that typed
+/// every character on one placeholder key would drive the field perfectly while
+/// silently telling the world that no letter was ever pressed — which is
+/// precisely the coincidence a focus-routing test exists to rule out. A
+/// character with no US-layout key ([`key_code_for`] returns `None`) is typed
+/// on [`KeyCode::F35`], a key no profile binds, so the logical half still works.
 pub fn type_str(app: &mut App, text: &str) {
     for character in text.chars() {
         let logical = Key::Character(character.to_string().into());
-        key_down(
-            app,
-            KeyCode::F35,
-            logical.clone(),
-            Some(&character.to_string()),
-        );
-        key_up(app, KeyCode::F35, logical);
+        let key_code = key_code_for(character).unwrap_or(KeyCode::F35);
+        key_down(app, key_code, logical.clone(), Some(&character.to_string()));
+        key_up(app, key_code, logical);
     }
+}
+
+/// The physical key a US-layout keyboard puts `character` on, or `None` when
+/// this table has no entry for it.
+///
+/// Deliberately shallow: the letters, the digit row, and the punctuation the
+/// viewer's own fields actually take (a numeric field's `-` and `.`, a chat
+/// bar's space and comma). It is a *physical* mapping, so an upper-case letter
+/// resolves to the same key as its lower-case twin — the shift state a real
+/// keyboard would also be holding is the caller's to press if it matters.
+#[must_use]
+pub const fn key_code_for(character: char) -> Option<KeyCode> {
+    let key = match character.to_ascii_lowercase() {
+        'a' => KeyCode::KeyA,
+        'b' => KeyCode::KeyB,
+        'c' => KeyCode::KeyC,
+        'd' => KeyCode::KeyD,
+        'e' => KeyCode::KeyE,
+        'f' => KeyCode::KeyF,
+        'g' => KeyCode::KeyG,
+        'h' => KeyCode::KeyH,
+        'i' => KeyCode::KeyI,
+        'j' => KeyCode::KeyJ,
+        'k' => KeyCode::KeyK,
+        'l' => KeyCode::KeyL,
+        'm' => KeyCode::KeyM,
+        'n' => KeyCode::KeyN,
+        'o' => KeyCode::KeyO,
+        'p' => KeyCode::KeyP,
+        'q' => KeyCode::KeyQ,
+        'r' => KeyCode::KeyR,
+        's' => KeyCode::KeyS,
+        't' => KeyCode::KeyT,
+        'u' => KeyCode::KeyU,
+        'v' => KeyCode::KeyV,
+        'w' => KeyCode::KeyW,
+        'x' => KeyCode::KeyX,
+        'y' => KeyCode::KeyY,
+        'z' => KeyCode::KeyZ,
+        '0' => KeyCode::Digit0,
+        '1' => KeyCode::Digit1,
+        '2' => KeyCode::Digit2,
+        '3' => KeyCode::Digit3,
+        '4' => KeyCode::Digit4,
+        '5' => KeyCode::Digit5,
+        '6' => KeyCode::Digit6,
+        '7' => KeyCode::Digit7,
+        '8' => KeyCode::Digit8,
+        '9' => KeyCode::Digit9,
+        ' ' => KeyCode::Space,
+        '-' => KeyCode::Minus,
+        '.' => KeyCode::Period,
+        ',' => KeyCode::Comma,
+        '/' => KeyCode::Slash,
+        _other => return None,
+    };
+    Some(key)
+}
+
+/// Hold `modifier` down, run `body`, release it — the shape of every chord
+/// (`Ctrl+A`, `Shift+Home`). The logical key is what `bevy_ui_widgets`' editor
+/// reads for its modifier flags; the physical one is what the viewer's own
+/// binding profiles read.
+pub fn with_modifier(app: &mut App, key_code: KeyCode, logical: Key, body: impl FnOnce(&mut App)) {
+    key_down(app, key_code, logical.clone(), None);
+    body(app);
+    key_up(app, key_code, logical);
+}
+
+/// Give `entity` the keyboard focus without a pointer, and run one frame — the
+/// programmatic half of what a click on a field does.
+pub fn focus(app: &mut App, entity: Entity) {
+    app.world_mut()
+        .resource_mut::<InputFocus>()
+        .set(entity, FocusCause::Navigated);
+    app.update();
+}
+
+/// Drop the keyboard focus, and run one frame.
+pub fn blur(app: &mut App) {
+    app.world_mut().resource_mut::<InputFocus>().clear();
+    app.update();
+}
+
+/// The named field's current text, or `None` when no such [`EditableText`] node
+/// exists.
+#[must_use]
+pub fn text_of(app: &mut App, name: &str) -> Option<String> {
+    let entity = crate::find_by_name(app, name)?;
+    let editable = app.world().get::<EditableText>(entity)?;
+    Some(editable.value().to_string())
+}
+
+/// Announce that the platform IME has become active for the focused field, and
+/// run one frame. `bevy_ui_widgets` clears any stale composition on this.
+pub fn ime_enable(app: &mut App) {
+    write_ime(app, |window| Ime::Enabled { window });
+}
+
+/// Deliver an IME **preedit** — the composing text the candidate window is
+/// showing — with an optional `(anchor, focus)` cursor range within it.
+///
+/// The composing text is *not* part of [`EditableText::value`] until it is
+/// committed, which is the property worth a test: a viewer that read the
+/// preedit as typed text would send half-composed Japanese to chat.
+pub fn ime_preedit(app: &mut App, value: &str, cursor: Option<(usize, usize)>) {
+    let value = value.to_owned();
+    write_ime(app, move |window| Ime::Preedit {
+        window,
+        value,
+        cursor,
+    });
+}
+
+/// Deliver an IME **commit** — the composition the user accepted — and run one
+/// frame. This is the point the text enters the buffer.
+pub fn ime_commit(app: &mut App, value: &str) {
+    let value = value.to_owned();
+    write_ime(app, move |window| Ime::Commit { window, value });
+}
+
+/// Announce that the platform IME was force-disabled, cancelling any
+/// composition in progress, and run one frame.
+pub fn ime_disable(app: &mut App) {
+    write_ime(app, |window| Ime::Disabled { window });
+}
+
+/// The shared IME write: the typed message plus its [`WindowEvent`] wrapper,
+/// then one frame — the same one-source-of-truth shape the pointer uses.
+fn write_ime(app: &mut App, build: impl FnOnce(Entity) -> Ime) {
+    let window = window_entity(app);
+    let ime = build(window);
+    app.world_mut().write_message(ime.clone());
+    app.world_mut().write_message(WindowEvent::Ime(ime));
+    app.update();
 }
 
 /// The shared keyboard write: the typed message plus its wrapper.
@@ -685,5 +896,175 @@ mod tests {
         assert_eq!(cursor(&mut app), None);
         hover(&mut app, Vec2::new(42.0, 17.0));
         assert_eq!(cursor(&mut app), Some(Vec2::new(42.0, 17.0)));
+    }
+
+    // -----------------------------------------------------------------------
+    // Text entry: the editable-text path under real keystrokes and a real IME.
+    // -----------------------------------------------------------------------
+
+    /// A bare single-line [`EditableText`] field at `(left, top)`, sized the way
+    /// the viewer's own widget sizes one — in `"0"` advances and lines, which is
+    /// what `update_editable_text_content_size` reads.
+    fn text_field(app: &mut App, name: &str, initial: &str, left: f32, top: f32) -> Entity {
+        let mut editor = bevy::text::EditableText::new(initial);
+        editor.allow_newlines = false;
+        editor.visible_lines = Some(1.0);
+        editor.visible_width = Some(16.0);
+        app.world_mut()
+            .spawn((
+                editor,
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(left),
+                    top: Val::Px(top),
+                    ..Node::default()
+                },
+                TabIndex(0),
+                Name::new(name.to_owned()),
+            ))
+            .id()
+    }
+
+    /// **Typing lands in the focused field and nowhere else** — the whole
+    /// editable-text path, standing: the keystroke reaches
+    /// `EditableTextInputPlugin`'s observer, which queues a `TextEdit`, which
+    /// `apply_text_edits` drains into the parley editor.
+    ///
+    /// The negative half is the point. Both fields hear the same key messages;
+    /// only focus decides which one changes.
+    #[test]
+    fn typing_reaches_the_focused_field_and_no_other() {
+        let mut app = interactive_app();
+        let first = text_field(&mut app, "first", "", 10.0, 10.0);
+        text_field(&mut app, "second", "", 10.0, 80.0);
+        settle(&mut app);
+
+        super::focus(&mut app, first);
+        super::type_str(&mut app, "hi");
+        assert_eq!(super::text_of(&mut app, "first"), Some("hi".to_owned()));
+        assert_eq!(
+            super::text_of(&mut app, "second"),
+            Some(String::new()),
+            "an unfocused field must not hear a keystroke"
+        );
+
+        // Backspace is the same path, in reverse.
+        super::tap(&mut app, KeyCode::Backspace, Key::Backspace);
+        assert_eq!(super::text_of(&mut app, "first"), Some("h".to_owned()));
+    }
+
+    /// **A field lays out at its own intrinsic size, and a click focuses it.**
+    ///
+    /// The tooth for `update_editable_text_content_size`: without it a field is
+    /// a zero-sized node, the click sails past, and every text test above would
+    /// still pass because they focus by hand. A zero box would also make
+    /// `centre_of` meaningless, so the size is asserted directly.
+    #[test]
+    fn a_click_focuses_the_field_it_lands_on() -> Result<(), crate::TestError> {
+        let mut app = interactive_app();
+        let field = text_field(&mut app, "clickable", "abc", 10.0, 10.0);
+        settle(&mut app);
+
+        let size = app
+            .world()
+            .get::<ComputedNode>(field)
+            .ok_or("the field never laid out")?
+            .size;
+        assert!(
+            size.x > 1.0 && size.y > 1.0,
+            "a field must take its editor's intrinsic size, not zero (got {size:?})"
+        );
+
+        let at = super::centre_of(&mut app, "clickable").ok_or("the field has no centre")?;
+        click(&mut app, at, MouseButton::Left);
+        assert_eq!(
+            app.world().resource::<InputFocus>().get(),
+            Some(field),
+            "clicking a field must give it the keyboard"
+        );
+        Ok(())
+    }
+
+    /// **An IME preedit stays out of the value until it is committed.**
+    ///
+    /// The composing text belongs to the IME, not to the field: a viewer that
+    /// read it as typed text would send half-composed Japanese to chat the
+    /// moment a candidate appeared. `Ime::Disabled` cancels a composition in
+    /// flight rather than committing it.
+    #[test]
+    fn an_ime_preedit_stays_out_of_the_value_until_commit() {
+        let mut app = interactive_app();
+        let field = text_field(&mut app, "ime", "", 10.0, 10.0);
+        settle(&mut app);
+        super::focus(&mut app, field);
+
+        super::ime_enable(&mut app);
+        super::ime_preedit(&mut app, "にほん", Some((0, 9)));
+        assert_eq!(
+            super::text_of(&mut app, "ime"),
+            Some(String::new()),
+            "a composition in progress is not yet the field's value"
+        );
+        super::ime_commit(&mut app, "日本");
+        assert_eq!(super::text_of(&mut app, "ime"), Some("日本".to_owned()));
+
+        // A composition the platform cancels leaves the committed text alone.
+        super::ime_preedit(&mut app, "ご", Some((0, 3)));
+        super::ime_disable(&mut app);
+        assert_eq!(
+            super::text_of(&mut app, "ime"),
+            Some("日本".to_owned()),
+            "a cancelled composition must not be committed"
+        );
+    }
+
+    /// **A chord resolves as a chord**: `Ctrl+A` selects all, so the next
+    /// character replaces the field rather than appending to it.
+    ///
+    /// Worth its own test because the widget reads its modifiers from
+    /// `ButtonInput<Key>` — the *logical* keyboard — which only exists because
+    /// the driver writes real `KeyboardInput` messages and lets
+    /// `bevy_input`'s own system build the resource from them.
+    #[test]
+    fn a_ctrl_chord_reaches_the_field_as_a_chord() {
+        let mut app = interactive_app();
+        let field = text_field(&mut app, "chord", "hello", 10.0, 10.0);
+        settle(&mut app);
+        super::focus(&mut app, field);
+
+        super::with_modifier(&mut app, KeyCode::ControlLeft, Key::Control, |app| {
+            super::tap(app, KeyCode::KeyA, Key::Character("a".into()));
+        });
+        super::type_str(&mut app, "x");
+        assert_eq!(
+            super::text_of(&mut app, "chord"),
+            Some("x".to_owned()),
+            "select-all then a character replaces the whole field"
+        );
+    }
+
+    /// **`type_str` presses the physical key the character sits on.**
+    ///
+    /// The half of the driver nothing else would notice: the field only ever
+    /// reads the *logical* key, so a placeholder key code would drive it
+    /// perfectly — while `ButtonInput<KeyCode>`, which every world binding
+    /// profile reads, said no letter had been pressed at all. That is the exact
+    /// coincidence a focus-routing test must not be built on.
+    #[test]
+    fn typing_presses_the_physical_key_the_character_sits_on() {
+        let mut app = interactive_app();
+        settle(&mut app);
+        super::key_down(
+            &mut app,
+            super::key_code_for('w').unwrap_or(KeyCode::F35),
+            Key::Character("w".into()),
+            Some("w"),
+        );
+        assert!(
+            app.world()
+                .resource::<ButtonInput<KeyCode>>()
+                .pressed(KeyCode::KeyW),
+            "typing `w` must read as the physical W key being down"
+        );
     }
 }

@@ -2,7 +2,7 @@
 id: viewer-build-floater-interaction-tests
 title: The build floater — reflect, edit, commit
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — build floater / gizmos named the priority
 points: 8
 blocked_by: [viewer-ui-keyboard-text-harness, viewer-world-test-harness]

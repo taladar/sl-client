@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 303 |
-| blocked | 70 |
+| ready | 304 |
+| blocked | 68 |
 | in-progress | 20 |
 | bugs | 64 |
-| done | 933 |
+| done | 934 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1525** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (304)
 
 ### protocol
 
@@ -367,6 +367,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-build-display-options`](ready/viewer-build-display-options.md) —
   Build-mode display/overlay toggles (blocked by `viewer-object-selection-core`
   (done))
+- [`viewer-build-floater-interaction-tests`](ready/viewer-build-floater-interaction-tests.md)
+  — The build floater — reflect, edit, commit (blocked by
+  `viewer-ui-keyboard-text-harness` (done), `viewer-world-test-harness` (done))
 - [`viewer-build-general-sale-clickaction`](ready/viewer-build-general-sale-clickaction.md)
   — General tab — for-sale, click action, show in search, locked
 - [`viewer-build-grid-options`](ready/viewer-build-grid-options.md) —
@@ -879,9 +882,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-interaction-contracts`](ready/viewer-ui-interaction-contracts.md)
   — An interaction contract per registered element, swept like the matrix
   (blocked by `viewer-ui-interaction-harness` (done))
-- [`viewer-ui-keyboard-text-harness`](ready/viewer-ui-keyboard-text-harness.md)
-  — Keyboard focus, bindings and text entry, headless (blocked by
-  `viewer-ui-interaction-harness` (done))
 - [`viewer-ui-settings-binding-combo`](ready/viewer-ui-settings-binding-combo.md)
   — Combo↔settings two-way binding (blocked by `viewer-ui-combo-widget` (done),
   `viewer-ui-settings-binding` (done))
@@ -894,6 +894,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-styling-interaction-tests`](ready/viewer-ui-styling-interaction-tests.md)
   — bevy_flair state styling under synthetic hover and focus (blocked by
   `viewer-ui-interaction-harness` (done))
+- [`viewer-ui-widget-interaction-suite`](ready/viewer-ui-widget-interaction-suite.md)
+  — Deep interaction tests for the stateful widgets (blocked by
+  `viewer-ui-interaction-harness` (done), `viewer-ui-keyboard-text-harness`
+  (done))
 - [`viewer-url-context-menus`](ready/viewer-url-context-menus.md) — Right-click
   context menus on linkified text and names
 - [`viewer-usb-route-map-display`](ready/viewer-usb-route-map-display.md) — USB
@@ -950,16 +954,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (70)
+## blocked (68)
 
 ### viewer
 
 - [`viewer-avatar-moderation-actions`](blocked/viewer-avatar-moderation-actions.md)
   — Per-avatar parcel / estate moderation — the shared action layer (blocked by
   `viewer-region-options-estate`)
-- [`viewer-build-floater-interaction-tests`](blocked/viewer-build-floater-interaction-tests.md)
-  — The build floater — reflect, edit, commit (blocked by
-  `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness` (done))
 - [`viewer-environment-day-cycle-editor`](blocked/viewer-environment-day-cycle-editor.md)
   — Day-cycle editor (blocked by `viewer-environment-fixed-editor`)
 - [`viewer-environment-my-environments`](blocked/viewer-environment-my-environments.md)
@@ -1109,9 +1110,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-ui-baseline-regressions`](blocked/viewer-ui-baseline-regressions.md)
   — UI regression baselines — recorded geometry that may not drift by accident
   (blocked by `viewer-ui-test-harness` (done), `viewer-test-baseline-format`)
-- [`viewer-ui-widget-interaction-suite`](blocked/viewer-ui-widget-interaction-suite.md)
-  — Deep interaction tests for the stateful widgets (blocked by
-  `viewer-ui-interaction-harness` (done), `viewer-ui-keyboard-text-harness`)
 - [`viewer-usb-route-comments`](blocked/viewer-usb-route-comments.md) — USB
   waypoint comments in the viewer (blocked by `viewer-usb-route-map-display`)
 - [`viewer-usb-route-following`](blocked/viewer-usb-route-following.md) — USB
@@ -1367,7 +1365,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (933)
+## done (934)
 
 ### protocol
 
@@ -2680,6 +2678,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Headless synthetic-pointer input for the UI test harness
 - [`viewer-ui-inventory-gear-menu-clipped`](done/viewer-ui-inventory-gear-menu-clipped.md)
   — Inventory gear menu is clipped to the floater it drops from
+- [`viewer-ui-keyboard-text-harness`](done/viewer-ui-keyboard-text-harness.md) —
+  Keyboard focus, bindings and text entry, headless (blocked by
+  `viewer-ui-interaction-harness` (done))
 - [`viewer-ui-menu-bar`](done/viewer-ui-menu-bar.md) — Top menu bar (blocked by
   `viewer-ui-context-menu` (done))
 - [`viewer-ui-menu-keyboard-nav`](done/viewer-ui-menu-keyboard-nav.md) —

@@ -473,3 +473,101 @@ mod tests {
         }
     }
 }
+
+/// Resolution **under real keystrokes** ([[viewer-ui-keyboard-text-harness]]):
+/// the same per-mode table, reached through the `KeyboardInput` messages winit
+/// writes rather than through a poked `ButtonInput<KeyCode>`.
+///
+/// The tests above own the *table*; these own the **path to it**. A binding
+/// profile is only worth anything if a physical key press actually lands in
+/// `ButtonInput<KeyCode>` — which is `bevy_input`'s own system's job, running
+/// before `update_action_input` in the same `PreUpdate` — and if the mode is
+/// read on the frame the key is down rather than the frame after.
+#[cfg(test)]
+mod typed_tests {
+    use super::{Action, InputActionPlugin, InputMode};
+    use crate::input_context::{CursorGrabAllowed, InputContextPlugin};
+    use crate::world_api::CameraMode;
+    use bevy::input::keyboard::Key;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+    use sl_viewer_testkit::interact::{self, InteractionTest};
+    use sl_viewer_testkit::settle;
+
+    /// The interaction harness with both input layers, in `mode`, with nothing
+    /// focused — so the world owns the keyboard.
+    fn moded_app(mode: InputMode) -> App {
+        let mut app = InteractionTest::new().build();
+        app.init_resource::<CameraMode>()
+            .insert_resource(CursorGrabAllowed(false))
+            .add_plugins((InputContextPlugin, InputActionPlugin));
+        settle(&mut app);
+        *app.world_mut().resource_mut::<InputMode>() = mode;
+        app
+    }
+
+    /// Hold every key in `keys` down together, report which of `Action::ALL`
+    /// are pressed while they are, then release them — the actions are edge
+    /// state, readable only between the down and the up.
+    fn actions_while_held(app: &mut App, keys: &[(KeyCode, Key)]) -> Vec<Action> {
+        for (key_code, logical) in keys {
+            interact::key_down(app, *key_code, logical.clone(), None);
+        }
+        let held: Vec<Action> = Action::ALL
+            .into_iter()
+            .filter(|action| {
+                app.world()
+                    .resource::<ButtonInput<Action>>()
+                    .pressed(*action)
+            })
+            .collect();
+        for (key_code, logical) in keys {
+            interact::key_up(app, *key_code, logical.clone());
+        }
+        held
+    }
+
+    /// **One physical key, two meanings**: the arrow keys drive the avatar in
+    /// third person and are unbound in flycam, which keeps the WASD cluster
+    /// only. Driven from the key up, so the whole resolution chain — winit
+    /// message, `ButtonInput<KeyCode>`, the mode's profile — is in the picture.
+    #[test]
+    fn an_arrow_key_resolves_per_mode_from_a_real_press() {
+        let mut app = moded_app(InputMode::ThirdPerson);
+        assert_eq!(
+            actions_while_held(&mut app, &[(KeyCode::ArrowUp, Key::ArrowUp)]),
+            vec![Action::MoveForward],
+            "in third person the arrow walks the avatar"
+        );
+
+        let mut app = moded_app(InputMode::Flycam);
+        assert_eq!(
+            actions_while_held(&mut app, &[(KeyCode::ArrowUp, Key::ArrowUp)]),
+            Vec::new(),
+            "in flycam the same arrow is unbound"
+        );
+        assert_eq!(
+            actions_while_held(&mut app, &[(KeyCode::KeyW, Key::Character("w".into()))]),
+            vec![Action::MoveForward],
+            "…while the WASD cluster still drives the camera"
+        );
+    }
+
+    /// **A held modifier is its own action, resolved alongside the key it
+    /// modifies**: `Shift+W` is `Run` *and* `MoveForward`, not one or the
+    /// other. The nearest thing the binding table has to a chord, and the shape
+    /// every "walk vs run" reader depends on.
+    #[test]
+    fn shift_and_a_movement_key_resolve_together() {
+        let mut app = moded_app(InputMode::ThirdPerson);
+        let mut held = actions_while_held(
+            &mut app,
+            &[
+                (KeyCode::ShiftLeft, Key::Shift),
+                (KeyCode::KeyW, Key::Character("w".into())),
+            ],
+        );
+        held.sort_by_key(|action| format!("{action:?}"));
+        assert_eq!(held, vec![Action::MoveForward, Action::Run]);
+    }
+}

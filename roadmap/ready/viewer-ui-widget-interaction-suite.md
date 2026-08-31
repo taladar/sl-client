@@ -2,7 +2,7 @@
 id: viewer-ui-widget-interaction-suite
 title: Deep interaction tests for the stateful widgets
 topic: viewer
-status: blocked
+status: ready
 origin: user request (2026-07) — end manual re-testing of UI interactions
 points: 8
 blocked_by: [viewer-ui-interaction-harness, viewer-ui-keyboard-text-harness]

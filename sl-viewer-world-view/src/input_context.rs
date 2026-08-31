@@ -460,3 +460,173 @@ mod tests {
         assert!(app.world().get_resource::<InputContext>().is_some());
     }
 }
+
+/// The routing rule **under real keystrokes**
+/// ([[viewer-ui-keyboard-text-harness]]): a field standing in the interaction
+/// harness, focused by a click where it laid out, and keys written the way
+/// winit writes them.
+///
+/// Everything above drives this module's systems with hand-set resources — a
+/// context inserted, a `ButtonInput` poked. That proves the *rule*; it cannot
+/// prove the **composition**, which is where this bug class actually lives: a
+/// keystroke has to reach `bevy_input`'s `ButtonInput<KeyCode>`, the focus
+/// dispatcher and the field's own observer from one message, in an order where
+/// `compute_input_context` has already run when `update_action_input` reads it.
+/// Get any of that wrong and typing walks the avatar again — the failure the
+/// module was written for, and the one its own tests are structurally unable to
+/// see.
+#[cfg(test)]
+mod typed_tests {
+    use super::{CursorGrabAllowed, InputContext, InputContextPlugin};
+    use crate::input_action::{Action, InputActionPlugin};
+    use crate::world_api::CameraMode;
+    use bevy::input::keyboard::Key;
+    use bevy::input_focus::tab_navigation::TabIndex;
+    use bevy::prelude::*;
+    use bevy::text::EditableText;
+    use pretty_assertions::assert_eq;
+    use sl_viewer_testkit::interact::{self, InteractionTest};
+    use sl_viewer_testkit::{TestError, settle};
+
+    /// The one field's node name.
+    const FIELD: &str = "typed-field";
+
+    /// The interaction harness with both input layers on top, holding one
+    /// single-line field. Nothing else: the point is the two layers meeting.
+    fn routed_app() -> App {
+        let mut app = InteractionTest::new().build();
+        app.init_resource::<CameraMode>()
+            .insert_resource(CursorGrabAllowed(false))
+            .add_plugins((InputContextPlugin, InputActionPlugin));
+        let mut editor = EditableText::new("");
+        editor.allow_newlines = false;
+        editor.visible_lines = Some(1.0);
+        editor.visible_width = Some(16.0);
+        app.world_mut().spawn((
+            editor,
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(20.0),
+                top: Val::Px(20.0),
+                ..Node::default()
+            },
+            TabIndex(0),
+            Name::new(FIELD),
+        ));
+        settle(&mut app);
+        app
+    }
+
+    /// Whether `action` is held right now.
+    fn holding(app: &App, action: Action) -> bool {
+        app.world()
+            .resource::<ButtonInput<Action>>()
+            .pressed(action)
+    }
+
+    /// Press `key_code` (with its logical meaning) and report whether `action`
+    /// fired while it was down, releasing it again either way — the actions are
+    /// edge state, so they can only be read between the down and the up.
+    fn press_and_hold(app: &mut App, key_code: KeyCode, logical: Key, action: Action) -> bool {
+        let text = match &logical {
+            Key::Character(character) => Some(character.to_string()),
+            _other => None,
+        };
+        interact::key_down(app, key_code, logical.clone(), text.as_deref());
+        let held = holding(app, action);
+        interact::key_up(app, key_code, logical);
+        held
+    }
+
+    /// **The rule the module exists for, end to end**: while the field holds
+    /// focus a movement key is the field's letter and the world hears nothing;
+    /// `Escape` hands the keyboard back and the same key walks the avatar.
+    #[test]
+    fn typing_into_a_focused_field_never_reaches_the_world() -> Result<(), TestError> {
+        let mut app = routed_app();
+        interact::click_node(&mut app, FIELD)?;
+        assert_eq!(
+            *app.world().resource::<InputContext>(),
+            InputContext::TextEntry,
+            "a click on a field must put the viewer in text entry"
+        );
+
+        assert!(
+            !press_and_hold(
+                &mut app,
+                KeyCode::KeyW,
+                Key::Character("w".into()),
+                Action::MoveForward
+            ),
+            "`W` typed into a field must not also walk the avatar"
+        );
+        assert_eq!(
+            interact::text_of(&mut app, FIELD),
+            Some("w".to_owned()),
+            "…and it must still have been typed"
+        );
+
+        interact::tap(&mut app, KeyCode::Escape, Key::Escape);
+        assert_eq!(
+            *app.world().resource::<InputContext>(),
+            InputContext::World,
+            "`Escape` hands the keyboard back to the world"
+        );
+
+        assert!(
+            press_and_hold(
+                &mut app,
+                KeyCode::KeyW,
+                Key::Character("w".into()),
+                Action::MoveForward
+            ),
+            "with no UI focus the same key walks the avatar"
+        );
+        assert_eq!(
+            interact::text_of(&mut app, FIELD),
+            Some("w".to_owned()),
+            "…and the unfocused field is not typed into"
+        );
+        Ok(())
+    }
+
+    /// **The arrow keys**, the case the module documentation singles out: in a
+    /// field they move the caret, in the world they turn the avatar, and ours
+    /// used to do both at once. A letter key is the easy half — an arrow
+    /// generates no character, so a viewer that gated on "is this a character
+    /// key" would pass the test above and fail this one.
+    #[test]
+    fn an_arrow_key_moves_the_caret_and_not_the_avatar() -> Result<(), TestError> {
+        let mut app = routed_app();
+        interact::click_node(&mut app, FIELD)?;
+        interact::type_str(&mut app, "ab");
+
+        interact::key_down(&mut app, KeyCode::ArrowLeft, Key::ArrowLeft, None);
+        let turned = holding(&app, Action::MoveLeft);
+        interact::key_up(&mut app, KeyCode::ArrowLeft, Key::ArrowLeft);
+        assert!(!turned, "an arrow in a field must not turn the avatar");
+
+        let field = sl_viewer_testkit::find_by_name(&mut app, FIELD).ok_or("no field")?;
+        let caret = app
+            .world()
+            .get::<EditableText>(field)
+            .ok_or("the field lost its editor")?
+            .editor
+            .raw_selection()
+            .focus()
+            .index();
+        assert_eq!(caret, 1, "the arrow moved the caret one character left");
+
+        interact::blur(&mut app);
+        assert!(
+            press_and_hold(
+                &mut app,
+                KeyCode::ArrowLeft,
+                Key::ArrowLeft,
+                Action::MoveLeft
+            ),
+            "with the field unfocused the same arrow turns the avatar"
+        );
+        Ok(())
+    }
+}

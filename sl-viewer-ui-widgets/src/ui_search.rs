@@ -577,4 +577,67 @@ mod tests {
         assert!(value.is_empty(), "Escape clears the focused field's term");
         Ok(())
     }
+
+    /// **The cancel gesture, typed** ([[viewer-ui-keyboard-text-harness]]): the
+    /// term is typed in through real keystrokes and `Escape` is a real key
+    /// press, not a poked `ButtonInput`.
+    ///
+    /// The distinction is not ceremony. `escape_clears_the_focused_field`
+    /// above sets the text through `set_text` and focuses by hand, so it would
+    /// keep passing if the field had stopped accepting keystrokes altogether —
+    /// and the second half here (`Escape` with the field unfocused) is the
+    /// scoping rule that makes the first half a rule rather than a global key
+    /// handler.
+    #[test]
+    fn a_typed_term_is_cancelled_by_a_real_escape() -> Result<(), TestError> {
+        use crate::ui_test::interact::{self, InteractionTest};
+        use bevy::input::keyboard::Key;
+        use sl_viewer_ui_core::ui::UiScaffoldSystems;
+
+        let mut app = InteractionTest::new().build();
+        app.add_plugins(SearchFieldPlugin).add_systems(
+            Startup,
+            (|mut commands: Commands, root: Res<UiRoot>| {
+                spawn_search_field(
+                    &mut commands,
+                    root.0,
+                    &SearchFieldSpec {
+                        placeholder: "Search".to_owned(),
+                        search_glyph: true,
+                        ..SearchFieldSpec::new("test-search")
+                    },
+                );
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+
+        interact::click_node(&mut app, "test-search:field")?;
+        interact::type_str(&mut app, "boots");
+        assert_eq!(
+            interact::text_of(&mut app, "test-search:field"),
+            Some("boots".to_owned()),
+            "the term must arrive by typing before Escape can cancel it"
+        );
+
+        interact::tap(&mut app, KeyCode::Escape, Key::Escape);
+        assert_eq!(
+            interact::text_of(&mut app, "test-search:field"),
+            Some(String::new()),
+            "Escape cancels the search in one press"
+        );
+
+        // Unfocused, the same key is somebody else's: a stray Escape must not
+        // reach across the screen and clear a search box nobody is typing in.
+        interact::click_node(&mut app, "test-search:field")?;
+        interact::type_str(&mut app, "hats");
+        interact::blur(&mut app);
+        interact::tap(&mut app, KeyCode::Escape, Key::Escape);
+        assert_eq!(
+            interact::text_of(&mut app, "test-search:field"),
+            Some("hats".to_owned()),
+            "an unfocused field keeps its term"
+        );
+        Ok(())
+    }
 }

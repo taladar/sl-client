@@ -285,6 +285,10 @@ pub(crate) fn world_app_with_ui() -> Result<App, Box<dyn core::error::Error>> {
     // The interaction half: the UI stack, the UI picking backend and the widget
     // systems. The input stack underneath it is already in `world_app`.
     interact::install_ui_interaction(&mut app);
+    // …and the editable-text path on top of it, so a floater or a chat bar
+    // standing in this world can actually be typed into
+    // ([[viewer-ui-keyboard-text-harness]]).
+    interact::install_text_editing(&mut app);
     app.update();
     install_hud_camera_projection(&mut app)
         .ok_or("no HUD camera spawned — did the vendored character assets load?")?;

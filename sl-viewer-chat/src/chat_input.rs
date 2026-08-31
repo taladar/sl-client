@@ -621,4 +621,68 @@ mod tests {
         assert!(app.world().entity(field).contains::<ChatInputField>());
         Ok(())
     }
+
+    /// **The commit gesture, typed** ([[viewer-ui-keyboard-text-harness]]): a
+    /// line typed on a real keyboard into a field focused by a real click, sent
+    /// by a real `Enter`, with the `Shift` modifier read off the same press.
+    ///
+    /// The hand-poked test above sets the text through `set_text` and presses
+    /// `Enter` on the `ButtonInput` resource, so it cannot see the one thing
+    /// that makes this gesture work: `Enter` reaches `send_chat_input` **only
+    /// because** a single-line `EditableText` refuses newlines and leaves the
+    /// key to propagate. A field that quietly gained `allow_newlines` would
+    /// swallow every send, and only this test would notice.
+    #[test]
+    fn a_typed_line_is_sent_by_a_real_enter() -> Result<(), TestError> {
+        use bevy::input::keyboard::Key;
+        use sl_viewer_testkit::interact::{self, InteractionTest};
+
+        let mut app = InteractionTest::new().build();
+        // Recorded, not drained from the message queue: a driven gesture spans
+        // several frames (the modifier down, the key down, the key up), and a
+        // `Messages` buffer that has been swapped twice has already dropped the
+        // submit the middle frame wrote.
+        sl_viewer_testkit::record::<ChatInputSubmit>(&mut app);
+        app.add_message::<crate::emoji_picker::OpenEmojiPicker>()
+            .add_plugins((ColonCompletePlugin, ChatInputPlugin))
+            .add_systems(
+                Startup,
+                (|mut commands: Commands, root: Res<UiRoot>| {
+                    spawn_chat_input(&mut commands, root.0, &ChatInputSpec::new("test-chat"));
+                })
+                .after(UiScaffoldSystems::SpawnRoot),
+            );
+        settle(&mut app);
+
+        interact::click_node(&mut app, "test-chat:field")?;
+        interact::type_str(&mut app, "hello");
+        assert_eq!(
+            interact::text_of(&mut app, "test-chat:field"),
+            Some("hello".to_owned()),
+            "the draft must arrive by typing before Enter can send it"
+        );
+
+        // Shift held across the press, as a whisper / shout modifier would be.
+        interact::with_modifier(&mut app, KeyCode::ShiftLeft, Key::Shift, |app| {
+            interact::tap(app, KeyCode::Enter, Key::Enter);
+        });
+        let submitted: Vec<(String, bool)> = sl_viewer_testkit::drain::<ChatInputSubmit>(&mut app)
+            .into_iter()
+            .map(|submit| (submit.text, submit.shift))
+            .collect();
+        assert_eq!(submitted, vec![("hello".to_owned(), true)]);
+        assert_eq!(
+            interact::text_of(&mut app, "test-chat:field"),
+            Some(String::new()),
+            "the field is cleared for the next line"
+        );
+
+        // A blank line is neither sent nor a crash: the same key, nothing to say.
+        interact::tap(&mut app, KeyCode::Enter, Key::Enter);
+        assert!(
+            sl_viewer_testkit::drain::<ChatInputSubmit>(&mut app).is_empty(),
+            "an empty field sends nothing"
+        );
+        Ok(())
+    }
 }

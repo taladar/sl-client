@@ -1556,3 +1556,216 @@ mod tests {
         assert_eq!(ok.sanitised_initial(), "-3.5");
     }
 }
+
+/// The widget **under real keystrokes** ([[viewer-ui-keyboard-text-harness]]):
+/// a field spawned into the interaction harness, focused by a click where it
+/// laid out, and typed into through the same `KeyboardInput` messages winit
+/// writes live.
+///
+/// Distinct from the module tests above, which drive the validators and the
+/// overwrite rewrite as *functions*. Those say the rules are right; these say
+/// the rules are **wired** — that the `EditableTextFilter` reaches
+/// `apply_text_edits`, that `enforce_numeric_intermediate` runs between the
+/// edit and the layout that reads it, and that `Insert` toggles a mode the
+/// typing path then honours. A validator can be perfect and unreachable.
+#[cfg(test)]
+mod typed_tests {
+    use super::{TextInputKind, TextInputPlugin, TextInputSpec, TextInputValue, spawn_text_input};
+    use bevy::input::keyboard::Key;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use crate::ui_test::interact::{self, InteractionTest};
+    use crate::ui_test::{TestError, settle};
+    use sl_viewer_ui_core::ui::{UiRoot, UiScaffoldSystems};
+
+    /// The one field's node name — [`spawn_text_input`] suffixes the element.
+    const FIELD: &str = "typed:field";
+
+    /// An interaction-harness app holding one field of `spec`'s kind, already
+    /// laid out and **focused by a click on it** — so every assertion below is
+    /// about a field the pointer could actually reach.
+    fn typed_field_app(spec: TextInputSpec) -> Result<App, TestError> {
+        let mut app = InteractionTest::new().build();
+        app.add_plugins(TextInputPlugin);
+        app.add_systems(
+            Startup,
+            (move |mut commands: Commands, root: Res<UiRoot>| {
+                spawn_text_input(&mut commands, root.0, &spec);
+            })
+            .after(UiScaffoldSystems::SpawnRoot),
+        );
+        settle(&mut app);
+        interact::click_node(&mut app, FIELD)?;
+        Ok(app)
+    }
+
+    /// A spec for the one field of `kind`, starting at `initial`.
+    fn spec(kind: TextInputKind, initial: &str) -> TextInputSpec {
+        TextInputSpec {
+            initial: initial.to_owned(),
+            ..TextInputSpec::new("typed", kind)
+        }
+    }
+
+    /// The field's text now.
+    fn value(app: &mut App) -> String {
+        interact::text_of(app, FIELD).unwrap_or_default()
+    }
+
+    /// **The per-character filter is wired**: a letter typed into a float field
+    /// never enters the buffer, while the digits and the point do.
+    #[test]
+    fn a_float_field_refuses_a_letter_as_it_is_typed() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Float, ""))?;
+        interact::type_str(&mut app, "1.5");
+        assert_eq!(value(&mut app), "1.5");
+
+        interact::type_str(&mut app, "e");
+        assert_eq!(
+            value(&mut app),
+            "1.5",
+            "`e` is not a float character, so the keystroke never reaches the buffer"
+        );
+        assert_eq!(
+            TextInputKind::Float.parse(&value(&mut app)),
+            Some(TextInputValue::Float(1.5)),
+            "what was typed reads back as the committed value"
+        );
+        Ok(())
+    }
+
+    /// **The structural validator is wired**: a second decimal point is all
+    /// legal float *characters*, so only the whole-string prevalidate can
+    /// reject it — and it must do so before the buffer is ever laid out.
+    #[test]
+    fn a_second_decimal_point_is_reverted() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Float, "1.5"))?;
+        interact::tap(&mut app, KeyCode::End, Key::End);
+        interact::type_str(&mut app, ".");
+        assert_eq!(
+            value(&mut app),
+            "1.5",
+            "a second point reverts to the last valid value"
+        );
+        Ok(())
+    }
+
+    /// **A sign is only a sign at the front.** The `-` character passes the
+    /// integer field's filter, so this is the arrangement half again — and the
+    /// same key at the head of the field is accepted, which is what makes the
+    /// rejection a rule rather than a dead key.
+    #[test]
+    fn a_trailing_sign_is_reverted_but_a_leading_one_is_kept() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Integer, "12"))?;
+        interact::tap(&mut app, KeyCode::End, Key::End);
+        interact::type_str(&mut app, "-");
+        assert_eq!(value(&mut app), "12", "`12-` is not an integer");
+
+        interact::tap(&mut app, KeyCode::Home, Key::Home);
+        interact::type_str(&mut app, "-");
+        assert_eq!(value(&mut app), "-12", "a leading sign is fine");
+        Ok(())
+    }
+
+    /// **A non-negative field has no sign key at all**: `-` is rejected by the
+    /// character filter, not merely reverted, so it never flickers on screen.
+    #[test]
+    fn a_non_negative_field_rejects_the_sign_key() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::NonNegativeInteger, ""))?;
+        interact::type_str(&mut app, "-5");
+        assert_eq!(
+            value(&mut app),
+            "5",
+            "the sign never enters an unsigned field"
+        );
+        Ok(())
+    }
+
+    /// **`max_characters` caps the field**, enforced by `bevy_text` itself —
+    /// asserted here because the widget only sets it, and a spec field nothing
+    /// reads is a spec field that quietly stops working.
+    #[test]
+    fn a_capped_field_stops_accepting_characters() -> Result<(), TestError> {
+        let mut app = typed_field_app(TextInputSpec {
+            max_characters: Some(3),
+            ..spec(TextInputKind::Line, "")
+        })?;
+        interact::type_str(&mut app, "abcdef");
+        assert_eq!(value(&mut app), "abc");
+        Ok(())
+    }
+
+    /// **`Enter` is the multi-line field's newline and the single-line field's
+    /// nothing** — the split that lets a single-line field's consumer read
+    /// `Enter` as *commit* (the chat bar's send) without the field eating it
+    /// first.
+    #[test]
+    fn enter_is_a_newline_only_where_newlines_are_allowed() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Line, "ab"))?;
+        interact::tap(&mut app, KeyCode::Enter, Key::Enter);
+        assert_eq!(
+            value(&mut app),
+            "ab",
+            "a single-line field must leave `Enter` for its consumer"
+        );
+
+        let mut app = typed_field_app(spec(TextInputKind::Multiline, "ab"))?;
+        interact::tap(&mut app, KeyCode::End, Key::End);
+        interact::tap(&mut app, KeyCode::Enter, Key::Enter);
+        interact::type_str(&mut app, "c");
+        assert_eq!(value(&mut app), "ab\nc");
+        Ok(())
+    }
+
+    /// **The `Insert` key toggles overwrite mode, and typing then replaces**
+    /// (R28) — the live path behind `overwrite_rewritten_edits`, which the
+    /// module tests only drive as a function.
+    ///
+    /// The toggle is deliberately scoped to a focused field, so the second half
+    /// checks the same key with focus dropped leaves the mode alone.
+    #[test]
+    fn the_insert_key_toggles_overwrite_and_typing_replaces() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Integer, "12"))?;
+        interact::tap(&mut app, KeyCode::Home, Key::Home);
+        interact::tap(&mut app, KeyCode::Insert, Key::Insert);
+        assert!(
+            app.world().resource::<super::OverwriteMode>().0,
+            "`Insert` on a focused field turns overwrite on"
+        );
+        interact::type_str(&mut app, "9");
+        assert_eq!(
+            value(&mut app),
+            "92",
+            "overwrite replaces the covered digit"
+        );
+
+        // Off again, and the same key is inert once nothing is focused.
+        interact::tap(&mut app, KeyCode::Insert, Key::Insert);
+        assert!(!app.world().resource::<super::OverwriteMode>().0);
+        interact::blur(&mut app);
+        interact::tap(&mut app, KeyCode::Insert, Key::Insert);
+        assert!(
+            !app.world().resource::<super::OverwriteMode>().0,
+            "`Insert` with no field focused must not flip text entry behind its back"
+        );
+        Ok(())
+    }
+
+    /// **A disabled field cannot be typed into** — the interaction half of the
+    /// greyed look: `clear_disabled_field_focus` drops the focus before the
+    /// frame's edits apply, so the keystroke has nowhere to land.
+    #[test]
+    fn a_disabled_field_swallows_no_keystrokes() -> Result<(), TestError> {
+        let mut app = typed_field_app(spec(TextInputKind::Line, "ab"))?;
+        let field =
+            crate::ui_test::find_by_name(&mut app, FIELD).ok_or("the field did not spawn")?;
+        app.world_mut()
+            .entity_mut(field)
+            .insert(bevy::ui::InteractionDisabled);
+        settle(&mut app);
+        interact::type_str(&mut app, "c");
+        assert_eq!(value(&mut app), "ab", "a disabled field takes no input");
+        Ok(())
+    }
+}
