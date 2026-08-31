@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 306 |
+| ready | 305 |
 | blocked | 65 |
 | in-progress | 19 |
-| bugs | 64 |
-| done | 937 |
+| bugs | 65 |
+| done | 938 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1526** |
+| **total** | **1527** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (306)
+## ready (305)
 
 ### protocol
 
@@ -931,9 +931,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-world-pie-menu-reactions`](ready/viewer-world-pie-menu-reactions.md)
   — Right-click reactions per world target class (blocked by
   `viewer-world-test-harness` (done))
-- [`viewer-world-pie-target-tests`](ready/viewer-world-pie-target-tests.md) —
-  Right-clicking each world target opens exactly its pie (blocked by
-  `viewer-world-test-harness` (done))
 
 ### idiomatic
 
@@ -1211,7 +1208,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-determinism`](in-progress/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
 
-## bugs (64)
+## bugs (65)
 
 ### viewer
 
@@ -1342,6 +1339,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Steady-state frame rate caps at ~46 fps on the local grid (was 60)
 - [`viewer-prim-attachment-worn-but-not-rendered`](bugs/viewer-prim-attachment-worn-but-not-rendered.md)
   — A plain prim attachment reads "(worn)" in inventory but never appears on
+- [`viewer-prim-rebuild-drops-a-click`](bugs/viewer-prim-rebuild-drops-a-click.md)
+  — A prim's re-tessellation frame swallows any click on it
 - [`viewer-profile-floater-single-instance`](bugs/viewer-profile-floater-single-instance.md)
   — A second resident profile replaces the first instead of opening its own
 - [`viewer-rigged-attachments-wearer-not-resolved`](bugs/viewer-rigged-attachments-wearer-not-resolved.md)
@@ -1360,7 +1359,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (937)
+## done (938)
 
 ### protocol
 
@@ -2783,6 +2782,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   floater — MapItem marker layers (blocked by `viewer-world-map-floater` (done))
 - [`viewer-world-map-search`](done/viewer-world-map-search.md) — World-map
   floater — region-name search (blocked by `viewer-world-map-floater` (done))
+- [`viewer-world-pie-target-tests`](done/viewer-world-pie-target-tests.md) —
+  Right-clicking each world target opens exactly its pie (blocked by
+  `viewer-world-test-harness` (done))
 - [`viewer-world-test-harness`](done/viewer-world-test-harness.md) — A headless
   fixture world — SlEvent in, SlCommand out (blocked by `viewer-plugin-groups`
   (done))

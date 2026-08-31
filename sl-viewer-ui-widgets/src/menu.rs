@@ -254,6 +254,46 @@ impl MenuConditions {
     }
 }
 
+/// Every command action in a menu tree, depth-first, tagged with the
+/// `>`-joined path of menu labels that reaches it — the line-menu analogue of
+/// the pie's `pie_menu::addresses`.
+///
+/// The pie pins *which compass point* an action sits at because a pie is
+/// operated by direction; a pull-down is operated by path and order, so what a
+/// bar pins is the walk: which menu an action hangs under and where in the list
+/// it falls. Same obligation either way — moving an entry must be a deliberate
+/// diff against a committed table, not a side effect of tidying, because a user
+/// who has learnt *World ▸ Mini-Map* is re-taught for free otherwise.
+///
+/// A [`MenuItemDef::DynamicSubmenu`]'s lines are data, not declarations — a pick
+/// there reports `(slot, index)` and there is no action string to pin — so the
+/// walk descends into static submenus only.
+#[must_use]
+pub fn action_paths(menu: &MenuDef) -> Vec<(String, &'static str)> {
+    let mut found = Vec::new();
+    collect_action_paths(menu, "", &mut found);
+    found
+}
+
+/// [`action_paths`]' recursion: walk `menu`, tracking the label path taken to
+/// reach it.
+fn collect_action_paths(menu: &MenuDef, prefix: &str, found: &mut Vec<(String, &'static str)>) {
+    let here = if prefix.is_empty() {
+        menu.label.to_owned()
+    } else {
+        format!("{prefix} > {}", menu.label)
+    };
+    for item in menu.items {
+        match item {
+            MenuItemDef::Command(command) => found.push((here.clone(), command.action)),
+            MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
+                collect_action_paths(sub, &here, found);
+            }
+            MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Dynamic slots — the runtime-labelled entries a static tree cannot spell.
 // ---------------------------------------------------------------------------
@@ -2878,7 +2918,8 @@ mod tests {
         CHECK_GLYPH, DropDirection, FIXTURE_AVATAR, FIXTURE_MENU_BAR, FIXTURE_WORLD, MenuBranch,
         MenuCommand, MenuConditions, MenuDef, MenuDynamicPick, MenuDynamicSlots, MenuEntryAction,
         MenuHost, MenuItemDef, MenuKeyboard, MenuSource, MnemonicSpan, SUBMENU_ARROW,
-        SetMenuDynamicLabels, assign_jump_keys, build_menu_popup, spawn_menu_bar_specimen,
+        SetMenuDynamicLabels, action_paths, assign_jump_keys, build_menu_popup,
+        spawn_menu_bar_specimen,
     };
     use bevy::input_focus::{FocusCause, InputFocus};
     use bevy::picking::hover::HoverMap;
@@ -2893,36 +2934,12 @@ mod tests {
     use sl_viewer_ui_core::ui::{UiDirection, UiRoot, UiScaffoldSystems};
     use sl_viewer_ui_core::ui_element::{ElementCx, UiAction};
 
-    /// Every command action in a menu, depth-first, tagged with the `>`-joined
-    /// path of menu labels that reaches it — the line-menu analogue of the pie's
-    /// address table. Pinned so moving an entry is a deliberate diff.
-    fn action_paths(menu: &MenuDef, prefix: &str) -> Vec<(String, &'static str)> {
-        let here = if prefix.is_empty() {
-            menu.label.to_owned()
-        } else {
-            format!("{prefix} > {}", menu.label)
-        };
-        let mut out = Vec::new();
-        for item in menu.items {
-            match item {
-                MenuItemDef::Command(command) => out.push((here.clone(), command.action)),
-                MenuItemDef::Submenu(sub) | MenuItemDef::SubmenuWhen(sub, _) => {
-                    out.extend(action_paths(sub, &here));
-                }
-                // A dynamic submenu's lines are data, not actions: there is
-                // nothing to pin here (a pick reports `(slot, index)`).
-                MenuItemDef::DynamicSubmenu { .. } | MenuItemDef::Separator => {}
-            }
-        }
-        out
-    }
-
     /// The fixture bar's entire action table, pinned against a hand-written list.
     #[test]
     fn the_fixture_action_table_is_pinned() {
         let mut table = Vec::new();
         for menu in FIXTURE_MENU_BAR.menus {
-            table.extend(action_paths(menu, ""));
+            table.extend(action_paths(menu));
         }
         let expected = vec![
             ("Avatar".to_owned(), "inventory"),
@@ -2944,7 +2961,7 @@ mod tests {
     #[test]
     fn no_menu_repeats_an_action() {
         for menu in FIXTURE_MENU_BAR.menus {
-            let actions: Vec<&str> = action_paths(menu, "")
+            let actions: Vec<&str> = action_paths(menu)
                 .into_iter()
                 .map(|(_, action)| action)
                 .collect();

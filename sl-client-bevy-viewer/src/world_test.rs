@@ -2303,4 +2303,327 @@ mod tests {
         );
         Ok(())
     }
+
+    /// **A right *drag* is the camera's, not the pie's**: the orbit gesture
+    /// presses the same button over the same prim, so the only thing that tells
+    /// the two apart is how far the pointer travelled before the release
+    /// (`RIGHT_CLICK_DRAG_SLOP`).
+    ///
+    /// The drag deliberately ends **back on the prim** it started on: a swing
+    /// out and back leaves the release exactly where the control's click was, so
+    /// "no pie opened" cannot be the pointer having wandered off the target.
+    #[test]
+    fn a_right_drag_opens_no_pie() -> Result<(), TestError> {
+        let mut app = world_app();
+        record::<OpenObjectMenu>(&mut app);
+        let _scoped = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+        settle(&mut app, 2);
+
+        // The control: the same button, the same pixel, no motion.
+        let centre = Vec2::new(400.0, 300.0);
+        interact::hover(&mut app, centre);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 3);
+        assert!(
+            drain::<OpenObjectMenu>(&mut app).len() == 1,
+            "this prim IS right-clickable, or the drag below proves nothing"
+        );
+
+        // Off the rebuild frame first ([[viewer-prim-rebuild-drops-a-click]]):
+        // the fixture prim re-tessellates a few frames after the camera lands,
+        // despawning and respawning its faces, and for that one frame the world
+        // is unpickable — a release landing there is dropped whatever the
+        // gesture was, which would make this negative pass for the wrong
+        // reason.
+        settle(&mut app, 6);
+
+        // The orbit: press, swing far past the slop, come back, release.
+        interact::press(&mut app, MouseButton::Right);
+        interact::hover(&mut app, Vec2::new(centre.x + 60.0, centre.y));
+        interact::hover(&mut app, centre);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 3);
+        let opened = drain::<OpenObjectMenu>(&mut app);
+        assert!(
+            opened.is_empty(),
+            "a right-drag is the camera's gesture and must open no pie, got {}",
+            opened.len()
+        );
+        Ok(())
+    }
+
+    /// **A floater eats the right-click**: with a panel parked over the
+    /// manipulator's prim, a right-click on the panel is the panel's, and
+    /// nothing behind it hears it. Removing the panel — the control, run
+    /// second, so the open pie's own blocking ring can never be what suppressed
+    /// the first click — restores the pie.
+    #[test]
+    fn a_right_click_through_a_floater_opens_no_pie() -> Result<(), TestError> {
+        let mut app = super::world_app_with_ui()?;
+        record::<OpenObjectMenu>(&mut app);
+        let _scoped = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+        settle(&mut app, 2);
+
+        // A floater parked over the whole viewport.
+        let panel = app
+            .world_mut()
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(0.0),
+                    top: Val::Px(0.0),
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    ..Default::default()
+                },
+                Name::new("blocking-panel"),
+            ))
+            .id();
+        // Past the prim's re-tessellation frame, where the world is briefly
+        // unpickable and a click is dropped whatever is over it
+        // ([[viewer-prim-rebuild-drops-a-click]]) — a negative that landed
+        // there would pass without the panel doing anything.
+        settle(&mut app, 8);
+
+        let centre = Vec2::new(400.0, 300.0);
+        interact::hover(&mut app, centre);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 5);
+        let opened = drain::<OpenObjectMenu>(&mut app);
+        assert!(
+            opened.is_empty(),
+            "a right-click that landed on a UI panel must not open the pie of the prim \
+             behind it, got {}",
+            opened.len()
+        );
+        assert!(
+            find_by_name(&mut app, "pie-menu").is_none(),
+            "and no pie stands"
+        );
+
+        // The control: close the floater and click the same pixel again.
+        app.world_mut().entity_mut(panel).despawn();
+        settle(&mut app, 3);
+        interact::hover(&mut app, centre);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        settle(&mut app, 5);
+        assert!(
+            drain::<OpenObjectMenu>(&mut app).len() == 1,
+            "with the panel gone the same click must reach the prim — otherwise the \
+             blocked case above proves nothing"
+        );
+        Ok(())
+    }
+
+    /// **The seat decides which of the two fixed slices is live**: the self
+    /// avatar pie declares *Sit Down* at north-west and *Stand Up* at west,
+    /// each gated on the state it applies in, and the opener snapshots that
+    /// state from the session's seat and the viewer's ground-sit flag.
+    ///
+    /// This is the wiring the per-menu condition tests cannot see: they resolve
+    /// the pie against conditions handed to them, while this drives a real
+    /// right-click and asks which conditions the *world* put in the request.
+    #[test]
+    fn the_seat_decides_the_self_pie_stand_slice() -> Result<(), TestError> {
+        use crate::avatar_menu::{AVATAR_MENU_ELEMENT, SELF_SITTING, SELF_STANDING};
+        use crate::pie_menu::{Compass, OpenPieMenu, PieConditions, SlotOutcome, resolve_slots};
+
+        /// The one `OpenPieMenu` a right-click asked for, resolved against the
+        /// conditions it carried: the two slices as the user would see them.
+        fn stand_and_sit(
+            app: &mut App,
+        ) -> Result<(Vec<&'static str>, bool, bool), Box<dyn core::error::Error>> {
+            let opened = drain::<OpenPieMenu>(app);
+            let request = match opened.as_slice() {
+                [request] => request,
+                other => return Err(format!("expected one pie, got {}", other.len()).into()),
+            };
+            assert!(
+                request.element == AVATAR_MENU_ELEMENT,
+                "a right-click on the own body opens an avatar pie, not `{}`",
+                request.element
+            );
+            let slots = resolve_slots(
+                request.menu,
+                &PieConditions::new(request.conditions.iter().copied()),
+            );
+            let live = |point: Compass, action: &'static str| -> bool {
+                slots
+                    .get(point.slot())
+                    .copied()
+                    .flatten()
+                    .is_some_and(|slot| slot.outcome == SlotOutcome::Action(action) && slot.enabled)
+            };
+            Ok((
+                request.conditions.clone(),
+                live(Compass::West, "stand"),
+                live(Compass::NorthWest, "sit-ground"),
+            ))
+        }
+
+        let mut app = world_app();
+        record::<OpenPieMenu>(&mut app);
+        let own = sl_client_bevy::AgentKey::from(sl_client_bevy::Uuid::from_u128(0xE));
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlIdentity>()
+            .agent_id = Some(own);
+        super::seed_avatar(
+            &mut app,
+            own,
+            2,
+            sl_client_bevy::Vector {
+                x: 120.0,
+                y: 120.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let at = super::avatar_position_of(&mut app, own)
+            .ok_or("the own avatar sphere never spawned or dressed")?;
+
+        // Standing: Sit Down is the live one.
+        right_click_at(&mut app, at);
+        let (conditions, stand, sit) = stand_and_sit(&mut app)?;
+        assert!(
+            conditions == vec![SELF_STANDING] && sit && !stand,
+            "a standing avatar's pie offers Sit Down and greys Stand Up \
+             (conditions {conditions:?}, stand live {stand}, sit live {sit})"
+        );
+
+        // Sitting on an object (the session's seat): the pair swaps, and
+        // neither slice moved to do it.
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlAgentParcel>()
+            .seated_on = Some(sl_client_bevy::ObjectKey::from(
+            sl_client_bevy::Uuid::from_u128(0xF),
+        ));
+        right_click_at(&mut app, at);
+        let (conditions, stand, sit) = stand_and_sit(&mut app)?;
+        assert!(
+            conditions == vec![SELF_SITTING] && stand && !sit,
+            "an object-seated avatar's pie offers Stand Up at west and greys Sit Down \
+             (conditions {conditions:?}, stand live {stand}, sit live {sit})"
+        );
+
+        // Sitting on the ground: no seat, the viewer's own flag, same answer —
+        // the second source the opener ORs in.
+        app.world_mut()
+            .resource_mut::<sl_client_bevy::SlAgentParcel>()
+            .seated_on = None;
+        app.world_mut()
+            .resource_mut::<crate::world_api::SelfGroundSit>()
+            .sitting = true;
+        right_click_at(&mut app, at);
+        let (conditions, stand, sit) = stand_and_sit(&mut app)?;
+        assert!(
+            conditions == vec![SELF_SITTING] && stand && !sit,
+            "a ground-sitting avatar is sitting too (conditions {conditions:?}, \
+             stand live {stand}, sit live {sit})"
+        );
+        Ok(())
+    }
+
+    /// **The pie opens where the cursor is, and lays out clean there**: every
+    /// other pie-target test stops at the request or clicks a label; this one
+    /// pins the two things a user reads before either — that the ring centres
+    /// on the pixel they right-clicked (which is what makes a flick a gesture
+    /// and not a hunt), and that the menu the world opened passes the same
+    /// layout checks the UI tier runs on every registered element.
+    ///
+    /// The cursor is deliberately **off the viewport centre**: a pie that
+    /// ignored the request and centred itself on the screen would pass at the
+    /// centre and only there.
+    #[test]
+    fn the_object_pie_opens_at_the_cursor_and_lays_out_clean() -> Result<(), TestError> {
+        let mut app = super::world_app_with_ui()?;
+        record::<crate::pie_menu::OpenPieMenu>(&mut app);
+        let _scoped = super::seed_prim_with_flags(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+            crate::object_menu::FLAGS_HANDLE_TOUCH,
+        );
+        settle(&mut app, 5);
+
+        // Aim past the prim, so it projects well off the viewport centre.
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(
+            &mut app,
+            target + Vec3::new(0.0, 0.0, 10.0),
+            Vec3::new(target.x + 1.5, target.y, target.z),
+        );
+        settle(&mut app, 2);
+        let cursor = world_to_viewport(&mut app, target).ok_or("the prim projects nowhere")?;
+        assert!(
+            (cursor.x - 400.0).abs() > 50.0,
+            "the fixture must sit off the viewport centre for this test to mean anything, \
+             got {cursor:?}"
+        );
+
+        interact::hover(&mut app, cursor);
+        interact::press(&mut app, MouseButton::Right);
+        interact::release(&mut app, MouseButton::Right);
+        // The pick resolves, the pie spawns hidden, its labels are measured and
+        // the ring fitted around them, and `place_pie_menu` waits for two
+        // agreeing frames before revealing it.
+        settle(&mut app, 8);
+
+        let opened = drain::<crate::pie_menu::OpenPieMenu>(&mut app);
+        let element = match opened.as_slice() {
+            [request] => request.element,
+            other => return Err(format!("expected one pie, got {}", other.len()).into()),
+        };
+        assert!(
+            element == crate::object_menu::OBJECT_MENU_ELEMENT,
+            "a right-click on a prim opens the object pie, not `{element}`"
+        );
+
+        let ring = interact::centre_of(&mut app, "pie-ring").ok_or("the pie drew no ring")?;
+        let drift = Vec2::new(ring.x - cursor.x, ring.y - cursor.y).length();
+        assert!(
+            drift < 1.0,
+            "the pie's ring must centre on the pixel that was right-clicked \
+             (cursor {cursor:?}, ring {ring:?}, {drift} px apart)"
+        );
+
+        let violations = sl_viewer_testkit::layout_violations(
+            &mut app,
+            sl_viewer_testkit::LayoutTest::new()
+                .with_viewport(super::VIEWPORT.x, super::VIEWPORT.y),
+        );
+        assert!(
+            violations.is_empty(),
+            "the pie the world opened must lay out clean: {violations:#?}"
+        );
+        Ok(())
+    }
 }

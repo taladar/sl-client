@@ -1049,3 +1049,157 @@ fn handle_top_menu_actions(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use sl_viewer_ui_widgets::menu::action_paths;
+
+    use super::TOP_MENU_BAR;
+
+    /// The whole bar's action table: every command, in walk order, under the
+    /// `>`-joined path of menu labels that reaches it.
+    fn table() -> Vec<(String, &'static str)> {
+        let mut walked = Vec::new();
+        for menu in TOP_MENU_BAR.menus {
+            walked.extend(action_paths(menu));
+        }
+        walked
+    }
+
+    /// **The live bar's action table, pinned** — the line-menu counterpart of
+    /// the pies' committed compass-address tables
+    /// ([[viewer-world-pie-target-tests]]).
+    ///
+    /// A pull-down is operated by path and order rather than by direction, so
+    /// what moves under a user here is *which menu an entry hangs under* and
+    /// *where in the list it falls* — the same muscle memory, spelt in a
+    /// different geometry. Reordering entries or moving one between menus is
+    /// exactly as free, and as invisible in review, as re-slotting a pie was
+    /// before its table existed. So: a moved entry must show up as a
+    /// deliberate edit to this list, in the same commit, where a reviewer sees
+    /// it — never as a side effect of tidying a `static`.
+    ///
+    /// Adding an entry is a one-line addition here; that is the point, not an
+    /// inconvenience.
+    #[test]
+    fn the_menu_bar_action_table_is_pinned() {
+        let expected: Vec<(String, &'static str)> = vec![
+            ("Avatar".to_owned(), "toggle-preferences"),
+            ("Avatar".to_owned(), "toggle-inventory"),
+            ("Avatar".to_owned(), "toggle-experiences"),
+            ("Avatar".to_owned(), "quit"),
+            ("Comm".to_owned(), "toggle-conversations"),
+            ("Comm > Online Status".to_owned(), "presence-away"),
+            ("Comm > Online Status".to_owned(), "presence-do-not-disturb"),
+            ("Comm > Online Status".to_owned(), "presence-autorespond"),
+            (
+                "Comm > Online Status".to_owned(),
+                "presence-autorespond-non-friends",
+            ),
+            ("Comm > Online Status".to_owned(), "reject-teleport-offers"),
+            ("Comm > Online Status".to_owned(), "reject-group-invites"),
+            (
+                "Comm > Online Status".to_owned(),
+                "reject-friendship-requests",
+            ),
+            ("Comm".to_owned(), "open-friends-list"),
+            ("Comm".to_owned(), "open-groups-list"),
+            ("Comm".to_owned(), "open-block-list"),
+            ("World".to_owned(), "toggle-minimap"),
+            ("World".to_owned(), "toggle-radar"),
+            ("World".to_owned(), "toggle-world-map"),
+            ("World".to_owned(), "toggle-property-lines"),
+            ("World".to_owned(), "about-land"),
+            ("World".to_owned(), "place-profile"),
+            ("World".to_owned(), "about-region"),
+            ("World".to_owned(), "toggle-asset-blacklist"),
+            ("World".to_owned(), "toggle-avatar-render-settings"),
+            ("World".to_owned(), "toggle-friends-only"),
+            (
+                "World > Environment > Day Cycle".to_owned(),
+                "env-daycycle-sunrise",
+            ),
+            (
+                "World > Environment > Day Cycle".to_owned(),
+                "env-daycycle-midday",
+            ),
+            (
+                "World > Environment > Day Cycle".to_owned(),
+                "env-daycycle-sunset",
+            ),
+            (
+                "World > Environment > Day Cycle".to_owned(),
+                "env-daycycle-midnight",
+            ),
+            (
+                "World > Environment > Legacy".to_owned(),
+                "env-legacy-sunrise",
+            ),
+            (
+                "World > Environment > Legacy".to_owned(),
+                "env-legacy-midday",
+            ),
+            (
+                "World > Environment > Legacy".to_owned(),
+                "env-legacy-sunset",
+            ),
+            (
+                "World > Environment > Legacy".to_owned(),
+                "env-legacy-midnight",
+            ),
+            (
+                "World > Environment > Modern".to_owned(),
+                "env-modern-sunrise",
+            ),
+            (
+                "World > Environment > Modern".to_owned(),
+                "env-modern-midday",
+            ),
+            (
+                "World > Environment > Modern".to_owned(),
+                "env-modern-sunset",
+            ),
+            (
+                "World > Environment > Modern".to_owned(),
+                "env-modern-midnight",
+            ),
+            ("World > Environment".to_owned(), "env-shared"),
+            ("Build".to_owned(), "toggle-build-tools"),
+            ("Build".to_owned(), "undo-objects"),
+            ("Build".to_owned(), "redo-objects"),
+            ("Build".to_owned(), "link-objects"),
+            ("Build".to_owned(), "unlink-objects"),
+            ("Content".to_owned(), "toggle-search"),
+            ("Content".to_owned(), "toggle-web-browser"),
+            ("Help".to_owned(), "toggle-about"),
+            ("Advanced".to_owned(), "toggle-debug-settings"),
+            ("Advanced".to_owned(), "toggle-collect-diagnostics"),
+        ];
+        assert_eq!(
+            table(),
+            expected,
+            "a menu-bar entry moved — if intended, bless it by editing this table"
+        );
+    }
+
+    /// **No action string appears twice in the whole bar.**
+    ///
+    /// Stricter than the widget fixture's per-menu check, because the live
+    /// dispatch is stricter: [`handle_top_menu_actions`] matches on the action
+    /// name alone, with no idea which menu the pick came from, so two entries
+    /// sharing a name are one entry with two labels — and menu search
+    /// ([`crate::menu_search`]) would offer both.
+    #[test]
+    fn no_two_entries_in_the_bar_share_an_action() {
+        let mut actions: Vec<&str> = table().into_iter().map(|(_path, action)| action).collect();
+        let count = actions.len();
+        actions.sort_unstable();
+        actions.dedup();
+        assert_eq!(
+            actions.len(),
+            count,
+            "two menu-bar entries declare the same action string"
+        );
+    }
+}
