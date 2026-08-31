@@ -27,11 +27,14 @@ landed 2026-08-31: `seed_avatar` (placeholder sphere; own avatar via
 `SlIdentity.agent_id`), `seed_attachment` (nibble-swapped point in the
 state byte), `seed_terrain` (one flat land patch), plus the aim helpers
 (`scene_position_of`, `avatar_position_of`, `terrain_centre`).
-Remaining: the **HUD** fixture — `setup_hud_screen` bails without an
-`AvatarAssetLibrary` (`load(dir)` is its only constructor), so HUD
-routing needs the sl-test-assets mini avatar library first; `with_ui`
-composition with the UI stack; and the helper surface (`entity_of`,
-`drain_commands`, `select_by_click`).
+The HUD fixture followed the same day, unblocked by the vendored
+character assets: `world_app_with_hud()` loads the real
+`AvatarAssetLibrary` from `viewer-assets/character/`, adds the
+render-layer propagation the HUD pick paths filter by, and
+`install_hud_camera_projection` hand-fills the orthographic HUD
+camera's computed values. Remaining: `with_ui` composition with the UI
+stack, and the helper surface (`entity_of`, `drain_commands`,
+`select_by_click`).
 
 Blocked on [[viewer-plugin-groups]] (2026-08-30): the "one real unknown"
 below — carving a reusable plugin subset out of `run()` — is that task, so

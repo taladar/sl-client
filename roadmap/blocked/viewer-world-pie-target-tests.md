@@ -11,16 +11,17 @@ blocked_by: [viewer-world-test-harness]
 
 Context: [context/testing.md](../context/testing.md).
 
-Five of six targets landed (2026-08-31): prim → `OpenObjectMenu` (and
-none over empty sky), another avatar and the own avatar →
-`OpenAvatarMenu` naming the right agent, a worn attachment →
-`OpenAttachmentMenu` with `hud: false`, bare land → `OpenLandMenu` —
-each a real right click through the synthetic pointer and the CPU
-resolver ([[viewer-cpu-pick-resolver]], done). Remaining: the HUD
-attachment target (waits on the harness's `AvatarAssetLibrary` fixture),
-the through-a-floater and after-a-right-drag negatives, the seated
-stand-up condition, and the `OpenPieMenu`-level assertions (expected
-element at the cursor, layout, compass click → action).
+All six targets landed (2026-08-31): prim → `OpenObjectMenu` (and none
+over empty sky), another avatar and the own avatar → `OpenAvatarMenu`
+naming the right agent, a worn attachment → `OpenAttachmentMenu` with
+`hud: false`, bare land → `OpenLandMenu`, and — with the vendored
+character assets satisfying `setup_hud_screen` — a HUD-Center
+attachment → `OpenAttachmentMenu` with `hud: true` through the
+orthographic HUD pick. Each is a real right click through the synthetic
+pointer and the CPU resolver ([[viewer-cpu-pick-resolver]], done).
+Remaining: the through-a-floater and after-a-right-drag negatives, the
+seated stand-up condition, and the `OpenPieMenu`-level assertions
+(expected element at the cursor, layout, compass click → action).
 
 The four live pie address tables are pinned; what nobody tests is
 *target classification under a real right click*. In the fixture world
