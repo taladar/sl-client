@@ -10,9 +10,11 @@
 //! Usage (the `character/` dir supplies the standard skeleton + visual params):
 //!
 //! ```console
-//! SL_VIEWER_ASSETS=<firestorm>/indra/newview/character \
-//!   cargo run --release -p sl-client-bevy --example avatar_replay -- <dir>/<agent>.json
+//! cargo run --release -p sl-client-bevy --example avatar_replay -- <dir>/<agent>.json
 //! ```
+//!
+//! The vendored `viewer-assets/character/` directory is the default for the
+//! avatar assets; set `SL_VIEWER_ASSETS` only to point at different ones.
 //!
 //! `SL_REPLAY_TIME` (seconds, default 1.0) picks the animation sample time.
 
@@ -100,8 +102,12 @@ fn main() -> Result<(), Box<dyn Error>> {
     )
     .ok();
 
-    // The standard skeleton + visual-param table, built exactly as the viewer does.
-    let char_dir = PathBuf::from(std::env::var("SL_VIEWER_ASSETS")?);
+    // The standard skeleton + visual-param table, built exactly as the viewer
+    // does. `SL_VIEWER_ASSETS` overrides; the vendored copy is the default.
+    let char_dir = std::env::var_os("SL_VIEWER_ASSETS").map_or_else(
+        || std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../viewer-assets/character"),
+        PathBuf::from,
+    );
     let skeleton = Skeleton::from_xml(&fs_err::read_to_string(
         char_dir.join("avatar_skeleton.xml"),
     )?)?;

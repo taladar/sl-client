@@ -508,9 +508,11 @@ struct Options {
     #[clap(long, default_value_t = build_info::full_version())]
     version: String,
     /// Directory holding the standard Linden `character/` assets
-    /// (`avatar_skeleton.xml`, `avatar_lad.xml`, the base-body `.llm` meshes) —
-    /// point this at an installed Firestorm / Second Life viewer to render real
-    /// system-avatar bodies. Without it, avatars stay placeholder spheres.
+    /// (`avatar_skeleton.xml`, `avatar_lad.xml`, the base-body `.llm` meshes).
+    /// Defaults to the vendored `viewer-assets/character/` beside the
+    /// workspace when present; point this at an installed Firestorm / Second
+    /// Life viewer to use different assets. Without any, avatars stay
+    /// placeholder spheres.
     #[clap(long, env = "SL_VIEWER_ASSETS")]
     viewer_assets: Option<PathBuf>,
     /// A debug affordance: play this animation (a built-in or uploaded `.anim`
@@ -755,6 +757,18 @@ fn load_avatar_library(dir: Option<&Path>) -> Option<AvatarAssetLibrary> {
             None
         }
     }
+}
+
+/// The vendored character directory (`viewer-assets/character/` at the
+/// workspace root, see its README for provenance), when this build still sits
+/// beside its sources — the default for `--viewer-assets` /
+/// `SL_VIEWER_ASSETS`, so avatars get the real Linden bodies out of the box
+/// while an explicit flag or environment variable still overrides.
+fn default_viewer_assets() -> Option<PathBuf> {
+    let vendored = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()?
+        .join("viewer-assets/character");
+    vendored.is_dir().then_some(vendored)
 }
 
 /// The camera's start-up configuration for a viewer session — the fixed pose
@@ -2067,7 +2081,10 @@ pub fn init_tracing() -> TracingGuards {
 pub fn run() -> Result<(), Error> {
     // Held for the whole process so the Chrome profiler (if enabled) flushes.
     let _tracing_guards = init_tracing();
-    let options = Options::parse();
+    let mut options = Options::parse();
+    // An explicit `--viewer-assets` / `SL_VIEWER_ASSETS` wins; otherwise the
+    // vendored character directory serves the real Linden bodies by default.
+    options.viewer_assets = options.viewer_assets.take().or_else(default_viewer_assets);
     // `--replay <dir>` renders a captured bundle offline; otherwise a normal login.
     if let Some(bundle_dir) = options.replay.clone() {
         return run_replay(&options, &bundle_dir);

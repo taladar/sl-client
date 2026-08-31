@@ -93,7 +93,7 @@ the viewer **together**, and end the recording by **closing the viewer** so the
 # Start the recorder, launch the viewer, drive it, then close the viewer window
 # (normal Quit -> AppExit) to flush a complete trace. Do NOT pass -s.
 tracy-capture -o trace.tracy -f &   # -f overwrites; blocks until the client connects
-BEVY_ASSET_ROOT=… SL_VIEWER_ASSETS=… RUST_LOG=info \
+BEVY_ASSET_ROOT=… RUST_LOG=info \
   cargo run --release -p sl-client-bevy-viewer --features profile-tracy -- <args>
 wait   # tracy-capture serializes the complete trace once the viewer disconnects
 ```

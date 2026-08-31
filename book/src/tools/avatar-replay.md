@@ -26,9 +26,12 @@ Run the viewer logged into a grid with capture enabled:
 
 ```console
 SL_VIEWER_DUMP_DIR=avatar-dumps \
-SL_VIEWER_ASSETS=<firestorm>/indra/newview/character \
   cargo run --release -p sl-client-bevy-viewer -- --grid <grid> --avatar <name>
 ```
+
+(The vendored `viewer-assets/character` directory is the viewer's default
+for the avatar assets; set `SL_VIEWER_ASSETS` only to point at different
+ones.)
 
 With `SL_VIEWER_DUMP_DIR` set, pressing **Ctrl+Alt+D** writes a bundle for every
 nearby avatar. Capture is opt-in: with the variable unset the capture systems
@@ -63,8 +66,7 @@ No display names are stored; a bundle is keyed only by agent UUID.
 Point the viewer at a bundle directory:
 
 ```console
-SL_VIEWER_ASSETS=<firestorm>/indra/newview/character \
-  cargo run --release -p sl-client-bevy-viewer -- --replay avatar-dumps
+cargo run --release -p sl-client-bevy-viewer -- --replay avatar-dumps
 ```
 
 There is no login. `--replay` loads every `<agent>.json` in the directory and
@@ -108,8 +110,7 @@ posed skeleton from a bundle and prints each mouth/brow bone's distance from
 `mHead`, at the deformed rest and under the captured animation pose:
 
 ```console
-SL_VIEWER_ASSETS=<firestorm>/indra/newview/character \
-  cargo run --release -p sl-client-bevy --example avatar_replay -- avatar-dumps/<agent>.json
+cargo run --release -p sl-client-bevy --example avatar_replay -- avatar-dumps/<agent>.json
 ```
 
 `SL_REPLAY_TIME` (seconds, default `1.0`) picks the animation sample time.
