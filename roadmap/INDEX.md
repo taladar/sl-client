@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 304 |
+| ready | 303 |
 | blocked | 65 |
 | in-progress | 19 |
 | bugs | 65 |
-| done | 939 |
+| done | 940 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (303)
 
 ### protocol
 
@@ -614,9 +614,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-menu-land-items`](ready/viewer-minimap-menu-land-items.md) —
   Minimap context menu — About Land / Place Profile / World Map (blocked by
   `viewer-parcel-options-general` (done), `viewer-world-map-floater` (done))
-- [`viewer-movement-camera-input-tests`](ready/viewer-movement-camera-input-tests.md)
-  — Movement keys and camera modes, headless (blocked by
-  `viewer-world-test-harness` (done))
 - [`viewer-movement-controls-floater`](ready/viewer-movement-controls-floater.md)
   — Movement controls floater + stand / stop-flying buttons (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -1355,7 +1352,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (939)
+## done (940)
 
 ### protocol
 
@@ -1992,6 +1989,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-minimap-parcel-overlay`](done/viewer-minimap-parcel-overlay.md) —
   Parcel fills & property lines on the minimap (blocked by `viewer-minimap`
   (done), `viewer-parcel-overlay-decode` (done))
+- [`viewer-movement-camera-input-tests`](done/viewer-movement-camera-input-tests.md)
+  — Movement keys and camera modes, headless (blocked by
+  `viewer-world-test-harness` (done))
 - [`viewer-music-controls-push-chat-bar`](done/viewer-music-controls-push-chat-bar.md)
   — Parcel music controls push the nearby chat bar up when they appear
 - [`viewer-name-tags-billboard-render`](done/viewer-name-tags-billboard-render.md)

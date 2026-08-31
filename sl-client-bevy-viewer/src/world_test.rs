@@ -3612,3 +3612,566 @@ mod hud_click_tests {
         Ok(())
     }
 }
+
+/// The **advertised-intent tier** ([[viewer-movement-camera-input-tests]]): the
+/// `ControlFlags` a held movement key puts on the wire.
+///
+/// Second Life avatar motion is simulator-authoritative — the viewer never moves
+/// the body, it advertises intent in an `AgentUpdate` — so "does W walk?" is not
+/// a question about a transform, it is a question about the outbound
+/// [`Command::SetControls`] and [`Command::SetRotation`] stream. The camera tier
+/// above drives the same keyboard and asserts the *viewpoint*; this one asserts
+/// what the simulator is told, which is the half a scripted vehicle, a sit
+/// target and every locomotion animation actually read.
+///
+/// Everything here goes through the real action map (`W` → `Action::MoveForward`
+/// under the active binding profile), so a rebinding that stopped resolving
+/// would fail these tests rather than passing them on an injected action.
+#[cfg(test)]
+mod movement_tests {
+    use bevy::input::keyboard::Key;
+    use bevy::prelude::*;
+    use pretty_assertions::assert_eq;
+
+    use sl_client_bevy::{
+        AgentKey, Command, ControlFlags, ObjectKey, Rotation, SlAgentParcel, SlIdentity, Uuid,
+        Vector,
+    };
+    use sl_viewer_testkit::interact;
+
+    use super::{seed_avatar, seed_terrain, settle, world_app_with_input};
+    use crate::world_api::{AvatarControls, CameraMode, PresenceState};
+
+    /// A boxed error so tests can use `?` instead of the disallowed
+    /// `unwrap` / `expect`.
+    type TestError = Box<dyn core::error::Error>;
+
+    /// The own agent every fixture below drives.
+    const OWN: u128 = 0xA0;
+
+    /// The own avatar's local id in the fixture region.
+    const OWN_LOCAL: u32 = 2;
+
+    /// The terrain height (metres) the grounded fixture stands on, and the
+    /// avatar's own Z — the fixture seed's 4 m bounding box puts the stricter
+    /// avatar ground floor 2 m above the land, so an avatar reported *at* the
+    /// land height counts as standing on it.
+    const GROUND_M: f32 = 20.0;
+
+    /// The `W` key, as a keyboard delivers it (physical code plus logical key —
+    /// the action map reads the code, a focused text field would read the key).
+    fn forward_key() -> (KeyCode, Key) {
+        (KeyCode::KeyW, Key::Character("w".into()))
+    }
+
+    /// The `A` key — turn left in third person, strafe left in mouselook, steer
+    /// left in a vehicle.
+    fn left_key() -> (KeyCode, Key) {
+        (KeyCode::KeyA, Key::Character("a".into()))
+    }
+
+    /// The `D` key, the mirror of [`left_key`].
+    fn right_key() -> (KeyCode, Key) {
+        (KeyCode::KeyD, Key::Character("d".into()))
+    }
+
+    /// The `Shift` modifier, which runs.
+    fn run_key() -> (KeyCode, Key) {
+        (KeyCode::ShiftLeft, Key::Shift)
+    }
+
+    /// `PageUp` — ascend, and (held) take off.
+    fn ascend_key() -> (KeyCode, Key) {
+        (KeyCode::PageUp, Key::PageUp)
+    }
+
+    /// `F`, the fly toggle.
+    fn fly_key() -> (KeyCode, Key) {
+        (KeyCode::KeyF, Key::Character("f".into()))
+    }
+
+    /// Press and hold `key`, then step `frames` further updates (the press
+    /// itself is already one frame, and the key stays down through all of them).
+    ///
+    /// `frames` is never zero below, because the testkit's recorder is an
+    /// unordered `Update` system: a command the movement driver writes this
+    /// frame is copied into the drain on the next one.
+    fn hold(app: &mut App, key: &(KeyCode, Key), frames: u32) {
+        interact::key_down(app, key.0, key.1.clone(), None);
+        settle(app, frames);
+    }
+
+    /// Release `key`, and step the frame that carries what the release produced
+    /// into the recorder — see [`hold`].
+    fn release(app: &mut App, key: &(KeyCode, Key)) {
+        interact::key_up(app, key.0, key.1.clone());
+        settle(app, 1);
+    }
+
+    /// The `SetControls` flag sets and the body `SetRotation`s the viewer has
+    /// sent since the last drain, split out of the one outbound command stream.
+    fn drain_movement(app: &mut App) -> (Vec<ControlFlags>, Vec<Rotation>) {
+        let mut controls = Vec::new();
+        let mut rotations = Vec::new();
+        for command in super::drain_commands(app) {
+            match command {
+                Command::SetControls(flags) => controls.push(flags),
+                Command::SetRotation { body, head: _head } => rotations.push(body),
+                _other => {}
+            }
+        }
+        (controls, rotations)
+    }
+
+    /// The control-flag sets sent since the last drain, dropping the rotations.
+    fn drain_controls(app: &mut App) -> Vec<ControlFlags> {
+        drain_movement(app).0
+    }
+
+    /// The client-tracked walk heading (radians) the viewer would advertise.
+    fn heading(app: &App) -> f32 {
+        app.world().resource::<AvatarControls>().yaw
+    }
+
+    /// A fixture world with the input group and the **own avatar** standing in
+    /// the region, drained of the commands its arrival produced.
+    ///
+    /// The own avatar is what seeds the walk heading
+    /// ([`AvatarControls::seeded`](crate::world_api::AvatarControls)); without
+    /// one the viewer never advertises a body rotation at all, so half of what a
+    /// movement key does would be invisible.
+    ///
+    /// `grounded` also lays a land patch under it and grants the parcel's fly
+    /// permission — the two preconditions the hold-to-take-off rule needs. Left
+    /// off, the land height under the avatar is unknown, which is deliberately
+    /// *not* "on the ground": an unknown floor never forces a landing or a
+    /// take-off.
+    fn movement_app(grounded: bool) -> App {
+        let mut app = world_app_with_input();
+        let own = AgentKey::from(Uuid::from_u128(OWN));
+        app.world_mut().resource_mut::<SlIdentity>().agent_id = Some(own);
+        if grounded {
+            seed_terrain(&mut app, GROUND_M);
+            app.world_mut().resource_mut::<SlAgentParcel>().can_fly = true;
+        }
+        seed_avatar(
+            &mut app,
+            own,
+            OWN_LOCAL,
+            Vector {
+                x: 8.0,
+                y: 8.0,
+                z: GROUND_M,
+            },
+        );
+        // A rigged third-person camera over the avatar: the camera-mode machine
+        // is what the mouselook toggle drives, and without a `ViewerCamera` to
+        // drive there is no mode to switch — the movement keys would silently
+        // keep resolving under the third-person profile.
+        super::install_camera_rig(
+            &mut app,
+            Vec3::new(8.0, GROUND_M + 1.5, -4.0),
+            Vec3::new(8.0, GROUND_M + 1.5, -8.0),
+        );
+        settle(&mut app, 6);
+        let _arrival = drain_movement(&mut app);
+        app
+    }
+
+    /// **A held walk key is advertised once, and releasing it clears the
+    /// intent**: the simulator holds the last control set through its own
+    /// keep-alive re-sends, so the viewer emits a `SetControls` on the *edge*
+    /// only — the frame the flags change — and never again while the key stays
+    /// down.
+    ///
+    /// The silence in the middle is the load-bearing half. A viewer that
+    /// re-advertised every frame would put 60 `AgentUpdate`s a second on the
+    /// circuit for a key that is simply still held, which is the difference
+    /// between walking and flooding the connection.
+    #[test]
+    fn a_held_walk_key_is_advertised_once_and_releasing_clears_it() {
+        let mut app = movement_app(false);
+        let forward = forward_key();
+
+        hold(&mut app, &forward, 1);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS],
+            "the frame the walk key goes down advertises AT_POS, once"
+        );
+
+        settle(&mut app, 10);
+        assert_eq!(
+            drain_controls(&mut app),
+            Vec::new(),
+            "…and ten further frames of the same held key re-advertise nothing"
+        );
+
+        release(&mut app, &forward);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::empty()],
+            "releasing it clears the intent — there is no stop key, the flags \
+             are simply recomputed from what is held"
+        );
+
+        settle(&mut app, 10);
+        assert_eq!(
+            drain_controls(&mut app),
+            Vec::new(),
+            "…and a standing avatar says nothing at all"
+        );
+    }
+
+    /// **Run needs a walk key, and a double tap latches one**: `Shift` on its own
+    /// is not an intent, `Shift` with a walk key adds `FAST_AT`, and tapping the
+    /// walk key twice and holding the second tap runs without `Shift` at all
+    /// (the reference's tap-tap-hold).
+    ///
+    /// The negative — `Shift` alone advertising nothing — is what keeps the run
+    /// bit a modifier of a walk rather than a state of its own.
+    #[test]
+    fn run_needs_a_walk_key_and_a_double_tap_latches_one() {
+        let mut app = movement_app(false);
+        let (forward, run) = (forward_key(), run_key());
+
+        hold(&mut app, &run, 3);
+        assert_eq!(
+            drain_controls(&mut app),
+            Vec::new(),
+            "Shift with nothing else held is not an intent"
+        );
+
+        hold(&mut app, &forward, 1);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS.union(ControlFlags::FAST_AT)],
+            "Shift + a walk key runs"
+        );
+
+        release(&mut app, &run);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS],
+            "letting Shift go drops back to a walk while the key stays down"
+        );
+        release(&mut app, &forward);
+        let _stop = drain_controls(&mut app);
+
+        // Tap, then press and hold within the double-tap window: the second
+        // press latches the run for as long as it is held.
+        interact::key_down(&mut app, forward.0, forward.1.clone(), None);
+        release(&mut app, &forward);
+        let _tap = drain_controls(&mut app);
+        hold(&mut app, &forward, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS.union(ControlFlags::FAST_AT)],
+            "a double-tapped and held walk key runs with no Shift"
+        );
+
+        release(&mut app, &forward);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::empty()],
+            "…and the latch ends with the key, not with a timer"
+        );
+    }
+
+    /// **Left / right turn the body in third person and strafe in mouselook**:
+    /// the same key, two camera modes, two different things on the wire — a turn
+    /// is a `SetRotation` and no control bit, a strafe is `LEFT_POS` and no
+    /// change of heading.
+    ///
+    /// Both halves are asserted against the *other* mode's expectation, because
+    /// what makes this a mode split rather than two behaviours is that neither
+    /// leaks: mouselook must not turn the body (the mouse owns the heading
+    /// there) and third person must not strafe.
+    #[test]
+    fn left_turns_the_body_in_third_person_and_strafes_in_mouselook() -> Result<(), TestError> {
+        let mut app = movement_app(false);
+        let (forward, left) = (forward_key(), left_key());
+
+        // Third person: walk, then turn left for ten frames.
+        hold(&mut app, &forward, 1);
+        let before = heading(&app);
+        hold(&mut app, &left, 9);
+        let (controls, rotations) = drain_movement(&mut app);
+        assert_eq!(
+            controls,
+            vec![ControlFlags::AT_POS],
+            "in third person the turn keys carry no control bit of their own — \
+             the body facing is what moves"
+        );
+        let turned = heading(&app);
+        // Ten frames of 16 ms at the tuning's 3.2 rad/s.
+        let expected = before + 3.2 * 0.16;
+        assert!(
+            (turned - expected).abs() < 1.0e-2,
+            "…the heading turns left at the tuned rate (was {before}, expected \
+             {expected}, got {turned})"
+        );
+        assert!(
+            rotations.len() >= 2,
+            "…and it is advertised while turning, throttled to ~20 Hz over 10 \
+             frames, got {} send(s)",
+            rotations.len()
+        );
+        let last = rotations.last().ok_or("no rotation was advertised")?;
+        assert!(
+            last.z > 0.0 && last.s > 0.0,
+            "…as a turn about the Second Life up axis, got {last:?}"
+        );
+        release(&mut app, &left);
+
+        // The same two keys in mouselook, which the M key enters for real.
+        interact::tap(&mut app, KeyCode::KeyM, Key::Character("m".into()));
+        settle(&mut app, 2);
+        assert!(
+            *app.world().resource::<CameraMode>() == CameraMode::Mouselook,
+            "the M key enters mouselook"
+        );
+        let _switch = drain_movement(&mut app);
+        let before = heading(&app);
+        hold(&mut app, &left, 9);
+        let controls = drain_controls(&mut app);
+        assert_eq!(
+            controls,
+            vec![ControlFlags::AT_POS.union(ControlFlags::LEFT_POS)],
+            "in mouselook the same key strafes instead"
+        );
+        let after = heading(&app);
+        assert!(
+            (after - before).abs() < 1.0e-3,
+            "…and the key does not turn the body: the camera aim owns the \
+             heading in first person (was {before}, got {after})"
+        );
+        Ok(())
+    }
+
+    /// **A seated agent steers its vehicle and its body never turns**: while
+    /// sitting on an object the left / right keys send the yaw control bits a
+    /// script reads, and the viewer advertises no body rotation at all — the
+    /// avatar's orientation belongs to the vehicle.
+    ///
+    /// This is the guard on the reference's arrow-keys-orbit-the-vehicle bug.
+    /// Our session keeps the seat across a region crossing, so nothing may
+    /// re-route these keys back to turning the body mid-crossing; the unseated
+    /// half of the test is the same keys proving they *do* turn it otherwise.
+    #[test]
+    fn a_seated_agent_steers_the_vehicle_and_never_turns_its_body() {
+        let mut app = movement_app(false);
+        let (forward, left, right) = (forward_key(), left_key(), right_key());
+
+        app.world_mut().resource_mut::<SlAgentParcel>().seated_on =
+            Some(ObjectKey::from(Uuid::from_u128(0xB0)));
+        settle(&mut app, 1);
+        let _seating = drain_movement(&mut app);
+
+        let before = heading(&app);
+        hold(&mut app, &forward, 1);
+        hold(&mut app, &left, 4);
+        let (controls, rotations) = drain_movement(&mut app);
+        assert_eq!(
+            controls,
+            vec![
+                ControlFlags::AT_POS,
+                ControlFlags::AT_POS.union(ControlFlags::YAW_POS),
+            ],
+            "seated, forward drives the vehicle and left steers it"
+        );
+        assert_eq!(
+            rotations,
+            Vec::new(),
+            "…and a seated viewer advertises no body rotation, which is what \
+             would fight the vehicle for the avatar's facing"
+        );
+        assert!(
+            (heading(&app) - before).abs() < 1.0e-6,
+            "…nor does it turn the tracked heading behind the vehicle's back"
+        );
+
+        release(&mut app, &left);
+        hold(&mut app, &right, 4);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![
+                ControlFlags::AT_POS,
+                ControlFlags::AT_POS.union(ControlFlags::YAW_NEG),
+            ],
+            "right steers the other way"
+        );
+        release(&mut app, &right);
+
+        // Stand up: the very same key turns the body again.
+        app.world_mut().resource_mut::<SlAgentParcel>().seated_on = None;
+        settle(&mut app, 1);
+        let _standing = drain_movement(&mut app);
+        let before = heading(&app);
+        hold(&mut app, &left, 4);
+        let (controls, rotations) = drain_movement(&mut app);
+        assert_eq!(
+            controls,
+            Vec::new(),
+            "standing, the steer bits are gone — the flags are still just AT_POS"
+        );
+        assert!(
+            heading(&app) > before && !rotations.is_empty(),
+            "…and the key turns and advertises the body again (was {before}, \
+             got {}, {} rotation send(s))",
+            heading(&app),
+            rotations.len()
+        );
+    }
+
+    /// **Ascend is advertised, and a sustained hold only takes off where flying
+    /// is permitted**: `PageUp` puts `UP_POS` on the wire either way, but the
+    /// hold-to-fly rule needs the ground under the avatar *and* the parcel's
+    /// permission before it adds `FLY`.
+    ///
+    /// Off a known floor — the same key, the same hold, no land patch and no
+    /// permission — nothing but `UP_POS` is ever sent, which is what keeps a
+    /// no-fly parcel from launching the avatar the moment someone leans on the
+    /// ascend key.
+    #[test]
+    fn holding_ascend_takes_off_only_where_flying_is_permitted() {
+        let ascend = ascend_key();
+
+        // The negative: no land patch, no fly permission.
+        let mut app = movement_app(false);
+        hold(&mut app, &ascend, 40);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::UP_POS],
+            "an ascend key held well past the take-off threshold advertises the \
+             intent and nothing more where flying is not permitted"
+        );
+        release(&mut app, &ascend);
+
+        // …and on permitted ground the same hold takes off.
+        let mut app = movement_app(true);
+        hold(&mut app, &ascend, 40);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![
+                ControlFlags::UP_POS,
+                ControlFlags::UP_POS.union(ControlFlags::FLY),
+            ],
+            "standing on permitted ground, the same hold ascends and then takes \
+             off"
+        );
+        assert!(
+            app.world().resource::<AvatarControls>().flying,
+            "…and the viewer knows it is flying"
+        );
+    }
+
+    /// **Flycam parks the body but keeps it in the air**: switching the camera to
+    /// the free-fly spectator drops every movement bit — the keys drive the
+    /// camera there, not the avatar — while a `FLY` already advertised stays,
+    /// because clearing it would land a hovering avatar the instant the view
+    /// changed.
+    ///
+    /// The paired negative is the same switch made while walking on the ground:
+    /// there the parked set is empty, so "keeps FLY" is a rule about flight
+    /// rather than about the flags simply never being cleared.
+    #[test]
+    fn flycam_parks_the_body_and_keeps_a_hovering_avatar_up() {
+        let forward = forward_key();
+
+        // Walking on the ground: the park is a full stop.
+        let mut app = movement_app(false);
+        hold(&mut app, &forward, 2);
+        let _walking = drain_controls(&mut app);
+        *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Flycam;
+        settle(&mut app, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::empty()],
+            "a walking avatar stops when the camera leaves it"
+        );
+        release(&mut app, &forward);
+
+        // Flying: the park keeps the avatar aloft.
+        let mut app = movement_app(false);
+        interact::tap(&mut app, fly_key().0, fly_key().1);
+        settle(&mut app, 1);
+        hold(&mut app, &forward, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![
+                ControlFlags::FLY,
+                ControlFlags::FLY.union(ControlFlags::AT_POS),
+            ],
+            "the fly toggle is advertised, and then the walk on top of it"
+        );
+
+        *app.world_mut().resource_mut::<CameraMode>() = CameraMode::Flycam;
+        settle(&mut app, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::FLY],
+            "the flycam parks the motion bits and keeps the fly bit, so the \
+             avatar hovers instead of plummeting"
+        );
+
+        settle(&mut app, 10);
+        assert_eq!(
+            drain_controls(&mut app),
+            Vec::new(),
+            "…and the still-held walk key no longer reaches the avatar at all"
+        );
+    }
+
+    /// **The away bit rides along with the movement bits**: away is carried in
+    /// the same control word as the walk flags, so going away while walking must
+    /// re-advertise *both* rather than one writer overwriting the other's field.
+    ///
+    /// The reference keeps `AGENT_CONTROL_AWAY` in the word across its per-frame
+    /// reset for exactly this reason; a second writer that owned the away bit
+    /// alone would clear the walk every time it fired.
+    #[test]
+    fn the_away_bit_rides_along_with_the_movement_bits() {
+        let mut app = movement_app(false);
+        let forward = forward_key();
+        app.world_mut().init_resource::<PresenceState>();
+
+        hold(&mut app, &forward, 1);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS],
+            "walking, present"
+        );
+
+        app.world_mut()
+            .resource_mut::<PresenceState>()
+            .set_away(true);
+        settle(&mut app, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS.union(ControlFlags::AWAY)],
+            "going away while walking keeps the walk"
+        );
+
+        app.world_mut()
+            .resource_mut::<PresenceState>()
+            .set_away(false);
+        settle(&mut app, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::AT_POS],
+            "…and coming back drops only the away bit"
+        );
+
+        release(&mut app, &forward);
+        app.world_mut()
+            .resource_mut::<PresenceState>()
+            .set_away(true);
+        settle(&mut app, 2);
+        assert_eq!(
+            drain_controls(&mut app),
+            vec![ControlFlags::empty(), ControlFlags::AWAY],
+            "a standing avatar that goes away advertises the away bit alone"
+        );
+    }
+}

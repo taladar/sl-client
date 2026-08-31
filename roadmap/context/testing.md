@@ -109,7 +109,10 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   `…_with_edit`, `…_with_hud`, `…_with_input` (the camera / action /
   movement group), `…_with_ui`, `…_with_ui_and_edit`,
   `…_with_ui_and_input` — and a test takes the smallest one that can
-  produce its failure.
+  produce its failure. A `Recorded<M>` drain lags the write by a frame —
+  the copying system is an unordered `Update` system — so step one update
+  past the input that produced the message, or an effect that did happen
+  reads as "the key did nothing".
 - **a fake-grid fixture**: a `PrimFixture`/`NpcFixture`/`TerrainFixture`
   in `sl-fake-grid/src/fixtures/`, named in the catalogue so the viewer
   harness, the conformance `Grid::Fake` branch and the Firestorm
