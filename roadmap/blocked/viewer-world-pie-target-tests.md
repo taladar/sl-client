@@ -6,10 +6,17 @@ status: blocked
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-ui-radial-menu, viewer-ui-interaction-harness]
-blocked_by: [viewer-world-test-harness, viewer-cpu-pick-resolver]
+blocked_by: [viewer-world-test-harness]
 ---
 
 Context: [context/testing.md](../context/testing.md).
+
+First slice landed (2026-08-31): the prim target —
+`a_right_click_on_a_prim_asks_for_the_object_pie` drives a real right
+click through the synthetic pointer and the CPU resolver and drains
+exactly one `OpenObjectMenu` (and none over empty sky). The remaining
+targets wait on the harness's avatar / attachment / terrain / HUD
+fixtures; [[viewer-cpu-pick-resolver]] itself is done.
 
 The four live pie address tables are pinned; what nobody tests is
 *target classification under a real right click*. In the fixture world

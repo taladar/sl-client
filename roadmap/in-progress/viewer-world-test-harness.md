@@ -2,7 +2,7 @@
 id: viewer-world-test-harness
 title: A headless fixture world — SlEvent in, SlCommand out
 topic: viewer
-status: ready
+status: in-progress
 origin: user request (2026-07) — test in-world reactions without a server
 points: 8
 refs: [viewer-render-test-harness, viewer-ui-test-harness, viewer-cpu-pick-resolver]
@@ -11,6 +11,21 @@ blocked_by: [viewer-plugin-groups]
 
 Context: [context/viewer.md](../context/viewer.md),
 [context/testing.md](../context/testing.md).
+
+In progress (2026-08-31): `world_test.rs` landed — `world_app()` (the
+testkit input stack + visibility propagation + the world fold with the
+CPU resolver + every resource / message the group's systems validate
+against), `world_app_with_edit()` adding `EditGizmoPlugin`, the
+hand-filled `ViewerCamera` installer, a movable-prim fixture over
+`objects::fixture_object`, `world_to_viewport`, and the first two
+consumer tests (pie target, gizmo drag). The missing-resource inventory
+in `world_app` documents which resources / messages each absent plugin
+group owns — grown empirically via `RUST_BACKTRACE=full`, whose
+monomorphised `run_unsafe` frame names a failing system's full parameter
+list without needing the `bevy/debug` feature. Remaining: fixtures for
+the other target classes (own avatar, other avatar, attachment, terrain,
+HUD), `with_ui` composition with the UI stack, and the helper surface
+(`entity_of`, `drain_commands`, `select_by_click`).
 
 Blocked on [[viewer-plugin-groups]] (2026-08-30): the "one real unknown"
 below — carving a reusable plugin subset out of `run()` — is that task, so

@@ -74,9 +74,14 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   `.config/nextest.toml` runs one GPU app at a time and `gpu_lock()`
   serialises plain `cargo test`; the rig disables pipelined rendering,
   drives time with `TimeUpdateStrategy::ManualDuration`, and holds the
-  clock for the captured frame. Wall time is not a design constraint yet;
-  the generated all-pairs sweep is the one opt-in exception
-  (`SL_VIEWER_RENDER_MATRIX=full`).
+  clock for the captured frame. Wall time is not a design constraint yet
+  — long pre-commit test runs get dealt with when they actually become a
+  problem, not before; the generated all-pairs sweep is the one opt-in
+  exception (`SL_VIEWER_RENDER_MATRIX=full`). To keep that judgement
+  evidence-based, ggh's check-timing report (`ggh timings`) displays the
+  last measured duration for each check, and deliberately never
+  overwrites a non-skipped number with a skipped run's number — so the
+  recorded cost of a test stays the cost of actually running it.
 - **Capture budgets are a registry guard.** A sweep declares its capture
   budget and the registry test fails when a new subject or axis exceeds
   it — before anyone pays the GPU time.

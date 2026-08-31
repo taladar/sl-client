@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 294 |
+| ready | 292 |
 | blocked | 81 |
-| in-progress | 21 |
+| in-progress | 22 |
 | bugs | 64 |
-| done | 929 |
+| done | 930 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1524** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (294)
+## ready (292)
 
 ### protocol
 
@@ -446,9 +446,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-ui-virtualized-list` (done))
 - [`viewer-conversation-pane-toolbar`](ready/viewer-conversation-pane-toolbar.md)
   — The conversation pane's toolbar, including the participant list
-- [`viewer-cpu-pick-resolver`](ready/viewer-cpu-pick-resolver.md) — A CPU pick
-  resolver — the ID-buffer render's headless double (blocked by
-  `viewer-plugin-groups` (done))
 - [`viewer-crowd-harness-copies-render-grey`](ready/viewer-crowd-harness-copies-render-grey.md)
   — Crowd harness copies render grey (snapshot the template before its bake)
 - [`viewer-debug-consoles`](ready/viewer-debug-consoles.md) — Debug consoles —
@@ -891,9 +888,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — World-map floater — tracking & teleport hand-off (blocked by
   `viewer-world-map-floater` (done), `viewer-beacons-beam-render` (done),
   `viewer-teleport-flow-progress` (done))
-- [`viewer-world-test-harness`](ready/viewer-world-test-harness.md) — A headless
-  fixture world — SlEvent in, SlCommand out (blocked by `viewer-plugin-groups`
-  (done))
 
 ### idiomatic
 
@@ -934,7 +928,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-ui-keyboard-text-harness`, `viewer-world-test-harness`)
 - [`viewer-camera-input-interaction-tests`](blocked/viewer-camera-input-interaction-tests.md)
   — Camera, movement, mouselook and HUD picking under a synthetic pointer
-  (blocked by `viewer-world-test-harness`, `viewer-cpu-pick-resolver`)
+  (blocked by `viewer-world-test-harness`, `viewer-cpu-pick-resolver` (done))
 - [`viewer-edit-gizmo-interaction-tests`](blocked/viewer-edit-gizmo-interaction-tests.md)
   — Gizmo handle drags — press, constrain, stream, release (blocked by
   `viewer-world-test-harness`)
@@ -1138,7 +1132,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-world-test-harness`)
 - [`viewer-world-pie-target-tests`](blocked/viewer-world-pie-target-tests.md) —
   Right-clicking each world target opens exactly its pie (blocked by
-  `viewer-world-test-harness`, `viewer-cpu-pick-resolver`)
+  `viewer-world-test-harness`)
 
 ### test
 
@@ -1166,7 +1160,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (21)
+## in-progress (22)
 
 ### viewer
 
@@ -1214,6 +1208,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Upstream issue — font selection cannot see glyph-format renderability
 - [`viewer-video-playback`](in-progress/viewer-video-playback.md) — Video
   playback backend (a second media engine, not the browser)
+- [`viewer-world-test-harness`](in-progress/viewer-world-test-harness.md) — A
+  headless fixture world — SlEvent in, SlCommand out (blocked by
+  `viewer-plugin-groups` (done))
 
 ### chat
 
@@ -1374,7 +1371,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (929)
+## done (930)
 
 ### protocol
 
@@ -1765,6 +1762,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Contact sets — pseudonyms and display-name removal
 - [`viewer-contact-sets`](done/viewer-contact-sets.md) — Contact sets — named,
   coloured contact groups (blocked by `viewer-social-people-panel` (done))
+- [`viewer-cpu-pick-resolver`](done/viewer-cpu-pick-resolver.md) — A CPU pick
+  resolver — the ID-buffer render's headless double (blocked by
+  `viewer-plugin-groups` (done))
 - [`viewer-create-shift-drag-duplicate`](done/viewer-create-shift-drag-duplicate.md)
   — Create tool — Shift-drag to duplicate an object into a new one
 - [`viewer-crossing-stale-minimap-self-dot`](done/viewer-crossing-stale-minimap-self-dot.md)
