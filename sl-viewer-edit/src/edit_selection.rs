@@ -176,6 +176,21 @@ enum HighlightKind {
     DropForeign,
 }
 
+/// Every editor overlay the selection core hangs off a face mesh — the
+/// silhouette shell, the drag-hover shell, the Select Face grid cursor.
+///
+/// It is a **pick exclusion**, and that is why the three share a marker. Each
+/// overlay reuses its face's own mesh: the shells are inflated (so they sit
+/// strictly in front of the face) and the grid cursor is exactly coplanar with
+/// it. A world ray therefore strikes an overlay before — or indistinguishably
+/// from — the surface it decorates, and an overlay carries no
+/// [`PrimFaceEntity`], so the resolved hit loses its **face index**. That is
+/// invisible to whole-object selection (the walk up to the [`SceneObject`]
+/// finds the same object either way) and fatal to the Select Face tool, whose
+/// second click on a face resolved to "no face" and did nothing at all.
+#[derive(Component, Debug, Clone, Copy)]
+struct EditorOverlay;
+
 /// An outline-shell overlay child on one selected (or tentatively swept) face
 /// mesh — the selection highlight.
 #[derive(Component, Debug)]
@@ -338,6 +353,25 @@ struct SelectPointer<'w, 's> {
     camera: Query<'w, 's, (&'static Camera, &'static GlobalTransform), With<ViewerCamera>>,
     /// Render layers, to exclude HUD / gizmo geometry from world picks.
     layers: Query<'w, 's, (Entity, &'static RenderLayers)>,
+    /// The editor's own overlay shells, to exclude them too — see
+    /// [`EditorOverlay`].
+    overlays: Query<'w, 's, Entity, With<EditorOverlay>>,
+}
+
+impl SelectPointer<'_, '_> {
+    /// The entities a world pick must not strike: HUD and gizmo geometry (by
+    /// render layer, exactly as the touch pick excludes them) and the editor's
+    /// own overlay shells ([`EditorOverlay`]).
+    fn pick_exclusions(&self) -> HashSet<Entity> {
+        self.layers
+            .iter()
+            .filter(|(_entity, layers)| {
+                on_hud_layer(Some(layers)) || crate::gizmos::on_gizmo_layer(Some(layers))
+            })
+            .map(|(entity, _layers)| entity)
+            .chain(self.overlays.iter())
+            .collect()
+    }
 }
 
 /// The click / rubber-band pointer gesture of the selection tool. See the
@@ -400,14 +434,7 @@ fn handle_select_pointer(
             let Ok(ray) = camera.viewport_to_world(camera_transform, cursor) else {
                 return;
             };
-            let exclude: HashSet<Entity> = pointer
-                .layers
-                .iter()
-                .filter(|(_entity, layers)| {
-                    on_hud_layer(Some(layers)) || crate::gizmos::on_gizmo_layer(Some(layers))
-                })
-                .map(|(entity, _layers)| entity)
-                .collect();
+            let exclude = pointer.pick_exclusions();
             let shift =
                 keyboard.pressed(KeyCode::ShiftLeft) || keyboard.pressed(KeyCode::ShiftRight);
             handle_face_pick(
@@ -439,14 +466,7 @@ fn handle_select_pointer(
             return;
         };
         // The world pick, excluding HUD geometry exactly as the touch pick does.
-        let exclude: HashSet<Entity> = pointer
-            .layers
-            .iter()
-            .filter(|(_entity, layers)| {
-                on_hud_layer(Some(layers)) || crate::gizmos::on_gizmo_layer(Some(layers))
-            })
-            .map(|(entity, _layers)| entity)
-            .collect();
+        let exclude = pointer.pick_exclusions();
         let pressed_object = picker.pick(ray, &mut ray_cast, &exclude).and_then(|hit| {
             // A worn attachment is not world-editable here (the attachment
             // alignment tools are their own task); treat it as empty world.
@@ -511,10 +531,14 @@ fn handle_select_pointer(
     hide_rubber_band(&band, &mut band_nodes);
     if finished.banding {
         // Commit the sweep: extend keeps the existing selection, plain replaces.
+        // The sweep is taken **before** the replace, because `clear` empties the
+        // tentative set along with the committed one — clearing first left every
+        // plain (non-extend) rubber band committing an empty vector, so the
+        // gesture selected nothing at all and only a Shift-sweep ever worked.
+        let pending = core::mem::take(selection.rect_pending_mut());
         if !finished.extend {
             selection.clear();
         }
-        let pending = core::mem::take(selection.rect_pending_mut());
         for (scoped, entity) in pending {
             if let Some(full) = state.full_key(&scoped) {
                 selection.insert(scoped, full, entity);
@@ -935,6 +959,7 @@ fn apply_selection_highlight(
             Transform::from_scale(Vec3::splat(OUTLINE_INFLATE)),
             NotShadowCaster,
             SelectionHighlightOverlay { kind },
+            EditorOverlay,
             ChildOf(face),
         ));
     }
@@ -994,6 +1019,7 @@ fn apply_drag_hover_highlight(
             Transform::from_scale(Vec3::splat(OUTLINE_INFLATE)),
             NotShadowCaster,
             DragHoverOverlay { kind },
+            EditorOverlay,
             ChildOf(face),
         ));
     }
@@ -1238,6 +1264,7 @@ fn apply_face_cursor_highlight(
             MeshMaterial3d(material),
             NotShadowCaster,
             FaceCursorOverlay,
+            EditorOverlay,
             ChildOf(face),
         ));
     }
@@ -1286,10 +1313,12 @@ fn collect_own_face_ids(
 ///
 /// A promoted node drops its part's `ObjectProperties`; the wire diff
 /// (`sync_selection_wire`) then selects the root and re-requests them.
-pub(crate) fn promote_selection_to_roots(
-    selection: &mut SelectionSet,
-    objects: &ObjectState,
-) -> bool {
+///
+/// Public because the child→root jump needs a *populated* [`ObjectState`] — a
+/// real linkset in a real world — which only the viewer's fixture world can
+/// stand up ([[viewer-edit-selection-interaction-tests]]); the unit test below
+/// can reach no further than the all-roots no-op.
+pub fn promote_selection_to_roots(selection: &mut SelectionSet, objects: &ObjectState) -> bool {
     let mut promoted: Vec<SelectedNode> = Vec::new();
     for node in selection.nodes() {
         let root_scoped = objects.linkset_root_of(&node.scoped).unwrap_or(node.scoped);

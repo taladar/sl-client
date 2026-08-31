@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 307 |
+| ready | 306 |
 | blocked | 66 |
 | in-progress | 19 |
 | bugs | 64 |
-| done | 935 |
+| done | 936 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1526** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (307)
+## ready (306)
 
 ### protocol
 
@@ -477,9 +477,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-permission-gating`](ready/viewer-edit-permission-gating.md) —
   Permission-aware editing (grey out what perms forbid) (blocked by
   `viewer-object-selection-core` (done))
-- [`viewer-edit-selection-interaction-tests`](ready/viewer-edit-selection-interaction-tests.md)
-  — Selecting for edit — click, shift-click, rubber band, faces (blocked by
-  `viewer-world-test-harness` (done))
 - [`viewer-environment-fixed-editor`](ready/viewer-environment-fixed-editor.md)
   — Environment editors — sky & water settings assets (blocked by
   `viewer-ui-widget-scaffold` (done))
@@ -996,7 +993,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-gpu-interaction-readback`](blocked/viewer-gpu-interaction-readback.md)
   — Pixel-level reaction spot checks (GPU, serial) (blocked by
   `viewer-edit-gizmo-interaction-tests`,
-  `viewer-edit-selection-interaction-tests`)
+  `viewer-edit-selection-interaction-tests` (done))
 - [`viewer-i18n-agent-language`](blocked/viewer-i18n-agent-language.md) — Send
   agent-language preference to the grid (blocked by
   `viewer-i18n-locale-selection`)
@@ -1366,7 +1363,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (935)
+## done (936)
 
 ### protocol
 
@@ -1793,6 +1790,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-edit-face-selection`](done/viewer-edit-face-selection.md) — Select
   Face tool — per-face selection for texture edits (blocked by
   `viewer-object-selection-core` (done))
+- [`viewer-edit-selection-interaction-tests`](done/viewer-edit-selection-interaction-tests.md)
+  — Selecting for edit — click, shift-click, rubber band, faces (blocked by
+  `viewer-world-test-harness` (done))
 - [`viewer-emoji-colon-autocomplete`](done/viewer-emoji-colon-autocomplete.md) —
   Colon-based emoji autocomplete (blocked by `viewer-emoji-data` (done),
   `viewer-ui-text-input-widget` (done))

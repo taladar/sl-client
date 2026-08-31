@@ -349,16 +349,55 @@ pub(crate) fn seed_prim_with_flags(
     position: sl_client_bevy::Vector,
     extra_flags: u32,
 ) -> ScopedObjectId {
+    seed_object(app, fixture_prim(1, position, extra_flags))
+}
+
+/// [`seed_prim`] under an explicit region-local id — what a fixture world with
+/// **more than one** prim needs. The shared seed's id is `1`, so two prims
+/// streamed through [`seed_prim`] would be one object updated twice, silently:
+/// the second `ObjectAdded` folds onto the first's entity and the scene holds
+/// one box where the test believes there are two.
+pub(crate) fn seed_prim_numbered(
+    app: &mut App,
+    local_id: u32,
+    position: sl_client_bevy::Vector,
+) -> ScopedObjectId {
+    seed_object(app, fixture_prim(local_id, position, 0))
+}
+
+/// A fat prim **linked** under `parent_local`'s root — a two-prim linkset, the
+/// shape whole-linkset selection and *Edit Linked Parts* differ over. Its
+/// position is parent-relative (a linkset child's transform is), and the root
+/// must already be tracked when this folds in, so seed and settle the root
+/// first.
+pub(crate) fn seed_child_prim(
+    app: &mut App,
+    parent_local: u32,
+    local_id: u32,
+    position: sl_client_bevy::Vector,
+) -> ScopedObjectId {
+    let mut object = fixture_prim(local_id, position, 0);
+    object.parent_id = sl_client_bevy::RegionLocalObjectId(parent_local);
+    seed_object(app, object)
+}
+
+/// The shared editable-prim seed: [`crate::objects::fixture_object`] under
+/// `local_id` (whose grid-wide key is the same number, so every fixture prim is
+/// distinct on both), at `position`, with the ordinary editable agent-flag mask
+/// plus `extra_flags`. A zero mask would read as "may not move" and refuse a
+/// gizmo drag.
+fn fixture_prim(local_id: u32, position: sl_client_bevy::Vector, extra_flags: u32) -> Object {
     let mut object: Object = crate::objects::fixture_object(pcode::PRIMITIVE);
+    object.local_id = sl_client_bevy::RegionLocalObjectId(local_id);
+    object.full_id =
+        sl_client_bevy::ObjectKey::from(sl_client_bevy::Uuid::from_u128(u128::from(local_id)));
     object.motion.position = position;
-    // An ordinary editable prim: the edit gates read these agent flags, and a
-    // zero mask would read as "may not move" and refuse a gizmo drag.
     object.update_flags = crate::world_api::FLAGS_OBJECT_MODIFY
         | crate::world_api::FLAGS_OBJECT_MOVE
         | crate::world_api::FLAGS_OBJECT_COPY
         | crate::world_api::FLAGS_OBJECT_YOU_OWNER
         | extra_flags;
-    seed_object(app, object)
+    object
 }
 
 /// Stream one already-shaped [`Object`] to the viewer as an `ObjectAdded`.
@@ -531,7 +570,7 @@ pub(crate) fn first_tagged_face_position(app: &mut App) -> Option<Vec3> {
 mod tests {
     use bevy::prelude::*;
 
-    use sl_client_bevy::Vector;
+    use sl_client_bevy::{ScopedObjectId, Vector};
     use sl_viewer_testkit::{drain, find_by_name, interact, record};
 
     use super::{
@@ -632,27 +671,14 @@ mod tests {
         );
         settle(&mut app, 3);
 
-        // The +X arrow cone: of the three handles named `translate-x` (the
-        // shaft and both cones), the one farthest from the pivot on the
-        // positive side is a point the cursor cannot miss — and the
-        // pivot→cone screen direction is exactly the drag direction.
+        // The +X arrow cone, and the pivot→cone screen direction that is
+        // exactly the drag direction.
         let pivot = app
             .world()
             .get::<GlobalTransform>(entity)
             .map(GlobalTransform::translation)
             .ok_or("the selected prim has no transform")?;
-        let cone = {
-            let mut handles = app.world_mut().query::<(&Name, &GlobalTransform)>();
-            handles
-                .iter(app.world())
-                .filter(|(name, _global)| name.as_str() == "edit-gizmo:translate-x")
-                .map(|(_name, global)| global.translation())
-                .max_by(|a, b| {
-                    a.distance_squared(pivot)
-                        .total_cmp(&b.distance_squared(pivot))
-                })
-                .ok_or("no translate-x handle spawned")?
-        };
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
         let from = world_to_viewport(&mut app, cone).ok_or("the cone projects off screen")?;
         let pivot_screen =
             world_to_viewport(&mut app, pivot).ok_or("the pivot projects off screen")?;
@@ -713,6 +739,454 @@ mod tests {
                 && transform.rotation.is_none()
                 && transform.scale.is_none(),
             "a translate drag carries a position and nothing else (got {transform:?})"
+        );
+        Ok(())
+    }
+
+    /// The far **+X translate cone** of the spawned gizmo rig: of the three
+    /// parts named `edit-gizmo:translate-x` (the shaft and both cones), the one
+    /// farthest from `pivot` on the positive side — a point the cursor cannot
+    /// miss, and one that sits **off** the selected prim, out over empty world.
+    fn translate_x_cone(app: &mut App, pivot: Vec3) -> Option<Vec3> {
+        let mut handles = app.world_mut().query::<(&Name, &GlobalTransform)>();
+        handles
+            .iter(app.world())
+            .filter(|(name, _global)| name.as_str() == "edit-gizmo:translate-x")
+            .map(|(_name, global)| global.translation())
+            .max_by(|a, b| {
+                a.distance_squared(pivot)
+                    .total_cmp(&b.distance_squared(pivot))
+            })
+    }
+
+    /// Enter build mode: the selection gesture bails on an inactive tool before
+    /// it looks at the pointer at all, so every selection test opens with this.
+    fn enter_build_mode(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .active = true;
+        settle(app, 2);
+    }
+
+    /// Whether `scoped` is in the selection right now.
+    fn is_selected(app: &App, scoped: ScopedObjectId) -> bool {
+        app.world()
+            .resource::<crate::world_api::SelectionSet>()
+            .is_selected(scoped)
+    }
+
+    /// The primary selection's scoped id — the object the numeric fields and
+    /// the local-frame gizmos follow.
+    fn primary(app: &App) -> Option<ScopedObjectId> {
+        app.world()
+            .resource::<crate::world_api::SelectionSet>()
+            .primary()
+            .map(|node| node.scoped)
+    }
+
+    /// The **wire** half of the selection since the last drain: the ids sent in
+    /// an `ObjectSelect` (which is a properties request) and those sent in an
+    /// `ObjectDeselect`. What the simulator would have seen.
+    fn wire_selection(app: &mut App) -> (Vec<ScopedObjectId>, Vec<ScopedObjectId>) {
+        let mut selected = Vec::new();
+        let mut deselected = Vec::new();
+        for command in super::drain_commands(app) {
+            match command {
+                sl_client_bevy::Command::RequestObjectProperties { local_ids } => {
+                    selected.extend(local_ids);
+                }
+                sl_client_bevy::Command::DeselectObjects { local_ids } => {
+                    deselected.extend(local_ids);
+                }
+                _other => {}
+            }
+        }
+        (selected, deselected)
+    }
+
+    /// Two fat prims side by side, framed head-on by one camera, in build mode:
+    /// each one's scoped id and where its centre lands on screen. Eight metres
+    /// apart in region X and fourteen from the camera, so their projected boxes
+    /// are ~300 px apart — far enough that a rubber band can cover one and miss
+    /// the other by more than its own width.
+    #[expect(
+        clippy::type_complexity,
+        reason = "two (id, screen position) pairs is the tuple this returns; naming a struct for \
+                  one test setup helper would not read better"
+    )]
+    fn two_prims_in_view(
+        app: &mut App,
+    ) -> Result<((ScopedObjectId, Vec2), (ScopedObjectId, Vec2)), TestError> {
+        let left = super::seed_prim_numbered(
+            app,
+            1,
+            Vector {
+                x: 124.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        let right = super::seed_prim_numbered(
+            app,
+            2,
+            Vector {
+                x: 132.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(app, 6);
+        let left_at = super::scene_position_of(app, left).ok_or("the left prim never spawned")?;
+        let right_at =
+            super::scene_position_of(app, right).ok_or("the right prim never spawned")?;
+        // Component-wise plain `f32`: the lint fires on `glam` operators.
+        let mid = Vec3::new(
+            f32::midpoint(left_at.x, right_at.x),
+            f32::midpoint(left_at.y, right_at.y),
+            f32::midpoint(left_at.z, right_at.z),
+        );
+        install_camera(app, Vec3::new(mid.x, mid.y, mid.z + 14.0), mid);
+        settle(app, 2);
+        enter_build_mode(app);
+        let left_screen =
+            world_to_viewport(app, left_at).ok_or("the left prim projects off screen")?;
+        let right_screen =
+            world_to_viewport(app, right_at).ok_or("the right prim projects off screen")?;
+        Ok(((left, left_screen), (right, right_screen)))
+    }
+
+    /// **A click selects, a click on nothing deselects** — the first
+    /// selection-gesture test ([[viewer-edit-selection-interaction-tests]]),
+    /// driven through the real `handle_select_pointer` and the real world pick,
+    /// asserting both the local set and what the simulator would have seen.
+    #[test]
+    fn a_click_selects_a_prim_and_a_click_on_nothing_deselects_it() -> Result<(), TestError> {
+        let mut app = super::world_app_with_edit();
+        let scoped = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+        enter_build_mode(&mut app);
+        let _before = wire_selection(&mut app);
+
+        super::select_by_click(&mut app, Vec2::new(400.0, 300.0));
+        assert!(
+            is_selected(&app, scoped) && primary(&app) == Some(scoped),
+            "a click on the prim selects it and makes it primary"
+        );
+        let (selected, deselected) = wire_selection(&mut app);
+        assert!(
+            selected == vec![scoped] && deselected.is_empty(),
+            "selecting sends exactly one ObjectSelect for the clicked prim \
+             (selected {selected:?}, deselected {deselected:?})"
+        );
+
+        // A click on empty sky is a deselect-all, not a no-op.
+        super::select_by_click(&mut app, Vec2::new(10.0, 10.0));
+        assert!(
+            app.world()
+                .resource::<crate::world_api::SelectionSet>()
+                .is_empty(),
+            "a click on empty world clears the selection"
+        );
+        let (selected, deselected) = wire_selection(&mut app);
+        assert!(
+            deselected == vec![scoped] && selected.is_empty(),
+            "clearing sends exactly one ObjectDeselect for the dropped prim \
+             (selected {selected:?}, deselected {deselected:?})"
+        );
+        Ok(())
+    }
+
+    /// **Shift-click accumulates, and toggles back out**: the reference's
+    /// `LLToolSelect` extend semantics under a real held modifier — the second
+    /// prim joins the set and becomes primary, and shift-clicking it again
+    /// removes it (leaving the first, which never moved).
+    #[test]
+    fn a_shift_click_accumulates_and_then_toggles_the_second_prim() -> Result<(), TestError> {
+        use bevy::input::keyboard::Key;
+
+        let mut app = super::world_app_with_edit();
+        let ((left, left_at), (right, right_at)) = two_prims_in_view(&mut app)?;
+        let _before = wire_selection(&mut app);
+
+        super::select_by_click(&mut app, left_at);
+        assert!(
+            is_selected(&app, left) && !is_selected(&app, right),
+            "a plain click selects only what it hit"
+        );
+
+        interact::with_modifier(&mut app, KeyCode::ShiftLeft, Key::Shift, |app| {
+            interact::hover(app, right_at);
+            interact::press(app, MouseButton::Left);
+            interact::release(app, MouseButton::Left);
+        });
+        settle(&mut app, 2);
+        assert!(
+            is_selected(&app, left) && is_selected(&app, right),
+            "a shift-click adds to the selection instead of replacing it"
+        );
+        assert!(
+            primary(&app) == Some(right),
+            "the last-clicked object is the primary"
+        );
+        let (selected, _deselected) = wire_selection(&mut app);
+        assert!(
+            selected.contains(&left) && selected.contains(&right),
+            "both selections reached the wire (got {selected:?})"
+        );
+
+        // The same shift-click again toggles it back out.
+        interact::with_modifier(&mut app, KeyCode::ShiftLeft, Key::Shift, |app| {
+            interact::hover(app, right_at);
+            interact::press(app, MouseButton::Left);
+            interact::release(app, MouseButton::Left);
+        });
+        settle(&mut app, 2);
+        assert!(
+            is_selected(&app, left) && !is_selected(&app, right),
+            "a shift-click on a selected object removes it, leaving the rest"
+        );
+        let (_selected, deselected) = wire_selection(&mut app);
+        assert!(
+            deselected == vec![right],
+            "only the toggled-out object is deselected on the wire (got {deselected:?})"
+        );
+        Ok(())
+    }
+
+    /// **A rubber band selects what it sweeps, and nothing else**: a left drag
+    /// that starts on empty world grows past the click slop into a sweep
+    /// (`sweep_candidates` projecting each object's scale box), and the release
+    /// commits exactly the covered prim.
+    #[test]
+    fn a_rubber_band_drag_selects_only_the_prim_it_covers() -> Result<(), TestError> {
+        let mut app = super::world_app_with_edit();
+        let ((left, left_at), (right, right_at)) = two_prims_in_view(&mut app)?;
+        // A band around the right prim only: it starts in empty sky well above
+        // both boxes (an object press would be a click, not a sweep), and its
+        // near edge stays clear of the left prim's projected box.
+        let from = Vec2::new(right_at.x - 90.0, 60.0);
+        let to = Vec2::new(right_at.x + 90.0, 520.0);
+        assert!(
+            from.x - left_at.x > 100.0,
+            "the band must miss the left prim by more than its projected width \
+             (left {left_at:?}, band from {from:?})"
+        );
+
+        interact::drag(&mut app, from, to, 8, MouseButton::Left);
+        settle(&mut app, 2);
+        assert!(
+            is_selected(&app, right) && !is_selected(&app, left),
+            "the sweep commits the covered prim and only that one"
+        );
+        let (selected, _deselected) = wire_selection(&mut app);
+        assert!(
+            selected == vec![right],
+            "the swept selection reaches the wire like any other (got {selected:?})"
+        );
+        Ok(())
+    }
+
+    /// **Edit Linked Parts picks the prim; whole-linkset picks the root** — and
+    /// switching back promotes the part up to its root
+    /// (`promote_selection_to_roots`, whose child→root jump needs a populated
+    /// `ObjectState` and so could not be exercised until this fixture world).
+    #[test]
+    fn edit_linked_parts_selects_the_picked_prim_not_its_root() -> Result<(), TestError> {
+        let mut app = super::world_app_with_edit();
+        let root = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        // Linked under the root and held well out to the side, so the ray that
+        // strikes the child cannot also graze the root's box.
+        let child = super::seed_child_prim(
+            &mut app,
+            1,
+            2,
+            Vector {
+                x: 6.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        );
+        settle(&mut app, 6);
+        let at = super::scene_position_of(&mut app, child).ok_or("the child prim never spawned")?;
+        install_camera(&mut app, Vec3::new(at.x, at.y, at.z + 10.0), at);
+        enter_build_mode(&mut app);
+        let centre = Vec2::new(400.0, 300.0);
+
+        // Whole-linkset mode (the default): the click lands on the child and
+        // selects its root.
+        super::select_by_click(&mut app, centre);
+        assert!(
+            is_selected(&app, root) && !is_selected(&app, child),
+            "a whole-linkset click on a child prim selects the linkset root"
+        );
+
+        // Edit Linked Parts: the same click selects the part itself.
+        app.world_mut()
+            .resource_mut::<crate::world_api::EditToolState>()
+            .edit_linked = true;
+        settle(&mut app, 2);
+        super::select_by_click(&mut app, centre);
+        assert!(
+            is_selected(&app, child) && !is_selected(&app, root),
+            "an edit-linked click selects the picked part, not its root"
+        );
+
+        // Leaving Edit Linked Parts promotes the part back up to its root.
+        let promoted = app.world_mut().resource_scope(
+            |world, mut selection: Mut<crate::world_api::SelectionSet>| {
+                let objects = world.resource::<crate::world_api::ObjectState>();
+                crate::edit_selection::promote_selection_to_roots(&mut selection, objects)
+            },
+        );
+        assert!(
+            promoted,
+            "a selected child prim has a root to be promoted to"
+        );
+        assert!(
+            is_selected(&app, root) && !is_selected(&app, child),
+            "promoting a part selection yields its linkset root"
+        );
+        Ok(())
+    }
+
+    /// **Select Face picks one face, and shift toggles it back off**: the
+    /// distinct `LLToolFace` mode, where a click resolves to a prim *face*
+    /// rather than sweeping or driving a gizmo — and where toggling an object's
+    /// last face out drops the object from the selection with it.
+    #[test]
+    fn select_face_mode_picks_one_face_and_shift_toggles_it_off() -> Result<(), TestError> {
+        use bevy::input::keyboard::Key;
+
+        let mut app = super::world_app_with_edit();
+        let scoped = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 0.0, 10.0), target);
+        {
+            let mut tool = app
+                .world_mut()
+                .resource_mut::<crate::world_api::EditToolState>();
+            tool.active = true;
+            tool.tool = crate::world_api::EditTool::SelectFace;
+        }
+        settle(&mut app, 2);
+
+        let centre = Vec2::new(400.0, 300.0);
+        super::select_by_click(&mut app, centre);
+        let picked = {
+            let selection = app.world().resource::<crate::world_api::SelectionSet>();
+            assert!(
+                selection.is_selected(scoped),
+                "a face click selects the prim carrying the face"
+            );
+            let faces = selection
+                .primary_faces()
+                .ok_or("a face click must leave a face set, not the whole object")?;
+            assert!(
+                faces.len() == 1,
+                "a plain face click selects exactly one face, got {}",
+                faces.len()
+            );
+            *faces.iter().next().ok_or("just asserted one")?
+        };
+
+        // Shift on the same face toggles it out — and it was the object's last,
+        // so the object goes with it.
+        interact::with_modifier(&mut app, KeyCode::ShiftLeft, Key::Shift, |app| {
+            interact::hover(app, centre);
+            interact::press(app, MouseButton::Left);
+            interact::release(app, MouseButton::Left);
+        });
+        settle(&mut app, 2);
+        assert!(
+            app.world()
+                .resource::<crate::world_api::SelectionSet>()
+                .is_empty(),
+            "toggling an object's last face off drops the object (face {picked:?})"
+        );
+        Ok(())
+    }
+
+    /// **A press on a gizmo handle is never a selection click**: the ordering
+    /// `handle_select_pointer.after(drive_gizmo_interaction)` plus the
+    /// `claims_pointer` guard. The +X cone hangs out over empty world, so
+    /// without the guard this press would classify as an empty-world gesture
+    /// and its release would clear the very selection the rig is mounted on.
+    #[test]
+    fn a_press_on_a_gizmo_handle_never_changes_the_selection() -> Result<(), TestError> {
+        let mut app = super::world_app_with_edit();
+        let scoped = seed_prim(
+            &mut app,
+            Vector {
+                x: 128.0,
+                y: 128.0,
+                z: 30.0,
+            },
+        );
+        settle(&mut app, 5);
+        let target =
+            first_tagged_face_position(&mut app).ok_or("the fixture prim never built a face")?;
+        install_camera(&mut app, target + Vec3::new(0.0, 2.0, 10.0), target);
+        enter_build_mode(&mut app);
+        super::select_by_click(&mut app, Vec2::new(400.0, 300.0));
+        let entity = super::entity_of(&mut app, scoped).ok_or("the fixture prim has no entity")?;
+        settle(&mut app, 3);
+
+        let pivot = app
+            .world()
+            .get::<GlobalTransform>(entity)
+            .map(GlobalTransform::translation)
+            .ok_or("the selected prim has no transform")?;
+        let cone = translate_x_cone(&mut app, pivot).ok_or("no translate-x handle spawned")?;
+        let at = world_to_viewport(&mut app, cone).ok_or("the cone projects off screen")?;
+        // A world pick at the cone must find nothing — otherwise the guard is
+        // not what keeps the selection, and this test proves nothing.
+        assert!(
+            world_to_viewport(&mut app, pivot).is_some_and(|centre| (at.x - centre.x).abs() > 20.0),
+            "the cone must sit clear of the prim's own screen position"
+        );
+        let _before = wire_selection(&mut app);
+
+        interact::hover(&mut app, at);
+        interact::press(&mut app, MouseButton::Left);
+        interact::release(&mut app, MouseButton::Left);
+        settle(&mut app, 2);
+
+        assert!(
+            is_selected(&app, scoped) && primary(&app) == Some(scoped),
+            "a press on a manipulator handle leaves the selection exactly as it was"
+        );
+        let (selected, deselected) = wire_selection(&mut app);
+        assert!(
+            selected.is_empty() && deselected.is_empty(),
+            "an unchanged selection sends no select / deselect \
+             (selected {selected:?}, deselected {deselected:?})"
         );
         Ok(())
     }
