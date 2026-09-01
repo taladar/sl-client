@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 311 |
-| blocked | 58 |
+| blocked | 59 |
 | in-progress | 18 |
 | bugs | 65 |
 | done | 951 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1538** |
+| **total** | **1539** |
 
 ## ideas (98)
 
@@ -972,7 +972,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (58)
+## blocked (59)
 
 ### viewer
 
@@ -1132,6 +1132,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-assets-unify-rigged-fixtures`](blocked/test-assets-unify-rigged-fixtures.md)
+  — Two generators make a rigged fixture; there should be one (blocked by
+  `viewer-audit-render-fixtures-crate`)
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done), `test-fake-grid-timeline`)

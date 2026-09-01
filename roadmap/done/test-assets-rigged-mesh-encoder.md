@@ -40,7 +40,8 @@ shaped by `RIGGED_MESH_ASSET`.
 Not done here: `sl-viewer-world-scene`'s own `rigged_strip` still builds its
 own `Submesh` + `MeshSkin` for the no-grid render scene. It is the same *kind*
 of fixture from a second generator, but folding it into this one would rebless
-a committed render baseline, which is not this task's business.
+a committed render baseline, which is not this task's business — filed as
+[[test-assets-unify-rigged-fixtures]].
 
 [[viewer-mesh-encoder]] cleared the blocker (2026-09-01): `sl_mesh::encode`
 writes the header, the geometry blocks, the `skin` block and the convex
