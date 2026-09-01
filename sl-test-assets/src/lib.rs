@@ -14,11 +14,14 @@
 //! What the same fixtures need beside the pixels lives here too:
 //! [`sculpt_sphere`] (a sculpt map, which is geometry stored *as* a texture),
 //! [`mesh::unit_cube_mesh_asset`] (a whole mesh asset),
+//! [`rigged::cylinder_mesh_asset`] (a *skinned* one, plus the
+//! deliberately malformed rigs beside it),
 //! [`anim::chest_twist_animation_asset`] (a keyframe motion) and
 //! [`gltf_material_asset`] (a PBR material asset).
 
 pub mod anim;
 pub mod mesh;
+pub mod rigged;
 
 use bytes::Bytes;
 use sl_proto::DEFAULT_TERRAIN_DETAIL_TEXTURES;

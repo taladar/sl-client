@@ -24,7 +24,7 @@ use sl_wire::{LegacyMaterial, ReflectionProbeFlags};
 use super::RegionFixture;
 use super::npcs::{NpcAppearance, NpcFixture};
 use super::prims::{FaceStyle, PrimFixture, SculptKind, linkset};
-use crate::world::{AvatarIdentity, SceneFixtures, region_wide_parcel};
+use crate::world::{AvatarIdentity, ObjectAnimationFixture, SceneFixtures, region_wide_parcel};
 
 /// The catalogue parcel's name.
 pub const CATALOGUE_PARCEL_NAME: &str = "Fake Grid Catalogue";
@@ -77,6 +77,16 @@ pub const NORMAL_MAP: TextureKey = texture_key(0xCA7_0006);
 
 /// The texture the particle emitter throws.
 pub const PARTICLE_TEXTURE: TextureKey = texture_key(0xCA7_0007);
+
+/// The **rigged** mesh asset the rigged and animesh prims are shaped by: the
+/// two-bone cylinder of [`sl_test_assets::rigged::cylinder_mesh_asset`],
+/// whose upper joint is the one [`NPC_ANIMATION`] rotates.
+///
+/// One asset serves both prims on purpose. A rigged mesh rezzed in-world with
+/// no control avatar renders at its bind pose; the same asset on an animated
+/// object bends. Two prims side by side, one asset between them, is the
+/// cleanest way to see which of the two paths broke.
+pub const RIGGED_MESH_ASSET: MeshKey = MeshKey(Key(uuid::Uuid::from_u128(0xCA7_0008)));
 
 /// The catalogue NPC's agent id.
 pub const NPC_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0100);
@@ -167,7 +177,7 @@ fn slot_offset(local_id: RegionLocalObjectId) -> f32 {
 /// The names of the catalogue's prims, in the order they stand in the row.
 /// The index into this list is the prim's offset from the first catalogue
 /// local id, so the row order and the id order are the same thing.
-pub const NAMES: [&str; 16] = [
+pub const NAMES: [&str; 18] = [
     "plain-box",
     "checker-box",
     "sphere",
@@ -184,6 +194,8 @@ pub const NAMES: [&str; 16] = [
     "media-face-box",
     "reflection-probe",
     "linkset-root",
+    "rigged-mesh",
+    "animesh-cylinder",
 ];
 
 /// Every catalogue entry, in row order.
@@ -229,6 +241,7 @@ pub fn catalogue() -> RegionFixture {
     ));
     world.objects = objects(owner);
     world.npcs = vec![npc()];
+    world.object_animations = animesh_animations();
 
     RegionFixture {
         world,
@@ -410,10 +423,45 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
                     .collect();
                 objects.extend(linkset(prim.textured(CHECKER_TEXTURE), children));
             }
+            // The same rigged asset twice: at its bind pose, and bending.
+            "rigged-mesh" => objects.push(
+                prim.mesh(RIGGED_MESH_ASSET, 1)
+                    .textured(CHECKER_TEXTURE)
+                    .build(),
+            ),
+            "animesh-cylinder" => objects.push(
+                prim.mesh(RIGGED_MESH_ASSET, 1)
+                    .textured(CHECKER_TEXTURE)
+                    .animated_mesh()
+                    .build(),
+            ),
             _unknown => objects.push(prim.build()),
         }
     }
     objects
+}
+
+/// The catalogue's animated objects: the `animesh-cylinder` prim playing
+/// [`NPC_ANIMATION`].
+///
+/// It plays the *same* motion the NPC does, and deliberately so: the animation
+/// rotates `mChest`, which is the rigged cylinder's **upper** joint, so the
+/// prim's top half twists while its bottom half stays put. Two subjects on one
+/// motion also means a capture that finds neither of them moving is looking at
+/// a broken animation asset rather than a broken animesh path.
+///
+/// Empty if the catalogue has no `animesh-cylinder` entry, which only happens
+/// if [`NAMES`] loses it.
+#[must_use]
+pub fn animesh_animations() -> Vec<ObjectAnimationFixture> {
+    entry("animesh-cylinder")
+        .map(|animesh| {
+            vec![ObjectAnimationFixture::playing(
+                animesh.full_id,
+                AnimationKey::from(NPC_ANIMATION),
+            )]
+        })
+        .unwrap_or_default()
 }
 
 /// The catalogue's NPC: a blue-baked avatar standing west of the prim row,
@@ -719,6 +767,12 @@ fn assets() -> InMemoryAssetSource {
         }
         Err(error) => tracing::warn!("encoding the catalogue mesh failed: {error}"),
     }
+    match sl_test_assets::rigged::cylinder_mesh_asset() {
+        Ok(bytes) => {
+            let _previous = assets.insert(AssetKey::from(RIGGED_MESH_ASSET.uuid()), bytes);
+        }
+        Err(error) => tracing::warn!("encoding the catalogue rigged mesh failed: {error}"),
+    }
     let _previous = assets.insert(
         AssetKey::from(PBR_MATERIAL),
         sl_test_assets::gltf_material_asset([1.0, 1.0, 1.0, 1.0], Some(CHECKER_TEXTURE.uuid())),
@@ -753,6 +807,9 @@ mod test {
     use sl_types::key::SculptOrMeshKey;
 
     use super::*;
+
+    /// A boxed error so tests can use `?` instead of disallowed `unwrap`.
+    type TestError = Box<dyn core::error::Error>;
 
     /// Every name in the catalogue resolves, no two prims share an id, and
     /// every prim stands in its own slot of the row.
@@ -999,6 +1056,81 @@ mod test {
             })
             .map(sl_proto::TextureFace::media_enabled);
         assert_eq!(media, Some(true));
+    }
+
+    /// Both rigged prims name the rigged asset, only the animesh one carries
+    /// the animated-object flag, and the region has an `ObjectAnimation` for
+    /// exactly that one — the three facts that make the pair a *pair* rather
+    /// than two copies of the same prim.
+    #[test]
+    fn the_animesh_prim_is_the_rigged_one_plus_a_flag() {
+        let fixture = catalogue();
+        let find = |name: &str| -> Option<sl_proto::Object> {
+            let wanted = entry(name).map(|found| found.local_id);
+            fixture
+                .world
+                .objects
+                .iter()
+                .find(|object| Some(object.local_id) == wanted)
+                .cloned()
+        };
+        let shaped_by = |name: &str| -> Option<SculptOrMeshKey> {
+            find(name).and_then(|object| {
+                decode_extra_params(&object.extra_params)
+                    .sculpt
+                    .map(|sculpt| sculpt.texture)
+            })
+        };
+        let animated = |name: &str| -> bool {
+            find(name).is_some_and(|object| {
+                decode_extra_params(&object.extra_params)
+                    .extended_mesh
+                    .is_some_and(|mesh| mesh.flags & 0x1 != 0)
+            })
+        };
+
+        // One asset, two prims.
+        let rigged = Some(SculptOrMeshKey::Mesh(RIGGED_MESH_ASSET));
+        assert_eq!(shaped_by("rigged-mesh"), rigged);
+        assert_eq!(shaped_by("animesh-cylinder"), rigged);
+        // The flag is the only difference.
+        assert!(!animated("rigged-mesh"));
+        assert!(animated("animesh-cylinder"));
+
+        // And the animation is pushed for the animesh prim alone, numbered
+        // from one the way a simulator numbers a fresh set.
+        let animesh = entry("animesh-cylinder").map(|found| found.full_id);
+        let animations = &fixture.world.object_animations;
+        assert_eq!(animations.len(), 1);
+        let played = animations.first().map(|record| record.object);
+        assert_eq!(played, animesh);
+        assert_eq!(
+            animations.first().map(ObjectAnimationFixture::wire),
+            Some(vec![sl_proto::ObjectPlayingAnimation {
+                anim_id: AnimationKey::from(NPC_ANIMATION),
+                sequence_id: 1,
+            }])
+        );
+    }
+
+    /// The rigged mesh asset the two prims name is in the region's store, and
+    /// decodes back into a skinned cylinder — a prim naming an asset nothing
+    /// serves renders as nothing at all.
+    #[test]
+    fn the_rigged_mesh_asset_is_served_and_carries_its_skin() -> Result<(), TestError> {
+        let fixture = catalogue();
+        let bytes =
+            sl_proto::AssetSource::get(&fixture.assets, AssetKey::from(RIGGED_MESH_ASSET.uuid()))
+                .ok_or("the rigged mesh asset is not served")?;
+        let (header, header_size) = sl_mesh::parse_header(bytes).ok_or("no mesh header")?;
+        let block = header.skin.ok_or("a rigged mesh needs a skin block")?;
+        let (start, end) = block.range(header_size);
+        let skin = sl_mesh::decode_skin(bytes.get(start..end).ok_or("skin out of range")?)?;
+        assert_eq!(
+            skin.joint_names,
+            sl_test_assets::rigged::RIG_JOINTS.to_vec()
+        );
+        Ok(())
     }
 
     /// The linkset's children hang off its root, and stand above it.

@@ -2,12 +2,45 @@
 id: test-assets-rigged-mesh-encoder
 title: A rigged mesh fixture whose deformation is analytically checkable
 topic: test
-status: ready
+status: done
 origin: asked while reviewing viewer-static-asset-library (2026-09-01)
 points: 5
 refs: [test-shared-test-assets, viewer-p17-2, viewer-r1]
 blocked_by: [viewer-mesh-encoder]
 ---
+
+Done (2026-09-01): `sl-test-assets::rigged` — `cylinder` /
+`cylinder_mesh_asset` (a two-bone cylinder, 8 segments by 4 rings, weights
+ramping linearly with height on `["mTorso", "mChest"]`), `pathological_rig`
+(one quad, one pathology per vertex: weights summing to 0.6, no influences at
+all, the full four influences, and an influence naming a joint the skin does
+not list), `bento_override_rig` (Bento bones plus `alt_inverse_bind_matrix` /
+`pelvis_offset` / `lock_scale_if_joint_position`) and
+`lod_weight_mismatch_mesh_asset` (one geometry, disagreeing per-LOD `Weights`).
+
+`mChest` is the cylinder's **upper** joint on purpose: it is the joint the
+chest-twist motion of [[test-fake-grid-animation-assets]] rotates, so one asset
+serves both catalogue prims — the animesh one bends where the plain rigged one
+stands at its bind pose.
+
+Five unit tests in `sl-test-assets` pin the round trips and the closed-form
+deformation; the oracle derives its expectation from the vertex's *height*
+rather than from the weights it just read back, so a wrong weight stream cannot
+satisfy it by agreeing with itself. A sixth in `sl-client-bevy` runs the
+pathological rig through the real `to_bevy_rigged_mesh` **after** an asset round
+trip — the three tests already there hand it weights built in memory, and the
+codec/packer boundary is exactly where the two can silently disagree.
+
+The fake grid gained `PrimFixture::animated_mesh` (the extended-mesh
+`ANIMATED_MESH_ENABLED` flag), `SceneFixtures::object_animations` with an
+`ObjectAnimationFixture` pushed as `ObjectAnimation` at the end of the arrival
+burst, and the catalogue entries `rigged-mesh` and `animesh-cylinder`, both
+shaped by `RIGGED_MESH_ASSET`.
+
+Not done here: `sl-viewer-world-scene`'s own `rigged_strip` still builds its
+own `Submesh` + `MeshSkin` for the no-grid render scene. It is the same *kind*
+of fixture from a second generator, but folding it into this one would rebless
+a committed render baseline, which is not this task's business.
 
 [[viewer-mesh-encoder]] cleared the blocker (2026-09-01): `sl_mesh::encode`
 writes the header, the geometry blocks, the `skin` block and the convex

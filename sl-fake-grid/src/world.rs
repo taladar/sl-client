@@ -19,9 +19,9 @@ use std::time::Instant;
 use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
-    Object, ObjectExtraParams, ObjectMotion, ParcelCategory, ParcelInfo, ParcelRequestResult,
-    ParcelStatus, PrimShapeParams, RegionLocalObjectId, RegionLocalParcelId, ServerEvent,
-    SimSession, TerrainLayerType, pcode,
+    AnimationKey, Object, ObjectExtraParams, ObjectMotion, ObjectPlayingAnimation, ParcelCategory,
+    ParcelInfo, ParcelRequestResult, ParcelStatus, PrimShapeParams, RegionLocalObjectId,
+    RegionLocalParcelId, ServerEvent, SimSession, TerrainLayerType, pcode,
 };
 use sl_types::key::{AgentKey, ObjectKey, OwnerKey};
 use sl_types::lsl::{Rotation, Vector};
@@ -69,12 +69,61 @@ pub struct SceneFixtures {
     /// `AvatarAppearance`, an `AvatarAnimation` and its attachments to the
     /// arrival burst, and answers object refetches like any other object.
     pub npcs: Vec<NpcFixture>,
+    /// The animations signalled on the region's **animated objects**
+    /// (animesh), pushed as one `ObjectAnimation` each on arrival.
+    ///
+    /// An animesh is an ordinary rigged-mesh prim carrying the extended-mesh
+    /// `ANIMATED_MESH_ENABLED` flag ([`PrimFixture::animated_mesh`]); what
+    /// makes it *move* is this, a separate message keyed by the object's full
+    /// id rather than anything in the object update.
+    ///
+    /// [`PrimFixture::animated_mesh`]: crate::fixtures::PrimFixture::animated_mesh
+    pub object_animations: Vec<ObjectAnimationFixture>,
     /// The region-local id the arriving agent's own avatar object gets. A
     /// real simulator mints one per avatar; with one agent per session a
     /// fixed id is enough, but it must not collide with [`objects`].
     ///
     /// [`objects`]: Self::objects
     pub avatar_local_id: RegionLocalObjectId,
+}
+
+/// The animations one animated object (animesh) is playing.
+///
+/// The list is the object's **complete** state, not a delta, exactly as
+/// `ObjectAnimation` carries it: an animation that stops simply drops out of a
+/// later update.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ObjectAnimationFixture {
+    /// The animated object's full id — the animesh **root**, which is what an
+    /// `ObjectAnimation` names.
+    pub object: ObjectKey,
+    /// The animations it plays, in the order they are listed on the wire.
+    pub animations: Vec<AnimationKey>,
+}
+
+impl ObjectAnimationFixture {
+    /// One object playing one animation.
+    #[must_use]
+    pub fn playing(object: ObjectKey, animation: AnimationKey) -> Self {
+        Self {
+            object,
+            animations: vec![animation],
+        }
+    }
+
+    /// The wire record: each animation numbered from one in list order, the
+    /// way a simulator numbers a fresh set.
+    #[must_use]
+    pub fn wire(&self) -> Vec<ObjectPlayingAnimation> {
+        self.animations
+            .iter()
+            .enumerate()
+            .map(|(index, animation)| ObjectPlayingAnimation {
+                anim_id: *animation,
+                sequence_id: i32::try_from(index.saturating_add(1)).unwrap_or(i32::MAX),
+            })
+            .collect()
+    }
 }
 
 impl SceneFixtures {
@@ -85,6 +134,7 @@ impl SceneFixtures {
             parcels: Vec::new(),
             objects: Vec::new(),
             npcs: Vec::new(),
+            object_animations: Vec::new(),
             avatar_local_id: RegionLocalObjectId(1),
         }
     }
@@ -435,6 +485,28 @@ pub(crate) fn push_arrival_world(
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
     push_npcs(&world.npcs, sim, now);
+    push_object_animations(&world.object_animations, sim, now);
+}
+
+/// Pushes each animated object's `ObjectAnimation` — the animesh counterpart
+/// of an NPC's `AvatarAnimation`, and the message that turns a rigged prim
+/// carrying the animated-object flag into one that actually moves. It goes
+/// after the objects because it names an object by full id the client has to
+/// already know. Send failures are logged, never fatal.
+fn push_object_animations(
+    animations: &[ObjectAnimationFixture],
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    for animated in animations {
+        let playing = animated.wire();
+        if playing.is_empty() {
+            continue;
+        }
+        if let Err(error) = sim.send_object_animation(animated.object, &playing, now) {
+            tracing::warn!("sending an animated object's animations failed: {error}");
+        }
+    }
 }
 
 /// The colour the arriving agent's own avatar is baked. Green, so a fixture

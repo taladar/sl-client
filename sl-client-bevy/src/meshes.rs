@@ -560,6 +560,77 @@ mod tests {
         Ok(())
     }
 
+    /// The three tests above hand `to_bevy_rigged_mesh` weights built in
+    /// memory. This one hands it weights that made the **round trip through an
+    /// asset** — written by `sl_mesh::encode`, read back by
+    /// `sl_mesh::decode_lod` — because the two halves are what have to agree in
+    /// production, and the influence stream's edge cases are exactly where a
+    /// codec and a packer can silently disagree.
+    ///
+    /// The fixture's four vertices are one pathology each; see
+    /// `sl_test_assets::rigged::pathological_rig`.
+    #[test]
+    fn a_pathological_rig_survives_the_asset_round_trip() -> Result<(), TestError> {
+        use sl_test_assets::rigged::{
+            DANGLING_JOINT_VERTEX, FOUR_INFLUENCE_VERTEX, PATHOLOGICAL_JOINTS, UNNORMALISED_VERTEX,
+            UNWEIGHTED_VERTEX, pathological_rig_mesh_asset,
+        };
+
+        let asset = pathological_rig_mesh_asset()?;
+        let (header, header_size) = sl_mesh::parse_header(&asset).ok_or("no mesh header")?;
+        let block = header.lod(MeshLod::High).ok_or("no high lod")?;
+        let (start, end) = block.range(header_size);
+        let decoded = sl_mesh::decode_lod(
+            asset.get(start..end).ok_or("lod out of range")?,
+            MeshLod::High,
+        )?;
+        let submesh = decoded.submeshes.first().ok_or("no face")?;
+        let block = header.skin.ok_or("no skin block")?;
+        let (start, end) = block.range(header_size);
+        let skin = sl_mesh::decode_skin(asset.get(start..end).ok_or("skin out of range")?)?;
+        assert_eq!(skin.joint_names.len(), PATHOLOGICAL_JOINTS.len());
+
+        let mesh = to_bevy_rigged_mesh(submesh, &skin);
+        let Some(VertexAttributeValues::Uint16x4(indices)) =
+            mesh.attribute(Mesh::ATTRIBUTE_JOINT_INDEX)
+        else {
+            return Err("JOINT_INDEX is not a Uint16x4 attribute".into());
+        };
+        let Some(VertexAttributeValues::Float32x4(weights)) =
+            mesh.attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT)
+        else {
+            return Err("JOINT_WEIGHT is not a Float32x4 attribute".into());
+        };
+
+        // Written 0.3 / 0.3; renormalized here because Bevy's shader will not.
+        assert!(weights_close(
+            weights.get(UNNORMALISED_VERTEX),
+            [0.5, 0.5, 0.0, 0.0]
+        ));
+        // No influences at all: the reference's fallback, full weight on joint 0
+        // — not a zero matrix that would collapse the vertex onto the origin.
+        assert_eq!(indices.get(UNWEIGHTED_VERTEX), Some(&[0, 0, 0, 0]));
+        assert!(weights_close(
+            weights.get(UNWEIGHTED_VERTEX),
+            [1.0, 0.0, 0.0, 0.0]
+        ));
+        // Four influences: the case whose stream carries no `0xFF` terminator,
+        // so a decoder that looked for one would lose the vertex after it.
+        assert_eq!(indices.get(FOUR_INFLUENCE_VERTEX), Some(&[0, 1, 2, 3]));
+        assert!(weights_close(
+            weights.get(FOUR_INFLUENCE_VERTEX),
+            [0.25, 0.25, 0.25, 0.25]
+        ));
+        // An influence naming a joint the skin does not have is dropped, and
+        // nothing survives it, so this vertex falls back like the unweighted one.
+        assert_eq!(indices.get(DANGLING_JOINT_VERTEX), Some(&[0, 0, 0, 0]));
+        assert!(weights_close(
+            weights.get(DANGLING_JOINT_VERTEX),
+            [1.0, 0.0, 0.0, 0.0]
+        ));
+        Ok(())
+    }
+
     #[test]
     fn rigged_inverse_bindposes_fold_the_bind_shape() -> Result<(), TestError> {
         // A skin whose inverse-bind is identity and whose bind shape translates

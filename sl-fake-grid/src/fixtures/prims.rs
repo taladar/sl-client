@@ -16,7 +16,7 @@
 //! of the client's decoders, so a test asserts the fields it seeded.
 
 use sl_proto::{
-    FlexibleData, LightData, LightImage, Object, ObjectExtraParams, ParticleSystem,
+    ExtendedMesh, FlexibleData, LightData, LightImage, Object, ObjectExtraParams, ParticleSystem,
     PrimShapeParams, ReflectionProbe, RegionLocalObjectId, RenderMaterialRef, SculptData,
     TextureAnimation, TextureEntry, TextureFace, attachment_state_from_point, encode_extra_params,
     encode_particle_system, encode_texture_anim, encode_texture_entry,
@@ -34,6 +34,10 @@ pub const DEFAULT_FACE_COUNT: usize = 6;
 /// The sculpt-type code (`LL_SCULPT_TYPE_MESH`) that makes an `ExtraParams`
 /// sculpt block name a **mesh asset** rather than a sculpt texture.
 const SCULPT_TYPE_MESH: u8 = 5;
+
+/// `LLExtendedMeshParams::ANIMATED_MESH_ENABLED_FLAG` (`llprimitive.h`): the
+/// extended-mesh flag that makes a rigged linkset an **animated object**.
+const ANIMATED_MESH_ENABLED_FLAG: u32 = 0x1;
 
 /// The shape kind of a sculpted prim — the low bits of the sculpt-type byte
 /// (`LL_SCULPT_TYPE_*`), which say how the viewer stitches the sculpt map's
@@ -271,6 +275,25 @@ impl PrimFixture {
             sculpt_type: SCULPT_TYPE_MESH,
         });
         self.entry.faces.resize(faces.max(1), neutral_face());
+        self
+    }
+
+    /// Makes a mesh prim an **animated object** (animesh): the `ExtraParams`
+    /// extended-mesh block carries `ANIMATED_MESH_ENABLED_FLAG`, which is how a
+    /// simulator says "give this linkset a control avatar of its own and pose
+    /// its rigged submeshes from it".
+    ///
+    /// Only meaningful on a [`mesh`](Self::mesh) prim whose asset carries a
+    /// `skin` block — an animesh with nothing rigged to its skeleton has
+    /// nothing to move. The animations it plays travel separately, as the
+    /// `ObjectAnimation` the region pushes for its
+    /// [`SceneFixtures::object_animations`](crate::world::SceneFixtures::object_animations)
+    /// entry.
+    #[must_use]
+    pub const fn animated_mesh(mut self) -> Self {
+        self.extra.extended_mesh = Some(ExtendedMesh {
+            flags: ANIMATED_MESH_ENABLED_FLAG,
+        });
         self
     }
 

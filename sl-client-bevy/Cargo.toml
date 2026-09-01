@@ -73,6 +73,8 @@ serde_json = { workspace = true }
 # The loopback grid the `fake_grid_login_smoke` tier logs the real plugin
 # into; `sync` for its `broadcast` receivers, `rt-multi-thread` to host it.
 sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
+# The rigged-mesh fixtures the skinning tests round-trip through an asset.
+sl-test-assets = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 tracing-subscriber = { workspace = true }
 

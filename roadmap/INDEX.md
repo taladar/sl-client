@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 58 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 950 |
+| done | 951 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1538** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -948,9 +948,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Read and write an inventory object asset
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
-- [`test-assets-rigged-mesh-encoder`](ready/test-assets-rigged-mesh-encoder.md)
-  — A rigged mesh fixture whose deformation is analytically checkable (blocked
-  by `viewer-mesh-encoder` (done))
 - [`test-assets-settings-encoder`](ready/test-assets-settings-encoder.md) —
   Write an EEP settings asset, not only read one
 - [`test-assets-sound-encoder`](ready/test-assets-sound-encoder.md) — A
@@ -1347,7 +1344,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (950)
+## done (951)
 
 ### protocol
 
@@ -3073,6 +3070,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — HTTP ViewerAsset fetch through the caching AssetStore (sl-asset crate)
 - [`test-asset-upload`](done/test-asset-upload-upload-an-asset-via-caps-newfileagentinventory-uploader.md)
   — upload an asset via CAPS NewFileAgentInventory uploader
+- [`test-assets-rigged-mesh-encoder`](done/test-assets-rigged-mesh-encoder.md) —
+  A rigged mesh fixture whose deformation is analytically checkable (blocked by
+  `viewer-mesh-encoder` (done))
 - [`test-attach-detach`](done/test-attach-detach-rez-attachment-then-detach-into-inventory.md)
   — rez attachment, then detach into inventory
 - [`test-audit-conformance-runner-isolation`](done/test-audit-conformance-runner-isolation.md)
