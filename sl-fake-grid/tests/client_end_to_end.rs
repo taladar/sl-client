@@ -1636,4 +1636,44 @@ mod test {
         assert_eq!(mesh, sl_test_assets::mesh::unit_cube_mesh_asset()?);
         Ok(())
     }
+
+    /// The animation the catalogue's NPC plays is fetchable over
+    /// `ViewerAsset` and decodes as a keyframe motion — so an avatar the
+    /// viewer records as animating has a motion it can actually play, rather
+    /// than falling back to its own idle.
+    #[tokio::test]
+    async fn the_npc_animation_asset_is_fetchable_and_decodes() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::NPC_ANIMATION;
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(NPC_ANIMATION),
+                asset_type: sl_proto::AssetType::Animation,
+                byte_range: None,
+            })
+            .await?;
+        let bytes = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == NPC_ANIMATION => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            bytes,
+            sl_test_assets::anim::chest_twist_animation_asset(),
+            "the served animation is not the fixture's"
+        );
+        // The viewer's own decoder is the contract: a motion with a joint that
+        // has keyframes to interpolate between.
+        let motion = sl_anim::Motion::from_bytes(&bytes)?;
+        let joint = motion.joints.first().ok_or("the motion animates nothing")?;
+        assert!(joint.rotation_keys.len() >= 2);
+        assert!(motion.duration > 0.0);
+        Ok(())
+    }
 }

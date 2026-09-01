@@ -108,12 +108,13 @@ pub const NPC_ATTACHMENT_OBJECT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0102);
 /// the avatar from the prims beside it.
 pub const NPC_BAKE_COLOR: [u8; 4] = sl_test_assets::markers::BLUE;
 
-/// The animation the catalogue NPC plays: the standard built-in `stand`
-/// (`sl_anim::builtin_animation_by_name("stand")`). The fixture does not serve
-/// the animation *asset* — nothing in the fake grid does yet — so a viewer
-/// records the avatar as playing it and falls back to its own idle.
-pub const NPC_ANIMATION: uuid::Uuid =
-    uuid::Uuid::from_u128(0x2408_fe9e_df1d_1d7d_f4ff_1384_fa7b_350f);
+/// The animation the catalogue NPC plays. It is the catalogue's **own** id,
+/// not one of the built-in Linden animation UUIDs, so the fixture never
+/// pretends to be a Linden asset and the viewer has to fetch the motion over
+/// `ViewerAsset` like any other animation. The bytes behind it are
+/// [`sl_test_assets::anim::chest_twist_animation_asset`], registered in the
+/// catalogue's asset store like every other asset a catalogue prim names.
+pub const NPC_ANIMATION: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0103);
 
 /// The `x` the catalogue NPC stands on: one slot west of the prim row, so it
 /// has its own patch of screen.
@@ -683,8 +684,9 @@ const SCULPT_MAP_SIZE: u32 = 64;
 const SOLID_TEXTURE_SIZE: u32 = 128;
 
 /// The catalogue's binary assets: the checker every textured prim wears, the
-/// sculpt map, the mesh, the PBR material, the particle texture and the normal
-/// map — plus the four terrain detail solids the ground shades against.
+/// sculpt map, the mesh, the PBR material, the particle texture, the normal
+/// map and the NPC's animation — plus the four terrain detail solids the
+/// ground shades against.
 fn assets() -> InMemoryAssetSource {
     let mut assets = crate::scenario::default_assets();
     let checker = sl_test_assets::RgbaImage::checker(
@@ -720,6 +722,10 @@ fn assets() -> InMemoryAssetSource {
     let _previous = assets.insert(
         AssetKey::from(PBR_MATERIAL),
         sl_test_assets::gltf_material_asset([1.0, 1.0, 1.0, 1.0], Some(CHECKER_TEXTURE.uuid())),
+    );
+    let _previous = assets.insert(
+        AssetKey::from(NPC_ANIMATION),
+        sl_test_assets::anim::chest_twist_animation_asset(),
     );
     assets
 }
@@ -807,6 +813,7 @@ mod test {
             AssetKey::from(PARTICLE_TEXTURE.uuid()),
             AssetKey::from(NORMAL_MAP.uuid()),
             AssetKey::from(PBR_MATERIAL),
+            AssetKey::from(NPC_ANIMATION),
         ] {
             assert!(fixture.assets.contains(key), "no asset for {key}");
         }
@@ -839,6 +846,27 @@ mod test {
         for key in &bakes {
             assert!(scenario.assets.contains(*key), "no bake served for {key}");
         }
+    }
+
+    /// The animation the NPC plays is the catalogue's own asset: the id names
+    /// no built-in Linden animation, so a viewer has to fetch it, and what it
+    /// fetches decodes as a keyframe motion that moves a joint.
+    #[test]
+    fn the_npc_animation_is_a_fixture_asset() -> Result<(), Box<dyn core::error::Error>> {
+        assert!(
+            sl_anim::builtin_animation(NPC_ANIMATION).is_none(),
+            "the catalogue's animation id collides with a built-in"
+        );
+        let fixture = catalogue();
+        let bytes = sl_proto::AssetSource::get(&fixture.assets, AssetKey::from(NPC_ANIMATION))
+            .ok_or("the catalogue serves no animation")?;
+        let motion = sl_anim::Motion::from_bytes(bytes)?;
+        let joint = motion.joints.first().ok_or("the motion animates nothing")?;
+        assert!(
+            joint.rotation_keys.len() >= 2,
+            "one keyframe cannot move anything"
+        );
+        Ok(())
     }
 
     /// The catalogue's NPC is on the region's world, stands clear of the prim

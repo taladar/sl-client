@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 60 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 946 |
+| done | 947 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1529** |
+| **total** | **1530** |
 
 ## ideas (98)
 
@@ -946,8 +946,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-animation-assets`](ready/test-fake-grid-animation-assets.md)
-  — A synthetic animation asset the fake grid can actually serve
+- [`test-fake-grid-builtin-animation-assets`](ready/test-fake-grid-builtin-animation-assets.md)
+  — The built-in animations and UI sounds the own avatar plays 404
 - [`test-fake-grid-default-wearable-textures`](ready/test-fake-grid-default-wearable-textures.md)
   — Serve the default wearable textures so the own avatar is not untextured
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -1335,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (946)
+## done (947)
 
 ### protocol
 
@@ -3118,6 +3118,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   info / find by name
 - [`test-experience-permissions`](done/test-experience-permissions-request-set-experience-permission.md)
   — request / set experience permission
+- [`test-fake-grid-animation-assets`](done/test-fake-grid-animation-assets.md) —
+  A synthetic animation asset the fake grid can actually serve
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC

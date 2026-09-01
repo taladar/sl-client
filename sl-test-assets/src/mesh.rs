@@ -13,9 +13,7 @@ use std::io::Write as _;
 use sl_llsd::Llsd;
 use sl_proto::MeshLod;
 
-/// The `u16` full-scale value the quantized vertex streams are taken over
-/// (`sl-mesh`'s `dequantize` divides by exactly this).
-const U16_SCALE: f32 = 65_535.0;
+use crate::{push_u16, quantize_u16};
 
 /// The half-extent of the unit cube: its vertices span `[-0.5, 0.5]` on every
 /// axis, the normalized box a prim's scale stretches.
@@ -148,13 +146,13 @@ fn submesh(vertices: &[Vertex], indices: &[u16]) -> Llsd {
     let mut uvs = Vec::new();
     for vertex in vertices {
         for component in vertex.position {
-            push_u16(&mut positions, quantize(component, -HALF, HALF));
+            push_u16(&mut positions, quantize_u16(component, -HALF, HALF));
         }
         for component in vertex.normal {
-            push_u16(&mut normals, quantize(component, -1.0, 1.0));
+            push_u16(&mut normals, quantize_u16(component, -1.0, 1.0));
         }
         for component in vertex.uv {
-            push_u16(&mut uvs, quantize(component, 0.0, 1.0));
+            push_u16(&mut uvs, quantize_u16(component, 0.0, 1.0));
         }
     }
     let mut triangles = Vec::new();
@@ -203,37 +201,6 @@ fn reals(values: &[f32]) -> Llsd {
             .map(|value| Llsd::Real(f64::from(*value)))
             .collect(),
     )
-}
-
-/// Appends `value` little-endian, the byte order every quantized mesh stream
-/// uses.
-#[expect(
-    clippy::little_endian_bytes,
-    reason = "the mesh asset's quantized streams are wire-defined little-endian"
-)]
-fn push_u16(out: &mut Vec<u8>, value: u16) {
-    out.extend_from_slice(&value.to_le_bytes());
-}
-
-/// Quantizes `value` in `[min, max]` to the `u16` sample the decoder's
-/// `dequantize` (`min + sample / 65535 * (max - min)`) inverts.
-fn quantize(value: f32, min: f32, max: f32) -> u16 {
-    let span = max - min;
-    if span <= 0.0 {
-        return 0;
-    }
-    round_to_u16(((value - min) / span).clamp(0.0, 1.0) * U16_SCALE)
-}
-
-/// Rounds a value already clamped into `0..=65535` to its `u16`.
-#[expect(
-    clippy::as_conversions,
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    reason = "the value is clamped into 0..=65535 before the cast; no From impl exists"
-)]
-const fn round_to_u16(value: f32) -> u16 {
-    value.round().clamp(0.0, U16_SCALE) as u16
 }
 
 /// zlib-compresses `bytes` — the framing every mesh block is stored in.

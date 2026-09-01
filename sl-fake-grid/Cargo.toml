@@ -38,6 +38,7 @@ uuid = { workspace = true, features = ["v4"] }
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 reqwest = { workspace = true }
+sl-anim = { workspace = true }
 sl-client-tokio = { workspace = true }
 # `test-util` for the paused clock the injectable-clock tests run on.
 tokio = { workspace = true, features = ["test-util"] }

@@ -25,8 +25,9 @@ uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
-# The mesh and material assets the crate writes are read back through the
-# viewer's own decoders.
+# The animation, mesh and material assets the crate writes are read back through
+# the viewer's own decoders.
+sl-anim = { workspace = true }
 sl-material = { workspace = true }
 sl-mesh = { workspace = true }
 

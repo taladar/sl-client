@@ -13,9 +13,11 @@
 //!
 //! What the same fixtures need beside the pixels lives here too:
 //! [`sculpt_sphere`] (a sculpt map, which is geometry stored *as* a texture),
-//! [`mesh::unit_cube_mesh_asset`] (a whole mesh asset) and
+//! [`mesh::unit_cube_mesh_asset`] (a whole mesh asset),
+//! [`anim::chest_twist_animation_asset`] (a keyframe motion) and
 //! [`gltf_material_asset`] (a PBR material asset).
 
+pub mod anim;
 pub mod mesh;
 
 use bytes::Bytes;
@@ -189,6 +191,43 @@ pub fn sculpt_sphere(size: u32) -> RgbaImage {
 )]
 const fn round_to_u8(value: f32) -> u8 {
     value.round().clamp(0.0, 255.0) as u8
+}
+
+/// The `u16` full-scale value every quantized stream this crate writes is taken
+/// over: the mesh streams' `dequantize` and the animation keyframes' widening
+/// both divide by exactly this.
+const U16_SCALE: f32 = 65_535.0;
+
+/// Quantizes `value` in `[min, max]` to the `u16` sample the decoders'
+/// dequantisation (`min + sample / 65535 * (max - min)`) inverts. A degenerate
+/// range quantizes to zero rather than dividing by it.
+fn quantize_u16(value: f32, min: f32, max: f32) -> u16 {
+    let span = max - min;
+    if span <= 0.0 {
+        return 0;
+    }
+    round_to_u16(((value - min) / span).clamp(0.0, 1.0) * U16_SCALE)
+}
+
+/// Rounds a value already clamped into `0..=65535` to its `u16`.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is clamped into 0..=65535 before the cast; no From impl exists"
+)]
+const fn round_to_u16(value: f32) -> u16 {
+    value.round().clamp(0.0, U16_SCALE) as u16
+}
+
+/// Appends `value` little-endian, the byte order every quantized stream this
+/// crate writes uses.
+#[expect(
+    clippy::little_endian_bytes,
+    reason = "the mesh streams and the animation keyframes are wire-defined little-endian"
+)]
+fn push_u16(out: &mut Vec<u8>, value: u16) {
+    out.extend_from_slice(&value.to_le_bytes());
 }
 
 /// The `AT_MATERIAL` envelope fields a GLTF material asset is wrapped in
