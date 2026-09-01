@@ -16,7 +16,7 @@
 
 use std::time::Instant;
 
-use crate::fixtures::NpcFixture;
+use crate::fixtures::{NpcAppearance, NpcFixture};
 use crate::terrain::TerrainFixture;
 use sl_proto::{
     Object, ObjectExtraParams, ObjectMotion, ParcelCategory, ParcelInfo, ParcelRequestResult,
@@ -408,6 +408,7 @@ pub(crate) fn push_arrival_world(
     world: &SceneFixtures,
     terrain: &TerrainFixture,
     identity: &AvatarIdentity,
+    assets: &mut sl_proto::InMemoryAssetSource,
     sim: &mut SimSession,
     now: Instant,
 ) {
@@ -416,6 +417,7 @@ pub(crate) fn push_arrival_world(
     if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
+    push_own_appearance(identity, assets, sim, now);
     if let Err(error) = sim.send_parcel_overlay(&world.overlay_for(identity.agent_id), now) {
         tracing::warn!("sending the parcel overlay failed: {error}");
     }
@@ -433,6 +435,38 @@ pub(crate) fn push_arrival_world(
         tracing::warn!("rezzing the fixture objects failed: {error}");
     }
     push_npcs(&world.npcs, sim, now);
+}
+
+/// The colour the arriving agent's own avatar is baked. Green, so a fixture
+/// session tells its own body from the catalogue NPC's blue one at a glance —
+/// and from the region's red-and-green checker, which no avatar wears.
+pub const OWN_AVATAR_BAKE_COLOR: [u8; 4] = sl_test_assets::markers::GREEN;
+
+/// Pushes the arriving agent its **own** `AvatarAppearance`, registering the
+/// bakes it names.
+///
+/// A simulator sends an agent its own appearance like anyone else's, and a
+/// viewer that never receives one has no visual params and no texture entry
+/// for itself: it spawns the avatar, poses its skeleton, and draws no body at
+/// all — a name tag hanging in mid-air. The fake grid runs no bake service, so
+/// it bakes the arriving agent exactly the way it bakes an NPC: one solid per
+/// body region under ids derived from the agent's own id, whose bytes go into
+/// *this session's* asset store, because the agent id is only known now.
+fn push_own_appearance(
+    identity: &AvatarIdentity,
+    assets: &mut sl_proto::InMemoryAssetSource,
+    sim: &mut SimSession,
+    now: Instant,
+) {
+    let appearance = NpcAppearance::solid(identity.agent_id, OWN_AVATAR_BAKE_COLOR);
+    for (key, bytes) in appearance.bake_assets() {
+        let _previous = assets.insert(key, bytes);
+    }
+    if let Err(error) =
+        sim.send_avatar_appearance(&appearance.record(identity.agent_id, Vec::new()), now)
+    {
+        tracing::warn!("sending the arriving agent's own appearance failed: {error}");
+    }
 }
 
 /// Pushes the region's other avatars, in the order a simulator introduces

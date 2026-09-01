@@ -1590,6 +1590,70 @@ mod test {
         Ok(())
     }
 
+    /// The arriving agent is sent its **own** `AvatarAppearance`, and the
+    /// bakes it names are fetchable.
+    ///
+    /// Without one, a viewer has no visual params and no texture entry for
+    /// itself: it spawns the avatar, poses its skeleton, and draws no body at
+    /// all — which is exactly what a fake-grid login looked like, a name tag
+    /// hanging in mid-air over nothing.
+    #[tokio::test]
+    async fn the_arriving_agent_gets_its_own_appearance() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let me = running.agent.agent_id();
+        let appearance = running
+            .wait_for(|event| match event {
+                Event::AvatarAppearance(appearance) if appearance.avatar_id == me => {
+                    Some((**appearance).clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            appearance.visual_params.len(),
+            sl_fake_grid::fixtures::npcs::DEFAULT_VISUAL_PARAMS.len(),
+            "the own avatar's visual params were truncated on the wire"
+        );
+
+        // Every baked slot the entry names is served, so the body is painted
+        // rather than left with seven failed texture fetches.
+        let mut baked = 0_usize;
+        for slot in [
+            sl_proto::avatar_texture::HEAD_BAKED,
+            sl_proto::avatar_texture::UPPER_BAKED,
+            sl_proto::avatar_texture::LOWER_BAKED,
+        ] {
+            let texture = appearance
+                .texture_entry
+                .texture_id(slot)
+                .ok_or("a baked slot with no texture")?;
+            assert_ne!(
+                texture.uuid(),
+                sl_proto::avatar_texture::IMG_DEFAULT_AVATAR,
+                "slot {slot} is still the un-baked sentinel"
+            );
+            running
+                .commands
+                .send(Command::FetchTexture {
+                    texture_id: texture,
+                    discard_level: sl_proto::j2c::DiscardLevel::FULL,
+                })
+                .await?;
+            let bytes = running
+                .wait_for(|event| match event {
+                    Event::TextureReceived(fetched) if fetched.id == texture => {
+                        Some(fetched.data.clone())
+                    }
+                    _ => None,
+                })
+                .await?;
+            assert!(!bytes.is_empty(), "slot {slot}'s bake came back empty");
+            baked += 1;
+        }
+        assert_eq!(baked, 3, "one bake per body region");
+        Ok(())
+    }
+
     /// The catalogue's assets are actually served: the checker texture comes
     /// back over `GetTexture` and the mesh over `GetMesh2`, so a prim naming
     /// one is not pointing at a 404.

@@ -165,6 +165,7 @@ impl SharedSim {
                     &state.world,
                     &state.terrain,
                     &state.avatar,
+                    &mut state.assets,
                     &mut state.sim,
                     now,
                 );

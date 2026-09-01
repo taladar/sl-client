@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 60 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 948 |
+| done | 949 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1531** |
+| **total** | **1532** |
 
 ## ideas (98)
 
@@ -1335,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (948)
+## done (949)
 
 ### protocol
 
@@ -3127,6 +3127,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))
+- [`test-fake-grid-own-avatar-appearance`](done/test-fake-grid-own-avatar-appearance.md)
+  — The arriving agent never got its own AvatarAppearance
 - [`test-fake-grid-render-fixtures`](done/test-fake-grid-render-fixtures.md) —
   Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
   (blocked by `test-fake-grid-terrain-layerdata` (done),

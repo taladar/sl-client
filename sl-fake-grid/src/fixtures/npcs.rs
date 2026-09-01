@@ -174,6 +174,29 @@ impl NpcAppearance {
         entry
     }
 
+    /// The `AvatarAppearance` record a simulator pushes for the avatar
+    /// `avatar`, wearing `attachments`: this appearance's visual params and
+    /// baked texture entry.
+    ///
+    /// Both an NPC and the *arriving agent's own* avatar need one — a viewer
+    /// that receives no appearance for an avatar has no visual params and no
+    /// texture entry for it, and draws no body at all — so the record is built
+    /// here rather than on [`NpcFixture`], which only the NPCs have.
+    #[must_use]
+    pub fn record(&self, avatar: AgentKey, attachments: Vec<AvatarAttachment>) -> AvatarAppearance {
+        AvatarAppearance {
+            avatar_id: avatar,
+            is_trial: false,
+            texture_entry: self.texture_entry(),
+            visual_params: self.visual_params.clone(),
+            appearance_version: Some(1),
+            cof_version: Some(1),
+            appearance_flags: Some(0),
+            hover_height: None,
+            attachments,
+        }
+    }
+
     /// The bake assets the region has to serve for this appearance: one
     /// JPEG2000 solid per bake, keyed by the very id the texture entry names.
     /// A colour that fails to encode is skipped with a warning — the avatar
@@ -324,24 +347,16 @@ impl NpcFixture {
     /// visual params, its baked texture entry and the attachments it wears.
     #[must_use]
     pub fn appearance_record(&self) -> AvatarAppearance {
-        AvatarAppearance {
-            avatar_id: self.agent_id(),
-            is_trial: false,
-            texture_entry: self.appearance.texture_entry(),
-            visual_params: self.appearance.visual_params.clone(),
-            appearance_version: Some(1),
-            cof_version: Some(1),
-            appearance_flags: Some(0),
-            hover_height: None,
-            attachments: self
-                .attachments
+        self.appearance.record(
+            self.agent_id(),
+            self.attachments
                 .iter()
                 .map(|attachment| AvatarAttachment {
                     id: attachment.full_id,
                     attachment_point: attachment.attachment_point_id().unwrap_or(0),
                 })
                 .collect(),
-        }
+        )
     }
 
     /// The animations the NPC is playing, as the wire record: each numbered
