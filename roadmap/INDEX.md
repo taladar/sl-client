@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 305 |
-| blocked | 60 |
-| in-progress | 18 |
+| ready | 309 |
+| blocked | 61 |
+| in-progress | 19 |
 | bugs | 65 |
 | done | 949 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1532** |
+| **total** | **1538** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (305)
+## ready (309)
 
 ### protocol
 
@@ -608,8 +608,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media playback policies — URL filter, perms, first-click, rolloff
 - [`viewer-menu-bar-fill-implemented-entries`](ready/viewer-menu-bar-fill-implemented-entries.md)
   — Top menu bar — add entries for already-implemented features
-- [`viewer-mesh-encoder`](ready/viewer-mesh-encoder.md) — LLMesh encoder
-  (inverse of the sl-mesh decoder)
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
 - [`viewer-minimap-click-radar-select`](ready/viewer-minimap-click-radar-select.md)
@@ -939,6 +937,16 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-assets-gesture-codec`](ready/test-assets-gesture-codec.md) — Read and
+  write a gesture asset (LLMultiGesture)
+- [`test-assets-object-asset-codec`](ready/test-assets-object-asset-codec.md) —
+  Read and write an inventory object asset
+- [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
+  — Decide what the remaining asset classes are worth
+- [`test-assets-settings-encoder`](ready/test-assets-settings-encoder.md) —
+  Write an EEP settings asset, not only read one
+- [`test-assets-sound-encoder`](ready/test-assets-sound-encoder.md) — A
+  synthetic sound asset the fake grid can serve
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
@@ -959,7 +967,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (60)
+## blocked (61)
 
 ### viewer
 
@@ -1123,6 +1131,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-assets-rigged-mesh-encoder`](blocked/test-assets-rigged-mesh-encoder.md)
+  — A rigged mesh fixture whose deformation is analytically checkable (blocked
+  by `viewer-mesh-encoder`)
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done), `test-fake-grid-timeline`)
@@ -1134,7 +1145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (18)
+## in-progress (19)
 
 ### viewer
 
@@ -1150,6 +1161,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Start an ad-hoc conference from a multi-selection
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
+- [`viewer-mesh-encoder`](in-progress/viewer-mesh-encoder.md) — LLMesh encoder
+  (inverse of the sl-mesh decoder)
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)

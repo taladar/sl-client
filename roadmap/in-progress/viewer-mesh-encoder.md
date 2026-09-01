@@ -2,7 +2,7 @@
 id: viewer-mesh-encoder
 title: LLMesh encoder (inverse of the sl-mesh decoder)
 topic: viewer
-status: ready
+status: in-progress
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-mesh-model-upload
 ---
 
@@ -42,6 +42,20 @@ existing decode) keeps the on-wire format math in the pure crate, beneath the
 viewer-side floater and preview. The quantized-domain fields it emits feed the
 client-side cost estimate ([[viewer-mesh-cost-estimate]]) and the upload
 sequence ([[viewer-mesh-upload-sequence]]).
+
+Pulled forward (2026-09-01) by [[test-assets-rigged-mesh-encoder]]: the test
+tiers need to *write* a rigged mesh, and `sl-test-assets::mesh` had started
+hand-rolling the header and geometry blocks for its unit cube. Two encoders for
+one format is one too many, and the fixture one would have been the wrong place
+for the upload limits above. So the fixtures wait on this, and
+`sl-test-assets::mesh` is rewritten to call it rather than write LLSD itself.
+
+One detail confirmed against the reference while planning the fixtures: the
+`0xFF` terminator is written only for a list **shorter** than four. After the
+fourth influence `llvolume.cpp:2555-2612` sets its local `joint =
+END_INFLUENCES` without consuming a byte, so a four-influence vertex carries no
+terminator — and `sl_mesh::decode_weights` already matches that, which is what
+makes the round trip a real contract rather than a self-consistent one.
 
 Reference (Firestorm, read-only): `llmodel.cpp` (`writeModel` — the whole
 encoder).
