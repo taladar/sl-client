@@ -275,6 +275,140 @@ pub fn parse_llsd_notation(bytes: &[u8]) -> Result<Llsd, LlsdError> {
     parser.parse_value()
 }
 
+/// Serializes `value` as notation LLSD — the inverse of
+/// [`parse_llsd_notation`], mirroring Firestorm's `LLSDNotationFormatter`
+/// (`indra/llcommon/llsdserialize.cpp`) at its default options.
+///
+/// Bytes rather than a `String`: the reference escapes every byte outside
+/// printable ASCII, so the output is ASCII, but the *binary* kind is written
+/// as `b16"…"` uppercase hex (the reference's `OPTIONS_PRETTY_BINARY`, which
+/// is the default `LLSDSerialize::serialize` passes) and the caller usually
+/// wants bytes anyway.
+///
+/// Map keys are emitted in sorted order, matching
+/// [`to_llsd_xml`](Llsd::to_llsd_xml) and
+/// [`to_llsd_binary`](Llsd::to_llsd_binary), so two equal trees serialize
+/// identically.
+pub(crate) fn to_notation(value: &Llsd) -> Vec<u8> {
+    let mut out = Vec::new();
+    push_notation(value, &mut out);
+    out
+}
+
+/// Appends `value`'s notation encoding to `out`, recursing into arrays and
+/// maps. The value-by-value inverse of
+/// [`parse_value`](NotationParser::parse_value).
+fn push_notation(value: &Llsd, out: &mut Vec<u8>) {
+    match value {
+        Llsd::Undef => out.push(b'!'),
+        // The reference's default formatter has `boolalpha` off, so a boolean
+        // is the bare digit — `i1` would be an integer, `1` is `true`.
+        Llsd::Boolean(flag) => out.push(if *flag { b'1' } else { b'0' }),
+        Llsd::Integer(integer) => {
+            out.push(b'i');
+            out.extend_from_slice(integer.to_string().as_bytes());
+        }
+        Llsd::Real(real) => {
+            out.push(b'r');
+            // The reference streams a real at the ostream default of six
+            // significant digits, which loses precision; Rust's shortest
+            // round-tripping form is a deliberate improvement on it (the
+            // parser reads either).
+            out.extend_from_slice(real.to_string().as_bytes());
+        }
+        Llsd::Uuid(uuid) => {
+            out.push(b'u');
+            out.extend_from_slice(uuid.to_string().as_bytes());
+        }
+        Llsd::String(string) => push_notation_string(out, b'\'', string),
+        Llsd::Uri(uri) => {
+            out.push(b'l');
+            push_notation_string(out, b'"', uri);
+        }
+        // A date is kept verbatim (it is already the ISO-8601 text the
+        // reference streams out of `LLDate`).
+        Llsd::Date(date) => {
+            out.push(b'd');
+            push_notation_string(out, b'"', date);
+        }
+        Llsd::Binary(blob) => {
+            out.extend_from_slice(b"b16\"");
+            for byte in blob {
+                // Uppercase: the reference notes Python's `llbase.llsd`
+                // rejects lowercase `b16` digits, so it emits them uppercase.
+                out.push(hex_digit(byte.wrapping_shr(4), b'A'));
+                out.push(hex_digit(byte & 0x0f, b'A'));
+            }
+            out.push(b'"');
+        }
+        Llsd::Array(values) => {
+            out.push(b'[');
+            for (index, element) in values.iter().enumerate() {
+                if index > 0 {
+                    out.push(b',');
+                }
+                push_notation(element, out);
+            }
+            out.push(b']');
+        }
+        Llsd::Map(map) => {
+            out.push(b'{');
+            let mut entries: Vec<(&String, &Llsd)> = map.iter().collect();
+            entries.sort_by(|left, right| left.0.cmp(right.0));
+            for (index, (key, member)) in entries.into_iter().enumerate() {
+                if index > 0 {
+                    out.push(b',');
+                }
+                push_notation_string(out, b'\'', key);
+                out.push(b':');
+                push_notation(member, out);
+            }
+            out.push(b'}');
+        }
+    }
+}
+
+/// Appends `value` delimited by `quote`, escaping it the way the reference's
+/// `NOTATION_STRING_CHARACTERS` table does: the named escapes for `\a\b\t\n\v\f\r`,
+/// `\xHH` for every other byte below `0x20` and every byte from `0x7f` up (so a
+/// multi-byte UTF-8 sequence leaves as escaped bytes and returns as itself), and
+/// a backslash before a literal backslash or the delimiter.
+fn push_notation_string(out: &mut Vec<u8>, quote: u8, value: &str) {
+    out.push(quote);
+    for byte in value.bytes() {
+        match byte {
+            0x07 => out.extend_from_slice(b"\\a"),
+            0x08 => out.extend_from_slice(b"\\b"),
+            b'\t' => out.extend_from_slice(b"\\t"),
+            b'\n' => out.extend_from_slice(b"\\n"),
+            0x0b => out.extend_from_slice(b"\\v"),
+            0x0c => out.extend_from_slice(b"\\f"),
+            b'\r' => out.extend_from_slice(b"\\r"),
+            b'\\' => out.extend_from_slice(b"\\\\"),
+            other if other == quote => {
+                out.push(b'\\');
+                out.push(other);
+            }
+            other if !(0x20..0x7f).contains(&other) => {
+                out.extend_from_slice(b"\\x");
+                out.push(hex_digit(other.wrapping_shr(4), b'a'));
+                out.push(hex_digit(other & 0x0f, b'a'));
+            }
+            other => out.push(other),
+        }
+    }
+    out.push(quote);
+}
+
+/// The ASCII hexadecimal digit for a nibble `0..=15`, with `ten` as the letter
+/// the digits above nine start from (`b'a'` or `b'A'`).
+const fn hex_digit(nibble: u8, ten: u8) -> u8 {
+    match nibble {
+        0..=9 => b'0'.wrapping_add(nibble),
+        _ => ten.wrapping_add(nibble.wrapping_sub(10)),
+    }
+}
+
 /// A recursive-descent cursor over a notation-LLSD byte slice, producing an
 /// owned [`Llsd`] tree.
 struct NotationParser<'a> {
@@ -779,6 +913,98 @@ mod tests {
             parse_llsd_notation(b"b(3)\"abc\"")?,
             Llsd::Binary(b"abc".to_vec())
         );
+        Ok(())
+    }
+
+    /// The writer emits the reference's spelling for each kind: bare digits
+    /// for booleans, an `i`/`r`/`u` prefix on the numbers and the uuid,
+    /// single-quoted strings, `b16` uppercase hex for binary, and sorted map
+    /// keys.
+    #[test]
+    fn writes_the_reference_spelling() -> Result<(), TestError> {
+        let spelling = |value: &Llsd| String::from_utf8(value.to_llsd_notation());
+        assert_eq!(spelling(&Llsd::Undef)?, "!");
+        assert_eq!(spelling(&Llsd::Boolean(true))?, "1");
+        assert_eq!(spelling(&Llsd::Boolean(false))?, "0");
+        assert_eq!(spelling(&Llsd::Integer(-42))?, "i-42");
+        assert_eq!(spelling(&Llsd::Real(0.25))?, "r0.25");
+        assert_eq!(spelling(&Llsd::String("hi".to_owned()))?, "'hi'");
+        let uuid = "12345678-1234-1234-1234-1234567890ab";
+        assert_eq!(
+            spelling(&Llsd::Uuid(Uuid::parse_str(uuid)?))?,
+            format!("u{uuid}")
+        );
+        assert_eq!(spelling(&Llsd::Binary(vec![0x0a, 0xff]))?, "b16\"0AFF\"");
+        assert_eq!(
+            spelling(&Llsd::Array(vec![Llsd::Integer(1), Llsd::Integer(2)]))?,
+            "[i1,i2]"
+        );
+        let map = Llsd::Map(
+            [
+                ("z".to_owned(), Llsd::Integer(1)),
+                ("a".to_owned(), Llsd::Integer(2)),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(spelling(&map)?, "{'a':i2,'z':i1}");
+        Ok(())
+    }
+
+    /// A string is escaped the way the reference's table escapes it — named
+    /// escapes for the control characters it names, `\xHH` for the rest and for
+    /// every byte of a multi-byte UTF-8 sequence — and comes back as itself.
+    #[test]
+    fn writes_and_reads_back_escaped_strings() -> Result<(), TestError> {
+        let awkward = "it's a\\b\nc\td\u{1}e\u{00e9}";
+        let written = Llsd::String(awkward.to_owned()).to_llsd_notation();
+        assert_eq!(
+            String::from_utf8(written.clone())?,
+            "'it\\'s a\\\\b\\nc\\td\\x01e\\xc3\\xa9'"
+        );
+        assert_eq!(
+            parse_llsd_notation(&written)?,
+            Llsd::String(awkward.to_owned())
+        );
+        Ok(())
+    }
+
+    /// Every kind survives writing and reading back, nested — so a document
+    /// written here is one the parser (and the reference's) reads.
+    #[test]
+    fn every_kind_round_trips() -> Result<(), TestError> {
+        let tree = Llsd::Map(
+            [
+                ("undef".to_owned(), Llsd::Undef),
+                ("flag".to_owned(), Llsd::Boolean(true)),
+                ("count".to_owned(), Llsd::Integer(-7)),
+                ("real".to_owned(), Llsd::Real(1.0 / 3.0)),
+                (
+                    "id".to_owned(),
+                    Llsd::Uuid(Uuid::from_u128(0x00C0_FFEE_u128)),
+                ),
+                (
+                    "text".to_owned(),
+                    Llsd::String("a 'quoted' \\ one".to_owned()),
+                ),
+                (
+                    "uri".to_owned(),
+                    Llsd::Uri("http://example/x?a=1".to_owned()),
+                ),
+                (
+                    "when".to_owned(),
+                    Llsd::Date("2026-09-01T12:00:00Z".to_owned()),
+                ),
+                ("blob".to_owned(), Llsd::Binary(vec![0, 1, 254, 255])),
+                (
+                    "list".to_owned(),
+                    Llsd::Array(vec![Llsd::Real(-0.5), Llsd::Array(vec![Llsd::Undef])]),
+                ),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        assert_eq!(parse_llsd_notation(&tree.to_llsd_notation())?, tree);
         Ok(())
     }
 

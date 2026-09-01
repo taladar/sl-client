@@ -17,11 +17,14 @@
 //! [`rigged::cylinder_mesh_asset`] (a *skinned* one, plus the
 //! deliberately malformed rigs beside it),
 //! [`anim::chest_twist_animation_asset`] (a keyframe motion),
-//! [`gltf_material_asset`] (a PBR material asset) and
+//! [`gltf_material_asset`] (a PBR material asset),
 //! [`sound::marker_tone`] (an Ogg Vorbis sound, whose pitch is to the audio
-//! oracles what the marker colours are to the pixel ones).
+//! oracles what the marker colours are to the pixel ones) and
+//! [`environment::night_sky_asset`] (an EEP settings asset, whose brightness is
+//! to an environment oracle the same thing).
 
 pub mod anim;
+pub mod environment;
 pub mod mesh;
 pub mod rigged;
 pub mod sound;

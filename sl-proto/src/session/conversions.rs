@@ -861,28 +861,84 @@ pub fn water_settings_from_asset(name: &str, llsd: &Llsd) -> Option<WaterSetting
     Some(water_settings_from_llsd(name, llsd))
 }
 
+/// Decode a whole **day cycle** settings asset (`AT_SETTINGS` — an
+/// `LLSettingsDay` serialized as LLSD) into [`DayCycle`], tagging the cycle with
+/// `name`. Returns `None` when the payload is not a day-cycle settings map.
+///
+/// A day-cycle asset's LLSD is the same map the `ExtEnvironment` envelope
+/// carries under `day_cycle`, so this shares `day_cycle_from_llsd`; only the
+/// `type` tag distinguishes the asset from the envelope member.
+#[must_use]
+pub fn day_cycle_from_asset(name: &str, llsd: &Llsd) -> Option<DayCycle> {
+    if string_member(llsd, "type") != "daycycle" {
+        return None;
+    }
+    let mut cycle = day_cycle_from_llsd(Some(llsd));
+    // The caller's name wins, as it does for the single-frame kinds: it is the
+    // inventory item's name (or the asset id), which is what a viewer shows.
+    name.clone_into(&mut cycle.name);
+    Some(cycle)
+}
+
 /// Decode a downloaded EEP settings asset (`AT_SETTINGS`) into an
-/// [`EnvironmentAsset`] — a sky or a water frame — tagging it with `name`.
-/// Returns `None` when the bytes do not parse as LLSD, or are neither a sky nor a
-/// water settings map (a day-cycle asset, or a failure reply).
+/// [`EnvironmentAsset`] — a sky frame, a water frame, or a day cycle — tagging
+/// it with `name`. Returns `None` when the bytes do not parse as LLSD, or are
+/// none of the three settings kinds (a failure reply, say).
 ///
 /// This is the viewer's entry point for the `World ▸ Environment` **Modern**
 /// presets: fetching one of the reference viewer's `KNOWN_SKY_*` library skies by
 /// UUID and decoding it here renders the *exact* environment Firestorm loads, so a
-/// renderer comparison uses byte-identical input.
+/// renderer comparison uses byte-identical input. It is also how an environment
+/// *inventory* item is read, which is where the day-cycle kind arrives.
 #[must_use]
 pub fn environment_asset_from_bytes(name: &str, bytes: &[u8]) -> Option<EnvironmentAsset> {
     let llsd = settings_asset_llsd(bytes)?;
     if let Some(sky) = sky_settings_from_asset(name, &llsd) {
         return Some(EnvironmentAsset::Sky(Box::new(sky)));
     }
-    water_settings_from_asset(name, &llsd).map(EnvironmentAsset::Water)
+    if let Some(water) = water_settings_from_asset(name, &llsd) {
+        return Some(EnvironmentAsset::Water(water));
+    }
+    day_cycle_from_asset(name, &llsd).map(|cycle| EnvironmentAsset::DayCycle(Box::new(cycle)))
+}
+
+/// The header line the reference writes above a settings asset's body
+/// (`LLSDSerialize::serialize` with `LLSD_NOTATION`, which is what
+/// `LLSettingsVOBase::createInventoryItem` uploads).
+const SETTINGS_ASSET_HEADER: &[u8] = b"<? llsd/notation ?>\n";
+
+/// Encode an [`EnvironmentAsset`] as the `AT_SETTINGS` asset bytes a grid
+/// serves and the reference viewer uploads — the inverse of
+/// [`environment_asset_from_bytes`].
+///
+/// The body is notation LLSD behind the `<? llsd/notation ?>` header line,
+/// matching `LLSettingsVOBase::createInventoryItem` /
+/// `updateInventoryItem` (`indra/newview/llsettingsvo.cpp`), which serialize the
+/// settings map with `LLSDSerialize::LLSD_NOTATION`. Nothing in the workspace
+/// wrote one before, so an EEP fixture could only reach a region over the
+/// `ExtEnvironment` capability, never through an inventory item or an asset id.
+#[must_use]
+pub fn environment_asset_to_bytes(asset: &EnvironmentAsset) -> Vec<u8> {
+    let llsd = match asset {
+        EnvironmentAsset::Sky(sky) => sky_settings_to_llsd(sky),
+        EnvironmentAsset::Water(water) => water_settings_to_llsd(water),
+        EnvironmentAsset::DayCycle(cycle) => day_cycle_to_llsd(cycle),
+    };
+    let mut bytes = SETTINGS_ASSET_HEADER.to_vec();
+    bytes.extend_from_slice(&llsd.to_llsd_notation());
+    bytes
 }
 
 /// Parse a settings-asset payload into LLSD, handling the encodings one can arrive
 /// in — XML (self-describing), or binary / notation behind an optional
-/// `<? LLSD/… ?>` header line. Tries each in turn and returns the first that
-/// parses.
+/// `<? LLSD/… ?>` header line.
+///
+/// The header line, when there is one, *names* the encoding
+/// (`LLSDSerialize::deserialize` dispatches on it), so it is honoured rather
+/// than guessed: notation and binary are not mutually exclusive by sight — a
+/// notation map opens with `{`, which is also binary LLSD's map marker — so
+/// sniffing alone would hand a notation asset to the binary parser. Without a
+/// header each encoding is tried in turn.
 fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
     // XML carries its own `<?xml …?>` / `<llsd>` opening the parser expects.
     if let Ok(text) = std::str::from_utf8(bytes) {
@@ -893,26 +949,39 @@ fn settings_asset_llsd(bytes: &[u8]) -> Option<Llsd> {
             return Some(llsd);
         }
     }
-    // Otherwise strip an optional `<? LLSD/Notation ?>` / `<? LLSD/Binary ?>`
-    // header line and try the binary then notation encodings.
-    let payload = strip_llsd_header_line(bytes);
+    let (header, payload) = split_llsd_header_line(bytes);
+    // A `<? … ?>` line naming an encoding settles it. The reference's markers
+    // are `LLSD/Binary`, `LLSD/XML` and `llsd/notation`, matched case-insensitively
+    // because grids have shipped both spellings.
+    let header = header.map(|line| String::from_utf8_lossy(line).to_lowercase());
+    match header.as_deref() {
+        Some(line) if line.contains("notation") => return parse_llsd_notation(payload).ok(),
+        Some(line) if line.contains("binary") => return parse_llsd_binary(payload).ok(),
+        Some(line) if line.contains("xml") => {
+            return std::str::from_utf8(payload)
+                .ok()
+                .and_then(|text| parse_llsd_xml(text).ok());
+        }
+        _other => {}
+    }
     if let Ok(llsd) = parse_llsd_binary(payload) {
         return Some(llsd);
     }
     parse_llsd_notation(payload).ok()
 }
 
-/// Return `bytes` past a leading `<? … ?>` LLSD header line (up to and including
-/// its newline), or unchanged when there is none. An `<?xml` prolog is left in
-/// place — it is XML the caller parses whole, not an LLSD header to strip.
-fn strip_llsd_header_line(bytes: &[u8]) -> &[u8] {
+/// Split `bytes` at a leading `<? … ?>` LLSD header line into that line and the
+/// payload after it, or `(None, bytes)` when there is none. An `<?xml` prolog is
+/// left in place — it is XML the caller parses whole, not an LLSD header.
+fn split_llsd_header_line(bytes: &[u8]) -> (Option<&[u8]>, &[u8]) {
     if bytes.starts_with(b"<?")
         && !bytes.starts_with(b"<?xml")
         && let Some(newline) = bytes.iter().position(|&byte| byte == b'\n')
+        && let Some(payload) = bytes.get(newline.saturating_add(1)..)
     {
-        return bytes.get(newline.saturating_add(1)..).unwrap_or(bytes);
+        return (bytes.get(..newline), payload);
     }
-    bytes
+    (None, bytes)
 }
 
 /// Parses a day-cycle `OSDMap` into a [`DayCycle`]: its tracks (track 0 water, the

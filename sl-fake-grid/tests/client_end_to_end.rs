@@ -1786,4 +1786,57 @@ mod test {
         );
         Ok(())
     }
+
+    /// An EEP **settings** asset a region was handed is fetchable under its own
+    /// id, and what comes back decodes into the day cycle the fixture wrote.
+    ///
+    /// This is the half of EEP the `ExtEnvironment` capability cannot reach:
+    /// that path carries a *typed* `EnvironmentSettings` and never produces
+    /// asset bytes, so until `sl-test-assets::environment` no fixture could put
+    /// an environment in an inventory, offer one, or serve one by id.
+    #[tokio::test]
+    async fn a_settings_asset_is_fetchable_under_its_own_id() -> Result<(), TestError> {
+        let settings_id = uuid::Uuid::from_u128(0x5E_0000_0001);
+        let asset = sl_test_assets::environment::day_cycle_asset();
+
+        let mut fixture = sl_fake_grid::fixtures::RegionFixture::new();
+        let _previous = fixture
+            .assets
+            .insert(sl_proto::AssetKey::from(settings_id), asset.clone());
+        let region = fixture.into_region(RegionConfig::default());
+
+        let mut running = start_in(vec![region]).await?;
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(settings_id),
+                asset_type: sl_proto::AssetType::Settings,
+                byte_range: None,
+            })
+            .await?;
+        let bytes = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == settings_id => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(
+            bytes, asset,
+            "the served settings asset is not the fixture's"
+        );
+        let decoded = sl_proto::environment_asset_from_bytes(
+            sl_test_assets::environment::DAY_CYCLE_NAME,
+            &bytes,
+        )
+        .ok_or("the served bytes are not a settings asset")?;
+        assert_eq!(
+            decoded,
+            sl_proto::EnvironmentAsset::DayCycle(
+                Box::new(sl_test_assets::environment::day_cycle())
+            )
+        );
+        Ok(())
+    }
 }

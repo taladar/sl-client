@@ -5,7 +5,7 @@ topic: viewer
 status: ready
 origin: Vintage-parity coverage audit (2026-07-22)
 blocked_by: [viewer-ui-widget-scaffold]
-refs: [viewer-environment-personal-lighting, viewer-environment-day-cycle-editor, viewer-environment-my-environments]
+refs: [viewer-environment-personal-lighting, viewer-environment-day-cycle-editor, viewer-environment-my-environments, test-assets-settings-encoder]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
@@ -22,6 +22,11 @@ ingest, now editable with live preview through the local-override layer of
 Save path: settings assets serialize as LLSD and upload via the standard
 asset/inventory create-update flow (`sl-llsd` + `upload.rs`); load path:
 apply from inventory. The library ships Linden defaults to start from.
+
+The serialisation half is already done: `environment_asset_to_bytes`
+([[test-assets-settings-encoder]]) writes a sky, water or day-cycle asset
+in the notation LLSD the reference uploads, so this task's save path is the
+*upload* around it, not a second encoder.
 
 The day-cycle editor and the environments library build on this
 ([[viewer-environment-day-cycle-editor]],

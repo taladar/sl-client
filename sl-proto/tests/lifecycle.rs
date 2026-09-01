@@ -11651,6 +11651,92 @@ mod test {
         Ok(())
     }
 
+    /// Every settings-asset kind survives being written as `AT_SETTINGS` bytes
+    /// and read back — the inventory half of EEP, which until now could only be
+    /// read. The bytes carry the reference's `<? llsd/notation ?>` header, so
+    /// what is asserted is the encoding a real grid serves.
+    #[test]
+    fn every_settings_asset_kind_round_trips_through_its_bytes() -> Result<(), TestError> {
+        use sl_proto::{
+            EnvironmentAsset, environment_asset_from_bytes, environment_asset_to_bytes,
+        };
+
+        let round_trip = |asset: &EnvironmentAsset, name: &str| {
+            let bytes = environment_asset_to_bytes(asset);
+            assert!(
+                bytes.starts_with(b"<? llsd/notation ?>\n"),
+                "a settings asset is notation LLSD behind the reference's header"
+            );
+            environment_asset_from_bytes(name, &bytes)
+        };
+
+        let sky = EnvironmentAsset::Sky(Box::new(sky_fixture("Noon")));
+        assert_eq!(round_trip(&sky, "Noon").as_ref(), Some(&sky));
+
+        let water = EnvironmentAsset::Water(water_fixture("Glass"));
+        assert_eq!(round_trip(&water, "Glass").as_ref(), Some(&water));
+
+        let cycle = EnvironmentAsset::DayCycle(Box::new(DayCycle {
+            name: "Test Cycle".to_owned(),
+            water_track: vec![DayCycleFrame {
+                keyframe: 0.0,
+                name: "Glass".to_owned(),
+            }],
+            sky_tracks: vec![vec![
+                DayCycleFrame {
+                    keyframe: 0.0,
+                    name: "Midnight".to_owned(),
+                },
+                DayCycleFrame {
+                    keyframe: 0.5,
+                    name: "Noon".to_owned(),
+                },
+            ]],
+            sky_frames: [
+                ("Midnight".to_owned(), sky_fixture("Midnight")),
+                ("Noon".to_owned(), sky_fixture("Noon")),
+            ]
+            .into_iter()
+            .collect(),
+            water_frames: std::iter::once(("Glass".to_owned(), water_fixture("Glass"))).collect(),
+        }));
+        assert_eq!(round_trip(&cycle, "Test Cycle").as_ref(), Some(&cycle));
+        Ok(())
+    }
+
+    /// The three settings encodings a grid can serve all decode to the same
+    /// value: the notation the writer emits, the same document as LLSD XML, and
+    /// as binary LLSD behind its own header. A notation body opens with `{`,
+    /// which is also binary LLSD's map marker, so this pins that the header
+    /// line — not a guess at the first byte — picks the parser.
+    #[test]
+    fn a_settings_asset_decodes_from_any_of_its_encodings() -> Result<(), TestError> {
+        use sl_proto::{
+            EnvironmentAsset, environment_asset_from_bytes, environment_asset_to_bytes,
+        };
+
+        let sky = EnvironmentAsset::Sky(Box::new(sky_fixture("Noon")));
+        let notation = environment_asset_to_bytes(&sky);
+        let document = sl_wire::parse_llsd_notation(
+            notation
+                .get(b"<? llsd/notation ?>\n".len()..)
+                .ok_or("body")?,
+        )?;
+
+        let mut binary = b"<? LLSD/Binary ?>\n".to_vec();
+        binary.extend_from_slice(&document.to_llsd_binary());
+        let mut xml = b"<? LLSD/XML ?>\n".to_vec();
+        xml.extend_from_slice(document.to_llsd_xml().as_bytes());
+
+        for bytes in [notation, binary, xml, document.to_llsd_xml().into_bytes()] {
+            assert_eq!(
+                environment_asset_from_bytes("Noon", &bytes).as_ref(),
+                Some(&sky)
+            );
+        }
+        Ok(())
+    }
+
     #[test]
     fn uuid_name_reply_surfaces_avatar_names() -> Result<(), TestError> {
         let now = Instant::now();

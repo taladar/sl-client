@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 310 |
 | blocked | 59 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 952 |
+| done | 953 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1540** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (310)
 
 ### protocol
 
@@ -948,8 +948,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Read and write an inventory object asset
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
-- [`test-assets-settings-encoder`](ready/test-assets-settings-encoder.md) —
-  Write an EEP settings asset, not only read one
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
@@ -1347,7 +1345,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (952)
+## done (953)
 
 ### protocol
 
@@ -3076,6 +3074,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-assets-rigged-mesh-encoder`](done/test-assets-rigged-mesh-encoder.md) —
   A rigged mesh fixture whose deformation is analytically checkable (blocked by
   `viewer-mesh-encoder` (done))
+- [`test-assets-settings-encoder`](done/test-assets-settings-encoder.md) — Write
+  an EEP settings asset, not only read one
 - [`test-assets-sound-encoder`](done/test-assets-sound-encoder.md) — A synthetic
   sound asset the fake grid can serve
 - [`test-attach-detach`](done/test-attach-detach-rez-attachment-then-detach-into-inventory.md)

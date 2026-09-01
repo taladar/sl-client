@@ -435,6 +435,21 @@ impl Llsd {
         crate::binary::to_binary(self)
     }
 
+    /// Serializes this value as notation LLSD — the inverse of
+    /// [`parse_llsd_notation`](crate::parse_llsd_notation), and the encoding
+    /// the reference viewer writes an EEP settings asset and a GLTF
+    /// material-override document in.
+    ///
+    /// Bytes rather than a `String` because the notation *binary* kind carries
+    /// bytes; everything this emits is ASCII (non-ASCII bytes are escaped
+    /// `\xHH`, as the reference escapes them). Map keys are emitted in sorted
+    /// order, matching [`to_llsd_xml`](Self::to_llsd_xml) and
+    /// [`to_llsd_binary`](Self::to_llsd_binary).
+    #[must_use]
+    pub fn to_llsd_notation(&self) -> Vec<u8> {
+        crate::notation::to_notation(self)
+    }
+
     /// Appends this value's LLSD-XML element(s) to `out` without the `<llsd>`
     /// document wrapper, recursing into arrays and maps. The element-by-element
     /// inverse of [`node_to_llsd`].

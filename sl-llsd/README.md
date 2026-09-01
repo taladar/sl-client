@@ -12,7 +12,10 @@ types:
   a specific LLSD kind, returning [`LlsdError`] on a missing or wrong-kind
   field,
 - the LLSD-XML codec (`to_llsd_xml` / `parse_llsd_xml`) plus the `push_escaped`
-  XML-escaping helper, and
+  XML-escaping helper,
+- the binary and notation codecs (`to_llsd_binary` / `parse_llsd_binary`,
+  `to_llsd_notation` / `parse_llsd_notation`) — notation is what the reference
+  viewer writes an EEP settings asset and a GLTF material override in, and
 - a minimal notation-LLSD cursor ([`Scan`]) for walking notation byte streams.
 
 It sits above `sl-types` and below `sl-wire` in the dependency graph: `sl-wire`

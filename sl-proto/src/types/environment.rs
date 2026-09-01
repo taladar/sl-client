@@ -204,12 +204,14 @@ pub struct SkySettings {
     pub rainbow_texture: Option<TextureKey>,
 }
 
-/// A decoded EEP settings asset (`AT_SETTINGS`) — either a sky or a water frame.
+/// A decoded EEP settings asset (`AT_SETTINGS`) — a sky frame, a water frame, or
+/// a whole day cycle.
 ///
-/// A downloaded settings asset (e.g. the reference viewer's `KNOWN_SKY_*` library
-/// skies) tags its kind, so decoding one yields a sky *or* a water frame; the
-/// day-cycle kind is not modelled here (the World ▸ Environment presets are single
-/// fixed frames).
+/// A settings asset tags its own kind, so decoding one yields whichever of the
+/// three it is. The single-frame kinds are what the World ▸ Environment presets
+/// (the reference viewer's `KNOWN_SKY_*` library skies) are; the day-cycle kind
+/// is what an *inventory* environment item usually holds, and what the
+/// environment editor saves.
 ///
 /// (Not `Eq`: the settings hold `f32` fields.)
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -220,6 +222,10 @@ pub enum EnvironmentAsset {
     Sky(Box<SkySettings>),
     /// A water settings asset (`type` == `"water"`).
     Water(WaterSettings),
+    /// A day-cycle settings asset (`type` == `"daycycle"`): the named sky and
+    /// water frames and the tracks that sequence them. Boxed for the same
+    /// reason as [`Sky`](Self::Sky) — a cycle carries whole frames.
+    DayCycle(Box<DayCycle>),
 }
 
 /// A single water frame (`LLSettingsWater`): the surface and underwater state at

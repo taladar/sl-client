@@ -88,6 +88,28 @@ pub const PARTICLE_TEXTURE: TextureKey = texture_key(0xCA7_0007);
 /// cleanest way to see which of the two paths broke.
 pub const RIGGED_MESH_ASSET: MeshKey = MeshKey(Key(uuid::Uuid::from_u128(0xCA7_0008)));
 
+/// The bright EEP sky settings asset (`AT_SETTINGS`) the catalogue serves —
+/// [`sl_test_assets::environment::noon_sky_asset`].
+///
+/// No prim in the row names it, because an environment is not a prim: these
+/// four ids exist so a viewer pointed at the catalogue has a real settings
+/// asset of each kind to fetch, which is the half of EEP the typed
+/// `ExtEnvironment` capability cannot reach.
+pub const NOON_SKY_ASSET: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0009);
+
+/// The dark EEP sky settings asset — [`sl_test_assets::environment::night_sky_asset`].
+/// Paired with [`NOON_SKY_ASSET`]: the two differ by a luminance, so "the
+/// environment changed" is measurable rather than a matter of opinion.
+pub const NIGHT_SKY_ASSET: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_000A);
+
+/// The EEP water settings asset — [`sl_test_assets::environment::water_asset`].
+pub const WATER_SETTINGS_ASSET: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_000B);
+
+/// The EEP day-cycle settings asset — [`sl_test_assets::environment::day_cycle_asset`],
+/// which runs from [`NIGHT_SKY_ASSET`]'s frame to [`NOON_SKY_ASSET`]'s. This is
+/// the kind an environment *inventory* item holds.
+pub const DAY_CYCLE_ASSET: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_000C);
+
 /// The catalogue NPC's agent id.
 pub const NPC_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0100);
 
@@ -734,7 +756,8 @@ const SOLID_TEXTURE_SIZE: u32 = 128;
 /// The catalogue's binary assets: the checker every textured prim wears, the
 /// sculpt map, the mesh, the PBR material, the particle texture, the normal
 /// map and the NPC's animation — plus the four terrain detail solids the
-/// ground shades against.
+/// ground shades against and the four EEP settings assets nothing in the row
+/// names ([`NOON_SKY_ASSET`] and friends).
 fn assets() -> InMemoryAssetSource {
     let mut assets = crate::scenario::default_assets();
     let checker = sl_test_assets::RgbaImage::checker(
@@ -781,6 +804,26 @@ fn assets() -> InMemoryAssetSource {
         AssetKey::from(NPC_ANIMATION),
         sl_test_assets::anim::chest_twist_animation_asset(),
     );
+    for (id, bytes) in [
+        (
+            NOON_SKY_ASSET,
+            sl_test_assets::environment::noon_sky_asset(),
+        ),
+        (
+            NIGHT_SKY_ASSET,
+            sl_test_assets::environment::night_sky_asset(),
+        ),
+        (
+            WATER_SETTINGS_ASSET,
+            sl_test_assets::environment::water_asset(),
+        ),
+        (
+            DAY_CYCLE_ASSET,
+            sl_test_assets::environment::day_cycle_asset(),
+        ),
+    ] {
+        let _previous = assets.insert(AssetKey::from(id), bytes);
+    }
     assets
 }
 
@@ -923,6 +966,41 @@ mod test {
             joint.rotation_keys.len() >= 2,
             "one keyframe cannot move anything"
         );
+        Ok(())
+    }
+
+    /// The catalogue serves one EEP settings asset of every kind, each under
+    /// its own id, and each decodes through the viewer's own settings-asset
+    /// decoder into the kind its name promises.
+    #[test]
+    fn the_environment_assets_are_served_and_decode() -> Result<(), TestError> {
+        let fixture = catalogue();
+        let decode = |id: uuid::Uuid| {
+            sl_proto::AssetSource::get(&fixture.assets, AssetKey::from(id))
+                .and_then(|bytes| sl_proto::environment_asset_from_bytes(&id.to_string(), bytes))
+                .ok_or("no settings asset served")
+        };
+        assert!(matches!(
+            decode(NOON_SKY_ASSET)?,
+            sl_proto::EnvironmentAsset::Sky(_)
+        ));
+        assert!(matches!(
+            decode(WATER_SETTINGS_ASSET)?,
+            sl_proto::EnvironmentAsset::Water(_)
+        ));
+        let sl_proto::EnvironmentAsset::DayCycle(cycle) = decode(DAY_CYCLE_ASSET)? else {
+            return Err("the day-cycle asset is not a day cycle".into());
+        };
+        // The cycle carries both skies, so a viewer moving through it sees the
+        // dark end and the bright one.
+        assert_eq!(cycle.sky_frames.len(), 2);
+
+        // The two skies are the pair a luminance oracle compares.
+        let brightness = |id: uuid::Uuid| match decode(id) {
+            Ok(sl_proto::EnvironmentAsset::Sky(sky)) => Ok(sky.sunlight_color.red()),
+            _other => Err("not a sky asset"),
+        };
+        assert!(brightness(NOON_SKY_ASSET)? > brightness(NIGHT_SKY_ASSET)?);
         Ok(())
     }
 
