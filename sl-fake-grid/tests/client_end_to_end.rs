@@ -1740,4 +1740,50 @@ mod test {
         assert!(motion.duration > 0.0);
         Ok(())
     }
+
+    /// A **sound** asset a region was handed is fetchable under whatever id the
+    /// fixture filed it under, and arrives byte-identical.
+    ///
+    /// `AssetType::Sound` had no producer at all until `sl-test-assets::sound`,
+    /// so no fixture could put one on a grid; this is the proof that the class
+    /// travels the same `ViewerAsset` path every other asset does. That the
+    /// bytes are a *playable* Ogg Vorbis tone is pinned where they are written
+    /// (`sl-test-assets` decodes them through `symphonium`, the decoder
+    /// `sl-audio` plays clips with), so this test does not repeat it.
+    #[tokio::test]
+    async fn a_sound_asset_is_fetchable_under_its_own_id() -> Result<(), TestError> {
+        let sound_id = uuid::Uuid::from_u128(0x50_0000_0001);
+        let sound = sl_test_assets::sound::marker_tone(sl_test_assets::sound::tones::MID)?;
+
+        let mut fixture = sl_fake_grid::fixtures::RegionFixture::new();
+        let _previous = fixture
+            .assets
+            .insert(sl_proto::AssetKey::from(sound_id), sound.clone());
+        let region = fixture.into_region(RegionConfig::default());
+
+        let mut running = start_in(vec![region]).await?;
+        running
+            .commands
+            .send(Command::FetchAsset {
+                asset_id: sl_client_tokio::AssetKey::from(sound_id),
+                asset_type: sl_proto::AssetType::Sound,
+                byte_range: None,
+            })
+            .await?;
+        let bytes = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == sound_id => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(bytes, sound, "the served sound is not the fixture's");
+        assert_eq!(
+            bytes.get(0..4),
+            Some(b"OggS".as_slice()),
+            "the served sound is not an Ogg stream"
+        );
+        Ok(())
+    }
 }

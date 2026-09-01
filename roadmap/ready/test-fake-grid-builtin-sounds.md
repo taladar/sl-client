@@ -36,10 +36,16 @@ tree. So the bytes have to come from somewhere else:
   probably wanted regardless of the above.
 
 Whichever way, `sl-audio` needs a decodable container: the reference's
-built-in sounds are Ogg Vorbis, so a synthetic one has to be too — a
-short tone encoded once in `sl-test-assets`, beside the animation
-encoder, rather than an empty blob that would fail to decode instead of
-failing to fetch.
+built-in sounds are Ogg Vorbis, so a synthetic one has to be too — an
+empty blob would fail to *decode* instead of failing to fetch, which is
+no improvement.
+
+That half is now available: [[test-assets-sound-encoder]] added
+`sl-test-assets::sound::marker_tone`, a real Ogg Vorbis tone the fake
+grid can serve under any id. So what is left here is the *decision*
+above — six library ids answered with a tone each, or a `sound_cache`
+that stops retrying a built-in nothing serves — plus a pitch per id if
+the first is chosen, so a played built-in is identifiable by ear.
 
 Acceptance: an arrival against the stock scenario logs no failed sound
 fetch, and the UI sounds either play or are known-silent by design.

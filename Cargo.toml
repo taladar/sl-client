@@ -35,6 +35,7 @@ members = [
   "sl-rlv",
   "sl-sculpt",
   "sl-settings",
+  "sl-sound",
   "sl-survey",
   "sl-terrain",
   "sl-test-assets",

@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 59 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 951 |
+| done | 952 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1539** |
+| **total** | **1540** |
 
 ## ideas (98)
 
@@ -950,8 +950,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Decide what the remaining asset classes are worth
 - [`test-assets-settings-encoder`](ready/test-assets-settings-encoder.md) —
   Write an EEP settings asset, not only read one
-- [`test-assets-sound-encoder`](ready/test-assets-sound-encoder.md) — A
-  synthetic sound asset the fake grid can serve
 - [`test-audit-conformance-boilerplate`](ready/test-audit-conformance-boilerplate.md)
   — Factor the repeated session/id acquisition out of the conformance cases
 - [`test-audit-fake-grid-conformance-grid`](ready/test-audit-fake-grid-conformance-grid.md)
@@ -963,6 +961,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-builtin-textures`](ready/test-fake-grid-builtin-textures.md)
   — Serve the built-in sky, water and prim textures the viewer asks for
+- [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
+  fake grid can serve a sound but cannot play one
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1347,7 +1347,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (951)
+## done (952)
 
 ### protocol
 
@@ -3076,6 +3076,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-assets-rigged-mesh-encoder`](done/test-assets-rigged-mesh-encoder.md) —
   A rigged mesh fixture whose deformation is analytically checkable (blocked by
   `viewer-mesh-encoder` (done))
+- [`test-assets-sound-encoder`](done/test-assets-sound-encoder.md) — A synthetic
+  sound asset the fake grid can serve
 - [`test-attach-detach`](done/test-attach-detach-rez-attachment-then-detach-into-inventory.md)
   — rez attachment, then detach into inventory
 - [`test-audit-conformance-runner-isolation`](done/test-audit-conformance-runner-isolation.md)

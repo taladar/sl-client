@@ -16,12 +16,15 @@
 //! [`mesh::unit_cube_mesh_asset`] (a whole mesh asset),
 //! [`rigged::cylinder_mesh_asset`] (a *skinned* one, plus the
 //! deliberately malformed rigs beside it),
-//! [`anim::chest_twist_animation_asset`] (a keyframe motion) and
-//! [`gltf_material_asset`] (a PBR material asset).
+//! [`anim::chest_twist_animation_asset`] (a keyframe motion),
+//! [`gltf_material_asset`] (a PBR material asset) and
+//! [`sound::marker_tone`] (an Ogg Vorbis sound, whose pitch is to the audio
+//! oracles what the marker colours are to the pixel ones).
 
 pub mod anim;
 pub mod mesh;
 pub mod rigged;
+pub mod sound;
 
 use bytes::Bytes;
 use sl_proto::DEFAULT_TERRAIN_DETAIL_TEXTURES;

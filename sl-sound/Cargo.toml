@@ -1,0 +1,30 @@
+[package]
+name = "sl-sound"
+version = { workspace = true }
+authors = { workspace = true }
+edition = { workspace = true }
+rust-version = { workspace = true }
+description = "Ogg Vorbis encoding of Second Life / OpenSim sound assets, at the settings the reference viewer uploads with"
+readme = { workspace = true }
+license = { workspace = true }
+
+repository = { workspace = true }
+keywords = ["audio", "encode", "opensim", "secondlife", "vorbis"]
+categories = ["encoding", "game-development", "multimedia::audio"]
+publish = { workspace = true }
+
+exclude = { workspace = true }
+
+[dependencies]
+thiserror = { workspace = true }
+# Safe bindings around the aoTuV/Lancer-patched libvorbis and libogg C
+# libraries, built from source (no system library). `default-features = false`
+# drops `stream-serial-rng`: this crate picks a *fixed* Ogg stream serial so the
+# same samples always encode to the same bytes, which a fixture asset needs.
+vorbis_rs = { version = "0.5.6", default-features = false }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }
+
+[lints]
+workspace = true

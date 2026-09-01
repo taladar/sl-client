@@ -20,16 +20,25 @@ bytes = { workspace = true }
 sl-llsd = { workspace = true }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
+sl-sound = { path = "../sl-sound", version = "0.1.0" }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = ["encode"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
 # The animation and material assets the crate writes are read back through the
-# viewer's own decoders (the mesh encoder is `sl-mesh`'s own, so that crate is
-# a plain dependency).
+# viewer's own decoders (the mesh and sound encoders are `sl-mesh`'s and
+# `sl-sound`'s own, so those crates are plain dependencies).
 sl-anim = { workspace = true }
 sl-material = { workspace = true }
+# The decoder behind `sl-audio`'s `decode_clip`, used directly so a fixture
+# sound is read back the way the viewer reads one without dragging the mixer
+# (and its audio device backend) into this crate's tree.
+symphonium = { version = "0.12.2", default-features = false, features = [
+  "decode-native",
+  "ogg",
+  "vorbis",
+] }
 
 [lints]
 workspace = true
