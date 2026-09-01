@@ -74,16 +74,21 @@ mod test {
     }
 
     impl Harness {
-        /// Starts a grid with one account and builds (but does not step) a
-        /// headless app logging into it.
+        /// Starts a grid with one account on the stock region and builds (but
+        /// does not step) a headless app logging into it.
         fn start(channel: &str) -> Result<Self, TestError> {
+            Self::start_in(channel, RegionConfig::default())
+        }
+
+        /// [`start`](Self::start) against a grid serving `region`.
+        fn start_in(channel: &str, region: RegionConfig) -> Result<Self, TestError> {
             let runtime = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()?;
             let grid = runtime.block_on(
                 FakeGridBuilder::new()
                     .account(AccountConfig::new("Test", "User", "password"))
-                    .region(RegionConfig::default())
+                    .region(region)
                     .event_queue_hold(Duration::from_secs(2))
                     .start(),
             )?;
@@ -459,6 +464,84 @@ mod test {
                 .any(|event| matches!(event, SlSessionEvent::Disconnected(_))),
             "a clean logout never reports a disconnect"
         );
+        Ok(())
+    }
+
+    /// Another avatar reaches the Bevy client: the catalogue's NPC arrives as
+    /// an avatar-pcode object with its name-values, its appearance names the
+    /// bakes in their avatar-texture slots, its animation is listed, and the
+    /// box it wears arrives parented to it. This is the plugin-tier half of
+    /// NPC support; drawing the avatar is the full-stack tier's business.
+    #[test]
+    fn bevy_client_sees_the_catalogue_npc() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{
+            NPC_AGENT, NPC_ANIMATION, NPC_ATTACHMENT_LOCAL_ID, NPC_LOCAL_ID, npc,
+        };
+
+        let fixture_npc = npc();
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut harness = Harness::start_in("sl-fake-grid-bevy-npc", region)?;
+        harness.poll_login_notice()?;
+
+        let body = harness.wait_for_event("the NPC's avatar object", |event| match event {
+            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)
+                if object.local_id == NPC_LOCAL_ID =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })?;
+        assert_eq!(body.pcode, sl_proto::pcode::AVATAR);
+        assert_eq!(body.full_id.uuid(), NPC_AGENT);
+        assert!(
+            body.name_values()
+                .iter()
+                .any(|pair| pair.name == "FirstName" && pair.value == "Catalogue"),
+            "the NPC arrived unnamed: {:?}",
+            body.name_value
+        );
+
+        let appearance = harness.wait_for_event("the NPC's appearance", |event| match event {
+            SlSessionEvent::AvatarAppearance(appearance)
+                if appearance.avatar_id.uuid() == NPC_AGENT =>
+            {
+                Some((**appearance).clone())
+            }
+            _ => None,
+        })?;
+        for bake in &fixture_npc.appearance.bakes {
+            assert_eq!(
+                appearance.texture_entry.texture_id(bake.slot),
+                Some(bake.texture),
+                "the bake for slot {} did not reach the client",
+                bake.slot
+            );
+        }
+
+        let animations = harness.wait_for_event("the NPC's animations", |event| match event {
+            SlSessionEvent::AvatarAnimation {
+                avatar_id,
+                animations,
+                ..
+            } if avatar_id.uuid() == NPC_AGENT => Some(animations.clone()),
+            _ => None,
+        })?;
+        assert!(
+            animations
+                .iter()
+                .any(|animation| animation.anim_id == NPC_ANIMATION),
+            "the NPC is not playing its animation: {animations:?}"
+        );
+
+        let attachment = harness.wait_for_event("the NPC's attachment", |event| match event {
+            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)
+                if object.local_id == NPC_ATTACHMENT_LOCAL_ID =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })?;
+        assert_eq!(attachment.parent_id, NPC_LOCAL_ID);
         Ok(())
     }
 

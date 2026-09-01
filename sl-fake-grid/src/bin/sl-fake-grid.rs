@@ -163,6 +163,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 position.z
             );
         }
+        let npc = sl_fake_grid::fixtures::catalogue::npc();
+        tracing::info!(
+            "catalogue NPC {:?} {:?} (local id {}) at <{}, {}, {}>",
+            npc.identity.first_name,
+            npc.identity.last_name,
+            npc.local_id.0,
+            npc.position.x,
+            npc.position.y,
+            npc.position.z
+        );
     }
 
     let grid = builder.start().await?;

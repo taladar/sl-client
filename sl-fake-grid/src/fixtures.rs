@@ -12,6 +12,7 @@
 //! [`into_region`]: RegionFixture::into_region
 
 pub mod catalogue;
+pub mod npcs;
 pub mod prims;
 
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use crate::terrain::TerrainFixture;
 use crate::world::SceneFixtures;
 
 pub use catalogue::{CatalogueEntry, catalogue};
+pub use npcs::{NpcAppearance, NpcBake, NpcFixture};
 pub use prims::{DEFAULT_FACE_COUNT, FaceStyle, PrimFixture, SculptKind, blank_texture, linkset};
 
 /// Everything one fake region shows, as a value.
@@ -64,9 +66,14 @@ impl RegionFixture {
         Self::default()
     }
 
-    /// The fixture as a [`Scenario`]: the world and assets as they are, and a
-    /// setup hook that installs the region materials, the object media and the
-    /// environment on every fresh session.
+    /// The fixture as a [`Scenario`]: the world as it is, the assets plus
+    /// every NPC's bakes, and a setup hook that installs the region materials,
+    /// the object media and the environment on every fresh session.
+    ///
+    /// An NPC's baked textures are registered here rather than by the caller
+    /// because the appearance already names their ids — the fixture describes
+    /// the avatar, and this is the one place that knows a bake is fetched over
+    /// `GetTexture` like any other texture.
     ///
     /// The ground is **not** carried here — it belongs to the region, not to
     /// its scenario — so a caller that only wants a scenario keeps whatever
@@ -77,6 +84,12 @@ impl RegionFixture {
         let materials = self.materials;
         let media = self.media;
         let environment = self.environment;
+        let mut assets = self.assets;
+        for npc in &self.world.npcs {
+            for (key, bytes) in npc.bake_assets() {
+                let _previous = assets.insert(key, bytes);
+            }
+        }
         Scenario {
             setup: Arc::new(move |sim: &mut SimSession, _now| {
                 for (id, material) in &materials {
@@ -89,7 +102,7 @@ impl RegionFixture {
                     sim.set_environment(stamped_for(environment, sim.region_id()));
                 }
             }),
-            assets: self.assets,
+            assets,
             world: self.world,
             ..Scenario::empty()
         }

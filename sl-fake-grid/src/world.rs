@@ -16,6 +16,7 @@
 
 use std::time::Instant;
 
+use crate::fixtures::NpcFixture;
 use crate::terrain::TerrainFixture;
 use sl_proto::{
     Object, ObjectExtraParams, ObjectMotion, ParcelCategory, ParcelInfo, ParcelRequestResult,
@@ -63,6 +64,11 @@ pub struct SceneFixtures {
     /// arrival (after the agent's own avatar object, which the driver adds
     /// from the login).
     pub objects: Vec<Object>,
+    /// The other avatars the region shows — scripted, because the fake grid
+    /// has no inter-session broadcast. Each contributes its avatar body, an
+    /// `AvatarAppearance`, an `AvatarAnimation` and its attachments to the
+    /// arrival burst, and answers object refetches like any other object.
+    pub npcs: Vec<NpcFixture>,
     /// The region-local id the arriving agent's own avatar object gets. A
     /// real simulator mints one per avatar; with one agent per session a
     /// fixed id is enough, but it must not collide with [`objects`].
@@ -72,14 +78,27 @@ pub struct SceneFixtures {
 }
 
 impl SceneFixtures {
-    /// No parcels, no objects.
+    /// No parcels, no objects, no NPCs.
     #[must_use]
     pub const fn new() -> Self {
         Self {
             parcels: Vec::new(),
             objects: Vec::new(),
+            npcs: Vec::new(),
             avatar_local_id: RegionLocalObjectId(1),
         }
+    }
+
+    /// Every object the region shows: its prims, then each NPC's avatar body
+    /// and the attachments it wears. This is what an object refetch answers
+    /// from — an NPC is as refetchable as any prim.
+    #[must_use]
+    pub fn all_objects(&self) -> Vec<Object> {
+        let mut objects = self.objects.clone();
+        for npc in &self.npcs {
+            objects.extend(npc.objects());
+        }
+        objects
     }
 
     /// The first parcel whose bitmap covers the region-local point.
@@ -149,15 +168,28 @@ fn overlay_class(parcel: &ParcelInfo, viewer: AgentKey) -> u8 {
     }
 }
 
-/// The identity the agent's own avatar object is rezzed with.
-#[derive(Debug, Clone)]
-pub(crate) struct AvatarIdentity {
+/// The identity an avatar object is rezzed with — the arriving agent's own,
+/// or an [`NpcFixture`]'s.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AvatarIdentity {
     /// The agent id (the avatar object's full id).
-    pub(crate) agent_id: AgentKey,
+    pub agent_id: AgentKey,
     /// The account's first name.
-    pub(crate) first_name: String,
+    pub first_name: String,
     /// The account's last name.
-    pub(crate) last_name: String,
+    pub last_name: String,
+}
+
+impl AvatarIdentity {
+    /// The identity of the avatar `agent_id` called `first_name last_name`.
+    #[must_use]
+    pub fn new(agent_id: AgentKey, first_name: &str, last_name: &str) -> Self {
+        Self {
+            agent_id,
+            first_name: first_name.to_owned(),
+            last_name: last_name.to_owned(),
+        }
+    }
 }
 
 /// A region-wide public parcel: every cell of a 256 m region, owned by
@@ -335,8 +367,12 @@ pub fn box_prim(
 /// An avatar object for `identity` standing at `position`: the `LEGACY_AVATAR`
 /// pcode, the agent id as the full id, and the `FirstName` / `LastName` /
 /// `Title` name-values a simulator attaches so the viewer can label it.
+///
+/// This is the avatar body every fake-grid avatar is rezzed as — the arriving
+/// agent's own (from the login identity) and every
+/// [`NpcFixture`]'s.
 #[must_use]
-pub(crate) fn avatar_object(
+pub fn avatar_prim(
     local_id: RegionLocalObjectId,
     identity: &AvatarIdentity,
     position: Vector,
@@ -376,7 +412,7 @@ pub(crate) fn push_arrival_world(
     now: Instant,
 ) {
     let arrival = sl_proto::Camera::region_center().center;
-    let avatar = avatar_object(world.avatar_local_id, identity, arrival.clone());
+    let avatar = avatar_prim(world.avatar_local_id, identity, arrival.clone());
     if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
     }
@@ -395,6 +431,47 @@ pub(crate) fn push_arrival_world(
         && let Err(error) = sim.send_object_update(&world.objects, REAL_TIME_DILATION, now)
     {
         tracing::warn!("rezzing the fixture objects failed: {error}");
+    }
+    push_npcs(&world.npcs, sim, now);
+}
+
+/// Pushes the region's other avatars, in the order a simulator introduces
+/// one: every NPC's avatar object, then each one's appearance and playing
+/// animations, then their attachments.
+///
+/// The bodies go first as one update because the appearance and the animation
+/// name an avatar the client has to already know, and the attachments last
+/// because each names its wearer's region-local id as its parent. Send
+/// failures are logged, never fatal.
+fn push_npcs(npcs: &[NpcFixture], sim: &mut SimSession, now: Instant) {
+    if npcs.is_empty() {
+        return;
+    }
+    let bodies: Vec<Object> = npcs.iter().map(NpcFixture::avatar_prim).collect();
+    if let Err(error) = sim.send_object_update(&bodies, REAL_TIME_DILATION, now) {
+        tracing::warn!("rezzing the NPC avatars failed: {error}");
+    }
+    for npc in npcs {
+        if let Err(error) = sim.send_avatar_appearance(&npc.appearance_record(), now) {
+            tracing::warn!("sending an NPC's appearance failed: {error}");
+        }
+    }
+    for npc in npcs {
+        let animations = npc.playing_animations();
+        if !animations.is_empty()
+            && let Err(error) = sim.send_avatar_animation(npc.agent_id(), &animations, now)
+        {
+            tracing::warn!("sending an NPC's animations failed: {error}");
+        }
+    }
+    let attachments: Vec<Object> = npcs
+        .iter()
+        .flat_map(|npc| npc.attachments.iter().cloned())
+        .collect();
+    if !attachments.is_empty()
+        && let Err(error) = sim.send_object_update(&attachments, REAL_TIME_DILATION, now)
+    {
+        tracing::warn!("rezzing the NPC attachments failed: {error}");
     }
 }
 
@@ -468,10 +545,9 @@ pub(crate) fn answer_world_request(
         }
         ServerEvent::RequestObjects { objects } => {
             let matching: Vec<Object> = world
-                .objects
-                .iter()
+                .all_objects()
+                .into_iter()
                 .filter(|object| objects.iter().any(|(id, _)| *id == object.local_id))
-                .cloned()
                 .collect();
             if !matching.is_empty()
                 && let Err(error) = sim.send_object_update(&matching, REAL_TIME_DILATION, now)
@@ -556,13 +632,13 @@ mod test {
     }
 
     #[test]
-    fn avatar_object_carries_the_name_values() {
+    fn avatar_prim_carries_the_name_values() {
         let identity = AvatarIdentity {
             agent_id: agent(9),
             first_name: "Test".to_owned(),
             last_name: "User".to_owned(),
         };
-        let avatar = avatar_object(RegionLocalObjectId(1), &identity, ZERO);
+        let avatar = avatar_prim(RegionLocalObjectId(1), &identity, ZERO);
         assert_eq!(avatar.pcode, pcode::AVATAR);
         assert_eq!(avatar.full_id.uuid(), agent(9).uuid());
         assert!(

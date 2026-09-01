@@ -331,6 +331,99 @@ LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes) and
 `gltf_material_asset` (the `AT_MATERIAL` LLSD envelope around a glTF 2.0
 document).
 
+### Fixture textures: size it honestly, and mind the cache
+
+Two things about fixture textures cost a live-debugging session each.
+
+**Size them like real content.** `TEXTURE_SIZE` is 512 — what a Second Life
+diffuse texture is — and the NPC bakes are 512 as well. A 64² fixture
+texture is sharp in a decode test and renders as a stuck low-LOD blur: a
+one metre prim face at conversational range covers several hundred screen
+pixels, the pixel-area LOD driver asks for discard 0, and there is nothing
+finer to fetch. The encoded cost of the honest size is about 13 kB for the
+checker and ~300 bytes for a solid at *any* size, so there is nothing to
+save. A **sculpt map** is the exception (`SCULPT_MAP_SIZE`): it is geometry,
+one vertex per texel, and the reference viewer reads at most a 64² grid.
+
+**A texture's identity is its UUID, not its bytes.** Change a fixture
+texture's *content* under a stable id and every viewer that already fetched
+it keeps rendering the old pixels from its disk cache — including a run
+under a different avatar, because the texture cache is not per-account. An
+A/B against a viewer therefore has to start from a cold cache: point
+`XDG_CACHE_HOME` at a scratch directory for the run (better than deleting
+the real cache, and it isolates the whole account tree). The give-away in
+the log is the LOD driver's own line, which prints the size it learned:
+
+```text
+texture …ca70001 pixel-area LOD: discard 2 -> 0 (area 196888 px, native 64x64)
+```
+
+`native 64x64` for a texture the grid is serving at 512² means the viewer
+never re-fetched it. Run the viewer with
+`RUST_LOG=warn,sl_viewer_world_objects=debug` to see those lines.
+
+## NPCs: other avatars as content
+
+The grid rezzes only the arriving agent's own avatar and has no
+inter-session broadcast, so a second logged-in avatar is invisible to the
+first. Everything a viewer does with *other* people — the body, the bakes,
+the name tag, the playing animation, the attachment that follows a wearer
+— is therefore scripted content: an `fixtures::NpcFixture` on
+`SceneFixtures::npcs`.
+
+```text
+NpcFixture::new(local_id, AvatarIdentity::new(agent, "First", "Last"), position)
+    .looking(NpcAppearance::solid(agent, colour))   // .. or ::default_avatar()
+    .rotated(rotation)
+    .animating(animation)
+    .wearing(PrimFixture::boxed(..), point, item, offset, rotation)
+```
+
+What reaches the wire per NPC, appended to the arrival burst in the order
+a simulator introduces one: the **avatar objects** (`world::avatar_prim`
+— the same `LEGACY_AVATAR` body the arriving agent is rezzed as, carrying
+the `FirstName` / `LastName` name-values), then each one's
+**`AvatarAppearance`**, then its **`AvatarAnimation`**, then the
+**attachments** (ordinary child objects whose parent is the NPC's
+region-local id and whose state byte carries the attachment point). The
+bodies precede the appearances because an appearance names an avatar the
+client has to already know, and the attachments come last because each
+names its wearer. `SceneFixtures::all_objects` folds the NPCs' objects in
+beside the prims, so an object refetch answers for them too.
+
+The three server-side pushes are `SimSession::send_avatar_appearance`,
+`send_avatar_animation` and `send_terse_update` (the every-frame motion
+message, for a scripted move). One detail is worth knowing: an
+`AvatarAnimation`'s `AnimationSourceList` is positionally correlated with
+its animation list, and an animation with no triggering object is stamped
+with the **avatar's own id**, not a nil one — what OpenSim's
+`SendAnimations` does, so a receiver never sees a nil source.
+
+The shape is `NpcAppearance::DEFAULT_VISUAL_PARAMS`: OpenSim's own
+`AvatarAppearance.SetDefaultParams` table, the 218-byte "Ruth" body a grid
+hands an account with no stored appearance. Do not reach for the
+obvious-looking midpoint of each param's range instead — it renders a
+badly distorted avatar, because the ranges are not centred on anything a
+body wants to be. A receiver reads the vector positionally against its own
+transmitted param list, which in the standard `avatar_lad.xml` is 253
+params: exactly those 218 classic ones (every id below 10000), then the 33
+physics params and two more, so OpenSim's vector lands slot for slot and
+the rest falls back to each param's default.
+
+A bake is served like any other texture. `NpcAppearance::solid` paints one
+solid per body-region baked slot (head, upper, lower) under ids derived
+from the agent id (`ba4e<slot>-…` plus the avatar's low 96 bits, so two
+NPCs never share a bake), the texture entry names them in their
+`avatar_texture` slots, and `RegionFixture::into_scenario` registers the
+bytes — the OpenSim path, where no server-bake service is advertised and
+the viewer fetches each bake with a plain `GetTexture`.
+
+The catalogue's own NPC (`catalogue::npc()`) stands one slot west of the
+prim row, baked blue, playing the built-in `stand` animation and wearing a
+checker box on its skull. The animation *asset* is not served — nothing in
+the fake grid serves animations yet — so a viewer records it as playing
+and falls back to its own idle.
+
 ## The ground: terrain, wind and clouds
 
 A region's ground is not scenario content but region content, so it lives

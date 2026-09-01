@@ -2635,6 +2635,188 @@ mod test {
         Ok(())
     }
 
+    /// Another avatar's appearance, its playing animations and the terse
+    /// motion updates that move it all reach the client as the events a
+    /// renderer reads: the bakes come back in their `avatar_texture` slots, the
+    /// animation sources survive the positional correlation, and the terse
+    /// update lands on the object the full update introduced.
+    #[test]
+    fn avatar_appearance_animation_and_terse_motion_reach_client() -> Result<(), TestError> {
+        let now = Instant::now();
+        let (mut client, mut sim) = setup(now)?;
+        drain_client(&mut client);
+
+        // 1. Appearance: a full-width avatar texture entry with two bakes.
+        let npc = AgentKey::from(uuid::Uuid::from_u128(0x0BC1));
+        let head_bake = TextureKey::from(uuid::Uuid::from_u128(0xBA4E_0001));
+        let upper_bake = TextureKey::from(uuid::Uuid::from_u128(0xBA4E_0002));
+        let mut entry = TextureEntry {
+            faces: vec![
+                TextureFace::new(TextureKey::from(
+                    sl_proto::avatar_texture::IMG_DEFAULT_AVATAR
+                ));
+                sl_proto::avatar_texture::COUNT
+            ],
+        };
+        if let Some(face) = entry.faces.get_mut(sl_proto::avatar_texture::HEAD_BAKED) {
+            face.texture_id = head_bake;
+        }
+        if let Some(face) = entry.faces.get_mut(sl_proto::avatar_texture::UPPER_BAKED) {
+            face.texture_id = upper_bake;
+        }
+        let attachment = ObjectKey::from(uuid::Uuid::from_u128(0xA77A));
+        let appearance = sl_proto::AvatarAppearance {
+            avatar_id: npc,
+            is_trial: false,
+            texture_entry: entry,
+            visual_params: vec![128; 32],
+            appearance_version: Some(1),
+            cof_version: Some(7),
+            appearance_flags: Some(0),
+            hover_height: Some(sl_proto::Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.25,
+            }),
+            attachments: vec![sl_proto::AvatarAttachment {
+                id: attachment,
+                attachment_point: 6,
+            }],
+        };
+        sim.send_avatar_appearance(&appearance, now)?;
+
+        // 2. Animation: one agent-started, one triggered by a scripted object.
+        let animations = vec![
+            sl_proto::PlayingAnimation {
+                anim_id: uuid::Uuid::from_u128(0x5741_0001),
+                sequence_id: 1,
+                source_id: None,
+            },
+            sl_proto::PlayingAnimation {
+                anim_id: uuid::Uuid::from_u128(0x5741_0002),
+                sequence_id: 2,
+                source_id: Some(attachment),
+            },
+        ];
+        sim.send_avatar_animation(npc, &animations, now)?;
+        pump(&mut client, &mut sim, now)?;
+
+        let events = drain_client(&mut client);
+        let got = events
+            .iter()
+            .find_map(|e| match e {
+                Event::AvatarAppearance(appearance) => Some(appearance.clone()),
+                _ => None,
+            })
+            .ok_or("expected an AvatarAppearance client event")?;
+        assert_eq!(got.avatar_id, npc);
+        assert_eq!(
+            got.texture_entry
+                .texture_id(sl_proto::avatar_texture::HEAD_BAKED),
+            Some(head_bake)
+        );
+        assert_eq!(
+            got.texture_entry
+                .texture_id(sl_proto::avatar_texture::UPPER_BAKED),
+            Some(upper_bake)
+        );
+        assert_eq!(got.visual_params, vec![128; 32]);
+        assert_eq!(got.cof_version, Some(7));
+        assert_eq!(
+            got.hover_height.map(|hover| hover.z),
+            Some(0.25),
+            "the hover block did not survive"
+        );
+        assert_eq!(
+            got.attachments,
+            vec![sl_proto::AvatarAttachment {
+                id: attachment,
+                attachment_point: 6,
+            }]
+        );
+
+        let (avatar_id, got_animations) = events
+            .iter()
+            .find_map(|e| match e {
+                Event::AvatarAnimation {
+                    avatar_id,
+                    animations,
+                    ..
+                } => Some((*avatar_id, animations.clone())),
+                _ => None,
+            })
+            .ok_or("expected an AvatarAnimation client event")?;
+        assert_eq!(avatar_id, npc);
+        let played: Vec<(uuid::Uuid, i32)> = got_animations
+            .iter()
+            .map(|animation| (animation.anim_id, animation.sequence_id))
+            .collect();
+        assert_eq!(
+            played,
+            vec![
+                (uuid::Uuid::from_u128(0x5741_0001), 1),
+                (uuid::Uuid::from_u128(0x5741_0002), 2)
+            ]
+        );
+        // The scripted animation keeps its trigger; the agent-started one is
+        // stamped with the avatar's own id, as a simulator sends it.
+        let sources: Vec<Option<ObjectKey>> = got_animations
+            .iter()
+            .map(|animation| animation.source_id)
+            .collect();
+        assert_eq!(
+            sources,
+            vec![Some(ObjectKey::from(npc.uuid())), Some(attachment)]
+        );
+
+        // 3. Terse motion: the client applies it to the object it already has.
+        let prim = box_prim(
+            0x30,
+            0x3030,
+            sl_proto::Vector {
+                x: 1.0,
+                y: 2.0,
+                z: 3.0,
+            },
+        );
+        sim.send_object_update(std::slice::from_ref(&prim), 0xFFFF, now)?;
+        pump(&mut client, &mut sim, now)?;
+        drain_client(&mut client);
+
+        let moved = sl_proto::Vector {
+            x: 10.0,
+            y: 20.0,
+            z: 30.0,
+        };
+        let mut motion = prim.motion.clone();
+        motion.position = moved.clone();
+        sim.send_terse_update(
+            &[sl_proto::TerseUpdate {
+                local_id: RegionLocalObjectId(0x30),
+                state: 0,
+                motion,
+            }],
+            0xFFFF,
+            now,
+        )?;
+        pump(&mut client, &mut sim, now)?;
+
+        let updated = drain_client(&mut client)
+            .into_iter()
+            .find_map(|e| match e {
+                Event::ObjectUpdated(object) if object.local_id == RegionLocalObjectId(0x30) => {
+                    Some(object)
+                }
+                _ => None,
+            })
+            .ok_or("expected an ObjectUpdated from the terse update")?;
+        assert_eq!(updated.motion.position, moved);
+        // A terse update carries only motion, so the identity the full update
+        // introduced is still the client's.
+        assert_eq!(updated.full_id, prim.full_id);
+        Ok(())
+    }
+
     #[test]
     fn friendship_and_calling_cards_reach_client() -> Result<(), TestError> {
         let now = Instant::now();

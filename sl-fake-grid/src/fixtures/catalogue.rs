@@ -13,17 +13,18 @@
 //! of screen.
 
 use sl_proto::{
-    AssetKey, EnvironmentSettings, FlexibleData, InMemoryAssetSource, LightData, LightImage,
-    MediaEntry, ObjectMediaState, ParticleSystem, ReflectionProbe, RegionLocalObjectId,
+    AnimationKey, AssetKey, EnvironmentSettings, FlexibleData, InMemoryAssetSource, LightData,
+    LightImage, MediaEntry, ObjectMediaState, ParticleSystem, ReflectionProbe, RegionLocalObjectId,
     RegionLocalParcelId, TextureAnimation, particle_pattern, texture_anim_mode,
 };
-use sl_types::key::{AgentKey, Key, MeshKey, ObjectKey, OwnerKey, TextureKey};
+use sl_types::key::{AgentKey, InventoryKey, Key, MeshKey, ObjectKey, OwnerKey, TextureKey};
 use sl_types::lsl::Vector;
 use sl_wire::{LegacyMaterial, ReflectionProbeFlags};
 
 use super::RegionFixture;
+use super::npcs::{NpcAppearance, NpcFixture};
 use super::prims::{FaceStyle, PrimFixture, SculptKind, linkset};
-use crate::world::{SceneFixtures, region_wide_parcel};
+use crate::world::{AvatarIdentity, SceneFixtures, region_wide_parcel};
 
 /// The catalogue parcel's name.
 pub const CATALOGUE_PARCEL_NAME: &str = "Fake Grid Catalogue";
@@ -76,6 +77,51 @@ pub const NORMAL_MAP: TextureKey = texture_key(0xCA7_0006);
 
 /// The texture the particle emitter throws.
 pub const PARTICLE_TEXTURE: TextureKey = texture_key(0xCA7_0007);
+
+/// The catalogue NPC's agent id.
+pub const NPC_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0100);
+
+/// The catalogue NPC's first name.
+pub const NPC_FIRST_NAME: &str = "Catalogue";
+
+/// The catalogue NPC's last name.
+pub const NPC_LAST_NAME: &str = "Resident";
+
+/// The region-local id the catalogue NPC's avatar body is rezzed with. Clear
+/// of the prim row (`FIRST_LOCAL_ID`…) and of its linkset children
+/// (`FIRST_LOCAL_ID + 0x80`…).
+pub const NPC_LOCAL_ID: RegionLocalObjectId = RegionLocalObjectId(0x200);
+
+/// The region-local id of the box the catalogue NPC wears.
+pub const NPC_ATTACHMENT_LOCAL_ID: RegionLocalObjectId = RegionLocalObjectId(0x201);
+
+/// The attachment point the NPC wears its box on (`ATTACH_HEAD`, the skull).
+pub const NPC_ATTACHMENT_POINT: u8 = 2;
+
+/// The inventory item the NPC's attachment is worn from.
+pub const NPC_ATTACHMENT_ITEM: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0101);
+
+/// The full id of the box the catalogue NPC wears.
+pub const NPC_ATTACHMENT_OBJECT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0102);
+
+/// The colour the catalogue NPC's bakes are painted, so a capture can tell
+/// the avatar from the prims beside it.
+pub const NPC_BAKE_COLOR: [u8; 4] = sl_test_assets::markers::BLUE;
+
+/// The animation the catalogue NPC plays: the standard built-in `stand`
+/// (`sl_anim::builtin_animation_by_name("stand")`). The fixture does not serve
+/// the animation *asset* — nothing in the fake grid does yet — so a viewer
+/// records the avatar as playing it and falls back to its own idle.
+pub const NPC_ANIMATION: uuid::Uuid =
+    uuid::Uuid::from_u128(0x2408_fe9e_df1d_1d7d_f4ff_1384_fa7b_350f);
+
+/// The `x` the catalogue NPC stands on: one slot west of the prim row, so it
+/// has its own patch of screen.
+pub const NPC_X: f32 = ROW_FIRST_X - ROW_SPACING;
+
+/// The `z` of the catalogue NPC's avatar object — its **centre**, so half its
+/// 1.9 m height above the stock ground.
+pub const NPC_Z: f32 = 25.95;
 
 /// A fixed [`TextureKey`], as a `const fn` (`From<Uuid>` is not one).
 const fn texture_key(id: u128) -> TextureKey {
@@ -181,6 +227,7 @@ pub fn catalogue() -> RegionFixture {
         CATALOGUE_PARCEL_NAME,
     ));
     world.objects = objects(owner);
+    world.npcs = vec![npc()];
 
     RegionFixture {
         world,
@@ -367,6 +414,64 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
     }
     objects
 }
+
+/// The catalogue's NPC: a blue-baked avatar standing west of the prim row,
+/// playing the built-in `stand` animation and wearing a checker box on its
+/// skull.
+///
+/// This is what the full-stack tier asserts other-avatar rendering against —
+/// the body classifies as [`NPC_BAKE_COLOR`], the attachment follows the body,
+/// and the name tag reads `Catalogue Resident`.
+#[must_use]
+pub fn npc() -> NpcFixture {
+    let agent = AgentKey::from(NPC_AGENT);
+    NpcFixture::new(
+        NPC_LOCAL_ID,
+        AvatarIdentity::new(agent, NPC_FIRST_NAME, NPC_LAST_NAME),
+        Vector {
+            x: NPC_X,
+            y: ROW_Y,
+            z: NPC_Z,
+        },
+    )
+    .looking(NpcAppearance::solid(agent, NPC_BAKE_COLOR))
+    .animating(AnimationKey::from(NPC_ANIMATION))
+    .wearing(
+        PrimFixture::boxed(
+            NPC_ATTACHMENT_LOCAL_ID,
+            ObjectKey::from(NPC_ATTACHMENT_OBJECT),
+            agent,
+            Vector {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            Vector {
+                x: 0.25,
+                y: 0.25,
+                z: 0.25,
+            },
+        )
+        .textured(CHECKER_TEXTURE),
+        NPC_ATTACHMENT_POINT,
+        InventoryKey::from(NPC_ATTACHMENT_ITEM),
+        // A quarter metre above the skull point, so the box clears the head.
+        Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.25,
+        },
+        NO_ROTATION,
+    )
+}
+
+/// The identity rotation.
+const NO_ROTATION: sl_types::lsl::Rotation = sl_types::lsl::Rotation {
+    x: 0.0,
+    y: 0.0,
+    z: 0.0,
+    s: 1.0,
+};
 
 /// An eighth of a turn about the Z axis, as a quaternion.
 const YAW_45: sl_types::lsl::Rotation = sl_types::lsl::Rotation {
@@ -558,8 +663,24 @@ const fn fountain() -> ParticleSystem {
     }
 }
 
-/// The side, in pixels, of the catalogue's textures.
-const TEXTURE_SIZE: u32 = 64;
+/// The side, in pixels, of the catalogue's picture textures — the size a real
+/// Second Life diffuse texture is.
+///
+/// It has to be this big to look right: a 64² fixture texture is sharp in a
+/// decode test and reads as a stuck low-LOD blur in the viewer, because a one
+/// metre prim face at conversational range covers several hundred screen
+/// pixels and the LOD driver has nothing finer to fetch. The encoded cost of
+/// the honest size is about 13 kB (a solid is ~300 bytes at any size).
+const TEXTURE_SIZE: u32 = 512;
+
+/// The side, in pixels, of the catalogue's sculpt map. A sculpt map is
+/// *geometry* — one vertex per texel — and the reference viewer reads at most
+/// a 64² grid, so this deliberately does not follow [`TEXTURE_SIZE`].
+const SCULPT_MAP_SIZE: u32 = 64;
+
+/// The side, in pixels, of the catalogue's flat (single-colour) textures. A
+/// solid carries no detail, so it needs no more than a small tile.
+const SOLID_TEXTURE_SIZE: u32 = 128;
 
 /// The catalogue's binary assets: the checker every textured prim wears, the
 /// sculpt map, the mesh, the PBR material, the particle texture and the normal
@@ -575,18 +696,18 @@ fn assets() -> InMemoryAssetSource {
     register(&mut assets, AssetKey::from(CHECKER_TEXTURE.uuid()), || {
         checker.j2c()
     });
-    let sculpt = sl_test_assets::sculpt_sphere(TEXTURE_SIZE);
+    let sculpt = sl_test_assets::sculpt_sphere(SCULPT_MAP_SIZE);
     register(&mut assets, AssetKey::from(SCULPT_MAP.uuid()), || {
         sculpt.j2c()
     });
     let particle =
-        sl_test_assets::RgbaImage::solid(TEXTURE_SIZE / 4, sl_test_assets::markers::YELLOW);
+        sl_test_assets::RgbaImage::solid(SOLID_TEXTURE_SIZE, sl_test_assets::markers::YELLOW);
     register(&mut assets, AssetKey::from(PARTICLE_TEXTURE.uuid()), || {
         particle.j2c()
     });
     // A flat normal map: the neutral (0, 0, 1) tangent-space normal, so the
     // legacy material is a *material* without also being a bump pattern.
-    let normal = sl_test_assets::RgbaImage::solid(TEXTURE_SIZE / 4, [128, 128, 255, 255]);
+    let normal = sl_test_assets::RgbaImage::solid(SOLID_TEXTURE_SIZE, [128, 128, 255, 255]);
     register(&mut assets, AssetKey::from(NORMAL_MAP.uuid()), || {
         normal.j2c()
     });
@@ -693,6 +814,74 @@ mod test {
         for id in sl_proto::DEFAULT_TERRAIN_DETAIL_TEXTURES {
             assert!(fixture.assets.contains(AssetKey::from(id)));
         }
+    }
+
+    /// The NPC's bakes are served, but only once the fixture has become a
+    /// scenario — the appearance names the ids and `into_scenario` is what
+    /// registers the bytes behind them.
+    #[test]
+    fn the_npc_bakes_reach_the_asset_store() {
+        let fixture = catalogue();
+        let bakes: Vec<AssetKey> = npc()
+            .appearance
+            .bakes
+            .iter()
+            .map(|bake| AssetKey::from(bake.texture.uuid()))
+            .collect();
+        assert_eq!(bakes.len(), 3, "one bake per body region");
+        for key in &bakes {
+            assert!(
+                !fixture.assets.contains(*key),
+                "the raw fixture should not carry the bake {key} yet"
+            );
+        }
+        let scenario = fixture.into_scenario();
+        for key in &bakes {
+            assert!(scenario.assets.contains(*key), "no bake served for {key}");
+        }
+    }
+
+    /// The catalogue's NPC is on the region's world, stands clear of the prim
+    /// row, and carries the body, the appearance and the attachment a viewer
+    /// needs to draw another avatar.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the row positions are the same sums of exactly-representable \
+                  constants the code computes, so exact equality is the test"
+    )]
+    #[test]
+    fn the_catalogue_npc_stands_west_of_the_row() {
+        let fixture = catalogue();
+        let npc = fixture.world.npcs.first().cloned().unwrap_or_else(npc);
+        assert_eq!(npc.agent_id(), AgentKey::from(NPC_AGENT));
+        assert_eq!(npc.position.x, ROW_FIRST_X - ROW_SPACING);
+        assert_eq!(npc.position.y, ROW_Y);
+        // Its ids are its own: no prim, linkset child or NPC part collides.
+        let mut ids: Vec<u32> = fixture
+            .world
+            .all_objects()
+            .iter()
+            .map(|object| object.local_id.0)
+            .collect();
+        let count = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), count, "duplicate region-local ids");
+        assert!(ids.contains(&NPC_LOCAL_ID.0));
+        assert!(ids.contains(&NPC_ATTACHMENT_LOCAL_ID.0));
+
+        let record = npc.appearance_record();
+        assert_eq!(record.avatar_id, AgentKey::from(NPC_AGENT));
+        assert_eq!(
+            record.attachments.first().map(|worn| worn.attachment_point),
+            Some(NPC_ATTACHMENT_POINT)
+        );
+        assert_eq!(
+            npc.playing_animations()
+                .first()
+                .map(|animation| animation.anim_id),
+            Some(NPC_ANIMATION)
+        );
     }
 
     /// The prims carry what their names claim, read back out of the raw wire

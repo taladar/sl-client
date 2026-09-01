@@ -1466,6 +1466,130 @@ mod test {
         Ok(())
     }
 
+    /// The catalogue's NPC arrives as another avatar: its body, then the
+    /// appearance naming its bakes, then the animations it plays, then the
+    /// attachment parented to it — and the bakes the appearance names are
+    /// fetchable over `GetTexture`, the way a viewer gets them on OpenSim.
+    #[tokio::test]
+    async fn the_catalogue_npc_arrives_with_appearance_and_attachment() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{
+            NPC_AGENT, NPC_ANIMATION, NPC_ATTACHMENT_LOCAL_ID, NPC_ATTACHMENT_POINT, NPC_LOCAL_ID,
+            npc,
+        };
+
+        let npc = npc();
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+
+        // 1. The body: an avatar-pcode object under the NPC's own id, wearing
+        //    the name-values the viewer labels it with.
+        let body = running
+            .wait_for(|event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.local_id == NPC_LOCAL_ID =>
+                {
+                    Some((**object).clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(body.pcode, sl_proto::pcode::AVATAR);
+        assert_eq!(body.full_id.uuid(), NPC_AGENT);
+        assert!(
+            body.name_values()
+                .iter()
+                .any(|pair| pair.name == "FirstName" && pair.value == "Catalogue"),
+            "the NPC arrived unnamed: {:?}",
+            body.name_value
+        );
+
+        // 2. The appearance: the bakes in their `avatar_texture` slots.
+        let appearance = running
+            .wait_for(|event| match event {
+                Event::AvatarAppearance(appearance) if appearance.avatar_id.uuid() == NPC_AGENT => {
+                    Some((**appearance).clone())
+                }
+                _ => None,
+            })
+            .await?;
+        for bake in &npc.appearance.bakes {
+            assert_eq!(
+                appearance.texture_entry.texture_id(bake.slot),
+                Some(bake.texture),
+                "the bake for slot {} did not survive",
+                bake.slot
+            );
+        }
+        assert_eq!(
+            appearance.visual_params.len(),
+            npc.appearance.visual_params.len(),
+            "the visual params were truncated on the wire"
+        );
+
+        // 3. The animations it is playing.
+        let animations = running
+            .wait_for(|event| match event {
+                Event::AvatarAnimation {
+                    avatar_id,
+                    animations,
+                    ..
+                } if avatar_id.uuid() == NPC_AGENT => Some(animations.clone()),
+                _ => None,
+            })
+            .await?;
+        assert!(
+            animations
+                .iter()
+                .any(|animation| animation.anim_id == NPC_ANIMATION),
+            "the NPC is not playing its animation: {animations:?}"
+        );
+
+        // 4. The attachment: a child of the body, on the point it is worn at.
+        let attachment = running
+            .wait_for(|event| match event {
+                Event::ObjectAdded(object) | Event::ObjectUpdated(object)
+                    if object.local_id == NPC_ATTACHMENT_LOCAL_ID =>
+                {
+                    Some((**object).clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert_eq!(attachment.parent_id, NPC_LOCAL_ID);
+        assert_eq!(attachment.attachment_point_id(), Some(NPC_ATTACHMENT_POINT));
+        assert!(
+            appearance
+                .attachments
+                .iter()
+                .any(|worn| worn.id == attachment.full_id),
+            "the appearance does not list the attachment"
+        );
+
+        // 5. The bakes are served: the appearance names ids a viewer can
+        //    actually fetch.
+        let head = npc
+            .appearance
+            .bakes
+            .first()
+            .ok_or("the catalogue NPC has no bakes")?
+            .texture;
+        running
+            .commands
+            .send(Command::FetchTexture {
+                texture_id: head,
+                discard_level: sl_proto::j2c::DiscardLevel::FULL,
+            })
+            .await?;
+        let bake = running
+            .wait_for(|event| match event {
+                Event::TextureReceived(fetched) if fetched.id == head => Some(fetched.data.clone()),
+                _ => None,
+            })
+            .await?;
+        assert!(!bake.is_empty(), "the NPC's head bake came back empty");
+        Ok(())
+    }
+
     /// The catalogue's assets are actually served: the checker texture comes
     /// back over `GetTexture` and the mesh over `GetMesh2`, so a prim naming
     /// one is not pointing at a 404.

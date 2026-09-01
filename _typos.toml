@@ -68,6 +68,13 @@ Seach = "Seach"
 Dimentions = "Dimentions"
 
 [default.extend-identifiers]
+# Hexadecimal ids cited verbatim in prose and doc comments: the fake grid's
+# baked-texture id tag (`ba4e<slot>-…`, sl-fake-grid's `BAKE_ID_TAG`) and the
+# reference viewer's default wearable texture ids. Arbitrary hex spells
+# "typos" the same way a git-describe hash does (…ba… → by/be, …ded… → dead);
+# these are ids, not words.
+ba4e = "ba4e"
+822ded49 = "822ded49"
 # `flate2` is the gzip crate (used for the inventory disk cache); not a typo
 # of "flat".
 flate2 = "flate2"

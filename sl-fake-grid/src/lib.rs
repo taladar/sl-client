@@ -23,7 +23,8 @@ pub use accounts::AccountConfig;
 pub use economy_policy::{EconomyConfig, EconomyEvent};
 pub use error::Error;
 pub use fixtures::{
-    CatalogueEntry, FaceStyle, PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
+    CatalogueEntry, FaceStyle, NpcAppearance, NpcBake, NpcFixture, PrimFixture, RegionFixture,
+    SculptKind, catalogue, linkset,
 };
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use runtime::{
@@ -34,4 +35,4 @@ pub use teleport::TELEPORT_ARRIVAL_TIMEOUT;
 pub use terrain::{Heightfield, TerrainFixture};
 pub use time::{Now, system_clock, tokio_clock};
 pub use udp_assets::{TaskInventoryFixture, UdpAssetFixtures, flat_terrain_raw};
-pub use world::{SceneFixtures, box_prim, region_wide_parcel};
+pub use world::{AvatarIdentity, SceneFixtures, avatar_prim, box_prim, region_wide_parcel};

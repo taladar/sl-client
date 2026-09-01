@@ -68,6 +68,15 @@ use sl_wire::messages::{
     ViewerEffect as ViewerEffectMessage, ViewerEffectAgentDataBlock, ViewerEffectEffectBlock,
 };
 use sl_wire::messages::{
+    AvatarAnimation as AvatarAnimationWire, AvatarAnimationAnimationListBlock,
+    AvatarAnimationAnimationSourceListBlock, AvatarAnimationSenderBlock,
+    AvatarAppearance as AvatarAppearanceWire, AvatarAppearanceAppearanceDataBlock,
+    AvatarAppearanceAppearanceHoverBlock, AvatarAppearanceAttachmentBlockBlock,
+    AvatarAppearanceObjectDataBlock, AvatarAppearanceSenderBlock, AvatarAppearanceVisualParamBlock,
+    ImprovedTerseObjectUpdate, ImprovedTerseObjectUpdateObjectDataBlock,
+    ImprovedTerseObjectUpdateRegionDataBlock,
+};
+use sl_wire::messages::{
     ClearFollowCamProperties, ClearFollowCamPropertiesObjectDataBlock, ScriptControlChange,
     ScriptControlChangeDataBlock, SetFollowCamProperties,
     SetFollowCamPropertiesCameraPropertyBlock, SetFollowCamPropertiesObjectDataBlock,
@@ -141,6 +150,7 @@ use crate::bookkeeping_ids::{
 };
 use crate::error::Error;
 use crate::extra_params::decode_extra_param_blocks;
+use crate::object_update::TerseUpdate;
 use crate::session::{
     SERVER_HISTORY_CAP, STANDARD_REGION_SIZE_METRES, ServerHistoryMessage, TeleportFinishInfo,
     XFER_STALL_TIMEOUT, XFER_TIMEOUT_RESULT, agent_drop_group_to_llsd,
@@ -159,9 +169,9 @@ use crate::sim_inventory::{SimInventoryError, SimInventoryTree};
 use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
 use crate::types::directory::category_from_wire;
 use crate::types::{
-    AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarName, AvatarPickerResult, Camera,
-    ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DayCycle, DetachOrder,
-    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+    AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarName,
+    AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DayCycle,
+    DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EjectAction,
     EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo, FeatureDisabled,
     FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
@@ -172,13 +182,14 @@ use crate::types::{
     MapItem, MapItemType, MapLayer, MapRegionInfo, MapRequestFlags, MeanCollision, MovementMode,
     NavMeshStatus, NewInventoryLink, NotecardRez, Object, ObjectBuyItem, ObjectExtraParams,
     ObjectPlayingAnimation, ObjectPropertiesFamily, OpenRegionInfo, ParcelCategory, ParcelDetails,
-    ParcelInfo, ParcelObjectOwner, PlacesResult, Postcard, PrimShapeParams, ProposalVoteId,
-    RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem, RezAttachment,
-    RezObjectParams, RezScriptParams, SaleType, ScriptControl, ScriptPermissionRequest,
-    ScriptPermissions, ServerError, SetDisplayNameReply, SimWideDeleteFlags, SimulatorTime,
-    StartLocationSlot, TaskInventoryItem, TaskInventoryKey, TaskInventoryReply, TelehubInfo,
-    TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry, Throttle, TransferStatus,
-    Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType,
+    ParcelInfo, ParcelObjectOwner, PlacesResult, PlayingAnimation, Postcard, PrimShapeParams,
+    ProposalVoteId, RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem,
+    RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
+    ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
+    SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
+    TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry,
+    Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
+    ViewerEffectData, ViewerEffectType,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -6227,6 +6238,186 @@ impl SimSession {
                 .collect(),
         });
         self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AvatarAppearance` — another avatar's baked textures, visual
+    /// parameters, hover height and attachment list (the inverse of the
+    /// client's [`Event::AvatarAppearance`](crate::Event::AvatarAppearance)).
+    /// A simulator pushes one per avatar in view whenever that avatar's
+    /// appearance changes, and once for each avatar already present when an
+    /// agent arrives.
+    ///
+    /// The [`texture_entry`](AvatarAppearance::texture_entry) is encoded as a
+    /// full per-avatar `TextureEntry` whose
+    /// [`avatar_texture`](crate::avatar_texture) baked slots name the
+    /// composited textures the receiver fetches; the optional
+    /// `AppearanceData` block is written whenever the record carries any of
+    /// its three fields. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_avatar_appearance(
+        &mut self,
+        appearance: &AvatarAppearance,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let appearance_data = if appearance.appearance_version.is_some()
+            || appearance.cof_version.is_some()
+            || appearance.appearance_flags.is_some()
+        {
+            vec![AvatarAppearanceAppearanceDataBlock {
+                appearance_version: appearance.appearance_version.unwrap_or(0),
+                cof_version: appearance.cof_version.unwrap_or(0),
+                flags: appearance.appearance_flags.unwrap_or(0),
+            }]
+        } else {
+            Vec::new()
+        };
+        let message = AnyMessage::AvatarAppearance(AvatarAppearanceWire {
+            sender: AvatarAppearanceSenderBlock {
+                id: appearance.avatar_id.uuid(),
+                is_trial: appearance.is_trial,
+            },
+            object_data: AvatarAppearanceObjectDataBlock {
+                texture_entry: crate::appearance::encode_texture_entry(&appearance.texture_entry),
+            },
+            visual_param: appearance
+                .visual_params
+                .iter()
+                .map(|&param_value| AvatarAppearanceVisualParamBlock { param_value })
+                .collect(),
+            appearance_data,
+            appearance_hover: appearance
+                .hover_height
+                .iter()
+                .map(|hover_height| AvatarAppearanceAppearanceHoverBlock {
+                    hover_height: hover_height.clone(),
+                })
+                .collect(),
+            attachment_block: appearance
+                .attachments
+                .iter()
+                .map(|attachment| AvatarAppearanceAttachmentBlockBlock {
+                    id: attachment.id.uuid(),
+                    attachment_point: attachment.attachment_point,
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `AvatarAnimation` — the complete, authoritative set of
+    /// animations an avatar is now playing (the inverse of the client's
+    /// [`Event::AvatarAnimation`](crate::Event::AvatarAnimation)). As with
+    /// [`send_object_animation`](Self::send_object_animation) the list is the
+    /// full state, not a delta: an animation that stops simply drops out of a
+    /// later update.
+    ///
+    /// An animation whose [`source_id`](PlayingAnimation::source_id) names the
+    /// object that triggered it is carried in the positionally-correlated
+    /// `AnimationSourceList`, which the receiver reads by index. The list is
+    /// written whole as soon as any animation has a source, and an animation
+    /// with none is stamped with the **avatar's own id** — what OpenSim's
+    /// `SendAnimations` does (`if (objectIDs[i].IsZero()) … = sourceAgentId`),
+    /// so a receiver never sees a nil source. Sent reliably.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_avatar_animation(
+        &mut self,
+        avatar_id: AgentKey,
+        animations: &[PlayingAnimation],
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let animation_source_list = if animations
+            .iter()
+            .any(|animation| animation.source_id.is_some())
+        {
+            animations
+                .iter()
+                .map(|animation| AvatarAnimationAnimationSourceListBlock {
+                    object_id: animation
+                        .source_id
+                        .as_ref()
+                        .map_or_else(|| avatar_id.uuid(), sl_types::key::ObjectKey::uuid),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let message = AnyMessage::AvatarAnimation(AvatarAnimationWire {
+            sender: AvatarAnimationSenderBlock {
+                id: avatar_id.uuid(),
+            },
+            animation_list: animations
+                .iter()
+                .map(|animation| AvatarAnimationAnimationListBlock {
+                    anim_id: animation.anim_id,
+                    anim_sequence_id: animation.sequence_id,
+                })
+                .collect(),
+            animation_source_list,
+            physical_avatar_event_list: Vec::new(),
+        });
+        self.send(&message, Reliability::Reliable, now)?;
+        Ok(())
+    }
+
+    /// Sends an `ImprovedTerseObjectUpdate` carrying the new motion of objects
+    /// the client already knows — the message a simulator sends every frame for
+    /// everything that moves (an avatar walking, a physical prim falling, an
+    /// attachment following its wearer). The client applies it to the object it
+    /// has and surfaces an
+    /// [`Event::ObjectUpdated`](crate::Event::ObjectUpdated); an id it does not
+    /// know it refetches in full instead.
+    ///
+    /// Only motion travels here — a terse update carries no identity, shape or
+    /// extra params — and the position is full precision while the velocity,
+    /// acceleration, rotation and angular velocity are 16-bit quantized. An
+    /// avatar's update additionally carries its collision plane
+    /// ([`ObjectMotion::collision_plane`](crate::ObjectMotion::collision_plane)).
+    /// Sent unreliably, as a simulator sends it: the next frame's update
+    /// supersedes a lost one.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::NoCircuit`] if the circuit is not open, or a wire error if
+    /// the message fails to encode.
+    pub fn send_terse_update(
+        &mut self,
+        updates: &[TerseUpdate],
+        time_dilation: u16,
+        now: Instant,
+    ) -> Result<(), Error> {
+        if self.client_addr.is_none() {
+            return Err(Error::NoCircuit);
+        }
+        let message = AnyMessage::ImprovedTerseObjectUpdate(ImprovedTerseObjectUpdate {
+            region_data: ImprovedTerseObjectUpdateRegionDataBlock {
+                region_handle: self.region_handle.0,
+                time_dilation,
+            },
+            object_data: updates
+                .iter()
+                .map(|update| ImprovedTerseObjectUpdateObjectDataBlock {
+                    data: crate::object_update::encode_terse_object_data(update),
+                    texture_entry: Vec::new(),
+                })
+                .collect(),
+        });
+        self.send(&message, Reliability::Unreliable, now)?;
         Ok(())
     }
 

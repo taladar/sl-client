@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 304 |
+| ready | 305 |
 | blocked | 60 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 945 |
+| done | 946 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1527** |
+| **total** | **1529** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (304)
+## ready (305)
 
 ### protocol
 
@@ -946,9 +946,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-npc-avatars`](ready/test-fake-grid-npc-avatars.md) — NPC
-  avatars with appearance, animations and attachments (blocked by
-  `test-fake-grid-render-fixtures` (done))
+- [`test-fake-grid-animation-assets`](ready/test-fake-grid-animation-assets.md)
+  — A synthetic animation asset the fake grid can actually serve
+- [`test-fake-grid-default-wearable-textures`](ready/test-fake-grid-default-wearable-textures.md)
+  — Serve the default wearable textures so the own avatar is not untextured
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1124,7 +1125,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
-  `test-fake-grid-npc-avatars`, `test-fake-grid-timeline`)
+  `test-fake-grid-npc-avatars` (done), `test-fake-grid-timeline`)
 - [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness`)
@@ -1334,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (945)
+## done (946)
 
 ### protocol
 
@@ -3119,6 +3120,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
+- [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
+  avatars with appearance, animations and attachments (blocked by
+  `test-fake-grid-render-fixtures` (done))
 - [`test-fake-grid-render-fixtures`](done/test-fake-grid-render-fixtures.md) —
   Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
   (blocked by `test-fake-grid-terrain-layerdata` (done),
