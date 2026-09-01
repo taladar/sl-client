@@ -417,9 +417,9 @@ pub use editing::{
     RezObjectParams, RezScriptParams, SaleType, SurfaceInfo, TaskInventoryKey, TeleportFlags,
 };
 pub use environment::{
-    CloudPosDensity, Color, ColorAlpha, DayCycle, DayCycleFrame, EnvironmentAsset,
-    EnvironmentSettings, EnvironmentUpdate, Glow, Scale, SkySettings, WaterSettings,
-    azimuth_altitude_to_rotation,
+    CloudPosDensity, Color, ColorAlpha, DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle,
+    DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
+    SkySettings, WaterSettings, azimuth_altitude_to_rotation,
 };
 pub use event::Event;
 pub use generic::{GenericMessage, GenericStreamingMessage};

@@ -82,6 +82,13 @@ pub struct EnvironmentUpdate {
 /// A day cycle: the tracks scheduling named frames over a day, plus the frame
 /// definitions the tracks reference by name.
 ///
+/// The sky and water frames are split into two maps here, but on the wire they
+/// share **one** `frames` map keyed by name (`LLSettingsDay`'s own layout, which
+/// both the `ExtEnvironment` envelope and a day-cycle settings asset carry). So
+/// a sky frame and a water frame with the same name collide: the encoder emits
+/// one map entry and only the last one written survives the round trip. Name
+/// them apart.
+///
 /// (Not `Eq`: the frames hold `f32` settings.)
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DayCycle {
@@ -264,6 +271,16 @@ pub struct WaterSettings {
     pub wave2_direction: [f32; 2],
 }
 
+/// The name of the sky frame [`EnvironmentSettings::legacy_windlight_default`]
+/// defines — and the name a fake grid's stock region environment reuses, so the
+/// two agree about what "the default sky" is called.
+pub const DEFAULT_SKY_FRAME: &str = "Default";
+
+/// The name of the water frame beside [`DEFAULT_SKY_FRAME`]. Distinct from it
+/// because the two kinds share one name namespace on the wire (see
+/// [`DayCycle`]).
+pub const DEFAULT_WATER_FRAME: &str = "Default Water";
+
 impl EnvironmentSettings {
     /// The built-in **legacy WindLight default** environment: the sky and water
     /// the reference viewer falls back to when a region advertises no Extended
@@ -272,10 +289,14 @@ impl EnvironmentSettings {
     /// — one midday sky frame and one water frame on a trivial single-keyframe day
     /// cycle. Used as the viewer's starting environment until a real
     /// [`Event::Environment`](crate::Event::Environment) arrives.
+    ///
+    /// The two frames are named apart rather than both "Default": sky and water
+    /// frames share one name namespace on the wire (see [`DayCycle`]), so a
+    /// same-named pair survives only as long as nothing serializes it.
     #[must_use]
     pub fn legacy_windlight_default() -> Self {
-        let sky = SkySettings::legacy_windlight_default("Default");
-        let water = WaterSettings::legacy_default("Default");
+        let sky = SkySettings::legacy_windlight_default(DEFAULT_SKY_FRAME);
+        let water = WaterSettings::legacy_default(DEFAULT_WATER_FRAME);
         let mut sky_frames = BTreeMap::new();
         drop(sky_frames.insert(sky.name.clone(), sky));
         let mut water_frames = BTreeMap::new();
@@ -295,8 +316,8 @@ impl EnvironmentSettings {
             track_altitudes: [1000.0, 2000.0, 3000.0],
             day_cycle: DayCycle {
                 name: "Default".to_owned(),
-                water_track: vec![frame("Default")],
-                sky_tracks: vec![vec![frame("Default")]],
+                water_track: vec![frame(DEFAULT_WATER_FRAME)],
+                sky_tracks: vec![vec![frame(DEFAULT_SKY_FRAME)]],
                 sky_frames,
                 water_frames,
             },
@@ -1346,7 +1367,7 @@ mod tests {
         // The built-in default cycle has one water keyframe, so every day position
         // blends the same frame with itself — its values unchanged.
         let env = EnvironmentSettings::legacy_windlight_default();
-        let reference = WaterSettings::legacy_default("Default");
+        let reference = WaterSettings::legacy_default(super::DEFAULT_WATER_FRAME);
         assert!(env.blended_water_settings(0.5).is_some_and(|noon| {
             noon.fresnel_scale.to_bits() == reference.fresnel_scale.to_bits()
                 && noon.water_fog_density.to_bits() == reference.water_fog_density.to_bits()

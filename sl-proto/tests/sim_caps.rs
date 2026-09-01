@@ -2687,6 +2687,52 @@ mod test {
         Ok(())
     }
 
+    /// The region environment a fresh sim serves **determines the sky**: it
+    /// carries a real sky and water frame, and resolves to the same frame at
+    /// every day position.
+    ///
+    /// Both halves are the point of the fixture. An environment with an empty
+    /// day cycle says nothing about the sky, so each client renders its own
+    /// built-in default and two viewers pointed at the same region disagree for
+    /// reasons that have nothing to do with either renderer. And a cycle with
+    /// more than one keyframe would make the answer depend on the region clock,
+    /// so two captures minutes apart would not be comparable either.
+    #[test]
+    fn the_served_region_environment_pins_the_sky_at_every_day_position() -> Result<(), TestError> {
+        let mut caps = new_caps()?;
+        let mut sim = new_sim();
+        seed_region_info(&mut sim);
+        let now = Instant::now();
+        let mut client = new_client()?;
+        let path = granted_cap_path(&caps, CAP_EXT_ENVIRONMENT)?;
+        let events = fold_into_client(
+            &mut caps,
+            &mut sim,
+            &mut client,
+            &get(&path, Some("parcelid=-1")),
+            CAP_EXT_ENVIRONMENT,
+            now,
+        )?;
+        let [Event::Environment(environment)] = events.as_slice() else {
+            return Err(format!("expected Environment, got {events:?}").into());
+        };
+        assert_eq!(environment.day_cycle.sky_frames.len(), 1);
+        assert_eq!(environment.day_cycle.water_frames.len(), 1);
+        let mut skies = Vec::new();
+        for position in [0.0_f32, 0.25, 0.5, 0.75, 1.0] {
+            skies.push(
+                environment
+                    .blended_sky_settings(0.0, position)
+                    .ok_or("the served environment resolves to no sky")?,
+            );
+        }
+        let first = skies.first().ok_or("no sky sampled")?;
+        for sky in &skies {
+            assert_eq!(sky, first, "the served sky depends on the day position");
+        }
+        Ok(())
+    }
+
     /// The `ExtEnvironment` PUT merges the update into the store (bumping
     /// `env_version`), echoes the stored result through the client fold,
     /// surfaces [`ServerEvent::EnvironmentUpdated`] for the driver, and the

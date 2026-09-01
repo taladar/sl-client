@@ -170,8 +170,9 @@ use crate::sim_voice::{SimVoice, VoiceProvisionOutcome, VoiceProvisionRefusal};
 use crate::types::directory::category_from_wire;
 use crate::types::{
     AlertInfo, AssetType, AttachmentMode, AttachmentPoint, AvatarAppearance, AvatarName,
-    AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, CoarseLocation, DayCycle,
-    DetachOrder, DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
+    AvatarPickerResult, Camera, ChatSource, ChatType, ClassifiedCategory, CoarseLocation,
+    DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle, DayCycleFrame, DetachOrder,
+    DirClassifiedResult, DirEventResult, DirFindFlags, DirGroupResult, DirLandResult,
     DirPeopleResult, DirPlaceResult, DirectoryVisibility, DisplayNameUpdate, EjectAction,
     EnvironmentSettings, EnvironmentUpdate, EstateCovenant, EventInfo, FeatureDisabled,
     FollowCamPropertyValue, FreezeAction, FriendRights, GenericMessage, GenericStreamingMessage,
@@ -186,10 +187,10 @@ use crate::types::{
     ProposalVoteId, RegionIdentity, RegionStats, Reliability, RequiredVoiceVersion, RestoreItem,
     RezAttachment, RezObjectParams, RezScriptParams, SaleType, ScriptControl,
     ScriptPermissionRequest, ScriptPermissions, ServerError, SetDisplayNameReply,
-    SimWideDeleteFlags, SimulatorTime, StartLocationSlot, TaskInventoryItem, TaskInventoryKey,
-    TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType, TerrainPatch, TextureEntry,
-    Throttle, TransferStatus, Transmit, UpdateGroupInfoParams, UserInfo, ViewerEffect,
-    ViewerEffectData, ViewerEffectType,
+    SimWideDeleteFlags, SimulatorTime, SkySettings, StartLocationSlot, TaskInventoryItem,
+    TaskInventoryKey, TaskInventoryReply, TelehubInfo, TerraformArea, TerrainLayerType,
+    TerrainPatch, TextureEntry, Throttle, TransferStatus, Transmit, UpdateGroupInfoParams,
+    UserInfo, ViewerEffect, ViewerEffectData, ViewerEffectType, WaterSettings,
 };
 use crate::types::{Event, EventId};
 use sl_wire::AbuseReport;
@@ -2867,9 +2868,38 @@ pub struct ObjectMediaState {
 
 /// The environment a fresh session's region entry starts from: SL's stock
 /// four-hour day (`day_length` 14400 s, `day_offset` 57600 s), version 1, the
-/// default sky-track altitude breakpoints, and an empty day cycle (both codec
-/// directions tolerate empty tracks/frames) named "Default Daycycle".
+/// default sky-track altitude breakpoints, and a **single-keyframe** day cycle
+/// named "Default Daycycle" carrying the reference viewer's own default sky and
+/// water frames ([`SkySettings::legacy_windlight_default`],
+/// [`WaterSettings::legacy_default`] — `LLSettingsSky::defaults` /
+/// `LLSettingsWater::defaults`).
+///
+/// The cycle was empty, and an empty one is not a neutral choice: it says
+/// nothing about the sky, so every client renders its *own* built-in default
+/// instead. Two viewers pointed at the same fake region then disagree for
+/// reasons that have nothing to do with either renderer, which makes the
+/// comparison this grid exists to support meaningless. Serving a real frame
+/// makes the sky wire-determined — both our viewer and Firestorm draw the
+/// bytes the region sent.
+///
+/// **One** keyframe, deliberately. A cycle with two frames renders differently
+/// depending on the region clock, so two captures minutes apart would not be
+/// comparable either; with a single keyframe the day position cannot change
+/// anything. A fixture that *wants* a moving sky sets its own environment
+/// (`RegionFixture::environment`) — `sl_test_assets::environment::day_cycle`
+/// is one — rather than making every region's captures time-dependent.
 fn default_region_environment() -> EnvironmentSettings {
+    let sky = SkySettings::legacy_windlight_default(DEFAULT_SKY_FRAME);
+    let water = WaterSettings::legacy_default(DEFAULT_WATER_FRAME);
+    // The two frames are named apart because sky and water frames share one
+    // name namespace on the wire (see `DayCycle`): a same-named pair encodes to
+    // a single map entry and the sky is the one lost.
+    let keyframe = |name: &str| {
+        vec![DayCycleFrame {
+            keyframe: 0.0,
+            name: name.to_owned(),
+        }]
+    };
     EnvironmentSettings {
         parcel_id: -1,
         region_id: Uuid::nil(),
@@ -2880,10 +2910,10 @@ fn default_region_environment() -> EnvironmentSettings {
         track_altitudes: [1000.0, 2000.0, 3000.0],
         day_cycle: DayCycle {
             name: "Default Daycycle".to_owned(),
-            water_track: Vec::new(),
-            sky_tracks: Vec::new(),
-            sky_frames: BTreeMap::new(),
-            water_frames: BTreeMap::new(),
+            water_track: keyframe(DEFAULT_WATER_FRAME),
+            sky_tracks: vec![keyframe(DEFAULT_SKY_FRAME)],
+            sky_frames: BTreeMap::from([(DEFAULT_SKY_FRAME.to_owned(), sky)]),
+            water_frames: BTreeMap::from([(DEFAULT_WATER_FRAME.to_owned(), water)]),
         },
     }
 }
