@@ -1590,6 +1590,50 @@ mod test {
         Ok(())
     }
 
+    /// Every built-in library texture a viewer falls back to on arrival — the
+    /// sun and moon discs, the cloud noise, the two sky overlays, the star
+    /// bloom, the wave normal and the blank plywood — is served under its real
+    /// Linden id, and what comes back decodes.
+    ///
+    /// Without them a stock arrival is eight fetches that each burn six
+    /// retries before giving up, drowning the arrival log; and the sky draws no
+    /// sun at all. Decoding rather than only length-checking is the point: an
+    /// unfetchable id and an id serving eight bytes of nothing fail the same
+    /// way in a renderer.
+    #[tokio::test]
+    async fn every_built_in_library_texture_is_fetchable() -> Result<(), TestError> {
+        let mut running = start().await?;
+        let wanted: Vec<uuid::Uuid> = sl_proto::BUILTIN_ENVIRONMENT_TEXTURES
+            .into_iter()
+            .chain(core::iter::once(sl_proto::DEFAULT_PRIM_TEXTURE))
+            .collect();
+        for id in wanted {
+            let texture_id = sl_client_tokio::TextureKey::from(id);
+            running
+                .commands
+                .send(Command::FetchTexture {
+                    texture_id,
+                    discard_level: sl_proto::j2c::DiscardLevel::FULL,
+                })
+                .await?;
+            let bytes = running
+                .wait_for(|event| match event {
+                    Event::TextureReceived(fetched) if fetched.id == texture_id => {
+                        Some(fetched.data.clone())
+                    }
+                    _ => None,
+                })
+                .await?;
+            let decoded = sl_texture::decode_j2c(&bytes, sl_proto::j2c::DiscardLevel::FULL)
+                .map_err(|error| format!("the built-in texture {id} did not decode: {error}"))?;
+            assert!(
+                decoded.width > 0 && decoded.height > 0,
+                "the built-in texture {id} decoded to nothing"
+            );
+        }
+        Ok(())
+    }
+
     /// The arriving agent is sent its **own** `AvatarAppearance`, and the
     /// bakes it names are fetchable.
     ///

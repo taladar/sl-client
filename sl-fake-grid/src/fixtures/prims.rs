@@ -474,13 +474,12 @@ fn neutral_face() -> TextureFace {
 }
 
 /// The blank-plywood texture id every fresh prim wears
-/// (`IMG_DEFAULT`/`TEXTURE_PLYWOOD`), so an untextured fixture face is what a
-/// freshly rezzed prim looks like rather than a nil-texture hole.
+/// ([`sl_proto::DEFAULT_PRIM_TEXTURE`]), so an untextured fixture face is what
+/// a freshly rezzed prim looks like rather than a nil-texture hole. The stock
+/// asset store answers it ([`default_assets`](crate::scenario::default_assets)).
 #[must_use]
 pub fn blank_texture() -> TextureKey {
-    TextureKey::from(uuid::Uuid::from_u128(
-        0x89556747_24cb_43ed_920b_47caed15465f,
-    ))
+    TextureKey::from(sl_proto::DEFAULT_PRIM_TEXTURE)
 }
 
 /// The objects of a **linkset**: the root followed by its children, each

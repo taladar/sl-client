@@ -67,7 +67,7 @@ use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     CloudMaterial, CloudParams, Color as SlColor, ColorAlpha, DecodedTexture, Glow, SkyMaterial,
     SkyParams, SkySettings, StarMaterial, StarParams, SunDiscMaterial, SunDiscParams, TextureKey,
-    Uuid, to_bevy_image,
+    to_bevy_image,
 };
 
 use crate::coords::sl_to_bevy_object_rotation;
@@ -254,15 +254,6 @@ fn snap_shadow_direction(direction: Vec3) -> Vec3 {
     snapped.try_normalize().unwrap_or(direction)
 }
 
-/// The reference viewer's built-in rainbow texture (`IMG_RAINBOW`,
-/// `llsettingssky.cpp`), sampled by the sky's rainbow overlay when the sky frame
-/// names none of its own.
-const IMG_RAINBOW: Uuid = Uuid::from_u128(0x11b4_c57c_56b3_04ed_1f82_2004_3638_82e4);
-
-/// The reference viewer's built-in 22° ice-halo texture (`IMG_HALO`,
-/// `llsettingssky.cpp`).
-const IMG_HALO: Uuid = Uuid::from_u128(0x1214_9143_f599_91a7_77ac_b52a_3c0f_59cd);
-
 /// The reference `LLSettingsSky::calculateLightSettings` `LIMIT` floor on the
 /// light's up component, so the altitude attenuation term stays finite.
 const LIGHT_UP_LIMIT: f32 = f32::EPSILON * 8.0;
@@ -286,18 +277,6 @@ pub(crate) const SUN_DISK_RADIUS: f32 = 0.5;
 
 /// The reference moon-disc radius (`MOON_DISK_RADIUS = SUN_DISK_RADIUS * 0.9`).
 pub(crate) const MOON_DISK_RADIUS: f32 = 0.45;
-
-/// The reference viewer's built-in sun-disc texture (`DEFAULT_SUN_ID`,
-/// `llsettingssky.cpp`), used when the sky frame names none of its own.
-const DEFAULT_SUN_ID: Uuid = Uuid::from_u128(0x32bf_bcea_24b1_fb9d_1ef9_48a2_8a63_730f);
-
-/// The reference viewer's built-in moon-disc texture (`DEFAULT_MOON_ID`,
-/// `llsettingssky.cpp`).
-const DEFAULT_MOON_ID: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4a1_c428);
-
-/// The reference viewer's built-in cloud-noise texture (`DEFAULT_CLOUD_ID`,
-/// `llsettingssky.cpp`), sampled when the sky frame names none of its own.
-const DEFAULT_CLOUD_ID: Uuid = Uuid::from_u128(0x1dc1_368f_e8fe_f02d_a08d_9d9f_11c1_af6b);
 
 /// The radius of the cloud dome, in metres — the reference `LLSettingsSky::
 /// DOME_RADIUS`. The cloud layer's *depth* is forced to the far clip plane by
@@ -336,11 +315,6 @@ const CLOUD_SCROLL_DIVISOR: f32 = 100.0;
 /// refreshed well within an hour; half the wrap period leaves ample margin, at
 /// one material re-prepare per half hour.
 const CLOUD_SCROLL_REANCHOR_SECS: f32 = 1800.0;
-
-/// The reference viewer's built-in bloom / star texture (`IMG_BLOOM1`,
-/// `llsettingssky.cpp`), sampled by the star field when the sky frame names none
-/// of its own.
-const IMG_BLOOM1: Uuid = Uuid::from_u128(0x3c59_f7fe_9dc8_47f9_8aaf_a9dd_1fbc_3bef);
 
 /// The number of stars in the field (the reference `LLVOWLSky::getStarsNumVerts`).
 const STAR_COUNT: usize = 1000;
@@ -416,7 +390,7 @@ pub(crate) struct SkyState {
     /// The single sky-dome material, updated each frame by [`drive_sky`].
     material: Handle<SkyMaterial>,
     /// The texture id currently requested for the rainbow overlay (from the active
-    /// sky frame, or the built-in [`IMG_RAINBOW`]).
+    /// sky frame, or the built-in [`sl_client_bevy::DEFAULT_RAINBOW_TEXTURE`]).
     rainbow_key: Option<TextureKey>,
     /// The texture id currently requested for the halo overlay.
     halo_key: Option<TextureKey>,
@@ -439,7 +413,7 @@ pub(crate) struct DiscState {
     /// The moon-disc material.
     moon_material: Handle<SunDiscMaterial>,
     /// The texture id currently requested for the sun disc (the active sky
-    /// frame's, or the built-in [`DEFAULT_SUN_ID`]).
+    /// frame's, or the built-in [`sl_client_bevy::DEFAULT_SUN_TEXTURE`]).
     sun_key: Option<TextureKey>,
     /// The texture id currently requested for the moon disc.
     moon_key: Option<TextureKey>,
@@ -456,7 +430,7 @@ pub(crate) struct CloudState {
     /// The single cloud-dome material, updated each frame by [`drive_clouds`].
     material: Handle<CloudMaterial>,
     /// The texture id currently requested for the cloud noise (the active sky
-    /// frame's, or the built-in [`DEFAULT_CLOUD_ID`]).
+    /// frame's, or the built-in [`sl_client_bevy::DEFAULT_CLOUD_TEXTURE`]).
     cloud_key: Option<TextureKey>,
     /// The current scroll rate, in offset units per second (the sky frame's
     /// `cloud_scroll_rate` over the reference divisor) — the value uploaded as
@@ -492,7 +466,7 @@ pub(crate) struct StarState {
     /// The single star-field material, updated each frame by [`drive_stars`].
     material: Handle<StarMaterial>,
     /// The texture id currently requested for the bloom / star texture (the active
-    /// sky frame's, or the built-in [`IMG_BLOOM1`]).
+    /// sky frame's, or the built-in [`sl_client_bevy::DEFAULT_BLOOM_TEXTURE`]).
     star_key: Option<TextureKey>,
 }
 
@@ -875,11 +849,11 @@ pub(crate) fn drive_sky(
     // `SkyState` changed with identical values.
     let rainbow_key = Some(
         sky.rainbow_texture
-            .unwrap_or_else(|| TextureKey::from(IMG_RAINBOW)),
+            .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_RAINBOW_TEXTURE)),
     );
     let halo_key = Some(
         sky.halo_texture
-            .unwrap_or_else(|| TextureKey::from(IMG_HALO)),
+            .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_HALO_TEXTURE)),
     );
     if state.rainbow_key != rainbow_key {
         if let Some(key) = rainbow_key {
@@ -1133,10 +1107,10 @@ pub(crate) fn drive_sun_moon_discs(
     // marks `TextureManager` and `DiscState` changed with identical values.
     let sun_key = sky
         .sun_texture
-        .unwrap_or_else(|| TextureKey::from(DEFAULT_SUN_ID));
+        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_SUN_TEXTURE));
     let moon_key = sky
         .moon_texture
-        .unwrap_or_else(|| TextureKey::from(DEFAULT_MOON_ID));
+        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_MOON_TEXTURE));
     if state.sun_key != Some(sun_key) {
         textures.request_boosted(sun_key, SKY_BOOST_PRIORITY);
         state.sun_key = Some(sun_key);
@@ -1342,7 +1316,7 @@ pub(crate) fn drive_clouds(
     // change — the boost request is persistent in the store.
     let cloud_key = sky
         .cloud_texture
-        .unwrap_or_else(|| TextureKey::from(DEFAULT_CLOUD_ID));
+        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_CLOUD_TEXTURE));
     if state.cloud_key != Some(cloud_key) {
         textures.request_boosted(cloud_key, SKY_BOOST_PRIORITY);
         state.cloud_key = Some(cloud_key);
@@ -1556,7 +1530,7 @@ pub(crate) fn drive_stars(
     // the boost request is persistent in the store.
     let star_key = sky
         .bloom_texture
-        .unwrap_or_else(|| TextureKey::from(IMG_BLOOM1));
+        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_BLOOM_TEXTURE));
     if state.star_key != Some(star_key) {
         textures.request_boosted(star_key, SKY_BOOST_PRIORITY);
         state.star_key = Some(star_key);

@@ -42,6 +42,9 @@ sl-anim = { workspace = true }
 sl-client-tokio = { workspace = true }
 # The catalogue's rigged mesh asset is read back through the viewer's decoder.
 sl-mesh = { workspace = true }
+# The built-in library textures are decoded back through the viewer's own
+# JPEG2000 decoder, so a served id proves it carries a real image.
+sl-texture = { path = "../sl-texture", version = "0.1.0" }
 # `test-util` for the paused clock the injectable-clock tests run on.
 tokio = { workspace = true, features = ["test-util"] }
 

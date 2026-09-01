@@ -28,9 +28,9 @@ wearables and gestures, and there is no `.wav`/`.ogg` anywhere in its
 tree. So the bytes have to come from somewhere else:
 
 - serve a synthetic sound per id from `scenario::default_assets`, the
-  way [[test-fake-grid-builtin-textures]] proposes for the sky and prim
+  way [[test-fake-grid-builtin-textures]] now does for the sky and prim
   textures — a fake grid *is* a grid with a library, so answering a
-  library id is honest; or
+  library id is honest, and that task settled the precedent; or
 - teach `sound_cache` that a known built-in with no asset is not worth
   retrying, which removes the noise without inventing bytes, and is
   probably wanted regardless of the above.

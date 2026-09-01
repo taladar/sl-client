@@ -8638,6 +8638,7 @@ dependencies = [
  "sl-mesh",
  "sl-proto",
  "sl-test-assets",
+ "sl-texture",
  "sl-types",
  "sl-wire",
  "thiserror 2.0.19",

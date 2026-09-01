@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 310 |
+| ready | 309 |
 | blocked | 59 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 953 |
+| done | 954 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1540** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (310)
+## ready (309)
 
 ### protocol
 
@@ -957,8 +957,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
-- [`test-fake-grid-builtin-textures`](ready/test-fake-grid-builtin-textures.md)
-  — Serve the built-in sky, water and prim textures the viewer asks for
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -1345,7 +1343,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (953)
+## done (954)
 
 ### protocol
 
@@ -3141,6 +3139,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-fake-grid-animation-assets`](done/test-fake-grid-animation-assets.md) —
   A synthetic animation asset the fake grid can actually serve
+- [`test-fake-grid-builtin-textures`](done/test-fake-grid-builtin-textures.md) —
+  Serve the built-in sky, water and prim textures the viewer asks for
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC

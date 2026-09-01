@@ -456,6 +456,20 @@ stock scenario registers a JPEG2000 solid for each of the four default
 Linden ids (`scenario::default_assets`, from `sl-test-assets`) so the
 ground shades against real textures instead of four failed fetches.
 
+`default_assets` carries the rest of the **library** a viewer asks any
+grid for before it has been told about a single fixture: the built-in sun
+and moon discs, the cloud noise, the rainbow and halo overlays, the star
+bloom, the wave normal map and the blank plywood every untextured prim
+face falls back to
+(`sl_proto::BUILTIN_ENVIRONMENT_TEXTURES` plus
+`sl_proto::DEFAULT_PRIM_TEXTURE`; the pixels come from
+`sl_test_assets::builtin`). No viewer ships these — Firestorm marks the
+sky ones `// dataserver` — so without them an arrival is eight fetches
+that each burn a full retry budget, and the sky draws no sun at all.
+They are stand-ins rather than Linden's own pixels, shaped to be
+recognisable in the role: a disc reads as a sun, and the halo's bright
+band sits at the 22° radius the shader samples it at.
+
 `RegionConfig::environment` is the region's other environmental half: an
 `EnvironmentSettings` (day cycle, day length, sky-track altitudes) served
 by the `ExtEnvironment` capability. Left `None`, the session's stock
@@ -565,8 +579,9 @@ sit in "connecting" — the signalling, not the audio, is what this
 exercises. Chat-session channels can be gated with
 `set_channel_credentials(channel, credentials)`.
 
-The stock `Scenario` is intentionally small (an inventory skeleton, a library,
-one parcel, one box, a chat greeting, WebRTC voice signalling). A real viewer
+The stock `Scenario` is intentionally small (an inventory skeleton, a library
+of the twelve textures above, one parcel, one box, a chat greeting, WebRTC
+voice signalling). A real viewer
 will ask for much more — terrain, appearance, textures — and renders a login
 into a nearly empty world; growing the default scenario against what a viewer
 actually requests is expected iteration, not a bug. Firestorm's seed-request

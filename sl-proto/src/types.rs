@@ -391,8 +391,8 @@ pub use appearance::{
     TextureEntry, TextureFace, Wearable, WearableType, avatar_texture,
 };
 pub use asset::{
-    Asset, AssetType, AssetUpdateLocation, ImageCodec, InventoryType, NotUpdatableAssetType,
-    Texture, TransferStatus, UpdatableAssetType,
+    Asset, AssetType, AssetUpdateLocation, DEFAULT_PRIM_TEXTURE, ImageCodec, InventoryType,
+    NotUpdatableAssetType, Texture, TransferStatus, UpdatableAssetType,
 };
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,
@@ -417,8 +417,10 @@ pub use editing::{
     RezObjectParams, RezScriptParams, SaleType, SurfaceInfo, TaskInventoryKey, TeleportFlags,
 };
 pub use environment::{
-    CloudPosDensity, Color, ColorAlpha, DEFAULT_SKY_FRAME, DEFAULT_WATER_FRAME, DayCycle,
-    DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
+    BUILTIN_ENVIRONMENT_TEXTURES, CloudPosDensity, Color, ColorAlpha, DEFAULT_BLOOM_TEXTURE,
+    DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_RAINBOW_TEXTURE,
+    DEFAULT_SKY_FRAME, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_FRAME, DEFAULT_WATER_NORMAL_TEXTURE,
+    DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,
     SkySettings, WaterSettings, azimuth_altitude_to_rotation,
 };
 pub use event::Event;

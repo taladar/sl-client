@@ -106,10 +106,20 @@ impl Default for Scenario {
     }
 }
 
-/// The stock asset store: one JPEG2000 solid per default Linden terrain
-/// detail texture, so the ground a region streams shades against four real
-/// textures instead of four failed fetches. A colour that cannot be encoded
-/// is simply not registered (the encoder cannot fail on a solid).
+/// The stock asset store: the **library** textures a viewer asks any grid for
+/// before it has been told about a single fixture — one JPEG2000 solid per
+/// default Linden terrain detail texture, and one stand-in per built-in sky,
+/// water and prim texture
+/// ([`sl_test_assets::builtin::library_textures`]).
+///
+/// A fake grid is a grid *with a library*, so answering a Linden library id
+/// under its real UUID is honest — and not answering is expensive: each of the
+/// twelve is otherwise a fetch that burns its whole retry budget on every
+/// arrival, and the ground shades flat, the sky has no sun in it, and every
+/// untextured fixture prim is a hole.
+///
+/// A texture that cannot be encoded is simply not registered (none of these
+/// can fail: they are all small, non-empty and four-component).
 #[must_use]
 pub fn default_assets() -> sl_proto::InMemoryAssetSource {
     let mut assets = sl_proto::InMemoryAssetSource::new();
@@ -120,6 +130,14 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
             }
         }
         Err(error) => tracing::warn!("encoding the terrain detail textures failed: {error}"),
+    }
+    match sl_test_assets::builtin::library_textures() {
+        Ok(builtins) => {
+            for (id, j2c) in builtins {
+                let _previous = assets.insert(AssetKey::from(id), j2c);
+            }
+        }
+        Err(error) => tracing::warn!("encoding the built-in library textures failed: {error}"),
     }
     assets
 }
@@ -392,7 +410,27 @@ mod test {
                 "no asset registered for detail texture {id}"
             );
         }
-        assert_eq!(assets.len(), 4);
+    }
+
+    /// Every library texture a viewer falls back to is answered, so an arrival
+    /// costs no failed fetch — the sky's sun and moon in particular, which are
+    /// discs a viewer draws and no viewer ships.
+    #[test]
+    fn the_stock_assets_hold_every_builtin_library_texture() {
+        let assets = default_assets();
+        for id in sl_proto::BUILTIN_ENVIRONMENT_TEXTURES {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for built-in texture {id}"
+            );
+        }
+        assert!(
+            assets.contains(AssetKey::from(sl_proto::DEFAULT_PRIM_TEXTURE)),
+            "no asset registered for the blank-plywood prim texture"
+        );
+        // The four terrain solids and the eight built-ins, and nothing else: a
+        // stock scenario's store is the library, not a fixture dump.
+        assert_eq!(assets.len(), 12);
     }
 
     #[test]

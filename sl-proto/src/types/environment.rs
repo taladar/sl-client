@@ -281,6 +281,60 @@ pub const DEFAULT_SKY_FRAME: &str = "Default";
 /// [`DayCycle`]).
 pub const DEFAULT_WATER_FRAME: &str = "Default Water";
 
+/// The built-in sun-disc texture (`DEFAULT_SUN_ID`, `llsettingssky.cpp`) — what
+/// a renderer samples when [`SkySettings::sun_texture`] is `None`.
+pub const DEFAULT_SUN_TEXTURE: Uuid = Uuid::from_u128(0x32bf_bcea_24b1_fb9d_1ef9_48a2_8a63_730f);
+
+/// The built-in moon-disc texture (`DEFAULT_MOON_ID`, `llsettingssky.cpp`) —
+/// what a renderer samples when [`SkySettings::moon_texture`] is `None`.
+pub const DEFAULT_MOON_TEXTURE: Uuid = Uuid::from_u128(0xd07f_6eed_b96a_47cd_b51d_400a_d4a1_c428);
+
+/// The built-in cloud-noise texture (`DEFAULT_CLOUD_ID`, `llsettingssky.cpp`) —
+/// what a renderer samples when [`SkySettings::cloud_texture`] is `None`.
+pub const DEFAULT_CLOUD_TEXTURE: Uuid = Uuid::from_u128(0x1dc1_368f_e8fe_f02d_a08d_9d9f_11c1_af6b);
+
+/// The built-in rainbow texture (`IMG_RAINBOW`, `llsettingssky.cpp`) — what a
+/// renderer samples for the rainbow overlay when [`SkySettings::rainbow_texture`]
+/// is `None`. Sampled by *row*: the vertical axis sweeps the band, the
+/// horizontal axis selects the droplet-radius variant.
+pub const DEFAULT_RAINBOW_TEXTURE: Uuid =
+    Uuid::from_u128(0x11b4_c57c_56b3_04ed_1f82_2004_3638_82e4);
+
+/// The built-in 22° ice-halo texture (`IMG_HALO`, `llsettingssky.cpp`) — what a
+/// renderer samples for the halo overlay when [`SkySettings::halo_texture`] is
+/// `None`. Sampled at column zero, so only its vertical profile matters.
+pub const DEFAULT_HALO_TEXTURE: Uuid = Uuid::from_u128(0x1214_9143_f599_91a7_77ac_b52a_3c0f_59cd);
+
+/// The built-in bloom / star texture (`IMG_BLOOM1`, `llsettingssky.cpp`) — what
+/// the star field samples when [`SkySettings::bloom_texture`] is `None`. Drawn
+/// additively, so its dark texels contribute nothing.
+pub const DEFAULT_BLOOM_TEXTURE: Uuid = Uuid::from_u128(0x3c59_f7fe_9dc8_47f9_8aaf_a9dd_1fbc_3bef);
+
+/// The built-in wave normal map (`DEFAULT_WATER_NORMAL`, `indra_constants.cpp`)
+/// — what the water surface samples when [`WaterSettings::normal_map`] is
+/// `None`.
+pub const DEFAULT_WATER_NORMAL_TEXTURE: Uuid =
+    Uuid::from_u128(0x822d_ed49_9a6c_f61c_cb89_6df5_4f42_cdf4);
+
+/// Every built-in environment texture a renderer falls back to, in one list, so
+/// a grid fixture can answer the whole set and a test can prove none was
+/// forgotten.
+///
+/// The reference viewer ships **none** of these — Firestorm marks the sky ones
+/// `// dataserver` and its `static_assets` folders hold only animations,
+/// wearables and gestures — so on a real grid they are ordinary library assets
+/// fetched over `GetTexture` like any other. A fake grid that serves no
+/// substitute leaves a viewer retrying seven fetches on every arrival.
+pub const BUILTIN_ENVIRONMENT_TEXTURES: [Uuid; 7] = [
+    DEFAULT_SUN_TEXTURE,
+    DEFAULT_MOON_TEXTURE,
+    DEFAULT_CLOUD_TEXTURE,
+    DEFAULT_RAINBOW_TEXTURE,
+    DEFAULT_HALO_TEXTURE,
+    DEFAULT_BLOOM_TEXTURE,
+    DEFAULT_WATER_NORMAL_TEXTURE,
+];
+
 impl EnvironmentSettings {
     /// The built-in **legacy WindLight default** environment: the sky and water
     /// the reference viewer falls back to when a region advertises no Extended

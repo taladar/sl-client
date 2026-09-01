@@ -162,7 +162,7 @@ impl GridTest for SetAppearance {
             let grid = ctx.grid();
             // A real, permanently-served texture to advertise on the baked slots,
             // so the published appearance names an asset both grids actually hold.
-            let reference = fixtures::plywood_texture()?;
+            let reference = fixtures::plywood_texture();
 
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;

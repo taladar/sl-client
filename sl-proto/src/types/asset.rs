@@ -736,6 +736,15 @@ impl TransferStatus {
     }
 }
 
+/// The blank-plywood texture (`IMG_DEFAULT` / `TEXTURE_PLYWOOD`,
+/// `indra_constants.cpp`) every freshly rezzed prim wears and every prim face
+/// that names no texture of its own falls back to.
+///
+/// Like the [`BUILTIN_ENVIRONMENT_TEXTURES`](crate::BUILTIN_ENVIRONMENT_TEXTURES)
+/// this is an ordinary library asset on both grids — no viewer ships it — so a
+/// fake grid has to serve it or every untextured fixture prim is a failed fetch.
+pub const DEFAULT_PRIM_TEXTURE: Uuid = Uuid::from_u128(0x8955_6747_24cb_43ed_920b_47ca_ed15_465f);
+
 /// A fetched texture: its asset id, the codec the simulator reported (UDP path)
 /// and the raw encoded image bytes (a JPEG-2000 codestream for the usual
 /// [`J2c`](ImageCodec::J2c) codec). The bytes are **not** decoded into pixels —

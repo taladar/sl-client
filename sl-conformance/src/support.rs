@@ -400,8 +400,10 @@ pub mod fixtures {
     use crate::context::TestFailure;
 
     /// The standard SL/OpenSim "plywood" default texture, present on any stock
-    /// grid; used by `asset-decode` as a guaranteed-fetchable asset.
-    pub const PLYWOOD_TEXTURE: &str = "89556747-24cb-43ed-920b-47caed15465f";
+    /// grid; used by `asset-decode` as a guaranteed-fetchable asset. Taken from
+    /// the protocol crate rather than restated, so a case fetches the id the
+    /// renderer falls back to.
+    pub const PLYWOOD_TEXTURE: Uuid = sl_client_tokio::DEFAULT_PRIM_TEXTURE;
 
     /// The local OpenSim "Default Region" UUID, from this workspace's
     /// `Regions/Regions.ini` (the region at grid location 1000,1000).
@@ -443,12 +445,9 @@ pub mod fixtures {
     }
 
     /// The plywood default texture as a typed [`TextureKey`].
-    ///
-    /// # Errors
-    ///
-    /// Returns [`TestFailure::Assertion`] if the constant is malformed.
-    pub fn plywood_texture() -> Result<TextureKey, TestFailure> {
-        Ok(TextureKey::from(uuid(PLYWOOD_TEXTURE)?))
+    #[must_use]
+    pub fn plywood_texture() -> TextureKey {
+        TextureKey::from(PLYWOOD_TEXTURE)
     }
 }
 
@@ -499,11 +498,12 @@ mod tests {
     /// The fixture UUID constants parse, and the typed accessor matches.
     #[test]
     fn fixtures_parse() -> Result<(), crate::context::TestFailure> {
-        let plywood = fixtures::uuid(fixtures::PLYWOOD_TEXTURE)?;
         let _region = fixtures::uuid(fixtures::OPENSIM_DEFAULT_REGION)?;
         assert!(matches!(fixtures::uuid("not-a-uuid"), Err(_failure)));
-        let texture = fixtures::plywood_texture()?;
-        assert_eq!(texture.uuid(), plywood);
+        assert_eq!(
+            fixtures::plywood_texture().uuid(),
+            fixtures::PLYWOOD_TEXTURE
+        );
         Ok(())
     }
 }

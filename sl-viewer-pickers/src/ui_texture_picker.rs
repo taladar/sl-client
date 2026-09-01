@@ -60,10 +60,6 @@ use sl_client_bevy::SlCommand;
 /// The blank / white texture (`IMG_WHITE`) the **Blank** quick choice picks.
 const IMG_BLANK: Uuid = Uuid::from_u128(0x5748_decc_f629_461c_9a36_a35a_221f_e21f);
 
-/// The default object texture (`IMG_DEFAULT`, plywood) the **Default** quick
-/// choice picks.
-const IMG_DEFAULT: Uuid = Uuid::from_u128(0x8955_6747_24cb_43ed_920b_47ca_ed15_465f);
-
 /// A tree row's height, in logical pixels.
 const ROW_HEIGHT: f32 = 20.0;
 
@@ -1257,7 +1253,11 @@ fn on_picker_button(
             select_texture(&mut state, TextureKey::from(IMG_BLANK), &mut picked);
         }
         PickerButton::Default => {
-            select_texture(&mut state, TextureKey::from(IMG_DEFAULT), &mut picked);
+            select_texture(
+                &mut state,
+                TextureKey::from(sl_client_bevy::DEFAULT_PRIM_TEXTURE),
+                &mut picked,
+            );
         }
         PickerButton::Ok => {
             if let Some(requester) = state.requester {

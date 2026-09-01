@@ -50,7 +50,7 @@ use bevy::render::extract_resource::ExtractResource;
 use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use sl_client_bevy::{
     Color as SlColor, DecodedTexture, RegionHandle, SlEvent, SlIdentity, SlSessionEvent,
-    TextureKey, Uuid, WaterMaterial, WaterParams, WaterSettings,
+    TextureKey, WaterMaterial, WaterParams, WaterSettings,
 };
 
 use crate::coords::sl_to_bevy_object_rotation;
@@ -112,11 +112,6 @@ pub(crate) const DEFAULT_WATER_HEIGHT: f32 = 20.0;
 /// on what a void cell should inherit from the regions around it.
 const HEIGHT_EPSILON: f32 = 0.05;
 
-/// The reference viewer's built-in wave normal map (`DEFAULT_WATER_NORMAL`,
-/// `indra/llcommon/indra_constants.cpp`), sampled when the water frame names none
-/// of its own.
-const DEFAULT_WATER_NORMAL: Uuid = Uuid::from_u128(0x822d_ed49_9a6c_f61c_cb89_6df5_4f42_cdf4);
-
 /// The current agent-region water level, in world metres — the height the endless
 /// ocean sits at. Published each frame by [`drive_water`] so the underwater-fog
 /// post-process ([`crate::underwater_fog`]) knows where the surface is without
@@ -168,7 +163,7 @@ pub struct WaterState {
     /// The water height learned for each region from its handshake.
     region_heights: HashMap<RegionHandle, f32>,
     /// The texture id currently requested for the wave normal map (the water
-    /// frame's own, or the built-in [`DEFAULT_WATER_NORMAL`]).
+    /// frame's own, or the built-in [`sl_client_bevy::DEFAULT_WATER_NORMAL_TEXTURE`]).
     normal_key: Option<TextureKey>,
 }
 
@@ -382,7 +377,7 @@ pub(crate) fn drive_water(
     // reference built-in) so it resolves ahead of ordinary faces.
     let normal_key = water
         .normal_map
-        .unwrap_or_else(|| TextureKey::from(DEFAULT_WATER_NORMAL));
+        .unwrap_or_else(|| TextureKey::from(sl_client_bevy::DEFAULT_WATER_NORMAL_TEXTURE));
     // Only on a key change: the boost request is persistent in the store, and a
     // per-frame re-request marks `TextureManager` and `WaterState` changed with
     // identical values.

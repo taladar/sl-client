@@ -29,7 +29,7 @@ impl GridTest for AssetDecode {
 
     fn run<'a>(&'a self, ctx: &'a mut TestContext) -> TestFuture<'a> {
         Box::pin(async move {
-            let texture_id = fixtures::plywood_texture()?;
+            let texture_id = fixtures::plywood_texture();
 
             let session = ctx.primary();
             session.wait_for_region(REGION_TIMEOUT).await?;

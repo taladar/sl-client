@@ -22,8 +22,15 @@
 //! oracles what the marker colours are to the pixel ones) and
 //! [`environment::night_sky_asset`] (an EEP settings asset, whose brightness is
 //! to an environment oracle the same thing).
+//!
+//! [`builtin`] is the odd one out: not fixtures a test names, but stand-ins for
+//! the Linden **library** textures a viewer asks every grid for on arrival — the
+//! sun and moon discs, the cloud noise, the sky overlays, the wave normal and
+//! the blank plywood. A fake grid serves those under their real ids, because a
+//! grid with a library is exactly what it is pretending to be.
 
 pub mod anim;
+pub mod builtin;
 pub mod environment;
 pub mod mesh;
 pub mod rigged;
@@ -63,7 +70,7 @@ pub struct RgbaImage {
 
 impl RgbaImage {
     /// A `size`×`size` image painted by `paint(x, y)`.
-    fn painted(size: u32, paint: impl Fn(u32, u32) -> [u8; 4]) -> Self {
+    pub(crate) fn painted(size: u32, paint: impl Fn(u32, u32) -> [u8; 4]) -> Self {
         let mut pixels = Vec::new();
         for y in 0..size {
             for x in 0..size {
@@ -198,7 +205,7 @@ pub fn sculpt_sphere(size: u32) -> RgbaImage {
     clippy::cast_sign_loss,
     reason = "the value is clamped into 0..=255 before the cast; no From impl exists"
 )]
-const fn round_to_u8(value: f32) -> u8 {
+pub(crate) const fn round_to_u8(value: f32) -> u8 {
     value.round().clamp(0.0, 255.0) as u8
 }
 
