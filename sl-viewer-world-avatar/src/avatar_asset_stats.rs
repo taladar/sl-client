@@ -74,7 +74,7 @@ mod tests {
     fn avatar_stores_publish_only_while_something_is_looking() {
         let mut app = App::new();
         app.add_plugins(AvatarAssetStatsPlugin)
-            .insert_resource(AnimationManager::new(None))
+            .insert_resource(AnimationManager::new())
             .init_resource::<WearableAssetManager>();
 
         app.update();
@@ -103,7 +103,7 @@ mod tests {
     fn publisher_covers_every_avatar_store() {
         let mut app = App::new();
         app.init_resource::<PipelineStats>()
-            .insert_resource(AnimationManager::new(None))
+            .insert_resource(AnimationManager::new())
             .init_resource::<WearableAssetManager>()
             .add_systems(Update, publish_avatar_asset_store_stats);
         app.update();

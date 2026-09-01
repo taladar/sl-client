@@ -105,5 +105,6 @@ fixed here and written up in the book chapter:
   `native WxH`, which read `64x64` while the grid served 512².
 
 Also noticed and filed rather than fixed here:
-[[test-fake-grid-default-wearable-textures]] — the *own* avatar's default
-wearable textures 404 against the fake grid.
+[[test-fake-grid-builtin-textures]] — eight built-in textures 404 against
+the fake grid. (Filed under a wrong name: they are the sky/water and
+default-prim textures, not wearable ones. Re-diagnosed 2026-09-01.)

@@ -17,11 +17,14 @@
 //! - [`entry`] — the shared, opaque asset object.
 //! - [`store`] — the weak-reference fetch/cache store.
 //! - [`progress`] — fetch progress observation and priority.
+//! - [`static_assets`] — the viewer-shipped, fixed-UUID assets the store
+//!   answers from before it ever reaches the network.
 
 pub mod disk;
 pub mod entry;
 pub mod fetcher;
 pub mod progress;
+pub mod static_assets;
 pub mod store;
 
 pub use disk::{AssetDiskCache, CacheLimits};
@@ -29,6 +32,7 @@ pub use entry::AssetEntry;
 pub use fetcher::{AssetFetcher, AssetRef, BlobFetcher, FetchChunk, FetchError};
 pub use progress::{AssetProgress, Priority};
 pub use sl_asset_sched::{GateStats, StoreStats};
+pub use static_assets::StaticAssetLibrary;
 pub use store::{AssetError, AssetStore};
 
 pub use sl_proto::{AssetKey, AssetType};

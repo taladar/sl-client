@@ -78,7 +78,7 @@ pub(crate) fn world_app() -> App {
     app.insert_resource(crate::settings::ViewerSettings::declared_for_test(
         crate::REGISTRARS,
     ));
-    app.insert_resource(crate::animations::AnimationManager::new(None));
+    app.insert_resource(crate::animations::AnimationManager::new());
     app.init_resource::<crate::camera::CameraStart>();
     app.init_resource::<SlIdentity>();
     // Resources world-group systems read but other groups own: the edit

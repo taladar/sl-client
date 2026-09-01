@@ -198,10 +198,6 @@ pub struct AnimationManager {
     /// The store's HTTP fetcher, kept so its `ViewerAsset` capability URL can be
     /// refreshed on a region change.
     fetcher: Arc<BevyAssetFetcher>,
-    /// The `--viewer-assets` directory, searched for a `<uuid>.anim` built-in
-    /// file before falling back to the `ViewerAsset` fetch; `None` when the flag
-    /// was not given.
-    viewer_assets: Option<PathBuf>,
     /// The background resolve+decode task per animation id, polled to completion
     /// by [`poll_animations`]; presence means "already being resolved".
     inflight: HashMap<AssetKey, Task<Option<Motion>>>,
@@ -212,25 +208,36 @@ pub struct AnimationManager {
     /// that failed — so [`request`](Self::request) does not retry them forever.
     unavailable: HashSet<AssetKey>,
     /// Ids requested before the region's `ViewerAsset` capability was known (and
-    /// with no local `.anim` to read instead), held here so the fetch is not run —
+    /// not shipped as a static asset either), held here so the fetch is not run —
     /// and the id not marked permanently [`unavailable`](Self::unavailable) — until
     /// the cap arrives. Drained by `retry_pending`.
     pending: HashSet<AssetKey>,
 }
 
+impl Default for AnimationManager {
+    /// [`AnimationManager::new`]: the manager takes no configuration of its
+    /// own — where an animation's bytes come from is the asset store's
+    /// business.
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AnimationManager {
     /// Build the manager over a fresh [`BevyAssetFetcher`], backed by the on-disk
     /// asset cache when a cache directory is available (falling back to an
-    /// in-memory-only store), and searching `viewer_assets` for local built-in
-    /// `.anim` files.
+    /// in-memory-only store).
+    ///
+    /// A built-in animation the viewer *ships* is answered by the store's
+    /// static-asset library (`sl_asset::static_assets`) rather than by anything
+    /// here, so this manager has no local-file path of its own.
     #[must_use]
-    pub fn new(viewer_assets: Option<PathBuf>) -> Self {
+    pub fn new() -> Self {
         let fetcher = Arc::new(BevyAssetFetcher::new());
         let store = build_asset_store(&fetcher, animation_cache_dir());
         Self {
             store,
             fetcher,
-            viewer_assets,
             inflight: HashMap::new(),
             motions: HashMap::new(),
             unavailable: HashSet::new(),
@@ -264,17 +271,12 @@ impl AnimationManager {
             let _inserted = self.unavailable.insert(id);
             return;
         }
-        let local = self
-            .viewer_assets
-            .as_ref()
-            .map(|dir| dir.join(format!("{}.anim", id.uuid())));
-        // A downloadable `.anim` comes over the `ViewerAsset` cap unless a local
-        // built-in file can satisfy it. If neither is available yet (the cap is not
-        // set), hold the request rather than run a fetch that would fail and mark
-        // the animation permanently unavailable; `retry_pending` re-issues it once
-        // the cap arrives.
-        let local_exists = local.as_ref().is_some_and(|path| path.exists());
-        if !local_exists && !self.fetcher.has_cap_url() {
+        // A downloadable `.anim` comes over the `ViewerAsset` cap unless the
+        // store ships it as a static asset. If neither is available yet (the cap
+        // is not set), hold the request rather than run a fetch that would fail
+        // and mark the animation permanently unavailable; `retry_pending`
+        // re-issues it once the cap arrives.
+        if !self.store.holds_static(id) && !self.fetcher.has_cap_url() {
             let _inserted = self.pending.insert(id);
             return;
         }
@@ -283,31 +285,22 @@ impl AnimationManager {
         debug!("resolving animation {} (`{label}`)", id.uuid());
         let store = self.store.clone();
         let task = IoTaskPool::get().spawn(async move {
-            // A pre-provisioned built-in `.anim` on disk wins; otherwise fetch the
-            // asset over `ViewerAsset`. Both the blocking file read and HTTP fetch
-            // run on this IoTaskPool thread, and the decode with them, so the
-            // render thread never touches animation bytes.
-            let bytes = match local {
-                Some(path) if path.exists() => match fs_err::read(&path) {
-                    Ok(bytes) => bytes,
-                    Err(error) => {
-                        warn!("reading local animation {}: {error}", path.display());
+            // The store answers from its static library, its disk cache or the
+            // `ViewerAsset` capability, in that order. Both the blocking reads
+            // and the HTTP fetch run on this IoTaskPool thread, and the decode
+            // with them, so the render thread never touches animation bytes.
+            let bytes = match store.get(id, AssetType::Animation).await {
+                Ok(entry) => match entry.data() {
+                    Some(data) => data.to_vec(),
+                    None => {
+                        warn!("animation {} fetched but has no data", id.uuid());
                         return None;
                     }
                 },
-                _absent => match store.get(id, AssetType::Animation).await {
-                    Ok(entry) => match entry.data() {
-                        Some(data) => data.to_vec(),
-                        None => {
-                            warn!("animation {} fetched but has no data", id.uuid());
-                            return None;
-                        }
-                    },
-                    Err(error) => {
-                        warn!("fetching animation {} over ViewerAsset: {error}", id.uuid());
-                        return None;
-                    }
-                },
+                Err(error) => {
+                    warn!("fetching animation {}: {error}", id.uuid());
+                    return None;
+                }
             };
             match Motion::from_bytes(&bytes) {
                 Ok(motion) => Some(motion),

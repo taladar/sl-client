@@ -1,9 +1,16 @@
-# Vendored Linden character assets
+# Vendored Linden viewer assets
 
-`character/` is a verbatim copy of the Second Life viewer's client-side
-avatar assets — `avatar_lad.xml` (the visual-parameter table),
-`avatar_skeleton.xml`, the base body meshes (`*.llm`), and the static
-bake-layer textures (`*.tga`).
+Three directories of upstream content, all copied verbatim from a
+Firestorm checkout:
+
+- `character/` — the client-side avatar assets: `avatar_lad.xml` (the
+  visual-parameter table), `avatar_skeleton.xml`, the base body meshes
+  (`*.llm`), and the static bake-layer textures (`*.tga`).
+- `static_assets/` — the fixed-UUID assets a **grid** would otherwise
+  serve, named `<uuid>.<class>`: 118 `.animatn` built-in agent
+  animations, 76 `.gesture`, 49 `.clothing` and 48 `.bodypart` library
+  wearables.
+- `fs_static_assets/` — 11 more `.animatn`, Firestorm's own additions.
 
 ## Provenance
 
@@ -12,7 +19,9 @@ Copied from the Firestorm viewer source tree:
 - checkout: `git@github.com:TommyTheTerrible/Firestorm-Vulkan.git`
   (a fork of `FirestormViewer/phoenix-firestorm`)
 - revision: `d95dde1f8e96adabedea8234bc4aabcf8377f40c`
-- path: `indra/newview/character/`
+- paths: `indra/newview/character/`,
+  `indra/newview/app_settings/static_assets/`,
+  `indra/newview/app_settings/fs_static_assets/`
 
 ## Licence
 
@@ -24,7 +33,7 @@ redistributed verbatim beside this file as [LGPL-license.txt]
 ship in this tree. "Second Life" and "Linden Lab" are registered
 trademarks of Linden Research, Inc.
 
-## Consumers
+## Consumers of `character/`
 
 - `AvatarAssetLibrary::load` (`sl-viewer-kit/src/avatar_assets.rs`)
   parses the skeleton, the LAD table and the meshes; the viewer loads
@@ -43,7 +52,33 @@ trademarks of Linden Research, Inc.
   the escape hatch back to `sl-avatar`'s 4-vertex fixture, for bisecting
   a verdict change between asset content and render path.
 
-Do not edit the files under `character/` — they are upstream content,
-kept byte-for-byte (the repo's text checks are skipped for them via
+## Consumers of `static_assets/` and `fs_static_assets/`
+
+- `sl_asset::StaticAssetLibrary` indexes both directories by the UUID
+  each file is named for, and every `sl_asset::AssetStore` consults that
+  library **before** its disk cache and before the `ViewerAsset`
+  capability. So the built-in animations, library wearables and gestures
+  reach whatever asks for them — the animation resolver, the wearable
+  fetcher, anything later — with no consumer knowing the library exists.
+- The viewer defaults `--static-assets` / `SL_VIEWER_STATIC_ASSETS` to
+  these two directories, in this order (Linden first, Firestorm second,
+  so an id in both resolves to Firestorm's, which is upstream's own
+  precedence). `--no-static-assets` ships none, which is how to tell a
+  grid-side asset problem from a vendored-copy one.
+- `vendored_static_assets.rs` (`sl-viewer-kit/tests/`) decodes every
+  file with the decoder for its class, so a bad re-copy fails a test
+  rather than a login.
+
+This mirrors what the reference viewer does:
+`LLDiskCache::prepopulateCacheWithStatic` copies the same files into the
+asset cache at start-up and puts their UUIDs on a purge skip list, so a
+later fetch of one is answered locally and never reaches the network.
+Firestorm seeds `static_assets` only in its OpenSim-capable builds
+(Second Life's own grid serves them); we seed both always, because the
+viewer also has to work against `sl-fake-grid`, which has no library at
+all.
+
+Do not edit the vendored files — they are upstream content, kept
+byte-for-byte (the repo's text checks are skipped for them via
 `.gitattributes`). To update, re-copy from a newer viewer checkout and
 record the new revision here.

@@ -24,6 +24,7 @@ use crate::disk::{AssetDiskCache, CacheLimits, now_unix};
 use crate::entry::AssetEntry;
 use crate::fetcher::{AssetRef, BlobFetcher, FetchError};
 use crate::progress::AssetProgress;
+use crate::static_assets::StaticAssetLibrary;
 
 /// Maximum number of assets fetching at once; the rest queue behind the gate.
 const DEFAULT_INFLIGHT: usize = 16;
@@ -49,6 +50,10 @@ struct StoreInner {
     fetcher: Arc<dyn BlobFetcher>,
     /// The optional on-disk cache (our own dedicated directory).
     disk: Option<AssetDiskCache>,
+    /// The viewer-shipped assets consulted ahead of the cache and the network,
+    /// snapshotted from the process-wide library at construction so a store's
+    /// behaviour cannot change under it later.
+    static_assets: Option<Arc<StaticAssetLibrary>>,
     /// The priority-ordered admission gate bounding in-flight fetches.
     gate: PriorityGate,
     /// Monotonic source of unique gate request ids.
@@ -84,6 +89,23 @@ impl AssetStore {
         disk_dir: Option<std::path::PathBuf>,
         limits: CacheLimits,
     ) -> std::io::Result<Self> {
+        Self::with_static_assets(fetcher, disk_dir, limits, crate::static_assets::installed())
+    }
+
+    /// Builds a store as [`new`](Self::new) does but over an explicit
+    /// `static_assets` library rather than the process-wide one, so a caller
+    /// that has its own — a test, or a tool serving a different library — does
+    /// not have to install anything globally.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `disk_dir` is given but its cache cannot be opened.
+    pub fn with_static_assets(
+        fetcher: Arc<dyn BlobFetcher>,
+        disk_dir: Option<std::path::PathBuf>,
+        limits: CacheLimits,
+        static_assets: Option<Arc<StaticAssetLibrary>>,
+    ) -> std::io::Result<Self> {
         let disk = match disk_dir {
             Some(dir) => Some(AssetDiskCache::open(dir, limits)?),
             None => None,
@@ -92,6 +114,7 @@ impl AssetStore {
             map: DashMap::new(),
             fetcher,
             disk,
+            static_assets,
             gate: PriorityGate::new(DEFAULT_INFLIGHT),
             request_counter: AtomicU64::new(0),
             cache_hits: AtomicU64::new(0),
@@ -107,6 +130,20 @@ impl AssetStore {
             .map
             .get(&AssetRef::new(id, asset_type))
             .and_then(|reference| reference.value().upgrade())
+    }
+
+    /// Whether the store's static library ships `id`, so a
+    /// [`get`](Self::get) for it will be answered locally and needs no
+    /// `ViewerAsset` capability.
+    ///
+    /// This is what lets a caller that would otherwise park a request until the
+    /// region's capability arrives issue it straight away.
+    #[must_use]
+    pub fn holds_static(&self, id: AssetKey) -> bool {
+        self.0
+            .static_assets
+            .as_ref()
+            .is_some_and(|library| library.contains(id))
     }
 
     /// Drops dead weak references from the map. Cheap; call periodically.
@@ -210,14 +247,30 @@ impl AssetStore {
         }
     }
 
-    /// Loads the asset bytes for `asset_ref`: the on-disk cache when it holds
-    /// them, otherwise a whole-asset `ViewerAsset` download (which is written
-    /// back to the cache on success).
+    /// Loads the asset bytes for `asset_ref`: a viewer-shipped static asset if
+    /// the library holds one, else the on-disk cache when it holds them,
+    /// otherwise a whole-asset `ViewerAsset` download (which is written back to
+    /// the cache on success).
+    ///
+    /// The static library comes first because its assets are the fixed-UUID
+    /// ones a grid could only answer with the same bytes — reading one locally
+    /// is what the reference viewer's seeded, never-purged cache amounts to.
+    /// A static hit is a local read that avoided a download, so it counts
+    /// towards [`StoreStats::cache_hits`], and it is not written to the disk
+    /// cache: the bytes are already on disk, permanently.
     async fn load_bytes(
         &self,
         entry: &AssetEntry,
         asset_ref: AssetRef,
     ) -> Result<Bytes, AssetError> {
+        if let Some(library) = self.0.static_assets.as_ref() {
+            entry.set_progress(AssetProgress::ReadingDisk);
+            if let Some(bytes) = library.read(asset_ref.id) {
+                self.0.cache_hits.fetch_add(1, Ordering::Relaxed);
+                return Ok(bytes);
+            }
+        }
+
         if let Some(disk) = self.0.disk.as_ref() {
             entry.set_progress(AssetProgress::ReadingDisk);
             if let Some(bytes) = disk.read(asset_ref.id.uuid()) {
@@ -277,6 +330,7 @@ mod tests {
     use sl_asset_sched::{FetchChunk, FetchError};
     use sl_proto::{AssetKey, AssetType, Uuid};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
     /// A fetcher that returns a fixed byte blob for any asset (a `200` whole
     /// response), for exercising the store without a network.
@@ -306,6 +360,75 @@ mod tests {
         let fetcher: Arc<dyn BlobFetcher> = Arc::new(BlobbyFetcher { blob });
         AssetStore::new(fetcher, None, CacheLimits::default())
             .unwrap_or_else(|_error| unreachable!("no disk cache cannot fail"))
+    }
+
+    /// A fetcher that refuses every fetch and records that it was asked, so a
+    /// test can prove an asset never reached the network.
+    #[derive(Debug, Default)]
+    struct NeverFetcher {
+        /// How many fetches were attempted.
+        calls: AtomicU64,
+    }
+
+    #[async_trait::async_trait]
+    impl sl_asset_sched::AssetFetcher<AssetRef> for NeverFetcher {
+        async fn fetch_range(
+            &self,
+            _id: AssetRef,
+            _start: usize,
+            _end: usize,
+        ) -> Result<FetchChunk, FetchError> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Err(FetchError::NotFound)
+        }
+    }
+
+    /// An asset the static library holds is served from it, ahead of the
+    /// network — which is what lets a viewer play a built-in animation against
+    /// a grid whose library does not have it (and before any capability has
+    /// arrived at all). An id the library does not hold still goes out to the
+    /// fetcher.
+    #[test]
+    fn a_static_asset_is_served_without_a_fetch() -> Result<(), Box<dyn core::error::Error>> {
+        let dir = std::env::temp_dir().join(format!("sl-asset-shipped-{}", std::process::id()));
+        let _removed = fs_err::remove_dir_all(&dir);
+        fs_err::create_dir_all(&dir)?;
+        let shipped = AssetKey::from(Uuid::from_u128(0x5747));
+        fs_err::write(
+            dir.join(format!("{}.animatn", shipped.uuid())),
+            b"a-built-in-motion",
+        )?;
+        let library = Arc::new(crate::StaticAssetLibrary::load([&dir]));
+
+        let fetcher = Arc::new(NeverFetcher::default());
+        let concrete = Arc::clone(&fetcher);
+        let blob: Arc<dyn BlobFetcher> = concrete;
+        let store =
+            AssetStore::with_static_assets(blob, None, CacheLimits::default(), Some(library))?;
+        pollster::block_on(async {
+            let entry = store.get(shipped, AssetType::Animation).await?;
+            assert_eq!(
+                entry.data().as_deref(),
+                Some(b"a-built-in-motion".as_slice())
+            );
+            assert_eq!(
+                fetcher.calls.load(Ordering::Relaxed),
+                0,
+                "a shipped asset went to the network"
+            );
+            // The local read counts as a cache hit: a download was avoided.
+            assert_eq!(store.stats().cache_hits, 1);
+
+            // An id the library does not hold is fetched as before.
+            let missing = AssetKey::from(Uuid::from_u128(0x404));
+            if store.get(missing, AssetType::Animation).await.is_ok() {
+                return Err("an id the library does not hold was served".into());
+            }
+            assert_eq!(fetcher.calls.load(Ordering::Relaxed), 1);
+            Ok::<(), Box<dyn core::error::Error>>(())
+        })?;
+        let _removed = fs_err::remove_dir_all(&dir);
+        Ok(())
     }
 
     #[test]

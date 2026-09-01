@@ -76,5 +76,5 @@ viewer: the log shows `resolving animation …0ca70103 ('uploaded')` →
 `decoded (1 joint track(s))` → `posing avatar …0ca70100 skeleton`, so the
 fixture motion is fetched over `ViewerAsset` and actually drives the NPC's
 bones. The built-in path is unchanged and still 404s — filed as
-[[test-fake-grid-builtin-animation-assets]] (with the six built-in UI
-sounds it turned out to be sitting beside).
+[[test-fake-grid-builtin-sounds]] — and then answered for the animations
+by [[viewer-static-asset-library]], which ships them.

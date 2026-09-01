@@ -173,7 +173,7 @@ pub use sl_mesh::{
 // `AssetKey`, and `AssetType` are already re-exported.
 pub use sl_asset::{
     AssetDiskCache, AssetEntry, AssetError, AssetProgress, AssetRef, AssetStore, BlobFetcher,
-    CacheLimits as AssetCacheLimits,
+    CacheLimits as AssetCacheLimits, StaticAssetLibrary,
 };
 
 // The GLTF (PBR) render-material asset decoder (`AT_MATERIAL`), the material

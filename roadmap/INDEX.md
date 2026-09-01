@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 60 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 947 |
+| done | 948 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1530** |
+| **total** | **1531** |
 
 ## ideas (98)
 
@@ -946,10 +946,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-builtin-animation-assets`](ready/test-fake-grid-builtin-animation-assets.md)
-  — The built-in animations and UI sounds the own avatar plays 404
-- [`test-fake-grid-default-wearable-textures`](ready/test-fake-grid-default-wearable-textures.md)
-  — Serve the default wearable textures so the own avatar is not untextured
+- [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
+  The built-in UI sounds the viewer plays on arrival 404
+- [`test-fake-grid-builtin-textures`](ready/test-fake-grid-builtin-textures.md)
+  — Serve the built-in sky, water and prim textures the viewer asks for
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1335,7 +1335,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (947)
+## done (948)
 
 ### protocol
 
@@ -2605,6 +2605,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   picks / classifieds (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-spacenav-ignore-when-window-unfocused`](done/viewer-spacenav-ignore-when-window-unfocused.md)
   — SpaceNavigator drives the viewer even when its window is not focused
+- [`viewer-static-asset-library`](done/viewer-static-asset-library.md) — Ship
+  the viewer's static assets and answer every fetch from them first
 - [`viewer-straddling-transparency-oit`](done/viewer-straddling-transparency-oit.md)
   — A translucent prim straddling the waterline loses its emergent half
 - [`viewer-stretch-global-axis-object`](done/viewer-stretch-global-axis-object.md)

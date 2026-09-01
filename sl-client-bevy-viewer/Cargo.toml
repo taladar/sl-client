@@ -174,6 +174,9 @@ image = { version = "0.25.10", default-features = false, features = [
 ] }
 jiff = { version = "0.2.35" }
 sl-account-dirs = { workspace = true }
+# The static-asset library the viewer ships (built-in animations, library
+# wearables and gestures) is installed process-wide before any asset store.
+sl-asset = { workspace = true }
 sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",

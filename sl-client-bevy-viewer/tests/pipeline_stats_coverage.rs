@@ -35,7 +35,7 @@ mod test {
             .init_resource::<TextureManager>()
             .init_resource::<MeshManager>()
             .init_resource::<MaterialManager>()
-            .insert_resource(AnimationManager::new(None))
+            .insert_resource(AnimationManager::new())
             .init_resource::<WearableAssetManager>();
         app
     }

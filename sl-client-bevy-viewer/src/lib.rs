@@ -515,6 +515,23 @@ struct Options {
     /// placeholder spheres.
     #[clap(long, env = "SL_VIEWER_ASSETS")]
     viewer_assets: Option<PathBuf>,
+    /// Directory of viewer-shipped assets named `<uuid>.<class>` — the
+    /// built-in animations, library body parts, clothing and gestures a grid
+    /// would otherwise have to serve. Every asset fetch consults these before
+    /// its cache and before the network, so the viewer keeps working against a
+    /// grid whose library is incomplete. Repeat the flag (or pass a
+    /// comma-separated list) to layer several; a later directory wins.
+    /// Defaults to the vendored `viewer-assets/static_assets/` and
+    /// `viewer-assets/fs_static_assets/` beside the workspace when present;
+    /// point this at an installed Firestorm's `app_settings/` copies instead if
+    /// you want its versions.
+    #[clap(long, env = "SL_VIEWER_STATIC_ASSETS", value_delimiter = ',')]
+    static_assets: Vec<PathBuf>,
+    /// Ship no static assets: every asset comes from the grid, as it would on a
+    /// viewer without a library. The way to tell a grid-side asset problem from
+    /// a vendored-copy one.
+    #[clap(long, conflicts_with = "static_assets")]
+    no_static_assets: bool,
     /// A debug affordance: play this animation (a built-in or uploaded `.anim`
     /// UUID) on the agent's **own** avatar once it lands, so the skeleton-animation
     /// driver can be exercised with a single login. Needs `--viewer-assets` (a
@@ -769,6 +786,49 @@ fn default_viewer_assets() -> Option<PathBuf> {
         .parent()?
         .join("viewer-assets/character");
     vendored.is_dir().then_some(vendored)
+}
+
+/// The vendored static-asset directories (`viewer-assets/static_assets/` and
+/// `viewer-assets/fs_static_assets/` at the workspace root, see the
+/// `viewer-assets` README for provenance), when this build still sits beside
+/// its sources — the default for `--static-assets` /
+/// `SL_VIEWER_STATIC_ASSETS`.
+///
+/// Firestorm's own two directories, in its order: the Linden library first, the
+/// Firestorm additions second, so an id in both resolves to Firestorm's.
+fn default_static_assets() -> Vec<PathBuf> {
+    let Some(root) = Path::new(env!("CARGO_MANIFEST_DIR")).parent() else {
+        return Vec::new();
+    };
+    [
+        "viewer-assets/static_assets",
+        "viewer-assets/fs_static_assets",
+    ]
+    .into_iter()
+    .map(|relative| root.join(relative))
+    .filter(|dir| dir.is_dir())
+    .collect()
+}
+
+/// Installs the process-wide static-asset library every later
+/// [`AssetStore`](sl_asset::AssetStore) consults, and logs what it holds.
+///
+/// Called once, before any store is built, because a store snapshots the
+/// library at construction — the reference viewer seeds its cache at the same
+/// point in start-up, and for the same reason.
+fn install_static_assets(options: &Options) {
+    if options.no_static_assets {
+        tracing::info!("--no-static-assets: every asset comes from the grid");
+        return;
+    }
+    let library = sl_asset::StaticAssetLibrary::load(&options.static_assets);
+    let count = library.len();
+    if sl_asset::static_assets::install(library) {
+        tracing::info!(
+            "shipping {count} static asset(s) from {:?}",
+            options.static_assets
+        );
+    }
 }
 
 /// The camera's start-up configuration for a viewer session — the fixed pose
@@ -1461,7 +1521,7 @@ fn run_session(
         // identical face content, so matched copies batch into instanced draws
         // (`viewer-perf-material-intern`).
         .init_resource::<ChatOverlay>()
-        .insert_resource(AnimationManager::new(viewer_assets.map(Path::to_path_buf)))
+        .insert_resource(AnimationManager::new())
         // The UI text & font foundation demo (viewer-ui-text-foundation): a
         // toggleable `EditableText` panel, seeded shown/hidden from
         // `SL_VIEWER_TEXT_DEMO` so the screenshot harness can capture it.
@@ -2085,6 +2145,12 @@ pub fn run() -> Result<(), Error> {
     // An explicit `--viewer-assets` / `SL_VIEWER_ASSETS` wins; otherwise the
     // vendored character directory serves the real Linden bodies by default.
     options.viewer_assets = options.viewer_assets.take().or_else(default_viewer_assets);
+    // Likewise for the shipped assets, and installed here — before anything
+    // builds an asset store, which snapshots the library as it is.
+    if options.static_assets.is_empty() {
+        options.static_assets = default_static_assets();
+    }
+    install_static_assets(&options);
     // `--replay <dir>` renders a captured bundle offline; otherwise a normal login.
     if let Some(bundle_dir) = options.replay.clone() {
         return run_replay(&options, &bundle_dir);

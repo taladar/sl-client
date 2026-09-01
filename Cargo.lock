@@ -8494,6 +8494,7 @@ dependencies = [
  "jiff",
  "pretty_assertions",
  "sl-account-dirs",
+ "sl-asset",
  "sl-cef",
  "sl-client-bevy",
  "sl-l10n",

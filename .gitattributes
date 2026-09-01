@@ -50,3 +50,13 @@ viewer-assets/LGPL-license.txt -whitespace
 # handled by _typos.toml and the `-whitespace` attribute above — per-file
 # skipchecks cannot reach repo-wide checks.
 viewer-assets/character/*.xml skipchecks=xml;;;vendored[[space]]upstream[[space]]content
+
+# The vendored static assets — the fixed-UUID built-in animations, library
+# body parts, clothing and gestures a grid would otherwise serve. Every one is
+# treated as binary: the keyframe motions are, and the wearable and gesture
+# "text" formats carry trailing NULs and upstream line endings that no text
+# check should touch or normalise.
+viewer-assets/static_assets/* binary
+viewer-assets/fs_static_assets/* binary
+viewer-assets/static_assets/* -whitespace
+viewer-assets/fs_static_assets/* -whitespace
