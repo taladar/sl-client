@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 309 |
-| blocked | 59 |
+| ready | 312 |
+| blocked | 61 |
 | in-progress | 18 |
-| bugs | 65 |
+| bugs | 69 |
 | done | 954 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1540** |
+| **total** | **1549** |
 
 ## ideas (98)
 
@@ -182,7 +182,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 ### test
 
 - [`test-firestorm-fake-grid-crosscheck`](ideas/test-firestorm-fake-grid-crosscheck.md)
-  — Point Firestorm at the fake grid to calibrate oracles (never to diff images)
+  — Point Firestorm at the fake grid to calibrate oracles
 - [`test-reference-cpp-oracles`](ideas/test-reference-cpp-oracles.md) —
   Reference-viewer C++ math and GLSL as test oracles (FFI / naga)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (312)
 
 ### protocol
 
@@ -821,8 +821,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
   — the restriction state machine (blocked by `viewer-rlv-command-parser`
   (done))
+- [`viewer-scene-dump`](ready/viewer-scene-dump.md) — Emit the shared scene-dump
+  JSON beside the frames
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
+- [`viewer-screenshot-fixed-resolution`](ready/viewer-screenshot-fixed-resolution.md)
+  — Pin the capture resolution, so two viewers can be compared at all
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
   warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-script-limits`](ready/viewer-script-limits.md) — Script limits —
@@ -957,6 +961,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
+- [`test-fake-grid-fixed-port-scenario`](ready/test-fake-grid-fixed-port-scenario.md)
+  — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -968,7 +974,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (59)
+## blocked (61)
 
 ### viewer
 
@@ -1137,6 +1143,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness`)
+- [`test-firestorm-crosscheck-report`](blocked/test-firestorm-crosscheck-report.md)
+  — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
+  by `test-firestorm-crosscheck-runner`, `viewer-scene-dump`)
+- [`test-firestorm-crosscheck-runner`](blocked/test-firestorm-crosscheck-runner.md)
+  — Run both viewers against one fake grid and collect their artifacts (blocked
+  by `viewer-screenshot-fixed-resolution`, `test-fake-grid-fixed-port-scenario`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1192,7 +1204,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (65)
+## bugs (69)
 
 ### viewer
 
@@ -1342,6 +1354,19 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   instead of the `Data` genome (fix landed, needs live verify)
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
+
+### test
+
+- [`test-fake-grid-catalogue-clears-inventory-root`](bugs/test-fake-grid-catalogue-clears-inventory-root.md)
+  — --catalogue clears the account inventory, so no SL-derived viewer can log in
+- [`test-fake-grid-circuit-code-as-i4-crashes-viewers`](bugs/test-fake-grid-circuit-code-as-i4-crashes-viewers.md)
+  — Login response sends circuit_code as <i4>, which overflows S32 and kills
+  Firestorm
+- [`test-fake-grid-inventory-skeleton-version-mismatch`](bugs/test-fake-grid-inventory-skeleton-version-mismatch.md)
+  — Login skeleton reports folder version -1 while AIS reports 8, crashing the
+  viewer
+- [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
+  Audit every login field emitted as <i4> for values that do not fit S32
 
 ## done (954)
 
