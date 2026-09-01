@@ -59,6 +59,26 @@ that stops simply drops out of a later update — not a delta. Each
 `ObjectPlayingAnimation` pairs the animation's `anim_id` (an `AnimationKey`)
 with its `sequence_id`.
 
+**An animesh is an object, not an avatar — but the reference viewer models it
+as one.** To animate a rigged mesh it spawns an `LLControlAvatar`, a subclass
+of `LLVOAvatar` whose own documentation calls it "a control av (no associated
+user)". Two consequences that cost an afternoon to rediscover:
+
+- It appears in `LLCharacter::sInstances` alongside real avatars. Anything
+  walking that list to count or describe the avatars present — a scene dump for
+  cross-viewer comparison, say — reports a region with one resident and one
+  rezzed animesh as holding two avatars unless it filters on
+  `LLVOAvatar::isControlAvatar()`.
+- **Its id is minted by the viewer, not the grid.**
+  `LLControlAvatar::createControlAvatar` goes through
+  `gObjectList.createObjectViewer`, so the puppet's UUID is local and bears no
+  relation to the animesh object's id. The viewer nonetheless asks
+  `GetDisplayNames` about it, and *no* grid can answer: the id did not exist
+  until the viewer invented it. A `bad_ids` reply is the correct answer, not a
+  missing fixture — worth knowing before filing it as a grid bug, which is
+  exactly the mistake this note exists to prevent. The visible name tag comes
+  from the object's name, not from the avatar name cache, so nothing is lost.
+
 ### Editing objects
 
 A client with build rights reshapes a prim by sending edit messages that target
