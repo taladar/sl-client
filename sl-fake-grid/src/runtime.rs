@@ -30,6 +30,7 @@ use crate::map_tiles::MapTileStore;
 use crate::scenario::Scenario;
 use crate::terrain::TerrainFixture;
 use crate::time::{Now, system_clock};
+use crate::world::AVATAR_CENTRE_ABOVE_GROUND_M;
 
 /// How the grid describes itself in `get_grid_info` and the login message.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -395,7 +396,8 @@ impl GridCore {
             prepared.seed_url.clone(),
         ));
         {
-            let state = prepared.shared.state.lock().await;
+            let mut state = prepared.shared.state.lock().await;
+            register_account_display_name(&mut state.sim, account);
             enrich_success(&mut success, account, region, &state.sim);
         }
         success.message = Some(self.identity.message.clone());
@@ -429,6 +431,32 @@ impl GridCore {
         sim.set_region_id(region.region_id);
         if let Some(arrival) = arrival {
             sim.set_arrival_position(arrival.position, arrival.look_at);
+        } else {
+            // A login with no placement of its own lands at the region centre,
+            // and `ArrivalPlacement::default` puts that at z = 30 -- which is
+            // the legacy default *camera* viewpoint, not a ground position. The
+            // fake grid runs no physics, so nothing then pulls the avatar down:
+            // it stands wherever it was rezzed, several metres above the
+            // ground, out of frame for a camera aimed at the region's content
+            // and casting its shadow from nowhere.
+            //
+            // Place it on the ground instead, at the same offset the NPC
+            // fixtures use -- an avatar's position is its centre, so half its
+            // 1.9 m height above the terrain.
+            let center = sl_proto::Camera::region_center().center;
+            let ground = region.config.terrain.height_at(center.x, center.y);
+            sim.set_arrival_position(
+                sl_types::map::RegionCoordinates::new(
+                    center.x,
+                    center.y,
+                    ground + AVATAR_CENTRE_ABOVE_GROUND_M,
+                ),
+                Vector {
+                    x: 1.0,
+                    y: 0.0,
+                    z: 0.0,
+                },
+            );
         }
         if let Some(environment) = region.config.environment.clone() {
             let stamped = EnvironmentSettings {
@@ -615,6 +643,30 @@ fn grid_info_of(identity: &GridIdentity, login_uri: &url::Url) -> GridInfo {
         .with(KEY_GRIDNICK, identity.nick.clone())
         .with(KEY_ECONOMY, login_uri.as_str())
         .with(KEY_MESSAGE, identity.message.clone())
+}
+
+/// Registers the logging-in account with the session's people-service store, so
+/// the `GetDisplayNames` capability can resolve the agent's own id.
+///
+/// Without this the capability answers correctly but unhelpfully: the id lands
+/// in `bad_ids`, and the reference viewer renders the name tag as
+/// `(???) (???)` and caches that for an hour
+/// (`LLAvatarNameResponder::result N unresolved ids`). An account the grid just
+/// authenticated is precisely an id it should be able to name.
+///
+/// The record is the shape a grid sends for an agent who has never set a custom
+/// display name: `display_name` equal to the legacy name and
+/// `is_display_name_default` true. `username` is the SLID form — dotted and
+/// lowercase, with the `Resident` last name elided, as Second Life does.
+fn register_account_display_name(sim: &mut SimSession, account: &Account) {
+    sim.set_display_name(
+        crate::world::AvatarIdentity::new(
+            account.agent_id,
+            &account.config.first_name,
+            &account.config.last_name,
+        )
+        .display_name_record(),
+    );
 }
 
 /// Fills the optional login-response fields the fixtures can answer:

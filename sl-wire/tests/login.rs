@@ -764,6 +764,50 @@ mod test {
     }
 
     #[test]
+    fn u32_login_fields_are_written_as_strings_not_i4() -> Result<(), Box<dyn std::error::Error>> {
+        use sl_wire::{CircuitCode, build_login_response};
+
+        // `<i4>` is signed 32-bit. circuit_code is a u32 and is above i32::MAX
+        // about half the time, seconds_since_epoch passes it in 2038, and
+        // region_x/region_y are u32 metres -- so none of them may be written as
+        // `<i4>`. The reference viewer parses `<i4>` with std::stoi, which
+        // throws std::out_of_range on a wider value; uncaught, mid-login, it
+        // takes the viewer down. Real grids send all four as strings and the
+        // viewer reads them back with asString()/strtoul().
+        //
+        // This asserts the *shape* on the wire rather than a round trip: our
+        // own reader accepts either form, so a round-trip test passes happily
+        // while emitting something no viewer can read. That is exactly how this
+        // shipped.
+        let mut success = full_success()?;
+        success.circuit_code = CircuitCode(u32::MAX);
+        success.seconds_since_epoch = Some(i64::from(i32::MAX) + 1);
+        success.region_x = Some(u32::MAX);
+        success.region_y = Some(u32::MAX);
+
+        let xml = build_login_response(&LoginResponse::Success(Box::new(success)));
+
+        for field in [
+            "circuit_code",
+            "seconds_since_epoch",
+            "region_x",
+            "region_y",
+        ] {
+            let member = format!("<member><name>{field}</name><value>");
+            let tail = xml
+                .split_once(member.as_str())
+                .ok_or_else(|| format!("{field} missing from the response"))?
+                .1;
+            assert!(
+                tail.starts_with("<string>"),
+                "{field} must be a <string>, got: {}",
+                tail.chars().take(40).collect::<String>()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn build_login_response_round_trips_a_full_success() -> Result<(), Box<dyn std::error::Error>> {
         use sl_wire::{build_login_response, parse_login_response};
 

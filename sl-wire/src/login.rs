@@ -294,15 +294,15 @@ pub fn build_login_request_with_method(request: &LoginRequest, method_name: &str
     push_string_member(&mut out, "platform", &request.platform);
     push_string_member(&mut out, "platform_string", &request.platform_string);
     push_string_member(&mut out, "platform_version", &request.platform_version);
-    push_int_member(&mut out, "address_size", i64::from(request.address_size));
+    push_int_member(&mut out, "address_size", request.address_size);
     push_string_member(&mut out, "host_id", &request.host_id);
     push_string_member(&mut out, "mac", &request.mac);
     push_string_member(&mut out, "id0", &request.id0);
     if let Some(event) = request.last_exec_event {
-        push_int_member(&mut out, "last_exec_event", i64::from(event));
+        push_int_member(&mut out, "last_exec_event", event);
     }
     if let Some(duration) = request.last_exec_duration {
-        push_int_member(&mut out, "last_exec_duration", i64::from(duration));
+        push_int_member(&mut out, "last_exec_duration", duration);
     }
     if let Some(session_id) = request.last_exec_session_id {
         push_string_member(&mut out, "last_exec_session_id", &session_id.to_string());
@@ -1925,9 +1925,9 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         "secure_session_id",
         &success.secure_session_id.to_string(),
     );
-    push_int_member(out, "circuit_code", i64::from(success.circuit_code.get()));
+    push_numeric_string_member(out, "circuit_code", success.circuit_code.get());
     push_string_member(out, "sim_ip", &success.sim_ip.to_string());
-    push_int_member(out, "sim_port", i64::from(success.sim_port));
+    push_int_member(out, "sim_port", i32::from(success.sim_port));
     push_string_member(out, "seed_capability", success.seed_capability.as_str());
     push_opt_string_member(out, "message", success.message.as_deref());
     push_opt_string_member(out, "mfa_hash", success.mfa_hash.as_deref());
@@ -1947,15 +1947,19 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
         );
     }
     if let Some(region_x) = success.region_x {
-        push_int_member(out, "region_x", i64::from(region_x));
+        push_numeric_string_member(out, "region_x", region_x);
     }
     if let Some(region_y) = success.region_y {
-        push_int_member(out, "region_y", i64::from(region_y));
+        push_numeric_string_member(out, "region_y", region_y);
     }
     push_opt_string_member(out, "agent_access", success.agent_access.as_deref());
     push_opt_string_member(out, "agent_access_max", success.agent_access_max.as_deref());
     if let Some(groups) = success.max_agent_groups {
-        push_int_member(out, "max-agent-groups", i64::from(groups));
+        push_int_member(
+            out,
+            "max-agent-groups",
+            i32::try_from(groups).unwrap_or(i32::MAX),
+        );
     }
     if let Some(root) = success.library_root {
         push_id_array_member(out, "inventory-lib-root", "folder_id", root.uuid());
@@ -1996,19 +2000,27 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     );
     push_opt_string_member(out, "start_location", success.start_location.as_deref());
     if let Some(seconds) = success.seconds_since_epoch {
-        push_int_member(out, "seconds_since_epoch", seconds);
+        push_numeric_string_member(out, "seconds_since_epoch", seconds);
     }
     if !success.udp_blacklist.is_empty() {
         push_string_member(out, "udp_blacklist", &success.udp_blacklist.join(","));
     }
     if let Some(port) = success.http_port {
-        push_int_member(out, "http_port", i64::from(port));
+        push_int_member(out, "http_port", i32::from(port));
     }
     if let Some(size) = success.region_size_x {
-        push_int_member(out, "region_size_x", i64::from(size));
+        push_int_member(
+            out,
+            "region_size_x",
+            i32::try_from(size).unwrap_or(i32::MAX),
+        );
     }
     if let Some(size) = success.region_size_y {
-        push_int_member(out, "region_size_y", i64::from(size));
+        push_int_member(
+            out,
+            "region_size_y",
+            i32::try_from(size).unwrap_or(i32::MAX),
+        );
     }
     if let Some(flags) = &success.login_flags {
         push_single_struct_member(out, "login-flags", |body| {
@@ -2123,10 +2135,10 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
     );
     push_opt_string_member(out, "currency", success.currency.as_deref());
     if let Some(fee) = success.classified_fee {
-        push_int_member(out, "classified_fee", i64::from(fee));
+        push_int_member(out, "classified_fee", fee);
     }
     if let Some(fee) = success.directory_fee {
-        push_int_member(out, "directory_fee", i64::from(fee));
+        push_int_member(out, "directory_fee", fee);
     }
     push_opt_string_member(out, "account_type", success.account_type.as_deref());
     if let Some(benefits) = &success.account_level_benefits {
@@ -2141,7 +2153,7 @@ fn push_success_members(out: &mut String, success: &LoginSuccess) {
 /// `event_categories` and `classified_categories` arrays).
 fn push_category_members(out: &mut String, category: &LoginCategory) {
     push_string_member(out, "category_name", &category.category_name);
-    push_int_member(out, "category_id", i64::from(category.category_id));
+    push_int_member(out, "category_id", category.category_id);
 }
 
 /// Appends an array member holding a single struct whose members `emit_fields`
@@ -2183,12 +2195,33 @@ fn push_struct_array_member<T>(
 }
 
 /// Appends an `<i4>` struct member.
-fn push_int_member(out: &mut String, name: &str, value: i64) {
+///
+/// Takes an `i32` rather than an `i64` on purpose: `<i4>` is **signed 32-bit**
+/// by the XML-RPC spec, so a wider value has no valid representation here and
+/// the type is what stops one being passed by accident. A field whose domain
+/// is `u32` (or wider) belongs in [`push_numeric_string_member`] instead.
+///
+/// This is not pedantry about the spec. The reference viewer parses `<i4>`
+/// with `std::stoi`, which throws `std::out_of_range` on a value above
+/// `i32::MAX` — uncaught, during login, killing the viewer outright.
+fn push_int_member(out: &mut String, name: &str, value: i32) {
     out.push_str("<member><name>");
     out.push_str(name);
     out.push_str("</name><value><i4>");
     out.push_str(&value.to_string());
     out.push_str("</i4></value></member>\n");
+}
+
+/// Appends a numeric struct member as a `<string>`, for values that do not fit
+/// `<i4>`.
+///
+/// Real grids send `circuit_code`, `region_x`/`region_y` and
+/// `seconds_since_epoch` this way, and the reference viewer reads all of them
+/// back out with `asString()` — `circuit_code` then goes through `strtoul`,
+/// which is unsigned. So a string is not a lossy fallback for these fields, it
+/// is the shape they are supposed to have.
+fn push_numeric_string_member<T: std::fmt::Display>(out: &mut String, name: &str, value: T) {
+    push_string_member(out, name, &value.to_string());
 }
 
 /// Appends a `<string>` struct member only when the value is present.
@@ -2224,8 +2257,8 @@ fn push_skeleton_member(out: &mut String, member: &str, folders: &[SkeletonFolde
         push_string_member(out, "folder_id", &folder.folder_id.to_string());
         push_string_member(out, "parent_id", &folder.parent_id.to_string());
         push_string_member(out, "name", &folder.name);
-        push_int_member(out, "type_default", i64::from(folder.type_default));
-        push_int_member(out, "version", i64::from(folder.version));
+        push_int_member(out, "type_default", i32::from(folder.type_default));
+        push_int_member(out, "version", folder.version);
         out.push_str("</struct></value>\n");
     }
     out.push_str("</data></array></value></member>\n");
@@ -2241,8 +2274,8 @@ fn push_buddy_list_member(out: &mut String, buddies: &[BuddyListEntry]) {
     for buddy in buddies {
         out.push_str("<value><struct>");
         push_string_member(out, "buddy_id", &buddy.buddy_id.to_string());
-        push_int_member(out, "buddy_rights_given", i64::from(buddy.rights_granted));
-        push_int_member(out, "buddy_rights_has", i64::from(buddy.rights_has));
+        push_int_member(out, "buddy_rights_given", buddy.rights_granted);
+        push_int_member(out, "buddy_rights_has", buddy.rights_has);
         out.push_str("</struct></value>\n");
     }
     out.push_str("</data></array></value></member>\n");

@@ -146,6 +146,46 @@ pub fn default_assets() -> sl_proto::InMemoryAssetSource {
 const AGENT_ROOT: u128 = 0xFA01;
 /// The stock "Clothing" folder under the agent root.
 const AGENT_CLOTHING: u128 = 0xFA02;
+/// The standard system folders every account has, as `(folder type, name)`.
+///
+/// A real grid creates these when the account is made, and the reference
+/// viewer requires them: `LLInventoryModel::validate` calls the ten
+/// asset-type folders (textures, sounds, objects, notecards, scripts, body
+/// parts, photo album, lost and found, animations, gestures) **fatal** when
+/// absent, because the viewer cannot create those itself — only the grid can.
+/// The remainder it will create over AIS if missing, but seeding them keeps a
+/// fresh login from generating a burst of folder-creation traffic that has
+/// nothing to do with what a test is looking at.
+///
+/// Ids are `AGENT_SYSTEM_FOLDER_BASE + folder type`, so each is stable and
+/// derivable rather than another hand-maintained constant per folder.
+///
+/// Types are `LLFolderType::EType` (`indra/llinventory/llfoldertype.h`).
+const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
+    (0, "Textures"),
+    (1, "Sounds"),
+    (2, "Calling Cards"),
+    (3, "Landmarks"),
+    (6, "Objects"),
+    (7, "Notecards"),
+    (10, "Scripts"),
+    (13, "Body Parts"),
+    (14, "Trash"),
+    (15, "Photo Album"),
+    (16, "Lost And Found"),
+    (20, "Animations"),
+    (21, "Gestures"),
+    (23, "Favorites"),
+    (46, "Current Outfit"),
+    (48, "My Outfits"),
+    (50, "Received Items"),
+    (56, "Settings"),
+    (57, "Materials"),
+];
+
+/// The id base for the [`AGENT_SYSTEM_FOLDERS`]; each folder's id is this plus
+/// its folder type. Chosen clear of the other `0xFAxx` fixture ids.
+const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
 /// The stock "Party Hat" item inside "Clothing".
 const AGENT_HAT: u128 = 0xFA11;
 /// The stock library root folder id.
@@ -323,7 +363,7 @@ pub const STOCK_PARCEL_LOCAL_ID: RegionLocalParcelId = RegionLocalParcelId(1);
 /// runtime advertises the backend from this (`SimulatorFeatures
 /// .VoiceServerType`, the login `voice-config`, the arrival
 /// `RequiredVoiceVersion` push).
-fn default_setup(sim: &mut SimSession, _now: Instant) {
+pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
     sim.agent_inventory_mut().insert_folder(InventoryFolder {
         folder_id: folder_key(AGENT_ROOT),
         parent_id: None,
@@ -338,6 +378,21 @@ fn default_setup(sim: &mut SimSession, _now: Instant) {
         folder_type: 5,
         version: 1,
     });
+    // The standard system folders. Without them the reference viewer's
+    // inventory validation fails with ten fatal errors and it dies in
+    // STATE_INVENTORY_CALLBACKS -- see AGENT_SYSTEM_FOLDERS.
+    for (folder_type, name) in AGENT_SYSTEM_FOLDERS {
+        sim.agent_inventory_mut().insert_folder(InventoryFolder {
+            folder_id: folder_key(
+                AGENT_SYSTEM_FOLDER_BASE.saturating_add(u128::try_from(*folder_type).unwrap_or(0)),
+            ),
+            parent_id: Some(folder_key(AGENT_ROOT)),
+            name: (*name).to_owned(),
+            folder_type: *folder_type,
+            version: 1,
+        });
+    }
+
     sim.agent_inventory_mut().insert_item(stock_item(
         AGENT_HAT,
         folder_key(AGENT_CLOTHING),

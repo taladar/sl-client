@@ -83,6 +83,18 @@ impl InMemoryAssetSource {
     pub fn is_empty(&self) -> bool {
         self.assets.is_empty()
     }
+
+    /// Every stored asset as `(key, bytes)`, for layering one source over
+    /// another — a fixture store inserted over the stock one, say.
+    ///
+    /// Iteration order is the underlying map's and so is not stable; callers
+    /// that need determinism must sort. Nothing here depends on the order,
+    /// because merging is last-write-wins per key regardless.
+    pub fn iter(&self) -> impl Iterator<Item = (AssetKey, &[u8])> {
+        self.assets
+            .iter()
+            .map(|(key, data)| (*key, data.as_slice()))
+    }
 }
 
 impl AssetSource for InMemoryAssetSource {

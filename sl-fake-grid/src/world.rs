@@ -240,6 +240,43 @@ impl AvatarIdentity {
             last_name: last_name.to_owned(),
         }
     }
+
+    /// This identity as a people-service record, for
+    /// [`SimSession::set_display_name`](sl_proto::SimSession::set_display_name).
+    ///
+    /// Any avatar the viewer can see needs one, or `GetDisplayNames` puts its
+    /// id in `bad_ids` and the name tag renders as `(???) (???)` — cached for
+    /// an hour, so it does not fix itself during a session.
+    ///
+    /// The record is the shape a grid sends for an agent with no custom
+    /// display name: `display_name` equal to the legacy name and
+    /// `is_display_name_default` set. `username` is the SLID form — dotted and
+    /// lowercase, with a `Resident` last name elided, as Second Life does.
+    #[must_use]
+    pub fn display_name_record(&self) -> sl_wire::DisplayName {
+        let username = if self.last_name.eq_ignore_ascii_case("Resident") {
+            self.first_name.to_lowercase()
+        } else {
+            format!(
+                "{}.{}",
+                self.first_name.to_lowercase(),
+                self.last_name.to_lowercase()
+            )
+        };
+        sl_wire::DisplayName {
+            id: self.agent_id,
+            username,
+            display_name: format!("{} {}", self.first_name, self.last_name),
+            legacy_first_name: self.first_name.clone(),
+            legacy_last_name: self.last_name.clone(),
+            is_display_name_default: true,
+            // Far enough out that a capture run never re-fetches mid-session;
+            // the viewer treats an elapsed expiry as a reason to ask again.
+            display_name_expires: "2099-01-01T00:00:00Z".to_owned(),
+            display_name_next_update: "2099-01-01T00:00:00Z".to_owned(),
+            missing: false,
+        }
+    }
 }
 
 /// A region-wide public parcel: every cell of a 256 m region, owned by
@@ -462,7 +499,17 @@ pub(crate) fn push_arrival_world(
     sim: &mut SimSession,
     now: Instant,
 ) {
-    let arrival = sl_proto::Camera::region_center().center;
+    // Rez the avatar where the session says it arrives, not at a second
+    // hard-coded guess: the placement is set once per session (a teleport's
+    // target, or the ground at the region centre for a fresh login) and this
+    // has to agree with it, or the object update and the AgentMovementComplete
+    // that follows disagree about where the avatar is.
+    let placement = sim.arrival_position().position;
+    let arrival = Vector {
+        x: placement.x(),
+        y: placement.y(),
+        z: placement.z(),
+    };
     let avatar = avatar_prim(world.avatar_local_id, identity, arrival.clone());
     if let Err(error) = sim.send_object_update(&[avatar], REAL_TIME_DILATION, now) {
         tracing::warn!("rezzing the arriving avatar failed: {error}");
@@ -513,6 +560,14 @@ fn push_object_animations(
 /// session tells its own body from the catalogue NPC's blue one at a glance —
 /// and from the region's red-and-green checker, which no avatar wears.
 pub const OWN_AVATAR_BAKE_COLOR: [u8; 4] = sl_test_assets::markers::GREEN;
+
+/// How far an avatar's **centre** sits above the ground it stands on: half the
+/// 1.9 m default avatar height.
+///
+/// An avatar object's position is its centre, not its feet, so a fixture that
+/// wants one standing on the terrain adds this to the terrain height. The
+/// catalogue NPC's `NPC_Z` is this same offset applied to the stock ground.
+pub const AVATAR_CENTRE_ABOVE_GROUND_M: f32 = 0.95;
 
 /// Pushes the arriving agent its **own** `AvatarAppearance`, registering the
 /// bakes it names.

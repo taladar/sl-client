@@ -84,14 +84,54 @@ impl RegionFixture {
         let materials = self.materials;
         let media = self.media;
         let environment = self.environment;
-        let mut assets = self.assets;
+        // Start from the stock asset store, not an empty one. It carries the
+        // built-in library textures every viewer asks any grid for -- the sun
+        // and moon discs, the cloud, water normals, the default prim texture,
+        // the terrain details -- which are not fixture content and which a
+        // fixture has no business dropping. Without them the ground shades
+        // flat, the sky has no sun in it, and each missing id burns its whole
+        // retry budget on every arrival, so the scene never goes quiet and a
+        // capture harness waiting for quiescence always times out.
+        //
+        // The fixture's own assets are inserted over the top, so a fixture that
+        // deliberately replaces a built-in still wins.
+        let mut assets = crate::scenario::default_assets();
+        for (key, bytes) in self.assets.iter() {
+            let _previous = assets.insert(key, bytes.to_vec());
+        }
         for npc in &self.world.npcs {
             for (key, bytes) in npc.bake_assets() {
                 let _previous = assets.insert(key, bytes);
             }
         }
+        let npc_identities = self
+            .world
+            .npcs
+            .iter()
+            .map(|npc| npc.identity.display_name_record())
+            .collect::<Vec<_>>();
         Scenario {
-            setup: Arc::new(move |sim: &mut SimSession, _now| {
+            setup: Arc::new(move |sim: &mut SimSession, now| {
+                // A fixture describes a region's *objects*, not the account
+                // logging in and not the region's civic furniture, so it is
+                // layered on top of the stock session seeding rather than
+                // replacing it. Skipping this used to leave the agent with an
+                // empty inventory, and a login response with no
+                // `inventory-root` is one no viewer descended from the Linden
+                // client will accept: its success check requires a usable
+                // inventory root, so the login is refused after otherwise
+                // succeeding. The objects and assets below still replace the
+                // stock ones, which is what "replaces region content" means.
+                crate::scenario::default_setup(sim, now);
+
+                // Every NPC the fixture rezzes needs a people-service record,
+                // or its name tag renders as `(???) (???)` — the id lands in
+                // the `GetDisplayNames` reply's `bad_ids` and the viewer caches
+                // that for an hour.
+                for npc in &npc_identities {
+                    sim.set_display_name(npc.clone());
+                }
+
                 for (id, material) in &materials {
                     sim.set_region_material(*id, material.clone());
                 }
