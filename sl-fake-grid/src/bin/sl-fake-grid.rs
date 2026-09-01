@@ -6,7 +6,7 @@
 //! `get_grid_info`, the world-map tiles, and the economy helper scripts.
 
 use clap::Parser;
-use sl_fake_grid::{AccountConfig, FakeGridBuilder, GridIdentity, RegionConfig};
+use sl_fake_grid::{AccountConfig, FakeGridBuilder, GridIdentity, RegionConfig, catalogue};
 
 /// Command-line options.
 #[derive(Debug, Parser)]
@@ -39,6 +39,16 @@ struct Options {
     /// re-poll answer, in seconds.
     #[arg(long, default_value_t = 30)]
     hold_secs: u64,
+
+    /// Rez the named prim catalogue in every region instead of the stock
+    /// content: one prim per rendering feature (textured, sphere-shaped,
+    /// per-face styled, mesh, sculpt, PBR, legacy material, projecting
+    /// light, flexi, particles, animated texture, hover text, media,
+    /// reflection probe, linkset) in a west-to-east row a few metres north
+    /// of the arrival point, with every asset they reference served. This is
+    /// the same fixture the automated tiers load.
+    #[arg(long)]
+    catalogue: bool,
 }
 
 /// Parses one `Name` / `Name@X,Y` region argument; `index` places an
@@ -90,8 +100,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             nick: options.grid_nick.clone(),
             ..GridIdentity::default()
         });
+    // The catalogue replaces a region's content wholesale; a region built
+    // without it keeps the stock scenario.
+    let dress = |region: RegionConfig| {
+        if options.catalogue {
+            catalogue().into_region(region)
+        } else {
+            region
+        }
+    };
     if options.regions.is_empty() {
-        builder = builder.region(RegionConfig::default());
+        builder = builder.region(dress(RegionConfig::default()));
     }
     for (index, raw) in options.regions.iter().enumerate() {
         match u32::try_from(index)
@@ -105,7 +124,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     region.grid_x,
                     region.grid_y
                 );
-                builder = builder.region(region);
+                builder = builder.region(dress(region));
             }
             None => {
                 tracing::error!("unparsable --region {raw:?} (want Name or Name@X,Y)");
@@ -130,6 +149,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // A usable default so `sl-fake-grid` alone is enough for a smoke test.
         builder = builder.account(AccountConfig::new("Test", "User", "password"));
         tracing::info!("no --account given; created Test User / password");
+    }
+
+    if options.catalogue {
+        for entry in sl_fake_grid::fixtures::catalogue::entries() {
+            let position = entry.position();
+            tracing::info!(
+                "catalogue prim {:?} (local id {}) at <{}, {}, {}>",
+                entry.name,
+                entry.local_id.0,
+                position.x,
+                position.y,
+                position.z
+            );
+        }
     }
 
     let grid = builder.start().await?;

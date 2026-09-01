@@ -2,7 +2,7 @@
 id: viewer-fake-grid-render-harness
 title: ViewerHarness — the real viewer against the fake grid, read back as pixels
 topic: viewer
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 8
 refs: [viewer-fake-grid-login-smoke, viewer-render-readback-tier, viewer-screenshot-wait-for-quiescence]
@@ -10,6 +10,11 @@ blocked_by: [test-fake-grid-terrain-layerdata, test-fake-grid-render-fixtures, v
 ---
 
 Context: [context/testing.md](../context/testing.md).
+
+All five blockers cleared (2026-09-01), the last being
+[[test-fake-grid-render-fixtures]]: `sl_fake_grid::catalogue()` is the
+fixture to start(), and `fixtures::catalogue::entry(name)` gives each
+subject's local id and region position for the projection oracle.
 
 The full-stack tier. In-process, inside the viewer library's tests
 (`src/full_stack_test.rs`, `sl-fake-grid` and `tokio` as dev-dependencies)

@@ -75,8 +75,12 @@ impl ExtraParamType {
 /// Walks an object's raw `ExtraParams` blob and decodes each known parameter
 /// into [`ObjectExtraParams`]. Best-effort: unknown parameters are skipped and a
 /// truncated blob stops the walk, returning whatever decoded so far.
+///
+/// The inverse of [`encode_extra_params`], and public for the same reason it
+/// is: a simulator implementation reads a client's blob with this and writes
+/// its own with that.
 #[must_use]
-pub(crate) fn decode_extra_params(blob: &[u8]) -> ObjectExtraParams {
+pub fn decode_extra_params(blob: &[u8]) -> ObjectExtraParams {
     let mut out = ObjectExtraParams::default();
     let mut reader = Reader::new(blob);
     let Ok(count) = reader.u8() else {

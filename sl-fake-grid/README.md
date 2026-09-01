@@ -40,4 +40,24 @@ answer, ICE trickle, parcel channel, logout — no media plane) and
 advertises it the way a Second Life region does (`voice-config`,
 `SimulatorFeatures.VoiceServerType`, `RequiredVoiceVersion`).
 
+## Content fixtures
+
+`fixtures::PrimFixture` builds the `Object` records a region pushes:
+every builder method sets a typed value and packs it into the raw wire
+blob beside it (`texture_entry`, `extra_params`, `particle_system`,
+`texture_anim`), which is the only form an `ObjectUpdate` carries. A
+`fixtures::RegionFixture` is one region's whole content — objects,
+assets, legacy materials, per-face media, environment, ground — and
+`into_region` wires each piece to the surface that serves it.
+
+`fixtures::catalogue()` is the **named catalogue**: one prim per
+rendering feature (textured, sphere-shaped, per-face styled, mesh,
+sculpt, PBR, legacy material, projecting light, flexi, particles,
+animated texture, hover text, media, reflection probe, linkset) in a
+west-to-east row north of the arrival point, with every asset it
+references served. The automated tiers and the binary's `--catalogue`
+flag load the same fixture, so "the mesh prim" is the same object with
+the same id in a unit test, a full-stack capture and a Firestorm
+session.
+
 See the book chapter "The fake grid" for architecture and usage.

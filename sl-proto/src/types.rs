@@ -451,7 +451,8 @@ pub use object::{
     ExtendedMesh, FlexibleData, LightData, LightImage, NameValue, Object, ObjectExtraParams,
     ObjectMotion, ObjectPlayingAnimation, ObjectProperties, ObjectPropertiesFamily, ParticleSystem,
     PrimShapeParams, ReflectionProbe, RenderMaterialRef, SculptData, TaskInventoryItem,
-    TaskInventoryReply, TextureAnimation, particle_pattern, pcode, texture_anim_mode,
+    TaskInventoryReply, TextureAnimation, attachment_state_from_point, particle_pattern, pcode,
+    texture_anim_mode,
 };
 pub use open_region::OpenRegionInfo;
 pub use parcel::{

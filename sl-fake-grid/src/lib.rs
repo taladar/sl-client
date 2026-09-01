@@ -6,6 +6,7 @@ mod driver;
 mod economy_endpoint;
 pub mod economy_policy;
 pub mod error;
+pub mod fixtures;
 mod http_answer;
 mod http_service;
 mod login_endpoint;
@@ -21,6 +22,9 @@ pub mod world;
 pub use accounts::AccountConfig;
 pub use economy_policy::{EconomyConfig, EconomyEvent};
 pub use error::Error;
+pub use fixtures::{
+    CatalogueEntry, FaceStyle, PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
+};
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use runtime::{
     FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig, TeleportNotice,

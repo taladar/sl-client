@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 303 |
-| blocked | 62 |
+| ready | 304 |
+| blocked | 60 |
 | in-progress | 18 |
 | bugs | 65 |
-| done | 944 |
+| done | 945 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1527** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (303)
+## ready (304)
 
 ### protocol
 
@@ -483,6 +483,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
+- [`viewer-fake-grid-render-harness`](ready/viewer-fake-grid-render-harness.md)
+  — ViewerHarness — the real viewer against the fake grid, read back as pixels
+  (blocked by `test-fake-grid-terrain-layerdata` (done),
+  `test-fake-grid-render-fixtures` (done), `viewer-plugin-groups` (done),
+  `viewer-screenshot-wait-for-quiescence` (done), `viewer-render-pixel-oracle`
+  (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -940,10 +946,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `test-fake-grid-determinism` (done))
 - [`test-conference-roster`](ready/test-conference-roster-start-an-ad-hoc-conference-verify-it-is-distinct-from-a-1-1.md)
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
-- [`test-fake-grid-render-fixtures`](ready/test-fake-grid-render-fixtures.md) —
-  Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
-  (blocked by `test-fake-grid-terrain-layerdata` (done),
-  `test-shared-test-assets` (done))
+- [`test-fake-grid-npc-avatars`](ready/test-fake-grid-npc-avatars.md) — NPC
+  avatars with appearance, animations and attachments (blocked by
+  `test-fake-grid-render-fixtures` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -953,7 +958,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (62)
+## blocked (60)
 
 ### viewer
 
@@ -967,12 +972,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-fake-grid-render-catalogue`](blocked/viewer-fake-grid-render-catalogue.md)
   — The full-stack test catalogue — NPCs, attachments, teleport, crossing,
   parcels, environment (blocked by `test-fake-grid-neighbours-crossing`)
-- [`viewer-fake-grid-render-harness`](blocked/viewer-fake-grid-render-harness.md)
-  — ViewerHarness — the real viewer against the fake grid, read back as pixels
-  (blocked by `test-fake-grid-terrain-layerdata` (done),
-  `test-fake-grid-render-fixtures`, `viewer-plugin-groups` (done),
-  `viewer-screenshot-wait-for-quiescence` (done), `viewer-render-pixel-oracle`
-  (done))
 - [`viewer-floater-interaction-tests`](blocked/viewer-floater-interaction-tests.md)
   — Floater chrome under a real pointer (blocked by
   `viewer-ui-interaction-harness` (done), `viewer-floater-registry`)
@@ -1126,9 +1125,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars`, `test-fake-grid-timeline`)
-- [`test-fake-grid-npc-avatars`](blocked/test-fake-grid-npc-avatars.md) — NPC
-  avatars with appearance, animations and attachments (blocked by
-  `test-fake-grid-render-fixtures`)
 - [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness`)
@@ -1338,7 +1334,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (944)
+## done (945)
 
 ### protocol
 
@@ -3123,6 +3119,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — request / set experience permission
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
+- [`test-fake-grid-render-fixtures`](done/test-fake-grid-render-fixtures.md) —
+  Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
+  (blocked by `test-fake-grid-terrain-layerdata` (done),
+  `test-shared-test-assets` (done))
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))

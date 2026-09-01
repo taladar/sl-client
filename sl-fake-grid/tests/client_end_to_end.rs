@@ -1374,4 +1374,142 @@ mod test {
         );
         Ok(())
     }
+
+    /// Every builder method of `PrimFixture` survives the round trip through
+    /// the real wire: the catalogue's prims are seeded on the grid, the real
+    /// client decodes the `ObjectUpdate`s they travel in, and the typed
+    /// `extra` / particle / texture-animation views plus the raw
+    /// `texture_entry` blob it comes back with are exactly what the fixture
+    /// encoded.
+    ///
+    /// The comparison is against the fixture's own **blob**, not its typed
+    /// view: the wire is the contract, and some blocks (the flexi floats) are
+    /// quantized on the way out, so what a viewer can possibly see is what
+    /// decoding the blob gives.
+    #[tokio::test]
+    async fn the_catalogue_reaches_the_client_field_for_field() -> Result<(), TestError> {
+        let fixture = sl_fake_grid::catalogue();
+        let seeded: Vec<sl_proto::Object> = fixture.world.objects.clone();
+        assert!(
+            seeded.len() >= sl_fake_grid::fixtures::catalogue::NAMES.len(),
+            "the catalogue seeded only {} objects",
+            seeded.len()
+        );
+        let region = fixture.into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+
+        // Collect the client's view of every seeded prim; the arrival burst
+        // sends them all in one `ObjectUpdate`, but the client surfaces them
+        // one event each and may re-send.
+        let wanted: std::collections::HashSet<sl_proto::RegionLocalObjectId> =
+            seeded.iter().map(|object| object.local_id).collect();
+        let mut seen: std::collections::HashMap<sl_proto::RegionLocalObjectId, sl_proto::Object> =
+            std::collections::HashMap::new();
+        while seen.len() < wanted.len() {
+            running
+                .wait_for(|event| {
+                    if let Event::ObjectAdded(object) | Event::ObjectUpdated(object) = event
+                        && wanted.contains(&object.local_id)
+                    {
+                        let _previous = seen.insert(object.local_id, (**object).clone());
+                    }
+                    Some(())
+                })
+                .await?;
+        }
+
+        for fixture_object in &seeded {
+            let name = sl_fake_grid::fixtures::catalogue::entries()
+                .into_iter()
+                .find(|entry| entry.local_id == fixture_object.local_id)
+                .map_or_else(|| "linkset-child".to_owned(), |entry| entry.name.to_owned());
+            let received = seen
+                .get(&fixture_object.local_id)
+                .ok_or_else(|| format!("{name} never reached the client"))?;
+
+            assert_eq!(
+                received.full_id, fixture_object.full_id,
+                "{name} arrived with a different full id"
+            );
+            assert_eq!(
+                received.texture_entry, fixture_object.texture_entry,
+                "{name}'s texture entry changed on the wire"
+            );
+            assert_eq!(
+                received.extra,
+                sl_proto::decode_extra_params(&fixture_object.extra_params),
+                "{name}'s extra params changed on the wire"
+            );
+            assert_eq!(
+                received.particles,
+                sl_proto::decode_particle_system(&fixture_object.particle_system),
+                "{name}'s particle system changed on the wire"
+            );
+            assert_eq!(
+                received.texture_animation,
+                sl_proto::decode_texture_anim(&fixture_object.texture_anim),
+                "{name}'s texture animation changed on the wire"
+            );
+            assert_eq!(
+                received.parent_id, fixture_object.parent_id,
+                "{name} arrived under a different parent"
+            );
+            assert_eq!(
+                received.text, fixture_object.text,
+                "{name}'s hover text changed on the wire"
+            );
+            assert_eq!(
+                received.motion.position, fixture_object.motion.position,
+                "{name} arrived somewhere else"
+            );
+        }
+        Ok(())
+    }
+
+    /// The catalogue's assets are actually served: the checker texture comes
+    /// back over `GetTexture` and the mesh over `GetMesh2`, so a prim naming
+    /// one is not pointing at a 404.
+    #[tokio::test]
+    async fn the_catalogue_assets_are_fetchable() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{CHECKER_TEXTURE, MESH_ASSET};
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut running = start_in(vec![region]).await?;
+        running
+            .commands
+            .send(Command::FetchTexture {
+                texture_id: CHECKER_TEXTURE,
+                discard_level: sl_proto::j2c::DiscardLevel::FULL,
+            })
+            .await?;
+        let texture = running
+            .wait_for(|event| match event {
+                Event::TextureReceived(fetched) if fetched.id == CHECKER_TEXTURE => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        assert!(!texture.is_empty(), "the checker texture came back empty");
+
+        running
+            .commands
+            .send(Command::FetchMesh {
+                mesh_id: MESH_ASSET,
+                byte_range: None,
+            })
+            .await?;
+        let mesh = running
+            .wait_for(|event| match event {
+                Event::AssetReceived(fetched) if fetched.id == MESH_ASSET.uuid() => {
+                    Some(fetched.data.clone())
+                }
+                _ => None,
+            })
+            .await?;
+        // What comes back is the mesh asset the fixture wrote: its header
+        // parses and names every level of detail.
+        assert_eq!(mesh, sl_test_assets::mesh::unit_cube_mesh_asset()?);
+        Ok(())
+    }
 }

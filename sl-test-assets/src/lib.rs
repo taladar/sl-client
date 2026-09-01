@@ -10,6 +10,13 @@
 //! The marker colours match the pixel oracles' dominant-channel classes:
 //! near-primary, `0.9` in the marker's channel(s) and `0.1` in the others, so a
 //! rendered pixel of one is unambiguous and a blend of two reads as both.
+//!
+//! What the same fixtures need beside the pixels lives here too:
+//! [`sculpt_sphere`] (a sculpt map, which is geometry stored *as* a texture),
+//! [`mesh::unit_cube_mesh_asset`] (a whole mesh asset) and
+//! [`gltf_material_asset`] (a PBR material asset).
+
+pub mod mesh;
 
 use bytes::Bytes;
 use sl_proto::DEFAULT_TERRAIN_DETAIL_TEXTURES;
@@ -149,6 +156,90 @@ impl RgbaImage {
     }
 }
 
+/// A `size`×`size` **sculpt map** of a sphere in the convention real sculpt
+/// content uses: the north pole (`z = +0.5`, blue at full) on the visible top
+/// row and longitude running counter-clockwise (`+X` → `+Y`) across the
+/// columns, which is the orientation the reference viewer tessellates outward.
+///
+/// A sculpt map is geometry stored as a texture — each pixel's `(r, g, b) /
+/// 255 - 0.5` is a vertex position — so it belongs beside the other procedural
+/// pixels rather than beside the mesh asset.
+#[must_use]
+pub fn sculpt_sphere(size: u32) -> RgbaImage {
+    let span = |value: u32| f32::from(u16::try_from(value).unwrap_or(u16::MAX));
+    RgbaImage::painted(size, |x, y| {
+        let theta = core::f32::consts::PI * span(y) / span(size.saturating_sub(1)).max(1.0);
+        let phi = core::f32::consts::TAU * span(x) / span(size).max(1.0);
+        let channel = |value: f32| round_to_u8((0.5 + 0.5 * value) * 255.0);
+        [
+            channel(theta.sin() * phi.cos()),
+            channel(theta.sin() * phi.sin()),
+            channel(theta.cos()),
+            255,
+        ]
+    })
+}
+
+/// Rounds a value already inside `0..=255` to its byte.
+#[expect(
+    clippy::as_conversions,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    reason = "the value is clamped into 0..=255 before the cast; no From impl exists"
+)]
+const fn round_to_u8(value: f32) -> u8 {
+    value.round().clamp(0.0, 255.0) as u8
+}
+
+/// The `AT_MATERIAL` envelope fields a GLTF material asset is wrapped in
+/// (`LLGLTFMaterial::ASSET_TYPE` and its newest accepted version).
+const GLTF_ASSET_TYPE: &str = "GLTF 2.0";
+/// The asset-envelope version written below.
+const GLTF_ASSET_VERSION: &str = "1.1";
+
+/// A **GLTF (PBR) material asset** — what the `ViewerAsset` capability serves
+/// for the `material_id` an object's `RenderMaterial` extra-params block
+/// names: the LLSD envelope `{ version, type, data }` whose `data` is a glTF
+/// 2.0 document carrying one material.
+///
+/// `base_color` is the linear RGBA factor and `base_color_texture` the texture
+/// asset the material samples, if any. The material is fully rough and
+/// non-metallic, so what a fixture asserts about it is its colour.
+#[must_use]
+pub fn gltf_material_asset(base_color: [f32; 4], base_color_texture: Option<Uuid>) -> Vec<u8> {
+    let factor = base_color
+        .iter()
+        .map(|component| component.to_string())
+        .collect::<Vec<String>>()
+        .join(", ");
+    let (texture_slot, indirection) = match base_color_texture {
+        Some(id) => (
+            r#", "baseColorTexture": { "index": 0 }"#.to_owned(),
+            format!(r#", "textures": [ {{ "source": 0 }} ], "images": [ {{ "uri": "{id}" }} ]"#),
+        ),
+        None => (String::new(), String::new()),
+    };
+    let document = format!(
+        r#"{{ "asset": {{ "version": "2.0" }}, "materials": [ {{ "pbrMetallicRoughness": {{ "baseColorFactor": [ {factor} ], "metallicFactor": 0.0, "roughnessFactor": 1.0{texture_slot} }} }} ]{indirection} }}"#
+    );
+    sl_llsd::Llsd::Map(
+        [
+            (
+                "version".to_owned(),
+                sl_llsd::Llsd::String(GLTF_ASSET_VERSION.to_owned()),
+            ),
+            (
+                "type".to_owned(),
+                sl_llsd::Llsd::String(GLTF_ASSET_TYPE.to_owned()),
+            ),
+            ("data".to_owned(), sl_llsd::Llsd::String(document)),
+        ]
+        .into_iter()
+        .collect(),
+    )
+    .to_llsd_binary()
+}
+
 /// The side, in pixels, of the terrain detail textures below.
 const TERRAIN_DETAIL_SIZE: u32 = 32;
 
@@ -176,7 +267,7 @@ pub fn terrain_detail_solids() -> Result<[(Uuid, Vec<u8>); 4], EncodeError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{RgbaImage, markers, terrain_detail_solids};
+    use super::{RgbaImage, markers, sculpt_sphere, terrain_detail_solids};
     use pretty_assertions::assert_eq;
     use sl_proto::j2c::DiscardLevel;
     use sl_texture::decode_j2c;
@@ -231,6 +322,53 @@ mod tests {
                 );
             }
         }
+        Ok(())
+    }
+
+    /// The poles and the equator sit where the sculpt sampler expects them:
+    /// the top row is `z = +0.5` (blue at full), the bottom row `z = -0.5`,
+    /// and the equator runs `+X` → `+Y` across the columns.
+    #[test]
+    fn the_sculpt_sphere_puts_its_north_pole_on_the_top_row() -> Result<(), TestError> {
+        let map = sculpt_sphere(16);
+        let blue = |x, y| map.pixel(x, y).map(|[_r, _g, b, _a]| b);
+        assert_eq!(blue(0, 0), Some(255));
+        assert_eq!(blue(7, 0), Some(255));
+        assert_eq!(blue(0, 15), Some(0));
+        // Row 8 of 16 is the sample closest to the equator (θ = π/2): its
+        // first column points at +X, a quarter of the way round at +Y.
+        let [red, _g, _b, _a] = map.pixel(0, 8).ok_or("no equator sample")?;
+        assert!(red > 200, "column 0 of the equator is not +X (red {red})");
+        let [_r, green, _b, _a] = map.pixel(4, 8).ok_or("no quarter sample")?;
+        assert!(
+            green > 200,
+            "column 4 of the equator is not +Y (green {green})"
+        );
+        Ok(())
+    }
+
+    /// The material asset decodes back through the viewer's own material
+    /// decoder into the colour and texture it was written with.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the factors travel as exactly-representable decimals through \
+                  the JSON, so exact equality is the test"
+    )]
+    #[test]
+    fn a_gltf_material_asset_decodes_back() -> Result<(), TestError> {
+        let texture = uuid::Uuid::from_u128(0x00C0_FFEE);
+        let asset = super::gltf_material_asset([0.25, 0.5, 0.75, 1.0], Some(texture));
+        let material = sl_material::parse_material_asset(&asset)?;
+        assert_eq!(material.base_color, [0.25_f32, 0.5, 0.75, 1.0]);
+        assert_eq!(
+            material.base_color_texture.map(|slot| slot.id.uuid()),
+            Some(texture)
+        );
+        // Without a texture the material is a plain colour.
+        let plain = super::gltf_material_asset([1.0, 0.0, 0.0, 1.0], None);
+        let plain = sl_material::parse_material_asset(&plain)?;
+        assert_eq!(plain.base_color, [1.0, 0.0, 0.0, 1.0]);
+        assert!(plain.base_color_texture.is_none());
         Ok(())
     }
 

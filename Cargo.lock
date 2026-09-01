@@ -8950,7 +8950,11 @@ name = "sl-test-assets"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "flate2",
  "pretty_assertions",
+ "sl-llsd",
+ "sl-material",
+ "sl-mesh",
  "sl-proto",
  "sl-texture",
  "uuid",

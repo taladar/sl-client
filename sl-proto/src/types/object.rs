@@ -190,6 +190,18 @@ const fn attachment_point_from_state(state: u8) -> u8 {
     (((state & 0xf0) >> 4) | ((state & 0x0f) << 4)) & !ATTACHMENT_ADD
 }
 
+/// The object `state` byte a simulator sends for an attachment worn on
+/// `point` — the inverse of the viewer's `ATTACHMENT_ID_FROM_STATE` unswizzle
+/// that [`Object::attachment_point_id`] applies. The nibble swap is its own
+/// inverse, so this is the same operation read the other way; it is the
+/// server-side half, used by anything that *writes* an `ObjectUpdate` for a
+/// worn object.
+#[must_use]
+pub const fn attachment_state_from_point(point: u8) -> u8 {
+    let point = point & !ATTACHMENT_ADD;
+    ((point & 0xf0) >> 4) | ((point & 0x0f) << 4)
+}
+
 impl Object {
     /// This object's [`ScopedObjectId`] — its region-local id paired with the
     /// circuit it was learned on. Pass it to the object
@@ -1091,6 +1103,20 @@ mod tests {
             hud.attachment_point(),
             Some(AttachmentPoint::Hud(HudAttachmentPoint::Center))
         );
+    }
+
+    /// The server-side half writes exactly the state byte the client-side half
+    /// reads back, for every point the enumeration names.
+    #[test]
+    fn attachment_state_round_trips_every_point() {
+        use super::attachment_state_from_point;
+        assert_eq!(attachment_state_from_point(6), 0x60);
+        assert_eq!(attachment_state_from_point(35), 0x32);
+        for point in 1..=0x7F_u8 {
+            let state = attachment_state_from_point(point);
+            let object = test_object(super::pcode::PRIMITIVE, state, "");
+            assert_eq!(object.attachment_point_id(), Some(point));
+        }
     }
 
     #[test]

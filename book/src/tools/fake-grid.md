@@ -135,7 +135,10 @@ add it to Firestorm's grid manager as a grid with that login URI. With
 no `--account` it creates `Test User` / `password`. `--region` repeats
 (`Name` or `Name@X,Y` in grid coordinates; the first is the start region,
 unplaced ones are laid out eastwards from 1000,1000), and a viewer can
-teleport between the regions from its map — see below.
+teleport between the regions from its map — see below. `--catalogue`
+replaces every region's stock content with the named prim catalogue (one
+prim per rendering feature, logged with its position on startup) — see
+below.
 
 ## The non-CAPS HTTP surfaces
 
@@ -259,6 +262,74 @@ The first version of the driver sent it on `AgentArrived` and the tokio
 end-to-end test never noticed — it only waited for
 `RegionHandshakeComplete`, which the movement-complete path also raises;
 the Bevy smoke tier's `SlRegionIdentity` assertion is what caught it.
+
+## Typed prim fixtures and the catalogue
+
+`box_prim` makes an untextured cube and nothing else, because
+`full_update_block` emits only the **raw byte fields** of an `Object`: its
+`texture_entry`, `extra_params`, `particle_system` and `texture_anim`
+travel as blobs, and the typed views beside them (`extra`, `particles`,
+`texture_animation`) are what a *decoder* filled in — an encoder never
+reads them. A fixture that wants a textured, lit, flexi or mesh prim has
+to write those blobs itself.
+
+`fixtures::PrimFixture` does. Each builder method sets a typed value and
+`build()` packs all four blobs through `sl-proto`'s own
+`encode_texture_entry` / `encode_extra_params` / `encode_particle_system`
+/ `encode_texture_anim`, which are the exact inverses of the client's
+decoders — so a test asserts the fields it seeded:
+
+```text
+PrimFixture::boxed(local_id, full_id, owner, position, scale)
+    .shape(..)              // path/profile curves: sphere, cylinder, tube
+    .textured(key)          // one texture on every face
+    .face(i, &FaceStyle { texture, color, alpha, glow, fullbright, shiny,
+                          bump, repeats, offset, rotation, material, media })
+    .mesh(key, faces)       // ExtraParams sculpt block, LL_SCULPT_TYPE_MESH
+    .sculpt(map, kind)      // .. or a sculpt map with its stitch kind
+    .pbr(face, material)    // ExtraParams RenderMaterial (GLTF)
+    .light(..) .projector(..) .flexi(..) .reflection_probe(..)
+    .particles(..) .texture_anim(..) .hover_text(..) .media_url(..)
+    .rotated(..) .child_of(parent, offset, rotation)     // a linkset child
+    .attached_to(wearer, point, item, offset, rotation)
+    .build()
+```
+
+`linkset(root, children)` re-parents every child to the root and returns
+the objects root-first — a linkset is one object per prim on the wire,
+linked only by the shared `parent_id`. An attachment's point rides in the
+`state` byte with its nibbles swapped (`attachment_state_from_point`, the
+inverse of the viewer's `ATTACHMENT_ID_FROM_STATE`) and its item id in an
+`AttachItemID` name-value.
+
+Quantization is visible here: the flexi block's floats travel as a byte
+each, so the typed `extra` a fixture holds and the `extra` a client
+decodes agree only to the wire's resolution. Compare against the decoded
+**blob**, not the typed value — the wire is the contract.
+
+`fixtures::RegionFixture` is one region's whole content as a value —
+`world`, `assets`, `materials`, `media`, `environment`, `terrain` — and
+`into_region(base)` is the single place that knows which surface serves
+which piece (objects and parcels over UDP, assets over
+`GetTexture`/`GetMesh2`/`ViewerAsset`, materials over `RenderMaterials`,
+media over `ObjectMedia`, the environment over `ExtEnvironment`, the
+ground as `LayerData` plus the estate RAW download).
+
+`fixtures::catalogue()` is the **named catalogue**: sixteen prims, one per
+rendering feature, in a west-to-east row 8 m north of the arrival point at
+4 m spacing, with every texture, sculpt map, mesh and material they
+reference served. `catalogue::entries()` / `entry(name)` give a subject's
+id and position, so a check finds "the mesh prim" by name rather than by
+a hard-coded local id, and the same fixture backs the automated tiers and
+the binary's `--catalogue` flag — which is what makes a Firestorm session
+and a full-stack capture look at the same objects.
+
+The procedural assets it needs come from `sl-test-assets`:
+`RgbaImage::checker` / `solid` (as JPEG2000), `sculpt_sphere` (a sculpt
+map — geometry stored as a texture), `mesh::unit_cube_mesh_asset` (the
+LLSD-binary header plus zlib-compressed LOD blocks `sl-mesh` decodes) and
+`gltf_material_asset` (the `AT_MATERIAL` LLSD envelope around a glTF 2.0
+document).
 
 ## The ground: terrain, wind and clouds
 

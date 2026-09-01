@@ -2,7 +2,7 @@
 id: test-fake-grid-npc-avatars
 title: NPC avatars with appearance, animations and attachments
 topic: test
-status: blocked
+status: ready
 origin: test-harness plan (2026-08-30)
 points: 5
 refs: [viewer-fake-grid-login-smoke]
@@ -10,6 +10,11 @@ blocked_by: [test-fake-grid-render-fixtures]
 ---
 
 Context: [context/testing.md](../context/testing.md).
+
+Unblocked (2026-09-01): [[test-fake-grid-render-fixtures]] shipped
+`PrimFixture` (including `.attached_to`, which is how an NPC's
+attachments are built) and the `RegionFixture` an `npcs` field belongs
+on — it was deliberately left off until this task defines `NpcFixture`.
 
 The fake grid rezzes only the arriving agent's own avatar object and has
 no inter-session broadcast, so a second avatar is invisible. Model other

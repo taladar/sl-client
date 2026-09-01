@@ -4,7 +4,7 @@ version = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-description = "Procedural test assets — marker-coloured checkers, solids and gradients as RGBA and JPEG2000 — shared by the sl-client test tiers"
+description = "Procedural test assets — marker-coloured checkers, solids and gradients as RGBA and JPEG2000, sculpt maps and a unit-cube mesh — shared by the sl-client test tiers"
 readme = { workspace = true }
 license = { workspace = true }
 
@@ -17,12 +17,18 @@ exclude = { workspace = true }
 
 [dependencies]
 bytes = { workspace = true }
+flate2 = { workspace = true }
+sl-llsd = { workspace = true }
 sl-proto = { workspace = true }
 sl-texture = { path = "../sl-texture", version = "0.1.0", features = ["encode"] }
 uuid = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The mesh and material assets the crate writes are read back through the
+# viewer's own decoders.
+sl-material = { workspace = true }
+sl-mesh = { workspace = true }
 
 [lints]
 workspace = true
