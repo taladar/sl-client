@@ -4,7 +4,7 @@ version = { workspace = true }
 authors = { workspace = true }
 edition = { workspace = true }
 rust-version = { workspace = true }
-description = "Decoding mesh fetch API and cache (LLMesh decode + LOD-aware store + Firestorm-compatible on-disk cache) for Second Life / OpenSim clients"
+description = "Mesh fetch API, codec and cache (LLMesh decode/encode + LOD-aware store + Firestorm-compatible on-disk cache) for Second Life / OpenSim clients"
 readme = { workspace = true }
 license = { workspace = true }
 

@@ -2,11 +2,40 @@
 id: viewer-mesh-encoder
 title: LLMesh encoder (inverse of the sl-mesh decoder)
 topic: viewer
-status: in-progress
+status: done
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-mesh-model-upload
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+Done (2026-09-01): `sl-mesh/src/encode.rs` — `MeshModel` (the decoder's own
+`Submesh` / `MeshSkin` / `PhysicsConvex` types, so a decoded asset can be
+edited and written back), `encode_mesh` and the three block writers, with
+every limit below enforced as a typed `MeshEncodeError` rather than a clamp.
+Eleven unit tests pin the round trip through the decoder, the `NoGeometry`
+marker, the influence stream's edge cases (four-influence = no terminator,
+zero influences, an unnormalised weight, a joint the skin does not list), the
+LOD chain, the convex decomposition and the header's write-order offsets.
+`sl-test-assets::mesh` now builds a `Submesh` and calls the encoder; it writes
+no LLSD of its own and no longer needs `flate2`.
+
+Two deliberate departures from the plan above:
+
+- **No `encode` feature.** The writer pulls in nothing the decoder does not
+  already have (`sl-wire`, `flate2`), so a feature would have bought only
+  `cargo hack` powerset time in the pre-commit hook. The module is
+  unconditional.
+- **A degenerate quantization domain writes `0` rather than dividing by its
+  zero range** the way `writeModel` does — `0` dequantizes back to the domain
+  minimum, which is the one value such a domain holds, where the reference
+  casts an infinity. This is what lets a flat face (every vertex sharing a `z`)
+  round trip at all.
+
+`encode_physics_convex_block` **derives** its `Min`/`Max` from the hull points
+rather than reading `PhysicsConvex`'s own, matching `Decomposition::asLLSD`:
+a decomposition built by hand would otherwise have to keep a redundant
+bounding box in step with its points, and a defaulted one would collapse every
+point onto the origin.
 
 Add an **`encode` feature to `sl-mesh`** that serialises an intermediate SL
 model into the raw binary LLMesh asset — the exact inverse of the LOD / `skin` /

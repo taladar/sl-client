@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 309 |
-| blocked | 61 |
-| in-progress | 19 |
+| ready | 312 |
+| blocked | 58 |
+| in-progress | 18 |
 | bugs | 65 |
-| done | 949 |
+| done | 950 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1538** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (309)
+## ready (312)
 
 ### protocol
 
@@ -608,8 +608,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Media playback policies — URL filter, perms, first-click, rolloff
 - [`viewer-menu-bar-fill-implemented-entries`](ready/viewer-menu-bar-fill-implemented-entries.md)
   — Top menu bar — add entries for already-implemented features
+- [`viewer-mesh-cost-estimate`](ready/viewer-mesh-cost-estimate.md) — Streaming
+  cost / land-impact estimate (blocked by `viewer-mesh-encoder` (done))
 - [`viewer-mesh-gltf-import`](ready/viewer-mesh-gltf-import.md) — glTF import
   into an intermediate SL model
+- [`viewer-mesh-upload-sequence`](ready/viewer-mesh-upload-sequence.md) —
+  Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`
+  (done))
 - [`viewer-minimap-click-radar-select`](ready/viewer-minimap-click-radar-select.md)
   — Minimap single-click selects the avatar in the radar (blocked by
   `viewer-avatar-radar` (done))
@@ -943,6 +948,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Read and write an inventory object asset
 - [`test-assets-remaining-class-audit`](ready/test-assets-remaining-class-audit.md)
   — Decide what the remaining asset classes are worth
+- [`test-assets-rigged-mesh-encoder`](ready/test-assets-rigged-mesh-encoder.md)
+  — A rigged mesh fixture whose deformation is analytically checkable (blocked
+  by `viewer-mesh-encoder` (done))
 - [`test-assets-settings-encoder`](ready/test-assets-settings-encoder.md) —
   Write an EEP settings asset, not only read one
 - [`test-assets-sound-encoder`](ready/test-assets-sound-encoder.md) — A
@@ -967,7 +975,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (61)
+## blocked (58)
 
 ### viewer
 
@@ -1011,8 +1019,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-lsl-editor-save-compile`](blocked/viewer-lsl-editor-save-compile.md)
   — LSL editor save — upload/compile round-trip and error list (blocked by
   `viewer-lsl-editor-widget`)
-- [`viewer-mesh-cost-estimate`](blocked/viewer-mesh-cost-estimate.md) —
-  Streaming cost / land-impact estimate (blocked by `viewer-mesh-encoder`)
 - [`viewer-mesh-lod-decimation`](blocked/viewer-mesh-lod-decimation.md) — LOD
   decimation via meshoptimizer (blocked by `viewer-mesh-gltf-import`)
 - [`viewer-mesh-physics-vhacd`](blocked/viewer-mesh-physics-vhacd.md) — Physics
@@ -1022,8 +1028,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-mesh-gltf-import`, `viewer-mesh-lod-decimation`,
   `viewer-mesh-physics-vhacd`, `viewer-mesh-upload-sequence`,
   `viewer-prim-texture-editing` (done))
-- [`viewer-mesh-upload-sequence`](blocked/viewer-mesh-upload-sequence.md) —
-  Two-POST NewFileAgentInventory mesh upload (blocked by `viewer-mesh-encoder`)
 - [`viewer-minimap-menu-avatar-actions`](blocked/viewer-minimap-menu-avatar-actions.md)
   — Minimap context menu — remaining avatar actions (More Options) (blocked by
   `viewer-block-list` (done), `viewer-report-abuse`, `viewer-derender-blacklist`
@@ -1131,9 +1135,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
-- [`test-assets-rigged-mesh-encoder`](blocked/test-assets-rigged-mesh-encoder.md)
-  — A rigged mesh fixture whose deformation is analytically checkable (blocked
-  by `viewer-mesh-encoder`)
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done), `test-fake-grid-timeline`)
@@ -1145,7 +1146,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
   — exchange voice signalling (blocked by `test-voice-account`)
 
-## in-progress (19)
+## in-progress (18)
 
 ### viewer
 
@@ -1161,8 +1162,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Start an ad-hoc conference from a multi-selection
 - [`viewer-media-prim-browser`](in-progress/viewer-media-prim-browser.md) —
   Media-on-a-prim & embedded web browser
-- [`viewer-mesh-encoder`](in-progress/viewer-mesh-encoder.md) — LLMesh encoder
-  (inverse of the sl-mesh decoder)
 - [`viewer-notecard-editor`](in-progress/viewer-notecard-editor.md) — Notecard
   viewer & editor (rich text with embedded items)
 - [`viewer-perf-pbr-shadow-cluster-rez`](in-progress/viewer-perf-pbr-shadow-cluster-rez.md)
@@ -1348,7 +1347,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-wasd-moves-flycam-in-world`](bugs/viewer-wasd-moves-flycam-in-world.md)
   — WASD appears to drive the flycam during normal play (debug-camera leftover?)
 
-## done (949)
+## done (950)
 
 ### protocol
 
@@ -1963,6 +1962,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   `viewer-lsl-parser-tree` (done), `protocol-lsl-syntax` (done))
 - [`viewer-material-swatch-sphere-preview`](done/viewer-material-swatch-sphere-preview.md)
   — Render a material-on-a-sphere preview for the PBR material swatch
+- [`viewer-mesh-encoder`](done/viewer-mesh-encoder.md) — LLMesh encoder (inverse
+  of the sl-mesh decoder)
 - [`viewer-mesh-lod-factor-preference`](done/viewer-mesh-lod-factor-preference.md)
   — Expose the mesh/prim LOD factor as a preference (the reference "Mesh Detail"
   slider)

@@ -2,12 +2,20 @@
 id: test-assets-rigged-mesh-encoder
 title: A rigged mesh fixture whose deformation is analytically checkable
 topic: test
-status: blocked
+status: ready
 origin: asked while reviewing viewer-static-asset-library (2026-09-01)
 points: 5
 refs: [test-shared-test-assets, viewer-p17-2, viewer-r1]
 blocked_by: [viewer-mesh-encoder]
 ---
+
+[[viewer-mesh-encoder]] cleared the blocker (2026-09-01): `sl_mesh::encode`
+writes the header, the geometry blocks, the `skin` block and the convex
+decomposition, and `sl-test-assets::mesh` already calls it for the unit cube.
+What it deliberately does *not* police is the content, so every pathological
+fixture below is writable: an unnormalised weight set, a vertex with no
+influences, a four-influence vertex (which carries no terminator), and an
+influence naming a joint the `skin` block does not list.
 
 Context: [context/testing.md](../context/testing.md).
 
@@ -27,12 +35,11 @@ cylinder with linearly ramped weights has a **closed-form** deformed
 position per vertex, so an oracle can assert exact numbers rather than
 "looks about right".
 
-The encoder itself is **not** this task. Writing an LLMesh asset is
-production work the viewer needs anyway for model upload, so it belongs
-in `sl-mesh` behind its `encode` feature: [[viewer-mesh-encoder]], which
-this waits on. `sl-test-assets::mesh` should end up *calling* that rather
-than hand-rolling the header and geometry blocks the way it does today —
-one format, one encoder.
+The encoder itself was **not** this task. Writing an LLMesh asset is
+production work the viewer needs anyway for model upload, so it landed in
+`sl-mesh` as [[viewer-mesh-encoder]], which this waited on;
+`sl-test-assets::mesh` now *calls* it rather than hand-rolling the header and
+geometry blocks — one format, one encoder.
 
 What is left here is the fixtures. A well-formed one (the cylinder), and
 — the part real content could not provide — deliberately **pathological**

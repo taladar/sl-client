@@ -2,12 +2,16 @@
 id: viewer-mesh-cost-estimate
 title: Streaming cost / land-impact estimate
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-mesh-model-upload
 blocked_by: [viewer-mesh-encoder]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+[[viewer-mesh-encoder]] cleared the blocker (2026-09-01): `sl_mesh::encode`
+writes the asset, and `encode_mesh` returns the whole byte string whose
+per-section sizes this needs.
 
 Compute the **streaming cost / land impact** of an encoded model client-side,
 from the viewer's own formula — no server round-trip needed for the estimate. It

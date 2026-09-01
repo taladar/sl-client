@@ -1,9 +1,9 @@
 # sl-mesh
 
-A higher-level mesh fetch API and cache for Second Life / OpenSim clients, the
-mesh counterpart of `sl-texture`. It fetches SL mesh assets over the
-`GetMesh2` / `GetMesh` capability, decodes the custom **LLMesh** format, and
-keeps the results in a level-of-detail-aware store.
+A higher-level mesh fetch API, codec and cache for Second Life / OpenSim
+clients, the mesh counterpart of `sl-texture`. It fetches SL mesh assets over
+the `GetMesh2` / `GetMesh` capability, decodes and encodes the custom
+**LLMesh** format, and keeps the results in a level-of-detail-aware store.
 
 SL mesh geometry is a **custom binary format, not glTF** (glTF in SL is the
 per-face PBR *material* layer, out of scope here). A mesh asset is a binary
@@ -17,6 +17,13 @@ blocks.
   zlib-inflate it, and dequantize the `u16` positions / normals / UVs and `u16`
   triangle indices into `f32` geometry (plus skin and physics decode). Runs off
   the calling thread on the shared `sl-asset-sched` rayon bridge.
+- **LLMesh encode** — the exact inverse: derive the position and texture
+  domains, quantize back to `u16`, deflate each block and lay the sections out
+  behind the header in write order. It refuses a model that breaks a format or
+  upload limit (face count, `u16` indices, the LOD chain, joint count, hull
+  size) rather than emitting an asset a grid would reject — but it will write
+  the *content* a skinning test needs, including unnormalised weights and a
+  vertex with no influences at all.
 - **Weak-reference store** — the store holds only `Weak<MeshEntry>`, so a mesh
   is collectible as soon as the last external `Arc` drops.
 - **LOD as separate blocks** — unlike a texture (progressive discard), each mesh
@@ -33,5 +40,7 @@ blocks.
   viewer's 12-byte preamble (`version`, `header_size`, cached-block `flags`) in
   a dedicated cache directory.
 
-Mesh **upload** (the viewer build path) and rigged-mesh skinning integration
-are out of scope; the decode exposes skin/weights and physics for an app to use.
+The viewer-side **model upload** flow (the build floater, LOD generation,
+physics decomposition, the upload capability) and rigged-mesh skinning
+integration are out of scope; this crate carries the asset codec they sit on,
+and the decode exposes skin/weights and physics for an app to use.

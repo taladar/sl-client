@@ -2,12 +2,16 @@
 id: viewer-mesh-upload-sequence
 title: Two-POST NewFileAgentInventory mesh upload
 topic: viewer
-status: blocked
+status: ready
 origin: reference-viewer feature-cluster survey (2026-07); split from viewer-mesh-model-upload
 blocked_by: [viewer-mesh-encoder]
 ---
 
 Context: [context/viewer.md](../context/viewer.md).
+
+[[viewer-mesh-encoder]] cleared the blocker (2026-09-01): `sl_mesh::encode`
+writes the asset, and `encode_mesh` returns the whole byte string whose
+per-section sizes this needs.
 
 Drive the **two-POST upload** of an encoded model to the `NewFileAgentInventory`
 cap. The upload cap itself is generic (done as `protocol-23`), so nothing

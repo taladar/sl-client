@@ -7,6 +7,8 @@
 //! progressive discard levels). The pieces are:
 //!
 //! - [`decode`] — LLMesh header parsing and geometry / skin / physics decoding.
+//! - [`encode`] — its inverse: writing an LLMesh asset, which model upload and
+//!   the mesh test fixtures both need.
 //! - [`disk`] — the Firestorm-compatible per-UUID on-disk mesh cache.
 //! - [`fetcher`] — the runtime-agnostic network abstraction.
 //! - [`entry`] — the shared, LOD-aware mesh object and its geometry lease.
@@ -15,6 +17,7 @@
 
 pub mod decode;
 pub mod disk;
+pub mod encode;
 pub mod entry;
 pub mod fetcher;
 pub mod progress;
@@ -27,6 +30,10 @@ pub use decode::{
     parse_header,
 };
 pub use disk::{AssetBytes, CacheLimits, MeshDiskCache};
+pub use encode::{
+    MeshEncodeError, MeshModel, encode_lod_block, encode_mesh, encode_physics_convex_block,
+    encode_skin_block,
+};
 pub use entry::{MeshEntry, MeshReadLease};
 pub use fetcher::{AssetFetcher, FetchChunk, FetchError, MeshFetcher};
 pub use progress::{MeshProgress, MeshRequest, Priority};

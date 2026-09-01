@@ -3,24 +3,15 @@
 //! `GetMesh2` capability serves and what [`sl_mesh`](https://docs.rs/sl-mesh)
 //! decodes.
 //!
-//! There is no mesh *encoder* in the workspace — nothing but a test needs to
-//! produce an asset — so this module is the one place that writes the format.
-//! It is deliberately the smallest asset the decoder accepts: a single
-//! submesh, one block shared by all four LOD entries, no skin and no physics.
+//! The format itself lives in `sl_mesh::encode`, beside the decoder it is the
+//! inverse of — one encoder, one set of upload limits. What is here is the
+//! *geometry*: the fixture cube this crate's callers rez.
 
-use std::io::Write as _;
-
-use sl_llsd::Llsd;
-use sl_proto::MeshLod;
-
-use crate::{push_u16, quantize_u16};
+use sl_mesh::{MeshEncodeError, MeshModel, Submesh, encode_mesh};
 
 /// The half-extent of the unit cube: its vertices span `[-0.5, 0.5]` on every
 /// axis, the normalized box a prim's scale stretches.
 const HALF: f32 = 0.5;
-
-/// The mesh-header version the reference viewer writes and `sl-mesh` accepts.
-const MESH_VERSION: i32 = 1;
 
 /// The six faces of a cube as `(normal, u axis, v axis)`, each axis pair
 /// ordered so `u × v` is the outward normal — which makes the two triangles
@@ -38,19 +29,7 @@ const CUBE_FACES: [([f32; 3], [f32; 3], [f32; 3]); 6] = [
 const FACE_CORNERS: [(f32, f32); 4] = [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)];
 
 /// The two triangles of a face, as indices into [`FACE_CORNERS`].
-const FACE_TRIANGLES: [u16; 6] = [0, 1, 2, 0, 2, 3];
-
-/// One vertex of the generated cube: position, outward normal and face-local
-/// texture coordinate.
-#[derive(Debug, Clone, Copy, PartialEq)]
-struct Vertex {
-    /// The position, in the normalized `[-0.5, 0.5]` mesh box.
-    position: [f32; 3],
-    /// The outward unit normal.
-    normal: [f32; 3],
-    /// The texture coordinate, `0..1` across the face.
-    uv: [f32; 2],
-}
+const FACE_TRIANGLES: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
 /// A unit cube as a Second Life mesh asset: 24 vertices (four per face, so
 /// each face keeps its own normal and a full `0..1` texture coordinate span),
@@ -58,51 +37,48 @@ struct Vertex {
 /// face, which is what a fixture wants when it asserts "the checker is on the
 /// mesh".
 ///
-/// All four LOD entries name the same block, so the asset renders identically
-/// however aggressively a viewer picks its level of detail.
+/// All four levels of detail carry the same geometry, so the asset renders
+/// identically however aggressively a viewer picks its level.
 ///
 /// # Errors
 ///
-/// Returns the zlib encoder's error, which writing to a `Vec` cannot produce.
-pub fn unit_cube_mesh_asset() -> Result<Vec<u8>, std::io::Error> {
-    let vertices = cube_vertices();
-    let indices = cube_indices();
-    let block = deflate(&Llsd::Array(vec![submesh(&vertices, &indices)]).to_llsd_binary())?;
-
-    let mut header = vec![("version".to_owned(), Llsd::Integer(MESH_VERSION))];
-    let reference = Llsd::Map(
-        [
-            ("offset".to_owned(), Llsd::Integer(0)),
-            (
-                "size".to_owned(),
-                Llsd::Integer(i32::try_from(block.len()).unwrap_or(i32::MAX)),
-            ),
-        ]
-        .into_iter()
-        .collect(),
-    );
-    for lod in MeshLod::ALL {
-        header.push((lod.header_key().to_owned(), reference.clone()));
-    }
-
-    let mut asset = Llsd::Map(header.into_iter().collect()).to_llsd_binary();
-    asset.extend_from_slice(&block);
-    Ok(asset)
+/// Returns [`MeshEncodeError`] if the encoder refuses the model, which a cube
+/// of 24 vertices in one face cannot provoke.
+pub fn unit_cube_mesh_asset() -> Result<Vec<u8>, MeshEncodeError> {
+    encode_mesh(&MeshModel::default().with_every_lod(vec![unit_cube_submesh()]))
 }
 
-/// The cube's 24 vertices, face by face.
-fn cube_vertices() -> Vec<Vertex> {
-    let mut vertices = Vec::new();
-    for (normal, u_axis, v_axis) in CUBE_FACES {
+/// The cube as a single submesh: its 24 vertices face by face, and the 36
+/// triangle indices that pair them up.
+///
+/// Public so a fixture can put the same geometry in a model of its own — a
+/// rigged one, say, whose `Weights` stream this crate does not choose.
+#[must_use]
+pub fn unit_cube_submesh() -> Submesh {
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+    let mut uvs = Vec::new();
+    let mut indices = Vec::new();
+    for (face, (normal, u_axis, v_axis)) in CUBE_FACES.into_iter().enumerate() {
+        let base = u32::try_from(face.saturating_mul(FACE_CORNERS.len())).unwrap_or(0);
         for (u_sign, v_sign) in FACE_CORNERS {
-            vertices.push(Vertex {
-                position: axes(normal, u_axis, v_axis, u_sign, v_sign),
-                normal,
-                uv: [f32::midpoint(u_sign, 1.0), f32::midpoint(v_sign, 1.0)],
-            });
+            positions.push(axes(normal, u_axis, v_axis, u_sign, v_sign));
+            normals.push(normal);
+            uvs.push([f32::midpoint(u_sign, 1.0), f32::midpoint(v_sign, 1.0)]);
+        }
+        for corner in FACE_TRIANGLES {
+            indices.push(base.saturating_add(corner));
         }
     }
-    vertices
+    Submesh {
+        positions,
+        normals,
+        uvs,
+        indices,
+        weights: None,
+        normalized_scale: [1.0, 1.0, 1.0],
+        no_geometry: false,
+    }
 }
 
 /// The corner at `(u_sign, v_sign)` of the face whose outward normal is
@@ -125,91 +101,6 @@ fn axes(
     position
 }
 
-/// The cube's 36 triangle indices: each face's two triangles offset to its
-/// four vertices.
-fn cube_indices() -> Vec<u16> {
-    let mut indices = Vec::new();
-    for face in 0..CUBE_FACES.len() {
-        let base = u16::try_from(face.saturating_mul(FACE_CORNERS.len())).unwrap_or(0);
-        for corner in FACE_TRIANGLES {
-            indices.push(base.saturating_add(corner));
-        }
-    }
-    indices
-}
-
-/// One submesh map: the quantized position / normal / texture-coordinate
-/// streams with the domains they are taken over, and the triangle list.
-fn submesh(vertices: &[Vertex], indices: &[u16]) -> Llsd {
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-    let mut uvs = Vec::new();
-    for vertex in vertices {
-        for component in vertex.position {
-            push_u16(&mut positions, quantize_u16(component, -HALF, HALF));
-        }
-        for component in vertex.normal {
-            push_u16(&mut normals, quantize_u16(component, -1.0, 1.0));
-        }
-        for component in vertex.uv {
-            push_u16(&mut uvs, quantize_u16(component, 0.0, 1.0));
-        }
-    }
-    let mut triangles = Vec::new();
-    for index in indices {
-        push_u16(&mut triangles, *index);
-    }
-
-    Llsd::Map(
-        [
-            (
-                "PositionDomain".to_owned(),
-                domain(&[-HALF, -HALF, -HALF], &[HALF, HALF, HALF]),
-            ),
-            ("Position".to_owned(), Llsd::Binary(positions)),
-            ("Normal".to_owned(), Llsd::Binary(normals)),
-            (
-                "TexCoord0Domain".to_owned(),
-                domain(&[0.0, 0.0], &[1.0, 1.0]),
-            ),
-            ("TexCoord0".to_owned(), Llsd::Binary(uvs)),
-            ("TriangleList".to_owned(), Llsd::Binary(triangles)),
-            ("NormalizedScale".to_owned(), reals(&[1.0, 1.0, 1.0])),
-        ]
-        .into_iter()
-        .collect(),
-    )
-}
-
-/// A `{ Min, Max }` domain map over vectors of any width.
-fn domain(min: &[f32], max: &[f32]) -> Llsd {
-    Llsd::Map(
-        [
-            ("Min".to_owned(), reals(min)),
-            ("Max".to_owned(), reals(max)),
-        ]
-        .into_iter()
-        .collect(),
-    )
-}
-
-/// An LLSD array of reals.
-fn reals(values: &[f32]) -> Llsd {
-    Llsd::Array(
-        values
-            .iter()
-            .map(|value| Llsd::Real(f64::from(*value)))
-            .collect(),
-    )
-}
-
-/// zlib-compresses `bytes` — the framing every mesh block is stored in.
-fn deflate(bytes: &[u8]) -> Result<Vec<u8>, std::io::Error> {
-    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
-    encoder.write_all(bytes)?;
-    encoder.finish()
-}
-
 #[cfg(test)]
 mod tests {
     use pretty_assertions::assert_eq;
@@ -229,10 +120,8 @@ mod tests {
         assert!(!header.not_found);
         for lod in MeshLod::ALL {
             let block = header.lod(lod).ok_or("missing lod")?;
-            let start = header_size.saturating_add(block.offset);
-            let bytes = asset
-                .get(start..start.saturating_add(block.size))
-                .ok_or("lod block out of range")?;
+            let (start, end) = block.range(header_size);
+            let bytes = asset.get(start..end).ok_or("lod block out of range")?;
             let decoded = sl_mesh::decode_lod(bytes, lod)?;
             assert_eq!(decoded.vertex_count(), 24);
             assert_eq!(decoded.triangle_count(), 12);
