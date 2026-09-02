@@ -1659,6 +1659,34 @@ mod test {
             "the own avatar's visual params were truncated on the wire"
         );
 
+        // The agent is also told what it is *playing*, in the same arrival
+        // burst. A real simulator always has an answer — OpenSim stands an
+        // arriving agent up before it has moved — and an avatar the grid
+        // signals nothing for is one no motion drives: the reference viewer
+        // draws it folded forwards in its raw rest pose, which is what a
+        // fake-grid arrival looked like once the body became visible at all.
+        //
+        // Asserted here rather than after the fetches below, because
+        // `wait_for` discards what it does not match: a later wait would throw
+        // this event away while draining the texture replies.
+        let animations = running
+            .wait_for(|event| match event {
+                Event::AvatarAnimation {
+                    avatar_id,
+                    animations,
+                    ..
+                } if *avatar_id == me => Some(animations.clone()),
+                _ => None,
+            })
+            .await?;
+        assert!(
+            animations.iter().any(|animation| {
+                sl_anim::builtin_animation(animation.anim_id)
+                    .is_some_and(|builtin| builtin.name == "stand")
+            }),
+            "the arriving agent is not standing: {animations:?}"
+        );
+
         // Every baked slot the entry names is served, so the body is painted
         // rather than left with seven failed texture fetches.
         let mut baked = 0_usize;
@@ -1692,6 +1720,19 @@ mod test {
                 })
                 .await?;
             assert!(!bytes.is_empty(), "slot {slot}'s bake came back empty");
+            // A bake is a five-component (`R G B alpha mask`) codestream, and
+            // for these three slots in particular that is not cosmetic: the
+            // reference viewer asks its fetcher for the fifth plane as the
+            // avatar's morph mask, and when the read fails it discards the
+            // colour decode along with it and marks the texture missing — so a
+            // three-component bake that fetches, decodes and looks perfect
+            // still leaves the agent's own avatar a cloud forever.
+            let header = sl_proto::j2c::parse_header_unvalidated(&bytes)
+                .ok_or("slot {slot}'s bake is not a J2C codestream")?;
+            assert_eq!(
+                header.components, 5,
+                "slot {slot}'s bake is not a five-component baked avatar texture"
+            );
             baked += 1;
         }
         assert_eq!(baked, 3, "one bake per body region");

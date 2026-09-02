@@ -39,7 +39,7 @@ pub mod sound;
 use bytes::Bytes;
 use sl_proto::DEFAULT_TERRAIN_DETAIL_TEXTURES;
 use sl_proto::j2c::DiscardLevel;
-use sl_texture::{DecodedImage, EncodeError, encode_j2c};
+use sl_texture::{DecodedImage, EncodeError, encode_baked_avatar_j2c, encode_j2c};
 use uuid::Uuid;
 
 /// The marker colours the oracles classify by dominant channel.
@@ -171,6 +171,32 @@ impl RgbaImage {
     /// Returns the encoder's error for an empty image.
     pub fn j2c(&self) -> Result<Vec<u8>, EncodeError> {
         encode_j2c(&self.clone().into_decoded())
+    }
+
+    /// The image as one **baked avatar texture**: the five-component
+    /// (`R G B alpha mask`) JPEG2000 codestream a grid serves a baked avatar
+    /// slot as, with an all-`255` morph mask.
+    ///
+    /// `255` is what the reference viewer's `gatherMorphMaskAlpha` starts the
+    /// mask at before each worn layer subtracts its own coverage, so it is
+    /// exactly the mask of a bake with no masking clothing layer — which is
+    /// what a fixture avatar wears.
+    ///
+    /// A bake is not an ordinary texture and cannot be encoded as one. The
+    /// reference viewer reads the fifth plane back as the morph mask for the
+    /// head, upper-body and lower-body bakes, and a bake without one makes that
+    /// read fail — which makes the viewer discard the colour decode along with
+    /// it and mark the texture a missing asset, leaving the agent's own avatar
+    /// a cloud however good the pixels were.
+    ///
+    /// # Errors
+    ///
+    /// Returns the encoder's error for an empty image.
+    pub fn baked_avatar_j2c(&self) -> Result<Vec<u8>, EncodeError> {
+        let texels = usize::try_from(self.width)
+            .unwrap_or(0)
+            .saturating_mul(usize::try_from(self.height).unwrap_or(0));
+        encode_baked_avatar_j2c(&self.clone().into_decoded(), &vec![u8::MAX; texels])
     }
 }
 

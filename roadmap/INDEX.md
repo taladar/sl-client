@@ -12,14 +12,14 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 311 |
+| ready | 312 |
 | blocked | 61 |
 | in-progress | 18 |
 | bugs | 71 |
-| done | 955 |
+| done | 956 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1551** |
+| **total** | **1553** |
 
 ## ideas (98)
 
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (311)
+## ready (312)
 
 ### protocol
 
@@ -353,6 +353,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — Undeform / reset skeleton for the own avatar
 - [`viewer-bake-cof-layer-order`](ready/viewer-bake-cof-layer-order.md) —
   Client-side bake honours COF layer-ordering tokens
+- [`viewer-bake-publish-morph-mask`](ready/viewer-bake-publish-morph-mask.md) —
+  Compute the clothing morph mask our published bake carries
 - [`viewer-beacons-control`](ready/viewer-beacons-control.md) — Tracking beacon
   — set / clear from the UI (blocked by `viewer-beacons-beam-render` (done),
   `viewer-ui-widget-scaffold` (done))
@@ -1367,13 +1369,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
   — The viewer falls back to map.secondlife.com instead of the grid's
   map-server-url
-- [`test-fake-grid-self-avatar-baked-textures-rejected`](bugs/test-fake-grid-self-avatar-baked-textures-rejected.md)
-  — The agent's own head, upper and lower bakes are fetched, served, and then
-  discarded
+- [`test-fake-grid-red-patch-on-own-avatar-chest`](bugs/test-fake-grid-red-patch-on-own-avatar-chest.md)
+  — A red shard sits on the own avatar's chest in every fake-grid capture
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (955)
+## done (956)
 
 ### protocol
 
@@ -3184,6 +3185,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Typed prim fixtures — textured, mesh, sculpt, PBR, light, particles, linksets
   (blocked by `test-fake-grid-terrain-layerdata` (done),
   `test-shared-test-assets` (done))
+- [`test-fake-grid-self-avatar-baked-textures-rejected`](done/test-fake-grid-self-avatar-baked-textures-rejected.md)
+  — The agent's own head, upper and lower bakes are fetched, served, and then
+  discarded
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))

@@ -22,6 +22,12 @@
 //! is too). The pixels are taken to be 8-bit **sRGB-encoded** samples, which is
 //! what every Second Life texture is — see the colour-space note at the
 //! `opj_image_create` call.
+//!
+//! A **baked avatar texture** is not an ordinary texture and has its own
+//! entry point, [`encode_baked_avatar`]: it is always **five** components —
+//! `R G B alpha mask` — because the reference viewer reads the fifth plane
+//! back as the avatar's morph mask. See that function for what happens to a
+//! bake that carries fewer.
 
 use core::ffi::c_void;
 
@@ -36,6 +42,14 @@ use openjpeg_sys::{
 
 /// The number of channels in a canonical RGBA8 pixel (the input layout).
 const RGBA_CHANNELS: usize = 4;
+
+/// The number of components a baked avatar texture is written with:
+/// `R G B alpha mask`.
+const BAKE_COMPONENTS: usize = 5;
+
+/// The largest number of output components any encode writes — the size of the
+/// component-descriptor array handed to OpenJPEG.
+const MAX_COMPONENTS: usize = BAKE_COMPONENTS;
 
 /// The lossy compression ratio requested of the encoder (`N`:1). Avatar bakes
 /// are lossy in the reference viewer; a modest ratio keeps them visually intact
@@ -65,6 +79,19 @@ pub enum EncodeError {
         /// The image width the buffer was measured against.
         width: u32,
         /// The image height the buffer was measured against.
+        height: u32,
+    },
+    /// The morph mask of a baked avatar texture does not hold one sample per
+    /// pixel.
+    #[error("morph mask is {got} bytes but {expected} were expected ({width}x{height})")]
+    MaskLen {
+        /// The actual byte count of the mask.
+        got: usize,
+        /// The byte count required for `width * height`.
+        expected: usize,
+        /// The image width the mask was measured against.
+        width: u32,
+        /// The image height the mask was measured against.
         height: u32,
     },
     /// The underlying OpenJPEG encoder failed at some stage.
@@ -102,7 +129,68 @@ pub fn encode_rgba8(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, E
             height,
         });
     }
-    encode(width, height, pixels)
+    encode(width, height, pixels, None)
+}
+
+/// Encodes one **baked avatar texture**: `width`×`height` RGBA8 `pixels` plus a
+/// one-byte-per-pixel `morph_mask`, as the five-component (`R G B alpha mask`)
+/// raw JPEG-2000 codestream a grid serves a baked avatar slot as.
+///
+/// A bake is five components even when it is fully opaque, and that is not an
+/// optimisation the caller may drop. The reference viewer asks its texture
+/// fetcher for an *auxiliary* channel for the head, upper-body and lower-body
+/// bakes — the three slots that carry a morph mask — and reads it with
+/// `decodeChannels(aux, .., first_channel = 4, ..)`, i.e. the fifth component.
+/// A bake with four or fewer components makes that read produce zero or fewer
+/// channels, the aux decode fails, and the fetcher then throws away the
+/// perfectly good colour decode along with it: the texture is marked a missing
+/// asset even though it arrived with HTTP 200 and decoded. On the agent's own
+/// avatar that is terminal — it stays a cloud.
+///
+/// The mask is the reference viewer's clothing/morph mask, and its neutral
+/// value is `255`, not zero: `gatherMorphMaskAlpha` fills the plane with `255`
+/// and then lets each worn layer subtract its own coverage, so an all-`255`
+/// mask is the mask of a bake nothing masks.
+///
+/// # Errors
+///
+/// Returns [`EncodeError::Empty`] for a zero-sized image, [`EncodeError::PixelLen`]
+/// when the pixel buffer length does not match the geometry,
+/// [`EncodeError::MaskLen`] when the mask does not hold one sample per pixel,
+/// and [`EncodeError::Codec`] when the OpenJPEG encoder rejects the image or
+/// fails to produce a codestream.
+pub fn encode_baked_avatar(
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    morph_mask: &[u8],
+) -> Result<Vec<u8>, EncodeError> {
+    if width == 0 || height == 0 {
+        return Err(EncodeError::Empty);
+    }
+    let texels = (width as usize)
+        .checked_mul(height as usize)
+        .ok_or_else(|| EncodeError::Codec("image geometry overflows usize".to_owned()))?;
+    let expected = texels
+        .checked_mul(RGBA_CHANNELS)
+        .ok_or_else(|| EncodeError::Codec("image geometry overflows usize".to_owned()))?;
+    if pixels.len() != expected {
+        return Err(EncodeError::PixelLen {
+            got: pixels.len(),
+            expected,
+            width,
+            height,
+        });
+    }
+    if morph_mask.len() != texels {
+        return Err(EncodeError::MaskLen {
+            got: morph_mask.len(),
+            expected: texels,
+            width,
+            height,
+        });
+    }
+    encode(width, height, pixels, Some(morph_mask))
 }
 
 /// A growable, seekable byte sink for OpenJPEG's output stream. The J2K encoder
@@ -225,14 +313,29 @@ fn resolutions_for(min_dim: u32) -> i32 {
 
 /// Encode `width`×`height` RGBA8 `pixels` (validated by the caller) to a raw
 /// `.j2c` codestream via the in-memory OpenJPEG pipeline.
-fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError> {
+///
+/// `morph_mask` is `Some` only for a baked avatar texture, and then it is
+/// written as a fifth component after the RGBA ones — see
+/// [`encode_baked_avatar`].
+fn encode(
+    width: u32,
+    height: u32,
+    pixels: &[u8],
+    morph_mask: Option<&[u8]>,
+) -> Result<Vec<u8>, EncodeError> {
     // Opaque images drop their (redundant) alpha plane; transparency keeps it.
+    // A bake keeps every plane regardless: its fifth component is only
+    // addressable if the alpha it follows is there too.
     let opaque = pixels
         .as_chunks::<RGBA_CHANNELS>()
         .0
         .iter()
         .all(|texel| texel.get(3) == Some(&u8::MAX));
-    let numcomps: usize = if opaque { 3 } else { 4 };
+    let numcomps: usize = match (morph_mask, opaque) {
+        (Some(_), _) => BAKE_COMPONENTS,
+        (None, true) => 3,
+        (None, false) => RGBA_CHANNELS,
+    };
 
     // One component descriptor per output channel: 8-bit unsigned, no
     // sub-sampling, origin at (0, 0).
@@ -246,7 +349,7 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
         prec: 8,
         bpp: 0,
         sgnd: 0,
-    }; 4];
+    }; MAX_COMPONENTS];
     let comptparms = params.as_ptr().cast_mut();
     let numcomps_u32 = u32::try_from(numcomps).unwrap_or(3);
 
@@ -257,7 +360,8 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
     // value never reaches the output bytes. Were this crate ever to grow a JP2
     // output or a non-sRGB input, the colour space would have to become an
     // argument rather than this constant.
-    // SAFETY: `comptparms` points at `numcomps` (<= 4) initialised descriptors.
+    // SAFETY: `comptparms` points at `numcomps` (<= `MAX_COMPONENTS`)
+    // initialised descriptors.
     let image = Image(unsafe {
         opj_image_create(numcomps_u32, comptparms, OPJ_COLOR_SPACE::OPJ_CLRSPC_SRGB)
     });
@@ -269,7 +373,9 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
 
     // OpenJPEG's `opj_image_create` leaves the image extent unset; the caller
     // must fill it (origin 0, extent = width/height as there is no sub-sampling),
-    // then copy each interleaved RGBA byte into its planar `i32` component.
+    // then copy each interleaved RGBA byte into its planar `i32` component. A
+    // bake's fifth component is the morph mask, which is one sample per pixel
+    // rather than one channel of the interleaved texels.
     // SAFETY: `image.0` is a valid, non-null image whose components each hold
     // `width*height` i32s (allocated by `opj_image_create`); the pixel index `i`
     // stays below that count.
@@ -279,11 +385,17 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
         (*image.0).x1 = width;
         (*image.0).y1 = height;
         let comps = (*image.0).comps;
-        for channel in 0..numcomps {
+        for channel in 0..numcomps.min(RGBA_CHANNELS) {
             let data = (*comps.add(channel)).data;
             for (i, texel) in pixels.as_chunks::<RGBA_CHANNELS>().0.iter().enumerate() {
                 let sample = texel.get(channel).copied().unwrap_or(0);
                 *data.add(i) = i32::from(sample);
+            }
+        }
+        if let Some(mask) = morph_mask {
+            let data = (*comps.add(RGBA_CHANNELS)).data;
+            for (i, sample) in mask.iter().enumerate() {
+                *data.add(i) = i32::from(*sample);
             }
         }
     }
@@ -366,11 +478,26 @@ fn encode(width: u32, height: u32, pixels: &[u8]) -> Result<Vec<u8>, EncodeError
 
 #[cfg(test)]
 mod tests {
-    use super::{EncodeError, encode_rgba8};
+    use super::{BAKE_COMPONENTS, EncodeError, encode_baked_avatar, encode_rgba8};
     use pretty_assertions::assert_eq;
 
     /// A boxed error so tests can use `?` instead of disallowed `unwrap`/`expect`.
     type TestError = Box<dyn core::error::Error>;
+
+    /// The number of components a raw JPEG-2000 codestream declares, read from
+    /// the `Csiz` field of its `SIZ` marker segment.
+    ///
+    /// The codestream opens with `SOC` (`FF4F`) then `SIZ` (`FF51`), and inside
+    /// `SIZ` come `Lsiz` and `Rsiz` (two bytes each) then eight four-byte
+    /// geometry fields, so `Csiz` starts at byte 40.
+    fn declared_components(codestream: &[u8]) -> Option<u16> {
+        if codestream.get(..4) != Some(&[0xFF, 0x4F, 0xFF, 0x51]) {
+            return None;
+        }
+        let high = u16::from(*codestream.get(40)?);
+        let low = u16::from(*codestream.get(41)?);
+        Some((high << 8_u16) | low)
+    }
 
     /// Build an RGBA8 test image from a per-pixel alpha function over an
     /// `x`/`y`-derived colour.
@@ -408,6 +535,52 @@ mod tests {
         assert!(matches!(
             encode_rgba8(4, 4, &[0, 0, 0]),
             Err(EncodeError::PixelLen { .. })
+        ));
+    }
+
+    /// An ordinary opaque texture drops its redundant alpha plane, and one with
+    /// transparency keeps it: the size saving that makes the heuristic worth
+    /// having, and the reason a bake cannot use it.
+    #[test]
+    fn an_ordinary_texture_drops_a_redundant_alpha_plane() -> Result<(), TestError> {
+        let opaque = encode_rgba8(64, 64, &gradient(64, 64, |_x, _y| u8::MAX))?;
+        assert_eq!(declared_components(&opaque), Some(3));
+        let translucent = encode_rgba8(
+            64,
+            64,
+            &gradient(64, 64, |x, _y| u8::try_from(x % 256).unwrap_or(0)),
+        )?;
+        assert_eq!(declared_components(&translucent), Some(4));
+        Ok(())
+    }
+
+    /// A bake is five components even when it is fully opaque. This is the
+    /// whole point of the separate entry point: the reference viewer reads the
+    /// fifth plane as the morph mask for the head, upper and lower bakes, and a
+    /// bake with fewer planes makes that read fail — which makes the viewer
+    /// discard the colour decode too and mark the texture missing, leaving the
+    /// agent's own avatar a cloud.
+    #[test]
+    fn a_bake_keeps_five_components_even_when_opaque() -> Result<(), TestError> {
+        let pixels = gradient(64, 64, |_x, _y| u8::MAX);
+        let mask = vec![0_u8; 64 * 64];
+        let bytes = encode_baked_avatar(64, 64, &pixels, &mask)?;
+        assert_eq!(
+            declared_components(&bytes),
+            Some(u16::try_from(BAKE_COMPONENTS).unwrap_or(0))
+        );
+        Ok(())
+    }
+
+    /// A mask that is not one sample per pixel is refused rather than encoded
+    /// short: a bake whose fifth plane is the wrong size is a bake the
+    /// reference viewer reads garbage from.
+    #[test]
+    fn rejects_a_mask_that_is_not_one_sample_per_pixel() {
+        let pixels = gradient(4, 4, |_x, _y| u8::MAX);
+        assert!(matches!(
+            encode_baked_avatar(4, 4, &pixels, &[0, 0, 0]),
+            Err(EncodeError::MaskLen { .. })
         ));
     }
 }

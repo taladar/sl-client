@@ -7,7 +7,8 @@
 //!
 //! 1. composite each bake region (`composite_own_region`, the same canonical
 //!    bytes P15.3 draped);
-//! 2. J2C-encode it ([`sl_texture::encode_j2c`]) and upload it over the legacy
+//! 2. J2C-encode it as a five-component baked avatar texture
+//!    ([`sl_texture::encode_baked_avatar_j2c`]) and upload it over the legacy
 //!    `UploadBakedTexture` capability, one region at a time (the upload reply
 //!    carries no correlation id, so the uploads are serialised);
 //! 3. once every region is uploaded, advertise the baked-texture ids in an
@@ -31,7 +32,7 @@ use sl_client_bevy::{
     SkeletalDeformations, SlCapabilities, SlCommand, SlEvent, SlSessionEvent, TextureEntry,
     TextureFace, TextureKey, Uuid, Vector, avatar_texture, encode_texture_entry,
 };
-use sl_texture::encode_j2c;
+use sl_texture::encode_baked_avatar_j2c;
 
 use crate::avatar_assets::AvatarAssetLibrary;
 use crate::avatars::composite_own_region;
@@ -245,7 +246,20 @@ pub(crate) fn drive_bake_publish(
                 let Some(decoded) = composite_own_region(&inputs, region) else {
                     continue;
                 };
-                match encode_j2c(&decoded) {
+                // A bake is a *five*-component (`R G B alpha mask`) codestream,
+                // not an ordinary texture: the reference viewer reads the fifth
+                // plane as the morph mask for the head, upper and lower bakes,
+                // and when that read fails it discards the colour decode with
+                // it and marks the texture missing — so a bake uploaded as an
+                // ordinary opaque texture (three components) would make every
+                // reference viewer see this avatar as an unbaked cloud. The
+                // mask is all-`255` — what the reference's `gatherMorphMaskAlpha`
+                // starts from before each worn layer subtracts its coverage —
+                // because nothing here computes clothing morph masks yet
+                // ([[viewer-bake-publish-morph-mask]]); that costs the
+                // clothing-driven body morphs on observers, not the bake.
+                let morph_mask = vec![u8::MAX; decoded.pixels.len().checked_div(4).unwrap_or(0)];
+                match encode_baked_avatar_j2c(&decoded, &morph_mask) {
                     Ok(data) => {
                         let bytes = data.len();
                         writer.write(SlCommand(Command::UploadBakedTexture { data }));

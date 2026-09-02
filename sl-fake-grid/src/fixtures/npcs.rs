@@ -216,7 +216,9 @@ impl NpcAppearance {
         self.bakes
             .iter()
             .filter_map(|bake| {
-                match sl_test_assets::RgbaImage::solid(BAKE_TEXTURE_SIZE, bake.color).j2c() {
+                match sl_test_assets::RgbaImage::solid(BAKE_TEXTURE_SIZE, bake.color)
+                    .baked_avatar_j2c()
+                {
                     Ok(bytes) => Some((AssetKey::from(bake.texture.uuid()), bytes)),
                     Err(error) => {
                         tracing::warn!("encoding the bake for slot {} failed: {error}", bake.slot);

@@ -40,6 +40,19 @@ pub enum EncodeError {
         /// The image height the buffer was measured against.
         height: u32,
     },
+    /// The morph mask of a baked avatar texture does not hold one sample per
+    /// pixel.
+    #[error("morph mask is {got} bytes but {expected} were expected ({width}x{height})")]
+    MaskLen {
+        /// The actual byte count of the mask.
+        got: usize,
+        /// The byte count required for `width * height`.
+        expected: usize,
+        /// The image width the mask was measured against.
+        width: u32,
+        /// The image height the mask was measured against.
+        height: u32,
+    },
     /// The underlying JPEG-2000 encoder failed at some stage.
     #[error("JPEG-2000 encode failed: {0}")]
     Codec(String),
@@ -67,23 +80,70 @@ pub enum EncodeError {
     reason = "re-exported at the crate root, where `encode_j2c` reads clearly"
 )]
 pub fn encode_j2c(image: &DecodedImage) -> Result<Vec<u8>, EncodeError> {
-    sl_j2c_encode::encode_rgba8(image.width, image.height, &image.pixels).map_err(|error| {
-        match error {
-            sl_j2c_encode::EncodeError::Empty => EncodeError::Empty,
-            sl_j2c_encode::EncodeError::PixelLen {
-                got,
-                expected,
-                width,
-                height,
-            } => EncodeError::PixelLen {
-                got,
-                expected,
-                width,
-                height,
-            },
-            sl_j2c_encode::EncodeError::Codec(message) => EncodeError::Codec(message),
-        }
-    })
+    sl_j2c_encode::encode_rgba8(image.width, image.height, &image.pixels).map_err(translate)
+}
+
+/// Encodes a canonical RGBA8 [`DecodedImage`] plus its one-byte-per-pixel
+/// `morph_mask` as one **baked avatar texture**: the five-component
+/// (`R G B alpha mask`) codestream a grid serves a baked avatar slot as, and
+/// the inverse of the multi-component branch of
+/// [`decode_j2c`](crate::decode::decode_j2c).
+///
+/// A bake is five components even when it is fully opaque — see
+/// [`sl_j2c_encode::encode_baked_avatar`] for why a shorter one leaves the
+/// reference viewer's avatar a cloud.
+///
+/// # Errors
+///
+/// Returns [`EncodeError::Disabled`] when built without the `encode` feature,
+/// [`EncodeError::Empty`] for a zero-sized image, [`EncodeError::PixelLen`] when
+/// the pixel buffer length does not match the geometry,
+/// [`EncodeError::MaskLen`] when the mask does not hold one sample per pixel,
+/// and [`EncodeError::Codec`] when the OpenJPEG encoder rejects the image or
+/// fails to produce a codestream.
+#[cfg(feature = "encode")]
+#[expect(
+    clippy::module_name_repetitions,
+    reason = "re-exported at the crate root, where `encode_baked_avatar_j2c` reads clearly"
+)]
+pub fn encode_baked_avatar_j2c(
+    image: &DecodedImage,
+    morph_mask: &[u8],
+) -> Result<Vec<u8>, EncodeError> {
+    sl_j2c_encode::encode_baked_avatar(image.width, image.height, &image.pixels, morph_mask)
+        .map_err(translate)
+}
+
+/// Restates an [`sl_j2c_encode`] failure as this crate's own, so callers never
+/// have to name the encoder crate's error type.
+#[cfg(feature = "encode")]
+fn translate(error: sl_j2c_encode::EncodeError) -> EncodeError {
+    match error {
+        sl_j2c_encode::EncodeError::Empty => EncodeError::Empty,
+        sl_j2c_encode::EncodeError::PixelLen {
+            got,
+            expected,
+            width,
+            height,
+        } => EncodeError::PixelLen {
+            got,
+            expected,
+            width,
+            height,
+        },
+        sl_j2c_encode::EncodeError::MaskLen {
+            got,
+            expected,
+            width,
+            height,
+        } => EncodeError::MaskLen {
+            got,
+            expected,
+            width,
+            height,
+        },
+        sl_j2c_encode::EncodeError::Codec(message) => EncodeError::Codec(message),
+    }
 }
 
 /// Stub used when the `encode` feature is disabled: always fails so the rest of
@@ -101,9 +161,22 @@ pub const fn encode_j2c(_image: &DecodedImage) -> Result<Vec<u8>, EncodeError> {
     Err(EncodeError::Disabled)
 }
 
+/// Stub used when the `encode` feature is disabled.
+///
+/// # Errors
+///
+/// Always returns [`EncodeError::Disabled`].
+#[cfg(not(feature = "encode"))]
+pub const fn encode_baked_avatar_j2c(
+    _image: &DecodedImage,
+    _morph_mask: &[u8],
+) -> Result<Vec<u8>, EncodeError> {
+    Err(EncodeError::Disabled)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::encode_j2c;
+    use super::{EncodeError, encode_baked_avatar_j2c, encode_j2c};
     use crate::decode::{DecodedImage, decode_j2c};
     use bytes::Bytes;
     use pretty_assertions::assert_eq;
@@ -208,5 +281,54 @@ mod tests {
         // Errors either way: `Empty` with the encoder linked, `Disabled` without.
         let rejected = encode_j2c(&image).is_err();
         assert!(rejected, "zero-sized image should be rejected");
+    }
+
+    /// A bake round-trips as five components, mask and all — the encode side of
+    /// the multi-component branch `decode_j2c` already had, and the shape the
+    /// reference viewer's second `decodeChannels(.., 4, 4)` pass reads. An
+    /// opaque bake keeps them: the alpha plane is not dropped, because the mask
+    /// that follows it is only addressable at component index 4.
+    #[test]
+    #[cfg_attr(not(feature = "encode"), ignore = "requires the `encode` feature")]
+    fn a_bake_round_trips_with_its_morph_mask() -> Result<(), TestError> {
+        let image = gradient(64, 64, |_x, _y| u8::MAX);
+        // A mask with structure, so a decode that returned zeroes or dropped the
+        // plane could not pass by accident.
+        let mask = (0..64_u32)
+            .flat_map(|y| (0..64_u32).map(move |x| if x < 32 && y < 32 { 255 } else { 0 }))
+            .map(|value| u8::try_from(value).unwrap_or(0))
+            .collect::<Vec<u8>>();
+        let bytes = encode_baked_avatar_j2c(&image, &mask)?;
+        let decoded = decode_j2c(&bytes, DiscardLevel::FULL)?;
+        assert_eq!(decoded.components, 5, "a bake is five components");
+        assert!(
+            mean_abs_diff(&image.pixels, &decoded.pixels) < 8.0,
+            "the bake's colour round-trip drifted too far"
+        );
+        let aux = decoded
+            .aux
+            .ok_or("the bake decoded without its morph mask")?;
+        assert_eq!(aux.len(), mask.len());
+        assert!(
+            aux.first().copied().unwrap_or(0) > 192,
+            "the masked corner should decode near-full"
+        );
+        assert!(
+            aux.last().copied().unwrap_or(255) < 64,
+            "the unmasked corner should decode near-zero"
+        );
+        Ok(())
+    }
+
+    /// A mask that is not one sample per pixel is refused rather than encoded
+    /// short.
+    #[test]
+    #[cfg_attr(not(feature = "encode"), ignore = "requires the `encode` feature")]
+    fn rejects_a_mask_that_is_not_one_sample_per_pixel() {
+        let image = gradient(4, 4, |_x, _y| u8::MAX);
+        assert!(matches!(
+            encode_baked_avatar_j2c(&image, &[0, 0, 0]),
+            Err(EncodeError::MaskLen { .. })
+        ));
     }
 }

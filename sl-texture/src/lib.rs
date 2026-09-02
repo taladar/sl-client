@@ -23,7 +23,7 @@ pub mod store;
 
 pub use decode::{DecodeError, DecodedImage, decode_j2c, downsample};
 pub use disk::{CacheLimits, TextureDiskCache};
-pub use encode::{EncodeError, encode_j2c};
+pub use encode::{EncodeError, encode_baked_avatar_j2c, encode_j2c};
 pub use entry::{TextureEntry, TextureReadLease};
 pub use fetcher::{
     AssetFetcher, FetchChunk, FetchError, NotRemotelyFetchable, RemoteTextureSource,
