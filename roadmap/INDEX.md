@@ -15,10 +15,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 312 |
 | blocked | 61 |
 | in-progress | 18 |
-| bugs | 71 |
+| bugs | 70 |
 | done | 956 |
 | deferred | 24 |
-| wont-do | 13 |
+| wont-do | 14 |
 | **total** | **1553** |
 
 ## ideas (98)
@@ -1205,7 +1205,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (71)
+## bugs (70)
 
 ### viewer
 
@@ -1369,8 +1369,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
   — The viewer falls back to map.secondlife.com instead of the grid's
   map-server-url
-- [`test-fake-grid-red-patch-on-own-avatar-chest`](bugs/test-fake-grid-red-patch-on-own-avatar-chest.md)
-  — A red shard sits on the own avatar's chest in every fake-grid capture
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
@@ -3516,7 +3514,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-recommit-conformance-records`](deferred/test-recommit-conformance-records.md)
   — Revisit committing sl-conformance records once implementation churn settles
 
-## wont-do (13)
+## wont-do (14)
 
 ### protocol
 
@@ -3550,6 +3548,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 
 ### test
 
+- [`test-fake-grid-red-patch-on-own-avatar-chest`](wont-do/test-fake-grid-red-patch-on-own-avatar-chest.md)
+  — A red shard sits on the own avatar's chest in every fake-grid capture
 - [`test-group-proposal-vote`](wont-do/test-group-proposal-vote-start-a-proposal-cast-a-ballot.md)
   — start a proposal, cast a ballot
 - [`test-parcel-voice-info`](wont-do/test-parcel-voice-info-request-parcel-voice-info.md)

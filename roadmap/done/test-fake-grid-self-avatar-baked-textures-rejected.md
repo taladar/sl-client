@@ -100,14 +100,27 @@ was authored in. A real simulator always has an answer (OpenSim's
 `ScenePresence` stands an arriving agent up before it has moved a metre),
 so `push_own_animation` now sends an `AvatarAnimation` playing the
 built-in `stand` — an asset every viewer ships, so the grid serves
-nothing extra. The hands came back with it.
+nothing extra. The pose came right with it, and so did the **left** hand.
+
+The right one did not, and that was a third thing again — not the grid's
+at all, but an upstream bug in the reference viewer's skin shader
+(`avatarSkinV.glsl`: `mWristRight` lands in the last palette slot and its
+blend partner is read one past the end of the array, so `NaN * 0` empties
+the 388 vertices bound to it). Reported as
+[secondlife/viewer#6240](https://github.com/secondlife/viewer/issues/6240);
+the chase is recorded in [[test-firestorm-crosscheck-report]]. Worth
+knowing here only because it masqueraded as part of this bug for an
+afternoon: with the avatar clouded, then unposed, then one-handed, it was
+natural to keep reading each new symptom as more of the same fixture
+problem.
 
 Verified live (2026-09-02) against the Firestorm capture harness
 (`--credentials` / `--gridfile` / `--screenshot-dir`) pointed at
 `scripts/fake-grid.sh --scenario catalogue`: the run's log carries zero
 `Self is clouded` and zero `Fetch failure` lines, its scene dump reports
 the self avatar `is_fully_loaded`, and its frames show a green body
-standing upright with hands.
+standing upright. (The frames from that run still show only the left
+hand — the shader bug above, fixed separately in the Firestorm fork.)
 
 One thing that is **not** a bug, recorded so the next run does not chase
 it: with `--camera-position` / `--camera-look-at` forced, the self avatar
