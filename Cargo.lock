@@ -9592,6 +9592,7 @@ dependencies = [
  "sl-viewer-world-objects",
  "sl-viewer-world-scene",
  "thiserror 2.0.19",
+ "time",
  "url",
  "wgpu-types",
 ]

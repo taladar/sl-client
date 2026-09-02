@@ -267,6 +267,7 @@ pub(crate) use sl_viewer_notices::script_permission;
 pub(crate) use sl_viewer_search::search;
 pub(crate) use sl_viewer_world_avatar::replay_bundle;
 pub(crate) use sl_viewer_world_avatar::rigged_attachments;
+pub(crate) use sl_viewer_world_view::scene_dump;
 pub(crate) use sl_viewer_world_view::screenshot;
 pub(crate) use sl_viewer_world_view::session;
 // The settings store is its own crate now that it no longer names the
@@ -599,6 +600,16 @@ struct Options {
         value_parser = clap::builder::FalseyValueParser::new()
     )]
     capture_gizmos: bool,
+    /// Write the structured scene dump — what the viewer was showing when it
+    /// took its frames — to this path instead of `<screenshot-dir>/scene.json`.
+    /// The document is the one the patched Firestorm writes
+    /// (`schema_version` 1), so the two can be diffed field by field to say
+    /// *why* two frames differ: a prim in the wrong place, a texture that
+    /// resolved to a different asset, a mesh stuck at a coarser LOD, a material
+    /// that never arrived. Needs `--screenshot-dir`: the dump describes the
+    /// scene a capture's last frame was taken from.
+    #[clap(long, env = "SL_VIEWER_SCENE_DUMP", value_name = "PATH")]
+    scene_dump: Option<PathBuf>,
     /// A debug affordance: place the fly-camera at an absolute Second Life
     /// region-local position `x,y,z` (Z-up metres, e.g. `240,128,25` near an
     /// east edge) instead of snapping it to the agent on login. Lets an
@@ -919,6 +930,9 @@ struct CaptureStartup<'a> {
     /// composited frame they hold (`--capture-size`, `--capture-ui`,
     /// `--capture-hud`, `--capture-gizmos`).
     content: crate::screenshot::CaptureContent,
+    /// Where the structured scene dump goes (`--scene-dump`), or `None` for
+    /// `<screenshot-dir>/scene.json`.
+    scene_dump: Option<&'a Path>,
 }
 
 /// The skin configuration for a viewer session: which skin / theme to wear and
@@ -1567,7 +1581,7 @@ fn run_session(
         // agent UUID is known at login.
         .insert_resource(AccountContext {
             accounts_base: config_accounts_base,
-            grid,
+            grid: grid.clone(),
             avatar,
         })
         // The viewer settings store (viewer-ui-settings-store), the reference's
@@ -1803,6 +1817,25 @@ fn run_session(
             // up before it photographs the avatar it rebuilt offline.
             grid_expected: !replaying,
         });
+        // The structured description of the scene those frames were taken from,
+        // in the same document the patched Firestorm writes — so a frame pair
+        // that differs can be asked *why* it differs. `--scene-dump` moves it;
+        // by default it lands beside the frames it describes.
+        app.add_plugins(crate::scene_dump::SceneDumpPlugin {
+            path: capture
+                .scene_dump
+                .map_or_else(|| dir.join("scene.json"), Path::to_path_buf),
+            identity: crate::scene_dump::DumpIdentity {
+                channel: params.request.channel.clone(),
+                version: params.request.version.clone(),
+                grid: grid.clone(),
+            },
+        });
+    } else if capture.scene_dump.is_some() {
+        // A dump describes the scene a capture's last frame was taken from, so
+        // without a capture there is no moment to describe. Say so rather than
+        // writing nothing and leaving the operator to wonder.
+        warn!("--scene-dump has no effect without --screenshot-dir");
     } else if capture.content != crate::screenshot::CaptureContent::WORLD_ONLY {
         // Capture knobs with nothing to capture is a mistyped command line, and a
         // silent no-op would look exactly like a run that worked.
@@ -1902,6 +1935,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             CaptureStartup {
                 dir: options.screenshot_dir.as_deref(),
                 content: capture_content(options),
+                scene_dump: options.scene_dump.as_deref(),
             },
             CameraStartup {
                 start: camera_start,
@@ -2027,6 +2061,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
         CaptureStartup {
             dir: options.screenshot_dir.as_deref(),
             content: capture_content(options),
+            scene_dump: options.scene_dump.as_deref(),
         },
         CameraStartup {
             start: camera_start,

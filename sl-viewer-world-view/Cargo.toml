@@ -46,6 +46,7 @@ sl-viewer-world-avatar = { workspace = true }
 sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true, features = ["formatting", "macros"] }
 url = { workspace = true }
 wgpu-types = { workspace = true }
 

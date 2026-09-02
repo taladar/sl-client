@@ -760,6 +760,7 @@ pub(crate) fn capture_screenshots(
     mut sl_commands: MessageWriter<SlCommand>,
     pending_saves: Query<(), With<ScreenshotSaveTask>>,
     mut pinned: Option<ResMut<PinnedCapture>>,
+    mut scene_dump: Option<ResMut<crate::scene_dump::SceneDumpRequest>>,
     overlays: Query<(Entity, &OverlayCamera, Option<&RenderTarget>)>,
 ) {
     let now = time.elapsed_secs();
@@ -845,6 +846,12 @@ pub(crate) fn capture_screenshots(
         // run that happened from one that did not, and a viewer that dies during
         // its logout must leave the run looking like what it was.
         schedule.write_status();
+        // And the scene the last frame was taken from, if this run writes one.
+        // The dump itself is written at the end of this frame (`Last`), where
+        // the transforms it reads back are the ones the frame was rendered with.
+        if let Some(dump) = scene_dump.as_mut() {
+            dump.request();
+        }
         // Every frame is written: give the window back to the world camera, so the
         // logout's grace period is watchable.
         if let Some(pinned) = pinned.as_mut() {

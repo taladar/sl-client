@@ -8820,7 +8820,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 === LICENSE MIT === MIT License ===
-used-by: time-core 0.1.9, time 0.3.53
+used-by: time-core 0.1.9, time-macros 0.2.31, time 0.3.53
 
 Copyright (c) Jacob Pratt et al.
 

@@ -2083,15 +2083,17 @@ const DAY_POSITION_STEPS: f64 = 32768.0;
 /// The normalised day-cycle position (`0.0..=1.0`) for the current region time,
 /// the reference `LLEnvironment::convert_time_to_position`: `fmod(now +
 /// day_offset, day_length) / day_length` over the Unix clock, quantised to
-/// [`DAY_POSITION_STEPS`] steps per day so the sampled environment settles
-/// between steps.
+/// `DAY_POSITION_STEPS` (32768) steps per day so the sampled environment settles
+/// between steps. The constant stays private — this function is public because
+/// the scene dump reports the position it returns, not to publish the tuning.
 ///
 /// A pinned position ([`EnvironmentState::pinned_day_position`], from the
 /// `SL_VIEWER_SKY_DAY_POSITION` override in `RenderOverrides`) wins instead, so
 /// the offline screenshot harness can inspect any point in the day (e.g. midday)
 /// regardless of the wall clock. A pinned position is already stable, so it is
 /// honoured exactly rather than rounded to the grid.
-pub(crate) fn day_position(environment: &EnvironmentState) -> f32 {
+#[must_use]
+pub fn day_position(environment: &EnvironmentState) -> f32 {
     if let Some(position) = environment.pinned_day_position {
         return position;
     }

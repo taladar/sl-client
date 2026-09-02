@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 312 |
-| blocked | 60 |
+| blocked | 59 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 959 |
+| done | 960 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1555** |
@@ -825,8 +825,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-rlv-restriction-state`](ready/viewer-rlv-restriction-state.md) — RLV
   — the restriction state machine (blocked by `viewer-rlv-command-parser`
   (done))
-- [`viewer-scene-dump`](ready/viewer-scene-dump.md) — Emit the shared scene-dump
-  JSON beside the frames
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
@@ -965,6 +963,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
+- [`test-firestorm-crosscheck-report`](ready/test-firestorm-crosscheck-report.md)
+  — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
+  by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -974,7 +975,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (60)
+## blocked (59)
 
 ### viewer
 
@@ -1143,9 +1144,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
   scenario timelines with markers (blocked by `test-fake-grid-determinism`
   (done), `viewer-fake-grid-render-harness`)
-- [`test-firestorm-crosscheck-report`](blocked/test-firestorm-crosscheck-report.md)
-  — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
-  by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1368,7 +1366,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (959)
+## done (960)
 
 ### protocol
 
@@ -2582,6 +2580,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-scene-dump`](done/viewer-scene-dump.md) — Emit the shared scene-dump
+  JSON beside the frames
 - [`viewer-screenshot-fixed-resolution`](done/viewer-screenshot-fixed-resolution.md)
   — Pin the capture resolution, so two viewers can be compared at all
 - [`viewer-screenshot-wait-for-quiescence`](done/viewer-screenshot-wait-for-quiescence.md)

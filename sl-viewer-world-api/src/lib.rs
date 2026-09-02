@@ -4621,6 +4621,16 @@ pub struct ShapeFingerprint {
 }
 
 impl ShapeFingerprint {
+    /// The object-class byte this shape was fingerprinted from.
+    ///
+    /// The scene dump names an object's class the way the reference viewer
+    /// spells it, and this is where the viewer already keeps the byte — the
+    /// alternative being a second copy of it on every tracked object.
+    #[must_use]
+    pub const fn pcode(&self) -> u8 {
+        self.pcode
+    }
+
     /// The shape fingerprint of `object`.
     #[must_use]
     pub fn of(object: &Object) -> Self {

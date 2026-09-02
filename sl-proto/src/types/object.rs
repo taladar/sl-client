@@ -34,6 +34,74 @@ pub mod pcode {
     pub const PARTICLE_SYSTEM: u8 = 143;
     /// A legacy tree.
     pub const TREE: u8 = 255;
+
+    /// The low nibble that selects a `PCode`'s *base* class (`LL_PCODE_BASE_MASK`).
+    const BASE_MASK: u8 = 0x0f;
+    /// The base class of every legacy object (`LL_PCODE_LEGACY`); the high
+    /// nibble then says which one.
+    const LEGACY: u8 = 0x0f;
+    /// The base class of a viewer/simulator-side object (`LL_PCODE_APP`) — what
+    /// terrain patches and other non-content entities are.
+    const APP: u8 = 14;
+    /// The high-nibble bit marking a half-primitive (`LL_PCODE_HEMI_MASK`).
+    const HEMI_MASK: u8 = 0x10;
+
+    /// A `PCode` in the reference viewer's own canonical spelling
+    /// (`LLPrimitive::pCodeToString`): `"volume-0"`, `"app-80"`, `"avatar"`,
+    /// `"sphere-hemi"`, `"null"`.
+    ///
+    /// Reproduced from the reference rather than invented because it is a
+    /// *shared* vocabulary: the scene dumps this workspace's viewer and the
+    /// patched Firestorm write are compared field by field, and a class named
+    /// differently on the two sides reads as a divergence in every object of
+    /// every scene. It is a spelling of a wire value, so it lives beside the
+    /// constants it spells.
+    ///
+    /// The shape half comes from the low nibble; the mask half is the high
+    /// nibble printed as lower-case hex, except that a half-primitive says
+    /// `hemi` — and an `app` code never does, since its high nibble is an
+    /// index rather than a set of flags.
+    #[must_use]
+    pub fn describe(pcode: u8) -> String {
+        if pcode == 0 {
+            return "null".to_owned();
+        }
+        let base = pcode & BASE_MASK;
+        if base == LEGACY {
+            return match pcode {
+                GRASS => "grass".to_owned(),
+                PARTICLE_SYSTEM => "particle system".to_owned(),
+                AVATAR => "avatar".to_owned(),
+                TEXT_BUBBLE => "text bubble".to_owned(),
+                TREE => "tree".to_owned(),
+                NEW_TREE => "tree_new".to_owned(),
+                other => format!("unknown legacy pcode {other}"),
+            };
+        }
+        let shape = match base {
+            1 => "cube",
+            2 => "prism",
+            3 => "tetrahedron",
+            4 => "pyramid",
+            5 => "cylinder",
+            6 => "cone",
+            7 => "sphere",
+            8 => "torus",
+            PRIMITIVE => "volume",
+            APP => "app",
+            _unknown => "unknown",
+        };
+        let high = pcode & !BASE_MASK;
+        if base != APP && high & HEMI_MASK != 0 {
+            format!("{shape}-hemi")
+        } else {
+            format!("{shape}-{high:x}")
+        }
+    }
+
+    /// A legacy text bubble — named here because [`describe`] spells it, and a
+    /// bare `0xe0 | LEGACY` in a match arm says nothing.
+    const TEXT_BUBBLE: u8 = 0xe0 | LEGACY;
 }
 
 /// An object's kinematic state, decoded from the packed `ObjectData`/`Data`
@@ -1131,5 +1199,42 @@ mod tests {
         // Grass likewise.
         let grass = test_object(super::pcode::GRASS, 1, "");
         assert_eq!(grass.attachment_point_id(), None);
+    }
+
+    /// The two spellings a live reference viewer actually wrote into a scene
+    /// dump of the fake grid's catalogue scene: every prim there is
+    /// `volume-0`, and every terrain patch `app-80`. If these two ever drift,
+    /// the cross-check reads a class difference on every object in the scene.
+    #[test]
+    fn a_pcode_is_spelled_as_the_reference_spells_it() {
+        assert_eq!(super::pcode::describe(super::pcode::PRIMITIVE), "volume-0");
+        assert_eq!(super::pcode::describe(0x80 | 14), "app-80");
+    }
+
+    /// A legacy code is a name, not a shape and a mask: the high nibble selects
+    /// which legacy object it is rather than modifying a shape.
+    #[test]
+    fn a_legacy_pcode_is_spelled_by_name() {
+        assert_eq!(super::pcode::describe(super::pcode::AVATAR), "avatar");
+        assert_eq!(super::pcode::describe(super::pcode::GRASS), "grass");
+        assert_eq!(super::pcode::describe(super::pcode::TREE), "tree");
+        assert_eq!(super::pcode::describe(super::pcode::NEW_TREE), "tree_new");
+        assert_eq!(
+            super::pcode::describe(super::pcode::PARTICLE_SYSTEM),
+            "particle system"
+        );
+        assert_eq!(super::pcode::describe(0), "null");
+    }
+
+    /// A half-primitive says so, and an `app` code — whose high nibble is an
+    /// index, not a set of flags — never does, even when that index happens to
+    /// carry the hemi bit.
+    #[test]
+    fn a_half_primitive_says_hemi_but_an_app_code_does_not() {
+        // sphere (7) | hemi (0x10)
+        assert_eq!(super::pcode::describe(0x17), "sphere-hemi");
+        assert_eq!(super::pcode::describe(7), "sphere-0");
+        // app (14) with the hemi bit inside its index
+        assert_eq!(super::pcode::describe(0x1e), "app-10");
     }
 }

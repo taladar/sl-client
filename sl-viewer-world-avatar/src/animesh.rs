@@ -179,6 +179,18 @@ pub struct ControlAvatarState {
 const MAX_SIGNALLED_PARTS: usize = 4096;
 
 impl ControlAvatarState {
+    /// The animesh root objects that currently have a control avatar, in no
+    /// particular order.
+    ///
+    /// Keyed by the **object** rather than by an id of the control avatar's own:
+    /// a control avatar has no grid identity, and the reference viewer mints it a
+    /// local UUID that differs between two viewers of the same scene (and between
+    /// two runs of one). The object it rides is the only thing about it that two
+    /// viewers can agree on, so that is what the scene dump reports it by.
+    pub fn animated_objects(&self) -> impl Iterator<Item = ObjectKey> + '_ {
+        self.avatars.keys().copied()
+    }
+
     /// Ensure a control avatar exists for the animesh root `object` (whose scene
     /// entity is `object_entity`), spawning its identity **root** as a child of
     /// the object entity on first call. Returns that root — the caller parents
