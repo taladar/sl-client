@@ -1686,6 +1686,9 @@ fn run_session(
                     // Menu ▸ Quit and the window close button / compositor close
                     // both route through a graceful logout here.
                     handle_quit_requests,
+                    // A harness (or a `Ctrl-C` in the terminal a run is watched
+                    // from) asks for the same graceful logout with a signal.
+                    crate::session::quit_on_termination_signal,
                     enforce_quit_deadline,
                     // Load the per-avatar account settings once the agent UUID is
                     // known at login (once; a no-op every frame thereafter).
@@ -1781,6 +1784,7 @@ fn run_session(
     // Avatar-state replay (viewer-avatar-state-dump-replay): inject the bundle's
     // captured events once and drive the optional test rig (orbit light /
     // reflection probe). Only present in `--replay` mode.
+    let replaying = replay.is_some();
     if let Some(config) = replay {
         app.insert_resource(config)
             .add_plugins(crate::avatar_replay::AvatarReplayPlugin);
@@ -1795,6 +1799,9 @@ fn run_session(
         app.add_plugins(crate::screenshot::ScreenshotPlugin {
             dir: dir.to_path_buf(),
             content: capture.content,
+            // A replay run has no grid, so it must not wait for a region to come
+            // up before it photographs the avatar it rebuilt offline.
+            grid_expected: !replaying,
         });
     } else if capture.content != crate::screenshot::CaptureContent::WORLD_ONLY {
         // Capture knobs with nothing to capture is a mistyped command line, and a
@@ -1815,6 +1822,14 @@ fn run_session(
 /// Returns an [`enum@Error`] if credentials cannot be loaded, the login URI
 /// cannot be resolved, or an MFA challenge cannot be answered.
 fn run_viewer(options: &Options) -> Result<(), Error> {
+    // Before anything else, so a signal that arrives during login is still a
+    // graceful logout: the flag is only read once the app is running, but the
+    // handler must already be installed when the signal lands. A failure to
+    // install one is logged and carried on from — the viewer still runs, it just
+    // dies abruptly when signalled, as it always did.
+    if let Err(error) = crate::session::install_termination_handler() {
+        warn!("could not install the SIGTERM/SIGINT handler: {error}");
+    }
     let credentials = Credentials::load(&options.credentials)?;
     let avatar = credentials.select(options.avatar.as_deref())?;
     let login_uri = resolve_login_uri(options, avatar)?;

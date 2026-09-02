@@ -13,6 +13,7 @@ members = [
   "sl-client-bevy-viewer",
   "sl-client-tokio",
   "sl-conformance",
+  "sl-crosscheck",
   "sl-emoji",
   "sl-fake-grid",
   "sl-gst",

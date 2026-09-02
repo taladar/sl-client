@@ -16,10 +16,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | blocked | 60 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 958 |
+| done | 959 |
 | deferred | 24 |
 | wont-do | 14 |
-| **total** | **1554** |
+| **total** | **1555** |
 
 ## ideas (98)
 
@@ -406,6 +406,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-flycam-floater`](ready/viewer-camera-flycam-floater.md) —
   Flycam control floater (blocked by `viewer-camera-flycam` (done),
   `viewer-ui-floater-basic` (done))
+- [`viewer-camera-fov-parity`](ready/viewer-camera-fov-parity.md) — The camera's
+  field of view is 45° here and 60° in the reference viewer
 - [`viewer-camera-keyboard-controls`](ready/viewer-camera-keyboard-controls.md)
   — Keyboard camera controls — orbit / pan / zoom / roll actions
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
@@ -963,10 +965,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
-- [`test-firestorm-crosscheck-runner`](ready/test-firestorm-crosscheck-runner.md)
-  — Run both viewers against one fake grid and collect their artifacts (blocked
-  by `viewer-screenshot-fixed-resolution` (done),
-  `test-fake-grid-fixed-port-scenario` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -1147,7 +1145,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   (done), `viewer-fake-grid-render-harness`)
 - [`test-firestorm-crosscheck-report`](blocked/test-firestorm-crosscheck-report.md)
   — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
-  by `test-firestorm-crosscheck-runner`, `viewer-scene-dump`)
+  by `test-firestorm-crosscheck-runner` (done), `viewer-scene-dump`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1370,7 +1368,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (958)
+## done (959)
 
 ### protocol
 
@@ -3191,6 +3189,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-terrain-layerdata`](done/test-fake-grid-terrain-layerdata.md)
   — The fake grid sends terrain — LayerData patches, wind, clouds (blocked by
   `test-fake-grid-determinism` (done))
+- [`test-firestorm-crosscheck-runner`](done/test-firestorm-crosscheck-runner.md)
+  — Run both viewers against one fake grid and collect their artifacts (blocked
+  by `viewer-screenshot-fixed-resolution` (done),
+  `test-fake-grid-fixed-port-scenario` (done))
 - [`test-friendship-offer-accept`](done/test-friendship-offer-accept-offer-accept-confirm-both-friend-lists.md)
   — offer, accept, confirm both friend lists
 - [`test-friendship-offer-accept-aditi`](done/test-friendship-offer-accept-aditi-add-the-aditi-variant.md)

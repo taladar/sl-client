@@ -18,6 +18,7 @@ publish.workspace = true
 # spec stays per-crate (see the root manifest).
 bevy = { version = "0.19.0" }
 clap = { workspace = true, features = ["cargo", "derive", "env"] }
+fs-err = { workspace = true }
 image = { version = "0.25.10", default-features = false, features = [
   "bmp",
   "jpeg",
@@ -25,6 +26,11 @@ image = { version = "0.25.10", default-features = false, features = [
   "tga",
 ] }
 parry3d = "0.27.0"
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+# The graceful-quit signal handler: a harness asks this viewer to log out with
+# SIGTERM, and the default disposition would strand the grid session.
+signal-hook = { version = "0.4.4", default-features = false }
 sl-cef = { path = "../sl-cef", version = "0.1.0" }
 sl-client-bevy = { workspace = true, features = [
   "bevy_pbr",
@@ -39,6 +45,7 @@ sl-viewer-world-api = { workspace = true }
 sl-viewer-world-avatar = { workspace = true }
 sl-viewer-world-objects = { workspace = true }
 sl-viewer-world-scene = { workspace = true }
+thiserror = { workspace = true }
 url = { workspace = true }
 wgpu-types = { workspace = true }
 

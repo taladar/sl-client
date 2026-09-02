@@ -198,6 +198,59 @@ host and resolved through `GET /get_grid_info`, which this grid serves.
 Give it `FIRESTORM_X64_USER_DIR=<a fresh temp dir>` too, or the run shares
 settings, cache, logs and the credential store with your real session.
 
+### The cross-check runner
+
+`sl-crosscheck` does all of the above unattended: it starts the grid, runs
+both viewers against it in turn, and collects what each of them wrote.
+
+```sh
+cargo build --release -p sl-client-bevy-viewer
+cargo run --release -p sl-crosscheck -- \
+  --scenario catalogue --look-at mesh-cube --day-position 0.25 \
+  --firestorm "${FIRESTORM_BUILD}/newview/packaged/firestorm"
+```
+
+The camera is aimed at a **landmark by name**, from `--look-from` metres
+south and `--look-above` metres up — south because the fixture row runs
+west to east, so a camera to the south sees the row rather than the end
+of it. Without `--firestorm` (or `SL_CROSSCHECK_FIRESTORM`, which an
+uncommitted `.env` beside the sources can set once) only this viewer
+runs, and that is a **one-sided run as asked**, not a failure: the exit
+status follows whether every viewer that was *asked* to run produced
+frames.
+
+A run leaves `run.json`, the two configuration files, and per viewer its
+`frame_NNN.png` sequence, `scene.json` (when that viewer writes one),
+`harness-status.json` and its own `viewer.log`.
+
+The grid runs **inside** the runner rather than as a spawned
+`sl-fake-grid`, which is the launcher's port lesson taken one step
+further: a readiness probe proves a *port* answers, while binding the
+port in-process makes "the grid that answered is not the one you started"
+impossible rather than merely detectable.
+
+Two invariants are worth knowing before reading a run:
+
+- **A viewer is asked to quit, never killed.** The escalation is
+  `SIGTERM` — which both viewers turn into a graceful logout — then the
+  logout grace, then `SIGKILL`. A session the simulator still believes is
+  logged in makes the *next* run fail to log in, and that failure looks
+  exactly like a viewer bug. Firestorm's own `--quitafter` is unusable
+  here for the same reason: it calls `forceQuit()`, which sends no
+  `LogoutRequest`.
+- **The status file, not the exit code, says whether a run happened.** A
+  viewer that never got in world still writes a full set of frames, black
+  and on schedule. Both viewers write `harness-status.json` before they
+  log out, with the same five keys; no file means the run never reached
+  that point. "The viewers differ" and "the run did not happen" are never
+  reported the same way — and nothing in the runner says the viewers
+  agree or differ at all, because nothing in it looks at a pixel.
+
+Each viewer is confined to the run directory:
+`FIRESTORM_X64_USER_DIR` for Firestorm, all four `XDG_*` roots for this
+viewer. Not only the cache — this viewer rewrites its settings on the way
+out, so a run would otherwise edit yours.
+
 ## The non-CAPS HTTP surfaces
 
 Besides login and CAPS, a real login host answers three more things a

@@ -58,6 +58,18 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   crate reaches for `Instant::now()` on its own, and
   `sl_fake_grid::tokio_clock()` is what a paused-timer test passes. Tier F
   records the grid produces are therefore comparable run to run.
+- `sl-crosscheck` — the Firestorm cross-check runner: one in-process fake
+  grid on a fixed port with a named scenario, both viewers run against it
+  in turn with the same capture size, layers, camera and day position, and
+  a run directory of frames, scene dumps, `harness-status.json` and
+  `run.json`. It collects; it never compares. Both viewers write
+  `harness-status.json` before logging out (ours is
+  `sl-viewer-world-view/src/harness_status.rs`), because a viewer that
+  never got in world still writes a full set of black frames on schedule —
+  "the run did not happen" and "the viewers differ" must never read the
+  same way. A viewer is asked to quit (`SIGTERM` → logout grace →
+  `SIGKILL`), never killed outright: a stranded grid session makes the
+  *next* run fail to log in.
 - `sl-viewer-testkit/src/baseline.rs` — the one baseline format for UI
   and render facts (`baselines/<crate>/<tier>/<id>.toml`, bless with
   `SL_VIEWER_BLESS_BASELINES=1`). A tier keeps its own opt-in list of

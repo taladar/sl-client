@@ -81,6 +81,7 @@ use bevy::tasks::{IoTaskPool, Task, block_on, poll_once};
 use bevy::window::WindowRef;
 use sl_client_bevy::SlCommand;
 
+use crate::harness_status::HarnessStatus;
 use crate::quiescence::SceneQuiescence;
 use crate::session::{ViewerSession, request_logout};
 use crate::world_api::{OverlayCamera, ViewerCamera};
@@ -97,23 +98,34 @@ pub struct ScreenshotPlugin {
     /// The pixel grid the frames are rendered at, and which layers of the
     /// composited frame they hold. See [the module docs](self).
     pub content: CaptureContent,
+    /// Whether this run logs into a grid, and so whether "the region never came
+    /// up" means the run failed.
+    ///
+    /// False in `--replay`, which rebuilds an avatar from a captured bundle with
+    /// no grid at all: there, waiting for a region would be waiting for
+    /// something that is never coming, and the frames of the replayed avatar are
+    /// exactly what the run is for.
+    pub grid_expected: bool,
 }
 
 impl Plugin for ScreenshotPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(ScreenshotSchedule::new(self.dir.clone()))
-            .insert_resource(self.content)
-            // After `Startup`, which is where the viewer spawns its one camera.
-            .add_systems(PostStartup, pin_capture_target)
-            .add_systems(
-                Update,
-                (
-                    route_overlay_cameras,
-                    capture_screenshots,
-                    poll_screenshot_saves,
-                )
-                    .chain(),
-            );
+        app.insert_resource(ScreenshotSchedule::new(
+            self.dir.clone(),
+            self.grid_expected,
+        ))
+        .insert_resource(self.content)
+        // After `Startup`, which is where the viewer spawns its one camera.
+        .add_systems(PostStartup, pin_capture_target)
+        .add_systems(
+            Update,
+            (
+                route_overlay_cameras,
+                capture_screenshots,
+                poll_screenshot_saves,
+            )
+                .chain(),
+        );
     }
 }
 
@@ -304,10 +316,32 @@ pub(crate) struct ScreenshotSchedule {
     next_at: Option<f32>,
     /// The index of the next frame to write.
     index: usize,
+    /// How many frames actually reached the disk, which is what the status file
+    /// reports: a frame captured is not a frame written, and the difference is
+    /// the whole reason a harness reads the counts rather than the run's word.
+    written: usize,
     /// When the region came up (elapsed seconds), once it has.
     region_seen_at: Option<f32>,
     /// Consecutive frames the scene has been quiet.
     quiet_frames: u32,
+    /// How long the run waits to get in world before giving up, in seconds from
+    /// startup (`SL_VIEWER_LOGIN_TIMEOUT`, default 180) — the same variable and
+    /// default the Firestorm harness uses.
+    login_timeout: f32,
+    /// Set when the run has gone wrong in a way it cannot capture through: no
+    /// camera to capture, a frame that failed to reach the disk, a login that
+    /// never landed. Carries the `reason` the status file reports.
+    failure: Option<String>,
+    /// Whether the first capture fired on a settled scene or on the timeout,
+    /// which the status file's `reason` distinguishes: a frame taken mid-load is
+    /// worth having as long as nobody reads it as a settled one.
+    settled: bool,
+    /// Whether [`HarnessStatus`] has already been written, so the "everything is
+    /// written" branch — reached on every frame of the logout — writes it once.
+    status_written: bool,
+    /// Whether a region is expected at all — false for a grid-less `--replay`
+    /// run, where nothing should wait for a login that was never attempted.
+    grid_expected: bool,
 }
 
 /// How many consecutive quiet frames the first capture waits for: long enough
@@ -320,6 +354,11 @@ const QUIET_HOLD_FRAMES: u32 = 30;
 /// right after arrival is not a loaded scene).
 const MIN_SETTLE_SECS: f32 = 5.0;
 
+/// How long a run waits to reach the world before it gives up, unless
+/// `SL_VIEWER_LOGIN_TIMEOUT` says otherwise. Firestorm's harness defaults to
+/// the same 180 s.
+const DEFAULT_LOGIN_TIMEOUT_SECS: f32 = 180.0;
+
 impl ScreenshotSchedule {
     /// A schedule writing `SL_VIEWER_SCREENSHOT_FRAMES` frames (default 30) at
     /// `SL_VIEWER_SCREENSHOT_INTERVAL` s (default 0.5), the first once the
@@ -328,7 +367,7 @@ impl ScreenshotSchedule {
     /// two runs comparable by construction; the timeout keeps a
     /// permanently-busy scene from hanging the run.
     #[must_use]
-    pub(crate) fn new(dir: PathBuf) -> Self {
+    pub(crate) fn new(dir: PathBuf, grid_expected: bool) -> Self {
         let env_f32 = |key: &str, default: f32| {
             std::env::var(key)
                 .ok()
@@ -348,8 +387,45 @@ impl ScreenshotSchedule {
             max_frames: env_usize("SL_VIEWER_SCREENSHOT_FRAMES", 30),
             next_at: None,
             index: 0,
+            written: 0,
             region_seen_at: None,
             quiet_frames: 0,
+            login_timeout: env_f32("SL_VIEWER_LOGIN_TIMEOUT", DEFAULT_LOGIN_TIMEOUT_SECS),
+            failure: None,
+            settled: false,
+            status_written: false,
+            grid_expected,
+        }
+    }
+
+    /// Write `harness-status.json` for this run, once.
+    ///
+    /// Called before the logout rather than after it: a status written on the
+    /// way out is a status a killed viewer never writes, and *no file* is how a
+    /// driving harness tells "the run did not happen" from "the viewers drew
+    /// different things" — see [`crate::harness_status`].
+    fn write_status(&mut self) {
+        if self.status_written {
+            return;
+        }
+        self.status_written = true;
+        let status = match &self.failure {
+            Some(reason) => HarnessStatus::new(false, reason, self.written, self.max_frames),
+            None if self.settled => {
+                HarnessStatus::new(true, "complete", self.written, self.max_frames)
+            }
+            None => HarnessStatus::new(
+                true,
+                "complete (captured before the scene settled)",
+                self.written,
+                self.max_frames,
+            ),
+        };
+        if let Err(error) = status.write(&self.dir) {
+            // The frames are already on disk and the run is over; a harness that
+            // finds no status treats this as a run that did not happen, which is
+            // the right conclusion from an unwritable directory.
+            error!("screenshot: {error}");
         }
     }
 }
@@ -389,6 +465,7 @@ const CAPTURE_PREVIEW_RENDER_LAYER: usize = 2;
 fn pin_capture_target(
     mut commands: Commands,
     content: Res<CaptureContent>,
+    mut schedule: ResMut<ScreenshotSchedule>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -396,6 +473,9 @@ fn pin_capture_target(
 ) {
     let Ok(camera) = camera.single() else {
         error!("screenshot: no single viewer camera to capture; this run will produce nothing");
+        // Fail the run rather than letting it photograph nothing on schedule:
+        // `capture_screenshots` writes the status and logs out.
+        schedule.failure = Some("no single viewer camera to capture".to_owned());
         return;
     };
     // The window's own surface format: an 8-bit sRGB target, so a captured frame
@@ -683,12 +763,46 @@ pub(crate) fn capture_screenshots(
     overlays: Query<(Entity, &OverlayCamera, Option<&RenderTarget>)>,
 ) {
     let now = time.elapsed_secs();
+    // A run that cannot capture is over: say so in the status file and log out,
+    // rather than filling the directory with frames of whatever is on screen.
+    if schedule.failure.is_some() {
+        // Hold the logout until every write in flight has drained, as the normal
+        // end of a run does: an abrupt exit truncates the last PNG, and a
+        // truncated frame is a rendering bug that never happened.
+        if pending_saves.is_empty() {
+            schedule.write_status();
+            request_logout(&mut session, &mut sl_commands, now);
+        }
+        return;
+    }
     if schedule.next_at.is_none() {
         // The first capture waits for the scene to settle: region up for a
         // while, and quiet for a run of frames. The configured delay is the
         // timeout that lets a permanently-busy scene still produce a frame.
         if quiescence.region_is_up() && schedule.region_seen_at.is_none() {
             schedule.region_seen_at = Some(now);
+        }
+        // Nothing was ever in front of the camera, so there is nothing to
+        // photograph and no point starting the schedule: a run that captures
+        // here writes a full set of empty frames and reports them as a
+        // successful comparison. Wait for the login timeout and fail the run.
+        //
+        // Only for a run that logs in. A `--replay` run has no grid and never
+        // will, and its frames — a bundle's avatar, rebuilt offline — are the
+        // whole point of it.
+        if schedule.grid_expected && schedule.region_seen_at.is_none() {
+            if now < schedule.login_timeout {
+                return;
+            }
+            let reason = format!(
+                "login not completed within {:.0} s; nothing was captured",
+                schedule.login_timeout
+            );
+            error!("screenshot: {reason}");
+            schedule.failure = Some(reason);
+            schedule.write_status();
+            request_logout(&mut session, &mut sl_commands, now);
+            return;
         }
         schedule.quiet_frames = if quiescence.is_quiet() {
             schedule.quiet_frames.saturating_add(1)
@@ -710,6 +824,7 @@ pub(crate) fn capture_screenshots(
                 quiescence.outstanding()
             );
         }
+        schedule.settled = settled;
         schedule.next_at = Some(now);
     }
     let next_at = schedule.next_at.unwrap_or(now);
@@ -726,6 +841,10 @@ pub(crate) fn capture_screenshots(
             "screenshot: captured {} frames; logging out",
             schedule.index
         );
+        // Before the logout, not after it: a harness reads this file to tell a
+        // run that happened from one that did not, and a viewer that dies during
+        // its logout must leave the run looking like what it was.
+        schedule.write_status();
         // Every frame is written: give the window back to the world camera, so the
         // logout's grace period is watchable.
         if let Some(pinned) = pinned.as_mut() {
@@ -790,6 +909,7 @@ fn save_off_thread(path: PathBuf) -> impl FnMut(On<ScreenshotCaptured>, Commands
 /// flight costs one cheap non-blocking poll.
 pub(crate) fn poll_screenshot_saves(
     mut commands: Commands,
+    mut schedule: ResMut<ScreenshotSchedule>,
     mut tasks: Query<(Entity, &mut ScreenshotSaveTask)>,
 ) {
     for (entity, mut task) in &mut tasks {
@@ -797,8 +917,19 @@ pub(crate) fn poll_screenshot_saves(
             continue;
         };
         match result {
-            Ok(path) => info!("screenshot: saved {}", path.display()),
-            Err(error) => error!("screenshot: save failed: {error}"),
+            Ok(path) => {
+                info!("screenshot: saved {}", path.display());
+                schedule.written = schedule.written.saturating_add(1);
+            }
+            Err(error) => {
+                error!("screenshot: save failed: {error}");
+                // A frame the harness thinks it captured but that never reached
+                // the disk is exactly the gap the status file exists to close:
+                // the run is short by one frame, and it must say so.
+                schedule
+                    .failure
+                    .get_or_insert_with(|| format!("a frame failed to reach the disk: {error}"));
+            }
         }
         commands.entity(entity).despawn();
     }

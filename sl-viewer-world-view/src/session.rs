@@ -328,6 +328,71 @@ pub fn handle_quit_input(
 #[derive(Debug, Message, Default)]
 pub struct QuitRequested;
 
+/// Set by the `SIGTERM` / `SIGINT` handler, read by [`quit_on_termination_signal`].
+///
+/// An [`AtomicBool`](core::sync::atomic::AtomicBool) rather than anything that
+/// allocates or locks, because it is written from inside a signal handler; in an
+/// [`Arc`](std::sync::Arc) because that is what `signal_hook`'s flag registration
+/// holds on to.
+#[cfg(unix)]
+static TERMINATION_REQUESTED: std::sync::LazyLock<std::sync::Arc<core::sync::atomic::AtomicBool>> =
+    std::sync::LazyLock::new(|| std::sync::Arc::new(core::sync::atomic::AtomicBool::new(false)));
+
+/// Ask the operating system to raise a flag on `SIGTERM` and `SIGINT` instead of
+/// killing the process, so [`quit_on_termination_signal`] can turn either into
+/// the same graceful logout the menu's Quit takes.
+///
+/// This is what lets a **driving harness ask this viewer to quit**. A cross-check
+/// runner that must escalate a stuck run has only signals to escalate with, and
+/// the default `SIGTERM` disposition strands the grid session — which does not
+/// merely lose that run: the next login is rejected until the simulator times the
+/// stale presence out, and *that* failure looks exactly like a viewer bug. The
+/// runner still escalates to `SIGKILL` in the end; this is what makes the step
+/// before it worth taking.
+///
+/// `SIGINT` comes with it because a run watched from a terminal is stopped with
+/// `Ctrl-C`, and that should log out too rather than strand the session.
+///
+/// A no-op off Unix, where there are no such signals to install.
+///
+/// # Errors
+///
+/// Returns the registration error. The caller logs it and carries on: a viewer
+/// that could not install the handler still runs, it just dies abruptly when
+/// signalled, exactly as it did before.
+pub fn install_termination_handler() -> Result<(), std::io::Error> {
+    #[cfg(unix)]
+    for signal in [signal_hook::consts::SIGTERM, signal_hook::consts::SIGINT] {
+        let _registration =
+            signal_hook::flag::register(signal, std::sync::Arc::clone(&TERMINATION_REQUESTED))?;
+    }
+    Ok(())
+}
+
+/// Turn a `SIGTERM` / `SIGINT` into the same graceful logout the menu's Quit
+/// takes, once per run.
+///
+/// Polled from `Update` rather than acted on in the handler itself: a signal
+/// handler may not touch the ECS (or allocate, or lock), and the quit path is a
+/// message and a deadline.
+pub fn quit_on_termination_signal(
+    time: Res<Time>,
+    mut session: ResMut<ViewerSession>,
+    mut commands: MessageWriter<SlCommand>,
+) {
+    #[cfg(unix)]
+    {
+        if !TERMINATION_REQUESTED.load(core::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
+        if session.quit_deadline.is_some() {
+            return;
+        }
+        info!("termination signal received; logging out");
+        request_logout(&mut session, &mut commands, time.elapsed_secs());
+    }
+}
+
 /// Route quit requests — menu ▸ Quit and the window close button (which, on
 /// Wayland, includes a compositor-initiated close) — into a graceful
 /// `request_logout`. The window's default close-to-exit is disabled

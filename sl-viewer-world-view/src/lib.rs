@@ -38,6 +38,7 @@ pub(crate) use sl_viewer_world_scene::water;
 
 pub mod camera;
 pub mod gpu_pick;
+pub mod harness_status;
 pub mod hud;
 pub mod hud_pick;
 pub mod input_action;

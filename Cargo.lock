@@ -3159,6 +3159,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8258,6 +8264,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2a0c28ca5908dbdbcd52e6fdaa00358ab88637f8ab33e1f188dd510eb44b53d"
+dependencies = [
+ "libc",
+ "signal-hook-registry",
+]
+
+[[package]]
 name = "signal-hook-registry"
 version = "1.4.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8609,6 +8625,27 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-journald",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
+name = "sl-crosscheck"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "dotenvy",
+ "fs-err",
+ "nix 0.31.3",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "signal-hook",
+ "sl-fake-grid",
+ "thiserror 2.0.19",
+ "tokio",
+ "toml",
+ "tracing",
  "tracing-subscriber",
  "url",
 ]
@@ -9533,9 +9570,13 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "clap",
+ "fs-err",
  "image",
  "parry3d",
  "pretty_assertions",
+ "serde",
+ "serde_json",
+ "signal-hook",
  "sl-cef",
  "sl-client-bevy",
  "sl-proto",
@@ -9550,6 +9591,7 @@ dependencies = [
  "sl-viewer-world-avatar",
  "sl-viewer-world-objects",
  "sl-viewer-world-scene",
+ "thiserror 2.0.19",
  "url",
  "wgpu-types",
 ]
