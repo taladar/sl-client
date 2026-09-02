@@ -2252,6 +2252,30 @@ pub enum CameraMode {
 #[derive(Component, Debug, Clone, Copy, Default)]
 pub struct ViewerCamera;
 
+/// Marks a camera that draws one **overlay layer** over the world camera's
+/// frame, and names which layer it draws.
+///
+/// The composited window frame is four passes in a fixed order — the world
+/// (order 0), the edit gizmos (1), the HUD attachments (2, which is also
+/// `bevy_ui`'s default camera and so carries the viewer's UI) — and the capture
+/// harness routes each one into a captured frame or leaves it on the window
+/// *independently*, so a comparison can ask about HUD rendering without the UI
+/// in the way, or about the UI without the HUD.
+///
+/// It lives here, rather than each overlay's own crate, because the harness
+/// (`sl-viewer-world-view`) must address a camera spawned by a crate above it
+/// (`sl-viewer-edit`'s gizmo overlay) without depending on it.
+#[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OverlayCamera {
+    /// The edit-tool gizmo overlay: the move / rotate / scale handles and the
+    /// selection outlines, on their own render layer.
+    Gizmos,
+    /// The HUD-attachment layer — and, because that camera carries
+    /// `IsDefaultUiCamera`, every `bevy_ui` node too. The two are one camera, so
+    /// a capture that wants one and not the other hides the other's content.
+    HudAndUi,
+}
+
 /// The drivable state of the [`ViewerCamera`], shared by every mode.
 ///
 /// Third person reads the orbit fields (`azimuth` /

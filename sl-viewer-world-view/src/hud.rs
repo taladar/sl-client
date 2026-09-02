@@ -206,6 +206,13 @@ pub(crate) fn setup_hud_screen(
             // gizmos, the HUD and the in-world name tags, same stacking as
             // when the (removed) tag overlay camera carried this marker.
             IsDefaultUiCamera,
+            // Which overlay of the composited frame this camera draws, so the
+            // capture harness can route it into a captured frame — or leave it
+            // on the window — independently of the world and the gizmos. It
+            // draws two things, the HUD layer and (as the default UI camera)
+            // the UI, which is why the harness hides one when only the other
+            // was asked for.
+            crate::world_api::OverlayCamera::HudAndUi,
         ))
         .id();
     info!(

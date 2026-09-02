@@ -550,6 +550,55 @@ struct Options {
     /// cursor un-grabbed so it does not hijack the desktop it runs on.
     #[clap(long, env = "SL_VIEWER_SCREENSHOT_DIR")]
     screenshot_dir: Option<PathBuf>,
+    /// The pixel grid every `--screenshot-dir` frame is rendered at,
+    /// `WIDTHxHEIGHT` (default `1920x1080`). A run never captures the window:
+    /// the frame is rendered into an off-screen target of exactly this size,
+    /// because a window's size is a request no window manager promises to honour
+    /// or to keep constant — and two frames of different sizes cannot be diffed.
+    /// The environment variable is the one the Firestorm capture harness reads,
+    /// so one env block sizes both viewers.
+    #[clap(long, env = "SL_VIEWER_CAPTURE_SIZE", value_parser = crate::screenshot::parse_capture_size)]
+    capture_size: Option<crate::screenshot::CaptureSize>,
+    /// Put the viewer's UI in the captured frames. Off by default, so a
+    /// cross-viewer render comparison sees the world rather than two viewers'
+    /// unrelated interfaces. Independent of `--capture-hud`: asking for the HUD
+    /// alone hides the UI for the run (the two share one camera). The
+    /// environment variable takes the Firestorm harness's falsey set — unset,
+    /// empty, `0`, `false`, `no` and `off` are off, anything else on — so one
+    /// env block means the same thing to both viewers.
+    #[clap(
+        long,
+        env = "SL_VIEWER_CAPTURE_UI",
+        num_args = 0..=1,
+        default_value_t = false,
+        default_missing_value = "true",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    capture_ui: bool,
+    /// Put the HUD-attachment layer in the captured frames — the way to compare
+    /// HUD rendering between the two viewers. Off by default. Independent of
+    /// `--capture-ui`.
+    #[clap(
+        long,
+        env = "SL_VIEWER_CAPTURE_HUD",
+        num_args = 0..=1,
+        default_value_t = false,
+        default_missing_value = "true",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    capture_hud: bool,
+    /// Put the edit-tool gizmo overlay (the move / rotate / scale handles and
+    /// selection outlines) in the captured frames. Off by default; only visible
+    /// at all when something is selected.
+    #[clap(
+        long,
+        env = "SL_VIEWER_CAPTURE_GIZMOS",
+        num_args = 0..=1,
+        default_value_t = false,
+        default_missing_value = "true",
+        value_parser = clap::builder::FalseyValueParser::new()
+    )]
+    capture_gizmos: bool,
     /// A debug affordance: place the fly-camera at an absolute Second Life
     /// region-local position `x,y,z` (Z-up metres, e.g. `240,128,25` near an
     /// east edge) instead of snapping it to the agent on login. Lets an
@@ -841,6 +890,37 @@ struct CameraStartup {
     spin: CameraSpin,
 }
 
+/// The unattended capture harness's configuration for a viewer session: where
+/// the PNG sequence goes, and what its frames hold. Bundled alongside
+/// [`CameraStartup`] to keep [`run_session`] within the argument-count lint —
+/// and because capture settings without a directory are meaningless, which reads
+/// better as one value than as several arguments that have to agree.
+/// What this run's captured frames hold, from the `--capture-*` options: the
+/// pixel grid, and each layer of the composited frame independently.
+fn capture_content(options: &Options) -> crate::screenshot::CaptureContent {
+    crate::screenshot::CaptureContent {
+        size: options
+            .capture_size
+            .unwrap_or(crate::screenshot::CaptureSize::DEFAULT),
+        ui: options.capture_ui,
+        hud: options.capture_hud,
+        gizmos: options.capture_gizmos,
+    }
+}
+
+/// The unattended capture harness's configuration for a viewer session: where
+/// the PNG sequence goes, and what its frames hold.
+#[derive(Clone, Copy)]
+struct CaptureStartup<'a> {
+    /// The screenshot directory (`--screenshot-dir`), or `None` for an ordinary
+    /// interactive session.
+    dir: Option<&'a Path>,
+    /// The pixel grid the frames are rendered at and which layers of the
+    /// composited frame they hold (`--capture-size`, `--capture-ui`,
+    /// `--capture-hud`, `--capture-gizmos`).
+    content: crate::screenshot::CaptureContent,
+}
+
 /// The skin configuration for a viewer session: which skin / theme to wear and
 /// whether to hot-watch the `.css` files. Bundled alongside [`CameraStartup`] to
 /// keep [`run_session`] within the argument-count lint.
@@ -877,7 +957,7 @@ fn run_session(
     viewer_assets: Option<&Path>,
     play_animation: &[Uuid],
     repeat_animation: bool,
-    screenshot_dir: Option<&Path>,
+    capture: CaptureStartup<'_>,
     camera: CameraStartup,
     skin: SkinRuntime,
     media: MediaRuntime,
@@ -1500,7 +1580,7 @@ fn run_session(
         // the spin, and third-person auto-follows when no pose is fixed. The world
         // context may grab the cursor (only in mouselook) unless this is an unattended
         // screenshot run, whose whole point is to leave the desktop's pointer alone.
-        .insert_resource(CursorGrabAllowed(screenshot_dir.is_none()))
+        .insert_resource(CursorGrabAllowed(capture.dir.is_none()))
         .insert_resource(camera_start)
         .insert_resource(camera_spin)
         .init_resource::<LoginOutcome>()
@@ -1705,15 +1785,21 @@ fn run_session(
         app.insert_resource(config)
             .add_plugins(crate::avatar_replay::AvatarReplayPlugin);
     }
-    // In screenshot mode, capture a numbered PNG sequence of the window after a
-    // startup delay, then quit (the R11 offline-inspection harness).
-    if let Some(dir) = screenshot_dir {
+    // In screenshot mode, capture a numbered PNG sequence after a startup delay,
+    // then quit (the R11 offline-inspection harness) — from the window, or from
+    // an off-screen target of the pinned `--capture-size` when one was asked for.
+    if let Some(dir) = capture.dir {
         if let Err(error) = fs_err::create_dir_all(dir) {
             warn!("failed to create screenshot dir {}: {error}", dir.display());
         }
         app.add_plugins(crate::screenshot::ScreenshotPlugin {
             dir: dir.to_path_buf(),
+            content: capture.content,
         });
+    } else if capture.content != crate::screenshot::CaptureContent::WORLD_ONLY {
+        // Capture knobs with nothing to capture is a mistyped command line, and a
+        // silent no-op would look exactly like a run that worked.
+        warn!("the --capture-* options have no effect without --screenshot-dir");
     }
     let _exit = app.run();
     app.world_mut()
@@ -1798,7 +1884,10 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             options.viewer_assets.as_deref(),
             &options.play_animation,
             options.repeat_animation,
-            options.screenshot_dir.as_deref(),
+            CaptureStartup {
+                dir: options.screenshot_dir.as_deref(),
+                content: capture_content(options),
+            },
             CameraStartup {
                 start: camera_start,
                 spin: camera_spin,
@@ -1920,7 +2009,10 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
         options.viewer_assets.as_deref(),
         &options.play_animation,
         options.repeat_animation,
-        options.screenshot_dir.as_deref(),
+        CaptureStartup {
+            dir: options.screenshot_dir.as_deref(),
+            content: capture_content(options),
+        },
         CameraStartup {
             start: camera_start,
             spin: camera_spin,

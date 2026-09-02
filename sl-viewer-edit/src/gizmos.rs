@@ -1241,6 +1241,11 @@ fn spawn_gizmo_camera(
             Msaa::Sample4,
             Hdr,
             Tonemapping::None,
+            // Which overlay of the composited frame this camera draws, so the
+            // screenshot harness can route the gizmos into a captured frame
+            // independently of the world, the HUD and the UI — without the
+            // harness's crate having to know this one.
+            sl_viewer_world_api::OverlayCamera::Gizmos,
             ChildOf(camera),
         ))
         .id();

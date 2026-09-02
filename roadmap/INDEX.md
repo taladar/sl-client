@@ -13,13 +13,13 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 312 |
-| blocked | 61 |
+| blocked | 60 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 956 |
+| done | 958 |
 | deferred | 24 |
 | wont-do | 14 |
-| **total** | **1553** |
+| **total** | **1554** |
 
 ## ideas (98)
 
@@ -827,8 +827,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   JSON beside the frames
 - [`viewer-screen-space-reflections`](ready/viewer-screen-space-reflections.md)
   — Screen-space reflections (SSR)
-- [`viewer-screenshot-fixed-resolution`](ready/viewer-screenshot-fixed-resolution.md)
-  — Pin the capture resolution, so two viewers can be compared at all
 - [`viewer-script-error-window`](ready/viewer-script-error-window.md) — Script
   warning / error window (blocked by `viewer-ui-widget-scaffold` (done))
 - [`viewer-script-limits`](ready/viewer-script-limits.md) — Script limits —
@@ -965,6 +963,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
+- [`test-firestorm-crosscheck-runner`](ready/test-firestorm-crosscheck-runner.md)
+  — Run both viewers against one fake grid and collect their artifacts (blocked
+  by `viewer-screenshot-fixed-resolution` (done),
+  `test-fake-grid-fixed-port-scenario` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -974,7 +976,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (61)
+## blocked (60)
 
 ### viewer
 
@@ -1146,10 +1148,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-firestorm-crosscheck-report`](blocked/test-firestorm-crosscheck-report.md)
   — Report the divergences — contact sheet, image diff, scene-dump diff (blocked
   by `test-firestorm-crosscheck-runner`, `viewer-scene-dump`)
-- [`test-firestorm-crosscheck-runner`](blocked/test-firestorm-crosscheck-runner.md)
-  — Run both viewers against one fake grid and collect their artifacts (blocked
-  by `viewer-screenshot-fixed-resolution`, `test-fake-grid-fixed-port-scenario`
-  (done))
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1372,7 +1370,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (956)
+## done (958)
 
 ### protocol
 
@@ -1732,6 +1730,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-caps-event-queue-stops-after-teleport-spree`](done/viewer-caps-event-queue-stops-after-teleport-spree.md)
   — CAPS EventQueueGet stops delivering (no CrossedRegion) after a rapid
   teleport spree, freezing the avatar at a crossing
+- [`viewer-capture-layers`](done/viewer-capture-layers.md) — UI, HUD and gizmos
+  as independent switches in both viewers' captures
 - [`viewer-cef-audio-mixer-handoff`](done/viewer-cef-audio-mixer-handoff.md) —
   CEF page audio into the shared mixer (OnAudioStreamPacket) (blocked by
   `viewer-audio-backend` (done))
@@ -2584,6 +2584,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   regressions
 - [`viewer-rlv-command-parser`](done/viewer-rlv-command-parser.md) — RLV — parse
   the @-command chat protocol
+- [`viewer-screenshot-fixed-resolution`](done/viewer-screenshot-fixed-resolution.md)
+  — Pin the capture resolution, so two viewers can be compared at all
 - [`viewer-screenshot-wait-for-quiescence`](done/viewer-screenshot-wait-for-quiescence.md)
   — Screenshot mode should wait for the scene to load, not for a fixed delay
 - [`viewer-script-dialog-body-links`](done/viewer-script-dialog-body-links.md) —
