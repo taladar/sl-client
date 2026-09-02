@@ -5391,9 +5391,55 @@ pub(crate) fn bulk_update_item_to_llsd(item: &InventoryItem) -> Result<Llsd, sl_
     ]))
 }
 
+/// Whether an item is a link (`AT_LINK` / `AT_LINK_FOLDER`) rather than an
+/// item owning an asset of its own. AIS3 files the two under different
+/// `_embedded` keys, so a serializer has to tell them apart.
+fn is_link_item(item: &InventoryItem) -> bool {
+    let code = i32::from(item.item_type);
+    code == crate::types::ASSET_CODE_LINK || code == crate::types::ASSET_CODE_LINK_FOLDER
+}
+
+/// Serializes items as an AIS3 uuid-keyed map, the shape every `_embedded`
+/// block uses.
+fn ais_item_map(items: &[InventoryItem]) -> Result<Llsd, sl_wire::WireError> {
+    Ok(Llsd::Map(
+        items
+            .iter()
+            .map(|item| Ok((item.item_id.to_string(), inventory_item_to_llsd(item)?)))
+            .collect::<Result<_, sl_wire::WireError>>()?,
+    ))
+}
+
+/// Serializes folders as an AIS3 uuid-keyed `categories` map.
+fn ais_category_map(folders: &[InventoryFolder]) -> Llsd {
+    Llsd::Map(
+        folders
+            .iter()
+            .map(|folder| {
+                (
+                    folder.folder_id.to_string(),
+                    inventory_folder_to_llsd(folder),
+                )
+            })
+            .collect(),
+    )
+}
+
 /// Serializes folders and items as an AIS3 (`InventoryAPIv3`) response body
 /// (inverse of `ais_inventory_update_from_llsd`): the affected objects nest
 /// under `_embedded` as uuid-keyed maps.
+///
+/// **Links go under `_embedded.links`, not `_embedded.items`.** AIS3 files
+/// them separately and the reference viewer relies on the distinction twice
+/// over: `AISUpdate::parseEmbeddedLinks` gives a link the default permissions
+/// a link is supposed to carry, and `AISUpdate::parseDescendentCount` treats a
+/// reply as a *complete* listing — the precondition for accepting the folder's
+/// `version` — only when it can see all three of `categories`, `links` and
+/// `items`. Filing a link under `items` therefore leaves the folder's version
+/// permanently unknown, which for the Current Outfit Folder means
+/// `LLAppearanceMgr::updateAppearanceFromCOF` never runs and the agent's own
+/// avatar stays a cloud. All three keys are emitted even when empty, for the
+/// same reason.
 ///
 /// # Errors
 ///
@@ -5404,26 +5450,44 @@ pub fn ais_inventory_update_to_llsd(
     folders: &[InventoryFolder],
     items: &[InventoryItem],
 ) -> Result<Llsd, sl_wire::WireError> {
-    let categories = folders
-        .iter()
-        .map(|folder| {
-            (
-                folder.folder_id.to_string(),
-                inventory_folder_to_llsd(folder),
-            )
-        })
-        .collect();
-    let item_map = items
-        .iter()
-        .map(|item| Ok((item.item_id.to_string(), inventory_item_to_llsd(item)?)))
-        .collect::<Result<_, sl_wire::WireError>>()?;
+    let (links, plain): (Vec<_>, Vec<_>) = items.iter().cloned().partition(is_link_item);
     Ok(llsd_map(vec![(
         "_embedded",
         llsd_map(vec![
-            ("categories", Llsd::Map(categories)),
-            ("items", Llsd::Map(item_map)),
+            ("categories", ais_category_map(folders)),
+            ("items", ais_item_map(&plain)?),
+            ("links", ais_item_map(&links)?),
         ]),
     )]))
+}
+
+/// Serializes an AIS3 `GET /category/<id>/links` (and `/category/current/links`)
+/// reply: the folder at the top level with **only** its link items embedded.
+///
+/// Deliberately not [`ais_category_children_reply_to_llsd`] with the links
+/// passed as items: a links fetch is not a complete listing of the folder, so
+/// it must not claim to be one. Emitting only `_embedded.links` is what steers
+/// `AISUpdate::parseDescendentCount` to its Current-Outfit branch, where a
+/// links-only count is the right count; emitting empty `items` and
+/// `categories` alongside would instead assert the folder holds nothing else.
+///
+/// # Errors
+///
+/// Returns [`WireError::ValueOutOfRange`](sl_wire::WireError::ValueOutOfRange) if
+/// an item's L$ sale price exceeds the signed 32-bit range the wire field can
+/// hold.
+pub fn ais_category_links_reply_to_llsd(
+    folder: &InventoryFolder,
+    links: &[InventoryItem],
+) -> Result<Llsd, sl_wire::WireError> {
+    let mut reply = inventory_folder_to_llsd(folder);
+    if let Llsd::Map(reply_map) = &mut reply {
+        let _previous = reply_map.insert(
+            "_embedded".to_owned(),
+            llsd_map(vec![("links", ais_item_map(links)?)]),
+        );
+    }
+    Ok(reply)
 }
 
 /// Serializes an [`InventoryFolder`] as a `CreateInventoryCategory` reply body

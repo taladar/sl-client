@@ -101,16 +101,19 @@ pub use grid_info::{
 };
 pub use header::{PacketFlags, ParsedDatagram, encode_datagram, parse_datagram};
 pub use inventory::{
-    AIS_MAX_FOLDER_DEPTH, AisCategoryCreate, AisItemUpdate, AisLinkCreate, AisUpdate,
-    CreateInventoryCategoryRequest, ais_category_children_fetch_url, ais_category_children_url,
-    ais_category_url, ais_create_category_url, ais_item_url, ais_update_to_llsd,
-    build_ais_create_category_body, build_ais_create_link_body, build_ais_move_body,
-    build_ais_rename_category_body, build_ais_update_item_body, build_ais_update_response,
-    build_create_inventory_category_request, build_create_inventory_category_response,
-    parse_ais_category_children_fetch_url, parse_ais_category_children_url, parse_ais_category_url,
-    parse_ais_create_category_body, parse_ais_create_category_url, parse_ais_create_link_body,
-    parse_ais_item_url, parse_ais_move_body, parse_ais_rename_category_body,
-    parse_ais_update_item_body, parse_create_inventory_category_request,
+    AIS_CURRENT_OUTFIT_LINKS_PATH, AIS_MAX_FOLDER_DEPTH, AIS_ORPHANS_PATH, AisCategoryCreate,
+    AisItemUpdate, AisLinkCreate, AisUpdate, CreateInventoryCategoryRequest,
+    ais_category_children_fetch_url, ais_category_children_url, ais_category_links_url,
+    ais_category_url, ais_create_category_url, ais_current_outfit_links_url, ais_item_url,
+    ais_orphans_url, ais_update_to_llsd, build_ais_create_category_body,
+    build_ais_create_link_body, build_ais_move_body, build_ais_rename_category_body,
+    build_ais_update_item_body, build_ais_update_response, build_create_inventory_category_request,
+    build_create_inventory_category_response, is_ais_current_outfit_links_url, is_ais_orphans_url,
+    parse_ais_category_children_fetch_url, parse_ais_category_children_url,
+    parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
+    parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
+    parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
+    parse_create_inventory_category_request,
 };
 pub use landmark::{LandmarkAsset, landmark_to_wire, parse_landmark};
 pub use llsd::{

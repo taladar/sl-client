@@ -66,6 +66,50 @@ pub fn ais_category_children_fetch_url(category_id: InventoryFolderKey, depth: i
     format!("/category/{category_id}/children?depth={depth}")
 }
 
+/// The URL suffix for a folder's **link items only**
+/// (`GET /category/<id>/links`), the reference viewer's
+/// `AISAPI::FetchCategoryLinks`.
+///
+/// Distinct from [`ais_category_children_url`]: a `/links` fetch answers the
+/// folder's link items whatever `depth` the body asks for, because the depth
+/// there governs how far *embedded* outfit folders are expanded, not whether
+/// the folder's own links come back.
+#[must_use]
+pub fn ais_category_links_url(category_id: InventoryFolderKey) -> String {
+    format!("/category/{category_id}/links")
+}
+
+/// The URL suffix for the **Current Outfit** folder's links
+/// (`GET /category/current/links`), the reference viewer's `AISAPI::FetchCOF`.
+///
+/// `current` is a server-resolved alias, not a UUID: the client does not know
+/// which folder it names, so a grid must answer it by looking up the account's
+/// `FolderType::CurrentOutfit` folder itself. This is the fetch that populates
+/// the COF, and until it succeeds the viewer's own avatar stays a cloud —
+/// `LLAppearanceMgr::updateAppearanceFromCOF` refuses to run against a folder
+/// whose version is still unknown.
+pub const AIS_CURRENT_OUTFIT_LINKS_PATH: &str = "category/current/links";
+
+/// The URL suffix for the account's orphaned items (`GET /orphans`) — items
+/// whose parent folder the inventory service cannot resolve. A healthy account
+/// has none, but the viewer asks on every login and treats a non-2xx as an
+/// inventory error.
+pub const AIS_ORPHANS_PATH: &str = "orphans";
+
+/// The URL suffix for [`AIS_CURRENT_OUTFIT_LINKS_PATH`], with the leading `/`
+/// the other builders emit.
+#[must_use]
+pub fn ais_current_outfit_links_url() -> String {
+    format!("/{AIS_CURRENT_OUTFIT_LINKS_PATH}")
+}
+
+/// The URL suffix for [`AIS_ORPHANS_PATH`], with the leading `/` the other
+/// builders emit.
+#[must_use]
+pub fn ais_orphans_url() -> String {
+    format!("/{AIS_ORPHANS_PATH}")
+}
+
 /// The URL suffix for an item by id (`/item/<id>`), used by `PATCH` (update /
 /// move), `DELETE` (remove), and `GET` (fetch).
 #[must_use]
@@ -207,6 +251,32 @@ pub fn parse_ais_category_children_url(suffix: &str) -> Option<InventoryFolderKe
     let (path, _query) = split_url_suffix(suffix);
     let id = path.strip_prefix("category/")?.strip_suffix("/children")?;
     Uuid::parse_str(id).ok().map(InventoryFolderKey::from)
+}
+
+/// Parses the [`ais_category_links_url`] suffix back into its folder id
+/// (`/category/<id>/links`), or `None` if it does not match. The `current`
+/// alias is deliberately **not** accepted here — it names no id, so it is
+/// [`is_ais_current_outfit_links_url`]'s to recognise.
+#[must_use]
+pub fn parse_ais_category_links_url(suffix: &str) -> Option<InventoryFolderKey> {
+    let (path, _query) = split_url_suffix(suffix);
+    let id = path.strip_prefix("category/")?.strip_suffix("/links")?;
+    Uuid::parse_str(id).ok().map(InventoryFolderKey::from)
+}
+
+/// Whether the suffix is the Current Outfit links fetch
+/// ([`AIS_CURRENT_OUTFIT_LINKS_PATH`]).
+#[must_use]
+pub fn is_ais_current_outfit_links_url(suffix: &str) -> bool {
+    let (path, _query) = split_url_suffix(suffix);
+    path == AIS_CURRENT_OUTFIT_LINKS_PATH
+}
+
+/// Whether the suffix is the orphaned-items fetch ([`AIS_ORPHANS_PATH`]).
+#[must_use]
+pub fn is_ais_orphans_url(suffix: &str) -> bool {
+    let (path, _query) = split_url_suffix(suffix);
+    path == AIS_ORPHANS_PATH
 }
 
 /// Parses the [`ais_category_children_fetch_url`] suffix back into its

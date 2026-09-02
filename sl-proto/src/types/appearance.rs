@@ -369,6 +369,62 @@ pub mod avatar_texture {
     /// `IMG_USE_BAKED_AUX3`: a mesh replaces the universal aux3 bake.
     pub const IMG_USE_BAKED_AUX3: Uuid = Uuid::from_u128(0xedd5_1b77_fc10_ce7a_4b3d_011d_fc34_9e4f);
 
+    /// The **wearable layer textures** the Linden default body parts name: the
+    /// images a viewer composites into a local bake, as opposed to the bake
+    /// results themselves.
+    ///
+    /// These are library assets, fetched from the grid like any other texture.
+    /// They matter to a fake grid because the local-bake path is not optional:
+    /// with no appearance service to bake server-side, the viewer composites
+    /// its own avatar from exactly these, and a slot whose source texture 404s
+    /// never finishes its layer. `LLVOAvatarSelf::getHasMissingParts` then
+    /// reports the baked slot as "not loaded" and the agent's own avatar stays
+    /// a cloud — with every body part correctly worn, which is what makes the
+    /// symptom misleading.
+    ///
+    /// The set is the union over the four default body parts (shape, skin,
+    /// hair, eyes) of the texture ids in their `.bodypart` assets, less the
+    /// null id. It is small and fixed because the default wearables are.
+    pub const WEARABLE_LAYER_TEXTURES: [(Uuid, WearableLayer); 5] = [
+        (
+            Uuid::from_u128(0x193b_acad_5558_5e52_f3aa_3192_a568_e9a1),
+            WearableLayer::SkinHead,
+        ),
+        (
+            Uuid::from_u128(0xa6c6_fd50_7d98_7afb_a7aa_3484_81f2_4c8a),
+            WearableLayer::SkinUpperBody,
+        ),
+        (
+            Uuid::from_u128(0xf634_e17f_3164_1dfe_508b_0e02_547c_ebe4),
+            WearableLayer::SkinLowerBody,
+        ),
+        (
+            Uuid::from_u128(0x7ca3_9b4c_bd19_4699_aff7_f93f_d03d_3e7b),
+            WearableLayer::Hair,
+        ),
+        (
+            Uuid::from_u128(0x07e1_d75e_9312_ed2c_3c20_2d8a_7e91_09f0),
+            WearableLayer::EyeIris,
+        ),
+    ];
+
+    /// Which part of the avatar a [`WEARABLE_LAYER_TEXTURES`] entry paints —
+    /// enough for a test-asset generator to pick a plausible colour without
+    /// hard-coding one per UUID.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+    pub enum WearableLayer {
+        /// The face and scalp of a skin wearable.
+        SkinHead,
+        /// The torso and arms of a skin wearable.
+        SkinUpperBody,
+        /// The hips and legs of a skin wearable.
+        SkinLowerBody,
+        /// The hair wearable's strand texture.
+        Hair,
+        /// The iris of an eyes wearable.
+        EyeIris,
+    }
+
     /// The `IMG_USE_BAKED_*` sentinel → baked-slot mapping, in slot order.
     const USE_BAKED: [(Uuid, usize); 11] = [
         (IMG_USE_BAKED_HEAD, HEAD_BAKED),

@@ -131,11 +131,18 @@ impl NpcAppearance {
     }
 
     /// The default avatar's shape painted `color`: one solid bake per body
-    /// region (head, upper body, lower body), each served under an id derived
-    /// from `agent` so no two NPCs share a texture.
+    /// region, each served under an id derived from `agent` so no two NPCs
+    /// share a texture.
     ///
     /// This is the appearance a render test asserts against — the whole body
     /// classifies as one known colour.
+    ///
+    /// Every slot but the skirt is baked, and that completeness matters:
+    /// `LLVOAvatar::isFullyTextured` walks *every* avatar mesh (the skirt
+    /// aside, which it skips unless one is worn) and an unbaked slot leaves
+    /// the avatar at rez status 1, "gray" — which never becomes fully loaded,
+    /// so the viewer keeps drawing the cloud particle over a body that is
+    /// otherwise complete. A grid that bakes an avatar at all bakes all of it.
     #[must_use]
     pub fn solid(agent: AgentKey, color: [u8; 4]) -> Self {
         Self {
@@ -143,6 +150,8 @@ impl NpcAppearance {
                 avatar_texture::HEAD_BAKED,
                 avatar_texture::UPPER_BAKED,
                 avatar_texture::LOWER_BAKED,
+                avatar_texture::EYES_BAKED,
+                avatar_texture::HAIR_BAKED,
             ]
             .into_iter()
             .map(|slot| NpcBake {

@@ -20,7 +20,7 @@ use http::status::StatusCode as HttpStatusCode;
 use http_body_util::{BodyExt as _, Full};
 use hyper::body::Incoming;
 use hyper::{Request, Response};
-use sl_proto::CapsResponse;
+use sl_proto::{AssetKey, AssetSource as _, CapsResponse};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, watch};
 
@@ -197,6 +197,22 @@ async fn handle_request(
         let Some(shared) = core.session(seq).await else {
             return Ok(plain_status(HttpStatusCode::NOT_FOUND));
         };
+        if let Some(texture) = appearance_texture_id(&path) {
+            if method != "GET" {
+                return Ok(plain_status(HttpStatusCode::METHOD_NOT_ALLOWED));
+            }
+            let answer = {
+                let guard = shared.state.lock().await;
+                guard
+                    .assets
+                    .get(AssetKey::from(texture))
+                    .map(|bytes| ranged_asset(bytes, range.as_deref(), J2C_CONTENT_TYPE))
+            };
+            return Ok(match answer {
+                Some(answer) => answer_response(answer),
+                None => plain_status(HttpStatusCode::NOT_FOUND),
+            });
+        }
         let caps_response = dispatch_caps(
             &shared,
             core.eq_hold,
@@ -236,6 +252,106 @@ async fn collect_body(request: Request<Incoming>) -> Result<Bytes, HttpStatusCod
             Err(HttpStatusCode::PAYLOAD_TOO_LARGE)
         }
     }
+}
+
+/// The `Content-Type` a baked avatar texture is served with, the same
+/// JPEG2000 codestream media type the `GetTexture` cap uses.
+const J2C_CONTENT_TYPE: &str = "image/x-j2c";
+
+/// Serves stored asset bytes, honouring a `Range` header the way the asset
+/// caps do: no range → `200` whole; a satisfiable range → `206` with the
+/// slice and a `Content-Range`; a start past the end → `416`.
+///
+/// The viewer's texture fetcher opens a texture with `Range: bytes=0-599` and
+/// only asks for the rest once it has read the codestream header, so a route
+/// that serves textures has to answer ranges — and has to advertise that it
+/// does, or the fetcher cannot tell a short whole body from a truncated one.
+fn ranged_asset(bytes: &[u8], range: Option<&str>, content_type: &'static str) -> HttpAnswer {
+    let whole = || {
+        HttpAnswer::ok(content_type, bytes.to_vec())
+            .header("accept-ranges", "bytes")
+            .header("content-length", bytes.len().to_string())
+    };
+    let Some((start, end)) = range.and_then(parse_byte_range) else {
+        return whole();
+    };
+    if start >= bytes.len() {
+        return HttpAnswer::status(HttpStatusCode::RANGE_NOT_SATISFIABLE.as_u16())
+            .header("content-range", format!("bytes */{}", bytes.len()));
+    }
+    // A range covering the whole asset is answered as the whole asset: the
+    // fetcher's opening `bytes=0-599` on a texture shorter than 600 bytes is
+    // the common case, and a 206 claiming a range wider than the body is not.
+    let end = end
+        .unwrap_or_else(|| bytes.len().saturating_sub(1))
+        .min(bytes.len().saturating_sub(1));
+    if start == 0 && end == bytes.len().saturating_sub(1) {
+        return whole();
+    }
+    let slice = bytes.get(start..=end).unwrap_or_default().to_vec();
+    let len = slice.len();
+    HttpAnswer::with_status(
+        HttpStatusCode::PARTIAL_CONTENT.as_u16(),
+        content_type,
+        slice,
+    )
+    .header("accept-ranges", "bytes")
+    .header("content-length", len.to_string())
+    .header(
+        "content-range",
+        format!("bytes {start}-{end}/{}", bytes.len()),
+    )
+}
+
+/// Parses a single-range `Range: bytes=<start>-[<end>]` header into its
+/// offsets. Multi-range and suffix (`bytes=-N`) forms are not used by the
+/// viewer and are treated as absent.
+fn parse_byte_range(header: &str) -> Option<(usize, Option<usize>)> {
+    let spec = header.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (start, end) = spec.split_once('-')?;
+    let start = start.trim().parse::<usize>().ok()?;
+    let end = end.trim();
+    let end = if end.is_empty() {
+        None
+    } else {
+        Some(end.parse::<usize>().ok()?)
+    };
+    Some((start, end))
+}
+
+/// Parses an **appearance-service** texture URL into the baked texture id it
+/// names: `/sim/<seq>/appearance/texture/<agent>/<slot>/<uuid>`.
+///
+/// This is the grid's avatar-baking service, the one the login response names
+/// in `agent_appearance_service`. The reference viewer builds the URL as
+/// `<service>texture/<agent id>/<slot name>/<texture id>`
+/// (`LLVOAvatar::getImageURL`) and will not fetch a baked slot any other way
+/// once it decides the avatar is server-baked — so a grid that hands out bake
+/// ids but names no service leaves every avatar, the agent's own included,
+/// permanently a cloud with no failing request to point at: `getImageURL`
+/// returns an empty URL and nothing is ever requested.
+///
+/// The fake grid runs no real bake service: the bakes are fabricated per
+/// session ([`crate::world`]) and live in that session's asset store, so the
+/// route is mounted **under the session** rather than at the grid root a real
+/// deployment would use. The agent id and slot name are accepted and ignored
+/// — the store is keyed by texture id alone, and the fake grid has one
+/// appearance per session to serve.
+fn appearance_texture_id(path: &str) -> Option<uuid::Uuid> {
+    let rest = path.strip_prefix("/sim/")?;
+    let rest = rest.split_once('/')?.1;
+    let rest = rest.strip_prefix("appearance/texture/")?;
+    let mut parts = rest.split('/');
+    let _agent = parts.next()?;
+    let _slot = parts.next()?;
+    let texture = parts.next()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    uuid::Uuid::parse_str(texture).ok()
 }
 
 /// Parses `/sim/<seq>/…` into the session sequence number.

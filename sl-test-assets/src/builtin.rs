@@ -371,7 +371,38 @@ pub fn library_textures() -> Result<Vec<(Uuid, Vec<u8>)>, EncodeError> {
         textures.push((id, RgbaImage::solid(FLAT_SIZE, WATER_PLANE_RGBA).j2c()?));
     }
 
+    // The layer textures the default body parts name. Stand-ins, and not in
+    // OpenSimulator's set either -- but unlike a missing bump map a missing
+    // one of these is not a cosmetic loss: the viewer composites its own
+    // avatar out of them whenever the grid runs no appearance service, and a
+    // slot whose source 404s leaves the agent a cloud however correctly its
+    // wearables are worn. A flat skin tone bakes into a recognisable avatar,
+    // which is all a render comparison needs.
+    for (id, layer) in sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES {
+        textures.push((
+            id,
+            RgbaImage::solid(SHAPED_SIZE, wearable_layer_rgba(layer)).j2c()?,
+        ));
+    }
+
     Ok(textures)
+}
+
+/// The stand-in colour for a wearable layer: a plausible flat tone per region,
+/// so a locally-baked avatar reads as an avatar rather than as five identical
+/// grey patches.
+const fn wearable_layer_rgba(layer: sl_proto::avatar_texture::WearableLayer) -> [u8; 4] {
+    use sl_proto::avatar_texture::WearableLayer;
+    match layer {
+        // A mid skin tone, slightly warmer on the face than the body, the way
+        // a real skin's head texture is.
+        WearableLayer::SkinHead => [222, 184, 155, u8::MAX],
+        WearableLayer::SkinUpperBody | WearableLayer::SkinLowerBody => [214, 176, 148, u8::MAX],
+        // Hair is sampled with its alpha, so an opaque brown keeps the scalp
+        // from reading as a hole.
+        WearableLayer::Hair => [78, 54, 38, u8::MAX],
+        WearableLayer::EyeIris => [96, 118, 132, u8::MAX],
+    }
 }
 
 /// The vendored upstream textures, embedded so the fixture crate stays free of

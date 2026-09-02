@@ -41,8 +41,9 @@ use sl_wire::{
     build_provision_voice_account_response, build_region_experiences_response,
     build_remote_parcel_response, build_render_materials_response,
     build_resource_cost_selected_response, build_seed_response, build_simulator_features_response,
-    parse_agent_preferences, parse_ais_category_children_fetch_url,
-    parse_ais_category_children_url, parse_ais_category_url, parse_ais_create_category_body,
+    is_ais_current_outfit_links_url, is_ais_orphans_url, parse_agent_preferences,
+    parse_ais_category_children_fetch_url, parse_ais_category_children_url,
+    parse_ais_category_links_url, parse_ais_category_url, parse_ais_create_category_body,
     parse_ais_create_category_url, parse_ais_create_link_body, parse_ais_item_url,
     parse_ais_move_body, parse_ais_rename_category_body, parse_ais_update_item_body,
     parse_avatar_picker_search_query, parse_create_inventory_category_request,
@@ -68,7 +69,8 @@ use uuid::Uuid;
 use crate::asset_caps::AssetCaps;
 use crate::bookkeeping_ids::ImSessionId;
 use crate::session::{
-    ais_category_children_reply_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
+    ais_category_children_reply_to_llsd, ais_category_links_reply_to_llsd,
+    ais_inventory_update_to_llsd, ais_item_reply_to_llsd, ais_mutation_reply_to_llsd,
     chat_session_agent_params_from_llsd, chat_session_request_from_llsd,
     chat_session_roster_to_llsd, environment_to_llsd, environment_update_from_llsd,
     fetch_inventory_items_to_llsd, inventory_descendents_to_llsd,
@@ -1567,11 +1569,48 @@ impl SimCaps {
                         Err(_) => CapsResponse::internal_error(),
                     };
                 }
+                // `/links` answers a folder's link items only, at any depth the
+                // body asks for: the depth there governs how far *embedded*
+                // outfit folders expand, not whether the folder's own links
+                // come back. `current` is the server-resolved alias for the
+                // Current Outfit folder — the client cannot name its id.
+                let links_folder = if is_ais_current_outfit_links_url(&suffix) {
+                    match tree.folder_of_type(crate::FolderType::CurrentOutfit.to_code()) {
+                        Some(folder) => Some(folder.folder_id),
+                        // No Current Outfit folder means nothing is worn, not a
+                        // malformed request.
+                        None => return CapsResponse::not_found(),
+                    }
+                } else {
+                    parse_ais_category_links_url(&suffix)
+                };
+                if let Some(folder_id) = links_folder {
+                    let Some(folder) = tree.folder(folder_id).cloned() else {
+                        return CapsResponse::not_found();
+                    };
+                    let Some(links) = tree.child_links(folder_id) else {
+                        return CapsResponse::not_found();
+                    };
+                    return match ais_category_links_reply_to_llsd(&folder, &links) {
+                        Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+                        Err(_) => CapsResponse::internal_error(),
+                    };
+                }
                 if let Some(item_id) = parse_ais_item_url(&suffix) {
                     let Some(item) = tree.item(item_id) else {
                         return CapsResponse::not_found();
                     };
                     return match ais_item_reply_to_llsd(item) {
+                        Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
+                        Err(_) => CapsResponse::internal_error(),
+                    };
+                }
+                if is_ais_orphans_url(&suffix) {
+                    // The serving tree is built parent-first and its moves
+                    // reject unknown parents, so it can hold no orphan. The
+                    // viewer asks on every login regardless and reads any
+                    // non-2xx as an inventory error, so answer the empty set.
+                    return match ais_inventory_update_to_llsd(&[], &[]) {
                         Ok(body) => CapsResponse::llsd_xml(body.to_llsd_xml()),
                         Err(_) => CapsResponse::internal_error(),
                     };

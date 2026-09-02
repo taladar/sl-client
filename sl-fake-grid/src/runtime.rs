@@ -402,6 +402,16 @@ impl GridCore {
         }
         success.message = Some(self.identity.message.clone());
         success.map_server_url = Some(self.login_uri.clone());
+        // The grid's avatar-baking service. Without it the viewer decides the
+        // avatar is server-baked, finds no URL to fetch a bake from, and
+        // leaves every avatar a cloud -- silently, because `getImageURL`
+        // returns an empty string rather than a failing request. See
+        // `crate::http_service::appearance_texture_id` for why it is mounted
+        // per session.
+        success.agent_appearance_service = self
+            .login_uri
+            .join(&format!("sim/{}/appearance/", prepared.seq))
+            .ok();
         success.currency = Some(self.economy.currency_symbol.clone());
         Ok((prepared, success))
     }

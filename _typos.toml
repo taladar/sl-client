@@ -31,7 +31,14 @@ extend-exclude = [
 # The conformance records stamp a git-describe hash (e.g. "a843ba4-dirty") in
 # `behavior_describe`; arbitrary hex can spell a "typo" (…ba… → by/be), so
 # ignore that field's quoted value.
-extend-ignore-re = ['behavior_describe = "[^"]*"']
+extend-ignore-re = [
+  'behavior_describe = "[^"]*"',
+  # Baked-texture ids quoted verbatim from viewer logs. The tag word is
+  # `ba4e` plus the slot (`ba4e0008` = head), and the tokenizer splits the
+  # digits off, leaving a bare "ba" the identifier allow-list below cannot
+  # reach. The whole id is one token to a reader, so ignore it as one.
+  "ba4e[0-9a-f]{4}",
+]
 
 [default.extend-words]
 # "LOD" = level of detail (mesh rendering term), not a typo of "LOAD".

@@ -7,6 +7,24 @@ use uuid::Uuid;
 // Asset & texture pipeline (#19): asset/texture fetch value types.
 // ---------------------------------------------------------------------------
 
+/// `AT_LINK`: an inventory item that points at another **item** rather than
+/// owning an asset of its own — how the Current Outfit Folder records what is
+/// worn, and how Favorites and outfit folders record their contents. A link's
+/// `asset_id` is the linked item's *item* id.
+///
+/// Deliberately a code and not an [`AssetType`] variant: there is no asset
+/// behind a link, so every question `AssetType` exists to answer (which fetch
+/// cap serves it, which query parameter names it, what its type name is on the
+/// wire) has no meaningful answer for one. It classifies as
+/// [`AssetType::Other`].
+pub const ASSET_CODE_LINK: i32 = 24;
+
+/// `AT_LINK_FOLDER`: an inventory item that points at a **folder** — how an
+/// outfit link inside the Current Outfit Folder names the outfit folder it
+/// came from. See [`ASSET_CODE_LINK`] for why this is a code rather than an
+/// [`AssetType`] variant.
+pub const ASSET_CODE_LINK_FOLDER: i32 = 25;
+
 /// The Second Life asset class (`LLAssetType` / `AT_*`), identifying what kind
 /// of asset a UUID names. Used to pick the
 /// [`ViewerAsset`](crate::CAP_VIEWER_ASSET) HTTP fetch query parameter.

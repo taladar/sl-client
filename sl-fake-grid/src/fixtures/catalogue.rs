@@ -935,7 +935,11 @@ mod test {
             .iter()
             .map(|bake| AssetKey::from(bake.texture.uuid()))
             .collect();
-        assert_eq!(bakes.len(), 3, "one bake per body region");
+        // Head, upper body, lower body, eyes and hair — every region but the
+        // skirt, which only a skirt-wearing avatar needs. An unbaked region
+        // leaves the avatar at rez status "gray" forever, so the count is the
+        // contract, not an incidental number.
+        assert_eq!(bakes.len(), 5, "one bake per body region but the skirt");
         for key in &bakes {
             assert!(
                 !fixture.assets.contains(*key),

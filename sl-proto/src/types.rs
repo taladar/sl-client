@@ -391,8 +391,9 @@ pub use appearance::{
     TextureEntry, TextureFace, Wearable, WearableType, avatar_texture,
 };
 pub use asset::{
-    Asset, AssetType, AssetUpdateLocation, DEFAULT_PRIM_TEXTURE, ImageCodec, InventoryType,
-    NotUpdatableAssetType, Texture, TransferStatus, UpdatableAssetType,
+    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, Asset, AssetType, AssetUpdateLocation,
+    DEFAULT_PRIM_TEXTURE, ImageCodec, InventoryType, NotUpdatableAssetType, Texture,
+    TransferStatus, UpdatableAssetType,
 };
 pub use avatar_profile::{
     AvatarClassified, AvatarGroupMembership, AvatarInterests, AvatarPick, AvatarProperties,

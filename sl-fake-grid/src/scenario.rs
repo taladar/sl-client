@@ -188,6 +188,56 @@ const AGENT_SYSTEM_FOLDERS: &[(i8, &str)] = &[
 const AGENT_SYSTEM_FOLDER_BASE: u128 = 0xFA80;
 /// The stock "Party Hat" item inside "Clothing".
 const AGENT_HAT: u128 = 0xFA11;
+
+/// The four body-part wearables the stock account wears, as
+/// `(wearable type, name, asset id)`.
+///
+/// The reference viewer will not de-cloud its **own** avatar until the agent
+/// wears all four: `LLVOAvatarSelf::getHasMissingParts` counts SHAPE, SKIN,
+/// HAIR and EYES and logs "Self is clouded due to missing one or more required
+/// body parts" when any is absent. That gate is independent of the bakes — a
+/// grid can push a perfectly good `AvatarAppearance`, and the avatar still
+/// stays a cloud without these.
+///
+/// The ids are Linden **library** assets, which every viewer ships in its
+/// `app_settings/static_assets` and pre-loads into its cache. Naming them costs
+/// the grid no asset to serve: the viewer resolves each locally and never asks.
+/// (They are the same files this workspace vendors under
+/// `viewer-assets/static_assets/`, so its own viewer resolves them the same
+/// way.)
+///
+/// Wearable types are `LLWearableType::EType`; the ids are the `type` field of
+/// the corresponding `.bodypart` asset.
+const AGENT_BODY_PARTS: &[(i8, &str, u128)] = &[
+    // RASL F LEARN SHAPE (ANNA)
+    (0, "Shape", 0x57cb_d4f1_c53e_020f_f455_5ad2_a5ba_b98d),
+    // RASL F EXPLORE SKIN (SOFIA)
+    (1, "Skin", 0x205a_e4a8_42c6_1c5c_b142_6728_64fa_fe8a),
+    // RASL M LEARN EYEBROWSHAPER
+    (2, "Hair", 0x51f3_b303_a783_f0bd_9e98_9c09_4be1_3653),
+    // New Eyes
+    (3, "Eyes", 0x1497_39c0_f677_4b4c_1587_e44b_e72d_d7ef),
+];
+
+/// The id base for the body-part inventory items; each item's id is this plus
+/// its wearable type.
+const AGENT_BODY_PART_ITEM_BASE: u128 = 0xFA_C000;
+
+/// The id base for the Current Outfit Folder links to those items.
+const AGENT_COF_LINK_BASE: u128 = 0xFA_D000;
+
+/// `AT_BODYPART`: the asset and inventory type a body-part wearable carries.
+const ASSET_TYPE_BODYPART: i8 = 13;
+
+/// `AT_LINK`: the type of a Current Outfit Folder link. A link's `asset_id` is
+/// the **item** it points at, not an asset.
+const ASSET_TYPE_LINK: i8 = 24;
+
+/// `FT_BODYPART`, the folder the wearables themselves live in.
+const FOLDER_TYPE_BODY_PARTS: i8 = 13;
+
+/// `FT_CURRENT_OUTFIT`, the folder whose links say what is being worn.
+const FOLDER_TYPE_CURRENT_OUTFIT: i8 = 46;
 /// The stock library root folder id.
 const LIB_ROOT: u128 = 0xFB01;
 /// The stock "Library Texture" item inside the library root.
@@ -393,6 +443,47 @@ pub(crate) fn default_setup(sim: &mut SimSession, _now: Instant) {
         });
     }
 
+    // The worn body parts, and the Current Outfit Folder links that say they
+    // are worn. Both halves are needed: the items alone leave the wearables in
+    // inventory but not on the avatar, and the viewer counts what the COF links
+    // resolve to. Without them the agent's own avatar never de-clouds -- see
+    // AGENT_BODY_PARTS.
+    let body_parts_folder = folder_key(
+        AGENT_SYSTEM_FOLDER_BASE
+            .saturating_add(u128::try_from(FOLDER_TYPE_BODY_PARTS).unwrap_or(0)),
+    );
+    let cof_folder = folder_key(
+        AGENT_SYSTEM_FOLDER_BASE
+            .saturating_add(u128::try_from(FOLDER_TYPE_CURRENT_OUTFIT).unwrap_or(0)),
+    );
+    for (wearable_type, name, asset) in AGENT_BODY_PARTS {
+        let offset = u128::try_from(*wearable_type).unwrap_or(0);
+        let item_id = InventoryKey::from(uuid::Uuid::from_u128(
+            AGENT_BODY_PART_ITEM_BASE.saturating_add(offset),
+        ));
+
+        // The wearable itself, in Body Parts.
+        let mut item = stock_item(0, body_parts_folder, name);
+        item.item_id = item_id;
+        item.asset_id = uuid::Uuid::from_u128(*asset);
+        item.item_type = ASSET_TYPE_BODYPART;
+        item.inv_type = ASSET_TYPE_BODYPART;
+        // `flags` carries the wearable type for a body part, which is how the
+        // viewer knows which slot an item fills before fetching its asset.
+        item.flags = u32::try_from(*wearable_type).unwrap_or(0);
+        sim.agent_inventory_mut().insert_item(item);
+
+        // The COF link naming it. A link's asset_id is the *item* it points at.
+        let mut link = stock_item(0, cof_folder, name);
+        link.item_id = InventoryKey::from(uuid::Uuid::from_u128(
+            AGENT_COF_LINK_BASE.saturating_add(offset),
+        ));
+        link.asset_id = item_id.uuid();
+        link.item_type = ASSET_TYPE_LINK;
+        link.inv_type = ASSET_TYPE_LINK;
+        sim.agent_inventory_mut().insert_item(link);
+    }
+
     sim.agent_inventory_mut().insert_item(stock_item(
         AGENT_HAT,
         folder_key(AGENT_CLOTHING),
@@ -512,11 +603,17 @@ mod test {
                 "no asset registered for avatar sentinel {id}"
             );
         }
+        for (id, _layer) in sl_proto::avatar_texture::WEARABLE_LAYER_TEXTURES {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for wearable layer texture {id}"
+            );
+        }
         // Four terrain solids, seven environment textures, the prim texture,
-        // two avatar sentinels, fifteen bump maps, two viewer textures and two
-        // water plane textures — and nothing else: a stock scenario's store is
-        // the library, not a fixture dump.
-        assert_eq!(assets.len(), 4 + 7 + 1 + 2 + 15 + 2 + 2);
+        // two avatar sentinels, fifteen bump maps, two viewer textures, two
+        // water plane textures and five wearable layer textures — and nothing
+        // else: a stock scenario's store is the library, not a fixture dump.
+        assert_eq!(assets.len(), 4 + 7 + 1 + 2 + 15 + 2 + 2 + 5);
     }
 
     #[test]

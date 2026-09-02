@@ -20,7 +20,9 @@ use std::collections::BTreeMap;
 use sl_types::key::{InventoryFolderKey, InventoryKey};
 use sl_wire::AisUpdate;
 
-use crate::types::{Event, InventoryFolder, InventoryItem};
+use crate::types::{
+    ASSET_CODE_LINK, ASSET_CODE_LINK_FOLDER, Event, InventoryFolder, InventoryItem,
+};
 
 /// Why an inventory-tree mutation was rejected; the dispatch layer maps the
 /// variants to HTTP statuses.
@@ -108,6 +110,40 @@ impl SimInventoryTree {
             });
         }
         children
+    }
+
+    /// The folder the account keeps for `folder_type`, if it has one.
+    ///
+    /// Ties are broken by id so the answer is stable: a well-formed account has
+    /// exactly one folder per system type, but nothing in the tree enforces
+    /// that and a fixture may seed two.
+    pub(crate) fn folder_of_type(&self, folder_type: i8) -> Option<&InventoryFolder> {
+        self.folders
+            .values()
+            .filter(|folder| folder.folder_type == folder_type)
+            .min_by_key(|folder| folder.folder_id)
+    }
+
+    /// The **link items** directly inside `folder_id`, sorted by name, or
+    /// `None` when the folder is unknown.
+    ///
+    /// This is what AIS3's `/links` fetches answer. Links are the items whose
+    /// asset code is [`ASSET_CODE_LINK`] or [`ASSET_CODE_LINK_FOLDER`];
+    /// anything else in the folder is not part of the answer, which is why
+    /// this is not just [`Self::child_items`].
+    pub(crate) fn child_links(&self, folder_id: InventoryFolderKey) -> Option<Vec<InventoryItem>> {
+        if !self.folders.contains_key(&folder_id) {
+            return None;
+        }
+        Some(
+            self.child_items(folder_id, 0)
+                .into_iter()
+                .filter(|item| {
+                    let code = i32::from(item.item_type);
+                    code == ASSET_CODE_LINK || code == ASSET_CODE_LINK_FOLDER
+                })
+                .collect(),
+        )
     }
 
     /// Serves one `FetchInventoryDescendents2` folder entry: the direct
