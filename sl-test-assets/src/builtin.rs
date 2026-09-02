@@ -56,6 +56,10 @@ const MOON_TRANSPARENT_RGB: [u8; 3] = [0x55, 0x55, 0x55];
 /// a fixture that failed to apply its texture.
 const PLYWOOD_RGB: [u8; 3] = [190, 158, 116];
 
+/// The water plane's stand-in colour: a translucent blue-green, so a capture
+/// showing water shows something water-coloured rather than a hole.
+const WATER_PLANE_RGBA: [u8; 4] = [64, 110, 120, 200];
+
 /// The tangent-space "no bump at all" normal, `(0, 0, 1)` encoded into a byte
 /// per axis. The sea then takes its shape entirely from the wave maths rather
 /// than from a stand-in's invented ripples.
@@ -309,8 +313,23 @@ const fn opaque_bytes(rgb: [u8; 3]) -> [u8; 4] {
 ///
 /// Returns the encoder's error, which none of these images can produce (they are
 /// all small, non-empty and four-component).
-pub fn library_textures() -> Result<[(Uuid, Vec<u8>); 8], EncodeError> {
-    Ok([
+pub fn library_textures() -> Result<Vec<(Uuid, Vec<u8>)>, EncodeError> {
+    let mut textures: Vec<(Uuid, Vec<u8>)> = vec![
+        // The avatar sentinels. These are not decoration: an appearance names
+        // every un-baked slot with `IMG_DEFAULT_AVATAR`, and the reference
+        // viewer *fetches* the sentinel rather than treating it as a marker, so
+        // a grid that does not serve it leaves an avatar retrying a 404 for
+        // every unbaked slot -- which is both why the avatar stays a cloud and
+        // why the scene never falls quiet for a capture waiting on quiescence.
+        // On Second Life both are ordinary dataserver assets.
+        (
+            sl_proto::avatar_texture::IMG_DEFAULT_AVATAR,
+            RgbaImage::solid(SHAPED_SIZE, [128, 128, 128, u8::MAX]).j2c()?,
+        ),
+        (
+            sl_proto::avatar_texture::IMG_INVISIBLE,
+            RgbaImage::solid(FLAT_SIZE, [0, 0, 0, 0]).j2c()?,
+        ),
         (sl_proto::DEFAULT_SUN_TEXTURE, sun_disc(SHAPED_SIZE).j2c()?),
         (
             sl_proto::DEFAULT_MOON_TEXTURE,
@@ -337,7 +356,63 @@ pub fn library_textures() -> Result<[(Uuid, Vec<u8>); 8], EncodeError> {
             flat_wave_normal(FLAT_SIZE).j2c()?,
         ),
         (sl_proto::DEFAULT_PRIM_TEXTURE, plywood(FLAT_SIZE).j2c()?),
-    ])
+    ];
+
+    // The standard bump maps and the two viewer utility textures are the real
+    // upstream pixels, vendored from OpenSimulator (see
+    // `opensim-assets/README.md`) rather than stood in for: unlike the sky and
+    // water above, a bump map's *content* is what the renderer samples, so a
+    // flat stand-in would silently render every bumped face smooth.
+    textures.extend(vendored_textures());
+
+    // The water plane's own two textures are not in OpenSimulator's set, so
+    // they keep a stand-in: a translucent blue-green, so water reads as water.
+    for id in sl_proto::BUILTIN_WATER_PLANE_TEXTURES {
+        textures.push((id, RgbaImage::solid(FLAT_SIZE, WATER_PLANE_RGBA).j2c()?));
+    }
+
+    Ok(textures)
+}
+
+/// The vendored upstream textures, embedded so the fixture crate stays free of
+/// filesystem access like the rest of it.
+///
+/// The bump maps are listed in `std_bump.ini` order, which is the order the
+/// bumpiness enum indexes them, and paired with the ids `sl-proto` names — so a
+/// wrongly paired file is a compile error at the `zip`, not a wrong texture on
+/// a face. See `opensim-assets/README.md` for provenance and licence; the files
+/// are unmodified, which is what the licence claim there rests on.
+fn vendored_textures() -> Vec<(Uuid, Vec<u8>)> {
+    /// The fifteen standard bump maps, in `std_bump.ini` order.
+    const BUMPMAPS: [&[u8]; 15] = [
+        include_bytes!("../../opensim-assets/textures/058c75c0-a0d5-f2f8-43f3-e9699a89c2fc.j2c"),
+        include_bytes!("../../opensim-assets/textures/6c9fa78a-1c69-2168-325b-3e03ffa348ce.j2c"),
+        include_bytes!("../../opensim-assets/textures/b8eed5f0-64b7-6e12-b67f-43fa8e773440.j2c"),
+        include_bytes!("../../opensim-assets/textures/9deab416-9c63-78d6-d558-9a156f12044c.j2c"),
+        include_bytes!("../../opensim-assets/textures/db9d39ec-a896-c287-1ced-64566217021e.j2c"),
+        include_bytes!("../../opensim-assets/textures/f2d7b6f6-4200-1e9a-fd5b-96459e950f94.j2c"),
+        include_bytes!("../../opensim-assets/textures/d9258671-868f-7511-c321-7baef9e948a4.j2c"),
+        include_bytes!("../../opensim-assets/textures/d21e44ca-ff1c-a96e-b2ef-c0753426b7d9.j2c"),
+        include_bytes!("../../opensim-assets/textures/4726f13e-bd07-f2fb-feb0-bfa2ac58ab61.j2c"),
+        include_bytes!("../../opensim-assets/textures/e569711a-27c2-aad4-9246-0c910239a179.j2c"),
+        include_bytes!("../../opensim-assets/textures/073c9723-540c-5449-cdd4-0e87fdc159e3.j2c"),
+        include_bytes!("../../opensim-assets/textures/ae874d1a-93ef-54fb-5fd3-eb0cb156afc0.j2c"),
+        include_bytes!("../../opensim-assets/textures/92e66e00-f56f-598a-7997-048aa64cde18.j2c"),
+        include_bytes!("../../opensim-assets/textures/83b77fc6-10b4-63ec-4de7-f40629f238c5.j2c"),
+        include_bytes!("../../opensim-assets/textures/735198cf-6ea0-2550-e222-21d3c6a341ae.j2c"),
+    ];
+    /// `IMG_SMOKE` and `IMG_FACE_SELECT`, in that order.
+    const VIEWER: [&[u8]; 2] = [
+        include_bytes!("../../opensim-assets/textures/b4ba225c-373f-446d-9f7e-6cb7b5cf9b3d.j2c"),
+        include_bytes!("../../opensim-assets/textures/a85ac674-cb75-4af6-9499-df7c5aaf7a28.j2c"),
+    ];
+
+    sl_proto::BUILTIN_BUMPMAP_TEXTURES
+        .into_iter()
+        .zip(BUMPMAPS)
+        .chain(sl_proto::BUILTIN_VIEWER_TEXTURES.into_iter().zip(VIEWER))
+        .map(|(id, bytes)| (id, bytes.to_vec()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -359,6 +434,24 @@ mod tests {
         for id in sl_proto::BUILTIN_ENVIRONMENT_TEXTURES {
             assert!(ids.contains(&id), "no stand-in for built-in texture {id}");
         }
+        // The sets the viewer fetches unconditionally on arrival. Each is
+        // listed by its sl-proto constant rather than by literal id, so adding
+        // an id there without an image here fails this rather than showing up
+        // as a 404 in a capture run.
+        for id in sl_proto::BUILTIN_BUMPMAP_TEXTURES {
+            assert!(ids.contains(&id), "no image for standard bump map {id}");
+        }
+        for id in sl_proto::BUILTIN_VIEWER_TEXTURES {
+            assert!(ids.contains(&id), "no image for viewer texture {id}");
+        }
+        for id in sl_proto::BUILTIN_WATER_PLANE_TEXTURES {
+            assert!(
+                ids.contains(&id),
+                "no stand-in for water plane texture {id}"
+            );
+        }
+        assert!(ids.contains(&sl_proto::avatar_texture::IMG_DEFAULT_AVATAR));
+        assert!(ids.contains(&sl_proto::avatar_texture::IMG_INVISIBLE));
         assert!(ids.contains(&sl_proto::DEFAULT_PRIM_TEXTURE));
         let mut unique = ids.clone();
         unique.sort_unstable();

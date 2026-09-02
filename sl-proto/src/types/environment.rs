@@ -335,6 +335,61 @@ pub const BUILTIN_ENVIRONMENT_TEXTURES: [Uuid; 7] = [
     DEFAULT_WATER_NORMAL_TEXTURE,
 ];
 
+/// The water plane's own two textures, which the renderer picks between by
+/// whether the water is transparent — Firestorm's
+/// `DEFAULT_TRANSPARENT_WATER_TEXTURE` and `DEFAULT_OPAQUE_WATER_TEXTURE`
+/// (`indra/llinventory/llsettingswater.cpp`).
+///
+/// Separate from [`DEFAULT_WATER_NORMAL_TEXTURE`], which is the ripple normal
+/// map: these are the surface itself. Like the rest, the viewer ships neither
+/// and fetches both from the grid on arrival.
+pub const BUILTIN_WATER_PLANE_TEXTURES: [Uuid; 2] = [
+    Uuid::from_u128(0x2bfd_3884_7e27_69b9_ba3a_3e67_3f68_0004),
+    Uuid::from_u128(0x43c3_2285_d658_1793_c123_bf86_315d_e055),
+];
+
+/// The fifteen **standard bump maps** the reference viewer loads from
+/// `app_settings/std_bump.ini` at startup: woodgrain, bark, bricks, checker,
+/// concrete, crustytile, cutstone, discs, gravel, petridish, siding, stonetile,
+/// stucco, suction, weave — in that order, which is the order `std_bump.ini`
+/// lists them and therefore the order the bumpiness enum indexes them.
+///
+/// A face with a legacy `bump` value above the procedural range names one of
+/// these, and the viewer fetches every one of them over `GetTexture` **whether
+/// or not any face uses it** — it builds the standard-bumpmap table on startup.
+/// So a grid that serves none of them leaves fifteen fetches retrying on every
+/// single arrival, which is enough on its own to keep a scene from ever falling
+/// quiet.
+pub const BUILTIN_BUMPMAP_TEXTURES: [Uuid; 15] = [
+    Uuid::from_u128(0x058c_75c0_a0d5_f2f8_43f3_e969_9a89_c2fc), // woodgrain
+    Uuid::from_u128(0x6c9f_a78a_1c69_2168_325b_3e03_ffa3_48ce), // bark
+    Uuid::from_u128(0xb8ee_d5f0_64b7_6e12_b67f_43fa_8e77_3440), // bricks
+    Uuid::from_u128(0x9dea_b416_9c63_78d6_d558_9a15_6f12_044c), // checker
+    Uuid::from_u128(0xdb9d_39ec_a896_c287_1ced_6456_6217_021e), // concrete
+    Uuid::from_u128(0xf2d7_b6f6_4200_1e9a_fd5b_9645_9e95_0f94), // crustytile
+    Uuid::from_u128(0xd925_8671_868f_7511_c321_7bae_f9e9_48a4), // cutstone
+    Uuid::from_u128(0xd21e_44ca_ff1c_a96e_b2ef_c075_3426_b7d9), // discs
+    Uuid::from_u128(0x4726_f13e_bd07_f2fb_feb0_bfa2_ac58_ab61), // gravel
+    Uuid::from_u128(0xe569_711a_27c2_aad4_9246_0c91_0239_a179), // petridish
+    Uuid::from_u128(0x073c_9723_540c_5449_cdd4_0e87_fdc1_59e3), // siding
+    Uuid::from_u128(0xae87_4d1a_93ef_54fb_5fd3_eb0c_b156_afc0), // stonetile
+    Uuid::from_u128(0x92e6_6e00_f56f_598a_7997_048a_a64c_de18), // stucco
+    Uuid::from_u128(0x83b7_7fc6_10b4_63ec_4de7_f406_29f2_38c5), // suction
+    Uuid::from_u128(0x7351_98cf_6ea0_2550_e222_21d3_c6a3_41ae), // weave
+];
+
+/// The viewer's own two utility textures that nonetheless live on the grid:
+/// `IMG_SMOKE` (the particle default) and `IMG_FACE_SELECT` (the build-tool
+/// face highlight), both from `indra/llcommon/indra_constants.cpp`.
+///
+/// Both are marked `// VIEWER` or used by viewer UI, but neither ships with the
+/// client — they are fetched like any other library texture, and so a grid has
+/// to answer them.
+pub const BUILTIN_VIEWER_TEXTURES: [Uuid; 2] = [
+    Uuid::from_u128(0xb4ba_225c_373f_446d_9f7e_6cb7_b5cf_9b3d), // IMG_SMOKE
+    Uuid::from_u128(0xa85a_c674_cb75_4af6_9499_df7c_5aaf_7a28), // IMG_FACE_SELECT
+];
+
 impl EnvironmentSettings {
     /// The built-in **legacy WindLight default** environment: the sky and water
     /// the reference viewer falls back to when a region advertises no Extended

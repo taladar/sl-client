@@ -417,7 +417,8 @@ pub use editing::{
     RezObjectParams, RezScriptParams, SaleType, SurfaceInfo, TaskInventoryKey, TeleportFlags,
 };
 pub use environment::{
-    BUILTIN_ENVIRONMENT_TEXTURES, CloudPosDensity, Color, ColorAlpha, DEFAULT_BLOOM_TEXTURE,
+    BUILTIN_BUMPMAP_TEXTURES, BUILTIN_ENVIRONMENT_TEXTURES, BUILTIN_VIEWER_TEXTURES,
+    BUILTIN_WATER_PLANE_TEXTURES, CloudPosDensity, Color, ColorAlpha, DEFAULT_BLOOM_TEXTURE,
     DEFAULT_CLOUD_TEXTURE, DEFAULT_HALO_TEXTURE, DEFAULT_MOON_TEXTURE, DEFAULT_RAINBOW_TEXTURE,
     DEFAULT_SKY_FRAME, DEFAULT_SUN_TEXTURE, DEFAULT_WATER_FRAME, DEFAULT_WATER_NORMAL_TEXTURE,
     DayCycle, DayCycleFrame, EnvironmentAsset, EnvironmentSettings, EnvironmentUpdate, Glow, Scale,

@@ -15,11 +15,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | ready | 312 |
 | blocked | 61 |
 | in-progress | 18 |
-| bugs | 69 |
+| bugs | 70 |
 | done | 954 |
 | deferred | 24 |
 | wont-do | 13 |
-| **total** | **1549** |
+| **total** | **1550** |
 
 ## ideas (98)
 
@@ -1204,7 +1204,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`chat-group-history-server-side`](in-progress/chat-group-history-server-side.md)
   — Server-side group / session chat history ("fetch history")
 
-## bugs (69)
+## bugs (70)
 
 ### viewer
 
@@ -1365,6 +1365,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-inventory-skeleton-version-mismatch`](bugs/test-fake-grid-inventory-skeleton-version-mismatch.md)
   — Login skeleton reports folder version -1 while AIS reports 8, crashing the
   viewer
+- [`test-fake-grid-map-server-url-not-honoured`](bugs/test-fake-grid-map-server-url-not-honoured.md)
+  — The viewer falls back to map.secondlife.com instead of the grid's
+  map-server-url
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 

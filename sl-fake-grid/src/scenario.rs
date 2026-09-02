@@ -483,9 +483,40 @@ mod test {
             assets.contains(AssetKey::from(sl_proto::DEFAULT_PRIM_TEXTURE)),
             "no asset registered for the blank-plywood prim texture"
         );
-        // The four terrain solids and the eight built-ins, and nothing else: a
-        // stock scenario's store is the library, not a fixture dump.
-        assert_eq!(assets.len(), 12);
+        // The sets a viewer fetches unconditionally on arrival, whether or not
+        // anything in the region uses them.
+        for id in sl_proto::BUILTIN_BUMPMAP_TEXTURES {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for standard bump map {id}"
+            );
+        }
+        for id in sl_proto::BUILTIN_VIEWER_TEXTURES {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for viewer texture {id}"
+            );
+        }
+        for id in sl_proto::BUILTIN_WATER_PLANE_TEXTURES {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for water plane texture {id}"
+            );
+        }
+        for id in [
+            sl_proto::avatar_texture::IMG_DEFAULT_AVATAR,
+            sl_proto::avatar_texture::IMG_INVISIBLE,
+        ] {
+            assert!(
+                assets.contains(AssetKey::from(id)),
+                "no asset registered for avatar sentinel {id}"
+            );
+        }
+        // Four terrain solids, seven environment textures, the prim texture,
+        // two avatar sentinels, fifteen bump maps, two viewer textures and two
+        // water plane textures — and nothing else: a stock scenario's store is
+        // the library, not a fixture dump.
+        assert_eq!(assets.len(), 4 + 7 + 1 + 2 + 15 + 2 + 2);
     }
 
     #[test]

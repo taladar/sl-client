@@ -60,3 +60,11 @@ viewer-assets/static_assets/* binary
 viewer-assets/fs_static_assets/* binary
 viewer-assets/static_assets/* -whitespace
 viewer-assets/fs_static_assets/* -whitespace
+
+# The vendored OpenSimulator library textures (see opensim-assets/README.md):
+# the standard bump maps and two viewer utility textures a grid serves. Binary
+# JPEG2000, and an upstream licence notice that must stay byte-for-byte — the
+# licence it carries is what permits redistribution, so nothing may reformat it.
+opensim-assets/textures/*.j2c binary
+opensim-assets/textures/* -whitespace
+opensim-assets/licenses.txt -whitespace
