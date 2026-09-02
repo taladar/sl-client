@@ -11,6 +11,17 @@ blocked_by: [viewer-screenshot-fixed-resolution, test-fake-grid-fixed-port-scena
 
 Context: [context/testing.md](../context/testing.md).
 
+One blocker cleared (2026-09-02): [[test-fake-grid-fixed-port-scenario]]
+shipped `--scenario <name>`, the `fixtures::scenarios` registry (each
+scene naming its landmarks, so a camera can be aimed by name) and
+`scripts/fake-grid.sh`, which is the "start the grid on a fixed port"
+step below. Two of its lessons are the runner's too: a readiness probe
+against a port proves the *port* answers, not that the grid you started
+did — refuse a port something already answers on — and `kill -0` says
+yes to an exited-but-unreaped child, so it is not a liveness check for a
+viewer either. Still waiting on
+[[viewer-screenshot-fixed-resolution]].
+
 The driver. Start `sl-fake-grid` on a fixed port with a named scenario,
 launch this viewer and Firestorm against it with the same resolution,
 camera and day position, wait for both, and collect

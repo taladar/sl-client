@@ -6,7 +6,8 @@
 //! `get_grid_info`, the world-map tiles, and the economy helper scripts.
 
 use clap::Parser;
-use sl_fake_grid::{AccountConfig, FakeGridBuilder, GridIdentity, RegionConfig, catalogue};
+use sl_fake_grid::fixtures::scenarios;
+use sl_fake_grid::{AccountConfig, FakeGridBuilder, GridIdentity, RegionConfig};
 
 /// Command-line options.
 #[derive(Debug, Parser)]
@@ -40,15 +41,18 @@ struct Options {
     #[arg(long, default_value_t = 30)]
     hold_secs: u64,
 
-    /// Rez the named prim catalogue in every region instead of the stock
-    /// content: one prim per rendering feature (textured, sphere-shaped,
-    /// per-face styled, mesh, sculpt, PBR, legacy material, projecting
-    /// light, flexi, particles, animated texture, hover text, media,
-    /// reflection probe, linkset) in a west-to-east row a few metres north
-    /// of the arrival point, with every asset they reference served. This is
-    /// the same fixture the automated tiers load.
-    #[arg(long)]
-    catalogue: bool,
+    /// The named scene every region shows. `stock` is the standard region;
+    /// `catalogue` rezzes the named prim catalogue (one prim per rendering
+    /// feature in a west-to-east row a few metres north of the arrival point,
+    /// an NPC avatar, every asset they reference), which is the same fixture
+    /// the automated tiers load. A scene is named so a harness photographing
+    /// it can say which one it photographed.
+    #[arg(
+        long,
+        default_value = scenarios::DEFAULT,
+        value_parser = clap::builder::PossibleValuesParser::new(scenarios::names()),
+    )]
+    scenario: String,
 }
 
 /// Parses one `Name` / `Name@X,Y` region argument; `index` places an
@@ -91,6 +95,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
         .init();
     let options = Options::parse();
+    // Unreachable in practice — clap's possible-value parser rejects an
+    // unknown name before this — but the registry, not this binary, is what
+    // decides which names exist.
+    let Some(scene) = scenarios::scenario(&options.scenario) else {
+        tracing::error!(
+            "unknown --scenario {:?} (known: {})",
+            options.scenario,
+            scenarios::names().join(", ")
+        );
+        return Err("bad --scenario argument".into());
+    };
 
     let mut builder = FakeGridBuilder::new()
         .http_port(options.http_port)
@@ -100,15 +115,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             nick: options.grid_nick.clone(),
             ..GridIdentity::default()
         });
-    // The catalogue replaces a region's content wholesale; a region built
-    // without it keeps the stock scenario.
-    let dress = |region: RegionConfig| {
-        if options.catalogue {
-            catalogue().into_region(region)
-        } else {
-            region
-        }
-    };
+    // A scene dresses every region the same way; the stock one dresses a
+    // region with nothing, so it keeps the grid-wide scenario.
+    let dress = |region: RegionConfig| scene.dress(region);
     if options.regions.is_empty() {
         builder = builder.region(dress(RegionConfig::default()));
     }
@@ -151,27 +160,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         tracing::info!("no --account given; created Test User / password");
     }
 
-    if options.catalogue {
-        for entry in sl_fake_grid::fixtures::catalogue::entries() {
-            let position = entry.position();
-            tracing::info!(
-                "catalogue prim {:?} (local id {}) at <{}, {}, {}>",
-                entry.name,
-                entry.local_id.0,
-                position.x,
-                position.y,
-                position.z
-            );
-        }
-        let npc = sl_fake_grid::fixtures::catalogue::npc();
+    tracing::info!("scenario {:?}: {}", scene.name, scene.summary);
+    // What stands in the scene, so a person driving a viewer by hand can fly
+    // to one and a harness can aim a camera at one by name. The scene answers
+    // this itself, so naming the next one is not a change here.
+    for landmark in scene.landmarks() {
         tracing::info!(
-            "catalogue NPC {:?} {:?} (local id {}) at <{}, {}, {}>",
-            npc.identity.first_name,
-            npc.identity.last_name,
-            npc.local_id.0,
-            npc.position.x,
-            npc.position.y,
-            npc.position.z
+            "landmark {:?} at <{}, {}, {}>",
+            landmark.name,
+            landmark.position.x,
+            landmark.position.y,
+            landmark.position.z
         );
     }
 

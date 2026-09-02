@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 61 |
 | in-progress | 18 |
 | bugs | 71 |
-| done | 954 |
+| done | 955 |
 | deferred | 24 |
 | wont-do | 13 |
 | **total** | **1551** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -961,8 +961,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   — start an ad-hoc conference; verify it is distinct from a 1:1 (multi-pa
 - [`test-fake-grid-builtin-sounds`](ready/test-fake-grid-builtin-sounds.md) —
   The built-in UI sounds the viewer plays on arrival 404
-- [`test-fake-grid-fixed-port-scenario`](ready/test-fake-grid-fixed-port-scenario.md)
-  — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
@@ -1148,7 +1146,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   by `test-firestorm-crosscheck-runner`, `viewer-scene-dump`)
 - [`test-firestorm-crosscheck-runner`](blocked/test-firestorm-crosscheck-runner.md)
   — Run both viewers against one fake grid and collect their artifacts (blocked
-  by `viewer-screenshot-fixed-resolution`, `test-fake-grid-fixed-port-scenario`)
+  by `viewer-screenshot-fixed-resolution`, `test-fake-grid-fixed-port-scenario`
+  (done))
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1374,7 +1373,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (954)
+## done (955)
 
 ### protocol
 
@@ -3174,6 +3173,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   Serve the built-in sky, water and prim textures the viewer asks for
 - [`test-fake-grid-determinism`](done/test-fake-grid-determinism.md) — An
   injectable clock and seeded ids for sl-fake-grid
+- [`test-fake-grid-fixed-port-scenario`](done/test-fake-grid-fixed-port-scenario.md)
+  — Named scenarios and a fixed-port launcher for the fake grid
 - [`test-fake-grid-npc-avatars`](done/test-fake-grid-npc-avatars.md) — NPC
   avatars with appearance, animations and attachments (blocked by
   `test-fake-grid-render-fixtures` (done))

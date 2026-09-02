@@ -23,8 +23,8 @@ pub use accounts::AccountConfig;
 pub use economy_policy::{EconomyConfig, EconomyEvent};
 pub use error::Error;
 pub use fixtures::{
-    CatalogueEntry, FaceStyle, NpcAppearance, NpcBake, NpcFixture, PrimFixture, RegionFixture,
-    SculptKind, catalogue, linkset,
+    CatalogueEntry, FaceStyle, Landmark, NamedScenario, NpcAppearance, NpcBake, NpcFixture,
+    PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use map_tiles::STOCK_TILE_JPEG;
 pub use runtime::{

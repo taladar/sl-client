@@ -9,11 +9,17 @@
 //! into the [`RegionConfig`] a grid is built from, wiring each piece to the
 //! surface that serves it.
 //!
+//! [`scenarios`] names the scenes: `stock`, `catalogue`, and whatever comes
+//! next. A harness selects one by name rather than by rebuilding a region
+//! itself, which is what lets two viewers agree on which scene they
+//! photographed.
+//!
 //! [`into_region`]: RegionFixture::into_region
 
 pub mod catalogue;
 pub mod npcs;
 pub mod prims;
+pub mod scenarios;
 
 use std::sync::Arc;
 
@@ -29,6 +35,7 @@ use crate::world::SceneFixtures;
 pub use catalogue::{CatalogueEntry, catalogue};
 pub use npcs::{NpcAppearance, NpcBake, NpcFixture};
 pub use prims::{DEFAULT_FACE_COUNT, FaceStyle, PrimFixture, SculptKind, blank_texture, linkset};
+pub use scenarios::{Landmark, NamedScenario};
 
 /// Everything one fake region shows, as a value.
 ///

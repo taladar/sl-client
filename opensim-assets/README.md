@@ -66,7 +66,7 @@ Research, Inc., and the notice's trademark reservation applies.
   `BUILTIN_VIEWER_TEXTURES`), so nothing restates a UUID the renderer
   already knows.
 - `sl_fake_grid::scenario::default_assets` puts them in every scenario's
-  asset store, so any fixture — stock or `--catalogue` — answers them.
+  asset store, so any fixture — any `--scenario` — answers them.
 
 Do not edit the vendored files: they are upstream content kept
 byte-for-byte, which is also what lets the licence claim above stand.

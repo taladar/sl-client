@@ -55,9 +55,17 @@ rendering feature (textured, sphere-shaped, per-face styled, mesh,
 sculpt, PBR, legacy material, projecting light, flexi, particles,
 animated texture, hover text, media, reflection probe, linkset) in a
 west-to-east row north of the arrival point, with every asset it
-references served. The automated tiers and the binary's `--catalogue`
-flag load the same fixture, so "the mesh prim" is the same object with
-the same id in a unit test, a full-stack capture and a Firestorm
+references served. The automated tiers and the binary's `--scenario
+catalogue` load the same fixture, so "the mesh prim" is the same object
+with the same id in a unit test, a full-stack capture and a Firestorm
 session.
+
+`fixtures::scenarios` names the scenes — `stock` and `catalogue` today —
+so a harness selects one by name and the next one is a registry entry
+rather than a change to the harness. Each scene names its landmarks (a
+name and a region position per thing worth aiming a camera at).
+`scripts/fake-grid.sh` starts the binary on a fixed port with a named
+scenario and prints, once the grid answers `get_grid_info`, the login URI
+as an IPv4 literal plus the `--grid` argument Firestorm wants.
 
 See the book chapter "The fake grid" for architecture and usage.

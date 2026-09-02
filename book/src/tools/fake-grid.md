@@ -135,10 +135,68 @@ add it to Firestorm's grid manager as a grid with that login URI. With
 no `--account` it creates `Test User` / `password`. `--region` repeats
 (`Name` or `Name@X,Y` in grid coordinates; the first is the start region,
 unplaced ones are laid out eastwards from 1000,1000), and a viewer can
-teleport between the regions from its map — see below. `--catalogue`
-replaces every region's stock content with the named prim catalogue (one
-prim per rendering feature, logged with its position on startup) — see
-below.
+teleport between the regions from its map — see below.
+
+### Named scenarios
+
+`--scenario <name>` picks the scene every region shows, from the registry
+in `fixtures::scenarios`. Two exist today: `stock` (the default — one
+region-wide parcel, one scripted box, an arrival greeting) and
+`catalogue` (the named prim catalogue: one prim per rendering feature,
+plus an NPC, with every asset they reference served — see below).
+
+A scene is *named* so that a harness photographing it can say which one
+it photographed, and so the next scene is a registry entry rather than a
+change to the harness. Each scene also names its **landmarks** — a name
+and a region position for each thing worth aiming a camera at
+(`NamedScenario::landmarks` / `landmark(name)`), which is what the binary
+logs on startup:
+
+```text
+scenario "catalogue": the named prim catalogue: one prim per rendering feature …
+landmark "catalogue-resident" at <104, 136, 25.95>
+landmark "plain-box" at <108, 136, 25.5>
+landmark "checker-box" at <112, 136, 25.5>
+…
+```
+
+### The launcher
+
+`scripts/fake-grid.sh` is the launcher a cross-check run starts from:
+
+```sh
+scripts/fake-grid.sh --port 9100 --scenario catalogue
+```
+
+Its scenario default is `catalogue`, not the binary's `stock`: a launcher
+run is a cross-check or a hand-driven Firestorm session, and both want
+the feature row. The banner names the scene it started, so the two
+defaults never have to be remembered.
+
+It builds the release binary, refuses a port something is already
+listening on (a leftover grid would otherwise answer the readiness probe
+and the viewer would log into last run's scene), waits until the grid
+answers `get_grid_info` — the document Firestorm fetches before it will
+show a login screen — and only then prints how to reach it:
+
+```text
+  fake grid ready on 127.0.0.1:9100, scenario "catalogue"
+
+    this workspace's viewer   SL_LOGIN_URI=http://127.0.0.1:9100/
+    Firestorm                 --grid 127.0.0.1:9100 --multiple
+```
+
+Three things about that are not guessable. The port is **fixed**, not
+ephemeral, because both viewers of a run are configured before either
+starts and Firestorm caches a grid in its grid manager between runs. The
+host is the IPv4 literal and never `localhost`, which resolves to `::1`
+first while this grid listens IPv4-only — a viewer told `localhost` fails
+to connect for a reason that looks nothing like the cause. And Firestorm
+wants `--grid <ipv4:port>`, not `--loginuri`: `CmdLineLoginURI` is dead
+code in its OpenSim build, while an unknown `--grid` name is treated as a
+host and resolved through `GET /get_grid_info`, which this grid serves.
+Give it `FIRESTORM_X64_USER_DIR=<a fresh temp dir>` too, or the run shares
+settings, cache, logs and the credential store with your real session.
 
 ## The non-CAPS HTTP surfaces
 
@@ -321,8 +379,8 @@ rendering feature, in a west-to-east row 8 m north of the arrival point at
 reference served. `catalogue::entries()` / `entry(name)` give a subject's
 id and position, so a check finds "the mesh prim" by name rather than by
 a hard-coded local id, and the same fixture backs the automated tiers and
-the binary's `--catalogue` flag — which is what makes a Firestorm session
-and a full-stack capture look at the same objects.
+the binary's `--scenario catalogue` — which is what makes a Firestorm
+session and a full-stack capture look at the same objects.
 
 The procedural assets it needs come from `sl-test-assets`:
 `RgbaImage::checker` / `solid` (as JPEG2000), `sculpt_sphere` (a sculpt
