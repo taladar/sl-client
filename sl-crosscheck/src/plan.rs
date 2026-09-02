@@ -127,6 +127,15 @@ pub struct CaptureSpec {
     /// viewer its own default, which is *not* the same default — pin it for any
     /// comparison that involves lighting, which is all of them.
     pub day_position: Option<f32>,
+    /// The camera's vertical field of view, in degrees. `None` leaves each
+    /// viewer its own default.
+    ///
+    /// Both default to the reference's 60° since
+    /// [[viewer-camera-fov-parity]] — ours was 45°, and a run put both cameras
+    /// at one pose and framed five prims of a row against three. Pinning it
+    /// states the premise instead of resting on two defaults agreeing, which is
+    /// what let that go unnoticed.
+    pub fov_degrees: Option<f32>,
 }
 
 impl Default for CaptureSpec {
@@ -149,6 +158,7 @@ impl Default for CaptureSpec {
             settle_timeout: 25.0,
             login_timeout: 180.0,
             day_position: None,
+            fov_degrees: None,
         }
     }
 }
@@ -196,6 +206,9 @@ impl CaptureSpec {
                 "SL_VIEWER_SKY_DAY_POSITION".to_owned(),
                 position.to_string(),
             ));
+        }
+        if let Some(degrees) = self.fov_degrees {
+            env.push(("SL_VIEWER_CAPTURE_FOV".to_owned(), degrees.to_string()));
         }
         env
     }
@@ -317,6 +330,26 @@ mod tests {
                 .map(|(_name, value)| value.as_str());
             assert_eq!(value, Some("0"), "{key} should be stated as off");
         }
+    }
+
+    /// A pinned lens reaches both viewers, and an unpinned one stays unpinned:
+    /// they agree on 60° by default, and a run that wants to *state* that says
+    /// so rather than resting on two defaults agreeing.
+    #[test]
+    fn a_pinned_lens_travels_with_the_capture_block() {
+        let mut capture = CaptureSpec::default();
+        assert!(
+            !capture
+                .env()
+                .iter()
+                .any(|(name, _value)| name == "SL_VIEWER_CAPTURE_FOV")
+        );
+        capture.fov_degrees = Some(60.0);
+        assert!(
+            capture
+                .env()
+                .contains(&("SL_VIEWER_CAPTURE_FOV".to_owned(), "60".to_owned()))
+        );
     }
 
     /// The size goes out in the `WIDTHxHEIGHT` form both viewers parse, and an

@@ -146,6 +146,13 @@ struct Options {
     #[arg(long)]
     day_position: Option<f32>,
 
+    /// Pin the camera's vertical field of view, in degrees, in both viewers.
+    /// Unset leaves each its own default — which agree at the reference's 60°
+    /// since `viewer-camera-fov-parity`, but a run that would rather say so
+    /// than rely on it can.
+    #[arg(long)]
+    fov: Option<f32>,
+
     /// The account both viewers log in as, `First:Last:password`.
     #[arg(long, default_value = "Test:User:password")]
     account: String,
@@ -412,6 +419,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             settle_timeout: options.settle_timeout,
             login_timeout: options.login_timeout,
             day_position: options.day_position,
+            fov_degrees: options.fov,
         },
         camera,
     };

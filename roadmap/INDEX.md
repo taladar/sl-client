@@ -12,11 +12,11 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | Status | Tasks |
 | --- | --- |
 | ideas | 98 |
-| ready | 312 |
+| ready | 311 |
 | blocked | 59 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 960 |
+| done | 961 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1555** |
@@ -230,7 +230,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`server-voice-infrastructure`](ideas/server-voice-infrastructure.md) — Voice
   infrastructure — WebRTC media plane
 
-## ready (312)
+## ready (311)
 
 ### protocol
 
@@ -406,8 +406,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-flycam-floater`](ready/viewer-camera-flycam-floater.md) —
   Flycam control floater (blocked by `viewer-camera-flycam` (done),
   `viewer-ui-floater-basic` (done))
-- [`viewer-camera-fov-parity`](ready/viewer-camera-fov-parity.md) — The camera's
-  field of view is 45° here and 60° in the reference viewer
 - [`viewer-camera-keyboard-controls`](ready/viewer-camera-keyboard-controls.md)
   — Keyboard camera controls — orbit / pan / zoom / roll actions
 - [`viewer-camera-presets`](ready/viewer-camera-presets.md) — Saveable camera
@@ -1366,7 +1364,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (960)
+## done (961)
 
 ### protocol
 
@@ -1711,6 +1709,8 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-camera-focus-on-object`](done/viewer-camera-focus-on-object.md) —
   Focus / alt-zoom on object (blocked by `viewer-camera-third-person-orbit`
   (done))
+- [`viewer-camera-fov-parity`](done/viewer-camera-fov-parity.md) — The camera's
+  field of view is 45° here and 60° in the reference viewer
 - [`viewer-camera-input-interaction-tests`](done/viewer-camera-input-interaction-tests.md)
   — Camera, movement, mouselook and HUD picking under a synthetic pointer
   (blocked by `viewer-world-test-harness` (done), `viewer-cpu-pick-resolver`

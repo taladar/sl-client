@@ -51,6 +51,9 @@ use crate::settings_binding::SettingBinding;
 use crate::world_api::AvatarState;
 use crate::world_api::{CameraMode, ViewerCamera};
 use sl_client_bevy::SlIdentity;
+use sl_viewer_world_scene::viewer_camera::{
+    DEFAULT_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW, clamp_field_of_view,
+};
 
 /// The stable id of this tab in `crate::preferences::PREF_TABS`.
 pub(crate) const TAB_ID: &str = "camera-move";
@@ -116,11 +119,28 @@ const SENSITIVITY_RAD_PER_PX_PER_UNIT: f32 = 0.001;
 
 /// The field-of-view slider's lower bound: the reference viewer's
 /// `MIN_FIELD_OF_VIEW`, 5° in radians.
-const FOV_MIN: f32 = 0.087_266_46;
+const FOV_MIN: f32 = MIN_FIELD_OF_VIEW;
 
 /// The field-of-view slider's upper bound: the reference viewer's
 /// `MAX_FIELD_OF_VIEW`, 175° in radians.
-const FOV_MAX: f32 = 3.054_326_2;
+const FOV_MAX: f32 = MAX_FIELD_OF_VIEW;
+
+/// A vertical field of view (radians) pinned for this run, overriding the
+/// persisted `CameraAngle` preference without rewriting it.
+///
+/// Inserted by the binary for `--camera-fov` / `SL_VIEWER_CAPTURE_FOV`. A
+/// cross-check does not need it — both viewers default to the reference's 60°
+/// — but a comparison whose framing rests on two viewers' defaults agreeing has
+/// an unstated premise, and this is how a run states it.
+///
+/// A resource rather than a store write on purpose: the store is what the
+/// operator's preferences live in, and a run must be able to pin a lens without
+/// editing them.
+#[derive(Debug, Clone, Copy, Resource)]
+pub struct CameraFovOverride {
+    /// The pinned vertical field of view, in radians.
+    pub radians: f32,
+}
 
 /// Below this difference (radians) the stored field of view counts as already
 /// applied, so `apply_camera_fov` does not re-write (and `Changed`-mark) the
@@ -137,9 +157,14 @@ pub fn register_settings(settings: &mut ViewerSettings) {
     settings.register_in(
         CAMERA_SECTION,
         SETTING_CAMERA_ANGLE,
-        // Bevy's default perspective FOV — today's spawn value. The reference
-        // defaults wider (1.047 = 60°); ours keeps the out-of-the-box view.
-        SettingValue::F32(core::f32::consts::FRAC_PI_4),
+        // The reference's own default (`CameraAngle` 1.047197551 = 60°), which
+        // is a fidelity number rather than a taste one: how far away things
+        // look, how much of a room fits on screen and how a camera offset feels
+        // are all read off it, and a resident's eye is calibrated to it by every
+        // other viewer. This used to be Bevy's 45°, and the first two-viewer
+        // cross-check caught it — both cameras at the same pose, five prims of a
+        // fixture row in one frame and three in the other.
+        SettingValue::F32(DEFAULT_FIELD_OF_VIEW),
         "World camera vertical field of view in radians",
     );
     settings.register_in(
@@ -425,21 +450,33 @@ fn refresh_movement_tuning(
 /// itself.
 fn apply_camera_fov(
     settings: Option<Res<ViewerSettings>>,
+    pinned: Option<Res<CameraFovOverride>>,
     mut cameras: Query<&mut Projection, With<ViewerCamera>>,
 ) {
-    let Some(settings) = settings else {
-        return;
+    let stored = match pinned {
+        // A run that pinned a lens keeps it whatever the preference says.
+        Some(pinned) => pinned.radians,
+        None => {
+            let Some(settings) = settings else {
+                return;
+            };
+            let Ok(stored) = settings.store().get_f32(SETTING_CAMERA_ANGLE) else {
+                return;
+            };
+            stored
+        }
     };
-    let Ok(stored) = settings.store().get_f32(SETTING_CAMERA_ANGLE) else {
-        return;
-    };
-    let want = stored.clamp(FOV_MIN, FOV_MAX);
     for mut projection in &mut cameras {
         // Read through the immutable reborrow first: `projection.as_mut()`
         // would dirty the projection unconditionally.
         let Projection::Perspective(perspective) = &*projection else {
             continue;
         };
+        // Clamped the way the reference clamps it, against *this* view's aspect
+        // ratio: the 5°–175° bounds limit the horizontal extent, so a wide view
+        // admits a narrower vertical field than a square one
+        // (`LLCamera::getMinView` / `getMaxView`).
+        let want = clamp_field_of_view(stored, perspective.aspect_ratio);
         if (perspective.fov - want).abs() <= FOV_EPSILON {
             continue;
         }

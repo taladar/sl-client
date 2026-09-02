@@ -122,5 +122,9 @@ the two viewers' `render` sections differ (`mesh_lod_boost` 1.0 against
 2.0, draw distance 512 m against 128 m), which *explains* the `lod`
 differences on five objects. A report that ranks scenes by pixel distance
 without showing the render sections beside them hides its own answer.
-See also [[viewer-camera-fov-parity]], which is a framing difference in
-every frame until it is fixed.
+[[viewer-camera-fov-parity]] is fixed (2026-09-02): both viewers now frame
+at the reference's 60°, and the same five subjects land at the same screen
+positions. One artefact of it survives in the dumps and must not be ranked
+as a divergence — `camera.aspect` reads 1.778 here against 1.388 there,
+because Firestorm's snapshot renders at the capture's aspect while its
+`LLViewerCamera` reports the window's by the time the dump is written.

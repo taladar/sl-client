@@ -1,6 +1,6 @@
 schema = 1
-blessed_describe = "6e76be10-dirty"
-blessed_at_unix = 1788176664
+blessed_describe = "d25bc90b-dirty"
+blessed_at_unix = 1788385347
 
 [facts]
 "lod.high.triangles" = 9090
@@ -26,6 +26,6 @@ z = -0.839824
 tolerance = 0.001
 
 [facts."framing.centre-pixel"]
-x = 127.999969
-y = 129.58609
+x = 127.999977
+y = 129.137924
 tolerance = 0.5

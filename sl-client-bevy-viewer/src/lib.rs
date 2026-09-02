@@ -632,6 +632,16 @@ struct Options {
     /// left/right pan).
     #[clap(long, value_enum, default_value_t = SpinAxis::Yaw)]
     camera_spin_axis: SpinAxis,
+    /// The camera's vertical field of view in **degrees**, overriding the
+    /// persisted `CameraAngle` preference for this run without rewriting it.
+    ///
+    /// Both viewers default to the reference's 60°, so a cross-check does not
+    /// need this — but a comparison whose framing depends on two viewers'
+    /// defaults agreeing is a comparison with an unstated premise, and this is
+    /// how a run states it. The environment variable is the one the Firestorm
+    /// harness reads, so one env block aims both lenses.
+    #[clap(long, env = "SL_VIEWER_CAPTURE_FOV", value_name = "DEGREES")]
+    camera_fov: Option<f32>,
     /// The UI skin to wear — a directory under `assets/skins/` (`graphite`,
     /// `azure`). Skins are colour / texture / font tokens only, never layout.
     /// Overrides the persisted preferences choice (the colors & skins tab) for
@@ -899,6 +909,10 @@ struct CameraStartup {
     start: CameraStart,
     /// The optional auto-spin survey pan.
     spin: CameraSpin,
+    /// A vertical field of view in radians overriding the persisted
+    /// `CameraAngle` for this run (`--camera-fov`, in degrees on the command
+    /// line), or `None` to use the preference.
+    field_of_view: Option<f32>,
 }
 
 /// The unattended capture harness's configuration for a viewer session: where
@@ -985,6 +999,7 @@ fn run_session(
     let CameraStartup {
         start: camera_start,
         spin: camera_spin,
+        field_of_view: camera_fov,
     } = camera;
     let SkinRuntime {
         selection: skin,
@@ -1841,6 +1856,11 @@ fn run_session(
         // silent no-op would look exactly like a run that worked.
         warn!("the --capture-* options have no effect without --screenshot-dir");
     }
+    // A lens pinned for this run (`--camera-fov`), which beats the persisted
+    // `CameraAngle` without rewriting it.
+    if let Some(radians) = camera_fov {
+        app.insert_resource(crate::preferences_camera_move::CameraFovOverride { radians });
+    }
     let _exit = app.run();
     app.world_mut()
         .remove_resource::<LoginOutcome>()
@@ -1940,6 +1960,7 @@ fn run_viewer(options: &Options) -> Result<(), Error> {
             CameraStartup {
                 start: camera_start,
                 spin: camera_spin,
+                field_of_view: options.camera_fov.map(f32::to_radians),
             },
             SkinRuntime {
                 selection: crate::skin::SkinSelection::resolve(
@@ -2066,6 +2087,7 @@ fn run_replay(options: &Options, bundle_dir: &Path) -> Result<(), Error> {
         CameraStartup {
             start: camera_start,
             spin: camera_spin,
+            field_of_view: options.camera_fov.map(f32::to_radians),
         },
         SkinRuntime {
             selection: {

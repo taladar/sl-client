@@ -21,11 +21,60 @@ use crate::tonemap::SlTonemap;
 use crate::underwater_fog::UnderwaterFog;
 use sl_viewer_world_api::ViewerCamera;
 
+/// The reference viewer's default vertical field of view, in radians
+/// (`DEFAULT_FIELD_OF_VIEW`, `llcamera.h`): **60°**, and the default of its
+/// persisted `CameraAngle` setting (`1.047197551`).
+///
+/// This is a fidelity number, not a taste one. How far away things look, how
+/// much of a room fits on screen and how a camera offset feels are all read off
+/// it, and a Second Life user's eye is calibrated to this value by every other
+/// viewer. Bevy's own default is 45°, which framed noticeably less of the world:
+/// the first two-viewer cross-check put both cameras at the same pose and
+/// photographed five prims of a fixture row here against three there.
+pub const DEFAULT_FIELD_OF_VIEW: f32 = core::f32::consts::PI / 3.0;
+
+/// The narrowest vertical field of view the reference accepts, in radians
+/// (`MIN_FIELD_OF_VIEW`): 5°. Also the lower bound of the preferences tab's
+/// field-of-view slider, which reads it from here rather than restating it.
+pub const MIN_FIELD_OF_VIEW: f32 = 5.0 * core::f32::consts::PI / 180.0;
+
+/// The widest vertical field of view the reference accepts, in radians
+/// (`MAX_FIELD_OF_VIEW`): 175°. Also the upper bound of the preferences tab's
+/// field-of-view slider.
+pub const MAX_FIELD_OF_VIEW: f32 = 175.0 * core::f32::consts::PI / 180.0;
+
+/// A vertical field of view clamped the way the reference clamps one
+/// (`LLCamera::getMinView` / `getMaxView`), which is **aspect-dependent**: the
+/// limits bound the *horizontal* extent, so a wide view has its maximum divided
+/// by the aspect ratio and a narrow one has its minimum divided by it.
+///
+/// Ported rather than simplified because the asymmetry is the whole content of
+/// it: without the scaling, a 21:9 window admits a vertical field of view whose
+/// horizontal span is past 175° and the projection turns inside out at the edges.
+#[must_use]
+pub fn clamp_field_of_view(fov: f32, aspect: f32) -> f32 {
+    if !fov.is_finite() || aspect <= 0.0 || !aspect.is_finite() {
+        return DEFAULT_FIELD_OF_VIEW;
+    }
+    let (min, max) = if aspect > 1.0 {
+        (MIN_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW / aspect)
+    } else {
+        (MIN_FIELD_OF_VIEW / aspect, MAX_FIELD_OF_VIEW)
+    };
+    fov.clamp(min.min(max), max.max(min))
+}
+
 /// The viewer's perspective projection: a close near plane (2 cm) so the camera
 /// can push right up to fine detail — an avatar's face — without the surface
-/// clipping away, and a far plane well beyond a region's diagonal so distant
-/// objects do not vanish. Everything else is Bevy's default (a 45° vertical field
-/// of view, aspect from the view's target).
+/// clipping away, a far plane well beyond a region's diagonal so distant objects
+/// do not vanish, and the reference's own [`DEFAULT_FIELD_OF_VIEW`].
+///
+/// The far plane is deliberately **not** the reference's. It sets its far clip
+/// to the draw distance (`LLAgentCamera` → `setFar(mDrawDistance)`) and draws its
+/// sky in a pass of its own that the clip never reaches; ours is one scene, whose
+/// sky dome is 3 km out and whose cloud dome is 15 km, so a far plane at the
+/// draw distance would clip the sky away entirely. Matching it there is a change
+/// to how the sky is drawn, not a change to a number.
 ///
 /// A function rather than a literal inside [`viewer_camera_bundle`] so that code
 /// which has to *reproduce* this framing without a camera — the render tier's
@@ -36,6 +85,7 @@ pub fn viewer_projection() -> PerspectiveProjection {
     PerspectiveProjection {
         near: 0.02,
         far: 4096.0,
+        fov: DEFAULT_FIELD_OF_VIEW,
         ..default()
     }
 }
@@ -128,4 +178,94 @@ pub fn viewer_camera_bundle(transform: Transform) -> impl Bundle {
         // and selects this camera for the fog pass.
         UnderwaterFog::default(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        DEFAULT_FIELD_OF_VIEW, MAX_FIELD_OF_VIEW, MIN_FIELD_OF_VIEW, clamp_field_of_view,
+        viewer_projection,
+    };
+
+    /// The default is the reference's 60°, not the engine's 45°.
+    ///
+    /// A fidelity pin rather than a taste one: the two-viewer cross-check found
+    /// this by photographing one scene from one pose and framing five prims of a
+    /// row here against three there. Anything that "tidies" this back to a
+    /// framework default is changing how far away the whole world looks.
+    #[test]
+    fn the_default_field_of_view_is_the_references() {
+        let degrees = DEFAULT_FIELD_OF_VIEW.to_degrees();
+        assert!(
+            (degrees - 60.0).abs() < 1.0e-3,
+            "the default field of view is {degrees}°, not 60°"
+        );
+        assert!(
+            (viewer_projection().fov - DEFAULT_FIELD_OF_VIEW).abs() < 1.0e-6,
+            "the camera bundle does not use the default field of view"
+        );
+    }
+
+    /// The reference's clamp is **asymmetric in the aspect ratio**, because the
+    /// 5°–175° bounds limit the *horizontal* extent: a wide view therefore
+    /// admits a narrower vertical field than a square one. Without the scaling a
+    /// 21:9 window opens past 175° horizontally and the projection turns inside
+    /// out at the edges.
+    #[test]
+    fn a_wide_view_may_not_open_as_far_as_a_square_one() {
+        let square = clamp_field_of_view(MAX_FIELD_OF_VIEW, 1.0);
+        let wide = clamp_field_of_view(MAX_FIELD_OF_VIEW, 21.0 / 9.0);
+        assert!(
+            (square - MAX_FIELD_OF_VIEW).abs() < 1.0e-6,
+            "a square view keeps the full maximum"
+        );
+        assert!(
+            wide < square,
+            "a wide view should be held below the square maximum, got {wide} against {square}"
+        );
+        assert!(
+            (wide - MAX_FIELD_OF_VIEW / (21.0 / 9.0)).abs() < 1.0e-6,
+            "a wide view's maximum is the bound divided by its aspect"
+        );
+    }
+
+    /// And the mirror image: a taller-than-wide view cannot close as far,
+    /// because the minimum is what bounds its width.
+    #[test]
+    fn a_narrow_view_may_not_close_as_far_as_a_square_one() {
+        let narrow = clamp_field_of_view(MIN_FIELD_OF_VIEW, 0.5);
+        assert!(
+            narrow > MIN_FIELD_OF_VIEW,
+            "a narrow view should be held above the square minimum, got {narrow}"
+        );
+        assert!((narrow - MIN_FIELD_OF_VIEW / 0.5).abs() < 1.0e-6);
+    }
+
+    /// An ordinary field of view passes through untouched at every ordinary
+    /// aspect — the clamp is a guard, not a policy.
+    #[test]
+    fn an_ordinary_field_of_view_is_left_alone() {
+        for aspect in [1.0, 4.0 / 3.0, 16.0 / 9.0, 21.0 / 9.0] {
+            let clamped = clamp_field_of_view(DEFAULT_FIELD_OF_VIEW, aspect);
+            assert!(
+                (clamped - DEFAULT_FIELD_OF_VIEW).abs() < 1.0e-6,
+                "60° was moved to {clamped} at aspect {aspect}"
+            );
+        }
+    }
+
+    /// A view with no aspect yet — a camera whose target has not been sized, or
+    /// one that has been handed a zero or a not-a-number — falls back to the
+    /// default rather than propagating the nonsense into a projection matrix.
+    #[test]
+    fn a_nonsense_aspect_falls_back_to_the_default() {
+        for aspect in [0.0, -1.0, f32::NAN, f32::INFINITY] {
+            let clamped = clamp_field_of_view(DEFAULT_FIELD_OF_VIEW, aspect);
+            assert!((clamped - DEFAULT_FIELD_OF_VIEW).abs() < 1.0e-6);
+        }
+        assert!(
+            (clamp_field_of_view(f32::NAN, 1.0) - DEFAULT_FIELD_OF_VIEW).abs() < 1.0e-6,
+            "a not-a-number field of view falls back too"
+        );
+    }
 }
