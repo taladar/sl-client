@@ -250,6 +250,8 @@ pub(crate) use sl_viewer_world_view::physics;
 pub mod render_gallery;
 pub(crate) use sl_viewer_world_objects::render_priority;
 #[cfg(test)]
+mod full_stack_test;
+#[cfg(test)]
 mod pixel_oracle;
 #[cfg(test)]
 mod render_matrix;

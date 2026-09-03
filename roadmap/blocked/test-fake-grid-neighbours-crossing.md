@@ -27,6 +27,13 @@ be scripted, mirroring `teleport_session`:
   the source kills its avatar object and becomes a child; non-adjacent
   old children are retired; a `CrossingNotice` is published.
 
+The harness's `cross_to` belongs here rather than to
+[[viewer-fake-grid-render-harness]], which shipped without it (2026-09-03)
+for the plain reason that there is nothing to call yet: the grid has no
+crossing. It is the one method of that task's planned `ViewerHarness` API
+that is absent, and adding `FakeGrid::cross_agent` above is what makes it
+writable — as a sibling of `teleport_to`, which is there and tested.
+
 The continuity test will force the viewer-side work: re-basing existing
 entities when the current region handle changes, exactly one avatar
 entity per agent across circuits, attachments re-parenting, the camera

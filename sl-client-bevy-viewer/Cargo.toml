@@ -226,9 +226,14 @@ fs-err = { workspace = true }
 
 [dev-dependencies]
 pretty_assertions = { workspace = true }
+# The loopback grid the full-stack tier (`src/full_stack_test.rs`) renders
+# against: the real viewer logging into a real grid, in one process.
+sl-fake-grid = { path = "../sl-fake-grid", version = "0.1.0" }
 sl-mesh = { workspace = true }
 sl-proto = { workspace = true }
 sl-viewer-testkit = { workspace = true }
+# Hosts the fake grid's tasks; `sync` for its `broadcast` receivers.
+tokio = { workspace = true, features = ["rt-multi-thread", "sync"] }
 
 [lints]
 workspace = true

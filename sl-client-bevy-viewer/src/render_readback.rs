@@ -154,7 +154,7 @@ const fn row_to_f32(row: u32) -> f32 {
 /// which a 256² frame answers as well as a 4K one — and the frame is rendered by
 /// a probe rig that re-renders the scene six times per capture, so the cost is
 /// paid over and over.
-const FRAME: u32 = 256;
+pub(crate) const FRAME: u32 = 256;
 
 /// The same frame side as a `u16`, which is the width a pixel coordinate
 /// converts from **losslessly** — the form [`crate::render_test::framing_pixel`]
@@ -204,7 +204,7 @@ const NO_ADAPTER_FRAMES: u32 = 90;
 /// Frames stepped with the clock **held** before a frame is read. A readback
 /// completes a frame or more after its render, so the slot must be given time to
 /// hold a frame that was rendered under the held clock rather than the one before.
-const HOLD_FRAMES: u32 = 4;
+pub(crate) const HOLD_FRAMES: u32 = 4;
 
 /// The scene time a static scene is captured at, in seconds. One second rather
 /// than zero, so a driver that needs time to have passed — a fountain that has
@@ -254,7 +254,7 @@ impl PipelineStatus {
 
 /// Publishes [`PipelineStatus`]: the same cell in both worlds, written from the
 /// render world's cleanup set each frame.
-struct PipelineStatusPlugin;
+pub(crate) struct PipelineStatusPlugin;
 
 impl Plugin for PipelineStatusPlugin {
     fn build(&self, app: &mut App) {
@@ -417,6 +417,28 @@ fn check_logs(logs: &LogCapture, scene: &str) {
 /// for it rather than be handed it inside a system.
 #[derive(Resource, Clone, Default)]
 pub(crate) struct Captured(Arc<Mutex<Option<Vec<u8>>>>);
+
+impl Captured {
+    /// Take whatever frame is in the slot, leaving it empty.
+    ///
+    /// A method rather than a field read because the cell is also drained from
+    /// [`crate::full_stack_test`], which is a sibling module and cannot see the
+    /// private field. A poisoned lock reads as "no frame", which is what a
+    /// caller does with a failure here anyway.
+    pub(crate) fn take(&self) -> Option<Vec<u8>> {
+        self.0.lock().ok()?.take()
+    }
+
+    /// Put `frame` in the slot, replacing whatever was there.
+    ///
+    /// The newest frame is the only interesting one — an older one is a picture
+    /// of a scene that has since moved on.
+    pub(crate) fn set(&self, frame: Vec<u8>) {
+        if let Ok(mut slot) = self.0.lock() {
+            *slot = Some(frame);
+        }
+    }
+}
 
 /// Where a set of world points landed on the frame, in pixels.
 ///

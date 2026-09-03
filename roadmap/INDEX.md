@@ -13,10 +13,10 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 | --- | --- |
 | ideas | 98 |
 | ready | 310 |
-| blocked | 59 |
+| blocked | 58 |
 | in-progress | 18 |
 | bugs | 70 |
-| done | 964 |
+| done | 965 |
 | deferred | 24 |
 | wont-do | 14 |
 | **total** | **1557** |
@@ -485,12 +485,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`viewer-experiences-floater`](ready/viewer-experiences-floater.md) —
   Experiences floater — lists, profile, search (blocked by
   `viewer-ui-widget-scaffold` (done), `viewer-ui-virtualized-list` (done))
-- [`viewer-fake-grid-render-harness`](ready/viewer-fake-grid-render-harness.md)
-  — ViewerHarness — the real viewer against the fake grid, read back as pixels
-  (blocked by `test-fake-grid-terrain-layerdata` (done),
-  `test-fake-grid-render-fixtures` (done), `viewer-plugin-groups` (done),
-  `viewer-screenshot-wait-for-quiescence` (done), `viewer-render-pixel-oracle`
-  (done))
 - [`viewer-floater-registry`](ready/viewer-floater-registry.md) — A FLOATERS
   registry, so floaters can be swept at all
 - [`viewer-floater-update-in-place`](ready/viewer-floater-update-in-place.md) —
@@ -961,6 +955,9 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   The built-in UI sounds the viewer plays on arrival 404
 - [`test-fake-grid-object-sounds`](ready/test-fake-grid-object-sounds.md) — The
   fake grid can serve a sound but cannot play one
+- [`test-fake-grid-timeline`](ready/test-fake-grid-timeline.md) — Scripted
+  scenario timelines with markers (blocked by `test-fake-grid-determinism`
+  (done), `viewer-fake-grid-render-harness` (done))
 - [`test-handover-distant-and-vehicle-aditi`](ready/test-handover-distant-and-vehicle-aditi.md)
   — Live-test distant teleport (world_reset) and vehicle corner crossings, incl.
   on aditi
@@ -970,7 +967,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`repl-audit-binary-duplication`](ready/repl-audit-binary-duplication.md) —
   The two REPL binaries share ~400 near-verbatim lines and have already drifted
 
-## blocked (59)
+## blocked (58)
 
 ### viewer
 
@@ -1136,9 +1133,6 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-neighbours-crossing`](blocked/test-fake-grid-neighbours-crossing.md)
   — Neighbour child agents and a scripted region crossing (blocked by
   `test-fake-grid-npc-avatars` (done), `test-fake-grid-timeline`)
-- [`test-fake-grid-timeline`](blocked/test-fake-grid-timeline.md) — Scripted
-  scenario timelines with markers (blocked by `test-fake-grid-determinism`
-  (done), `viewer-fake-grid-render-harness`)
 - [`test-voice-account`](blocked/test-voice-account-provision-a-voice-account.md)
   — provision a voice account (blocked by `viewer-voice-audio`)
 - [`test-voice-signaling`](blocked/test-voice-signaling-exchange-voice-signalling.md)
@@ -1361,7 +1355,7 @@ status. Regenerate this file with `python3 roadmap/index.py`.
 - [`test-fake-grid-xmlrpc-int-width`](bugs/test-fake-grid-xmlrpc-int-width.md) —
   Audit every login field emitted as <i4> for values that do not fit S32
 
-## done (964)
+## done (965)
 
 ### protocol
 
@@ -1829,6 +1823,12 @@ status. Regenerate this file with `python3 roadmap/index.py`.
   SimSession (blocked by `protocol-sim-caps-framework` (done))
 - [`viewer-fake-grid-login-smoke`](done/viewer-fake-grid-login-smoke.md) — The
   real client stack against the fake grid (blocked by `viewer-fake-grid` (done))
+- [`viewer-fake-grid-render-harness`](done/viewer-fake-grid-render-harness.md) —
+  ViewerHarness — the real viewer against the fake grid, read back as pixels
+  (blocked by `test-fake-grid-terrain-layerdata` (done),
+  `test-fake-grid-render-fixtures` (done), `viewer-plugin-groups` (done),
+  `viewer-screenshot-wait-for-quiescence` (done), `viewer-render-pixel-oracle`
+  (done))
 - [`viewer-fake-grid-teleport`](done/viewer-fake-grid-teleport.md) — Fake-grid
   inter-region teleport (teleport_agent + auto-responder)
 - [`viewer-fake-grid-udp-assets`](done/viewer-fake-grid-udp-assets.md) — Fake

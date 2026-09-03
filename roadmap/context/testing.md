@@ -51,6 +51,18 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   managers' in-flight counts) and the readback rig's `settle()`
   (pipelines compiled, probe bursts complete, timeline reached, clock
   held). A capture taken before the scene settles is a flake, not a test.
+  The two are **different quiets** and the full-stack tier waits for both
+  in that order: a frame taken while a texture is still decoding shows an
+  untextured face, and one taken while a pipeline is still compiling
+  shows nothing at all.
+- `sl-fake-grid/src/marker.rs` — `marker(name)` / `marker_name` /
+  `MARKER_METHOD`: a `GenericMessage` on the method
+  `sl-fake-grid-marker`, sent by the grid purely so a test can wait for
+  it. UDP is ordered per circuit, so a marker sent after a `KillObject`
+  arrives after it and the client having seen the marker means it has
+  seen the kill. This is how the full-stack tier synchronises with
+  grid-side work instead of sleeping for a plausible number of
+  milliseconds; the scripted timeline emits the same message from a step.
 - `sl-fake-grid` is reproducible on demand:
   `FakeGridBuilder::deterministic(seed)` seeds every minted identifier (session,
   secure session, circuit code, capability tokens, agent and region ids) and
@@ -160,6 +172,17 @@ multi-region offsets, in-flight asset leaks, NPC appearance delivery.
   answers both the LAND patches of the arrival burst and the estate RAW
   download, so "the ground is at 25 m" means the same thing on both
   paths.
-- **a full-stack test**: `ViewerHarness::start(fixture).login()`, wait on a
-  timeline `Marker` and `wait_quiet()`, `capture()` and read it with the
-  pixel oracles; return `Ok` with a log line when no adapter is present.
+- **a full-stack test**: `ViewerHarness::start(fixture)` then `login()`,
+  drive the grid through `grid(...)`, `mark(name)` after the grid-side
+  work and `wait_marker(name)` for it, `look_from(eye, target)` to frame
+  a subject, `capture()` and read it with the pixel oracles; return `Ok`
+  with a log line when `capture()` answers `None` (no adapter). `capture`
+  waits for both quiets — every asset store's in-flight count
+  (`SceneQuiescence`) and then the render's `settle()` — so a test never
+  waits on a duration. Two facts about this tier's frames that do not
+  hold in the readback tier: the **alpha channel is the glow mask, not
+  opacity**, so every capture is `all_transparent` and comparisons
+  discard alpha; and the readback observer must be attached to its own
+  entity, because the full viewer runs other readbacks (the GPU pick, the
+  GPU avatar palettes) that a global observer would drain into the frame
+  slot.

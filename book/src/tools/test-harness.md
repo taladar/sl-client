@@ -39,6 +39,45 @@ extend the harness and fills in as the tiers land.
   front → see-through), not per-cell tables.
 - A capture is taken only once the scene has settled.
 
+## The full-stack tier
+
+`src/full_stack_test.rs` is the only tier where nothing is cut: the real
+`SlClientPlugin` with its socket, the viewer's world, input and render
+plugin groups, and an in-process `sl-fake-grid` on a runtime the harness
+owns. Between an object arriving on the wire and a lit pixel of it there
+is a chain no other tier runs end to end — the capability announcement,
+the asset fetch, the decode, the mesh build, the material, the camera.
+
+A test starts a grid from a fixture, logs in, drives the grid side, frames
+a subject and reads the frame:
+
+```text
+let mut harness = ViewerHarness::start(sl_fake_grid::catalogue())?;
+harness.login()?;                       // circuit, handshake, the whole ground
+harness.look_from(eye, target)?;        // a flycam pose, in region metres
+let Some(frame) = harness.capture()? else { return Ok(()) };  // no adapter
+let disc = ...;                         // from harness.project(&[centre, edge])
+assert!(coverage(&frame, disc, Marker::Red) > 0.15);
+harness.logout()
+```
+
+Three things about it are easy to get wrong:
+
+- **Nothing waits on a duration.** `capture()` waits for both quiets —
+  every asset store's in-flight count, then the render's `settle()` — and
+  grid-side work is synchronised with a marker: `mark(name)` sends a
+  `GenericMessage` the grid emits purely to be waited for, `wait_marker`
+  waits for it, and UDP ordering makes "the client saw the marker" mean
+  "the client saw everything sent before it". A wait that runs out dumps
+  the outstanding asset count, the last events and the last warnings.
+- **The frame's alpha is the glow mask, not opacity.** Every capture here
+  is fully transparent and correct; `screenshot.rs` drops the same
+  channel before it writes a PNG. Compare colours, not RGBA.
+- **The readback observer belongs to its own entity.** The full viewer
+  runs other readbacks (the GPU pick's ID buffer, the GPU avatar
+  palettes), so a global `On<ReadbackComplete>` captures whichever fired
+  last.
+
 ## Baselines
 
 The tiers above catch what is **wrong**. A baseline catches what merely

@@ -11,6 +11,7 @@ mod http_answer;
 mod http_service;
 mod login_endpoint;
 mod map_tiles;
+pub mod marker;
 pub mod runtime;
 pub mod scenario;
 mod teleport;
@@ -27,6 +28,7 @@ pub use fixtures::{
     PrimFixture, RegionFixture, SculptKind, catalogue, linkset,
 };
 pub use map_tiles::STOCK_TILE_JPEG;
+pub use marker::{MARKER_METHOD, marker, marker_name};
 pub use runtime::{
     FakeAgent, FakeGrid, FakeGridBuilder, GridIdentity, LoginNotice, RegionConfig, TeleportNotice,
 };

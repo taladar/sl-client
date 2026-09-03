@@ -376,6 +376,54 @@ pub(crate) fn differing_pixels(a: &Frame, b: &Frame, within: Option<Silhouette>)
     count
 }
 
+/// Whether two pixels differ by more than [`DIFFER_STEP`] in any channel — the
+/// same threshold [`differing_pixels`] counts by, so "these two are different"
+/// means the same thing whether it is asked of two pixels or two frames.
+pub(crate) fn pixels_differ(a: Vec4, b: Vec4) -> bool {
+    [a.x - b.x, a.y - b.y, a.z - b.z, a.w - b.w]
+        .iter()
+        .any(|channel| channel.abs() > DIFFER_STEP)
+}
+
+/// The mean pixel of the frame's rows `from..to` (`to` exclusive), or `None` if
+/// the range holds no row of the frame.
+///
+/// A **horizontal band** is the right shape for a scene laid out by height:
+/// looking level across a region, the sky is above the horizon, the sea is
+/// between the horizon and the far shore, and the ground is below it. Each of
+/// those is a band spanning the whole frame, and reading one as a mean says what
+/// the band *is* without asking what colour it should have been.
+pub(crate) fn band_mean(frame: &Frame, from: u32, to: u32) -> Option<Vec4> {
+    let height = frame.size().y;
+    let (from, to) = (from.min(height), to.min(height));
+    // Summed component by component rather than as a `Vec4`: the workspace's
+    // `arithmetic_side_effects` lint bans the overloaded operator, and the
+    // component form is what `corner_background` already uses.
+    let mut sum = [0.0_f32; 4];
+    let mut count = 0.0_f32;
+    for y in from..to {
+        for x in 0..frame.size().x {
+            if let Some(pixel) = frame.pixel(x, y) {
+                sum = [
+                    sum[0] + pixel.x,
+                    sum[1] + pixel.y,
+                    sum[2] + pixel.z,
+                    sum[3] + pixel.w,
+                ];
+                count += 1.0;
+            }
+        }
+    }
+    (count > 0.0).then(|| {
+        Vec4::new(
+            sum[0] / count,
+            sum[1] / count,
+            sum[2] / count,
+            sum[3] / count,
+        )
+    })
+}
+
 /// The mean of the frame's four corner pixels: what the *background* looks
 /// like, sampled rather than assumed, for [`coverage_not_background`]. The
 /// corners belong to the subject only if it fills the frame, which the caller's
@@ -720,5 +768,45 @@ mod tests {
             }
         );
         Ok(())
+    }
+
+    /// A band reads back as the mean of its own rows, and an empty range as
+    /// nothing at all rather than as black.
+    #[test]
+    fn a_band_is_the_mean_of_its_rows() -> Result<(), TestError> {
+        // Two solid halves, so each band's mean is exactly its own colour and a
+        // band spanning both is exactly halfway between them.
+        const SIDE: u32 = 8;
+        let mut pixels = blank(SIDE);
+        for y in 0..SIDE {
+            for x in 0..SIDE {
+                paint(&mut pixels, SIDE, x, y, if y < 4 { RED } else { GREEN });
+            }
+        }
+        let frame = frame(pixels, SIDE)?;
+        let top = super::band_mean(&frame, 0, 4).ok_or("the top band")?;
+        let bottom = super::band_mean(&frame, 4, 8).ok_or("the bottom band")?;
+        assert!((top.x - f32::from(RED[0]) / 255.0).abs() < 1e-3);
+        assert!((bottom.y - f32::from(GREEN[1]) / 255.0).abs() < 1e-3);
+        let whole = super::band_mean(&frame, 0, 8).ok_or("the whole frame")?;
+        assert!(
+            (whole.x - f32::midpoint(top.x, bottom.x)).abs() < 1e-3,
+            "{whole} is not halfway between the two halves"
+        );
+        // Rows past the bottom of the frame are clamped away, so an empty range
+        // is `None` and never a black mean a caller would compare against.
+        assert_eq!(super::band_mean(&frame, 8, 16), None);
+        assert_eq!(super::band_mean(&frame, 5, 4), None);
+        Ok(())
+    }
+
+    /// Two pixels differ by the same threshold two frames do.
+    #[test]
+    fn two_pixels_differ_by_the_frame_threshold() {
+        let red = as_vec(RED);
+        assert!(super::pixels_differ(red, as_vec(GREEN)));
+        assert!(!super::pixels_differ(red, red));
+        // Four steps of an 8-bit channel is below the eight-step threshold.
+        assert!(!super::pixels_differ(red, as_vec([234, 25, 25, 255])));
     }
 }
