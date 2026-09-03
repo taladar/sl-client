@@ -545,6 +545,56 @@ mod test {
         Ok(())
     }
 
+    /// The catalogue's **seated** NPC reaches the client sitting: its avatar
+    /// object names the bench as its parent and carries the sit offset, which
+    /// is parent-relative.
+    ///
+    /// This is the one case where an avatar's own position is not region-local,
+    /// so a client that read it as a region position would place the body half
+    /// a metre above the region's south-west corner. Asserted on the wire
+    /// values here; where the body is *drawn* is the full-stack tier's
+    /// business.
+    #[test]
+    fn bevy_client_sees_the_seated_npc() -> Result<(), TestError> {
+        use sl_fake_grid::fixtures::catalogue::{
+            SEAT_LOCAL_ID, SEATED_NPC_AGENT, SEATED_NPC_LOCAL_ID, SEATED_NPC_SIT_OFFSET_Z,
+        };
+
+        let region = sl_fake_grid::catalogue().into_region(RegionConfig::default());
+        let mut harness = Harness::start_in("sl-fake-grid-bevy-seated-npc", region)?;
+        harness.poll_login_notice()?;
+
+        let body =
+            harness.wait_for_event("the seated NPC's avatar object", |event| match event {
+                SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)
+                    if object.local_id == SEATED_NPC_LOCAL_ID =>
+                {
+                    Some((**object).clone())
+                }
+                _ => None,
+            })?;
+        assert_eq!(body.pcode, sl_proto::pcode::AVATAR);
+        assert_eq!(body.full_id.uuid(), SEATED_NPC_AGENT);
+        assert_eq!(body.parent_id, SEAT_LOCAL_ID);
+        assert!(
+            (body.motion.position.z - SEATED_NPC_SIT_OFFSET_Z).abs() < 1e-3,
+            "the sit offset did not reach the client: {:?}",
+            body.motion.position
+        );
+
+        // The seat itself is an ordinary in-world prim, and arrives as one.
+        let seat = harness.wait_for_event("the bench", |event| match event {
+            SlSessionEvent::ObjectAdded(object) | SlSessionEvent::ObjectUpdated(object)
+                if object.local_id == SEAT_LOCAL_ID =>
+            {
+                Some((**object).clone())
+            }
+            _ => None,
+        })?;
+        assert_eq!(seat.parent_id, sl_proto::RegionLocalObjectId(0));
+        Ok(())
+    }
+
     /// Two apps against two grids in one process: ephemeral ports and
     /// per-app network threads keep them independent.
     #[test]

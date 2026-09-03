@@ -156,6 +156,48 @@ pub const NPC_X: f32 = ROW_FIRST_X - ROW_SPACING;
 /// 1.9 m height above the stock ground.
 pub const NPC_Z: f32 = 25.95;
 
+/// The seated NPC's agent id.
+pub const SEATED_NPC_AGENT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0110);
+
+/// The seated NPC's first name.
+pub const SEATED_NPC_FIRST_NAME: &str = "Seated";
+
+/// The seated NPC's last name.
+pub const SEATED_NPC_LAST_NAME: &str = "Resident";
+
+/// The region-local id the seated NPC's avatar body is rezzed with.
+pub const SEATED_NPC_LOCAL_ID: RegionLocalObjectId = RegionLocalObjectId(0x210);
+
+/// The colour the seated NPC's bakes are painted: a different marker from
+/// [`NPC_BAKE_COLOR`], so a capture holding both avatars can say which is which.
+pub const SEATED_NPC_BAKE_COLOR: [u8; 4] = sl_test_assets::markers::GREEN;
+
+/// The region-local id of the bench the seated NPC sits on.
+pub const SEAT_LOCAL_ID: RegionLocalObjectId = RegionLocalObjectId(0x202);
+
+/// The full id of that bench.
+pub const SEAT_OBJECT: uuid::Uuid = uuid::Uuid::from_u128(0xCA7_0104);
+
+/// The bench's `x`: two slots west of the prim row, so the seated pair has its
+/// own patch of screen west of the standing NPC.
+pub const SEAT_X: f32 = NPC_X - ROW_SPACING;
+
+/// The bench's `z` — its **centre**. Half of [`SEAT_HEIGHT`] above the stock
+/// ground, so it rests on the ground with its top at [`ROW_Z`].
+pub const SEAT_Z: f32 = 25.25;
+
+/// How tall the bench is, in metres.
+pub const SEAT_HEIGHT: f32 = 0.5;
+
+/// How far above the bench's centre the seated avatar's object sits — the sit
+/// offset the avatar update carries, which is parent-relative.
+///
+/// A third of a metre above the bench's top, which is where a sit target puts
+/// an avatar's root: the reference viewer then drops the *skeleton* from there
+/// so the seated body meets the surface, and this fixture exists partly to
+/// check that both viewers do it the same way.
+pub const SEATED_NPC_SIT_OFFSET_Z: f32 = 0.55;
+
 /// A fixed [`TextureKey`], as a `const fn` (`From<Uuid>` is not one).
 const fn texture_key(id: u128) -> TextureKey {
     TextureKey(Key(uuid::Uuid::from_u128(id)))
@@ -262,7 +304,7 @@ pub fn catalogue() -> RegionFixture {
         CATALOGUE_PARCEL_NAME,
     ));
     world.objects = objects(owner);
-    world.npcs = vec![npc()];
+    world.npcs = vec![npc(), seated_npc()];
     world.object_animations = animesh_animations();
 
     RegionFixture {
@@ -460,6 +502,10 @@ fn objects(owner: AgentKey) -> Vec<sl_proto::Object> {
             _unknown => objects.push(prim.build()),
         }
     }
+    // The seated NPC's bench, which stands outside the row: it is furniture for
+    // the avatar beside it rather than a rendering feature of its own, so it
+    // has no catalogue entry and no row slot.
+    objects.push(seat().build());
     objects
 }
 
@@ -534,6 +580,69 @@ pub fn npc() -> NpcFixture {
         },
         NO_ROTATION,
     )
+}
+
+/// The bench the seated NPC sits on: a plain checkered box west of the
+/// standing NPC, resting on the ground with its top level with the prim row.
+///
+/// An ordinary in-world prim, deliberately: what makes the avatar beside it
+/// *seated* is the avatar update's `ParentID`, not anything about the seat.
+#[must_use]
+pub fn seat() -> PrimFixture {
+    PrimFixture::boxed(
+        SEAT_LOCAL_ID,
+        ObjectKey::from(SEAT_OBJECT),
+        AgentKey::from(uuid::Uuid::from_u128(CATALOGUE_OWNER)),
+        Vector {
+            x: SEAT_X,
+            y: ROW_Y,
+            z: SEAT_Z,
+        },
+        Vector {
+            x: 1.0,
+            y: 1.0,
+            z: SEAT_HEIGHT,
+        },
+    )
+    .textured(CHECKER_TEXTURE)
+}
+
+/// The catalogue's **seated** NPC: a green-baked avatar sitting on
+/// [`seat()`], parented to it the way a sitting avatar is on the wire.
+///
+/// A seated avatar is the one case where an avatar's own position is
+/// parent-relative rather than region-local, and both viewers place the body by
+/// composing it onto the seat and then dropping the skeleton onto the surface.
+/// Nothing else in the catalogue exercises that path, and a scene dump of a
+/// standing avatar cannot tell whether a viewer ever learned it.
+#[must_use]
+pub fn seated_npc() -> NpcFixture {
+    let agent = AgentKey::from(SEATED_NPC_AGENT);
+    NpcFixture::new(
+        SEATED_NPC_LOCAL_ID,
+        AvatarIdentity::new(agent, SEATED_NPC_FIRST_NAME, SEATED_NPC_LAST_NAME),
+        // Parent-relative: the offset from the bench, not a region position.
+        Vector {
+            x: 0.0,
+            y: 0.0,
+            z: SEATED_NPC_SIT_OFFSET_Z,
+        },
+    )
+    .seated_on(SEAT_LOCAL_ID)
+    .looking(NpcAppearance::solid(agent, SEATED_NPC_BAKE_COLOR))
+    .animating(AnimationKey::from(NPC_ANIMATION))
+}
+
+/// Where the seated NPC's avatar object ends up in the region: the bench's
+/// position plus its sit offset, which is what its landmark names and what
+/// both viewers' scene dumps report for it.
+#[must_use]
+pub const fn seated_npc_position() -> Vector {
+    Vector {
+        x: SEAT_X,
+        y: ROW_Y,
+        z: SEAT_Z + SEATED_NPC_SIT_OFFSET_Z,
+    }
 }
 
 /// The identity rotation.
@@ -845,7 +954,7 @@ fn register<E: std::fmt::Display>(
 
 #[cfg(test)]
 mod test {
-    use pretty_assertions::assert_eq;
+    use pretty_assertions::{assert_eq, assert_ne};
     use sl_proto::{decode_extra_params, decode_particle_system, decode_texture_entry};
     use sl_types::key::SculptOrMeshKey;
 
@@ -1049,6 +1158,55 @@ mod test {
                 .map(|animation| animation.anim_id),
             Some(NPC_ANIMATION)
         );
+    }
+
+    /// The seated NPC sits on the bench: its avatar update names the bench as
+    /// its `ParentID` and carries a **parent-relative** position, which is the
+    /// one case where an avatar's own position is not region-local.
+    ///
+    /// The two halves are asserted together on purpose. A seated avatar whose
+    /// parent was dropped would read as an avatar standing at the sit offset —
+    /// half a metre above the region's south-west corner — and a viewer that
+    /// composed a parent-relative position as if it were region-local would draw
+    /// it there too.
+    #[expect(
+        clippy::float_cmp,
+        reason = "the sit offset is the exactly-representable constant the fixture states"
+    )]
+    #[test]
+    fn the_seated_npc_sits_on_the_bench() -> Result<(), TestError> {
+        let fixture = catalogue();
+        let seated = fixture
+            .world
+            .npcs
+            .iter()
+            .find(|npc| npc.agent_id() == AgentKey::from(SEATED_NPC_AGENT))
+            .ok_or("the catalogue holds no seated NPC")?;
+        let body = seated.avatar_prim();
+        assert_eq!(body.parent_id, SEAT_LOCAL_ID);
+        assert_eq!(body.motion.position.z, SEATED_NPC_SIT_OFFSET_Z);
+        assert_eq!(body.motion.position.x, 0.0);
+
+        // The bench is a real prim of the region, under the avatar.
+        let bench = fixture
+            .world
+            .objects
+            .iter()
+            .find(|object| object.local_id == SEAT_LOCAL_ID)
+            .ok_or("the catalogue holds no bench")?;
+        assert_eq!(bench.parent_id, RegionLocalObjectId(0));
+        assert_eq!(bench.motion.position.x, SEAT_X);
+        assert_eq!(bench.scale.z, SEAT_HEIGHT);
+
+        // Where it ends up, which is what the landmark and both viewers' scene
+        // dumps name: the bench's position plus the sit offset.
+        assert_eq!(seated_npc_position().z, SEAT_Z + SEATED_NPC_SIT_OFFSET_Z);
+        assert_eq!(seated_npc_position().x, bench.motion.position.x);
+
+        // A second avatar, told apart from the standing one by its bake.
+        assert_ne!(SEATED_NPC_BAKE_COLOR, NPC_BAKE_COLOR);
+        assert_ne!(SEATED_NPC_AGENT, NPC_AGENT);
+        Ok(())
     }
 
     /// The prims carry what their names claim, read back out of the raw wire

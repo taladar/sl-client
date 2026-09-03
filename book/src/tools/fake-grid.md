@@ -143,7 +143,8 @@ teleport between the regions from its map — see below.
 in `fixtures::scenarios`. Two exist today: `stock` (the default — one
 region-wide parcel, one scripted box, an arrival greeting) and
 `catalogue` (the named prim catalogue: one prim per rendering feature,
-plus an NPC, with every asset they reference served — see below).
+plus two NPCs — one standing, one sitting on a bench — with every asset
+they reference served — see below).
 
 A scene is *named* so that a harness photographing it can say which one
 it photographed, and so the next scene is a registry entry rather than a
@@ -154,6 +155,8 @@ logs on startup:
 
 ```text
 scenario "catalogue": the named prim catalogue: one prim per rendering feature …
+landmark "seated-resident" at <100, 136, 25.8>
+landmark "sit-bench" at <100, 136, 25.25>
 landmark "catalogue-resident" at <104, 136, 25.95>
 landmark "plain-box" at <108, 136, 25.5>
 landmark "checker-box" at <112, 136, 25.5>
@@ -530,10 +533,18 @@ bytes — the OpenSim path, where no server-bake service is advertised and
 the viewer fetches each bake with a plain `GetTexture`.
 
 The catalogue's own NPC (`catalogue::npc()`) stands one slot west of the
-prim row, baked blue, playing the built-in `stand` animation and wearing a
-checker box on its skull. The animation *asset* is not served — nothing in
-the fake grid serves animations yet — so a viewer records it as playing
-and falls back to its own idle.
+prim row, baked blue, playing the catalogue's own animation and wearing a
+checker box on its skull.
+
+A second one (`catalogue::seated_npc()`) is **sitting**, baked green, one
+slot further west on the bench `catalogue::seat()`. An avatar sits by
+being parented: its update carries the seat's local id as its `ParentID`
+and a position that is the offset from the seat rather than a region
+position — the one case where an avatar's own position is not
+region-local. `NpcFixture::seated_on` is the whole of it, and both
+viewers' scene dumps report the composed region position
+(`catalogue::seated_npc_position()`), which is what makes the seated path
+comparable rather than merely visible.
 
 ## The ground: terrain, wind and clouds
 

@@ -112,18 +112,38 @@ fn catalogue(region: RegionConfig) -> RegionConfig {
     super::catalogue().into_region(region)
 }
 
-/// The catalogue's row of prims, west to east, and its NPC standing at the
-/// west end of the row.
+/// The catalogue's row of prims, west to east, its NPC standing at the west end
+/// of the row, and the seated NPC on its bench west of that.
+///
+/// The seated one's landmark is the position its avatar object ends up at
+/// (`seated_npc_position`) rather than its own `position`, which is
+/// parent-relative — a camera aimed at a landmark is aimed at a place in the
+/// region.
 fn catalogue_landmarks() -> Vec<Landmark> {
     let npc = super::catalogue::npc();
-    std::iter::once(Landmark {
-        name: format!(
+    let seated = super::catalogue::seated_npc();
+    let named = |npc: &super::npcs::NpcFixture| {
+        format!(
             "{}-{}",
             npc.identity.first_name.to_lowercase(),
             npc.identity.last_name.to_lowercase()
-        ),
-        position: npc.position,
-    })
+        )
+    };
+    [
+        Landmark {
+            name: named(&seated),
+            position: super::catalogue::seated_npc_position(),
+        },
+        Landmark {
+            name: "sit-bench".to_owned(),
+            position: super::catalogue::seat().build().motion.position,
+        },
+        Landmark {
+            name: named(&npc),
+            position: npc.position,
+        },
+    ]
+    .into_iter()
     .chain(
         super::catalogue::entries()
             .into_iter()
@@ -222,8 +242,25 @@ mod test {
         }
         assert_eq!(
             world.npcs.len(),
-            1,
-            "the dressed region does not hold the catalogue's NPC"
+            2,
+            "the dressed region does not hold both of the catalogue's NPCs"
+        );
+        let seated = world
+            .npcs
+            .iter()
+            .find(|npc| npc.seat.is_some())
+            .ok_or("the dressed region holds no seated NPC")?;
+        assert_eq!(
+            seated.seat,
+            Some(super::super::catalogue::SEAT_LOCAL_ID),
+            "the seated NPC does not sit on the catalogue's bench"
+        );
+        assert!(
+            world
+                .objects
+                .iter()
+                .any(|object| object.local_id == super::super::catalogue::SEAT_LOCAL_ID),
+            "the dressed region does not hold the bench its NPC sits on"
         );
         Ok(())
     }

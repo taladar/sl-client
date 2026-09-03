@@ -108,3 +108,15 @@ Also noticed and filed rather than fixed here:
 [[test-fake-grid-builtin-textures]] — eight built-in textures 404 against
 the fake grid. (Filed under a wrong name: they are the sky/water and
 default-prim textures, not wearable ones. Re-diagnosed 2026-09-01.)
+
+A **second NPC, sitting**, was added 2026-09-03, because
+[[viewer-scene-dump-worn-placement]] wanted one:
+`catalogue::seated_npc()`, baked green, on the bench
+`catalogue::seat()` a slot west of the standing one, with landmarks
+`seated-resident` and `sit-bench` to aim a camera at. Sitting is one
+builder — `NpcFixture::seated_on` — because on the wire it is one field:
+the avatar update carries the seat's local id as its `ParentID` and a
+position that is the **offset from the seat** rather than a region
+position, which is the only case where an avatar's own position is not
+region-local. Nothing in the catalogue exercised that before, and neither
+viewer's scene dump could say whether the other had ever learned it.

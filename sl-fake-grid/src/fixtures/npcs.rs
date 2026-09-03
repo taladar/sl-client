@@ -259,10 +259,17 @@ pub struct NpcFixture {
     pub local_id: RegionLocalObjectId,
     /// Who the NPC is: the agent id and the name the viewer labels it with.
     pub identity: AvatarIdentity,
-    /// Where it stands, in region metres (the avatar object's centre).
+    /// Where it is: the avatar object's centre in region metres when it stands
+    /// on the ground, or its offset from the seat when it
+    /// [sits](Self::seated_on) — the same field the wire carries, in the same
+    /// two meanings.
     pub position: Vector,
-    /// Which way it faces.
+    /// Which way it faces, in the frame [`position`](Self::position) is in.
     pub rotation: Rotation,
+    /// The object it is **sitting on**, if any: the avatar update's `ParentID`,
+    /// which is what tells a viewer to place the body against a seat rather
+    /// than against the region.
+    pub seat: Option<RegionLocalObjectId>,
     /// How it looks.
     pub appearance: NpcAppearance,
     /// What it is playing, in the order the animations are listed on the wire.
@@ -290,10 +297,26 @@ impl NpcFixture {
             identity,
             position,
             rotation: NO_ROTATION,
+            seat: None,
             appearance: NpcAppearance::default_avatar(),
             animations: Vec::new(),
             attachments: Vec::new(),
         }
+    }
+
+    /// Sits the NPC on the object `seat`, whose id becomes the avatar update's
+    /// `ParentID`.
+    ///
+    /// A seated avatar's [`position`](Self::position) and
+    /// [`rotation`](Self::rotation) are **relative to the seat**, exactly as
+    /// they are on the wire — so a caller sets them to the sit offset, not to a
+    /// region position. Nothing else about the NPC changes: an avatar sits by
+    /// being parented, and the sit animation is an ordinary
+    /// [`animating`](Self::animating) entry.
+    #[must_use]
+    pub const fn seated_on(mut self, seat: RegionLocalObjectId) -> Self {
+        self.seat = Some(seat);
+        self
     }
 
     /// Gives the NPC `appearance`.
@@ -346,11 +369,16 @@ impl NpcFixture {
         self.identity.agent_id
     }
 
-    /// The avatar object the NPC is rezzed as.
+    /// The avatar object the NPC is rezzed as — parented to its
+    /// [seat](Self::seated_on) when it has one, which is the whole of what
+    /// "this avatar is sitting" is on the wire.
     #[must_use]
     pub fn avatar_prim(&self) -> Object {
         let mut object = avatar_prim(self.local_id, &self.identity, self.position.clone());
         object.motion.rotation = self.rotation.clone();
+        if let Some(seat) = self.seat {
+            object.parent_id = seat;
+        }
         object
     }
 
@@ -598,6 +626,34 @@ mod test {
             objects.first().map(|body| body.local_id),
             Some(npc.local_id)
         );
+    }
+
+    /// A seated NPC's avatar object names its seat as its parent and carries
+    /// the sit offset unchanged — a seated avatar's position is
+    /// parent-relative, and an NPC that is *not* seated keeps a `ParentID` of
+    /// zero, which is the difference a viewer places the body by.
+    #[test]
+    fn a_seated_npc_is_parented_to_its_seat() {
+        let seat = RegionLocalObjectId(0x300);
+        let offset = Vector {
+            x: 0.0,
+            y: 0.0,
+            z: 0.55,
+        };
+        let seated = NpcFixture::new(
+            RegionLocalObjectId(0x210),
+            AvatarIdentity::new(agent(), "Seated", "Npc"),
+            offset.clone(),
+        )
+        .seated_on(seat);
+        let body = seated.avatar_prim();
+        assert_eq!(body.parent_id, seat);
+        assert_eq!(body.motion.position, offset);
+        assert_eq!(seated.seat, Some(seat));
+
+        // The standing one is unchanged: no parent, region-local position.
+        assert_eq!(npc().avatar_prim().parent_id, RegionLocalObjectId(0));
+        assert_eq!(npc().seat, None);
     }
 
     /// The animations are numbered from one in list order — a viewer tells a

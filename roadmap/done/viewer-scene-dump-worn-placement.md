@@ -81,3 +81,9 @@ the two dumps agree on both avatars and on the worn box, to millimetres,
 where they were 0.94 m and 0.86 m apart; and the frames of the same run
 show the box on the NPC's skull in both viewers, which is the measurement
 that says the drawn placement was never the thing that differed.
+
+The seated half of the composition had no fixture to prove it, so the
+catalogue grew one (see [[test-fake-grid-npc-avatars]]): a second NPC
+sitting on a bench, whose avatar update is parent-relative. Both viewers
+now report it at the same composed region position, and both draw it on the
+bench — the seat path is measured rather than merely written.
